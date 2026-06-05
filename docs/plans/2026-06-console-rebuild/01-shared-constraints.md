@@ -174,16 +174,19 @@ src/server/
 
     # ★ CR8 新增：
     lifecycle.ts                 # MVP6 lifecycle 指标路由
+    activations.ts               # ★ CR8 新增：全通道激活记录路由
+    governance.ts                # ★ CR8 新增：治理队列聚合路由
 
     # CR2 删除（对应废弃页面）：
     # agents.ts, central.ts, events.ts, evolution.ts,
-    # feedback.ts, gates.ts, health.ts, overview.ts,
+    # feedback.ts, gates.ts, overview.ts,
     # pipeline.ts, samples.ts, thinking-models.ts
+    # 注意：health.ts 保留（checkAuth 和控制中心配置就绪依赖它）
 
   models/
     # 保留：
     ApprovalsConsoleModel.ts, PrinciplesConsoleModel.ts,
-    FeedbackReportConsoleModel.ts, WorkspaceService.ts
+    FeedbackReportConsoleModel.ts, HealthCheckModel.ts, WorkspaceService.ts
 
     # ★ CR8 新增：
     LifecycleConsoleModel.ts     # 桥接 LifecycleDatasource
@@ -191,9 +194,10 @@ src/server/
     # CR2 删除：
     # EventLogReadModel.ts, EvolutionConsoleModel.ts,
     # FeedbackConsoleModel.ts, GateConsoleModel.ts,
-    # HealthCheckModel.ts, OverviewConsoleModel.ts,
+    # OverviewConsoleModel.ts,
     # PipelineStatsModel.ts, SampleConsoleModel.ts,
     # ThinkingModelsConsoleModel.ts
+    # 注意：HealthCheckModel.ts 保留（控制中心配置就绪依赖）
 ```
 
 **硬规则**：不修改 `src/server` 的数据访问层（SqliteConnection、store）。只允许按工单
@@ -208,10 +212,11 @@ src/server/
 `GateBlockItem`, `CentralOverview`, `CentralHealth`, `SampleListItem`,
 `SampleDetail`, `SamplesData`, `EvolutionStats`, `EvolutionTaskItem`,
 `EvolutionTasksData`, `EvolutionPrinciplesData`, `QueueHealthData`,
-`ThinkingModelOverview`, `HealthCheckItem`, `PipelineTimestamps`,
+`ThinkingModelOverview`, `PipelineTimestamps`,
 `SystemHealthStatus`, `PipelineStage`, `Bottleneck`, `PipelineStats`,
 `EventLogEntry`, `EventsResponse`, `RelatedEventsResponse`, `AgentInfo`,
 `AgentDetail`
+注意：`HealthCheckItem` 保留（控制中心配置就绪依赖）
 
 **删除的函数**（对应废弃路由）：
 `fetchOverview`, `fetchOverviewHealth`, `fetchGateStats`, `fetchGateBlocks`,
@@ -219,10 +224,12 @@ src/server/
 `fetchCentralOverview`, `fetchCentralHealth`, `fetchSamples`,
 `fetchSampleDetail`, `reviewSample`, `fetchEvolutionStats`,
 `fetchEvolutionTasks`, `fetchEvolutionPrinciples`, `fetchEvolutionQueue`,
-`fetchThinkingModels`, `fetchSystemHealth`, `fetchPipelineStats`,
+`fetchThinkingModels`, `fetchPipelineStats`,
 `fetchEvents`, `fetchEventsGrouped`, `fetchRelatedEvents`, `fetchAgents`,
 `fetchAgentDetail`, `fetchTasks`, `fetchTaskEvidence`, `approveTask`,
 `rejectTask`, `cleanupTask`, `fetchStatus`, `fetchActivity`
+注意：`fetchSystemHealth` 重命名为 `fetchConfigReadiness`（CR2），仅保留配置就绪
+数据源功能，删除全局健康红点展示路径。`checkAuth` 保留不变。
 
 **保留的接口和函数**：
 `getToken`, `setToken`, `clearToken`, `checkAuth`, `request`,
@@ -231,10 +238,12 @@ src/server/
 `createFeedbackReport`, `listFeedbackReports`, `getFeedbackReport`, `deleteFeedbackReport`,
 `fetchConfigSummary`, `fetchConfigCatalog`, `updateAgentBinding`,
 `checkAgentReadiness`, `updateDefaultRuntime`,
-`fetchWorkspaces`, `addWorkspace`, `removeWorkspace`, `syncWorkspace`
+`fetchWorkspaces`, `addWorkspace`, `removeWorkspace`, `syncWorkspace`,
+`fetchConfigReadiness`（由 `fetchSystemHealth` 重命名，仅保留配置就绪功能）
 
 **CR8 新增**：
-`fetchLifecycleMetrics`, `fetchAllActivations` 等新 API 函数
+`fetchLifecycleMetrics`, `fetchAllActivations`, `fetchGovernanceQueue`,
+`fetchApprovalsGrouped` 等新 API 函数
 
 **CR10 类型安全清理**：当前 `api.ts` 有多处 `as` 类型断言（第 162、169、181、185 行）
 违反 H 节。CR10 必须用运行时校验替换所有 `as`，新增 `validators.ts` 提供复用的
@@ -250,26 +259,32 @@ src/server/
 `handleGatesRoute`, `disposeGateModels`, `handleFeedbackRoute`,
 `disposeFeedbackModels`, `handleSamplesRoute`, `disposeSampleModels`,
 `handleEvolutionRoute`, `disposeEvolutionModels`,
-`handleThinkingModelsRoute`, `disposeThinkingModelsModels`,
-`handleHealthRoute`, `disposeHealthModels`, `handlePipelineRoute`,
+`handleThinkingModelsRoute`, `disposeThinkingModelsModels`, `handlePipelineRoute`,
 `disposePipelineModels`, `handleEventsRoute`, `disposeEventsModels`,
 `handleAgentsRoute`, `disposeAgentModels`, `createCentralRoutes`
+注意：`handleHealthRoute` / `disposeHealthModels` 保留（checkAuth 和控制中心依赖）
 
 **删除的路由 if 块**：`/api/overview`, `/api/gate`, `/api/feedback`（旧 GFI 通道）,
 `/api/samples`, `/api/evolution`, `/api/thinking-models`, `/api/central`,
-`/api/agents`, `/api/health`, `/api/pipeline`, `/api/events`,
+`/api/agents`, `/api/pipeline`, `/api/events`,
 `/api/status`, `/api/tasks`, `/api/activity`
+注意：`/api/health` 保留（checkAuth 和控制中心配置就绪依赖）
 
 **删除的 dispose 调用**：`disposeOverviewModels()`, `disposeGateModels()`,
 `disposeFeedbackModels()`, `disposeSampleModels()`, `disposeEvolutionModels()`,
-`disposeThinkingModelsModels()`, `disposeHealthModels()`, `disposePipelineModels()`,
+`disposeThinkingModelsModels()`, `disposePipelineModels()`,
 `disposeEventsModels()`, `disposeAgentModels()`
+注意：`disposeHealthModels()` 保留
 
-**保留的路由**：`/api/v1/approvals`, `/api/principles`, `/api/v1/config`,
+**保留的路由**：`/api/health`, `/api/v1/approvals`, `/api/principles`, `/api/v1/config`,
 `/api/v1/state`, `/api/update`, `/api/update/history`, `/api/feedback/reports`,
 `/api/workspaces`
 
-**CR8 新增**：`/api/v1/lifecycle` 路由
+**CR8 新增路由**：
+- `GET /api/v1/lifecycle/principles/:principleId` — lifecycle 指标
+- `GET /api/v1/activations` — 全通道激活记录
+- `GET /api/v1/governance/queue` — 治理队列聚合（首页消费）
+- `GET /api/v1/approvals/grouped` — 按原则分组的审批记录
 
 清理后 `index.ts` 预计 ~500 行。
 
@@ -294,8 +309,10 @@ src/server/
    - 删除 9 个废弃业务组件
    - 清理 `api.ts`（从 ~900 行砍到 ~300 行）
    - 清理 `App.tsx` 路由表（从 21 条路由砍到 9 条新路由 + 占位页）
+   - 重构认证 flow：Router 始终渲染，`/splash` → auth check → `/login` or `/focus`
    - 清理 `server/index.ts` 路由注册（删除对应 if 块）
-   - 创建 9 个占位页面（只显示页面名称，确保编译通过）
+   - 创建 9 个业务占位页面 + splash/login 组件 + dev-only design-system 路由
+   - 将 `fetchSystemHealth` 重命名为 `fetchConfigReadiness`，删除全局红点展示路径
    - 删除废弃 i18n key
 3. **CR3–CR9**：逐个填充真实页面
 4. **CR10**：i18n 清理 + 整体验收
@@ -342,16 +359,27 @@ import，确保 esbuild 打包进 bundle。`design-prototype/` 目录的 HTML �
 ### A.11 API 向后兼容
 
 PD Console 的 API 只被前端消费，没有外部消费者。但 `pd-cli` 可能调用部分 API。
-CR2 开工前需确认 pd-cli 是否依赖任何将被删除的路由。如果依赖，需要在 CR2 中
-保留该路由或协调 CLI 修改。
+CR2 开工前需运行以下命令确认 pd-cli 是否依赖任何将被删除的路由：
+
+```bash
+rg "/api/(health|tasks|status|activity|overview|gate|feedback|events|pipeline)" packages/pd-cli packages -g "*.ts"
+```
+
+如果发现依赖，需要在 CR2 中保留该路由或协调 CLI 修改，并在 PR 描述中列出结果。
 
 ### A.12 测试策略
 
 - CR2 删除废弃页面/路由时，同步删除对应的测试文件
 - 每个 CR 工单在实现时写对应测试
-- CR8 新增的 lifecycle 路由需要新测试
+- CR8 新增的 lifecycle/activations/governance 路由需要新测试
 - 服务端路由删除后，对应的集成测试也要删除
 - 每个 CR 的 DoD 包含 `npm run build && npm run test && npm run lint` 通过
+- **视觉回归 smoke**：CR1 完成后，至少在 light/dark 两个模式下对 `/design-system`
+  和 `/focus` 做 DOM style assertion 或 Playwright screenshot 对比，防止 token
+  替换破坏后续页面
+- **暗色模式对比度审计**：CR10 验收时，至少检查正文（`--ink` on `--paper`）、
+  弱化文本（`--ink-4` on `--paper`）、按钮（`--gov` on `--surface`）、
+  标签（`--ink-4` on `--surface`）在 light/dark 两个模式下的对比度
 
 ---
 
@@ -375,7 +403,7 @@ CR2 开工前需确认 pd-cli 是否依赖任何将被删除的路由。如果�
 | `--ink` | `#1A1D23` | 主文字 |
 | `--ink-2` | `#2E323A` | 次文字 |
 | `--ink-3` | `#4A4F5A` | 正文辅助 |
-| `--ink-4` | `#6B7280` | 弱化/标签（WCAG AA 对比度 ≥ 4.5:1） |
+| `--ink-4` | `#5F6774` | 弱化/标签（WCAG AA 对比度 ≥ 4.5:1） |
 | `--ink-5` | `#9CA3AF` | 仅装饰（不用于可读文字） |
 | `--line` | `#D1D5DB` | 主边框/分割线 |
 | `--line-2` | `#E5E7EB` | 次边框 |
@@ -492,7 +520,7 @@ CR2 开工前需确认 pd-cli 是否依赖任何将被删除的路由。如果�
 5. 原则债务 Principle Debt（`/debt`）
 
 **次级工具区（弱化，footer/角落）**：控制中心 `/control-center`、产品反馈
-`/report-problem`、设置 `/settings`、更新 `/update`（更新可更靠后）。
+`/report-problem`、设置 `/settings`、更新 `/update`（独立路由，不在 /settings 下）。
 
 **删除**（页面 + 对应后端 route）：Overview、Data Flow、Event Log、Evolution、
 Central、Agents、Tasks、Samples、Thinking Models、Trust/GFI Monitor（`/feedback`
@@ -524,7 +552,7 @@ Central、Agents、Tasks、Samples、Thinking Models、Trust/GFI Monitor（`/fee
 - 标签措辞规则：标签只描述当前状态，不暗示系统尚未实现的聚合能力。"反复出现"
   改为"行为偏差"（中性，不暗示聚合）。
 - 空状态**不写**"暂无数据"，要引导下一步。示例：
-  「还没有可审查原则。当 PD 捕获到反复出现的行为偏差时，会在这里生成原则候选，等待你审查。」
+  「还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。」
 - 错误提示冷静，不制造恐慌。示例：
   「无法加载这条原则的证据来源。原则本身未受影响。你可以稍后重试，或暂时保留在待审查状态。」
 
@@ -571,6 +599,90 @@ PD 的信任来自诚实。以下为硬性红线：
   `prompt-injection-candidate→prompt`）。`defer_archive` 通道**不在** `ROUTE_CHANNEL_MAP`
   中——它通过 `defer` route 处理，不走标准映射。MVP 实际启用的 writer 为
   `prompt` 和 `defer_archive`（低风险通道），`code_tool_hook` 为高风险通道。
+
+### G.1 CR8 新增端点契约
+
+CR8 需新增以下 4 个端点，供 CR3/CR4/CR6/CR7 消费：
+
+**`GET /api/v1/governance/queue`**（治理队列聚合，首页 CR3 消费）
+```typescript
+interface GovernanceQueueResponse {
+  pendingReviewCount: number;      // 待审查原则数
+  behaviorDeviationCount: number;  // 行为偏差信号数（不暗示聚合）
+  stagnationSignals: Array<{       // 停滞信号
+    type: 'no_pain' | 'never_activated';
+    principleId: string;
+    daysSince: number;
+  }>;
+}
+```
+
+**`GET /api/v1/approvals/grouped`**（按原则分组的审批记录，CR4 消费）
+```typescript
+interface ApprovalGroup {
+  principleId: string;
+  principleTitle: string;
+  status: 'pending' | 'approved' | 'rejected';
+  records: Array<{
+    id: string;
+    artifactId: string;
+    channel: string;
+    createdAt: string;
+  }>;
+}
+```
+
+**`GET /api/v1/activations`**（全通道激活记录，CR6/CR7 消费）
+```typescript
+interface ActivationRecord {
+  id: string;
+  artifactId: string;
+  principleId: string;       // Model 层 join 得到
+  channel: string;           // prompt | defer_archive | code_tool_hook
+  action: string;
+  targetRef: string;
+  activatedAt: string | null;
+  status: 'active' | 'inactive';
+}
+```
+
+**`GET /api/v1/lifecycle/principles/:principleId`**（lifecycle 指标，CR4/CR6 第三层消费）
+```typescript
+interface LifecycleMetricsResponse {
+  principleId: string;
+  adherence: {
+    rate: number | null;     // null = insufficientData
+    note: string;            // "规则质量信号，不等于行为变化"（F.1）
+  };
+  ruleMetrics: Array<{
+    ruleId: string;
+    triggered: number;
+    lastTriggeredAt: string | null;
+  }>;
+}
+```
+
+### G.2 行为证据数据契约（CR5 消费）
+
+行为证据复用 `principles.ts` 现有 pain 相关数据，最小 response shape：
+
+```typescript
+interface PainEvidence {
+  id: string;
+  title: string;                  // 行为偏差简述
+  context: string;                // 发生场景
+  agentBehavior: string;          // Agent 实际行为
+  expectedBehavior?: string;      // 期望行为（如有）
+  source: 'tool_call' | 'prompt'; // 信号来源
+  recommendationState: 'pending' | 'candidate' | 'principle' | 'dismissed';
+  trajectorySummary: {
+    taskId: string;
+    toolName: string;
+    timestamp: string;
+  };
+  createdAt: string;
+}
+```
 
 ---
 
@@ -644,7 +756,7 @@ PD 的信任来自诚实。以下为硬性红线：
 
 - 所有可读文字必须满足 WCAG AA 对比度：正文 ≥ 4.5:1，大字（≥18px 或 ≥14px bold）
   ≥ 3:1。
-- `--ink-4` 为 `#6B7280`，在 `--paper` (#F0F1F4) 上对比度 ≥ 4.5:1（WCAG AA）。
+- `--ink-4` 为 `#5F6774`，在 `--paper` (#F0F1F4) 上对比度 ≥ 4.5:1（WCAG AA）。
 - `--ink-5` 仅用于装饰元素（分割线、背景图案），**不用于任何可读文字**。
 - 暗色模式同理，上线前需用对比度检测工具验证。
 

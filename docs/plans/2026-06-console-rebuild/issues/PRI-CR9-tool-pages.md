@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2
-**必读**: `../01-shared-constraints.md`（B 视觉、E 文案、F 诚实约束、H 安全）
+**必读**: `../01-shared-constraints.md`（B 视觉、E 文案、F 诚实约束、H 安全）、`packages/pd-console/design-prototype/control-center.html`、`packages/pd-console/design-prototype/settings.html`、`packages/pd-console/design-prototype/report-problem.html`、`packages/pd-console/design-prototype/update.html`
 
 ## 背景
 
@@ -42,6 +42,8 @@
 ## 实施提示
 
 - 控制中心保留 `health.ts`/`HealthCheckModel` 作为"配置就绪"的数据源（CR2 已说明不删）。
+  消费 `fetchConfigReadiness`（由 `fetchSystemHealth` 重命名而来，见 A.5），不再使用
+  `fetchSystemHealth`。
 - 不要把控制中心做成第二个 dashboard：它是配置页，给"改完配置能不能跑"的就绪反馈。
 - 产品反馈页文案注意：它是"对 PD 产品的反馈"，不是"喂给 Agent 的证据"，不要改语义。
 

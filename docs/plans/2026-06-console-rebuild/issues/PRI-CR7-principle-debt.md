@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节）、Reader Companion 第六部分 B1（原则债务回路）、UX 规范 Page 5
+**必读**: `../01-shared-constraints.md`（全节，**尤其 G.1 数据契约**）、`packages/pd-console/design-prototype/principle-debt.html`（视觉参考）
 
 ## 背景
 
@@ -31,6 +31,7 @@ Reader Companion "原则债务阻尼回路" 与 UX 规范 Page 5。
 - [ ] 列出长期未激活原则（数据来自 CR8 激活 join），债务原因为自然语言、非指标墙。
 - [ ] 无现成数据支撑的维度（如冲突检测）诚实留白，**不自造** MVP5 级检测逻辑。
 - [ ] 可执行动作走现有端点；无端点的动作为禁用占位 + 诚实旁注（F）。
+- [ ] 归档操作使用 CR1 的 `ConfirmationBar` 组件（J.1）+ `UndoToast`（J.2）。
 - [ ] 解析遵循 H 节；空/错误态诚实文案（"还没有原则债务…"引导式空状态）。
 - [ ] 中英文 i18n 完整。
 - [ ] `cd packages/pd-console && npm run build && npm run test` 通过；`npm run lint` 通过。

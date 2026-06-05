@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节，**尤其 F 诚实约束 + G 数据契约**）
+**必读**: `../01-shared-constraints.md`（全节，**尤其 F 诚实约束 + G.1 数据契约**）、`packages/pd-console/design-prototype/activation.html`（视觉参考）
 
 ## 背景
 

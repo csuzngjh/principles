@@ -2,7 +2,7 @@
 
 **Type**: AFK
 **Priority**: P2（收尾）
-**Blocked by**: PRI-CR3, CR4, CR5, CR6, CR7, CR8, CR9
+**Blocked by**: PRI-CR3, PRI-CR4, PRI-CR5, PRI-CR6, PRI-CR7, PRI-CR8, PRI-CR9
 **必读**: `../01-shared-constraints.md`（E 文案、F 诚实约束、I DoD）、`PD_BRAND_CONSTITUTION.md` §9、§13 品牌审查清单
 
 ## 背景
@@ -37,6 +37,13 @@
 - [ ] 全量构建测试：`cd packages/pd-console && npm run build && npm run test` 通过；
       `cd packages/principles-core && npm run build && npm run test` 通过；`npm run lint` 通过。
 - [ ] 导航走查：5 治理页 + 工具页可达，废弃路由返回 404，钻取链路正确。
+- [ ] 启动页 `/splash` 和登录页 `/login` 走查：认证 flow 正常、暗色模式正常、
+      登录页 slogan 已替换禁止词。
+- [ ] `/design-system` 预览路由仅在开发环境可访问（`import.meta.env.DEV`），
+      生产构建不包含此路由。
+- [ ] 暗色模式对比度审计：至少检查正文（`--ink` on `--paper`）、弱化文本
+      （`--ink-4` on `--paper`）、按钮（`--gov` on `--surface`）、标签
+      （`--ink-4` on `--surface`）在 light/dark 两个模式下的对比度 ≥ 4.5:1。
 
 ## 验收清单（PR 中逐条勾选并附证据）
 

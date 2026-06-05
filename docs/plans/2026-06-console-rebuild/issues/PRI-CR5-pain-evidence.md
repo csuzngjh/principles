@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2
-**必读**: `../01-shared-constraints.md`（全节）、`design-prototype`（视觉 token 与卡片/inset 参考）
+**必读**: `../01-shared-constraints.md`（全节，**尤其 G.2 行为证据数据契约**）、`packages/pd-console/design-prototype/pain-evidence.html`（视觉 token 与卡片/inset 参考）
 
 ## 背景
 
@@ -14,7 +14,8 @@
 
 实现 `PainEvidencePage`（路由 `/pain`），复用 `principles.ts` 现有 pain 相关数据
 （**不新增后端回路**，沿用现有 route；若现有 route 不足，只做 G 节允许的返回结构
-微调，并在 PR 说明）：
+微调，并在 PR 说明）。数据契约见 `01-shared-constraints.md` G.2 节的
+`PainEvidence` interface。
 
 1. 每条 pain 证据卡（复用 CR1 卡片）：简短描述、发生场景、相关 Agent 行为、来源、
    是否建议生成原则。

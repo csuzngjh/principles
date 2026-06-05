@@ -25,6 +25,9 @@
 2. **路由表更新**（`src/ui/App.tsx`）：建立 5 个治理路由 + 工具路由的占位（页面本体
    由 CR3–CR9 实现，这里先放空壳/Loading 占位，保证可导航、可编译）。
    - 新增启动页路由 `/splash` 和登录页路由 `/login`（C.0）。
+   - **重构认证 flow**：当前 App.tsx 在 Router 外 early return LoginPage。重构为
+     Router 始终渲染，`/splash` → auth check → `/login` or `/focus`。LoginPage
+     成为 Router 内的一个路由页面，不再是 Router 外的条件渲染。
 3. **页面目录重组**（A.3）：将页面按 IA 分目录放置，不再扁平：
    - `pages/focus/FocusPage.tsx`、`pages/pain/PainPage.tsx`、
      `pages/principles/PrinciplesPage.tsx`、`pages/activation/ActivationPage.tsx`、
@@ -43,7 +46,9 @@
    `config.ts`、`workspaces.ts`、`state.ts`、`update.ts`、`update-history.ts`、
    `health.ts`（仅供控制中心配置就绪用，见 CR9，不再用于全局红点）。
 6. **清理 `api.ts`**（A.5）：删除所有废弃接口和函数（详见 A.5 的删除清单），保留
-   认证、审批、原则、反馈报告、配置、工作区相关函数。清理后预计 ~300 行。
+   认证、审批、原则、反馈报告、配置、工作区相关函数。将 `fetchSystemHealth`
+   重命名为 `fetchConfigReadiness`，仅保留配置就绪数据源功能，删除全局健康
+   红点展示路径。清理后预计 ~300 行。
 7. **清理服务端 `index.ts`**（A.6）：删除废弃路由的 import、if 块和 dispose 调用
    （详见 A.6 的删除清单）。
 8. **清理对应 Model**（A.4）：删除仅服务废弃页面的 Model

@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P1（被 CR3/CR4/CR6 消费，应早于它们的联调）
 **Blocked by**: PRI-CR2
-**必读**: `../01-shared-constraints.md`（F 诚实约束、G 数据契约、H 安全规则）
+**必读**: `../01-shared-constraints.md`（F 诚实约束、**G.1 数据契约**、H 安全规则）
 
 ## 背景
 
@@ -13,27 +13,30 @@
 
 ## What to build
 
-1. **MVP6：暴露 lifecycle 指标。** 新增一条只读 route（如
-   `GET /api/v1/principles/:id/lifecycle-metrics`），调用 `lifecycle-metrics.ts`
-   的 `computePrincipleAdherence` / `computeRuleMetrics`，返回结构化 JSON。
+1. **MVP6：暴露 lifecycle 指标。** 新增只读 route
+   `GET /api/v1/lifecycle/principles/:principleId`，调用
+   `lifecycle-metrics.ts` 的 `computePrincipleAdherence` / `computeRuleMetrics`，
+   返回 `LifecycleMetricsResponse`（见 G.1）。
    - **必须**在返回里带 `insufficientData` 标志与一个 `note` 字段，明确"该原则无
      rule 时指标为空 / 不代表行为变化"（诚实约束 F.1）。
    - 不新造指标，不改指标算法。
-2. **激活 join：`artifactId → principleId`。** 在服务激活数据的 Model（如
-   `ApprovalsConsoleModel` 或新增 `ActivationConsoleModel`）里，用
-   `SqlitePIArtifactStore` 取 `PIArtifactSnapshot.sourcePrincipleId`，把
-   `activations` 记录 join 成"按原则聚合的激活事实"。
-   - 暴露一条只读 route（如 `GET /api/v1/activations` 或
-     `GET /api/v1/principles/:id/activation`），返回：激活/未激活、channel、action、
-     targetRef、`activatedAt`。
+2. **激活 join：`artifactId → principleId`。** 新增只读 route
+   `GET /api/v1/activations`，返回全通道激活记录 `ActivationRecord[]`（见 G.1）。
+   在 Model 层用 `SqlitePIArtifactStore` 取 `PIArtifactSnapshot.sourcePrincipleId`，
+   把 `activations` 记录 join 成"按原则聚合的激活事实"。
    - **不得**返回触发/命中计数（不存在，属 MVP5）。
-3. **审批按原则聚合（为 CR4 服务）：** 提供一个把"同一原则的多条 channel 审批记录"
-   聚合为"一条原则一个待决条目"的返回结构（读模型层聚合，不改审批写逻辑、不加 modify）。
+3. **审批按原则聚合（为 CR4 服务）：** 新增只读 route
+   `GET /api/v1/approvals/grouped`，返回 `ApprovalGroup[]`（见 G.1），把"同一原则
+   的多条 channel 审批记录"聚合为"一条原则一个待决条目"（读模型层聚合，不改审批
+   写逻辑、不加 modify）。
+4. **治理队列聚合（为 CR3 首页服务）：** 新增只读 route
+   `GET /api/v1/governance/queue`，返回 `GovernanceQueueResponse`（见 G.1），
+   聚合待审查数、行为偏差信号数、停滞信号。
 
 ## Acceptance criteria
 
-- [ ] lifecycle-metrics route 返回结构化 JSON，`--json`/默认输出为单一可解析对象
-      （遵循 CLI/Operator JSON 严格性精神）。
+- [ ] lifecycle-metrics route 返回结构化 JSON，HTTP response body 为单一可解析 JSON
+      对象（`LifecycleMetricsResponse`，见 G.1）。
 - [ ] 无 rule 的原则返回 `insufficientData: true` + 解释性 `note`，不返回伪造数值。
 - [ ] 激活 route 能按 `principleId` 返回激活事实；记录确实来自 `sourcePrincipleId`
       join，不是猜测拼接（避免 ERR-004/008 lineage 不一致）。
