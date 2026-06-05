@@ -137,7 +137,7 @@ function ActivationFactCard({
             <span className="text-amber">{t("pages.activation.neverActivated")}</span>
           ) : (
             <span className="text-ink-2 font-mono text-[12px] tabular-nums">
-              {new Date(record.activatedAt as string).toLocaleString()}
+              {new Date(record.activatedAt!).toLocaleString()}
             </span>
           )}
         </div>
@@ -288,11 +288,17 @@ export function ActivationPage() {
     const newCache: Record<string, LifecycleMetricsData | null> = {};
     await Promise.all(
       Array.from(activePrinciples).map(async (principleId) => {
-        const lifecycleResult = await fetchLifecycleMetrics(principleId);
-        if (lifecycleResult.success) {
-          const validatedMetrics = validateLifecycleMetricsData(lifecycleResult.data);
-          newCache[principleId] = validatedMetrics;
-        } else {
+        try {
+          const lifecycleResult = await fetchLifecycleMetrics(principleId);
+          if (lifecycleResult.success) {
+            const validatedMetrics = validateLifecycleMetricsData(lifecycleResult.data);
+            newCache[principleId] = validatedMetrics;
+          } else {
+            newCache[principleId] = null;
+          }
+        } catch {
+          // EP-03: graceful degradation — lifecycle metrics are optional
+          // Individual principle failure must not block the entire page
           newCache[principleId] = null;
         }
       })
@@ -314,12 +320,6 @@ export function ActivationPage() {
     // When the backend endpoint is available, replace this with an actual API call
     toast.success(t("pages.activation.disableSuccess"), {
       description: t("pages.activation.disableSuccessDescription", { id: record.principleId }),
-      action: {
-        label: t("common.cancel"),
-        onClick: () => {
-          toast.info(t("pages.activation.undoDisable"));
-        },
-      },
       duration: 5000,
     });
 
