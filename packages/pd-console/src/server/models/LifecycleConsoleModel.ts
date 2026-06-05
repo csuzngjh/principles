@@ -8,11 +8,16 @@ import { ConsoleLifecycleDatasource } from './ConsoleLifecycleDatasource.js';
 
 export interface LifecycleMetricsResponse {
   principleId: string;
-  adherenceRate: number | null;
-  insufficientData: boolean;
-  note?: string;
-  ruleMetrics: Record<string, RuleMetricResult>;
-  generatedAt: string;
+  adherence: {
+    insufficientData: boolean;
+    rate: number | null;
+    note: string;
+  };
+  ruleMetrics: {
+    ruleId: string;
+    triggered: number;
+    lastTriggeredAt: string | null;
+  }[];
 }
 
 export class LifecycleConsoleModel {
@@ -31,30 +36,47 @@ export class LifecycleConsoleModel {
     const principle = readModel.principles.find((p) => p.principle.id === principleId);
     if (!principle) return null;
 
-    const ruleMetrics: Record<string, RuleMetricResult> = {};
+    const ruleMetricsMap: Record<string, RuleMetricResult> = {};
     for (const rule of principle.rules) {
-      ruleMetrics[rule.rule.id] = computeRuleMetrics(rule);
+      ruleMetricsMap[rule.rule.id] = computeRuleMetrics(rule);
     }
 
-    const adherence = computePrincipleAdherence(principle, ruleMetrics);
+    const adherence = computePrincipleAdherence(principle, ruleMetricsMap);
+
+    // Build ruleMetrics array from lifecycle evidence
+    const ruleMetrics: LifecycleMetricsResponse['ruleMetrics'] = principle.rules.map((rule) => {
+      const triggered = rule.replayEvidence.reportCount;
+      const latestReport = rule.replayEvidence.latestReports.length > 0
+        ? rule.replayEvidence.latestReports[0]
+        : null;
+      const lastTriggeredAt = latestReport?.generatedAt ?? null;
+      return {
+        ruleId: rule.rule.id,
+        triggered,
+        lastTriggeredAt,
+      };
+    });
 
     if (adherence.insufficientData) {
       return {
         principleId,
-        adherenceRate: null,
-        insufficientData: true,
-        note: '该原则尚无规则，无法计算依从率',
+        adherence: {
+          insufficientData: true,
+          rate: null,
+          note: '该原则尚无规则，无法计算依从率',
+        },
         ruleMetrics,
-        generatedAt: readModel.generatedAt,
       };
     }
 
     return {
       principleId,
-      adherenceRate: adherence.adherenceRate,
-      insufficientData: false,
+      adherence: {
+        insufficientData: false,
+        rate: adherence.adherenceRate,
+        note: '',
+      },
       ruleMetrics,
-      generatedAt: readModel.generatedAt,
     };
   }
 }

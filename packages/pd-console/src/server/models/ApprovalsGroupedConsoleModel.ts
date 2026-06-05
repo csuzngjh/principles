@@ -3,26 +3,26 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
+  loadLedger,
 } from '@principles/core/runtime-v2';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-export interface PrincipleApprovalGroup {
+export interface ApprovalGroup {
   principleId: string;
-  pendingCount: number;
-  approvedCount: number;
-  rejectedCount: number;
-  channels: {
+  principleTitle: string;
+  status: 'pending' | 'approved' | 'rejected';
+  records: {
+    id: string;
+    artifactId: string;
     channel: string;
-    pendingCount: number;
-    approvedCount: number;
-    rejectedCount: number;
+    createdAt: string;
   }[];
 }
 
 export interface ApprovalsGroupedResponse {
-  groups: PrincipleApprovalGroup[];
+  groups: ApprovalGroup[];
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely empty */
   note?: string;
@@ -86,55 +86,65 @@ export class ApprovalsGroupedConsoleModel {
       }
     }
 
+    // Load ledger for principle titles
+    const stateDir = path.join(this.workspaceDir, '.state');
+    let principleTitles = new Map<string, string>();
+    try {
+      const ledger = loadLedger(stateDir);
+      for (const [id, principle] of Object.entries(ledger.tree.principles)) {
+        principleTitles.set(id, principle.text);
+      }
+    } catch {
+      // Ledger not available — will fall back to principleId
+    }
+
     // Group by principleId (null → "unlinked")
-    const groupMap = new Map<string, Map<string, { pending: number; approved: number; rejected: number }>>();
+    const groupMap = new Map<string, {
+      id: string;
+      artifactId: string;
+      channel: string;
+      createdAt: string;
+      status: 'pending' | 'approved' | 'rejected';
+    }[]>();
 
     for (const approval of allApprovals) {
       const principleId = artifactPrincipleMap.get(approval.artifactId) ?? 'unlinked';
 
       if (!groupMap.has(principleId)) {
-        groupMap.set(principleId, new Map());
+        groupMap.set(principleId, []);
       }
-      const channelMap = groupMap.get(principleId);
-      if (!channelMap) continue;
+      const records = groupMap.get(principleId);
+      if (!records) continue;
 
-      const { channel } = approval;
-      if (!channelMap.has(channel)) {
-        channelMap.set(channel, { pending: 0, approved: 0, rejected: 0 });
-      }
-      const counts = channelMap.get(channel);
-      if (!counts) continue;
-
-      if (approval.status === 'pending') counts.pending++;
-      else if (approval.status === 'approved') counts.approved++;
-      else if (approval.status === 'rejected') counts.rejected++;
+      records.push({
+        id: approval.approvalId,
+        artifactId: approval.artifactId,
+        channel: approval.channel,
+        createdAt: approval.requestedAt,
+        status: approval.status as 'pending' | 'approved' | 'rejected',
+      });
     }
 
-    const groups: PrincipleApprovalGroup[] = [];
-    for (const [principleId, channelMap] of groupMap) {
-      let pendingCount = 0;
-      let approvedCount = 0;
-      let rejectedCount = 0;
-      const channels: PrincipleApprovalGroup['channels'] = [];
-
-      for (const [channel, counts] of channelMap) {
-        pendingCount += counts.pending;
-        approvedCount += counts.approved;
-        rejectedCount += counts.rejected;
-        channels.push({
-          channel,
-          pendingCount: counts.pending,
-          approvedCount: counts.approved,
-          rejectedCount: counts.rejected,
-        });
+    const groups: ApprovalGroup[] = [];
+    for (const [principleId, records] of groupMap) {
+      // Determine overall group status
+      const statuses = records.map((r) => r.status);
+      let status: 'pending' | 'approved' | 'rejected';
+      if (statuses.every((s) => s === 'approved')) {
+        status = 'approved';
+      } else if (statuses.every((s) => s === 'rejected')) {
+        status = 'rejected';
+      } else {
+        status = 'pending';
       }
+
+      const principleTitle = principleTitles.get(principleId) ?? principleId;
 
       groups.push({
         principleId,
-        pendingCount,
-        approvedCount,
-        rejectedCount,
-        channels,
+        principleTitle,
+        status,
+        records,
       });
     }
 

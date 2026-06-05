@@ -81,7 +81,7 @@ function AuthRoutes() {
                     <Route path="/debt" element={<DebtPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="/settings/update" element={<UpdatePage />} />
+                    <Route path="/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
                     <Route path="/design-system" element={<DesignSystemPage />} />
                   </Routes>

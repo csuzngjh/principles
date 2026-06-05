@@ -266,10 +266,14 @@ describe('CR8 Backend Data Contract Routes', () => {
 
       // Verify required fields
       expect(getStringField(data, 'principleId')).toBe(principleId);
-      expect(Object.hasOwn(data, 'adherenceRate')).toBe(true);
-      expect(Object.hasOwn(data, 'insufficientData')).toBe(true);
-      expect(Object.hasOwn(data, 'ruleMetrics')).toBe(true);
-      expect(getStringField(data, 'generatedAt')).toBeDefined();
+      // G.1: adherence is a nested object with insufficientData/rate/note
+      const adherence = data!['adherence'];
+      expect(isRecord(adherence)).toBe(true);
+      expect(Object.hasOwn(adherence as Record<string, unknown>, 'insufficientData')).toBe(true);
+      expect(Object.hasOwn(adherence as Record<string, unknown>, 'rate')).toBe(true);
+      expect(Object.hasOwn(adherence as Record<string, unknown>, 'note')).toBe(true);
+      // G.1: ruleMetrics is an array (not a Record)
+      expect(Array.isArray(data!['ruleMetrics'])).toBe(true);
     });
   });
 
@@ -316,16 +320,19 @@ describe('CR8 Backend Data Contract Routes', () => {
 
       const data = getDataObject(body);
       expect(data).toBeDefined();
-      expect(getBooleanField(data, 'insufficientData')).toBe(true);
-      expect(getNullField(data, 'adherenceRate')).toBeNull();
-      expect(getStringField(data, 'note')).toBeDefined();
+      // G.1: adherence is nested object
+      const adherence = data!['adherence'];
+      expect(isRecord(adherence)).toBe(true);
+      expect(getBooleanField(adherence, 'insufficientData')).toBe(true);
+      expect(getNullField(adherence, 'rate')).toBeNull();
+      expect(getStringField(adherence, 'note')).toBeDefined();
     });
   });
 
-  // ── 3. Activations route joins artifactId → sourcePrincipleId ─────────────
+  // ── 3. Activations route joins artifactId → principleId ─────────────
 
-  describe('GET /api/v1/activations — sourcePrincipleId join', () => {
-    it('joins artifactId to sourcePrincipleId from PIArtifactSnapshot', async () => {
+  describe('GET /api/v1/activations — principleId join', () => {
+    it('joins artifactId to principleId from PIArtifactSnapshot', async () => {
       const artifactId = `artifact-join-test-${Date.now()}`;
       const principleId = 'principle-from-artifact';
 
@@ -344,18 +351,19 @@ describe('CR8 Backend Data Contract Routes', () => {
       const activations = data!.activations;
       expect(Array.isArray(activations)).toBe(true);
 
+      // G.1: find by `id` field (not `activationId`), check `principleId` (not `sourcePrincipleId`)
       const match = (activations as unknown[]).find(
         (a): a is Record<string, unknown> => isRecord(a) && getStringField(a, 'artifactId') === artifactId,
       );
       expect(match).toBeDefined();
-      expect(getStringField(match, 'sourcePrincipleId')).toBe(principleId);
+      expect(getStringField(match, 'principleId')).toBe(principleId);
     });
   });
 
-  // ── 4. Missing sourcePrincipleId is explicit (null), not fabricated ───────
+  // ── 4. Missing principleId is converted to 'unlinked' ───────
 
-  describe('GET /api/v1/activations — missing sourcePrincipleId', () => {
-    it('returns null sourcePrincipleId when artifact has no sourcePrincipleId', async () => {
+  describe('GET /api/v1/activations — missing principleId', () => {
+    it('returns principleId="unlinked" when artifact has no sourcePrincipleId', async () => {
       const artifactId = `artifact-no-principle-${Date.now()}`;
 
       // Seed artifact WITHOUT sourcePrincipleId
@@ -373,20 +381,21 @@ describe('CR8 Backend Data Contract Routes', () => {
       const activations = data!.activations;
       expect(Array.isArray(activations)).toBe(true);
 
+      // G.1: find by `id` field, check `principleId` (not `sourcePrincipleId`)
       const match = (activations as unknown[]).find(
         (a): a is Record<string, unknown> => isRecord(a) && getStringField(a, 'artifactId') === artifactId,
       );
       expect(match).toBeDefined();
-      // sourcePrincipleId must be explicitly null, not undefined or fabricated
-      expect(Object.hasOwn(match!, 'sourcePrincipleId')).toBe(true);
-      expect(match!.sourcePrincipleId).toBeNull();
+      // G.1: null sourcePrincipleId is converted to 'unlinked' by the model
+      expect(Object.hasOwn(match!, 'principleId')).toBe(true);
+      expect(getStringField(match, 'principleId')).toBe('unlinked');
     });
   });
 
   // ── 5. Approvals grouped returns one principle-level item with channel records ──
 
   describe('GET /api/v1/approvals/grouped — structure', () => {
-    it('returns groups with principleId, counts, and channel records', async () => {
+    it('returns groups with principleId, principleTitle, status, and records', async () => {
       const principleId = 'cr8-grouped-principle';
       const artifactId1 = `artifact-grouped-1-${Date.now()}`;
       const artifactId2 = `artifact-grouped-2-${Date.now()}`;
@@ -413,20 +422,21 @@ describe('CR8 Backend Data Contract Routes', () => {
       );
       expect(group).toBeDefined();
 
-      // Verify principle-level counts
-      expect(typeof getNumberField(group, 'pendingCount')).toBe('number');
-      expect(typeof getNumberField(group, 'approvedCount')).toBe('number');
-      expect(typeof getNumberField(group, 'rejectedCount')).toBe('number');
-
-      // Verify channels array
-      const channels = group!.channels;
-      expect(Array.isArray(channels)).toBe(true);
-      expect(channels.length).toBeGreaterThan(0);
-
-      const channelEntry = (channels as unknown[])[0];
-      expect(isRecord(channelEntry)).toBe(true);
-      expect(getStringField(channelEntry, 'channel')).toBeDefined();
-      expect(typeof getNumberField(channelEntry, 'pendingCount')).toBe('number');
+      // G.1: check principleTitle (string)
+      expect(getStringField(group, 'principleTitle')).toBeDefined();
+      // G.1: check status (pending | approved | rejected)
+      const statusVal = getStringField(group, 'status');
+      expect(['pending', 'approved', 'rejected']).toContain(statusVal);
+      // G.1: check records array with id/artifactId/channel/createdAt
+      const records = group!['records'];
+      expect(Array.isArray(records)).toBe(true);
+      expect(records.length).toBeGreaterThan(0);
+      const firstRecord = (records as unknown[])[0];
+      expect(isRecord(firstRecord)).toBe(true);
+      expect(getStringField(firstRecord, 'id')).toBeDefined();
+      expect(getStringField(firstRecord, 'artifactId')).toBeDefined();
+      expect(getStringField(firstRecord, 'channel')).toBeDefined();
+      expect(getStringField(firstRecord, 'createdAt')).toBeDefined();
     });
   });
 
@@ -442,7 +452,8 @@ describe('CR8 Backend Data Contract Routes', () => {
 
       expect(typeof getNumberField(data, 'pendingReviewCount')).toBe('number');
       expect(typeof getNumberField(data, 'behaviorDeviationCount')).toBe('number');
-      expect(typeof getNumberField(data, 'stagnationSignals')).toBe('number');
+      // G.1: stagnationSignals is an array, not a number
+      expect(Array.isArray(data!['stagnationSignals'])).toBe(true);
       expect(getStringField(data, 'generatedAt')).toBeDefined();
     });
   });
@@ -504,7 +515,9 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(data).toBeDefined();
       expect(getNumberField(data, 'pendingReviewCount')).toBe(0);
       expect(getNumberField(data, 'behaviorDeviationCount')).toBe(0);
-      expect(getNumberField(data, 'stagnationSignals')).toBe(0);
+      // G.1: stagnationSignals is an empty array (not 0)
+      expect(Array.isArray(data!['stagnationSignals'])).toBe(true);
+      expect((data!['stagnationSignals'] as unknown[]).length).toBe(0);
 
       disposeGovernanceModels();
       await new Promise<void>((resolve) => freshServer.close(() => resolve()));

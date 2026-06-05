@@ -47,7 +47,7 @@ const toolNavItems = [
   { id: "control-center", label: "控制中心", href: "/control-center", icon: Settings, shortcut: "Alt+8" },
   { id: "report-problem", label: "产品反馈", href: "/report-problem", icon: MessageSquare, shortcut: "Alt+9" },
   { id: "settings", label: "设置", href: "/settings", icon: Settings, shortcut: "Alt+0" },
-  { id: "update", label: "更新", href: "/settings/update", icon: RefreshCw, shortcut: "" },
+  { id: "update", label: "更新", href: "/update", icon: RefreshCw, shortcut: "" },
 ];
 
 export function AppSidebar() {

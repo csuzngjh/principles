@@ -378,6 +378,92 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
   );
 }
 
+// ── CR8: Backend Data Contract (G.1) ─────────────────────────────────────────
+
+interface StagnationSignal {
+  type: 'no_pain' | 'never_activated';
+  principleId: string;
+  daysSince: number;
+}
+
+interface GovernanceQueueData {
+  pendingReviewCount: number;
+  behaviorDeviationCount: number;
+  stagnationSignals: StagnationSignal[];
+  note?: string;
+}
+
+interface ApprovalGroupRecord {
+  id: string;
+  artifactId: string;
+  channel: string;
+  createdAt: string;
+}
+
+interface ApprovalGroup {
+  principleId: string;
+  principleTitle: string;
+  status: 'pending' | 'approved' | 'rejected';
+  records: ApprovalGroupRecord[];
+}
+
+interface ApprovalsGroupedData {
+  groups: ApprovalGroup[];
+  generatedAt: string;
+  note?: string;
+}
+
+interface ActivationRecord {
+  id: string;
+  artifactId: string;
+  principleId: string;
+  channel: string;
+  action: string;
+  targetRef: string;
+  activatedAt: string | null;
+  status: 'active' | 'inactive';
+}
+
+interface ActivationsData {
+  activations: ActivationRecord[];
+  generatedAt: string;
+  note?: string;
+}
+
+interface LifecycleAdherence {
+  insufficientData: boolean;
+  rate: number | null;
+  note: string;
+}
+
+interface LifecycleRuleMetric {
+  ruleId: string;
+  triggered: number;
+  lastTriggeredAt: string | null;
+}
+
+interface LifecycleMetricsData {
+  principleId: string;
+  adherence: LifecycleAdherence;
+  ruleMetrics: LifecycleRuleMetric[];
+}
+
+async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>> {
+  return request<GovernanceQueueData>('/api/v1/governance/queue');
+}
+
+async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
+  return request<ApprovalsGroupedData>('/api/v1/approvals/grouped');
+}
+
+async function fetchAllActivations(): Promise<ApiResponse<ActivationsData>> {
+  return request<ActivationsData>('/api/v1/activations');
+}
+
+async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<LifecycleMetricsData>> {
+  return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
+}
+
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -406,6 +492,10 @@ export {
   removeWorkspace,
   syncWorkspace,
   fetchConfigReadiness,
+  fetchGovernanceQueue,
+  fetchApprovalsGrouped,
+  fetchAllActivations,
+  fetchLifecycleMetrics,
 };
 
 export type {
@@ -432,4 +522,14 @@ export type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   ReadinessCheckData,
+  StagnationSignal,
+  GovernanceQueueData,
+  ApprovalGroupRecord,
+  ApprovalGroup,
+  ApprovalsGroupedData,
+  ActivationRecord,
+  ActivationsData,
+  LifecycleAdherence,
+  LifecycleRuleMetric,
+  LifecycleMetricsData,
 };

@@ -7,18 +7,19 @@ import type { ActivationStatusRecord, PIArtifactRecord } from '@principles/core/
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-export interface ActivationFact {
-  activationId: string;
+export interface ActivationRecord {
+  id: string;
   artifactId: string;
+  principleId: string;
   channel: string;
   action: string;
   targetRef: string;
-  activatedAt: string;
-  sourcePrincipleId: string | null;
+  activatedAt: string | null;
+  status: 'active' | 'inactive';
 }
 
 export interface ActivationsResponse {
-  activations: ActivationFact[];
+  activations: ActivationRecord[];
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely empty */
   note?: string;
@@ -81,14 +82,15 @@ export class ActivationsConsoleModel {
       }
     }
 
-    const facts: ActivationFact[] = allActivations.map((record) => ({
-      activationId: record.activationId,
+    const facts: ActivationRecord[] = allActivations.map((record) => ({
+      id: record.activationId,
       artifactId: record.artifactId,
+      principleId: artifactPrincipleMap.get(record.artifactId) ?? 'unlinked',
       channel: record.channel,
       action: record.action,
       targetRef: record.targetRef,
       activatedAt: record.activatedAt,
-      sourcePrincipleId: artifactPrincipleMap.get(record.artifactId) ?? null,
+      status: 'active' as const,
     }));
 
     return {
