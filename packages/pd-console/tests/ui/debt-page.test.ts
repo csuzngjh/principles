@@ -3,7 +3,9 @@
  *
  * Validates:
  * - Principle list validators reject malformed payloads
+ * - Activation validators reject malformed payloads
  * - Debt candidate derivation from cross-referenced data
+ * - P1 honesty: no false debt candidates when activation data is unavailable
  * - Empty state / degraded state handling
  * - Disabled actions never produce success toast (no backend endpoint)
  * - English i18n copy has no CJK characters
@@ -15,12 +17,16 @@ import { describe, it, expect } from "vitest";
 import {
   validatePrincipleListItem,
   validatePrinciplesListData,
+  validateActivationRecord,
+  validateActivationsData,
   deriveDebtCandidates,
   isActionAvailable,
 } from "../../src/ui/pages/debt/DebtValidators.js";
 import type {
   SuggestedAction,
+  DebtCandidate,
 } from "../../src/ui/pages/debt/DebtValidators.js";
+import type { ActivationRecord, PrincipleListItem } from "../../src/ui/api.js";
 import enJson from "../../src/ui/i18n/en.json" with { type: "json" };
 import zhJson from "../../src/ui/i18n/zh-CN.json" with { type: "json" };
 
@@ -532,5 +538,152 @@ describe("Debt: disabled action explanations are present in i18n", () => {
     expect(typeof zhDebt?.archiveDisabledReason).toBe("string");
     expect(typeof zhDebt?.downgradeDisabledReason).toBe("string");
     expect(typeof zhDebt?.keepObservingDisabledReason).toBe("string");
+  });
+});
+
+// ── validateActivationRecord ────────────────────────────────────────────────
+
+describe("validateActivationRecord", () => {
+  it("validates a well-formed activation record", () => {
+    const result = validateActivationRecord(makeActivationRecord());
+    expect(result).not.toBeNull();
+    expect(result?.principleId).toBe("principle-001");
+    expect(result?.status).toBe("active");
+  });
+
+  it("validates record with null activatedAt", () => {
+    const result = validateActivationRecord(
+      makeActivationRecord({ activatedAt: null }),
+    );
+    expect(result).not.toBeNull();
+    expect(result?.activatedAt).toBeNull();
+  });
+
+  it("rejects null input", () => {
+    expect(validateActivationRecord(null)).toBeNull();
+  });
+
+  it("rejects missing principleId", () => {
+    const { principleId, ...rest } = makeActivationRecord();
+    expect(validateActivationRecord(rest)).toBeNull();
+  });
+
+  it("rejects invalid status", () => {
+    expect(
+      validateActivationRecord(makeActivationRecord({ status: "unknown" })),
+    ).toBeNull();
+  });
+
+  it("rejects non-string id", () => {
+    expect(
+      validateActivationRecord(makeActivationRecord({ id: 123 })),
+    ).toBeNull();
+  });
+});
+
+// ── validateActivationsData ─────────────────────────────────────────────────
+
+describe("validateActivationsData", () => {
+  it("validates well-formed activations data", () => {
+    const result = validateActivationsData({
+      activations: [makeActivationRecord()],
+      generatedAt: "2026-06-01T00:00:00.000Z",
+    });
+    expect(result).not.toBeNull();
+    expect(result?.activations).toHaveLength(1);
+  });
+
+  it("validates empty activations array", () => {
+    const result = validateActivationsData({
+      activations: [],
+      generatedAt: "2026-06-01T00:00:00.000Z",
+    });
+    expect(result).not.toBeNull();
+    expect(result?.activations).toHaveLength(0);
+  });
+
+  it("rejects null input", () => {
+    expect(validateActivationsData(null)).toBeNull();
+  });
+
+  it("rejects missing activations field", () => {
+    expect(validateActivationsData({ generatedAt: "2026-06-01" })).toBeNull();
+  });
+
+  it("rejects missing generatedAt", () => {
+    expect(validateActivationsData({ activations: [] })).toBeNull();
+  });
+
+  it("rejects data with any invalid record (fail loud, ERR-009)", () => {
+    const result = validateActivationsData({
+      activations: [makeActivationRecord(), { id: 123 }],
+      generatedAt: "2026-06-01T00:00:00.000Z",
+    });
+    expect(result).toBeNull();
+  });
+});
+
+// ── P1 honesty: no false candidates when activations unavailable ────────────
+
+describe("P1: activations unavailable must not produce false debt candidates", () => {
+  /**
+   * Simulates the DebtPage orchestration logic after the P1 fix.
+   * When activations API fails or data is malformed, candidates must be empty
+   * to avoid misinterpreting "data unavailable" as "no activation records".
+   */
+  function simulateDebtPageDerivation(
+    principles: PrincipleListItem[],
+    activationsAvailable: boolean,
+    activations: ActivationRecord[],
+  ): DebtCandidate[] {
+    // Mirrors the fixed DebtPage.loadData logic:
+    // Only derive debt candidates when activation data is available.
+    return activationsAvailable
+      ? deriveDebtCandidates(principles, activations)
+      : [];
+  }
+
+  it("API fail + active principles → zero candidates (not false noActivationRecord)", () => {
+    const principles = [
+      validatePrincipleListItem(makePrincipleListItem({ id: "p-1" })),
+      validatePrincipleListItem(makePrincipleListItem({ id: "p-2" })),
+    ].filter((p): p is PrincipleListItem => p !== null);
+
+    expect(principles).toHaveLength(2);
+
+    // Simulate: activations API failed (success=false)
+    const activationsAvailable = false;
+    const candidates = simulateDebtPageDerivation(principles, activationsAvailable, []);
+    expect(candidates).toHaveLength(0);
+  });
+
+  it("API success but malformed data → zero candidates", () => {
+    const principles = [makePrincipleListItem()] as PrincipleListItem[];
+
+    // Simulate: activations API returned success but data failed validation
+    const activationsAvailable = false;
+    const candidates = simulateDebtPageDerivation(principles, activationsAvailable, []);
+    expect(candidates).toHaveLength(0);
+  });
+
+  it("API success + valid empty activations → candidates derived honestly", () => {
+    const principles = [makePrincipleListItem()] as PrincipleListItem[];
+
+    // Simulate: activations API succeeded with valid (empty) data
+    const activationsAvailable = true;
+    const candidates = simulateDebtPageDerivation(principles, activationsAvailable, []);
+    // With empty activations and available=true, active principle IS a real noActivationRecord
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.debtReason).toBe("noActivationRecord");
+  });
+
+  it("API success + valid activations → normal derivation", () => {
+    const principles = [makePrincipleListItem()] as PrincipleListItem[];
+    const activations = [makeActivationRecord()] as ActivationRecord[];
+
+    const activationsAvailable = true;
+    const candidates = simulateDebtPageDerivation(principles, activationsAvailable, activations);
+    // Active principle with active activation → not debt
+    expect(candidates).toHaveLength(0);
   });
 });

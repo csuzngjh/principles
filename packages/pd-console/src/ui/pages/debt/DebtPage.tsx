@@ -168,11 +168,17 @@ export function DebtPage() {
       return;
     }
 
-    // Handle activations fetch failure (graceful degradation — ERR-002)
+    // Handle activations fetch — track availability for honest debt derivation.
+    // When activations are unavailable, we MUST NOT derive activation-dependent
+    // debt candidates (noActivationRecord, approvedNeverActivated, longTermInactive)
+    // because empty activation data ≠ "no activations exist". (P1 / F.5 honesty boundary)
     let validatedActivations: ActivationRecord[] = [];
+    let activationsAvailable = false;
+
     if (activationsResult.success) {
       const validated = validateActivationsData(activationsResult.data);
       if (validated !== null) {
+        activationsAvailable = true;
         validatedActivations = validated.activations;
         if (validated.note) {
           setDegradedNote(validated.note);
@@ -184,17 +190,20 @@ export function DebtPage() {
         );
       }
     } else {
-      // Activations API failed — we can still show principles-based debt
+      // Activations API failed — we cannot derive honest debt candidates
       setDegradedNote(
         t("pages.debt.activationsUnavailable"),
       );
     }
 
-    // Derive debt candidates from cross-referenced data
-    const debtCandidates = deriveDebtCandidates(
-      validatedPrinciples.principles,
-      validatedActivations,
-    );
+    // Only derive debt candidates when activation data is available.
+    // Without it, every active principle would falsely appear as "noActivationRecord".
+    const debtCandidates = activationsAvailable
+      ? deriveDebtCandidates(
+          validatedPrinciples.principles,
+          validatedActivations,
+        )
+      : [];
 
     setCandidates(debtCandidates);
     setLoadingState("loaded");
