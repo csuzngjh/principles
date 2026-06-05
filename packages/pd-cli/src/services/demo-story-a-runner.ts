@@ -156,6 +156,7 @@ async function completePostApprovalActivation(
     action: writerResult.action,
     targetRef: writerResult.targetRef,
     activatedAt: now,
+    deactivatedAt: null,
   });
 
   return {

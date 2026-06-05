@@ -38,17 +38,21 @@ async function request<T>(
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
+      let nextAction: string | undefined;
       try {
-        const parsed = await response.json() as { error?: string; message?: string };
+        const parsed = await response.json() as { error?: string; message?: string; nextAction?: string };
         if (parsed && typeof parsed.message === 'string') {
           errorMessage = parsed.message;
         } else if (parsed && typeof parsed.error === 'string') {
           errorMessage = parsed.error;
         }
+        if (parsed && typeof parsed.nextAction === 'string') {
+          ({ nextAction } = parsed);
+        }
       } catch {
         // ignore parse errors
       }
-      return { success: false, error: errorMessage };
+      return { success: false, error: errorMessage, nextAction };
     }
 
     const json = await response.json() as { success?: boolean; data?: T };
@@ -460,6 +464,21 @@ async function fetchAllActivations(): Promise<ApiResponse<ActivationsData>> {
   return request<ActivationsData>('/api/v1/activations');
 }
 
+interface DisableActivationResponse {
+  activationId: string;
+  status: 'inactive';
+}
+
+async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationResponse>> {
+  return request<DisableActivationResponse>(
+    `/api/v1/activations/${encodeURIComponent(activationId)}/disable`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ confirmed: true }),
+    },
+  );
+}
+
 async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<LifecycleMetricsData>> {
   return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
 }
@@ -495,6 +514,7 @@ export {
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
   fetchAllActivations,
+  disableActivation,
   fetchLifecycleMetrics,
 };
 

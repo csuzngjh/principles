@@ -226,6 +226,7 @@ async function insertPromptActivation(overrides: {
     action,
     targetRef,
     activatedAt: now,
+    deactivatedAt: null,
   });
 }
 
@@ -308,6 +309,35 @@ describe('Runtime V2 prompt activation injection', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
+  });
+
+  it('deactivated activation is not injected into prompt', async () => {
+    const artifactId = 'art-v2-deactivated-200';
+    const principleId = 'princ-v2-deactivated-200';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    // Deactivate the activation
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const deactivated = await store.deactivateActivation(`act_prompt_${principleId}`, new Date().toISOString());
+    expect(deactivated).toBe(true);
+
+    // Close test connection so the reader gets a fresh view
+    sqliteConn.close();
+
+    // Verify the deactivation persisted via a fresh connection
+    const verifyConn = new SqliteConnection(tempWorkspaceDir);
+    const row = verifyConn.getDb().prepare(
+      'SELECT deactivated_at FROM activations WHERE activation_id = ?'
+    ).get(`act_prompt_${principleId}`) as { deactivated_at: string | null } | undefined;
+    expect(row?.deactivated_at).toBeTruthy();
+    verifyConn.close();
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles).toHaveLength(0);
   });
 
   it('prompt feature flag check is present — core flag cannot be disabled by config', async () => {
