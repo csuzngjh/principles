@@ -225,4 +225,95 @@ describe('redactDiagnosticsForCopy', () => {
     expect(result).not.toContain('feature-50');
     expect(result).toContain('+10 more');
   });
+
+  // ── Additional edge cases for diagnostics truncation ──────────────────────────
+
+  it('truncates runtime profiles exceeding MAX_ITEMS_PER_SECTION', () => {
+    // Create diagnostics with 60 runtime profiles (exceeds limit of 50)
+    const manyProfiles = Array.from({ length: 60 }, (_, i) => ({
+      id: `profile-${i}`,
+      type: 'openclaw',
+      label: `openclaw: profile-${i}`,
+      readiness: 'ready' as const,
+    }));
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      runtimeProfiles: manyProfiles,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    expect(result).toContain('profile-0');
+    expect(result).toContain('profile-49');
+    expect(result).not.toContain('profile-50');
+    expect(result).toContain('+10 more');
+  });
+
+  it('truncates agents exceeding MAX_ITEMS_PER_SECTION', () => {
+    // Create diagnostics with 60 agents (exceeds limit of 50)
+    const manyAgents = Array.from({ length: 60 }, (_, i) => ({
+      name: `agent-${i}`,
+      enabled: true,
+      runtimeProfileId: 'default',
+      runtimeProfileLabel: 'openclaw: default',
+      readiness: 'ready' as const,
+    }));
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      agents: manyAgents,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    expect(result).toContain('agent-0');
+    expect(result).toContain('agent-49');
+    expect(result).not.toContain('agent-50');
+    expect(result).toContain('+10 more');
+  });
+
+  it('truncates warnings exceeding MAX_ITEMS_PER_SECTION', () => {
+    // Create diagnostics with 60 warnings (exceeds limit of 50)
+    const manyWarnings = Array.from({ length: 60 }, (_, i) => `Warning ${i}`);
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      warnings: manyWarnings,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    expect(result).toContain('Warning 0');
+    expect(result).toContain('Warning 49');
+    expect(result).not.toContain('Warning 50');
+    expect(result).toContain('+10 more');
+  });
+
+  it('truncates errors exceeding MAX_ITEMS_PER_SECTION', () => {
+    // Create diagnostics with 60 errors (exceeds limit of 50)
+    const manyErrors = Array.from({ length: 60 }, (_, i) => ({
+      path: `path-${i}`,
+      reason: `Error ${i}`,
+      nextAction: `Fix error ${i}`,
+    }));
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      errors: manyErrors,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    expect(result).toContain('path-0');
+    expect(result).toContain('path-49');
+    expect(result).not.toContain('path-50');
+    expect(result).toContain('+10 more');
+  });
+
+  it('handles exactly MAX_ITEMS_PER_SECTION items without truncation', () => {
+    // Create diagnostics with exactly 50 features (at limit)
+    const exactFeatures = Array.from({ length: 50 }, (_, i) => ({
+      id: `feature-${i}`,
+      category: 'core',
+      enabled: true,
+    }));
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      features: exactFeatures,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    expect(result).toContain('feature-0');
+    expect(result).toContain('feature-49');
+    expect(result).not.toContain('+');
+    expect(result).not.toContain('more');
+  });
 });
