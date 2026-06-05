@@ -348,6 +348,7 @@ export function FocusPage() {
   const stagnationSignals = queueData?.stagnationSignals ?? [];
   const stagnationCount = stagnationSignals.length;
   const isAllEmpty = pendingCount === 0 && deviationCount === 0 && stagnationCount === 0;
+  const approvalDataUnavailable = groupedData === null && pendingCount > 0;
 
   return (
     <PageShell>
@@ -388,7 +389,9 @@ export function FocusPage() {
           </div>
         ) : (
           <div className="text-ink-3 text-[13px] leading-relaxed py-3">
-            {t("pages.focus.emptyPending")}
+            {approvalDataUnavailable
+              ? t("pages.focus.loadError")
+              : t("pages.focus.emptyPending")}
           </div>
         )}
       </section>
@@ -415,7 +418,14 @@ export function FocusPage() {
                 {t("pages.focus.viewFullChain")}
               </summary>
               <div className="mt-2 pl-4 border-l-2 border-line text-ink-3 text-[13px]">
-                {t("pages.focus.emptyDeviation")}
+                {pendingGroups.length > 0
+                  ? pendingGroups.map((g) => (
+                      <div key={g.principleId} className="py-1">
+                        {g.principleTitle} — {g.records.length}{" "}
+                        {g.records.length === 1 ? "条记录" : "条记录"}
+                      </div>
+                    ))
+                  : t("pages.focus.emptyDeviation")}
               </div>
             </details>
           </>
