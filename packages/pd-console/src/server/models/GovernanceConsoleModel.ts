@@ -12,6 +12,8 @@ export interface GovernanceQueueResponse {
   behaviorDeviationCount: number;
   stagnationSignals: number;
   generatedAt: string;
+  /** Present when data is degraded/missing rather than genuinely zero */
+  note?: string;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -42,6 +44,7 @@ export class GovernanceConsoleModel {
         behaviorDeviationCount: 0,
         stagnationSignals: 0,
         generatedAt: new Date().toISOString(),
+        note: 'state.db not found — workspace may not be initialized',
       };
     }
 
@@ -59,6 +62,7 @@ export class GovernanceConsoleModel {
           behaviorDeviationCount: 0,
           stagnationSignals: 0,
           generatedAt: new Date().toISOString(),
+          note: 'approval queue table not found — workspace may not be initialized',
         };
       }
       throw err;

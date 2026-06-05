@@ -20,6 +20,8 @@ export interface ActivationFact {
 export interface ActivationsResponse {
   activations: ActivationFact[];
   generatedAt: string;
+  /** Present when data is degraded/missing rather than genuinely empty */
+  note?: string;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -45,7 +47,7 @@ export class ActivationsConsoleModel {
   async getActivations(): Promise<ActivationsResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { activations: [], generatedAt: new Date().toISOString() };
+      return { activations: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
     }
 
     const conn = this.getReadConnection();
@@ -57,7 +59,7 @@ export class ActivationsConsoleModel {
       allActivations = await activationStore.listAllActivations();
     } catch (err) {
       if (isMissingTableError(err)) {
-        return { activations: [], generatedAt: new Date().toISOString() };
+        return { activations: [], generatedAt: new Date().toISOString(), note: 'activation table not found — workspace may not be initialized' };
       }
       throw err;
     }

@@ -39,16 +39,9 @@ function AuthRoutes() {
   useEffect(() => {
     if (!showSplash) return;
     if (authed === null) return; // still checking
-    // After splash, navigate based on auth
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-      if (authed) {
-        navigate("/focus", { replace: true });
-      } else {
-        navigate("/login", { replace: true });
-      }
-    }, 0);
-    return () => clearTimeout(timer);
+    // Wait for splash animation to complete before navigating
+    // SplashScreen has its own 2200ms timer; we wait for it to call onComplete
+    // This effect only handles the case where auth resolves after splash is done
   }, [authed, showSplash, navigate]);
 
   const handleAuthSuccess = useCallback(() => {
@@ -58,7 +51,14 @@ function AuthRoutes() {
 
   return (
     <Routes>
-      <Route path="/splash" element={<SplashScreen onComplete={() => setShowSplash(false)} />} />
+      <Route path="/splash" element={<SplashScreen onComplete={() => {
+        setShowSplash(false);
+        if (authed) {
+          navigate("/focus", { replace: true });
+        } else {
+          navigate("/login", { replace: true });
+        }
+      }} />} />
       <Route path="/login" element={<LoginForm onAuthSuccess={handleAuthSuccess} />} />
       <Route
         path="/*"

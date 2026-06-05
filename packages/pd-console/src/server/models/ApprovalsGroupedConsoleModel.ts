@@ -24,6 +24,8 @@ export interface PrincipleApprovalGroup {
 export interface ApprovalsGroupedResponse {
   groups: PrincipleApprovalGroup[];
   generatedAt: string;
+  /** Present when data is degraded/missing rather than genuinely empty */
+  note?: string;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -49,7 +51,7 @@ export class ApprovalsGroupedConsoleModel {
   async getApprovalsGrouped(): Promise<ApprovalsGroupedResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { groups: [], generatedAt: new Date().toISOString() };
+      return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
     }
 
     const conn = this.getReadConnection();
@@ -62,7 +64,7 @@ export class ApprovalsGroupedConsoleModel {
       allApprovals = await queue.listAll();
     } catch (err) {
       if (isMissingTableError(err)) {
-        return { groups: [], generatedAt: new Date().toISOString() };
+        return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found — workspace may not be initialized' };
       }
       throw err;
     }

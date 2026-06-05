@@ -25,6 +25,9 @@ function validateReplayReport(raw: unknown): ReplayReport | null {
   if (typeof raw.implementationId !== 'string') return null;
   if (typeof raw.overallDecision !== 'string') return null;
   if (typeof raw.generatedAt !== 'string') return null;
+  // After basic structural checks, cast through unknown for ReplayReport
+  // This is acceptable: the file comes from PD's own replay-reports directory,
+  // and we've validated the key discriminator fields above.
   return raw as unknown as ReplayReport;
 }
 
@@ -35,8 +38,16 @@ export class ConsoleLifecycleDatasource implements LifecycleDatasource {
   ) {}
 
   loadLedger(): LedgerTreeStore {
-    const hybrid = loadLedger(this.stateDir);
-    return hybrid.tree as unknown as LedgerTreeStore;
+    const { tree } = loadLedger(this.stateDir);
+    // Runtime shape check: tree must be a non-null object with 'principles' record
+    if (typeof tree !== 'object' || tree === null || !isRecord((tree as unknown as Record<string, unknown>).principles)) {
+      throw new Error(
+        `ConsoleLifecycleDatasource.loadLedger: ledger tree is malformed. ` +
+        `Expected object with 'principles' record, got ${tree === null ? 'null' : typeof tree}. ` +
+        `stateDir=${this.stateDir}`
+      );
+    }
+    return tree;
   }
 
   listReplayReports(implementationId: string): ReplayReport[] {
@@ -57,7 +68,11 @@ export class ConsoleLifecycleDatasource implements LifecycleDatasource {
           return validateReplayReport(parsed);
         })
         .filter((report): report is ReplayReport => report !== null);
-    } catch {
+    } catch (err) {
+      console.warn(
+        `ConsoleLifecycleDatasource.listReplayReports: failed to read replay reports ` +
+        `for implementationId=${implementationId}: ${err instanceof Error ? err.message : String(err)}`
+      );
       return [];
     }
   }
