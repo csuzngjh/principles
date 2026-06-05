@@ -22,6 +22,10 @@ import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 
+// Vite replaces import.meta.env.DEV with a boolean literal at build time.
+// The cast avoids TS2339 without needing a generated .d.ts file.
+const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
+
 function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [showSplash, setShowSplash] = useState(true);
@@ -83,7 +87,12 @@ function AuthRoutes() {
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
-                    <Route path="/design-system" element={<DesignSystemPage />} />
+                    {IS_DEV && (
+                      <Route path="/design-system" element={<DesignSystemPage />} />
+                    )}
+                    {!IS_DEV && (
+                      <Route path="/design-system" element={<Navigate to="/focus" replace />} />
+                    )}
                   </Routes>
                 </ErrorBoundary>
               </main>

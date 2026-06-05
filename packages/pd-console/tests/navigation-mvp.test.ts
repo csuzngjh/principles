@@ -244,4 +244,26 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(appSrc).toContain('Navigate to="/login"');
     });
   });
+
+  describe('/design-system dev-only guard', () => {
+    let appSrc: string;
+
+    beforeAll(() => {
+      appSrc = readFile(APP_PATH);
+    });
+
+    it('/design-system route is gated by IS_DEV (import.meta.env.DEV)', () => {
+      expect(appSrc).toContain('IS_DEV');
+      expect(appSrc).toContain('import.meta');
+      expect(appSrc).toContain('path="/design-system"');
+    });
+
+    it('non-DEV /design-system redirects to /focus', () => {
+      // The route should have a Navigate to="/focus" fallback for production
+      const designSystemBlock = appSrc.substring(
+        appSrc.indexOf('path="/design-system"'),
+      );
+      expect(designSystemBlock).toContain('Navigate to="/focus"');
+    });
+  });
 });
