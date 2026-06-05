@@ -14,94 +14,140 @@ import type {
   StagnationSignal,
 } from "../../api.js";
 
-// ── Runtime validators (H section / ERR-001/005/009) ────────────────────────
+// ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
 const VALID_STAGNATION_TYPES = new Set(["no_pain", "never_activated"]);
 
-function validateStagnationSignal(raw: unknown): StagnationSignal | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
-  if (
-    VALID_STAGNATION_TYPES.has(obj.type as string) &&
-    typeof obj.principleId === "string" &&
-    typeof obj.daysSince === "number" &&
-    obj.principleId.length > 0 &&
-    obj.daysSince >= 0
-  ) {
-    return {
-      type: obj.type as "no_pain" | "never_activated",
-      principleId: obj.principleId,
-      daysSince: obj.daysSince,
-    };
-  }
-  return null;
+/** Type guard: is this a non-null object with own properties (not inherited)? */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
+function validateStagnationSignal(raw: unknown): StagnationSignal | null {
+  if (!isRecord(raw)) return null;
   if (
-    typeof obj.pendingReviewCount !== "number" ||
-    obj.pendingReviewCount < 0 ||
-    typeof obj.behaviorDeviationCount !== "number" ||
-    obj.behaviorDeviationCount < 0 ||
-    !Array.isArray(obj.stagnationSignals)
+    !Object.hasOwn(raw, "type") ||
+    !Object.hasOwn(raw, "principleId") ||
+    !Object.hasOwn(raw, "daysSince")
   ) {
     return null;
   }
-  const signals = obj.stagnationSignals
+  const type = raw.type;
+  const principleId = raw.principleId;
+  const daysSince = raw.daysSince;
+  if (
+    typeof type !== "string" ||
+    !VALID_STAGNATION_TYPES.has(type) ||
+    typeof principleId !== "string" ||
+    principleId.length === 0 ||
+    typeof daysSince !== "number" ||
+    daysSince < 0
+  ) {
+    return null;
+  }
+  return {
+    type: type as "no_pain" | "never_activated",
+    principleId,
+    daysSince,
+  };
+}
+
+function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
+  if (!isRecord(raw)) return null;
+  if (
+    !Object.hasOwn(raw, "pendingReviewCount") ||
+    !Object.hasOwn(raw, "behaviorDeviationCount") ||
+    !Object.hasOwn(raw, "stagnationSignals")
+  ) {
+    return null;
+  }
+  const pendingReviewCount = raw.pendingReviewCount;
+  const behaviorDeviationCount = raw.behaviorDeviationCount;
+  const stagnationSignals = raw.stagnationSignals;
+  if (
+    typeof pendingReviewCount !== "number" ||
+    pendingReviewCount < 0 ||
+    typeof behaviorDeviationCount !== "number" ||
+    behaviorDeviationCount < 0 ||
+    !Array.isArray(stagnationSignals)
+  ) {
+    return null;
+  }
+  const signals = stagnationSignals
     .map(validateStagnationSignal)
     .filter((s: StagnationSignal | null): s is StagnationSignal => s !== null);
   return {
-    pendingReviewCount: obj.pendingReviewCount,
-    behaviorDeviationCount: obj.behaviorDeviationCount,
+    pendingReviewCount,
+    behaviorDeviationCount,
     stagnationSignals: signals,
-    note: typeof obj.note === "string" ? obj.note : undefined,
+    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
   };
 }
 
 function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
+  if (!isRecord(raw)) return null;
   if (
-    typeof obj.principleId !== "string" ||
-    typeof obj.principleTitle !== "string" ||
-    !["pending", "approved", "rejected"].includes(obj.status as string) ||
-    !Array.isArray(obj.records)
+    !Object.hasOwn(raw, "principleId") ||
+    !Object.hasOwn(raw, "principleTitle") ||
+    !Object.hasOwn(raw, "status") ||
+    !Object.hasOwn(raw, "records")
   ) {
     return null;
   }
-  const validRecords = obj.records.filter((r: unknown) => {
-    if (typeof r !== "object" || r === null) return false;
-    const rec = r as Record<string, unknown>;
+  const principleId = raw.principleId;
+  const principleTitle = raw.principleTitle;
+  const status = raw.status;
+  const records = raw.records;
+  if (
+    typeof principleId !== "string" ||
+    typeof principleTitle !== "string" ||
+    typeof status !== "string" ||
+    !["pending", "approved", "rejected"].includes(status) ||
+    !Array.isArray(records)
+  ) {
+    return null;
+  }
+  const validRecords = records.filter((r: unknown): r is ApprovalGroup["records"][number] => {
+    if (!isRecord(r)) return false;
     return (
-      typeof rec.id === "string" &&
-      typeof rec.artifactId === "string" &&
-      typeof rec.channel === "string" &&
-      typeof rec.createdAt === "string"
+      Object.hasOwn(r, "id") &&
+      Object.hasOwn(r, "artifactId") &&
+      Object.hasOwn(r, "channel") &&
+      Object.hasOwn(r, "createdAt") &&
+      typeof r.id === "string" &&
+      typeof r.artifactId === "string" &&
+      typeof r.channel === "string" &&
+      typeof r.createdAt === "string"
     );
   });
   return {
-    principleId: obj.principleId,
-    principleTitle: obj.principleTitle,
-    status: obj.status as "pending" | "approved" | "rejected",
-    records: validRecords as ApprovalGroup["records"],
+    principleId,
+    principleTitle,
+    status: status as "pending" | "approved" | "rejected",
+    records: validRecords,
   };
 }
 
 function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
-  if (!Array.isArray(obj.groups) || typeof obj.generatedAt !== "string") {
+  if (!isRecord(raw)) return null;
+  if (
+    !Object.hasOwn(raw, "groups") ||
+    !Object.hasOwn(raw, "generatedAt")
+  ) {
     return null;
   }
-  const groups = obj.groups
+  const groups = raw.groups;
+  const generatedAt = raw.generatedAt;
+  if (!Array.isArray(groups) || typeof generatedAt !== "string") {
+    return null;
+  }
+  const validatedGroups = groups
     .map(validateApprovalGroup)
     .filter((g: ApprovalGroup | null): g is ApprovalGroup => g !== null);
   return {
-    groups,
-    generatedAt: obj.generatedAt,
-    note: typeof obj.note === "string" ? obj.note : undefined,
+    groups: validatedGroups,
+    generatedAt,
+    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
   };
 }
 
