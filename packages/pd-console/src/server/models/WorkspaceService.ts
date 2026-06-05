@@ -1,4 +1,9 @@
-import { OverviewConsoleModel } from './OverviewConsoleModel.js';
+import {
+  OperatorHealthReadModel,
+  PainChainReadModel,
+  PruningReadModel,
+  RuntimeStateManager,
+} from '@principles/core/runtime-v2';
 import type { WorkspaceConfigStore } from '../config/WorkspaceConfigStore.js';
 import type { WorkspaceEntry, SyncResult } from '../types/index.js';
 
@@ -26,9 +31,18 @@ export interface CentralHealthOutput {
   }[];
 }
 
+interface WorkspaceModels {
+  operatorHealth: OperatorHealthReadModel;
+  painChain: PainChainReadModel;
+  pruning: PruningReadModel;
+  runtime: RuntimeStateManager;
+}
+
+const noop = (): void => { /* intentional no-op for promise catch */ };
+
 export class WorkspaceService {
   private readonly configStore: WorkspaceConfigStore;
-  private readonly models: Map<string, OverviewConsoleModel> = new Map();
+  private readonly models: Map<string, WorkspaceModels> = new Map();
 
   constructor(configStore: WorkspaceConfigStore) {
     this.configStore = configStore;
@@ -40,14 +54,18 @@ export class WorkspaceService {
 
     for (const ws of workspaces) {
       try {
-        const model = this.getModel(ws);
-        const overview = await model.getOverview();
+        const models = this.getModels(ws);
+        const [snapshot, pruningSummary] = await Promise.all([
+          models.operatorHealth.getSnapshot(),
+          Promise.resolve(models.pruning.getHealthSummary()),
+        ]);
+        const { byStatus } = pruningSummary;
         results.push({
           name: ws.name,
           path: ws.path,
-          status: overview.health.status,
-          gfi: overview.health.gfi.current,
-          principleCount: overview.summary.principleEventCount,
+          status: snapshot.overallStatus === 'healthy' ? 'healthy' : snapshot.overallStatus === 'degraded' ? 'degraded' : 'error',
+          gfi: snapshot.gfi.active?.currentGfi ?? 0,
+          principleCount: (byStatus.active ?? 0) + (byStatus.candidate ?? 0),
         });
       } catch {
         results.push({
@@ -74,19 +92,28 @@ export class WorkspaceService {
 
     for (const ws of workspaces) {
       try {
-        const model = this.getModel(ws);
-        const health = await model.getHealth();
-        if (health.status === 'error') {
+        const models = this.getModels(ws);
+        const [snapshot, pruningSummary, pendingTasks] = await Promise.all([
+          models.operatorHealth.getSnapshot(),
+          Promise.resolve(models.pruning.getHealthSummary()),
+          models.runtime.listTasks({ status: 'pending', limit: 100 }),
+        ]);
+        const { byStatus } = pruningSummary;
+        const wsStatus: 'healthy' | 'degraded' | 'error' =
+          snapshot.overallStatus === 'healthy' ? 'healthy' : snapshot.overallStatus === 'degraded' ? 'degraded' : 'error';
+
+        if (wsStatus === 'error') {
           overallStatus = 'error';
-        } else if (health.status !== 'healthy' && overallStatus === 'healthy') {
+        } else if (wsStatus !== 'healthy' && overallStatus === 'healthy') {
           overallStatus = 'degraded';
         }
+
         results.push({
           name: ws.name,
-          status: health.status,
-          gfi: health.gfi.current,
-          activePrinciples: health.principles.active,
-          pendingTasks: health.queue.pending,
+          status: wsStatus,
+          gfi: snapshot.gfi.active?.currentGfi ?? 0,
+          activePrinciples: (byStatus.active ?? 0) + (byStatus.candidate ?? 0),
+          pendingTasks: pendingTasks.length,
         });
       } catch {
         overallStatus = 'error';
@@ -113,7 +140,7 @@ export class WorkspaceService {
       throw new Error(`Workspace "${name}" not found`);
     }
 
-    this.models.delete(name);
+    this.disposeWorkspace(name);
     this.configStore.updateSyncTime(name);
 
     return {
@@ -124,18 +151,36 @@ export class WorkspaceService {
   }
 
   dispose(): void {
-    for (const model of this.models.values()) {
-      model.dispose();
+    for (const name of this.models.keys()) {
+      this.disposeWorkspace(name);
     }
     this.models.clear();
   }
 
-  private getModel(entry: WorkspaceEntry): OverviewConsoleModel {
-    let model = this.models.get(entry.name);
-    if (!model) {
-      model = new OverviewConsoleModel(entry.path);
-      this.models.set(entry.name, model);
+  private disposeWorkspace(name: string): void {
+    const existing = this.models.get(name);
+    if (existing) {
+      existing.operatorHealth.close().catch(noop);
+      existing.painChain.close().catch(noop);
+      existing.runtime.close().catch(noop);
+      this.models.delete(name);
     }
-    return model;
+  }
+
+  private getModels(entry: WorkspaceEntry): WorkspaceModels {
+    let existing = this.models.get(entry.name);
+    if (!existing) {
+      const runtime = new RuntimeStateManager({ workspaceDir: entry.path });
+      const painChain = new PainChainReadModel({ workspaceDir: entry.path, stateManager: runtime });
+      const pruning = new PruningReadModel({ workspaceDir: entry.path });
+      const operatorHealth = new OperatorHealthReadModel({
+        workspaceDir: entry.path,
+        painChainReadModel: painChain,
+        pruningReadModel: pruning,
+      });
+      existing = { operatorHealth, painChain, pruning, runtime };
+      this.models.set(entry.name, existing);
+    }
+    return existing;
   }
 }

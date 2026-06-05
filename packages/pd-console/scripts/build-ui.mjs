@@ -35,6 +35,10 @@ await build({
   minify: isProduction,
   jsx: "automatic",
   external: [],
+  loader: {
+    ".woff": "file",
+    ".woff2": "file",
+  },
   define: {
     "process.env.NODE_ENV": JSON.stringify(isProduction ? "production" : "development"),
   },

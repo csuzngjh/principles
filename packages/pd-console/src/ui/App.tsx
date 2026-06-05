@@ -1,39 +1,31 @@
 import { useState, useEffect, useCallback } from "react";
-import { HashRouter, Routes, Route } from "react-router-dom";
-import { I18nextProvider, useTranslation } from "react-i18next";
+import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { I18nextProvider } from "react-i18next";
 import i18n from "./i18n/index.js";
 import { ThemeProvider } from "./components/theme-provider.js";
-import { ThemeToggle } from "./components/theme-toggle.js";
-import { LanguageSwitcher } from "./components/language-switcher.js";
-import { AppSidebar } from "./components/app-sidebar.js";
-import { Button } from "./components/ui/button.js";
-import { TasksPage } from "./pages/TasksPage.js";
-import { OverviewPage } from "./pages/OverviewPage.js";
-import { FeedbackPage } from "./pages/FeedbackPage.js";
-import { PainPage } from "./pages/PainPage.js";
-import { ApprovalsPage } from "./pages/ApprovalsPage.js";
-import { GatesPage } from "./pages/GatesPage.js";
-import { SamplesPage } from "./pages/SamplesPage.js";
-import { EvolutionPage } from "./pages/EvolutionPage.js";
-import { ThinkingModelsPage } from "./pages/ThinkingModelsPage.js";
-import { SettingsPage } from "./pages/SettingsPage.js";
-import { ControlCenterPage } from "./pages/ControlCenterPage.js";
-import { CentralPage } from "./pages/CentralPage.js";
-import { DataFlowPage } from "./pages/DataFlowPage.js";
-import { EventLogPage } from "./pages/EventLogPage.js";
-import { PrinciplesPage } from "./pages/PrinciplesPage.js";
-import { PrincipleDetailPage } from "./pages/PrincipleDetailPage.js";
-import { AgentsPage } from "./pages/AgentsPage.js";
-import { LoginPage } from "./pages/LoginPage.js";
-import { UpdatePage } from "./pages/UpdatePage.js";
-import { ReportProblemPage } from "./pages/ReportProblemPage.js";
+import { AppSidebar } from "./components/layout/app-sidebar.js";
+import { SplashScreen } from "./components/auth/splash-screen.js";
+import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
-import { getToken, clearToken, checkAuth } from "./api.js";
+import { checkAuth, getToken } from "./api.js";
 
-export function App() {
-  const { t } = useTranslation();
+// New page imports (CR2 directory structure)
+import { FocusPage } from "./pages/focus/FocusPage.js";
+import { PainPage } from "./pages/pain/PainPage.js";
+import { PrinciplesPage } from "./pages/principles/PrinciplesPage.js";
+import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
+import { ActivationPage } from "./pages/activation/ActivationPage.js";
+import { DebtPage } from "./pages/debt/DebtPage.js";
+import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
+import { SettingsPage } from "./pages/settings/SettingsPage.js";
+import { UpdatePage } from "./pages/settings/UpdatePage.js";
+import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
+import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
+
+function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+  const navigate = useNavigate();
 
   const verifyAuth = useCallback(async () => {
     const valid = await checkAuth();
@@ -44,98 +36,73 @@ export function App() {
     verifyAuth();
   }, [verifyAuth]);
 
-  if (authed === null) {
-    return (
-      <ThemeProvider>
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-muted-foreground animate-pulse">
-            Checking authentication…
-          </div>
-        </div>
-      </ThemeProvider>
-    );
-  }
+  useEffect(() => {
+    if (!showSplash) return;
+    if (authed === null) return; // still checking
+    // After splash, navigate based on auth
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+      if (authed) {
+        navigate("/focus", { replace: true });
+      } else {
+        navigate("/login", { replace: true });
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [authed, showSplash, navigate]);
 
-  if (!authed) {
-    return (
-      <ThemeProvider>
-        <I18nextProvider i18n={i18n}>
-          <LoginPage onAuthSuccess={() => setAuthed(true)} />
-        </I18nextProvider>
-      </ThemeProvider>
-    );
-  }
-
-  const handleSignOut = () => {
-    clearToken();
-    setAuthed(false);
-  };
+  const handleAuthSuccess = useCallback(() => {
+    setAuthed(true);
+    navigate("/focus", { replace: true });
+  }, [navigate]);
 
   return (
-    <ThemeProvider>
-      <I18nextProvider i18n={i18n}>
-        <HashRouter>
-          <div className="min-h-screen bg-background text-foreground">
-            <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-background focus:text-foreground">
-              Skip to main content
-            </a>
-            <AppSidebar
-              collapsed={sidebarCollapsed}
-              onCollapsedChange={setSidebarCollapsed}
-            />
-            <div
-              className={`transition-[margin] duration-300 motion-reduce:transition-none flex flex-col min-h-screen ${sidebarCollapsed ? "ml-16" : "ml-56"}`}
-            >
-              <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                <div className="flex items-center justify-between px-6 py-3">
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      PD Console v0.2
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <LanguageSwitcher />
-                    <ThemeToggle />
-                    {getToken() && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleSignOut}
-                      >
-                        {t("common:logout")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </header>
-              <main id="main-content" className="flex-1 p-6 overflow-y-auto">
+    <Routes>
+      <Route path="/splash" element={<SplashScreen onComplete={() => setShowSplash(false)} />} />
+      <Route path="/login" element={<LoginForm onAuthSuccess={handleAuthSuccess} />} />
+      <Route
+        path="/*"
+        element={
+          authed ? (
+            <div className="min-h-screen bg-paper text-ink">
+              <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-paper focus:text-ink">
+                Skip to main content
+              </a>
+              <AppSidebar />
+              <main id="main-content" className="ml-[256px] min-h-screen overflow-y-auto">
                 <ErrorBoundary>
                   <Routes>
-                    <Route path="/" element={<PainPage />} />
+                    <Route path="/" element={<Navigate to="/focus" replace />} />
+                    <Route path="/focus" element={<FocusPage />} />
                     <Route path="/pain" element={<PainPage />} />
-                    <Route path="/approvals" element={<ApprovalsPage />} />
-                    <Route path="/overview" element={<OverviewPage />} />
-                    <Route path="/central" element={<CentralPage />} />
-                    <Route path="/tasks" element={<TasksPage />} />
-                    <Route path="/feedback" element={<FeedbackPage />} />
-                    <Route path="/gates" element={<GatesPage />} />
-                    <Route path="/samples" element={<SamplesPage />} />
-                    <Route path="/evolution" element={<EvolutionPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
-                    <Route path="/agents" element={<AgentsPage />} />
-                    <Route path="/data-flow" element={<DataFlowPage />} />
-                    <Route path="/event-log" element={<EventLogPage />} />
-                    <Route path="/thinking-models" element={<ThinkingModelsPage />} />
-                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/activation" element={<ActivationPage />} />
+                    <Route path="/debt" element={<DebtPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/settings/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
+                    <Route path="/design-system" element={<DesignSystemPage />} />
                   </Routes>
                 </ErrorBoundary>
               </main>
             </div>
-          </div>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+    </Routes>
+  );
+}
+
+export function App() {
+  return (
+    <ThemeProvider>
+      <I18nextProvider i18n={i18n}>
+        <HashRouter>
+          <AuthRoutes />
         </HashRouter>
       </I18nextProvider>
     </ThemeProvider>
