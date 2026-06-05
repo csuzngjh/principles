@@ -93,6 +93,15 @@ docs/*
 # Exception: brand guidelines must be committed
 !docs/brand/
 !docs/brand/**
+# Exception: console rebuild plan must be committed
+!docs/plans/
+!docs/plans/**
+# But not design prototypes (reference only, not committed)
+# Exception: two key prototypes are committed as visual baseline for CR1/CR3/CR4
+!packages/pd-console/design-prototype/governance-focus.html
+!packages/pd-console/design-prototype/principle-review.html
+docs/plans/2026-06-console-rebuild/design-prototype/
+packages/pd-console/design-prototype/
 # Exception: website docs must be committed
 !packages/website/docs/
 !packages/website/zh/docs/
