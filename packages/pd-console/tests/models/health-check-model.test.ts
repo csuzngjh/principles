@@ -35,7 +35,7 @@ describe('HealthCheckModel', () => {
       expect(health).toBeDefined();
       expect(health.overall).toBeDefined();
       expect(['healthy', 'degraded', 'error']).toContain(health.overall);
-      expect(health.checks).toHaveLength(6);
+      expect(health.checks).toHaveLength(5);
       expect(health.pipeline).toBeDefined();
       expect(health.generatedAt).toBeDefined();
     } finally {
@@ -51,7 +51,6 @@ describe('HealthCheckModel', () => {
       const health = await model.checkSystemHealth();
 
       const checkIds = health.checks.map(c => c.id);
-      expect(checkIds).toContain('event_log');
       expect(checkIds).toContain('sqlite');
       expect(checkIds).toContain('pain_chain_flow');
       expect(checkIds).toContain('task_queue');

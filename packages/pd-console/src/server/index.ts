@@ -10,44 +10,28 @@ import {
   PainChainReadModel,
   PruningReadModel,
   OperatorHealthReadModel,
-  listPruningReviews,
-  appendPruningReview,
 } from '@principles/core/runtime-v2';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
-import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js';
-import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
-import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
 import { handleFeedbackReportsRoute, disposeFeedbackReportModels } from './routes/feedback-reports.js';
 import {
   loadWorkspaceFeatureFlags,
   buildFeedbackChannelFlags,
 } from './config/feature-flags.js';
-import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
-import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
-import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/thinking-models.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
-import { handlePipelineRoute, disposePipelineModels } from './routes/pipeline.js';
-import { handleEventsRoute, disposeEventsModels } from './routes/events.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
+import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle.js';
+import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
+import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
+import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
-import { createCentralRoutes } from './routes/central.js';
-import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
 import { handleStateRoute } from './routes/state.js';
 import { handleConfigRoute } from './routes/config.js';
-import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
-import { 
-  parseDiagnosticianOutput, 
-  parseDiagnosticInput, 
-  parseSeverityFromDiagnostic,
-  parseReasonSummaryFromDiagnostic,
-  parseRecommendationKind 
-} from './utils/diagnostic-parser.js';
-import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent, DiagnosisOutput, DiagnosisInput } from './types/index.js';
+import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -293,19 +277,14 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
 }
 
 async function closeServices(services: AppServices): Promise<void> {
-  disposeOverviewModels();
-  disposeGateModels();
-  disposeFeedbackModels();
   disposeFeedbackReportModels();
-  disposeSampleModels();
   disposeApprovalsModels();
-  disposeEvolutionModels();
-  disposeThinkingModels();
+  disposeApprovalsGroupedModels();
   disposeHealthModels();
-  disposePipelineModels();
-  disposeEventsModels();
   disposePrinciplesModels();
-  disposeAgentModels();
+  disposeLifecycleModels();
+  disposeActivationsModels();
+  disposeGovernanceModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -317,7 +296,6 @@ async function closeServices(services: AppServices): Promise<void> {
 
 function handleRequest(services: AppServices): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   const { handleWorkspacesRoute } = createWorkspacesRoutes(services.configStore, services.workspaceService);
-  const { handleCentralRoute } = createCentralRoutes(services.workspaceService);
 
   return (req: http.IncomingMessage, res: http.ServerResponse): void => {
     const urlPath = req.url?.split('?')[0] ?? '/';
@@ -352,40 +330,18 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // ── New API routes ──────────────────────────────────────────────────
+      // ── API routes ──────────────────────────────────────────────────
 
-      // GET /api/overview, /api/overview/health
-      if (urlPath === '/api/overview' || urlPath.startsWith('/api/overview/')) {
-        const subPath = urlPath.slice('/api/overview'.length);
-        asyncHandler(() => handleOverviewRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
-      // GET /api/gate/stats, /api/gate/blocks
-      if (urlPath === '/api/gate' || urlPath.startsWith('/api/gate/')) {
-        const subPath = urlPath.slice('/api/gate'.length);
-        asyncHandler(() => handleGatesRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
-      // GET/POST /api/feedback/reports, /api/feedback/reports/:id — local MVP seed feedback drafts (PRI-285)
+      // GET/POST /api/feedback/reports, /api/feedback/reports/:id
       if (urlPath === '/api/feedback/reports' || urlPath.startsWith('/api/feedback/reports/')) {
         const subPath = urlPath.slice('/api/feedback/reports'.length);
         asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 
-      // GET /api/feedback/gfi, /api/feedback/empathy-events, /api/feedback/gate-blocks
-      if (urlPath === '/api/feedback' || urlPath.startsWith('/api/feedback/')) {
-        const subPath = urlPath.slice('/api/feedback'.length);
-        asyncHandler(() => handleFeedbackRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
-      // GET /api/samples, /api/samples/:id, /api/samples/:id/review
-      if (urlPath === '/api/samples' || urlPath.startsWith('/api/samples/')) {
-        const subPath = urlPath.slice('/api/samples'.length);
-        asyncHandler(() => handleSamplesRoute(req, res, services.workspaceDir, subPath))(req, res);
+      // GET /api/v1/approvals/grouped (MUST be before approvals catch-all)
+      if (urlPath === '/api/v1/approvals/grouped') {
+        asyncHandler(() => handleApprovalsGroupedRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 
@@ -396,13 +352,6 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-            // GET /api/evolution/stats, /api/evolution/tasks, /api/evolution/principles, /api/evolution/queue
-      if (urlPath === '/api/evolution' || urlPath.startsWith('/api/evolution/')) {
-        const subPath = urlPath.slice('/api/evolution'.length);
-        asyncHandler(() => handleEvolutionRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
       // GET /api/principles, /api/principles/:id
       if (urlPath === '/api/principles' || urlPath.startsWith('/api/principles/')) {
         const subPath = urlPath.slice('/api/principles'.length);
@@ -410,31 +359,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // GET /api/thinking-models, /api/thinking-models/:id
-      if (urlPath === '/api/thinking-models' || urlPath.startsWith('/api/thinking-models/')) {
-        const subPath = urlPath.slice('/api/thinking-models'.length);
-        asyncHandler(() => handleThinkingModelsRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
       // Workspace management routes
       if (urlPath === '/api/workspaces' || urlPath.startsWith('/api/workspaces/')) {
         const subPath = urlPath.slice('/api/workspaces'.length);
         asyncHandler(() => handleWorkspacesRoute(req, res, subPath))(req, res);
-        return;
-      }
-
-      // Central overview routes
-      if (urlPath === '/api/central' || urlPath.startsWith('/api/central/')) {
-        const subPath = urlPath.slice('/api/central'.length);
-        asyncHandler(() => handleCentralRoute(req, res, subPath))(req, res);
-        return;
-      }
-
-      // Agent status routes
-      if (urlPath === '/api/agents' || urlPath.startsWith('/api/agents/')) {
-        const subPath = urlPath.slice('/api/agents'.length);
-        asyncHandler(() => handleAgentsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
@@ -458,7 +386,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // Config API routes (PRI-309): /api/v1/config/summary, /api/v1/config/catalog,
+      // Config API routes: /api/v1/config/summary, /api/v1/config/catalog,
       // /api/v1/config/agents/:name/binding, /api/v1/config/readiness/:name
       if (urlPath === '/api/v1/config' || urlPath.startsWith('/api/v1/config/')) {
         const subPath = urlPath.slice('/api/v1/config'.length);
@@ -466,356 +394,29 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // ── Legacy API routes (preserved for backward compatibility) ──────
+      // CR8: GET /api/v1/lifecycle/principles/:principleId
+      if (urlPath.startsWith('/api/v1/lifecycle')) {
+        const subPath = urlPath.slice('/api/v1/lifecycle'.length);
+        asyncHandler(() => handleLifecycleRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // CR8: GET /api/v1/activations
+      if (urlPath === '/api/v1/activations' || urlPath.startsWith('/api/v1/activations/')) {
+        const subPath = urlPath.slice('/api/v1/activations'.length);
+        asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // CR8: GET /api/v1/governance/queue
+      if (urlPath === '/api/v1/governance/queue') {
+        asyncHandler(() => handleGovernanceRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
 
       // GET /api/health
       if (urlPath === '/api/health') {
         asyncHandler(() => handleHealthRoute(req, res, services.workspaceDir))(req, res);
-        return;
-      }
-
-      // GET /api/pipeline
-      if (urlPath === '/api/pipeline') {
-        asyncHandler(() => handlePipelineRoute(req, res, services.workspaceDir))(req, res);
-        return;
-      }
-
-      // GET /api/events
-      if (urlPath === '/api/events' || urlPath.startsWith('/api/events/')) {
-        const subPath = urlPath.slice('/api/events'.length);
-        asyncHandler(() => handleEventsRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
-        return;
-      }
-
-      // GET /api/status
-      if (urlPath === '/api/status') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const snapshot = await services.healthReadModel.getSnapshot();
-          const pruningSummary = services.pruningReadModel.getHealthSummary();
-          const { byStatus } = pruningSummary;
-          const principleActive = (byStatus.active ?? 0) + (byStatus.candidate ?? 0);
-          const principlePending = (byStatus.probation ?? 0) + (byStatus.deprecated ?? 0);
-          const status: 'healthy' | 'attention' | 'problem' =
-            snapshot.overallStatus === 'healthy' ? 'healthy'
-            : snapshot.overallStatus === 'degraded' ? 'attention'
-            : 'problem';
-          const result: SystemStatus = {
-            status,
-            principleTotal: pruningSummary.totalPrinciples,
-            principleActive,
-            principlePending,
-            weeklyChange: 0,
-          };
-          sendSuccess(response, result);
-        })(req, res);
-        return;
-      }
-
-      // GET /api/tasks
-      if (urlPath === '/api/tasks') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const pruningSignals = services.pruningReadModel.getPrincipleSignals();
-          const diagnosticianTasks = await services.stateManager.listTasks({ taskKind: 'diagnostician', limit: 50 });
-          const needsConfirmation: TaskItem[] = [];
-          const candidateBatches = await Promise.all(
-            diagnosticianTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
-          );
-          for (let ci = 0; ci < candidateBatches.length; ci++) {
-            const candidates = candidateBatches[ci];
-            const parentTask = diagnosticianTasks[ci];
-            for (const c of candidates) {
-              if (c.status !== 'pending') continue;
-              const severity = parseSeverityFromDiagnostic(parentTask.diagnosticJson);
-              const recommendationKind = parseRecommendationKind(c.sourceRecommendationJson);
-              needsConfirmation.push({
-                id: c.candidateId,
-                title: c.title,
-                sourceSummary: c.description,
-                priority: 'needs_confirmation',
-                kind: 'approval',
-                createdAt: c.createdAt,
-                confidence: c.confidence ?? undefined,
-                severity,
-                recommendationKind,
-              });
-            }
-          }
-          const suggestedAttention: TaskItem[] = pruningSignals
-            .filter((s) => s.riskLevel === 'watch' || s.riskLevel === 'review')
-            .map((s) => ({
-              id: s.principleId,
-              title: `Principle "${s.principleId}" needs attention`,
-              sourceSummary: s.reasons.join('; '),
-              priority: 'suggested_attention' as const,
-              kind: 'cleanup' as const,
-              createdAt: s.createdAt,
-              lastTriggeredAt: s.updatedAt,
-              triggerCount: s.derivedPainCount,
-            }));
-          const recentTasks = await services.stateManager.listTasks({ status: 'succeeded', limit: 5 });
-          const recentActivity: TaskItem[] = recentTasks.map((t) => {
-            const reasonSummary = parseReasonSummaryFromDiagnostic(t.diagnosticJson);
-            const severity = parseSeverityFromDiagnostic(t.diagnosticJson);
-            const {attemptCount} = t;
-            const {maxAttempts} = t;
-            const kindLabels: Record<string, string> = {
-              diagnostician: '诊断分析',
-              principle_candidate_intake: '原则候选录入',
-              dreamer: '深度反思',
-              keyword_optimization: '关键词优化',
-            };
-            return {
-              id: t.taskId,
-              title: reasonSummary || kindLabels[t.taskKind] || t.taskKind,
-              sourceSummary: reasonSummary ? `来源: ${t.taskKind}` : '',
-              priority: 'recent_activity' as const,
-              kind: 'completed' as const,
-              createdAt: t.createdAt,
-              status: t.status,
-              severity,
-              attemptCount,
-              maxAttempts,
-            };
-          });
-          sendSuccess(response, { needsConfirmation, suggestedAttention, recentActivity });
-        })(req, res);
-        return;
-      }
-
-      // GET /api/tasks/:id/evidence
-      if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/evidence')) {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        const parts = urlPath.split('/');
-        const [, , , id] = parts;
-        if (!id) {
-          sendError(res, 400, 'missing_id', 'Missing task ID');
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const candidate = await services.stateManager.getCandidate(id);
-          if (candidate) {
-            const trace = await services.painChainReadModel.traceByPainId(candidate.taskId.replace('diagnosis_', ''));
-            const evidence: EvidenceItem[] = [];
-            if (trace.runId) {
-              evidence.push({ timestamp: trace.checkedAt, operation: 'run', problem: trace.missingLinks.join('; ') || 'run completed' });
-            }
-            for (const cid of trace.candidateIds) {
-              evidence.push({ timestamp: trace.checkedAt, operation: 'candidate_generated', problem: `candidate: ${cid}` });
-            }
-            for (const lid of trace.ledgerEntryIds) {
-              evidence.push({ timestamp: trace.checkedAt, operation: 'ledger_written', problem: `principle: ${lid}` });
-            }
-
-            let diagnosis: DiagnosisOutput | undefined = undefined;
-            let inputInfo: DiagnosisInput | undefined = undefined;
-
-            const artifact = await services.stateManager.getArtifact(candidate.artifactId);
-            if (artifact && artifact.artifactKind === 'diagnostician_output') {
-              diagnosis = parseDiagnosticianOutput(artifact.contentJson);
-            }
-
-            const parentTask = await services.stateManager.getTask(candidate.taskId);
-            if (parentTask?.diagnosticJson) {
-              inputInfo = parseDiagnosticInput(parentTask.diagnosticJson);
-            }
-
-            const result: TaskEvidence = {
-              taskId: id,
-              summary: candidate.title,
-              why: candidate.description,
-              whatHappensIf: `If declined, this candidate will expire. Status: ${candidate.status}.`,
-              evidence,
-              diagnosis,
-              input: inputInfo,
-            };
-            sendSuccess(response, result);
-            return;
-          }
-          const signals = services.pruningReadModel.getPrincipleSignals();
-          const signal = signals.find((s) => s.principleId === id);
-          if (signal) {
-            const result: TaskEvidence = {
-              taskId: id,
-              summary: `Principle lifecycle signal for "${signal.principleId}"`,
-              why: signal.reasons.join('; '),
-              whatHappensIf: `Risk level: ${signal.riskLevel}. Age: ${signal.ageDays} days.`,
-              evidence: signal.reasons.map((reason) => ({ timestamp: signal.updatedAt, operation: 'pruning_signal', problem: reason })),
-            };
-            sendSuccess(response, result);
-            return;
-          }
-
-          const task = await services.stateManager.getTask(id);
-          if (task) {
-            let diagnosis: DiagnosisOutput | undefined = undefined;
-            let inputInfo: DiagnosisInput | undefined = undefined;
-
-            if (task.diagnosticJson) {
-              inputInfo = parseDiagnosticInput(task.diagnosticJson);
-            }
-
-            const taskCandidates = await services.stateManager.getCandidatesByTaskId(id);
-            if (taskCandidates.length > 0) {
-              const [firstCandidate] = taskCandidates;
-              const artifact = await services.stateManager.getArtifact(firstCandidate.artifactId);
-              if (artifact && artifact.artifactKind === 'diagnostician_output') {
-                diagnosis = parseDiagnosticianOutput(artifact.contentJson);
-              }
-            }
-
-            const result: TaskEvidence = {
-              taskId: id,
-              summary: inputInfo?.reasonSummary ?? `${task.taskKind} (${task.status})`,
-              why: diagnosis?.rootCause ?? '',
-              whatHappensIf: `Status: ${task.status}. Attempt: ${task.attemptCount}/${task.maxAttempts}.`,
-              evidence: [],
-              diagnosis,
-              input: inputInfo,
-            };
-            sendSuccess(response, result);
-            return;
-          }
-
-          sendNotFound(response, 'Task or principle not found');
-        })(req, res);
-        return;
-      }
-
-      // GET /api/activity
-      if (urlPath === '/api/activity') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const [recentTasks, pruningReviews] = await Promise.all([
-            services.stateManager.listTasks({ limit: 20 }),
-            Promise.resolve(listPruningReviews(services.workspaceDir)),
-          ]);
-          const events: ActivityEvent[] = [];
-          for (const t of recentTasks) {
-            const eventType: 'error' | 'learned' | 'approved' =
-              t.status === 'failed' ? 'error' : t.status === 'succeeded' ? 'learned' : 'approved';
-            events.push({ id: t.taskId, type: eventType, description: `${t.taskKind} (${t.status})`, timestamp: t.updatedAt });
-          }
-          for (const r of pruningReviews) {
-            const eventType: 'error' | 'learned' | 'approved' =
-              r.decision === 'keep' ? 'approved' : r.decision === 'archive-candidate' ? 'error' : 'learned';
-            events.push({ id: r.reviewId, type: eventType, description: `Pruning review: ${r.decision} for ${r.principleId}`, timestamp: r.reviewedAt });
-          }
-          events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-          sendSuccess(response, events);
-        })(req, res);
-        return;
-      }
-
-      // POST /api/tasks/:id/approve
-      if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/approve')) {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        const parts = urlPath.split('/');
-        const [, , , id] = parts;
-        if (!id) {
-          sendError(res, 400, 'missing_id', 'Missing task ID');
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const candidate = await services.stateManager.getCandidate(id);
-          if (!candidate) {
-            sendNotFound(response, 'Candidate not found');
-            return;
-          }
-          const transitioned = await services.stateManager.transitionCandidateStatus(id, 'pending', 'consumed');
-          if (!transitioned) {
-            const current = await services.stateManager.getCandidate(id);
-            sendError(res, 409, 'conflict', `Candidate is not pending (status: ${current?.status ?? 'unknown'})`);
-            return;
-          }
-          try {
-            const entry = await services.candidateIntakeService.intake(id);
-            sendSuccess(response, { principleId: entry.id });
-          } catch (intakeErr) {
-            await services.stateManager.updateCandidateStatus(id, { status: 'pending' });
-            throw intakeErr;
-          }
-        })(req, res);
-        return;
-      }
-
-      // POST /api/tasks/:id/reject
-      if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/reject')) {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        const parts = urlPath.split('/');
-        const [, , , id] = parts;
-        if (!id) {
-          sendError(res, 400, 'missing_id', 'Missing task ID');
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const candidate = await services.stateManager.getCandidate(id);
-          if (!candidate) {
-            sendNotFound(response, 'Candidate not found');
-            return;
-          }
-          const transitioned = await services.stateManager.transitionCandidateStatus(id, 'pending', 'expired');
-          if (!transitioned) {
-            const current = await services.stateManager.getCandidate(id);
-            sendError(res, 409, 'conflict', `Candidate is not pending (status: ${current?.status ?? 'unknown'})`);
-            return;
-          }
-          sendSuccess(response, { success: true });
-        })(req, res);
-        return;
-      }
-
-      // POST /api/tasks/:id/cleanup
-      if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/cleanup')) {
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        const parts = urlPath.split('/');
-        const [, , , id] = parts;
-        if (!id) {
-          sendError(res, 400, 'missing_id', 'Missing principle ID');
-          return;
-        }
-        asyncHandler(async (_req, response) => {
-          const signals = services.pruningReadModel.getPrincipleSignals();
-          const signal = signals.find((s) => s.principleId === id);
-          if (!signal) {
-            sendNotFound(response, 'Principle not found in review signals');
-            return;
-          }
-          appendPruningReview(services.workspaceDir, {
-            principleId: id,
-            decision: 'archive-candidate',
-            note: 'Archived via PD Console',
-            reviewer: 'operator',
-          });
-          const archived = await services.stateManager.archivePrinciple(id);
-          if (!archived) {
-            sendNotFound(response, 'Principle not found in ledger');
-            return;
-          }
-          sendSuccess(response, { success: true });
-        })(req, res);
         return;
       }
 
@@ -869,4 +470,3 @@ main().catch((err: unknown) => {
   console.error('[pd-console] Fatal startup error:', err);
   process.exit(1);
 });
-
