@@ -54,6 +54,38 @@
     "copied": "已复制"
   },
   "pages": {
+    "debt": {
+      "eyebrow": "原则债务",
+      "title": "原则债务",
+      "subtitle": "原则可能过时、过于宽泛或不再值得维护。本页识别需要治理、清理或继续观察的候选原则。",
+      "summaryTotal": "条债务候选",
+      "summaryNeverActivated": "条已批准但从未激活",
+      "summaryInactive": "条长期未激活",
+      "summaryNoRecord": "条无激活记录",
+      "boundaryLabel": "能力边界",
+      "boundaryText": "PD 暂不执行冲突检测、相似度评分或反复触发分析。这些属于 post-MVP 能力。下方的债务候选仅基于现有激活数据推导。",
+      "sectionCandidates": "债务候选",
+      "emptyTitle": "当前未发现原则债务",
+      "emptyDescription": "当原则已批准但从未激活，或长期处于未激活状态时，它们会在这里出现为审查候选。你可以决定归档、降权或继续观察。",
+      "loadError": "无法加载原则债务数据。你可以尝试刷新页面。",
+      "activationsDegraded": "激活数据不可用。PD 不会在无法读取激活记录时推断原则债务。",
+      "activationsUnavailable": "激活数据无法加载。PD 不会在无法读取激活记录时推断原则债务。请重启控制台以恢复完整债务分析。",
+      "reasonApprovedNeverActivated": "此原则已批准但未在任何通道中激活。它可能范围过窄、定义不清或已不再相关。",
+      "reasonLongTermInactive": "此原则已未激活 {{days}} 天。其原始证据可能已不适用，或范围可能需要缩小。",
+      "reasonNoActivationRecord": "此活跃原则暂无激活记录。它可能在激活管线可用之前创建，或尚未接入任何通道。",
+      "reasonTag": {
+        "approvedNeverActivated": "从未激活",
+        "longTermInactive": "长期未激活",
+        "noActivationRecord": "无激活记录"
+      },
+      "actionArchive": "归档",
+      "actionDowngrade": "降权",
+      "actionKeepObserving": "继续观察",
+      "archiveDisabledReason": "原则归档需要状态变更端点，目前尚未可用。此操作将在未来版本中启用。",
+      "downgradeDisabledReason": "原则降权（范围或优先级变更）暂未得到后端支持。此操作将在未来版本中可用。",
+      "keepObservingDisabledReason": "继续观察无需操作\u2014\u2014原则将持续出现在债务审查中，直至其状态发生变化。",
+      "footer": "本页只回答一个问题：哪些原则需要被治理、清理或继续观察。"
+    },
     "overview": {
       "title": "概览",
       "description": "系统状态总览",

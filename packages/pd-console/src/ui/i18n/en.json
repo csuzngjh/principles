@@ -54,6 +54,38 @@
     "copied": "Copied"
   },
   "pages": {
+    "debt": {
+      "eyebrow": "Principle Debt",
+      "title": "Principle Debt",
+      "subtitle": "Principles can become outdated, too broad, or no longer worth maintaining. This page identifies candidates for governance, cleanup, or continued observation.",
+      "summaryTotal": "debt candidate(s)",
+      "summaryNeverActivated": "approved but never activated",
+      "summaryInactive": "long-term inactive",
+      "summaryNoRecord": "no activation record",
+      "boundaryLabel": "Capability boundary",
+      "boundaryText": "PD does not perform conflict detection, similarity scoring, or repeated-trigger analysis. These are post-MVP capabilities. Debt candidates below are derived from available activation data only.",
+      "sectionCandidates": "Debt Candidates",
+      "emptyTitle": "No principle debt detected right now",
+      "emptyDescription": "When principles remain approved but never activated, or stay inactive for extended periods, they will appear here as candidates for review. You can then decide whether to archive, downgrade, or keep observing them.",
+      "loadError": "Unable to load principle debt data. You can try refreshing the page.",
+      "activationsDegraded": "Activation data is unavailable. PD will not infer principle debt until activation records can be loaded.",
+      "activationsUnavailable": "Activation data could not be loaded. PD will not infer principle debt until activation records can be loaded. Restart the console to restore full debt analysis.",
+      "reasonApprovedNeverActivated": "This principle was approved but has never been activated in any channel. It may be too narrow, poorly scoped, or no longer relevant.",
+      "reasonLongTermInactive": "This principle has been inactive for {{days}} days. Its original evidence may no longer apply, or its scope may need narrowing.",
+      "reasonNoActivationRecord": "This active principle has no activation record. It may have been created before the activation pipeline was available, or it may not be wired to any channel.",
+      "reasonTag": {
+        "approvedNeverActivated": "Never Activated",
+        "longTermInactive": "Long-Term Inactive",
+        "noActivationRecord": "No Activation Record"
+      },
+      "actionArchive": "Archive",
+      "actionDowngrade": "Downgrade",
+      "actionKeepObserving": "Keep Observing",
+      "archiveDisabledReason": "Principle archiving requires a status-change endpoint that is not yet available. This action will be enabled in a future version.",
+      "downgradeDisabledReason": "Principle downgrade (scope or priority change) is not yet supported by the backend. This action will be available in a future version.",
+      "keepObservingDisabledReason": "No action is needed to keep observing \u2014 the principle will continue to appear in debt reviews until its status changes.",
+      "footer": "This page answers one question: which principles need governance, cleanup, or continued observation."
+    },
     "overview": {
       "title": "Overview",
       "description": "System Status Overview",
