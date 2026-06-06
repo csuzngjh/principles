@@ -60,8 +60,8 @@ export function ApprovalCard({
               <Badge variant="outline" className="text-xs">
                 {getChannelLabel(approval.channel, t)}
               </Badge>
-              <Badge className={"text-xs border " + (CONFIDENCE_COLORS[approval.confidenceLabel] ?? CONFIDENCE_COLORS.medium)}>
-                {t("components:approvalCard.confidence." + approval.confidenceLabel)}
+              <Badge className={"text-xs border " + (CONFIDENCE_COLORS[approval.confidenceLabel ?? 'medium'] ?? CONFIDENCE_COLORS.medium)}>
+                {t("components:approvalCard.confidence." + (approval.confidenceLabel ?? 'medium'))}
               </Badge>
               {approval.riskLevel && (
                 <Badge variant="secondary" className={"text-xs " + (RISK_COLORS[approval.riskLevel] ?? "")}>

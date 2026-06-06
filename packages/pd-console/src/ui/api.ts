@@ -376,3 +376,93 @@ export {
   fetchUpdateStatus,
   fetchUpdateHistory,
 };
+
+// ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
+// These types are imported by page components. They are defined in validators.ts
+// and re-exported here under both the canonical name and the consumer-facing alias.
+
+export type {
+  FeedbackReportData,
+  FeedbackDraftSummaryData,
+  FeedbackDraftEnvelopeData,
+  DeleteEnvelopeData,
+  WorkspaceEntryData,
+  RemovedEnvelopeData,
+  SyncResultData,
+  ConfigReadinessData,
+  ConfigSummaryData,
+  ConfigCatalogData,
+  AgentBindingUpdateData,
+  ReadinessCheckData,
+  DefaultRuntimeUpdateData,
+  GovernanceQueueData,
+  ActivationsData,
+  DisableActivationData,
+  LifecycleMetricsData,
+  UpdateStatusData,
+  UpdateHistoryData,
+  ApprovalRecordData,
+  ApprovalListResultData,
+  PrinciplesListData,
+  ApprovalsGroupedData,
+} from "./utils/validators.js";
+
+// Consumer-facing type aliases (old names that pages import)
+export type { ActivationRecordData as ActivationRecord } from "./utils/validators.js";
+export type { ApprovalRecordData as ApprovalRecord } from "./utils/validators.js";
+export type { WorkspaceEntryData as WorkspaceEntry } from "./utils/validators.js";
+export type { PrincipleListItemData as PrincipleListItem } from "./utils/validators.js";
+export type { StagnationSignalData as StagnationSignal } from "./utils/validators.js";
+export type { ApprovalGroupData as ApprovalGroup } from "./utils/validators.js";
+export type { LifecycleAdherenceData as LifecycleAdherence } from "./utils/validators.js";
+export type { LifecycleRuleMetricData as LifecycleRuleMetric } from "./utils/validators.js";
+export type { RedactedRuntimeProfileSummaryData as RedactedRuntimeProfileSummary } from "./utils/validators.js";
+export type { RedactedFeatureSummaryData as RedactedFeatureSummary } from "./utils/validators.js";
+export type { RedactedAgentSummaryData as RedactedAgentSummary } from "./utils/validators.js";
+export type { UpdateHistoryEntryData as UpdateHistoryEntry } from "./utils/validators.js";
+export type { ReadinessStatus } from "./utils/validators.js";
+export type { ConfigSource } from "./utils/validators.js";
+
+// PrincipleDetail and PrincipleDetailData are deeply nested types
+// used only by PrincipleDetailPage. They are not validated at the API level
+// (fetchPrincipleDetail returns unknown). Define them locally for the page.
+// PrincipleDetail represents the validated principle data used by PrincipleDetailPage.
+// The page's own validatePrincipleDetail() handles runtime validation and
+// normalizes the API response into this shape.
+export interface PrincipleDetail {
+  id: string;
+  text: string;
+  triggerPattern: string;
+  action: string;
+  status: string;
+  priority: string;
+  scope: string;
+  domain: string | null;
+  evaluability: string;
+  valueScore: number;
+  adherenceRate: number;
+  painPreventedCount: number;
+  ruleCount: number;
+  conflictsWith: string[];
+  supersedes: string[] | null;
+  coreAxiom: string | null;
+  createdAt: string;
+  updatedAt: string;
+  channels: string[];
+  confidence: number | undefined;
+  rules: unknown[];
+  painIds: string[];
+  derivedFromPainIds: string[];
+  [key: string]: unknown;
+}
+
+export interface PrincipleDetailRule {
+  ruleId: string;
+  condition: string;
+  action: string;
+  scope: string;
+}
+
+export interface PrincipleDetailData {
+  principle: PrincipleDetail;
+}

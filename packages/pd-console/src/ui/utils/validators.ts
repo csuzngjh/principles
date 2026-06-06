@@ -234,7 +234,7 @@ export function validateSyncResult(v: unknown): SyncResultData | null {
 
 // ── Config / Control Center validators ────────────────────────────────────────
 
-type ReadinessStatus = 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
+export type ReadinessStatus = 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
 const VALID_READINESS: ReadinessStatus[] = ['ready', 'not_ready', 'needs_setup', 'disabled', 'unknown'];
 
 function validateReadinessStatus(v: unknown): ReadinessStatus | null {
@@ -242,7 +242,7 @@ function validateReadinessStatus(v: unknown): ReadinessStatus | null {
   return v as ReadinessStatus;
 }
 
-interface RedactedRuntimeProfileSummaryData {
+export interface RedactedRuntimeProfileSummaryData {
   id: string;
   type: string;
   label: string;
@@ -266,7 +266,7 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
   };
 }
 
-interface RedactedFeatureSummaryData {
+export interface RedactedFeatureSummaryData {
   id: string;
   category: string;
   enabled: boolean;
@@ -280,7 +280,7 @@ function validateFeatureSummary(v: unknown): RedactedFeatureSummaryData | null {
   return { id: v.id, category: v.category, enabled: v.enabled };
 }
 
-interface RedactedAgentSummaryData {
+export interface RedactedAgentSummaryData {
   name: string;
   enabled: boolean;
   runtimeProfileId: string;
@@ -314,9 +314,17 @@ function validateConfigError(v: unknown): ConfigErrorData | null {
   return { path: v.path, reason: v.reason, nextAction: v.nextAction };
 }
 
+export type ConfigSource = 'defaults' | 'user_config';
+const VALID_CONFIG_SOURCES: ConfigSource[] = ['defaults', 'user_config'];
+
+function validateConfigSource(v: unknown): ConfigSource | null {
+  if (!isString(v) || !VALID_CONFIG_SOURCES.includes(v as ConfigSource)) return null;
+  return v as ConfigSource;
+}
+
 export interface ConfigSummaryData {
   version: number;
-  source: string;
+  source: ConfigSource;
   features: RedactedFeatureSummaryData[];
   runtimeProfiles: RedactedRuntimeProfileSummaryData[];
   defaultRuntime: string;
@@ -329,7 +337,9 @@ export interface ConfigSummaryData {
 export function validateConfigSummary(v: unknown): ConfigSummaryData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'version') || !isNumber(v.version)) return null;
-  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  if (!Object.hasOwn(v, 'source')) return null;
+  const source = validateConfigSource(v.source);
+  if (source === null) return null;
   if (!Object.hasOwn(v, 'features') || !Array.isArray(v.features)) return null;
   if (!Object.hasOwn(v, 'runtimeProfiles') || !Array.isArray(v.runtimeProfiles)) return null;
   if (!Object.hasOwn(v, 'defaultRuntime') || !isString(v.defaultRuntime)) return null;
@@ -357,7 +367,7 @@ export function validateConfigSummary(v: unknown): ConfigSummaryData | null {
   }
 
   return {
-    version: v.version, source: v.source, features, runtimeProfiles,
+    version: v.version, source, features, runtimeProfiles,
     defaultRuntime: v.defaultRuntime, agents,
     ui: { diagnostics: { mode: ui.diagnostics.mode } },
     warnings, errors,
@@ -467,7 +477,7 @@ export function validateConfigReadiness(v: unknown): ConfigReadinessData | null 
 
 // ── Governance / Activations validators ───────────────────────────────────────
 
-interface StagnationSignalData {
+export interface StagnationSignalData {
   type: string;
   principleId: string;
   daysSince: number;
@@ -580,7 +590,7 @@ function validateLifecycleAdherence(v: unknown): LifecycleAdherenceData | null {
   };
 }
 
-interface LifecycleRuleMetricData {
+export interface LifecycleRuleMetricData {
   ruleId: string;
   triggered: number;
   lastTriggeredAt: string | null;
@@ -633,7 +643,7 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   return { currentVersion: v.currentVersion, latestVersion: v.latestVersion, updateAvailable: v.updateAvailable, lastChecked: v.lastChecked };
 }
 
-interface UpdateHistoryEntryData {
+export interface UpdateHistoryEntryData {
   version: string;
   appliedAt: string;
   notes: string;
@@ -802,13 +812,13 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (principles === null) return null;
   return {
     principles,
-    summary: { candidate: s.candidate, probation: s.probation, active: s.active, deprecated: s.deprecated, archived: s.archived, total: s.total },
+    summary: { candidate: s.candidate as number, probation: s.probation as number, active: s.active as number, deprecated: s.deprecated as number, archived: s.archived as number, total: s.total as number },
   };
 }
 
 // ── Approval group validators ─────────────────────────────────────────────────
 
-interface ApprovalGroupRecordData {
+export interface ApprovalGroupRecordData {
   id: string;
   artifactId: string;
   channel: string;
@@ -824,7 +834,7 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   return { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt };
 }
 
-interface ApprovalGroupData {
+export interface ApprovalGroupData {
   principleId: string;
   principleTitle: string;
   status: string;

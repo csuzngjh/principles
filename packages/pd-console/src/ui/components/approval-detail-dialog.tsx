@@ -51,8 +51,8 @@ export function ApprovalDetailDialog({
           <DialogDescription>
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="outline" className="text-xs">{t("components:approvalCard.channel." + approval.channel, approval.channel)}</Badge>
-              <Badge className={"text-xs border " + (CONFIDENCE_COLORS[approval.confidenceLabel] ?? CONFIDENCE_COLORS.medium)}>
-                {t("components:approvalCard.confidence." + approval.confidenceLabel)}
+              <Badge className={"text-xs border " + (CONFIDENCE_COLORS[approval.confidenceLabel ?? 'medium'] ?? CONFIDENCE_COLORS.medium)}>
+                {t("components:approvalCard.confidence." + (approval.confidenceLabel ?? 'medium'))}
               </Badge>
               {approval.riskLevel && (
                 <Badge variant="secondary" className="text-xs">{t("components:approvalCard.riskLevel." + approval.riskLevel, approval.riskLevel)}</Badge>

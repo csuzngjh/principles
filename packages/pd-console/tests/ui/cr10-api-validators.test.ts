@@ -420,7 +420,7 @@ describe('validateUpdateStatus', () => {
 describe('validateConfigSummary', () => {
   const validConfig = {
     version: 1,
-    source: 'file',
+    source: 'defaults',
     features: [{ id: 'f1', category: 'core', enabled: true }],
     runtimeProfiles: [{ id: 'rp1', type: 'openclaw', label: 'Default', readiness: 'ready' }],
     defaultRuntime: 'rp1',
