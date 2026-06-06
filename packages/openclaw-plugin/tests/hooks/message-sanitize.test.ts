@@ -41,21 +41,21 @@ describe('message-sanitize hook', () => {
   });
 
   it('redacts OpenAI-style secret keys (sk-*)', () => {
-    const token = 'sk-proj-' + 'a'.repeat(30); // 38 chars after sk-
+    const token = 'sk-proj-' + 'a'.repeat(30);
     const result = sanitizeForEvidence(`token is ${token}`);
     expect(result).toContain('___REDACTED___');
     expect(result).not.toContain(token);
   });
 
   it('redacts JWT-like patterns (eyJ*)', () => {
-    const jwt = 'eyJ' + 'a'.repeat(30) + '.bc'; // 34 chars after eyJ + dot
+    const jwt = 'eyJ' + 'a'.repeat(30) + '.bc';
     const result = sanitizeForEvidence(`Bearer ${jwt}`);
     expect(result).toContain('___REDACTED___');
     expect(result).not.toContain(jwt);
   });
 
   it('redacts long base64-like strings', () => {
-    const token = 'A'.repeat(50); // ≥40 alphanumeric
+    const token = 'A'.repeat(50);
     const result = sanitizeForEvidence(`hash: ${token}`);
     expect(result).toContain('___REDACTED___');
     expect(result).not.toContain(token);
@@ -81,13 +81,42 @@ describe('message-sanitize hook', () => {
 
   it('converges absolute paths to basename when no workspaceDir', () => {
     const result = sanitizeForEvidence('/home/user/secrets/token.json');
-    expect(result).toBe('token.json');
-    expect(result).not.toContain('/home/');
+    expect(result).toBe('<path:token.json>');
   });
 
   it('converges absolute paths to repo-relative when workspaceDir matches', () => {
     const result = sanitizeForEvidence('/workspace/my-repo/src/index.ts', '/workspace/my-repo');
     expect(result).toBe('src/index.ts');
+  });
+
+  // ── Path substring sanitization ──
+
+  it('replaces Windows absolute path in command with basename', () => {
+    const result = sanitizeForEvidence('cd D:\\Code\\principles && git status');
+    expect(result).not.toContain('D:\\Code\\principles');
+    expect(result).toContain('principles');
+  });
+
+  it('replaces Windows absolute path in reason with basename', () => {
+    const result = sanitizeForEvidence('error in C:\\Users\\Administrator\\secret.txt');
+    expect(result).not.toContain('C:\\Users\\Administrator');
+    expect(result).not.toContain('Administrator');
+    expect(result).toContain('secret.txt');
+  });
+
+  it('replaces POSIX absolute path in string', () => {
+    const result = sanitizeForEvidence('failed to read /home/user/project/src/config.ts');
+    expect(result).not.toContain('/home/user/project');
+    expect(result).toContain('config.ts');
+  });
+
+  it('converges workspace-internal path in string to repo-relative', () => {
+    const result = sanitizeForEvidence(
+      'edit failed on D:\\Code\\principles\\src\\index.ts',
+      'D:\\Code\\principles',
+    );
+    expect(result).not.toContain('D:\\Code\\principles');
+    expect(result).toContain('src\\index.ts');
   });
 
   // ── sanitizeToolParamsForEvidence ──

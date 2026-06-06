@@ -53,7 +53,24 @@ const ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\/|\\\\)/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:\\/;
 
 /**
- * Converges an absolute path to a safe representation.
+ * Matches absolute paths embedded anywhere inside a string.
+ * - Windows: D:\foo\bar or D:/foo/bar (drive letter + colon + separator + at least 1 segment)
+ * - POSIX: /foo/bar (root-absolute, at least 2 segments)
+ * - UNC: \\server\share\path
+ *
+ * Uses word-boundary-like anchors: path starts after whitespace, quote, equals, or string start.
+ */
+const ABSOLUTE_PATH_IN_STRING_RE =
+  /(?:^|[\s"'=])([A-Za-z]:\\[^\s"'&|<>]+|[A-Za-z]:\/[^\s"'&|<>]+|\\\\[^\s"'&|<>]+|(?:\/[\w.-]+){2,}(?:\/[^\s"'&|<>]*)?)/gm;
+
+// ── Helpers ──
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Converges a single absolute path to a safe representation.
  * - Under workspaceDir → repo-relative
  * - Other absolute → basename only
  * - Relative paths → kept as-is
@@ -79,13 +96,32 @@ export function convergePath(value: string, workspaceDir?: string): string {
   return nodePath.basename(value);
 }
 
+/**
+ * Replace absolute paths embedded inside a longer string.
+ * e.g. "cd D:\Code\principles && git status" → "cd principles && git status"
+ * e.g. "error in /home/user/project/src/file.ts" → "error in file.ts"
+ */
+function replacePathsInString(value: string, workspaceDir?: string): string {
+  return value.replace(ABSOLUTE_PATH_IN_STRING_RE, (fullMatch, capturedPath: string) => {
+    // Preserve the leading separator (space, quote, etc.) that preceded the path
+    const leading = fullMatch.slice(0, fullMatch.length - capturedPath.length);
+    const converged = convergePath(capturedPath, workspaceDir);
+    // Wrap in angle brackets if it was an outside-workspace absolute path that became a basename,
+    // to distinguish from normal words
+    if (ABSOLUTE_PATH_RE.test(capturedPath) && converged === nodePath.basename(capturedPath)) {
+      return `${leading}<path:${converged}>`;
+    }
+    return `${leading}${converged}`;
+  });
+}
+
 // ── String sanitization ──
 
 /**
  * Sanitize a single string value:
  * 1. Strip internal PD tags
  * 2. Redact token-like patterns
- * 3. Converge absolute paths
+ * 3. Replace absolute paths embedded in the string
  * 4. Bound length
  */
 export function sanitizeString(value: string, workspaceDir?: string): string {
@@ -104,8 +140,8 @@ export function sanitizeString(value: string, workspaceDir?: string): string {
     });
   }
 
-  // 3. Path convergence (only if it looks like a path)
-  result = convergePath(result, workspaceDir);
+  // 3. Replace absolute paths embedded in the string
+  result = replacePathsInString(result, workspaceDir);
 
   // 4. Bound length
   if (result.length > MAX_EVIDENCE_VALUE_CHARS) {
@@ -151,14 +187,13 @@ export function sanitizeValue(
     return mapped;
   }
 
-  // Objects — ERR-001: runtime validate before Object.entries
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
+  // Objects — ERR-001: runtime guard instead of `as Record`
+  if (isPlainRecord(value)) {
     const result: Record<string, unknown> = {};
     let count = 0;
-    for (const [k, v] of Object.entries(record)) {
+    for (const [k, v] of Object.entries(value)) {
       if (count >= MAX_KEYS) {
-        result['<truncated>'] = `${Object.keys(record).length - count} more keys`;
+        result['<truncated>'] = `${Object.keys(value).length - count} more keys`;
         break;
       }
       result[k] = sanitizeValue(v, depth + 1, workspaceDir);
@@ -174,7 +209,7 @@ export function sanitizeValue(
 /**
  * Sanitize tool-call params for evidence/trajectory storage.
  *
- * ERR-001: accepts `unknown`, not `Record<string, unknown>`.
+ * ERR-001: accepts `unknown`, not `Record<string, unknown>`. Runtime guards only.
  * ERR-055: ANY-segment sensitive field matching.
  * ERR-056: token redaction runs on ALL strings via sanitizeValue recursion.
  *
@@ -185,18 +220,37 @@ export function sanitizeToolParams(
   params: unknown,
   workspaceDir?: string,
 ): Record<string, unknown> {
-  // ERR-001: runtime validate before Object.entries
-  if (params === null || params === undefined || typeof params !== 'object' || Array.isArray(params)) {
-    // Non-object input: return safe bounded preview
-    if (Array.isArray(params)) {
-      return { '<array-input>': sanitizeValue(params, 0, workspaceDir) as string };
+  // ERR-001: runtime validate before any iteration
+  if (params === null || params === undefined) {
+    return {};
+  }
+
+  if (typeof params === 'string') {
+    return { '<string-input>': sanitizeString(params.slice(0, MAX_EVIDENCE_VALUE_CHARS), workspaceDir) };
+  }
+
+  if (typeof params === 'number' || typeof params === 'boolean') {
+    return {};
+  }
+
+  if (Array.isArray(params)) {
+    const sanitized = sanitizeValue(params, 0, workspaceDir);
+    // ERR-001: runtime guard on return — sanitizeValue returns unknown[] for arrays
+    if (Array.isArray(sanitized)) {
+      return { '<array-input>': sanitized.join(', ').slice(0, MAX_EVIDENCE_VALUE_CHARS) };
     }
-    if (typeof params === 'string') {
-      return { '<string-input>': sanitizeString(params.slice(0, MAX_EVIDENCE_VALUE_CHARS), workspaceDir) };
+    return { '<array-input>': '<sanitization-error>' };
+  }
+
+  // Object — ERR-001: isPlainRecord guard
+  if (isPlainRecord(params)) {
+    const sanitized = sanitizeValue(params, 0, workspaceDir);
+    // ERR-001: runtime guard on return
+    if (isPlainRecord(sanitized)) {
+      return sanitized;
     }
     return {};
   }
 
-  // Valid object: recurse through sanitizeValue
-  return sanitizeValue(params, 0, workspaceDir) as Record<string, unknown>;
+  return {};
 }
