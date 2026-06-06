@@ -112,6 +112,15 @@ async function request<T = unknown>(
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        const hadToken = getToken() !== null;
+        clearToken();
+        // eslint-disable-next-line no-undef
+        if (hadToken && !window.location.hash.startsWith("#/login")) {
+          // eslint-disable-next-line no-undef
+          window.location.hash = "#/login?session_expired=true";
+        }
+      }
       let errorMessage = `HTTP ${response.status}`;
       let nextAction: string | undefined;
       try {
@@ -134,9 +143,12 @@ async function request<T = unknown>(
     }
 
     const raw = await response.json();
+    const apiData = (raw && typeof raw === "object" && "success" in raw && "data" in raw)
+      ? (raw as { data: unknown }).data
+      : raw;
 
     if (validate) {
-      const validated = validate(raw);
+      const validated = validate(apiData);
       if (validated !== null) {
         return { success: true, data: validated };
       }
@@ -149,7 +161,7 @@ async function request<T = unknown>(
 
     // No validator provided — returns ApiResponse<unknown>.
     // The caller must not assume a specific data shape.
-    return { success: true, data: raw };
+    return { success: true, data: apiData };
   } catch (err) {
     return {
       success: false,

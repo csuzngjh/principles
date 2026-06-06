@@ -36,7 +36,7 @@ const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 
 function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
   // PRI-306: Load .pd/config.yaml and pass effectiveConfig to PainToPrincipleService
-  // so createPainSignalBridge uses config-driven runtime binding resolution.
+  // so config-driven runtime binding resolution is used.
   const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
   return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,

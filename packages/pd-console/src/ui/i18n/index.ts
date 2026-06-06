@@ -10,8 +10,8 @@ const getInitialLanguage = (): string => {
 
 i18n.use(initReactI18next).init({
   resources: {
-    "zh-CN": { common: zhCN.common, pages: zhCN.pages, components: zhCN.components },
-    en: { common: en.common, pages: en.pages, components: en.components },
+    "zh-CN": { common: zhCN, pages: zhCN.pages, components: zhCN.components },
+    en: { common: en, pages: en.pages, components: en.components },
   },
   lng: getInitialLanguage(),
   fallbackLng: "zh-CN",

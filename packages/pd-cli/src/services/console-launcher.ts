@@ -224,7 +224,7 @@ export async function openBrowser(url: string): Promise<{ opened: boolean; reaso
   let args: string[];
 
   if (platform === 'win32') {
-    cmd = 'cmd';
+    cmd = process.env.ComSpec || 'cmd.exe';
     args = ['/c', 'start', '""', url];
   } else if (platform === 'darwin') {
     cmd = 'open';
@@ -238,23 +238,36 @@ export async function openBrowser(url: string): Promise<{ opened: boolean; reaso
     try {
       const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
       
-      let resolved = false;
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          child.unref();
-          resolve({ opened: true });
-        }
-      }, 100);
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const done = (result: { opened: boolean; reason?: string; nextAction?: string }) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(result);
+      };
+
+      timer = setTimeout(() => {
+        child.unref();
+        done({ opened: true });
+      }, 1500);
 
       child.on('error', (err) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve({
+        done({
+          opened: false,
+          reason: `Failed to spawn browser process: ${err.message}`,
+          nextAction: `Ensure your system has '${cmd}' available in PATH or open the URL manually.`
+        });
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          done({ opened: true });
+        } else {
+          done({
             opened: false,
-            reason: `Failed to spawn browser process: ${err.message}`,
-            nextAction: `Ensure your system has '${cmd}' available in PATH or open the URL manually.`
+            reason: `Browser command exited with code ${code}`,
+            nextAction: `Open the URL manually: ${url}`
           });
         }
       });
