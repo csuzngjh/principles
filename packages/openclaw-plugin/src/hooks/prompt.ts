@@ -575,7 +575,7 @@ The empathy observer subagent handles pain detection independently.
                     confidence: result.confidence,
                     detection_mode: 'structured',
                     deduped: false,
-                    trigger_text_excerpt: sanitizeForEvidence(latestUserMessage).substring(0, 120),
+                    trigger_text_excerpt: sanitizeForEvidence(latestUserMessage, workspaceDir).substring(0, 120),
                     raw_score: painScore,
                     calibrated_score: painScore,
                     eventId,
@@ -590,7 +590,7 @@ The empathy observer subagent handles pain detection independently.
                       severity: result.severity,
                       origin: 'system_infer',
                       confidence: result.confidence,
-                      text: sanitizeForEvidence(latestUserMessage),
+                      text: sanitizeForEvidence(latestUserMessage, workspaceDir),
                     });
                   } catch (error) {
                     logger?.warn?.(`[PD:Empathy] Failed to persist trajectory: ${String(error)}`);
