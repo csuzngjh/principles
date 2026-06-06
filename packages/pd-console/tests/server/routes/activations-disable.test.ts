@@ -89,7 +89,23 @@ describe('Activation disable route', () => {
 
   afterEach(() => {
     disposeActivationsModels();
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    // On Windows, SQLite file handles may not release immediately after close().
+    // Retry the cleanup with a short delay to avoid EPERM errors.
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        break;
+      } catch (err) {
+        attempts++;
+        if (attempts >= maxAttempts) {
+          console.warn(`Failed to clean up temp dir after ${maxAttempts} attempts:`, err instanceof Error ? err.message : String(err));
+          break;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      }
+    }
   });
 
   // ── Request body validation ──────────────────────────────────────────────
