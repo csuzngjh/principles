@@ -363,9 +363,9 @@ describe('Approvals API — Proven Channel Restrictions', () => {
   // ── 7. Proven channel record can be approved and rejected ─────────────────
 
   describe('Proven channel approve/reject flow', () => {
-    it('can approve a pending proven-channel record', async () => {
+    it('approve returns activation_failed when artifact is missing, and rolls back approval to pending', async () => {
       const approvalId = seedApproval('prompt', 'pending', {
-        summary: 'Approvable prompt record',
+        summary: 'Approvable prompt record (no artifact)',
       });
 
       const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
@@ -373,10 +373,40 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
       });
-      expect(status).toBe(200);
-      const data = getDataObject(body);
-      expect(data).toBeDefined();
-      expect(getStringField(data, 'status')).toBe('approved');
+      // Artifact does not exist → dispatch fails → activation_failed
+      expect(status).toBe(500);
+      const rec = requireRecord(body, 'activation_failed response');
+      expect(getStringField(rec, 'error')).toBe('activation_failed');
+      expect(getStringField(rec, 'message')).toContain('rolled back to pending');
+    });
+
+    it('approval rolled back to pending can be re-approved', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Re-approvable after rollback',
+      });
+
+      // First approve: will fail because artifact is missing
+      const { status: firstStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'First attempt' }),
+      });
+      expect(firstStatus).toBe(500);
+
+      // Verify approval is back to pending (not stuck in approved)
+      const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      expect(detailStatus).toBe(200);
+      const detailData = getDataObject(detailBody);
+      expect(detailData).toBeDefined();
+      expect(getStringField(detailData, 'status')).toBe('pending');
+
+      // Re-approve: should also fail for same reason but proves idempotent retry works
+      const { status: retryStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Retry attempt' }),
+      });
+      expect(retryStatus).toBe(500); // still fails (no artifact) but NOT 409 already_decided
     });
 
     it('can reject a pending proven-channel record', async () => {

@@ -453,6 +453,7 @@ describe('ActivationDispatcher', () => {
       listPending: async () => [],
       approve: async () => ({ ok: false as const, error: 'not_found' as const }),
       reject: async () => ({ ok: false as const, error: 'not_found' as const }),
+      resetToPending: async () => ({ ok: false as const, error: 'not_found' as const }),
       listAll: async () => [],
       countByStatus: async () => ({ pending: 0, approved: 0, rejected: 0, cancelled: 0 }),
     };

@@ -110,4 +110,19 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     this.records.set(approvalId, updated);
     return { ok: true, record: updated };
   }
+
+  async resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }> {
+    const existing = this.records.get(approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'approved') return { ok: false, error: 'not_approved' };
+    const reset: ApprovalRecord = {
+      ...existing,
+      status: 'pending',
+      decidedAt: undefined,
+      decidedBy: undefined,
+      decisionNote: undefined,
+    };
+    this.records.set(approvalId, reset);
+    return { ok: true };
+  }
 }
