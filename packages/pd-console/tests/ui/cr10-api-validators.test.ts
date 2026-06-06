@@ -14,11 +14,20 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateErrorResponse,
-  validateSuccessEnvelope,
   validateHeaders,
   validateFeedbackReport,
   validateFeedbackDraftsList,
   validateDeleteEnvelope,
+  validateWorkspaceEntry,
+  validateWorkspaceList,
+  validateConfigSummary,
+  validateGovernanceQueue,
+  validateActivations,
+  validateDisableActivation,
+  validateUpdateStatus,
+  validateApprovalListResult,
+  validatePrinciplesList,
+  validateApprovalsGrouped,
 } from '../../src/ui/utils/validators.js';
 
 // ── validateErrorResponse ─────────────────────────────────────────────────────
@@ -76,54 +85,6 @@ describe('validateErrorResponse', () => {
     const result = validateErrorResponse({ message: 42 });
     // message is not a string, so it should be ignored
     expect(result!.message).toBeUndefined();
-  });
-});
-
-// ── validateSuccessEnvelope ───────────────────────────────────────────────────
-
-describe('validateSuccessEnvelope', () => {
-  it('accepts a valid success envelope', () => {
-    const result = validateSuccessEnvelope({ success: true, data: { id: '1' } });
-    expect(result).not.toBeNull();
-    expect(result!.success).toBe(true);
-    expect(result!.data).toEqual({ id: '1' });
-  });
-
-  it('accepts success envelope without data', () => {
-    const result = validateSuccessEnvelope({ success: true });
-    expect(result).not.toBeNull();
-    expect(result!.success).toBe(true);
-    expect(result!.data).toBeUndefined();
-  });
-
-  it('accepts success: false envelope', () => {
-    const result = validateSuccessEnvelope({ success: false });
-    expect(result).not.toBeNull();
-    expect(result!.success).toBe(false);
-  });
-
-  it('rejects null', () => {
-    expect(validateSuccessEnvelope(null)).toBeNull();
-  });
-
-  it('rejects arrays', () => {
-    expect(validateSuccessEnvelope([1, 2])).toBeNull();
-  });
-
-  it('rejects objects without success field', () => {
-    expect(validateSuccessEnvelope({ data: {} })).toBeNull();
-  });
-
-  it('rejects objects with non-boolean success', () => {
-    expect(validateSuccessEnvelope({ success: 'true' })).toBeNull();
-    expect(validateSuccessEnvelope({ success: 1 })).toBeNull();
-  });
-
-  it('rejects inherited success property', () => {
-    const obj = Object.create({ success: true });
-    obj.data = {};
-    // Object.hasOwn does not find inherited 'success'
-    expect(validateSuccessEnvelope(obj)).toBeNull();
   });
 });
 
@@ -290,5 +251,290 @@ describe('validateDeleteEnvelope', () => {
   it('rejects inherited deleted property', () => {
     const obj = Object.create({ deleted: true });
     expect(validateDeleteEnvelope(obj)).toBeNull();
+  });
+});
+
+// ── validateWorkspaceEntry ────────────────────────────────────────────────────
+
+describe('validateWorkspaceEntry', () => {
+  const validEntry = { name: 'ws1', path: '/tmp/ws1', lastSync: null, config: null };
+
+  it('accepts a valid workspace entry', () => {
+    const result = validateWorkspaceEntry(validEntry);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe('ws1');
+  });
+
+  it('rejects null', () => {
+    expect(validateWorkspaceEntry(null)).toBeNull();
+  });
+
+  it('rejects missing required fields', () => {
+    expect(validateWorkspaceEntry({ name: 'ws1' })).toBeNull();
+  });
+
+  it('rejects wrong field types', () => {
+    expect(validateWorkspaceEntry({ name: 123, path: '/x' })).toBeNull();
+  });
+});
+
+// ── validateWorkspaceList ─────────────────────────────────────────────────────
+
+describe('validateWorkspaceList', () => {
+  it('accepts a valid workspace list', () => {
+    const result = validateWorkspaceList([{ name: 'ws1', path: '/x', lastSync: null, config: null }]);
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(1);
+  });
+
+  it('accepts empty array', () => {
+    expect(validateWorkspaceList([])).toEqual([]);
+  });
+
+  it('rejects null', () => {
+    expect(validateWorkspaceList(null)).toBeNull();
+  });
+
+  it('rejects non-array', () => {
+    expect(validateWorkspaceList({})).toBeNull();
+  });
+
+  it('rejects invalid entries', () => {
+    expect(validateWorkspaceList([{ name: 123 }])).toBeNull();
+  });
+});
+
+// ── validateGovernanceQueue ───────────────────────────────────────────────────
+
+describe('validateGovernanceQueue', () => {
+  const validQueue = {
+    pendingReviewCount: 2,
+    behaviorDeviationCount: 1,
+    stagnationSignals: [{ type: 'never_activated', principleId: 'p1', daysSince: 30 }],
+  };
+
+  it('accepts a valid governance queue', () => {
+    const result = validateGovernanceQueue(validQueue);
+    expect(result).not.toBeNull();
+    expect(result!.pendingReviewCount).toBe(2);
+    expect(result!.stagnationSignals.length).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateGovernanceQueue(null)).toBeNull();
+  });
+
+  it('rejects missing required fields', () => {
+    expect(validateGovernanceQueue({ pendingReviewCount: 1 })).toBeNull();
+  });
+
+  it('rejects wrong field types', () => {
+    expect(validateGovernanceQueue({ ...validQueue, pendingReviewCount: 'two' })).toBeNull();
+  });
+
+  it('rejects invalid stagnation signals', () => {
+    expect(validateGovernanceQueue({ ...validQueue, stagnationSignals: [{ type: 123 }] })).toBeNull();
+  });
+});
+
+// ── validateActivations ───────────────────────────────────────────────────────
+
+describe('validateActivations', () => {
+  const validActivations = {
+    activations: [{
+      id: 'a1', artifactId: 'art1', principleId: 'p1',
+      channel: 'prompt', action: 'inject', targetRef: 'target',
+      activatedAt: '2026-06-01', status: 'active',
+    }],
+    generatedAt: '2026-06-01T00:00:00Z',
+  };
+
+  it('accepts valid activations', () => {
+    const result = validateActivations(validActivations);
+    expect(result).not.toBeNull();
+    expect(result!.activations.length).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateActivations(null)).toBeNull();
+  });
+
+  it('rejects missing required fields in activation record', () => {
+    expect(validateActivations({ activations: [{ id: 'a1' }], generatedAt: '2026' })).toBeNull();
+  });
+
+  it('rejects wrong field types', () => {
+    expect(validateActivations({ ...validActivations, generatedAt: 123 })).toBeNull();
+  });
+});
+
+// ── validateDisableActivation ─────────────────────────────────────────────────
+
+describe('validateDisableActivation', () => {
+  it('accepts valid response', () => {
+    const result = validateDisableActivation({ activationId: 'a1', status: 'disabled' });
+    expect(result).not.toBeNull();
+    expect(result!.activationId).toBe('a1');
+  });
+
+  it('rejects null', () => {
+    expect(validateDisableActivation(null)).toBeNull();
+  });
+
+  it('rejects missing fields', () => {
+    expect(validateDisableActivation({ activationId: 'a1' })).toBeNull();
+  });
+});
+
+// ── validateUpdateStatus ──────────────────────────────────────────────────────
+
+describe('validateUpdateStatus', () => {
+  const validStatus = {
+    currentVersion: '1.0.0',
+    latestVersion: '1.1.0',
+    updateAvailable: true,
+    lastChecked: '2026-06-01',
+  };
+
+  it('accepts valid update status', () => {
+    const result = validateUpdateStatus(validStatus);
+    expect(result).not.toBeNull();
+    expect(result!.updateAvailable).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(validateUpdateStatus(null)).toBeNull();
+  });
+
+  it('rejects missing fields', () => {
+    expect(validateUpdateStatus({ currentVersion: '1.0' })).toBeNull();
+  });
+
+  it('rejects wrong types', () => {
+    expect(validateUpdateStatus({ ...validStatus, updateAvailable: 'yes' })).toBeNull();
+  });
+});
+
+// ── validateConfigSummary ─────────────────────────────────────────────────────
+
+describe('validateConfigSummary', () => {
+  const validConfig = {
+    version: 1,
+    source: 'file',
+    features: [{ id: 'f1', category: 'core', enabled: true }],
+    runtimeProfiles: [{ id: 'rp1', type: 'openclaw', label: 'Default', readiness: 'ready' }],
+    defaultRuntime: 'rp1',
+    agents: [{ name: 'agent1', enabled: true, runtimeProfileId: 'rp1', runtimeProfileLabel: 'Default', readiness: 'ready' }],
+    ui: { diagnostics: { mode: 'redacted' } },
+    warnings: [],
+  };
+
+  it('accepts valid config summary', () => {
+    const result = validateConfigSummary(validConfig);
+    expect(result).not.toBeNull();
+    expect(result!.version).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateConfigSummary(null)).toBeNull();
+  });
+
+  it('rejects missing required fields', () => {
+    expect(validateConfigSummary({ version: 1 })).toBeNull();
+  });
+
+  it('rejects invalid nested features', () => {
+    expect(validateConfigSummary({ ...validConfig, features: [{ id: 123 }] })).toBeNull();
+  });
+
+  it('rejects invalid nested agents', () => {
+    expect(validateConfigSummary({ ...validConfig, agents: [{ name: 123 }] })).toBeNull();
+  });
+});
+
+// ── validateApprovalListResult ────────────────────────────────────────────────
+
+describe('validateApprovalListResult', () => {
+  const validResult = {
+    items: [{ approvalId: 'ap1', artifactId: 'art1', channel: 'prompt', riskLevel: 'low', status: 'pending', requestedAt: '2026-06-01' }],
+    total: 1,
+    stats: { pending: 1, approved: 0, rejected: 0, cancelled: 0 },
+  };
+
+  it('accepts valid approval list', () => {
+    const result = validateApprovalListResult(validResult);
+    expect(result).not.toBeNull();
+    expect(result!.items.length).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateApprovalListResult(null)).toBeNull();
+  });
+
+  it('rejects missing stats', () => {
+    expect(validateApprovalListResult({ items: [], total: 0 })).toBeNull();
+  });
+
+  it('rejects invalid items', () => {
+    expect(validateApprovalListResult({ ...validResult, items: [{ approvalId: 123 }] })).toBeNull();
+  });
+});
+
+// ── validatePrinciplesList ────────────────────────────────────────────────────
+
+describe('validatePrinciplesList', () => {
+  const validList = {
+    principles: [{
+      id: 'p1', text: 'Test principle', triggerPattern: 'pattern', action: 'inject',
+      status: 'active', priority: 'medium', scope: 'workspace', domain: null,
+      evaluability: 'high', valueScore: 0.8, adherenceRate: 0.9,
+      painPreventedCount: 5, ruleCount: 2, conflictsWithCount: 0,
+      createdAt: '2026-06-01', updatedAt: '2026-06-01',
+    }],
+    summary: { candidate: 0, probation: 0, active: 1, deprecated: 0, archived: 0, total: 1 },
+  };
+
+  it('accepts valid principles list', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.principles.length).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validatePrinciplesList(null)).toBeNull();
+  });
+
+  it('rejects invalid principles', () => {
+    expect(validatePrinciplesList({ ...validList, principles: [{ id: 123 }] })).toBeNull();
+  });
+
+  it('rejects invalid summary', () => {
+    expect(validatePrinciplesList({ ...validList, summary: { candidate: 'zero' } })).toBeNull();
+  });
+});
+
+// ── validateApprovalsGrouped ──────────────────────────────────────────────────
+
+describe('validateApprovalsGrouped', () => {
+  const validGrouped = {
+    groups: [{
+      principleId: 'p1', principleTitle: 'Test', status: 'pending',
+      records: [{ id: 'r1', artifactId: 'art1', channel: 'prompt', createdAt: '2026-06-01' }],
+    }],
+    generatedAt: '2026-06-01T00:00:00Z',
+  };
+
+  it('accepts valid grouped approvals', () => {
+    const result = validateApprovalsGrouped(validGrouped);
+    expect(result).not.toBeNull();
+    expect(result!.groups.length).toBe(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateApprovalsGrouped(null)).toBeNull();
+  });
+
+  it('rejects invalid groups', () => {
+    expect(validateApprovalsGrouped({ ...validGrouped, groups: [{ principleId: 123 }] })).toBeNull();
   });
 });

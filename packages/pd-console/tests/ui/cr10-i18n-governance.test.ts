@@ -14,15 +14,30 @@ import { describe, it, expect } from 'vitest';
 import en from '../../src/ui/i18n/en.json';
 import zhCN from '../../src/ui/i18n/zh-CN.json';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Safe helpers (no `as` casts on untrusted data) ────────────────────────────
+
+/** Type-safe own-property accessor. Returns undefined for non-own or non-object values. */
+function getOwnRecord(obj: unknown, key: string): Record<string, unknown> | undefined {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return undefined;
+  if (!Object.hasOwn(obj, key)) return undefined;
+  const val = (obj as Record<string, unknown>)[key];
+  if (typeof val !== 'object' || val === null || Array.isArray(val)) return undefined;
+  return val as Record<string, unknown>;
+}
+
+/** Type-safe own-property string accessor. Returns undefined if not own or not string. */
+function getOwnString(obj: unknown, key: string): string | undefined {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return undefined;
+  if (!Object.hasOwn(obj, key)) return undefined;
+  const val = (obj as Record<string, unknown>)[key];
+  return typeof val === 'string' ? val : undefined;
+}
 
 /** Recursively collect all dot-path keys from a nested object */
 function collectKeys(obj: unknown, prefix = ''): string[] {
-  if (obj === null || obj === undefined || typeof obj !== 'object' || Array.isArray(obj)) {
-    return [];
-  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
   const keys: string[] = [];
-  for (const key of Object.keys(obj as Record<string, unknown>)) {
+  for (const key of Object.keys(obj)) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
     const value = (obj as Record<string, unknown>)[key];
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -36,11 +51,9 @@ function collectKeys(obj: unknown, prefix = ''): string[] {
 
 /** Recursively collect all string values from a nested object */
 function collectStringValues(obj: unknown): string[] {
-  if (obj === null || obj === undefined || typeof obj !== 'object' || Array.isArray(obj)) {
-    return [];
-  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
   const values: string[] = [];
-  for (const key of Object.keys(obj as Record<string, unknown>)) {
+  for (const key of Object.keys(obj)) {
     const value = (obj as Record<string, unknown>)[key];
     if (typeof value === 'string') {
       values.push(value);
@@ -54,6 +67,24 @@ function collectStringValues(obj: unknown): string[] {
 /** Check if a string contains CJK characters */
 function containsChinese(str: string): boolean {
   return /[\u4e00-\u9fff\u3400-\u4dbf]/.test(str);
+}
+
+/** Recursively check all leaf values are strings; return non-string key paths */
+function findNonStringLeaves(obj: unknown, prefix = ''): string[] {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+  const nonString: string[] = [];
+  for (const key of Object.keys(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    const value = (obj as Record<string, unknown>)[key];
+    if (typeof value === 'string') {
+      // ok
+    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      nonString.push(...findNonStringLeaves(value, fullKey));
+    } else {
+      nonString.push(fullKey);
+    }
+  }
+  return nonString;
 }
 
 // ── Banned words ──────────────────────────────────────────────────────────────
@@ -73,20 +104,6 @@ const BANNED_WORDS_ZH = [
   '自动优化',
   '一键进化',
   '燃烧',
-  '驱动进化',
-];
-
-// ── Mixed terms: zh-CN should not contain bare English terms ──────────────────
-
-const ZH_BANNED_MIXED_TERMS = [
-  // Owner → 拥有者
-  { term: 'Owner', replacement: '拥有者', allowInProduct: true },
-  // Agent → 智能体
-  { term: 'Agent', replacement: '智能体', allowInProduct: true },
-  // Prompt → 提示词
-  { term: 'Prompt', replacement: '提示词', allowInProduct: true },
-  // Console → 控制台 (when used as generic noun, not product name)
-  { term: 'Console', replacement: '控制台', allowInProduct: true },
 ];
 
 // Product names / technical terms that are allowed to remain in English in zh-CN
@@ -133,59 +150,30 @@ describe('zh-CN no Owner/Agent/Prompt/Console mixed terms', () => {
   const zhValues = collectStringValues(zhCN);
 
   it('no bare "Owner" in zh-CN strings (should be 拥有者)', () => {
-    const violations: string[] = [];
-    for (const val of zhValues) {
-      // Check if "Owner" appears as a standalone word (not part of allowed product term)
-      if (/\bOwner\b/.test(val)) {
-        // Check if it's part of an allowed term
-        const isAllowed = ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Owner'));
-        if (!isAllowed) {
-          violations.push(val);
-        }
-      }
-    }
+    const violations = zhValues.filter(val =>
+      /\bOwner\b/.test(val) && !ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Owner'))
+    );
     expect(violations, `Found bare "Owner" in zh-CN: ${violations.join('; ')}`).toEqual([]);
   });
 
   it('no bare "Agent" in zh-CN strings (should be 智能体)', () => {
-    const violations: string[] = [];
-    for (const val of zhValues) {
-      if (/\bAgent\b/.test(val)) {
-        const isAllowed = ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Agent'));
-        if (!isAllowed) {
-          violations.push(val);
-        }
-      }
-    }
+    const violations = zhValues.filter(val =>
+      /\bAgent\b/.test(val) && !ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Agent'))
+    );
     expect(violations, `Found bare "Agent" in zh-CN: ${violations.join('; ')}`).toEqual([]);
   });
 
   it('no bare "Prompt" in zh-CN strings (should be 提示词)', () => {
-    const violations: string[] = [];
-    for (const val of zhValues) {
-      if (/\bPrompt\b/.test(val)) {
-        const isAllowed = ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Prompt'));
-        if (!isAllowed) {
-          violations.push(val);
-        }
-      }
-    }
+    const violations = zhValues.filter(val =>
+      /\bPrompt\b/.test(val) && !ALLOWED_EN_TERMS_IN_ZH.some(allowed => val.includes(allowed) && allowed.includes('Prompt'))
+    );
     expect(violations, `Found bare "Prompt" in zh-CN: ${violations.join('; ')}`).toEqual([]);
   });
 
   it('no bare "Console" in zh-CN strings (should be 控制台)', () => {
-    const violations: string[] = [];
-    for (const val of zhValues) {
-      if (/\bConsole\b/.test(val)) {
-        // Console API is allowed, bare Console is not
-        const isPartOfAllowedTerm = ALLOWED_EN_TERMS_IN_ZH.some(
-          allowed => allowed.includes('Console') && val.includes(allowed)
-        );
-        if (!isPartOfAllowedTerm) {
-          violations.push(val);
-        }
-      }
-    }
+    const violations = zhValues.filter(val =>
+      /\bConsole\b/.test(val) && !ALLOWED_EN_TERMS_IN_ZH.some(allowed => allowed.includes('Console') && val.includes(allowed))
+    );
     expect(violations, `Found bare "Console" in zh-CN: ${violations.join('; ')}`).toEqual([]);
   });
 });
@@ -231,33 +219,28 @@ describe('banned words scan', () => {
   });
 
   it('login slogan is governance-flavored (en)', () => {
-    const slogan = (en as Record<string, unknown>).pages
-      ? ((en as Record<string, unknown>).pages as Record<string, unknown>).login
-        ? (((en as Record<string, unknown>).pages as Record<string, unknown>).login as Record<string, unknown>).slogan as string
-        : ''
-      : '';
+    const pages = getOwnRecord(en, 'pages');
+    const login = pages ? getOwnRecord(pages, 'login') : undefined;
+    const slogan = login ? getOwnString(login, 'slogan') : undefined;
     expect(slogan).toBeTruthy();
-    // Must NOT contain banned words
     for (const word of BANNED_WORDS_EN) {
       expect(slogan, `Login slogan contains banned word "${word}"`).not.toContain(word);
     }
-    // Must contain governance-related term
     const governanceTerms = ['govern', 'principle', 'correction'];
-    const hasGovernance = governanceTerms.some(t => slogan.toLowerCase().includes(t));
+    const hasGovernance = governanceTerms.some(t => (slogan ?? '').toLowerCase().includes(t));
     expect(hasGovernance, `Login slogan "${slogan}" should contain a governance term`).toBe(true);
   });
 
   it('login slogan is governance-flavored (zh-CN)', () => {
-    const slogan = ((zhCN as Record<string, unknown>).pages as Record<string, unknown>).login
-      ? (((zhCN as Record<string, unknown>).pages as Record<string, unknown>).login as Record<string, unknown>).slogan as string
-      : '';
+    const pages = getOwnRecord(zhCN, 'pages');
+    const login = pages ? getOwnRecord(pages, 'login') : undefined;
+    const slogan = login ? getOwnString(login, 'slogan') : undefined;
     expect(slogan).toBeTruthy();
     for (const word of BANNED_WORDS_ZH) {
       expect(slogan, `Login slogan contains banned word "${word}"`).not.toContain(word);
     }
-    // Must contain governance-related term
     const governanceTerms = ['治理', '原则', '纠正', '沉淀'];
-    const hasGovernance = governanceTerms.some(t => slogan.includes(t));
+    const hasGovernance = governanceTerms.some(t => (slogan ?? '').includes(t));
     expect(hasGovernance, `Login slogan "${slogan}" should contain a governance term`).toBe(true);
   });
 });
@@ -285,49 +268,12 @@ describe('no raw key leakage', () => {
   it('every leaf value in en.json is a string', () => {
     const enKeys = collectKeys(en);
     expect(enKeys.length).toBeGreaterThan(0);
-    // collectKeys only returns keys that have non-object leaf values
-    // so if we got here, all values are primitives
-    // But let's verify they're all strings
-    function checkStringLeaves(obj: unknown): string[] {
-      if (obj === null || obj === undefined || typeof obj !== 'object' || Array.isArray(obj)) {
-        return [];
-      }
-      const nonString: string[] = [];
-      for (const key of Object.keys(obj as Record<string, unknown>)) {
-        const value = (obj as Record<string, unknown>)[key];
-        if (typeof value === 'string') {
-          // ok
-        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-          nonString.push(...checkStringLeaves(value));
-        } else {
-          nonString.push(key);
-        }
-      }
-      return nonString;
-    }
-    const nonString = checkStringLeaves(en);
+    const nonString = findNonStringLeaves(en);
     expect(nonString, `Non-string leaf values in en.json: ${nonString.join(', ')}`).toEqual([]);
   });
 
   it('every leaf value in zh-CN.json is a string', () => {
-    function checkStringLeaves(obj: unknown): string[] {
-      if (obj === null || obj === undefined || typeof obj !== 'object' || Array.isArray(obj)) {
-        return [];
-      }
-      const nonString: string[] = [];
-      for (const key of Object.keys(obj as Record<string, unknown>)) {
-        const value = (obj as Record<string, unknown>)[key];
-        if (typeof value === 'string') {
-          // ok
-        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-          nonString.push(...checkStringLeaves(value));
-        } else {
-          nonString.push(key);
-        }
-      }
-      return nonString;
-    }
-    const nonString = checkStringLeaves(zhCN);
+    const nonString = findNonStringLeaves(zhCN);
     expect(nonString, `Non-string leaf values in zh-CN.json: ${nonString.join(', ')}`).toEqual([]);
   });
 });

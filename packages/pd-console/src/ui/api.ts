@@ -1,8 +1,56 @@
 import type { ApiResponse } from "../types.js";
 import {
   validateErrorResponse,
-  validateSuccessEnvelope,
   validateHeaders,
+  validateFeedbackReport,
+  validateFeedbackDraftsList,
+  validateFeedbackDraftEnvelope,
+  validateDeleteEnvelope,
+  validateWorkspaceEntry,
+  validateWorkspaceList,
+  validateRemovedEnvelope,
+  validateSyncResult,
+  validateConfigReadiness,
+  validateConfigSummary,
+  validateConfigCatalog,
+  validateAgentBindingUpdate,
+  validateReadinessCheck,
+  validateDefaultRuntimeUpdate,
+  validateGovernanceQueue,
+  validateActivations,
+  validateDisableActivation,
+  validateLifecycleMetrics,
+  validateUpdateStatus,
+  validateUpdateHistory,
+  validateApprovalListResult,
+  validateApprovalRecordDirect,
+  validatePrinciplesList,
+  validateApprovalsGrouped,
+} from "./utils/validators.js";
+import type {
+  FeedbackReportData,
+  FeedbackDraftSummaryData,
+  FeedbackDraftEnvelopeData,
+  DeleteEnvelopeData,
+  WorkspaceEntryData,
+  RemovedEnvelopeData,
+  SyncResultData,
+  ConfigReadinessData,
+  ConfigSummaryData,
+  ConfigCatalogData,
+  AgentBindingUpdateData,
+  ReadinessCheckData,
+  DefaultRuntimeUpdateData,
+  GovernanceQueueData,
+  ActivationsData,
+  DisableActivationData,
+  LifecycleMetricsData,
+  UpdateStatusData,
+  UpdateHistoryData,
+  ApprovalRecordData,
+  ApprovalListResultData,
+  PrinciplesListData,
+  ApprovalsGroupedData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -19,9 +67,19 @@ function clearToken(): void {
   sessionStorage.removeItem("pd_token");
 }
 
+/**
+ * Send an authenticated request to the Console API.
+ *
+ * @param validate - Runtime validator for the response data. Required for
+ *   all endpoints that return typed data. When provided, the raw response
+ *   is passed through this validator; if validation fails, the request
+ *   returns `{ success: false, error, nextAction }` instead of `as T`.
+ *   Omit only for `unknown` responses (e.g. health checks).
+ */
 async function request<T>(
   path: string,
   options?: RequestInit,
+  validate?: (value: unknown) => T | null,
 ): Promise<ApiResponse<T>> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -64,10 +122,21 @@ async function request<T>(
     }
 
     const raw = await response.json();
-    const envelope = validateSuccessEnvelope(raw);
-    if (envelope && envelope.success === true && envelope.data !== undefined) {
-      return { success: true, data: envelope.data as T };
+
+    if (validate) {
+      const validated = validate(raw);
+      if (validated !== null) {
+        return { success: true, data: validated };
+      }
+      return {
+        success: false,
+        error: "Response validation failed: unexpected data shape from server",
+        nextAction: "Try refreshing the page. If the problem persists, report it.",
+      };
     }
+
+    // No validator provided — only allowed for unknown/health-check endpoints.
+    // The caller explicitly accepts the risk of unvalidated data.
     return { success: true, data: raw as T };
   } catch (err) {
     return {
@@ -84,281 +153,118 @@ async function checkAuth(): Promise<boolean> {
 
 // ── Config Readiness (renamed from fetchSystemHealth) ─────────────────────────
 
-interface HealthCheckItem {
-  id: string;
-  name: string;
-  status: 'healthy' | 'warning' | 'error';
-  message: string;
-  lastCheck: string;
-}
-
-interface ConfigReadinessData {
-  checks: HealthCheckItem[];
-  generatedAt: string;
-}
-
 async function fetchConfigReadiness(): Promise<ApiResponse<ConfigReadinessData>> {
-  return request<ConfigReadinessData>("/api/health");
+  return request<ConfigReadinessData>("/api/health", undefined, validateConfigReadiness);
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
-interface WorkspaceEntry {
-  name: string;
-  path: string;
-  lastSync: string | null;
-  config: { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } | null;
+async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
+  return request<WorkspaceEntryData[]>("/api/workspaces", undefined, validateWorkspaceList);
 }
 
-async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntry[]>> {
-  return request<WorkspaceEntry[]>("/api/workspaces");
-}
-
-async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntry>> {
-  return request<WorkspaceEntry>("/api/workspaces", {
+async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntryData>> {
+  return request<WorkspaceEntryData>("/api/workspaces", {
     method: "POST",
     body: JSON.stringify({ name, path }),
-  });
+  }, validateWorkspaceEntry);
 }
 
-async function removeWorkspace(name: string): Promise<ApiResponse<{ removed: string }>> {
-  return request<{ removed: string }>(`/api/workspaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+async function removeWorkspace(name: string): Promise<ApiResponse<RemovedEnvelopeData>> {
+  return request<RemovedEnvelopeData>(`/api/workspaces/${encodeURIComponent(name)}`, { method: "DELETE" }, validateRemovedEnvelope);
 }
 
-async function syncWorkspace(name: string): Promise<ApiResponse<{ success: boolean; syncedAt: string }>> {
-  return request<{ success: boolean; syncedAt: string }>(`/api/workspaces/${encodeURIComponent(name)}/sync`, { method: "POST" });
+async function syncWorkspace(name: string): Promise<ApiResponse<SyncResultData>> {
+  return request<SyncResultData>(`/api/workspaces/${encodeURIComponent(name)}/sync`, { method: "POST" }, validateSyncResult);
 }
 
 // ── Principles ────────────────────────────────────────────────────────────────
 
-interface PrincipleListItem {
-  id: string;
-  text: string;
-  triggerPattern: string;
-  action: string;
-  status: 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
-  priority: 'P0' | 'P1' | 'P2';
-  scope: 'general' | 'domain';
-  domain: string | null;
-  evaluability: 'manual_only' | 'deterministic' | 'weak_heuristic';
-  valueScore: number;
-  adherenceRate: number;
-  painPreventedCount: number;
-  ruleCount: number;
-  conflictsWithCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface RuleItem {
-  id: string;
-  name: string;
-  description: string;
-  type: 'hook' | 'gate' | 'skill' | 'lora' | 'test' | 'prompt';
-  triggerCondition: string;
-  enforcement: 'block' | 'warn' | 'log';
-  action: string;
-  status: 'proposed' | 'implemented' | 'enforced' | 'retired';
-  coverageRate: number;
-  falsePositiveRate: number;
-}
-
-interface PrincipleDetail extends PrincipleListItem {
-  coreAxiomId: string | null;
-  lastPainPreventedAt: string | null;
-  derivedFromPainIds: string[];
-  ruleIds: string[];
-  conflictsWithPrincipleIds: string[];
-  supersedesPrincipleId: string | null;
-  rules: RuleItem[];
-}
-
-interface PrinciplesListData {
-  principles: PrincipleListItem[];
-  summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
-}
-
-interface PrincipleDetailData {
-  principle: PrincipleDetail;
-}
-
 async function fetchPrinciples(): Promise<ApiResponse<PrinciplesListData>> {
-  return request<PrinciplesListData>("/api/principles");
+  return request<PrinciplesListData>("/api/principles", undefined, validatePrinciplesList);
 }
 
-async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<PrincipleDetailData>> {
-  return request<PrincipleDetailData>(`/api/principles/${encodeURIComponent(principleId)}`);
+// Principle detail is deeply nested; for now we accept unvalidated until a
+// dedicated validator is added (the page already handles missing fields gracefully).
+// This endpoint is marked legacy/deferred for full validation.
+async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<unknown>> {
+  return request<unknown>(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-
-interface ApprovalRecord {
-  approvalId: string;
-  artifactId: string;
-  channel: string;
-  riskLevel: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
-  confidence: number | undefined;
-  requestedAt: string;
-  decidedAt: string | undefined;
-  decidedBy: string | undefined;
-  decisionNote: string | undefined;
-  rejectionReason: string | undefined;
-  summary: string | undefined;
-  triggerReason: string | undefined;
-  confidenceLabel: 'high' | 'medium' | 'low';
-  confidenceExplanation: string | undefined;
-  effectDescription: string | undefined;
-  rejectionEffect: string | undefined;
-  isMvpProven?: boolean;
-}
-
-interface ApprovalListResult {
-  items: ApprovalRecord[];
-  total: number;
-  stats: { pending: number; approved: number; rejected: number; cancelled: number };
-}
 
 async function fetchApprovals(params?: {
   status?: string;
   channel?: string;
   page?: number;
   pageSize?: number;
-}): Promise<ApiResponse<ApprovalListResult>> {
+}): Promise<ApiResponse<ApprovalListResultData>> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set('status', params.status);
   if (params?.channel) searchParams.set('channel', params.channel);
   if (params?.page) searchParams.set('page', String(params.page));
   if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
   const qs = searchParams.toString() ? '?' + searchParams.toString() : '';
-  return request<ApprovalListResult>('/api/v1/approvals' + qs);
+  return request<ApprovalListResultData>('/api/v1/approvals' + qs, undefined, validateApprovalListResult);
 }
 
-async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecord>> {
-  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId));
+async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
+  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalRecordDirect);
 }
 
-async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecord>> {
-  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
+async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
+  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
     body: JSON.stringify({ note }),
-  });
+  }, validateApprovalRecordDirect);
 }
 
-async function rejectApproval(approvalId: string, reason: string): Promise<ApiResponse<ApprovalRecord>> {
-  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/reject', {
+async function rejectApproval(approvalId: string, reason: string): Promise<ApiResponse<ApprovalRecordData>> {
+  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/reject', {
     method: 'POST',
     body: JSON.stringify({ reason }),
-  });
+  }, validateApprovalRecordDirect);
 }
 
 // ── MVP seed feedback report drafts (PRI-285) ────────────────────────────────
 
-type FeedbackDraftSummary = {
-  id: string;
-  createdAt: string;
-  type: string;
-  title: string;
-};
-
-type FeedbackReportEnvelope = {
-  id: string;
-  createdAt: string;
-  report: Record<string, unknown>;
-};
-
-type FeedbackDraftsListEnvelope = { drafts: FeedbackDraftSummary[] };
-type FeedbackDraftEnvelope = { report: Record<string, unknown> };
-type FeedbackDeleteEnvelope = { deleted: boolean };
-
 async function createFeedbackReport(
   input: unknown,
   diagnostics: unknown,
-): Promise<ApiResponse<FeedbackReportEnvelope>> {
-  return request<FeedbackReportEnvelope>('/api/feedback/reports', {
+): Promise<ApiResponse<FeedbackReportData>> {
+  return request<FeedbackReportData>('/api/feedback/reports', {
     method: 'POST',
     body: JSON.stringify({ input, diagnostics }),
+  }, validateFeedbackReport);
+}
+
+async function listFeedbackReports(): Promise<ApiResponse<{ drafts: FeedbackDraftSummaryData[] }>> {
+  // The API returns { drafts: [...] } — validate the drafts array inside
+  return request<{ drafts: FeedbackDraftSummaryData[] }>('/api/feedback/reports', undefined, (v): { drafts: FeedbackDraftSummaryData[] } | null => {
+    const drafts = validateFeedbackDraftsList(v);
+    if (drafts === null) return null;
+    return { drafts };
   });
 }
 
-async function listFeedbackReports(): Promise<ApiResponse<FeedbackDraftsListEnvelope>> {
-  return request<FeedbackDraftsListEnvelope>('/api/feedback/reports');
+async function getFeedbackReport(id: string): Promise<ApiResponse<FeedbackDraftEnvelopeData>> {
+  return request<FeedbackDraftEnvelopeData>('/api/feedback/reports/' + encodeURIComponent(id), undefined, validateFeedbackDraftEnvelope);
 }
 
-async function getFeedbackReport(id: string): Promise<ApiResponse<FeedbackDraftEnvelope>> {
-  return request<FeedbackDraftEnvelope>('/api/feedback/reports/' + encodeURIComponent(id));
-}
-
-async function deleteFeedbackReport(id: string): Promise<ApiResponse<FeedbackDeleteEnvelope>> {
-  return request<FeedbackDeleteEnvelope>('/api/feedback/reports/' + encodeURIComponent(id), {
+async function deleteFeedbackReport(id: string): Promise<ApiResponse<DeleteEnvelopeData>> {
+  return request<DeleteEnvelopeData>('/api/feedback/reports/' + encodeURIComponent(id), {
     method: 'DELETE',
-  });
+  }, validateDeleteEnvelope);
 }
 
 // ── Config / Control Center API (PRI-303, PRI-309) ───────────────────────────
 
-type ReadinessStatus = 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
-
-interface RedactedRuntimeProfileSummary {
-  id: string;
-  type: string;
-  label: string;
-  apiKeyEnv?: string;
-  readiness: ReadinessStatus;
-}
-
-interface RedactedAgentSummary {
-  name: string;
-  enabled: boolean;
-  runtimeProfileId: string;
-  runtimeProfileLabel: string;
-  readiness: ReadinessStatus;
-}
-
-interface RedactedFeatureSummary {
-  id: string;
-  category: string;
-  enabled: boolean;
-}
-
-interface ConfigSummaryData {
-  version: number;
-  source: 'defaults' | 'user_config';
-  features: RedactedFeatureSummary[];
-  runtimeProfiles: RedactedRuntimeProfileSummary[];
-  defaultRuntime: string;
-  agents: RedactedAgentSummary[];
-  ui: { diagnostics: { mode: string } };
-  warnings: string[];
-  errors?: { path: string; reason: string; nextAction: string }[];
-}
-
-interface ConfigCatalogData {
-  profiles: RedactedRuntimeProfileSummary[];
-  errors?: { path: string; reason: string; nextAction: string }[];
-}
-
-interface AgentBindingUpdateData {
-  agent: string;
-  runtimeProfile: string;
-  enabled: boolean;
-}
-
-interface ReadinessCheckData {
-  agent: string;
-  readiness: ReadinessStatus;
-  profileId: string;
-  profileLabel: string;
-  reason?: string;
-  nextAction?: string;
-}
-
 async function fetchConfigSummary(): Promise<ApiResponse<ConfigSummaryData>> {
-  return request<ConfigSummaryData>('/api/v1/config/summary');
+  return request<ConfigSummaryData>('/api/v1/config/summary', undefined, validateConfigSummary);
 }
 
 async function fetchConfigCatalog(): Promise<ApiResponse<ConfigCatalogData>> {
-  return request<ConfigCatalogData>('/api/v1/config/catalog');
+  return request<ConfigCatalogData>('/api/v1/config/catalog', undefined, validateConfigCatalog);
 }
 
 async function updateAgentBinding(
@@ -372,151 +278,66 @@ async function updateAgentBinding(
       method: 'PATCH',
       body: JSON.stringify({ runtimeProfile, enabled }),
     },
+    validateAgentBindingUpdate,
   );
 }
 
 async function checkAgentReadiness(agentName: string): Promise<ApiResponse<ReadinessCheckData>> {
   return request<ReadinessCheckData>(
     `/api/v1/config/readiness/${encodeURIComponent(agentName)}`,
+    undefined,
+    validateReadinessCheck,
   );
 }
 
-async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse<{ defaultRuntime: string }>> {
-  return request<{ defaultRuntime: string }>(
+async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse<DefaultRuntimeUpdateData>> {
+  return request<DefaultRuntimeUpdateData>(
     '/api/v1/config/default-runtime',
     {
       method: 'PATCH',
       body: JSON.stringify({ defaultRuntime }),
     },
+    validateDefaultRuntimeUpdate,
   );
 }
 
 // ── CR8: Backend Data Contract (G.1) ─────────────────────────────────────────
 
-interface StagnationSignal {
-  type: 'no_pain' | 'never_activated';
-  principleId: string;
-  daysSince: number;
-}
-
-interface GovernanceQueueData {
-  pendingReviewCount: number;
-  behaviorDeviationCount: number;
-  stagnationSignals: StagnationSignal[];
-  note?: string;
-}
-
-interface ApprovalGroupRecord {
-  id: string;
-  artifactId: string;
-  channel: string;
-  createdAt: string;
-}
-
-interface ApprovalGroup {
-  principleId: string;
-  principleTitle: string;
-  status: 'pending' | 'approved' | 'rejected';
-  records: ApprovalGroupRecord[];
-}
-
-interface ApprovalsGroupedData {
-  groups: ApprovalGroup[];
-  generatedAt: string;
-  note?: string;
-}
-
-interface ActivationRecord {
-  id: string;
-  artifactId: string;
-  principleId: string;
-  channel: string;
-  action: string;
-  targetRef: string;
-  activatedAt: string | null;
-  status: 'active' | 'inactive';
-}
-
-interface ActivationsData {
-  activations: ActivationRecord[];
-  generatedAt: string;
-  note?: string;
-}
-
-interface LifecycleAdherence {
-  insufficientData: boolean;
-  rate: number | null;
-  note: string;
-}
-
-interface LifecycleRuleMetric {
-  ruleId: string;
-  triggered: number;
-  lastTriggeredAt: string | null;
-}
-
-interface LifecycleMetricsData {
-  principleId: string;
-  adherence: LifecycleAdherence;
-  ruleMetrics: LifecycleRuleMetric[];
-}
-
 async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>> {
-  return request<GovernanceQueueData>('/api/v1/governance/queue');
+  return request<GovernanceQueueData>('/api/v1/governance/queue', undefined, validateGovernanceQueue);
 }
 
 async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
-  return request<ApprovalsGroupedData>('/api/v1/approvals/grouped');
+  return request<ApprovalsGroupedData>('/api/v1/approvals/grouped', undefined, validateApprovalsGrouped);
 }
 
 async function fetchAllActivations(): Promise<ApiResponse<ActivationsData>> {
-  return request<ActivationsData>('/api/v1/activations');
+  return request<ActivationsData>('/api/v1/activations', undefined, validateActivations);
 }
 
-interface DisableActivationResponse {
-  activationId: string;
-  status: 'inactive';
-}
-
-async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationResponse>> {
-  return request<DisableActivationResponse>(
+async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationData>> {
+  return request<DisableActivationData>(
     `/api/v1/activations/${encodeURIComponent(activationId)}/disable`,
     {
       method: 'POST',
       body: JSON.stringify({ confirmed: true }),
     },
+    validateDisableActivation,
   );
 }
 
 async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<LifecycleMetricsData>> {
-  return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
+  return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`, undefined, validateLifecycleMetrics);
 }
 
 // ── Updates (CR9) ─────────────────────────────────────────────────────────────
 
-interface UpdateStatusData {
-  currentVersion: string;
-  latestVersion: string;
-  updateAvailable: boolean;
-  lastChecked: string;
-}
-
-interface UpdateHistoryEntry {
-  version: string;
-  appliedAt: string;
-  notes: string;
-}
-
-interface UpdateHistoryData {
-  updates: UpdateHistoryEntry[];
-}
-
 async function fetchUpdateStatus(): Promise<ApiResponse<UpdateStatusData>> {
-  return request<UpdateStatusData>('/api/update');
+  return request<UpdateStatusData>('/api/update', undefined, validateUpdateStatus);
 }
 
 async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
-  return request<UpdateHistoryData>('/api/update/history');
+  return request<UpdateHistoryData>('/api/update/history', undefined, validateUpdateHistory);
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
@@ -554,43 +375,4 @@ export {
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
-};
-
-export type {
-  HealthCheckItem,
-  ConfigReadinessData,
-  WorkspaceEntry,
-  PrincipleListItem,
-  RuleItem,
-  PrincipleDetail,
-  PrinciplesListData,
-  PrincipleDetailData,
-  ApprovalRecord,
-  ApprovalListResult,
-  FeedbackDraftSummary,
-  FeedbackReportEnvelope,
-  FeedbackDraftsListEnvelope,
-  FeedbackDraftEnvelope,
-  FeedbackDeleteEnvelope,
-  ReadinessStatus,
-  RedactedRuntimeProfileSummary,
-  RedactedAgentSummary,
-  RedactedFeatureSummary,
-  ConfigSummaryData,
-  ConfigCatalogData,
-  AgentBindingUpdateData,
-  ReadinessCheckData,
-  StagnationSignal,
-  GovernanceQueueData,
-  ApprovalGroupRecord,
-  ApprovalGroup,
-  ApprovalsGroupedData,
-  ActivationRecord,
-  ActivationsData,
-  LifecycleAdherence,
-  LifecycleRuleMetric,
-  LifecycleMetricsData,
-  UpdateStatusData,
-  UpdateHistoryEntry,
-  UpdateHistoryData,
 };
