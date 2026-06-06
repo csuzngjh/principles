@@ -483,6 +483,33 @@ async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<L
   return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
 }
 
+// ── Updates (CR9) ─────────────────────────────────────────────────────────────
+
+interface UpdateStatusData {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  lastChecked: string;
+}
+
+interface UpdateHistoryEntry {
+  version: string;
+  appliedAt: string;
+  notes: string;
+}
+
+interface UpdateHistoryData {
+  updates: UpdateHistoryEntry[];
+}
+
+async function fetchUpdateStatus(): Promise<ApiResponse<UpdateStatusData>> {
+  return request<UpdateStatusData>('/api/update');
+}
+
+async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
+  return request<UpdateHistoryData>('/api/update/history');
+}
+
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -516,6 +543,8 @@ export {
   fetchAllActivations,
   disableActivation,
   fetchLifecycleMetrics,
+  fetchUpdateStatus,
+  fetchUpdateHistory,
 };
 
 export type {
@@ -552,4 +581,7 @@ export type {
   LifecycleAdherence,
   LifecycleRuleMetric,
   LifecycleMetricsData,
+  UpdateStatusData,
+  UpdateHistoryEntry,
+  UpdateHistoryData,
 };
