@@ -9,6 +9,12 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [loading, setLoading] = React.useState(false);
   const { t } = useTranslation();
 
+  React.useEffect(() => {
+    if (window.location.hash.includes("session_expired=true")) {
+      setError("会话已过期或令牌失效，请重新输入。");
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token.trim()) return;
