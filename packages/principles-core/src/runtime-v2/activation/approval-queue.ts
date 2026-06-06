@@ -60,4 +60,8 @@ export class ApprovalQueue {
   async countByStatus(): Promise<ApprovalStats> {
     return this.store.countByStatus();
   }
+
+  async resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }> {
+    return this.store.resetToPending(approvalId);
+  }
 }

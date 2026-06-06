@@ -163,4 +163,13 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     const row = db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }
+
+  async resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }> {
+    const db = this.connection.getDb();
+    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'approved') return { ok: false, error: 'not_approved' };
+    db.prepare("UPDATE approvals SET status = 'pending', decided_at = NULL, decided_by = NULL, decision_note = NULL WHERE approval_id = ? AND status = 'approved'").run(approvalId);
+    return { ok: true };
+  }
 }

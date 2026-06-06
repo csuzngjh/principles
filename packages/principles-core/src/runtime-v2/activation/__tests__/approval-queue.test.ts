@@ -195,4 +195,60 @@ describe('ApprovalQueue', () => {
     expect(found).not.toBeNull();
     expect(found?.artifactId).toBe('art-1');
   });
+
+  describe('resetToPending', () => {
+    it('rolls back approved record to pending', async () => {
+      const store = new MemoryApprovalQueueStore();
+      const queue = new ApprovalQueue(store);
+      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      await queue.approve(record.approvalId, 'user-1', 'looks good');
+      const result = await queue.resetToPending(record.approvalId);
+      expect(result.ok).toBe(true);
+      const fresh = await queue.getById(record.approvalId);
+      expect(fresh?.status).toBe('pending');
+      expect(fresh?.decidedAt).toBeUndefined();
+      expect(fresh?.decidedBy).toBeUndefined();
+    });
+
+    it('returns not_found for missing record', async () => {
+      const store = new MemoryApprovalQueueStore();
+      const queue = new ApprovalQueue(store);
+      const result = await queue.resetToPending('nonexistent');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe('not_found');
+    });
+
+    it('returns not_approved for pending record', async () => {
+      const store = new MemoryApprovalQueueStore();
+      const queue = new ApprovalQueue(store);
+      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      const result = await queue.resetToPending(record.approvalId);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe('not_approved');
+    });
+
+    it('returns not_approved for rejected record', async () => {
+      const store = new MemoryApprovalQueueStore();
+      const queue = new ApprovalQueue(store);
+      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      await queue.reject(record.approvalId, 'user-1', 'bad');
+      const result = await queue.resetToPending(record.approvalId);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe('not_approved');
+    });
+
+    it('allows re-approval after rollback', async () => {
+      const store = new MemoryApprovalQueueStore();
+      const queue = new ApprovalQueue(store);
+      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      await queue.approve(record.approvalId, 'user-1', 'first');
+      await queue.resetToPending(record.approvalId);
+      const reApprove = await queue.approve(record.approvalId, 'user-2', 'retry');
+      expect(reApprove.ok).toBe(true);
+      if (reApprove.ok) {
+        expect(reApprove.record.status).toBe('approved');
+        expect(reApprove.record.decidedBy).toBe('user-2');
+      }
+    });
+  });
 });
