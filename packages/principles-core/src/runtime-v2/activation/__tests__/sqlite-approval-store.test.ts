@@ -136,4 +136,42 @@ describe('SqliteApprovalQueueStore', () => {
       expect(result.error).toBe('already_decided');
     }
   });
+
+  describe('resetToPending', () => {
+    it('rolls back approved record to pending and clears decision fields', async () => {
+      const created = await store.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      await store.approve(created.approvalId, 'user-1', 'looks good');
+      const result = await store.resetToPending(created.approvalId);
+      expect(result.ok).toBe(true);
+      const fresh = await store.getById(created.approvalId);
+      expect(fresh?.status).toBe('pending');
+      expect(fresh?.decidedAt).toBeUndefined();
+      expect(fresh?.decidedBy).toBeUndefined();
+    });
+
+    it('returns not_found for missing record', async () => {
+      const result = await store.resetToPending('nonexistent');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe('not_found');
+    });
+
+    it('returns not_approved for pending record', async () => {
+      const created = await store.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      const result = await store.resetToPending(created.approvalId);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe('not_approved');
+    });
+
+    it('allows re-approval after rollback', async () => {
+      const created = await store.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
+      await store.approve(created.approvalId, 'user-1', 'first');
+      await store.resetToPending(created.approvalId);
+      const reApprove = await store.approve(created.approvalId, 'user-2', 'retry');
+      expect(reApprove.ok).toBe(true);
+      if (reApprove.ok) {
+        expect(reApprove.record.status).toBe('approved');
+        expect(reApprove.record.decidedBy).toBe('user-2');
+      }
+    });
+  });
 });
