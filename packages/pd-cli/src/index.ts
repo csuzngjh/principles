@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * pd CLI 鈥?Principles Disciple command-line interface.
  *
@@ -834,7 +834,7 @@ const consoleCmd = program
   .passThroughOptions()
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
-  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--no-auth', 'Disable authentication (local dev only)')
   .option('--json', 'Output JSON status', false);
 
 consoleCmd
@@ -842,7 +842,7 @@ consoleCmd
   .description('Legacy launcher — start the pd-console on the requested port (no reuse, no browser open)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
-  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--no-auth', 'Disable authentication (local dev only)')
   .option('--json', 'Output JSON status', false)
   .action(async (opts) => {
     const { handleConsole } = await import('./commands/console.js');
@@ -861,8 +861,9 @@ consoleCmd
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Preferred port (default 3100; auto-falls back to next free port)')
   .option('--host <host>', 'Loopback host (default 127.0.0.1; non-loopback refused)')
-  .option('--no-auth', 'Disable authentication (local dev only)', false)
-  .option('--no-browser', 'Do not open the system browser on success', false)
+  .option('--no-auth', 'Disable authentication (local dev only)')
+  .option('--token <token>', 'Auth token for the Console (or set PD_CONSOLE_TOKEN env var)')
+  .option('--no-browser', 'Do not open the system browser on success')
   .option('--json', 'Output JSON status (suppresses browser open)', false)
   .action(async (opts) => {
     const { handleConsoleOpen } = await import('./commands/console.js');
@@ -871,6 +872,7 @@ consoleCmd
       port: opts.port,
       host: opts.host,
       noAuth: opts.auth === false,
+      token: opts.token,
       noBrowser: opts.browser === false,
       json: opts.json,
     });

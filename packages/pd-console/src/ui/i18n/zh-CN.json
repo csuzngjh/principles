@@ -507,7 +507,16 @@
     },
     "sidebar": {
       "collapse": "折叠侧边栏",
-      "expand": "展开侧边栏"
+      "expand": "展开侧边栏",
+      "focus": "治理焦点",
+      "pain": "行为证据",
+      "principles": "原则审查",
+      "activation": "生效情况",
+      "debt": "原则债务",
+      "controlCenter": "控制中心",
+      "reportProblem": "产品反馈",
+      "settings": "设置",
+      "update": "更新"
     },
     "approvalCard": {
       "confidence": {

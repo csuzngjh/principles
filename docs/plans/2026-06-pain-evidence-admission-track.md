@@ -55,6 +55,65 @@ The weak point is signal quality. In real use, manual pain recording works, but 
 
 The next iteration should therefore introduce an admission layer before diagnosis. The layer decides whether evidence becomes a diagnostic task, stays as evidence, joins an episode, or needs owner confirmation.
 
+## PEAT-0 Findings Integrated
+
+OpenClaw's read-only inventory produced three important facts that shape this plan:
+
+1. No automatic source created clearly useful pain signals in the last 30 days.
+2. Tool failures, dispatch errors, provider/rate-limit failures, and RuleHost blocks are mostly evidence or health signals, not direct principle pain.
+3. Current payload capture has privacy risks around user text previews, tool params, and evolution stream writes.
+
+This means the next work must not start with a large architecture rewrite. It must first reduce noise and protect privacy, then introduce the smallest production-path admission slice.
+
+## Delivery Model
+
+This plan has three tracks. They must not be blended.
+
+### Track A: Main-Safe Privacy And Hygiene Hotfixes
+
+These are small fixes that may go to `main` because they do not change diagnosis trigger policy.
+
+Allowed scope:
+
+- Redact or bound `triggerTextPreview`.
+- Redact or bound trajectory `paramsJson`.
+- Stop or sanitize raw `PainDetectedData` writes to deprecated evolution streams.
+- Add structured unavailable reasons for skipped observer/config paths.
+
+Not allowed in Track A:
+
+- Changing when diagnostic tasks are created.
+- Changing source admission policy.
+- Adding new source kinds.
+- Adding episode aggregation.
+
+### Track B: Minimal Admission Tracer Bullet
+
+This is the first feature branch slice. It proves the admission model on the real production path without implementing the full architecture.
+
+Required behavior:
+
+- Owner explicit manual pain still creates a diagnostic task.
+- Tool failure defaults to evidence-only.
+- Provider/rate-limit failure defaults to health/evidence-only.
+- RuleHost block defaults to evidence-only unless it is a high-confidence unsafe action.
+- The result includes `admissionDecision`, `admissionReason`, and `nextAction`.
+
+This track may merge only after owner review and live validation. It is not an emergency hotfix because it changes diagnosis trigger behavior.
+
+### Track C: Full Pain Evidence Architecture
+
+This is the longer PEAT line:
+
+- Source descriptors.
+- Episode aggregation.
+- OpenClaw hook decomposition.
+- Evidence persistence.
+- PD Web Console evidence views.
+- Owner-confirmation UX for empathy-inferred pain.
+
+Track C should be informed by Track B data and should not start by building all proposed modules at once.
+
 ## Relation To ADR-0015
 
 ADR-0015 proposes:
@@ -191,13 +250,29 @@ The trigger controller is the only component allowed to create diagnostic tasks.
 | Empathy inferred frustration | `owner_confirmation_required` or `aggregate_into_episode` | no direct trigger | Useful, but never silently creates principles. |
 | Correction observer output | `store_evidence_only` | no direct trigger | It tunes source quality; it is not user pain by itself. |
 
+## Episode Defaults
+
+These defaults are conservative starting points. PEAT-0 data should be used to refine them before Phase 2 implementation.
+
+| Source | Episode key | Threshold | Window | Maturity action |
+| --- | --- | --- | --- | --- |
+| `tool_failure` | `workspaceRef + toolName + normalizedTarget + errorHash` | 3 | 1 hour | evidence-only episode; owner can inspect |
+| `dispatch_error` | `workspaceRef + toolName + errorHash` | 3 | 1 hour | health/config evidence-only |
+| `provider_rate_limit` | `workspaceRef + provider + model + errorClass` | 2 | 1 hour | health/config evidence-only |
+| `ignored_instruction` | `workspaceRef + instructionHash + behaviorKind` | 2 | 24 hours | owner confirmation before diagnosis |
+| `repeated_intervention` | `workspaceRef + interventionKind + agentId` | 3 | 7 days | diagnostic task allowed |
+| `scope_drift` | `workspaceRef + taskKind + driftKind` | 3 | 7 days | owner confirmation before diagnosis |
+| `near_miss_blocked` | `workspaceRef + ruleId + toolName + normalizedTarget` | 3 | 24 hours | evidence-only unless owner marks false positive |
+
+Do not implement these as hidden hardcoded magic. The values must live in a source descriptor or admission policy object and be visible in tests.
+
 ## Architecture Target
 
 Keep the stable external facade where practical, but split the internals:
 
 ```mermaid
 flowchart TD
-  A["OpenClaw hook / CLI / Console / Feedback / Observer"] --> B["RawObservation adapter"]
+  A["OpenClaw hook / CLI / PD Web Console / Feedback / Observer"] --> B["RawObservation adapter"]
   B --> C["Evidence validator and sanitizer"]
   C --> D["PainEvidence"]
   D --> E["Pain assessor"]
@@ -208,7 +283,7 @@ flowchart TD
   F --> I["Trigger controller"]
   I --> J["Diagnostician task"]
   I --> K["Owner confirmation queue"]
-  G --> L["Console evidence view"]
+  G --> L["PD Web Console evidence view"]
 ```
 
 ### Proposed Modules
@@ -225,7 +300,35 @@ The exact file names may change after code exploration, but responsibilities sho
 | `admission-controller` | Decides reject/evidence-only/signal/episode/confirmation. |
 | `episode-correlator` | Groups repeated evidence by bounded correlation keys. |
 | `trigger-controller` | Decides if and when to create diagnostic tasks. |
-| `pain-evidence-read-model` | Console/CLI-safe summary of evidence, signals, episodes, and trigger decisions. |
+| `pain-evidence-read-model` | PD Web Console / CLI-safe summary of evidence, signals, episodes, and trigger decisions. |
+
+### `handleAfterToolCall` Decomposition Target
+
+The current `handleAfterToolCall` path has several concerns mixed together. The PEAT refactor must not treat it as a single "capture" function.
+
+Target decomposition:
+
+| Component | Responsibility |
+| --- | --- |
+| Friction tracker | GFI updates, session state changes, success relief. |
+| Evidence collector | Tool result classification, risk-path summary, RawObservation construction. |
+| Hygiene tracker | Memory/plan persistence tracking only. |
+| Probation feedback recorder | Principle probation success/failure attribution. |
+| Event recorder | Event-log and trajectory writes with bounded payloads. |
+| Pain admission emitter | Calls the PainToPrincipleService/admission facade. |
+
+Acceptance for this decomposition is not "the file is shorter." Acceptance is that diagnosis policy no longer lives in hook-level branches and each component can be tested independently with bounded inputs.
+
+### PainDiagnosticGate Disposition
+
+`PainDiagnosticGate` is legacy admission logic. It must not remain a parallel truth source after PEAT migration.
+
+Migration path:
+
+1. Track B may wrap `evaluatePainDiagnosticGate` as a compatibility sub-policy while adding explicit admission decisions.
+2. Once production-path tests cover manual pain, tool failure, RuleHost block, provider/rate-limit failure, and empathy-inferred evidence, direct calls to `evaluatePainDiagnosticGate` should be removed from hooks.
+3. Its cooldown behavior should be represented as episode/admission policy, not an independent hidden map.
+4. After no production code calls it, retire or archive it with a regression test proving no direct hook dependency remains.
 
 ### Core / Plugin Boundary
 
@@ -265,10 +368,12 @@ Required classification:
 - Which are evidence-only?
 - Which should require owner confirmation?
 - Which are historical/test pollution?
+- Recommended episode aggregation keys, thresholds, and windows based on observed source distribution.
+- Which privacy leaks are small enough for Track A hotfixes.
 
 ### Phase 1: Core Contracts And Descriptor Registry
 
-Build types and source descriptors first. No production trigger behavior changes.
+Build source descriptors and policy types first, but keep them small. No production trigger behavior changes.
 
 Acceptance criteria:
 
@@ -277,55 +382,48 @@ Acceptance criteria:
 - Tool failure and provider failure default to evidence-only.
 - Owner manual reports default to signal.
 - Empathy-inferred frustration cannot directly create a diagnostic task.
+- Episode defaults from this document are encoded in testable descriptor data, not scattered constants.
 
-### Phase 2: Admission And Trigger Policy
+### Phase 2: Minimal Admission Tracer Bullet
 
-Implement pure admission and trigger controllers.
+Implement admission and trigger policy together with the real `PainToPrincipleService.recordPain()` path. This intentionally combines the old Phase 2 and Phase 3 to avoid pure-policy tests drifting away from production input shape.
 
 Acceptance criteria:
 
 - Admission returns structured `reason` and `nextAction`.
 - Diagnosis can only be created through trigger controller.
-- Repeated weak evidence can aggregate into an episode.
+- Manual `/pd-pain`, OpenClaw pain command, and CLI pain record still create diagnostic tasks.
+- Tool failure and provider/rate-limit failure are evidence-only by default.
+- Existing bridge tests are updated to assert admission decisions, not just diagnostic side effects.
 - Rejected evidence is observable and bounded.
 - No GAP/objective/mission scoring appears in code.
 
-### Phase 3: Existing Facade Integration
+### Phase 3: OpenClaw Source Adapters And Hook Decomposition
 
-Refactor `PainToPrincipleService.recordPain()` and the existing bridge path to use the admission pipeline internally.
-
-Acceptance criteria:
-
-- Manual `/pd-pain` and CLI pain record still work.
-- Existing MVP path still creates diagnostic task for owner-explicit pain.
-- Tool failures no longer create direct diagnosis unless policy explicitly allows it.
-- All degraded paths include reason and next action.
-- Existing lineage/evidence references are preserved or explicitly migrated.
-
-### Phase 4: OpenClaw Source Adapters
-
-Split OpenClaw hook capture from admission/trigger.
+Split OpenClaw hook capture from admission/trigger and start decomposing `handleAfterToolCall`.
 
 Acceptance criteria:
 
-- `after_tool_call` captures evidence but does not own diagnosis policy.
+- `after_tool_call` creates bounded RawObservation or PainEvidence inputs but does not decide diagnosis.
 - RuleHost blocks become evidence with source kind and bounded action summary.
 - Provider/rate-limit failures become health/config evidence, not principle pain.
 - Empathy observer output requires confirmation or recurrence before diagnosis.
 - No raw prompt/chat/trajectory is stored in evidence.
+- Friction tracking, evidence collection, hygiene tracking, probation feedback, event recording, and admission emission are separated enough to test independently.
 
-### Phase 5: Persistence And Console Observability
+### Phase 4: Persistence And PD Web Console Observability
 
 Expose the pipeline to the owner.
 
 Acceptance criteria:
 
-- Console can show Evidence, Signals, Episodes, and Diagnosis Created as separate states.
+- The PD Web Console can show Evidence, Signals, Episodes, and Diagnosis Created as separate states.
 - Owner can understand why a piece of evidence did not become a principle.
 - Evidence records include source, reason, next action, and privacy notes.
 - Historical/test data can be filtered or quarantined from production views.
+- CLI JSON output exists for the same read model if UI work is deferred.
 
-### Phase 6: Dogfood Release Gate
+### Phase 5: Dogfood Release Gate
 
 Before merging to `main` or installing into production OpenClaw:
 
@@ -337,6 +435,8 @@ Before merging to `main` or installing into production OpenClaw:
 - Confirm no synthetic/test data is written to `D:\.openclaw\workspace`.
 - Confirm no new automatic diagnosis is created from provider/rate-limit/tool failure alone.
 - Confirm owner manual pain still creates a valid diagnostic task.
+- Confirm admission pipeline overhead on `after_tool_call` is within the agreed latency budget. Initial budget: p95 under 50 ms for local policy work, excluding optional async observer/LLM work.
+- Confirm diagnostic task creation rate changed in the expected direction: infra/tool failure diagnoses should decrease; owner-explicit diagnoses should remain unchanged.
 
 ## Test Strategy
 
@@ -366,11 +466,39 @@ Required negative tests:
 
 Create these only after owner accepts this design.
 
+```mermaid
+flowchart TD
+  A["PEAT-0 read-only inventory"] --> B["PEAT-A privacy hotfixes"]
+  A --> C["PEAT-1 descriptors"]
+  C --> D["PEAT-2 minimal admission tracer bullet"]
+  D --> E["PEAT-3 OpenClaw source adapters"]
+  D --> F["PEAT-4 persistence/read model"]
+  E --> G["PEAT-5 PD Web Console evidence view"]
+  F --> G
+  G --> H["PEAT-6 dogfood release gate"]
+```
+
 ### PEAT-0: Read-only pain source inventory
 
 Owner: OpenClaw.
 
 No code. Produce inventory report and classification table.
+
+Status: complete as of the first OpenClaw report attached to this plan.
+
+### PEAT-A: Privacy and payload hygiene hotfixes
+
+Owner: OpenClaw.
+
+Can target `main` if each fix is isolated and does not change diagnosis trigger policy.
+
+Scope:
+
+- Sanitize/bound `triggerTextPreview`.
+- Redact long/sensitive tool params before trajectory persistence.
+- Stop or sanitize raw evolution stream pain payloads.
+
+This may run before PEAT-1.
 
 ### PEAT-1: Pain evidence contracts and source descriptors
 
@@ -382,25 +510,25 @@ Implement core contracts and tests. No production wiring.
 
 Owner: OpenClaw.
 
-Implement pure policy and tests.
+Implement the minimal admission tracer bullet and production-path integration.
 
-### PEAT-3: PainToPrincipleService integration
-
-Owner: OpenClaw.
-
-Refactor existing facade to call admission/trigger path.
-
-### PEAT-4: OpenClaw source adapters
+### PEAT-3: OpenClaw source adapters and hook decomposition
 
 Owner: OpenClaw.
 
-Move hook-specific source mapping into adapters.
+Move hook-specific source mapping into adapters and split the major `handleAfterToolCall` concerns.
 
-### PEAT-5: Evidence persistence and console read model
+### PEAT-4: Evidence persistence and read model
 
 Owner: OpenClaw.
 
-Persist evidence/admission/episode state and expose safe owner-facing read model.
+Persist evidence/admission/episode state and expose a safe CLI/console read model.
+
+### PEAT-5: PD Web Console evidence view
+
+Owner: OpenClaw.
+
+Implement owner-facing evidence states in `packages/pd-console`.
 
 ### PEAT-6: Dogfood release gate
 
@@ -461,11 +589,11 @@ Do not implement fixes unless explicitly asked after the report.
 
 ## Open Questions
 
-These must be resolved before Phase 3 production wiring:
+These must be resolved before Phase 2 production-path admission wiring:
 
 1. Should evidence persistence be a new table or an extension of existing pain signal state?
 2. What is the retention/quarantine policy for evidence-only records?
-3. Should Console rename the owner-facing page from "Pain" to "Evidence" or keep both terms?
+3. Should the PD Web Console rename the owner-facing page from "Pain" to "Evidence" or keep both terms?
 4. What recurrence threshold should turn weak evidence into an episode?
 5. What owner UX should confirm empathy-inferred frustration?
 6. Which workspace is the official disposable dogfood workspace for feature validation?
@@ -482,4 +610,3 @@ Do not implement in this track:
 - New activation channels.
 - Hardcoded "confirm-first" or `PLAN.md` gate.
 - Automatic upload of logs, prompts, chats, or trajectories.
-

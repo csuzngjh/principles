@@ -16,14 +16,7 @@ mkdirSync(assetsDir, { recursive: true });
 const cssInput = path.join(rootDir, "src", "ui", "styles", "globals.css");
 const cssOutput = path.join(assetsDir, "app.css");
 
-const cssContent = readFileSync(cssInput, "utf8");
-const result = await postcss([tailwindcss, autoprefixer]).process(cssContent, {
-  from: cssInput,
-  to: cssOutput,
-});
-writeFileSync(cssOutput, result.css, "utf8");
-console.log("Processed Tailwind CSS");
-
+// Step 1: esbuild bundles JS (may also emit a minimal CSS from @fontsource imports)
 await build({
   entryPoints: [path.join(rootDir, "src", "ui", "main.tsx")],
   bundle: true,
@@ -41,8 +34,20 @@ await build({
   },
   define: {
     "process.env.NODE_ENV": JSON.stringify(isProduction ? "production" : "development"),
+    "import.meta.env.DEV": JSON.stringify(!isProduction),
+    "import.meta.env.PROD": JSON.stringify(isProduction),
   },
 });
+
+// Step 2: PostCSS/Tailwind overwrites the CSS (must run AFTER esbuild, which
+// may emit a minimal app.css from @fontsource imports that would otherwise clobber Tailwind output)
+const cssContent = readFileSync(cssInput, "utf8");
+const result = await postcss([tailwindcss(), autoprefixer()]).process(cssContent, {
+  from: cssInput,
+  to: cssOutput,
+});
+writeFileSync(cssOutput, result.css, "utf8");
+console.log("Processed Tailwind CSS (" + result.css.length + " bytes)");
 
 const html = `<!doctype html>
 <html lang="zh-CN">

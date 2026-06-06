@@ -36,25 +36,25 @@ function ThresholdMark({ className }: { className?: string }) {
 }
 
 const mainNavItems = [
-  { id: "focus", label: "治理焦点", href: "/focus", icon: Focus, shortcut: "Alt+3" },
-  { id: "pain", label: "行为证据", href: "/pain", icon: AlertTriangle, shortcut: "Alt+4" },
-  { id: "principles", label: "原则审查", href: "/principles", icon: BookOpen, shortcut: "Alt+5" },
-  { id: "activation", label: "生效情况", href: "/activation", icon: Zap, shortcut: "Alt+6" },
-  { id: "debt", label: "原则债务", href: "/debt", icon: Archive, shortcut: "Alt+7" },
+  { id: "focus", labelKey: "components.sidebar.focus", href: "/focus", icon: Focus, shortcut: "Alt+3" },
+  { id: "pain", labelKey: "components.sidebar.pain", href: "/pain", icon: AlertTriangle, shortcut: "Alt+4" },
+  { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen, shortcut: "Alt+5" },
+  { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap, shortcut: "Alt+6" },
+  { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive, shortcut: "Alt+7" },
 ];
 
 const toolNavItems = [
-  { id: "control-center", label: "控制中心", href: "/control-center", icon: Settings, shortcut: "Alt+8" },
-  { id: "report-problem", label: "产品反馈", href: "/report-problem", icon: MessageSquare, shortcut: "Alt+9" },
-  { id: "settings", label: "设置", href: "/settings", icon: Settings, shortcut: "Alt+0" },
-  { id: "update", label: "更新", href: "/update", icon: RefreshCw, shortcut: "" },
+  { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings, shortcut: "Alt+8" },
+  { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare, shortcut: "Alt+9" },
+  { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings, shortcut: "Alt+0" },
+  { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw, shortcut: "" },
 ];
 
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const isActive = (href: string) => {
     if (href === "/") return location.pathname === "/";
@@ -73,7 +73,7 @@ export function AppSidebar() {
   };
 
   return (
-    <aside className="w-[256px] h-screen flex flex-col bg-surface border-r border-line flex-shrink-0">
+    <aside className="w-[256px] h-screen fixed left-0 top-0 flex flex-col bg-surface border-r border-line flex-shrink-0 z-20">
       {/* Brand area */}
       <div className="px-5 pt-5 pb-4">
         <div className="flex items-center gap-2.5">
@@ -108,7 +108,7 @@ export function AppSidebar() {
                 )}
               >
                 <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                <span className="flex-1">{item.label}</span>
+                <span className="flex-1">{t(item.labelKey)}</span>
                 {item.shortcut && (
                   <span className="text-ink-4 font-mono text-[11px]">
                     {item.shortcut}
@@ -141,7 +141,7 @@ export function AppSidebar() {
                   )}
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.labelKey)}</span>
                   {item.shortcut && (
                     <span className="text-ink-4 font-mono text-[11px]">
                       {item.shortcut}

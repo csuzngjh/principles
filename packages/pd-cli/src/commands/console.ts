@@ -21,6 +21,8 @@ interface ConsoleOpenOptions {
   host?: string;
   json?: boolean;
   noAuth?: boolean;
+  /** Auth token for the Console. */
+  token?: string;
   /** Skip browser opening even in non-JSON mode. */
   noBrowser?: boolean;
 }
@@ -304,7 +306,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   // 4) Read auth token for health probes (PD_CONSOLE_TOKEN)
-  const token = process.env.PD_CONSOLE_TOKEN;
+  const token = opts.token ?? process.env.PD_CONSOLE_TOKEN;
 
   // 5) Plan the launch (reuse or fresh bind)
   let plan;
@@ -420,6 +422,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // 5) Fresh spawn path
   const args = [serverEntry, '--workspace', workspaceDir, '--port', String(plan.port), '--host', plan.host];
   if (opts.noAuth) args.push('--no-auth');
+  if (opts.token) args.push('--token', opts.token);
 
   const child: ChildProcess = spawn(process.execPath, args, {
     stdio: opts.json ? 'pipe' : 'inherit',
@@ -557,6 +560,9 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     if (browserOpened) {
       console.log('Browser opened. Press Ctrl+C to stop.');
     } else {
+      if (browserWarning) {
+        console.log(`Browser not opened: ${browserWarning}`);
+      }
       console.log(`Open ${plan.url} in your browser. Press Ctrl+C to stop.`);
     }
   }
