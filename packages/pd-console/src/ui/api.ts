@@ -1,4 +1,9 @@
 import type { ApiResponse } from "../types.js";
+import {
+  validateErrorResponse,
+  validateSuccessEnvelope,
+  validateHeaders,
+} from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -32,7 +37,7 @@ async function request<T>(
       ...options,
       headers: {
         ...headers,
-        ...(options?.headers as Record<string, string> | undefined),
+        ...(validateHeaders(options?.headers) ?? {}),
       },
     });
 
@@ -40,14 +45,17 @@ async function request<T>(
       let errorMessage = `HTTP ${response.status}`;
       let nextAction: string | undefined;
       try {
-        const parsed = await response.json() as { error?: string; message?: string; nextAction?: string };
-        if (parsed && typeof parsed.message === 'string') {
-          errorMessage = parsed.message;
-        } else if (parsed && typeof parsed.error === 'string') {
-          errorMessage = parsed.error;
-        }
-        if (parsed && typeof parsed.nextAction === 'string') {
-          ({ nextAction } = parsed);
+        const raw = await response.json();
+        const parsed = validateErrorResponse(raw);
+        if (parsed) {
+          if (parsed.message) {
+            errorMessage = parsed.message;
+          } else if (parsed.error) {
+            errorMessage = parsed.error;
+          }
+          if (parsed.nextAction) {
+            ({ nextAction } = parsed);
+          }
         }
       } catch {
         // ignore parse errors
@@ -55,11 +63,12 @@ async function request<T>(
       return { success: false, error: errorMessage, nextAction };
     }
 
-    const json = await response.json() as { success?: boolean; data?: T };
-    if (json.success === true && json.data !== undefined) {
-      return { success: true, data: json.data };
+    const raw = await response.json();
+    const envelope = validateSuccessEnvelope(raw);
+    if (envelope && envelope.success === true && envelope.data !== undefined) {
+      return { success: true, data: envelope.data as T };
     }
-    return { success: true, data: json as unknown as T };
+    return { success: true, data: raw as T };
   } catch (err) {
     return {
       success: false,
