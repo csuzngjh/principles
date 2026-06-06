@@ -41,7 +41,19 @@ function writeEvents(workspace: string, entries: unknown[]): void {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Retry on Windows handle-lock (e.g. better-sqlite3 zombie handles)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+        break;
+      } catch {
+        if (attempt < 2) {
+          // Wait for OS to release handles
+          const start = Date.now();
+          while (Date.now() - start < 50) { /* busy-wait */ }
+        }
+      }
+    }
   }
   WorkspaceContext.clearCache();
   clearSession('live-session');
@@ -1096,5 +1108,55 @@ describe('RuntimeSummaryService', () => {
 
       expect(summary.metadata.warnings.join('\n')).not.toContain('Diagnostician appears stalled');
     });
+  });
+
+  it('reports taskStoreError when SQLite task store DB is corrupted', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), []);
+
+    // Write a corrupted file (invalid SQLite) at the task store DB path
+    const dbDir = path.join(workspace, '.state', '.principles', 'db');
+    fs.mkdirSync(dbDir, { recursive: true });
+    fs.writeFileSync(path.join(dbDir, 'task-store.db'), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+
+    // Create a daily events file so readEvents does not pollute warnings
+    const today = new Date().toISOString().slice(0, 10);
+    writeEvents(workspace, [
+      { ts: `${today}T09:00:00Z`, type: 'heartbeat_diagnosis', category: 'task_injected', sessionId: 'test', data: {} },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.runtimeDiagnosis.taskStoreError).toBeDefined();
+    expect(summary.metadata.warnings.join('\n')).toContain('Task store query failed');
+    expect(summary.metadata.warnings.join('\n')).toContain('Task store query error');
+
+    // Pre-cleanup: delete DB file before afterEach to avoid Windows handle-lock on temp dir
+    try { fs.unlinkSync(path.join(dbDir, 'task-store.db')); } catch { /* ok */ }
+  });
+
+  it('shows 0 pendingTasks with no taskStoreError when task-store.db does not exist', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), []);
+
+    // No task-store.db created at all → ENOENT path, should be silent
+    const today = new Date().toISOString().slice(0, 10);
+    writeEvents(workspace, [
+      { ts: `${today}T09:00:00Z`, type: 'heartbeat_diagnosis', category: 'task_injected', sessionId: 'test', data: {} },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.runtimeDiagnosis.pendingTasks).toBe(0);
+    expect(summary.runtimeDiagnosis.taskStoreError).toBeUndefined();
+    expect(summary.metadata.warnings.join('\n')).not.toContain('Task store query');
   });
 });

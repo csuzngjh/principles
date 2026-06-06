@@ -509,7 +509,7 @@ export class RuntimeSummaryService {
       },
       gate: gateStats,
       // D: Heartbeat Diagnostician chain
-      runtimeDiagnosis: { ...runtimeDiagnosis, taskStoreError },
+      runtimeDiagnosis,
       ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {
         generatedAt,
