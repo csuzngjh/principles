@@ -64,7 +64,7 @@ export class HealthCheckModel {
 
   private async checkSqlite(): Promise<HealthCheckResult> {
     try {
-      const runtime = this.getRuntime();
+      const runtime = await this.getRuntime();
       await runtime.listTasks({ limit: 1 });
       return {
         id: 'sqlite',
@@ -133,7 +133,7 @@ export class HealthCheckModel {
 
   private async checkTaskQueue(): Promise<HealthCheckResult> {
     try {
-      const runtime = this.getRuntime();
+      const runtime = await this.getRuntime();
       const pendingTasks = await runtime.listTasks({ status: 'pending', limit: 100 });
       const leasedTasks = await runtime.listTasks({ status: 'leased', limit: 100 });
       const failedTasks = await runtime.listTasks({ status: 'failed', limit: 100 });
@@ -212,7 +212,7 @@ export class HealthCheckModel {
 
   private async checkGfiHealth(): Promise<HealthCheckResult> {
     try {
-      const health = this.getOperatorHealth();
+      const health = await this.getOperatorHealth();
       const snapshot = await health.getSnapshot();
       const { gfi } = snapshot;
       const { active } = gfi;
@@ -270,7 +270,7 @@ export class HealthCheckModel {
 
   private async getPipelineTimestamps(): Promise<PipelineTimestamps> {
     try {
-      const runtime = this.getRuntime();
+      const runtime = await this.getRuntime();
 
       const [painTasks, diagTasks, candidates] = await Promise.all([
         runtime.listTasks({ taskKind: 'pain_collector', limit: 1 }),
@@ -312,18 +312,20 @@ export class HealthCheckModel {
     }
   }
 
-  private getRuntime(): RuntimeStateManager {
+  private async getRuntime(): Promise<RuntimeStateManager> {
     if (!this.runtime) {
       this.runtime = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
+      await this.runtime.initialize();
     }
     return this.runtime;
   }
 
-  private getPainChain(): PainChainReadModel {
+  private async getPainChain(): Promise<PainChainReadModel> {
     if (!this.painChain) {
+      const runtime = await this.getRuntime();
       this.painChain = new PainChainReadModel({
         workspaceDir: this.workspaceDir,
-        stateManager: this.getRuntime(),
+        stateManager: runtime,
       });
     }
     return this.painChain;
@@ -336,11 +338,12 @@ export class HealthCheckModel {
     return this.pruning;
   }
 
-  private getOperatorHealth(): OperatorHealthReadModel {
+  private async getOperatorHealth(): Promise<OperatorHealthReadModel> {
     if (!this.operatorHealth) {
+      const painChain = await this.getPainChain();
       this.operatorHealth = new OperatorHealthReadModel({
         workspaceDir: this.workspaceDir,
-        painChainReadModel: this.getPainChain(),
+        painChainReadModel: painChain,
         pruningReadModel: this.getPruning(),
       });
     }
