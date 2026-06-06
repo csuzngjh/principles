@@ -16,31 +16,39 @@ import zhCN from '../../src/ui/i18n/zh-CN.json';
 
 // ── Safe helpers (no `as` casts on untrusted data) ────────────────────────────
 
+/** Type guard: checks that a value is a non-null, non-array object (i.e. a record). */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Safe own-property access via Object.getOwnPropertyDescriptor (no `as` on parent). */
+function getOwn(obj: object, key: string): unknown {
+  return Object.getOwnPropertyDescriptor(obj, key)?.value;
+}
+
 /** Type-safe own-property accessor. Returns undefined for non-own or non-object values. */
 function getOwnRecord(obj: unknown, key: string): Record<string, unknown> | undefined {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return undefined;
-  if (!Object.hasOwn(obj, key)) return undefined;
-  const val = (obj as Record<string, unknown>)[key];
-  if (typeof val !== 'object' || val === null || Array.isArray(val)) return undefined;
-  return val as Record<string, unknown>;
+  if (!isRecord(obj)) return undefined;
+  const val = getOwn(obj, key);
+  if (!isRecord(val)) return undefined;
+  return val;
 }
 
 /** Type-safe own-property string accessor. Returns undefined if not own or not string. */
 function getOwnString(obj: unknown, key: string): string | undefined {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return undefined;
-  if (!Object.hasOwn(obj, key)) return undefined;
-  const val = (obj as Record<string, unknown>)[key];
+  if (!isRecord(obj)) return undefined;
+  const val = getOwn(obj, key);
   return typeof val === 'string' ? val : undefined;
 }
 
 /** Recursively collect all dot-path keys from a nested object */
 function collectKeys(obj: unknown, prefix = ''): string[] {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+  if (!isRecord(obj)) return [];
   const keys: string[] = [];
   for (const key of Object.keys(obj)) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
-    const value = (obj as Record<string, unknown>)[key];
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const value = getOwn(obj, key);
+    if (isRecord(value)) {
       keys.push(...collectKeys(value, fullKey));
     } else {
       keys.push(fullKey);
@@ -51,13 +59,13 @@ function collectKeys(obj: unknown, prefix = ''): string[] {
 
 /** Recursively collect all string values from a nested object */
 function collectStringValues(obj: unknown): string[] {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+  if (!isRecord(obj)) return [];
   const values: string[] = [];
   for (const key of Object.keys(obj)) {
-    const value = (obj as Record<string, unknown>)[key];
+    const value = getOwn(obj, key);
     if (typeof value === 'string') {
       values.push(value);
-    } else if (typeof value === 'object' && value !== null) {
+    } else if (isRecord(value)) {
       values.push(...collectStringValues(value));
     }
   }
@@ -71,14 +79,14 @@ function containsChinese(str: string): boolean {
 
 /** Recursively check all leaf values are strings; return non-string key paths */
 function findNonStringLeaves(obj: unknown, prefix = ''): string[] {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+  if (!isRecord(obj)) return [];
   const nonString: string[] = [];
   for (const key of Object.keys(obj)) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
-    const value = (obj as Record<string, unknown>)[key];
+    const value = getOwn(obj, key);
     if (typeof value === 'string') {
       // ok
-    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    } else if (isRecord(value)) {
       nonString.push(...findNonStringLeaves(value, fullKey));
     } else {
       nonString.push(fullKey);

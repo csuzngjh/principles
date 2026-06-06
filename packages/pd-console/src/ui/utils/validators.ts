@@ -27,8 +27,32 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function isStringOrNull(v: unknown): v is string | null {
-  return v === null || typeof v === 'string';
+// ── Nullable field readers (no `as` casts) ────────────────────────────────────
+
+/** Result of reading a nullable string field from untrusted data. */
+type NullableStringResult =
+  | { valid: true; value: string | null }
+  | { valid: false };
+
+/** Read a nullable string field from an untrusted object. */
+function readNullableString(v: Record<string, unknown>, key: string): NullableStringResult {
+  if (!Object.hasOwn(v, key)) return { valid: true, value: null };
+  const val = v[key];
+  if (val === null || typeof val === 'string') return { valid: true, value: val };
+  return { valid: false };
+}
+
+/** Result of reading a nullable number field from untrusted data. */
+type NullableNumberResult =
+  | { valid: true; value: number | null }
+  | { valid: false };
+
+/** Read a nullable number field from an untrusted object. */
+function readNullableNumber(v: Record<string, unknown>, key: string): NullableNumberResult {
+  if (!Object.hasOwn(v, key)) return { valid: true, value: null };
+  const val = v[key];
+  if (val === null || (typeof val === 'number' && !Number.isNaN(val))) return { valid: true, value: val };
+  return { valid: false };
 }
 
 // ── Generic array element validator ───────────────────────────────────────────
@@ -169,12 +193,13 @@ function validateWorkspaceConfig(v: unknown): WorkspaceConfigData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'workspaceName') || !isString(v.workspaceName)) return null;
   if (!Object.hasOwn(v, 'enabled') || !isBoolean(v.enabled)) return null;
-  if (Object.hasOwn(v, 'displayName') && !isStringOrNull(v.displayName)) return null;
+  const displayName = readNullableString(v, 'displayName');
+  if (!displayName.valid) return null;
   if (!Object.hasOwn(v, 'syncEnabled') || !isBoolean(v.syncEnabled)) return null;
   return {
     workspaceName: v.workspaceName,
     enabled: v.enabled,
-    displayName: Object.hasOwn(v, 'displayName') ? (v.displayName as string | null) : null,
+    displayName: displayName.value,
     syncEnabled: v.syncEnabled,
   };
 }
@@ -190,7 +215,8 @@ export function validateWorkspaceEntry(v: unknown): WorkspaceEntryData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'name') || !isString(v.name)) return null;
   if (!Object.hasOwn(v, 'path') || !isString(v.path)) return null;
-  if (Object.hasOwn(v, 'lastSync') && !isStringOrNull(v.lastSync)) return null;
+  const lastSync = readNullableString(v, 'lastSync');
+  if (!lastSync.valid) return null;
 
   let config: WorkspaceConfigData | null = null;
   if (Object.hasOwn(v, 'config') && v.config !== null) {
@@ -201,7 +227,7 @@ export function validateWorkspaceEntry(v: unknown): WorkspaceEntryData | null {
   return {
     name: v.name,
     path: v.path,
-    lastSync: Object.hasOwn(v, 'lastSync') ? (v.lastSync as string | null) : null,
+    lastSync: lastSync.value,
     config,
   };
 }
@@ -235,11 +261,14 @@ export function validateSyncResult(v: unknown): SyncResultData | null {
 // ── Config / Control Center validators ────────────────────────────────────────
 
 export type ReadinessStatus = 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
-const VALID_READINESS: ReadinessStatus[] = ['ready', 'not_ready', 'needs_setup', 'disabled', 'unknown'];
 
 function validateReadinessStatus(v: unknown): ReadinessStatus | null {
-  if (!isString(v) || !VALID_READINESS.includes(v as ReadinessStatus)) return null;
-  return v as ReadinessStatus;
+  switch (v) {
+    case 'ready': case 'not_ready': case 'needs_setup': case 'disabled': case 'unknown':
+      return v;
+    default:
+      return null;
+  }
 }
 
 export interface RedactedRuntimeProfileSummaryData {
@@ -315,11 +344,14 @@ function validateConfigError(v: unknown): ConfigErrorData | null {
 }
 
 export type ConfigSource = 'defaults' | 'user_config';
-const VALID_CONFIG_SOURCES: ConfigSource[] = ['defaults', 'user_config'];
 
 function validateConfigSource(v: unknown): ConfigSource | null {
-  if (!isString(v) || !VALID_CONFIG_SOURCES.includes(v as ConfigSource)) return null;
-  return v as ConfigSource;
+  switch (v) {
+    case 'defaults': case 'user_config':
+      return v;
+    default:
+      return null;
+  }
 }
 
 export interface ConfigSummaryData {
@@ -533,12 +565,13 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
   if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
   if (!Object.hasOwn(v, 'action') || !isString(v.action)) return null;
   if (!Object.hasOwn(v, 'targetRef') || !isString(v.targetRef)) return null;
-  if (Object.hasOwn(v, 'activatedAt') && !isStringOrNull(v.activatedAt)) return null;
+  const activatedAt = readNullableString(v, 'activatedAt');
+  if (!activatedAt.valid) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   return {
     id: v.id, artifactId: v.artifactId, principleId: v.principleId,
     channel: v.channel, action: v.action, targetRef: v.targetRef,
-    activatedAt: Object.hasOwn(v, 'activatedAt') ? (v.activatedAt as string | null) : null,
+    activatedAt: activatedAt.value,
     status: v.status,
   };
 }
@@ -581,11 +614,12 @@ export interface LifecycleAdherenceData {
 function validateLifecycleAdherence(v: unknown): LifecycleAdherenceData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'insufficientData') || !isBoolean(v.insufficientData)) return null;
-  if (Object.hasOwn(v, 'rate') && !isNumber(v.rate) && v.rate !== null) return null;
+  const rate = readNullableNumber(v, 'rate');
+  if (!rate.valid) return null;
   if (!Object.hasOwn(v, 'note') || !isString(v.note)) return null;
   return {
     insufficientData: v.insufficientData,
-    rate: Object.hasOwn(v, 'rate') ? (v.rate as number | null) : null,
+    rate: rate.value,
     note: v.note,
   };
 }
@@ -600,10 +634,11 @@ function validateLifecycleRuleMetric(v: unknown): LifecycleRuleMetricData | null
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'ruleId') || !isString(v.ruleId)) return null;
   if (!Object.hasOwn(v, 'triggered') || !isNumber(v.triggered)) return null;
-  if (Object.hasOwn(v, 'lastTriggeredAt') && !isStringOrNull(v.lastTriggeredAt)) return null;
+  const lastTriggeredAt = readNullableString(v, 'lastTriggeredAt');
+  if (!lastTriggeredAt.valid) return null;
   return {
     ruleId: v.ruleId, triggered: v.triggered,
-    lastTriggeredAt: Object.hasOwn(v, 'lastTriggeredAt') ? (v.lastTriggeredAt as string | null) : null,
+    lastTriggeredAt: lastTriggeredAt.value,
   };
 }
 
@@ -776,7 +811,8 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   if (!Object.hasOwn(v, 'priority') || !isString(v.priority)) return null;
   if (!Object.hasOwn(v, 'scope') || !isString(v.scope)) return null;
-  if (Object.hasOwn(v, 'domain') && !isStringOrNull(v.domain)) return null;
+  const domain = readNullableString(v, 'domain');
+  if (!domain.valid) return null;
   if (!Object.hasOwn(v, 'evaluability') || !isString(v.evaluability)) return null;
   if (!Object.hasOwn(v, 'valueScore') || !isNumber(v.valueScore)) return null;
   if (!Object.hasOwn(v, 'adherenceRate') || !isNumber(v.adherenceRate)) return null;
@@ -788,7 +824,7 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   return {
     id: v.id, text: v.text, triggerPattern: v.triggerPattern, action: v.action,
     status: v.status, priority: v.priority, scope: v.scope,
-    domain: Object.hasOwn(v, 'domain') ? (v.domain as string | null) : null,
+    domain: domain.value,
     evaluability: v.evaluability, valueScore: v.valueScore, adherenceRate: v.adherenceRate,
     painPreventedCount: v.painPreventedCount, ruleCount: v.ruleCount,
     conflictsWithCount: v.conflictsWithCount, createdAt: v.createdAt, updatedAt: v.updatedAt,
@@ -805,14 +841,13 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (!Object.hasOwn(v, 'principles') || !Array.isArray(v.principles)) return null;
   if (!Object.hasOwn(v, 'summary') || !isObject(v.summary)) return null;
   const s = v.summary;
-  for (const key of ['candidate', 'probation', 'active', 'deprecated', 'archived', 'total']) {
-    if (!Object.hasOwn(s, key) || !isNumber(s[key])) return null;
-  }
+  const { candidate, probation, active, deprecated, archived, total } = s;
+  if (!isNumber(candidate) || !isNumber(probation) || !isNumber(active) || !isNumber(deprecated) || !isNumber(archived) || !isNumber(total)) return null;
   const principles = validateArray(v.principles, validatePrincipleListItem);
   if (principles === null) return null;
   return {
     principles,
-    summary: { candidate: s.candidate as number, probation: s.probation as number, active: s.active as number, deprecated: s.deprecated as number, archived: s.archived as number, total: s.total as number },
+    summary: { candidate, probation, active, deprecated, archived, total },
   };
 }
 

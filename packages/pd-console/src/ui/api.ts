@@ -70,13 +70,25 @@ function clearToken(): void {
 /**
  * Send an authenticated request to the Console API.
  *
- * @param validate - Runtime validator for the response data. Required for
- *   all endpoints that return typed data. When provided, the raw response
- *   is passed through this validator; if validation fails, the request
- *   returns `{ success: false, error, nextAction }` instead of `as T`.
- *   Omit only for `unknown` responses (e.g. health checks).
+ * Two overloads:
+ * 1. request(path, options?) → ApiResponse<unknown>
+ *    For endpoints without a runtime validator (health checks, etc.).
+ *    The caller receives unvalidated data and must not assume a specific shape.
+ *
+ * 2. request<T>(path, options, validate) → ApiResponse<T>
+ *    For endpoints with a runtime validator. The validator is applied to the
+ *    raw response; if validation fails, returns an error envelope instead.
  */
-async function request<T>(
+function request(
+  path: string,
+  options?: RequestInit,
+): Promise<ApiResponse<unknown>>;
+function request<T>(
+  path: string,
+  options: RequestInit | undefined,
+  validate: (value: unknown) => T | null,
+): Promise<ApiResponse<T>>;
+async function request<T = unknown>(
   path: string,
   options?: RequestInit,
   validate?: (value: unknown) => T | null,
@@ -135,9 +147,9 @@ async function request<T>(
       };
     }
 
-    // No validator provided — only allowed for unknown/health-check endpoints.
-    // The caller explicitly accepts the risk of unvalidated data.
-    return { success: true, data: raw as T };
+    // No validator provided — returns ApiResponse<unknown>.
+    // The caller must not assume a specific data shape.
+    return { success: true, data: raw };
   } catch (err) {
     return {
       success: false,
@@ -147,7 +159,7 @@ async function request<T>(
 }
 
 async function checkAuth(): Promise<boolean> {
-  const result = await request<unknown>("/api/health");
+  const result = await request("/api/health");
   return result.success;
 }
 
@@ -188,7 +200,7 @@ async function fetchPrinciples(): Promise<ApiResponse<PrinciplesListData>> {
 // dedicated validator is added (the page already handles missing fields gracefully).
 // This endpoint is marked legacy/deferred for full validation.
 async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<unknown>> {
-  return request<unknown>(`/api/principles/${encodeURIComponent(principleId)}`);
+  return request(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
