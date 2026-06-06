@@ -64,7 +64,9 @@ describe('recordPainSignalObservability', () => {
       type: 'pain_detected',
       data: {
         painId: 'manual_test_001',
-        taskId: 'diagnosis_manual_test_001',
+        source: 'manual',
+        score: 95,
+        evidenceCount: 0,
       },
     });
 
@@ -170,5 +172,27 @@ describe('recordPainSignalObservability', () => {
     } finally {
       dbRead.close();
     }
+  });
+
+  it('redacts token-like patterns in evolution stream reason', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'token_test_001',
+        painType: 'tool_failure',
+        source: 'tool_failure',
+        reason: 'Tool write failed with token sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 in path',
+        score: 60,
+        sessionId: 's1',
+      },
+    });
+
+    expect(result.warnings).toEqual([]);
+    const evolutionLine = readFileSync(String(result.evolutionStreamPath), 'utf8').trim();
+    const parsed = JSON.parse(evolutionLine);
+    expect(parsed.data.reason).toContain('___REDACTED___');
+    expect(parsed.data.reason).not.toContain('sk-proj-abcdefghijklmnopqrstuvwxyz0123456789');
   });
 });

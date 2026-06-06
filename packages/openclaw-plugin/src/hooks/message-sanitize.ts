@@ -1,4 +1,11 @@
 import type { PluginHookBeforeMessageWriteEvent, PluginHookBeforeMessageWriteResult } from '../openclaw-sdk.js';
+import {
+  sanitizeString as coreSanitizeString,
+  sanitizeValue as coreSanitizeValue,
+  sanitizeToolParams as coreSanitizeToolParams,
+  convergePath,
+  MAX_EVIDENCE_VALUE_CHARS,
+} from '@principles/core/runtime-v2';
 
 const INTERNAL_TAG_PATTERNS = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,
@@ -19,6 +26,41 @@ function isAssistantMessageWithContent(
     (msg as { role?: string }).role === 'assistant' &&
     typeof (msg as { content?: unknown }).content === 'string'
   );
+}
+
+// Re-export core constants and functions for backward compatibility
+export { MAX_EVIDENCE_VALUE_CHARS, convergePath };
+
+/**
+ * Sanitize a single string value for evidence storage.
+ * Delegates to core sanitizer with optional workspaceDir for path convergence.
+ */
+export function sanitizeForEvidence(value: unknown, workspaceDir?: string): string {
+  if (value === null || value === undefined) return '';
+  return coreSanitizeString(String(value), workspaceDir);
+}
+
+/**
+ * Recursively sanitize any value for evidence storage.
+ * Delegates to core sanitizer.
+ */
+export function sanitizeValueForEvidence(value: unknown, workspaceDir?: string): unknown {
+  return coreSanitizeValue(value, 0, workspaceDir);
+}
+
+/**
+ * Sanitize tool-call params for evidence/trajectory storage.
+ * Delegates to core sanitizer — accepts unknown, runtime-validates.
+ *
+ * ERR-001: no `as` casts on input
+ * ERR-055: ANY-segment sensitive field matching
+ * ERR-056: token redaction on ALL strings via recursive sanitizeValue
+ */
+export function sanitizeToolParamsForEvidence(
+  params: unknown,
+  workspaceDir?: string,
+): Record<string, unknown> {
+  return coreSanitizeToolParams(params, workspaceDir);
 }
 
 export function sanitizeAssistantText(text: string): string {
