@@ -1472,3 +1472,18 @@ export type {
   CreateReportResult,
 } from './feedback/index.js';
 
+// Evidence triage — PEAT-B1
+export type {
+  SourceKind,
+  TriageDecision,
+  TriageResult,
+  TriageInput,
+  SourceDescriptor,
+} from './evidence-triage/index.js';
+export {
+  isSourceKind,
+  SOURCE_DESCRIPTORS,
+  getSourceDescriptor,
+  evaluateTriage,
+} from './evidence-triage/index.js';
+

@@ -11,6 +11,8 @@ import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
+import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { resolveSourceKindFromLlmDetection, evaluateEvidenceTriage } from './triage-adapter.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -240,13 +242,27 @@ export function handleLlmOutput(
     // GFI-triggered pain: when accumulated friction crosses highGfi threshold,
     // emit pain signal even if L1 detection didn't fire.
     const highGfiThreshold = Math.max(config.get('severity_thresholds.high') || 70, painTriggerThreshold + 30);
+    let isGfiTriggered = false;
     if (state.currentGfi >= highGfiThreshold && painScore < painTriggerThreshold) {
         painScore = Math.min(state.currentGfi, 60);
         source = 'user_empathy';
+        isGfiTriggered = true;
         matchedReason = `Accumulated GFI (${state.currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Source: empathy keyword friction.`;
     }
 
     if (painScore >= painTriggerThreshold) {
+        // PEAT-B1: Evidence triage (feature-flagged)
+        let shouldDiagnose = true;
+        const llmTriageFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmission');
+        if (llmTriageFlag.enabled) {
+            const sourceKind = resolveSourceKindFromLlmDetection(source, isGfiTriggered);
+            const triage = evaluateEvidenceTriage(sourceKind, painScore);
+            if (triage.decision !== 'admit') {
+                shouldDiagnose = false;
+                ctx.logger?.info?.(`[PD:LLM] Triage ${triage.decision}: ${triage.reason}`);
+            }
+        }
+
         const gate = evaluatePainDiagnosticGate({
             source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
             score: painScore,
@@ -268,7 +284,7 @@ export function handleLlmOutput(
             isRisky: false
         });
 
-        if (gate.shouldDiagnose) {
+        if (shouldDiagnose && gate.shouldDiagnose) {
             const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
             emitPainDetectedEvent(wctx, {
                 ts: new Date().toISOString(),
@@ -286,7 +302,8 @@ export function handleLlmOutput(
                 },
             });
         } else {
-            ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
+            const skipReason = !shouldDiagnose ? 'triage evidence-only' : gate.detail;
+            ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${skipReason}`);
         }
     }
 
