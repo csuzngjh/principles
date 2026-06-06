@@ -14,6 +14,7 @@ const UI_SRC = path.join(PKG_ROOT, "src", "ui");
 let principlesPageSrc: string;
 let principleDetailSrc: string;
 let apiSrc: string;
+let validatorsSrc: string;
 let enJson: Record<string, unknown>;
 let zhJson: Record<string, unknown>;
 
@@ -27,6 +28,7 @@ beforeAll(() => {
     "utf-8",
   );
   apiSrc = fs.readFileSync(path.join(UI_SRC, "api.ts"), "utf-8");
+  validatorsSrc = fs.readFileSync(path.join(UI_SRC, "utils", "validators.ts"), "utf-8");
   enJson = JSON.parse(
     fs.readFileSync(path.join(UI_SRC, "i18n", "en.json"), "utf-8"),
   );
@@ -144,9 +146,10 @@ describe("Approval integration", () => {
   });
 
   it("approval status includes pending/approved/rejected", () => {
-    expect(apiSrc).toMatch(/pending/);
-    expect(apiSrc).toMatch(/approved/);
-    expect(apiSrc).toMatch(/rejected/);
+    const combinedSrc = apiSrc + validatorsSrc;
+    expect(combinedSrc).toMatch(/pending/);
+    expect(combinedSrc).toMatch(/approved/);
+    expect(combinedSrc).toMatch(/rejected/);
   });
 });
 
