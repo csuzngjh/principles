@@ -17,9 +17,9 @@
  * - ERR-055: ANY-segment sensitive field matching, not ALL-segment
  * - ERR-056: token redaction runs on ALL strings, not just truncation
  * - ERR-051: redaction is at persistence output path, not evaluation input path
+ * - EP-08: platform-agnostic path basename — uses split on both `\\` and `/`,
+ *   never relies on nodePath.basename which only splits on the host OS separator.
  */
-
-import * as nodePath from 'path';
 
 // ── Limits ──
 
@@ -31,12 +31,12 @@ const MAX_ARRAY_ITEMS = 20;
 // ── Token patterns ──
 
 const TOKEN_LIKE_PATTERNS: RegExp[] = [
-  /[A-Za-z0-9+/=]{40,}/g,          // ≥40 base64-like or hex tokens
-  /sk-[A-Za-z0-9_-]{20,}/g,        // OpenAI-style secret keys
-  /ghp_[A-Za-z0-9]{36,}/g,         // GitHub PATs
-  /gho_[A-Za-z0-9]{36,}/g,         // GitHub OAuth tokens
-  /xox[bpras]-[A-Za-z0-9-]{20,}/g, // Slack tokens
-  /eyJ[A-Za-z0-9_-]{20,}\./g,     // JWT-like tokens
+  /[A-Za-z0-9+/=]{40,}/g,
+  /sk-[A-Za-z0-9_-]{20,}/g,
+  /ghp_[A-Za-z0-9]{36,}/g,
+  /gho_[A-Za-z0-9]{36,}/g,
+  /xox[bpras]-[A-Za-z0-9-]{20,}/g,
+  /eyJ[A-Za-z0-9_-]{20,}\./g,
 ];
 
 // ── PD tag patterns ──
@@ -54,11 +54,7 @@ const WINDOWS_DRIVE_RE = /^[A-Za-z]:\\/;
 
 /**
  * Matches absolute paths embedded anywhere inside a string.
- * - Windows: D:\foo\bar or D:/foo/bar (drive letter + colon + separator + at least 1 segment)
- * - POSIX: /foo/bar (root-absolute, at least 2 segments)
- * - UNC: \\server\share\path
- *
- * Uses word-boundary-like anchors: path starts after whitespace, quote, equals, or string start.
+ * Windows drive, POSIX root, UNC paths.
  */
 const ABSOLUTE_PATH_IN_STRING_RE =
   /(?:^|[\s"'=])([A-Za-z]:\\[^\s"'&|<>]+|[A-Za-z]:\/[^\s"'&|<>]+|\\\\[^\s"'&|<>]+|(?:\/[\w.-]+){2,}(?:\/[^\s"'&|<>]*)?)/gm;
@@ -70,9 +66,22 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Platform-agnostic basename that handles both `\` and `/` separators.
+ *
+ * EP-08: nodePath.basename on Linux does not split on backslash.
+ * This helper splits on both separator families so that Windows paths
+ * like `D:\Code\principles` produce `principles` even when running on
+ * a POSIX CI runner.
+ */
+function platformAgnosticBasename(p: string): string {
+  const parts = p.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+/**
  * Converges a single absolute path to a safe representation.
  * - Under workspaceDir → repo-relative
- * - Other absolute → basename only
+ * - Other absolute → basename only (platform-agnostic)
  * - Relative paths → kept as-is
  */
 export function convergePath(value: string, workspaceDir?: string): string {
@@ -88,27 +97,25 @@ export function convergePath(value: string, workspaceDir?: string): string {
       : (a: string, b: string) => a === b;
     if (compare(normalizedValue.slice(0, normalizedWorkspace.length), normalizedWorkspace)) {
       const relative = normalizedValue.slice(normalizedWorkspace.length).replace(/^[/\\]/, '');
-      return relative || nodePath.basename(value);
+      return relative || platformAgnosticBasename(value);
     }
   }
 
   // Absolute, not under workspace → basename
-  return nodePath.basename(value);
+  return platformAgnosticBasename(value);
 }
 
 /**
  * Replace absolute paths embedded inside a longer string.
- * e.g. "cd D:\Code\principles && git status" → "cd principles && git status"
- * e.g. "error in /home/user/project/src/file.ts" → "error in file.ts"
+ * e.g. "cd D:\Code\principles && git status" → "cd <path:principles> && git status"
+ * e.g. "error in /home/user/project/src/file.ts" → "error in <path:file.ts>"
  */
 function replacePathsInString(value: string, workspaceDir?: string): string {
   return value.replace(ABSOLUTE_PATH_IN_STRING_RE, (fullMatch, capturedPath: string) => {
-    // Preserve the leading separator (space, quote, etc.) that preceded the path
     const leading = fullMatch.slice(0, fullMatch.length - capturedPath.length);
     const converged = convergePath(capturedPath, workspaceDir);
-    // Wrap in angle brackets if it was an outside-workspace absolute path that became a basename,
-    // to distinguish from normal words
-    if (ABSOLUTE_PATH_RE.test(capturedPath) && converged === nodePath.basename(capturedPath)) {
+    // Wrap outside-workspace absolute paths in angle brackets
+    if (ABSOLUTE_PATH_RE.test(capturedPath) && converged === platformAgnosticBasename(capturedPath)) {
       return `${leading}<path:${converged}>`;
     }
     return `${leading}${converged}`;
@@ -167,17 +174,11 @@ export function sanitizeValue(
   depth = 0,
   workspaceDir?: string,
 ): unknown {
-  // Depth guard
   if (depth > MAX_DEPTH) return '<max-depth>';
-
-  // Null/undefined
   if (value === null || value === undefined) return value;
-
-  // Primitives
   if (typeof value === 'string') return sanitizeString(value, workspaceDir);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
 
-  // Arrays
   if (Array.isArray(value)) {
     const items = value.slice(0, MAX_ARRAY_ITEMS);
     const mapped = items.map((item) => sanitizeValue(item, depth + 1, workspaceDir));
@@ -187,7 +188,7 @@ export function sanitizeValue(
     return mapped;
   }
 
-  // Objects — ERR-001: runtime guard instead of `as Record`
+  // ERR-001: runtime guard instead of `as Record`
   if (isPlainRecord(value)) {
     const result: Record<string, unknown> = {};
     let count = 0;
@@ -202,7 +203,6 @@ export function sanitizeValue(
     return result;
   }
 
-  // Functions, symbols, etc.
   return '<unsupported-type>';
 }
 
@@ -212,15 +212,11 @@ export function sanitizeValue(
  * ERR-001: accepts `unknown`, not `Record<string, unknown>`. Runtime guards only.
  * ERR-055: ANY-segment sensitive field matching.
  * ERR-056: token redaction runs on ALL strings via sanitizeValue recursion.
- *
- * @param params - raw tool params (any shape)
- * @param workspaceDir - optional workspace root for path convergence
  */
 export function sanitizeToolParams(
   params: unknown,
   workspaceDir?: string,
 ): Record<string, unknown> {
-  // ERR-001: runtime validate before any iteration
   if (params === null || params === undefined) {
     return {};
   }
@@ -235,17 +231,14 @@ export function sanitizeToolParams(
 
   if (Array.isArray(params)) {
     const sanitized = sanitizeValue(params, 0, workspaceDir);
-    // ERR-001: runtime guard on return — sanitizeValue returns unknown[] for arrays
     if (Array.isArray(sanitized)) {
       return { '<array-input>': sanitized.join(', ').slice(0, MAX_EVIDENCE_VALUE_CHARS) };
     }
     return { '<array-input>': '<sanitization-error>' };
   }
 
-  // Object — ERR-001: isPlainRecord guard
   if (isPlainRecord(params)) {
     const sanitized = sanitizeValue(params, 0, workspaceDir);
-    // ERR-001: runtime guard on return
     if (isPlainRecord(sanitized)) {
       return sanitized;
     }
