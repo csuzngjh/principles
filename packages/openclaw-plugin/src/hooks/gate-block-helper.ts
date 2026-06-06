@@ -10,6 +10,7 @@
  * had their own block persistence implementations.
  */
 
+import * as fs from 'fs';
 import { getSession, trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
@@ -17,6 +18,8 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { isRisky } from '../utils/io.js';
+import { normalizeProfile } from '../core/profile.js';
 import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
@@ -120,8 +123,17 @@ export function recordGateBlockAndReturn(
     let triageAdmitted = true;
     const gateBlockTriageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
     if (gateBlockTriageFlag.enabled) {
+      const profilePath = wctx.resolve('PROFILE');
+      const profile = fs.existsSync(profilePath)
+        ? normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')))
+        : normalizeProfile({});
+      // Real judgment for rulehost blocks: if a principle blocked an action on a risky path,
+      // it IS a high-confidence unsafe action. The pain score (45) is the evidence friction
+      // weight, NOT the action risk severity. The rulehost principle already determined
+      // this action was important enough to block — that is the real signal.
+      const isUnsafe = isRisky(filePath, profile.risk_paths);
       const triage = evaluateEvidenceTriage('rulehost_block', GATE_BLOCK_PAIN_SCORE, {
-        isUnsafeHighConfidence: false,
+        isUnsafeHighConfidence: isUnsafe,
       });
       if (triage.decision !== 'admit') {
         triageAdmitted = false;

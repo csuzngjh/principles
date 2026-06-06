@@ -162,3 +162,99 @@ describe('isHighConfidenceUnsafeAction', () => {
     expect(isHighConfidenceUnsafeAction(90, false)).toBe(false);
   });
 });
+
+// ── Evidence-Only Cooldown Contract ──────────────────────────────────────────
+//
+// Core contract: when triage returns evidence_only/owner_confirm/health_only,
+// the caller (hook) MUST NOT proceed to evaluatePainDiagnosticGate, which writes
+// cooldown. These tests verify the adapter-level guarantee: non-admit decisions
+// are surfaced clearly with the right nextAction, so the caller can distinguish
+// evidence-only from admit.
+
+describe('evidence-only cooldown contract', () => {
+  it('tool_failure returns evidence_only — no admit, caller must skip gate', () => {
+    const result = evaluateEvidenceTriage('tool_failure', 70);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+    expect(result.nextAction).toContain('evidence');
+  });
+
+  it('dispatch_error returns evidence_only — no admit', () => {
+    const result = evaluateEvidenceTriage('dispatch_error', 50);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('semantic (LLM detection) returns evidence_only — no admit', () => {
+    const result = evaluateEvidenceTriage('semantic', 55);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('llm_paralysis returns evidence_only — no admit', () => {
+    const result = evaluateEvidenceTriage('llm_paralysis', 40);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('gfi_threshold returns evidence_only — no admit', () => {
+    const result = evaluateEvidenceTriage('gfi_threshold', 70);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('empathy_inferred returns owner_confirm — no admit', () => {
+    const result = evaluateEvidenceTriage('empathy_inferred', 80);
+    expect(result.decision).toBe('owner_confirm');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('provider_failure returns health_only — no admit', () => {
+    const result = evaluateEvidenceTriage('provider_failure', 60);
+    expect(result.decision).toBe('health_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('rulehost_block WITHOUT isUnsafeHighConfidence returns evidence_only — no admit', () => {
+    const result = evaluateEvidenceTriage('rulehost_block', 45);
+    expect(result.decision).toBe('evidence_only');
+    expect(result.decision).not.toBe('admit');
+  });
+
+  it('rulehost_block WITH isUnsafeHighConfidence=true upgrades to admit', () => {
+    // This is the ONLY path where rulehost_block reaches the gate
+    const result = evaluateEvidenceTriage('rulehost_block', 80, { isUnsafeHighConfidence: true });
+    expect(result.decision).toBe('admit');
+    expect(result.reason).toContain('unsafe');
+  });
+
+  it('every LLM-typical source kind produces non-admit decision (cooldown-safe)', () => {
+    // These are the source kinds that handleLlmOutput produces
+    const llmSources = [
+      { kind: 'semantic' as const, score: 55 },
+      { kind: 'llm_paralysis' as const, score: 40 },
+      { kind: 'gfi_threshold' as const, score: 70 },
+      { kind: 'empathy_inferred' as const, score: 80 },
+    ];
+    for (const { kind, score } of llmSources) {
+      const result = evaluateEvidenceTriage(kind, score);
+      expect(result.decision).not.toBe('admit');
+      expect(result.reason).toBeTruthy();
+      expect(result.nextAction).toBeTruthy();
+    }
+  });
+
+  it('every after_tool_call-typical source kind produces non-admit decision (cooldown-safe)', () => {
+    // These are the source kinds that handleAfterToolCall produces
+    const toolSources = [
+      { kind: 'tool_failure' as const, score: 70 },
+      { kind: 'dispatch_error' as const, score: 50 },
+    ];
+    for (const { kind, score } of toolSources) {
+      const result = evaluateEvidenceTriage(kind, score);
+      expect(result.decision).not.toBe('admit');
+      expect(result.reason).toBeTruthy();
+      expect(result.nextAction).toBeTruthy();
+    }
+  });
+});

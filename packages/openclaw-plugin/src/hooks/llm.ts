@@ -252,30 +252,16 @@ export function handleLlmOutput(
 
     if (painScore >= painTriggerThreshold) {
         // PEAT-B1: Evidence triage (feature-flagged)
-        let shouldDiagnose = true;
+        let triageAdmitted = true;
         const llmTriageFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmission');
         if (llmTriageFlag.enabled) {
             const sourceKind = resolveSourceKindFromLlmDetection(source, isGfiTriggered);
             const triage = evaluateEvidenceTriage(sourceKind, painScore);
             if (triage.decision !== 'admit') {
-                shouldDiagnose = false;
+                triageAdmitted = false;
                 ctx.logger?.info?.(`[PD:LLM] Triage ${triage.decision}: ${triage.reason}`);
             }
         }
-
-        const gate = evaluatePainDiagnosticGate({
-            source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
-            score: painScore,
-            currentGfi: state.currentGfi,
-            consecutiveErrors: state.consecutiveErrors,
-            sessionId: ctx.sessionId || 'unknown',
-            errorHash: source,
-            thresholds: {
-                painTrigger: painTriggerThreshold,
-                highSeverity: config.get('severity_thresholds.high') || 70,
-                semanticPain: Math.max(painTriggerThreshold, 60),
-            },
-        });
 
         eventLog.recordPainSignal(ctx.sessionId, {
             score: painScore,
@@ -284,26 +270,43 @@ export function handleLlmOutput(
             isRisky: false
         });
 
-        if (shouldDiagnose && gate.shouldDiagnose) {
-            const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
-            emitPainDetectedEvent(wctx, {
-                ts: new Date().toISOString(),
-                type: 'pain_detected',
-                data: {
-                    painId: `llm_${Date.now()}`,
-                    painType: 'user_frustration' as const,
-                    source,
-                    reason: `${matchedReason}; diagnosticGate=${gate.reason}`,
-                    score: painScore,
-                    sessionId: ctx.sessionId || 'unknown',
-                    agentId: ctx.agentId,
-                    provenance: 'openclaw_context_bound',
-                    evidence,
+        if (triageAdmitted) {
+            const gate = evaluatePainDiagnosticGate({
+                source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
+                score: painScore,
+                currentGfi: state.currentGfi,
+                consecutiveErrors: state.consecutiveErrors,
+                sessionId: ctx.sessionId || 'unknown',
+                errorHash: source,
+                thresholds: {
+                    painTrigger: painTriggerThreshold,
+                    highSeverity: config.get('severity_thresholds.high') || 70,
+                    semanticPain: Math.max(painTriggerThreshold, 60),
                 },
             });
+
+            if (gate.shouldDiagnose) {
+                const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
+                emitPainDetectedEvent(wctx, {
+                    ts: new Date().toISOString(),
+                    type: 'pain_detected',
+                    data: {
+                        painId: `llm_${Date.now()}`,
+                        painType: 'user_frustration' as const,
+                        source,
+                        reason: `${matchedReason}; diagnosticGate=${gate.reason}`,
+                        score: painScore,
+                        sessionId: ctx.sessionId || 'unknown',
+                        agentId: ctx.agentId,
+                        provenance: 'openclaw_context_bound',
+                        evidence,
+                    },
+                });
+            } else {
+                ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
+            }
         } else {
-            const skipReason = !shouldDiagnose ? 'triage evidence-only' : gate.detail;
-            ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${skipReason}`);
+            ctx.logger?.info?.(`[PD:LLM] Triage evidence-only: pain signal recorded without diagnosis or gate evaluation`);
         }
     }
 
