@@ -20,7 +20,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateUpdateStatusData(raw: unknown): UpdateStatusData | null {
+export function validateUpdateStatusData(raw: unknown): UpdateStatusData | null {
   if (!isRecord(raw)) return null;
   if (
     !Object.hasOwn(raw, "currentVersion") ||
@@ -45,7 +45,7 @@ function validateUpdateStatusData(raw: unknown): UpdateStatusData | null {
   return { currentVersion, latestVersion, updateAvailable, lastChecked };
 }
 
-function validateUpdateHistoryEntry(raw: unknown): UpdateHistoryEntry | null {
+export function validateUpdateHistoryEntry(raw: unknown): UpdateHistoryEntry | null {
   if (!isRecord(raw)) return null;
   if (
     !Object.hasOwn(raw, "version") ||
@@ -67,7 +67,7 @@ function validateUpdateHistoryEntry(raw: unknown): UpdateHistoryEntry | null {
   return { version, appliedAt, notes };
 }
 
-function validateUpdateHistoryData(raw: unknown): UpdateHistoryData | null {
+export function validateUpdateHistoryData(raw: unknown): UpdateHistoryData | null {
   if (!isRecord(raw)) return null;
   if (!Object.hasOwn(raw, "updates")) {
     return null;

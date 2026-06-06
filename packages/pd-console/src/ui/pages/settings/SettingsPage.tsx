@@ -20,7 +20,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateWorkspaceEntry(raw: unknown): WorkspaceEntry | null {
+export function validateWorkspaceEntry(raw: unknown): WorkspaceEntry | null {
   if (!isRecord(raw)) return null;
   if (
     !Object.hasOwn(raw, "name") ||
@@ -76,7 +76,7 @@ function validateWorkspaceEntry(raw: unknown): WorkspaceEntry | null {
   return { name, path, lastSync, config };
 }
 
-function validateWorkspaceArray(raw: unknown): WorkspaceEntry[] | null {
+export function validateWorkspaceArray(raw: unknown): WorkspaceEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const entries: WorkspaceEntry[] = [];
   for (const item of raw) {

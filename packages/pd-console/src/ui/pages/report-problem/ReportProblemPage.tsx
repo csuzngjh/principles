@@ -52,9 +52,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateDraftsList(raw: unknown): FeedbackDraftSummary[] {
-  if (!isRecord(raw)) return [];
-  if (!Object.hasOwn(raw, "drafts") || !Array.isArray(raw.drafts)) return [];
+type DraftsListResult =
+  | { ok: true; drafts: FeedbackDraftSummary[] }
+  | { ok: false; reason: string };
+
+function validateDraftsList(raw: unknown): DraftsListResult {
+  if (!isRecord(raw)) {
+    return { ok: false, reason: "Drafts list response is not an object" };
+  }
+  if (!Object.hasOwn(raw, "drafts")) {
+    return { ok: false, reason: "Drafts list response missing 'drafts' field" };
+  }
+  if (!Array.isArray(raw.drafts)) {
+    return { ok: false, reason: "Drafts list 'drafts' field is not an array" };
+  }
   const result: FeedbackDraftSummary[] = [];
   for (const item of raw.drafts) {
     const parsed = parseDraftSummary(item);
@@ -62,7 +73,7 @@ function validateDraftsList(raw: unknown): FeedbackDraftSummary[] {
       result.push(parsed);
     }
   }
-  return result;
+  return { ok: true, drafts: result };
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -309,7 +320,14 @@ export function ReportProblemPage() {
       return;
     }
     const validated = validateDraftsList(result.data);
-    setDrafts(validated);
+    if (!validated.ok) {
+      setLoadError(validated.reason);
+      setDrafts([]);
+      setLoadingState("loaded");
+      return;
+    }
+    setDrafts(validated.drafts);
+    setLoadError(null);
     setLoadingState("loaded");
   }, []);
 
@@ -680,6 +698,12 @@ export function ReportProblemPage() {
       )}
 
       {/* Section 3: Saved Drafts */}
+      {loadError && (
+        <div className="mt-4 p-3 bg-panel border border-amber/20 rounded-[6px] text-ink-2 text-[13px]">
+          <p>{t("pages.reportProblem.loadError")}</p>
+          <p className="mt-1 text-ink-4 text-[12px] font-mono">{loadError}</p>
+        </div>
+      )}
       <SavedDraftsSection
         drafts={drafts}
         onLoad={handleLoadDraft}

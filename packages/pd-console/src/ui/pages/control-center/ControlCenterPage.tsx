@@ -27,15 +27,14 @@ import type { ControlCenterDiagnostics } from "../../utils/control-center-helper
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
-const VALID_READINESS_STATUSES = new Set<string>([
-  "ready",
-  "not_ready",
-  "needs_setup",
-  "disabled",
-  "unknown",
-]);
-
-const VALID_SOURCES = new Set<string>(["defaults", "user_config"]);
+function validateSource(raw: unknown): "defaults" | "user_config" | null {
+  if (typeof raw !== "string") return null;
+  switch (raw) {
+    case "defaults": return "defaults";
+    case "user_config": return "user_config";
+    default: return null;
+  }
+}
 
 /** Type guard: is this a non-null object with own properties (not inherited)? */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,8 +42,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validateReadinessStatus(raw: unknown): ReadinessStatus | null {
-  if (typeof raw !== "string" || !VALID_READINESS_STATUSES.has(raw)) return null;
-  return raw as ReadinessStatus;
+  if (typeof raw !== "string") return null;
+  switch (raw) {
+    case "ready": return "ready";
+    case "not_ready": return "not_ready";
+    case "needs_setup": return "needs_setup";
+    case "disabled": return "disabled";
+    case "unknown": return "unknown";
+    default: return null;
+  }
 }
 
 function validateRedactedFeatureSummary(
@@ -189,7 +195,7 @@ function validateConfigSummaryData(
   if (
     typeof version !== "number" ||
     typeof source !== "string" ||
-    !VALID_SOURCES.has(source) ||
+    validateSource(source) === null ||
     !Array.isArray(features) ||
     !Array.isArray(runtimeProfiles) ||
     typeof defaultRuntime !== "string" ||
@@ -203,12 +209,15 @@ function validateConfigSummaryData(
   // Validate ui.diagnostics (ERR-009)
   if (
     !Object.hasOwn(ui, "diagnostics") ||
-    !isRecord(ui.diagnostics) ||
-    !Object.hasOwn(ui.diagnostics, "mode") ||
-    typeof (ui.diagnostics as Record<string, unknown>).mode !== "string"
+    !isRecord(ui.diagnostics)
   ) {
     return null;
   }
+  const uiDiag = ui.diagnostics;
+  if (!Object.hasOwn(uiDiag, "mode") || typeof uiDiag.mode !== "string") {
+    return null;
+  }
+  const uiDiagMode: string = uiDiag.mode;
 
   // Validate features array elements (ERR-005/ERR-007)
   const validatedFeatures: RedactedFeatureSummary[] = [];
@@ -255,16 +264,19 @@ function validateConfigSummaryData(
     }
   }
 
+  const validatedSource = validateSource(source);
+  if (validatedSource === null) return null;
+
   return {
     version,
-    source: source as "defaults" | "user_config",
+    source: validatedSource,
     features: validatedFeatures,
     runtimeProfiles: validatedProfiles,
     defaultRuntime,
     agents: validatedAgents,
     ui: {
       diagnostics: {
-        mode: (ui.diagnostics as Record<string, unknown>).mode as string,
+        mode: uiDiagMode,
       },
     },
     warnings: validatedWarnings,
@@ -646,13 +658,15 @@ function AdvancedDiagnostics({
             {t("pages.controlCenter.readinessLabel")}
           </h3>
           <div className="bg-surface/60 border border-line rounded-[6px] px-3 py-2 space-y-2">
-            {(Object.keys(grouped) as ReadinessStatus[]).map((status) => {
-              const agentsInGroup = grouped[status];
+            {Object.keys(grouped).map((status) => {
+              const validatedStatus = validateReadinessStatus(status);
+              if (validatedStatus === null) return null;
+              const agentsInGroup = grouped[validatedStatus];
               if (agentsInGroup.length === 0) return null;
               return (
-                <div key={status} className="flex items-center gap-2">
-                  <span className={readinessTagClasses(status)}>
-                    {getReadinessLabel(status)}
+                <div key={validatedStatus} className="flex items-center gap-2">
+                  <span className={readinessTagClasses(validatedStatus)}>
+                    {getReadinessLabel(validatedStatus)}
                   </span>
                   <span className="text-ink-3 text-[13px]">
                     {agentsInGroup.map((a) => a.name).join(", ")}

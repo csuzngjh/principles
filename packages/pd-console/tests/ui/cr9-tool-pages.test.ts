@@ -303,42 +303,13 @@ describe("CR9: tool page components can be imported", () => {
   });
 });
 
-// ── Runtime validator tests ───────────────────────────────────────────────────
+// ── Runtime validator tests (production imports, not re-implementations) ──────
+
+import { validateUpdateStatusData, validateUpdateHistoryEntry, validateUpdateHistoryData } from "../../src/ui/pages/settings/UpdatePage.js";
+import { validateWorkspaceEntry, validateWorkspaceArray } from "../../src/ui/pages/settings/SettingsPage.js";
+import { parseDraftSummary, parseDraftRecord } from "../../src/ui/pages/ReportProblemValidators.js";
 
 describe("CR9: runtime validators for tool pages", () => {
-  // Re-implement validators to test logic directly
-  // (same pattern as focus-page.test.ts)
-
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
-
-  // Update page validators
-  function validateUpdateStatusData(raw: unknown): { currentVersion: string; latestVersion: string; updateAvailable: boolean; lastChecked: string } | null {
-    if (!isRecord(raw)) return null;
-    if (!Object.hasOwn(raw, "currentVersion") || !Object.hasOwn(raw, "latestVersion") || !Object.hasOwn(raw, "updateAvailable") || !Object.hasOwn(raw, "lastChecked")) return null;
-    const { currentVersion, latestVersion, updateAvailable, lastChecked } = raw;
-    if (typeof currentVersion !== "string" || typeof latestVersion !== "string" || typeof updateAvailable !== "boolean" || typeof lastChecked !== "string") return null;
-    return { currentVersion, latestVersion, updateAvailable, lastChecked };
-  }
-
-  function validateUpdateHistoryEntry(raw: unknown): { version: string; appliedAt: string; notes: string } | null {
-    if (!isRecord(raw)) return null;
-    if (!Object.hasOwn(raw, "version") || !Object.hasOwn(raw, "appliedAt") || !Object.hasOwn(raw, "notes")) return null;
-    const { version, appliedAt, notes } = raw;
-    if (typeof version !== "string" || typeof appliedAt !== "string" || typeof notes !== "string") return null;
-    return { version, appliedAt, notes };
-  }
-
-  // Settings page validators
-  function validateWorkspaceEntry(raw: unknown): { name: string; path: string; lastSync: string | null } | null {
-    if (!isRecord(raw)) return null;
-    if (!Object.hasOwn(raw, "name") || !Object.hasOwn(raw, "path") || !Object.hasOwn(raw, "lastSync")) return null;
-    const { name, path, lastSync } = raw;
-    if (typeof name !== "string" || name.length === 0 || typeof path !== "string" || path.length === 0) return null;
-    if (lastSync !== null && typeof lastSync !== "string") return null;
-    return { name, path, lastSync: lastSync as string | null };
-  }
 
   describe("validateUpdateStatusData", () => {
     it("accepts valid data", () => {
@@ -369,15 +340,42 @@ describe("CR9: runtime validators for tool pages", () => {
     it("rejects wrong types", () => expect(validateUpdateHistoryEntry({ version: 1, appliedAt: "2026", notes: "" })).toBeNull());
   });
 
+  describe("validateUpdateHistoryData", () => {
+    it("accepts valid data", () => {
+      const result = validateUpdateHistoryData({ updates: [{ version: "1.0.0", appliedAt: "2026-06-01", notes: "Initial" }] });
+      expect(result).not.toBeNull();
+      expect(result!.updates).toHaveLength(1);
+    });
+
+    it("rejects null", () => expect(validateUpdateHistoryData(null)).toBeNull());
+    it("rejects missing updates field", () => expect(validateUpdateHistoryData({})).toBeNull());
+    it("rejects non-array updates", () => expect(validateUpdateHistoryData({ updates: "not-array" })).toBeNull());
+    it("rejects invalid entry in updates array", () => expect(validateUpdateHistoryData({ updates: [{ version: 1 }] })).toBeNull());
+  });
+
   describe("validateWorkspaceEntry", () => {
     it("accepts valid data with lastSync", () => {
       const result = validateWorkspaceEntry({ name: "ws1", path: "/path/to/ws", lastSync: "2026-06-01" });
-      expect(result).toEqual({ name: "ws1", path: "/path/to/ws", lastSync: "2026-06-01" });
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("ws1");
+      expect(result!.path).toBe("/path/to/ws");
+      expect(result!.lastSync).toBe("2026-06-01");
     });
 
     it("accepts valid data with null lastSync", () => {
       const result = validateWorkspaceEntry({ name: "ws1", path: "/path/to/ws", lastSync: null });
-      expect(result).toEqual({ name: "ws1", path: "/path/to/ws", lastSync: null });
+      expect(result).not.toBeNull();
+      expect(result!.lastSync).toBeNull();
+    });
+
+    it("accepts valid data with config", () => {
+      const result = validateWorkspaceEntry({
+        name: "ws1", path: "/path", lastSync: null,
+        config: { workspaceName: "ws1", enabled: true, syncEnabled: false },
+      });
+      expect(result).not.toBeNull();
+      expect(result!.config).not.toBeNull();
+      expect(result!.config!.workspaceName).toBe("ws1");
     });
 
     it("rejects null", () => expect(validateWorkspaceEntry(null)).toBeNull());
@@ -389,6 +387,65 @@ describe("CR9: runtime validators for tool pages", () => {
       obj.path = "/path";
       obj.lastSync = null;
       expect(validateWorkspaceEntry(obj)).toBeNull();
+    });
+  });
+
+  describe("validateWorkspaceArray", () => {
+    it("accepts valid array", () => {
+      const result = validateWorkspaceArray([{ name: "ws1", path: "/p", lastSync: null }]);
+      expect(result).not.toBeNull();
+      expect(result!).toHaveLength(1);
+    });
+
+    it("rejects null", () => expect(validateWorkspaceArray(null)).toBeNull());
+    it("rejects non-array", () => expect(validateWorkspaceArray("not-array")).toBeNull());
+    it("rejects array with invalid entry", () => expect(validateWorkspaceArray([{ name: "" }])).toBeNull());
+  });
+
+  describe("parseDraftSummary", () => {
+    it("accepts valid data", () => {
+      const result = parseDraftSummary({ id: "abc", createdAt: "2026-06-01", type: "bug", title: "Test" });
+      expect(result).toEqual({ id: "abc", createdAt: "2026-06-01", type: "bug", title: "Test" });
+    });
+
+    it("rejects null", () => expect(parseDraftSummary(null)).toBeNull());
+    it("rejects missing fields", () => expect(parseDraftSummary({ id: "abc" })).toBeNull());
+    it("rejects wrong types", () => expect(parseDraftSummary({ id: 1, createdAt: "2026", type: "bug", title: "T" })).toBeNull());
+  });
+
+  describe("parseDraftRecord", () => {
+    const validRecord = {
+      id: "r1",
+      createdAt: "2026-06-01",
+      type: "bug" as const,
+      title: "A bug",
+      userText: { description: "Something broke" },
+      diagnosticSummary: {},
+      privacy: { includedSections: ["versions"], excludedByDefault: ["secrets"], redactionNotes: [] },
+      outputs: { markdown: "# Bug", emailText: "email", githubIssueUrl: "https://github.com/issue/1" },
+    };
+
+    it("accepts valid data", () => {
+      const result = parseDraftRecord(validRecord);
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe("r1");
+      expect(result!.type).toBe("bug");
+      expect(result!.outputs.markdown).toBe("# Bug");
+    });
+
+    it("rejects null", () => expect(parseDraftRecord(null)).toBeNull());
+    it("rejects missing required fields", () => expect(parseDraftRecord({ id: "r1" })).toBeNull());
+    it("rejects invalid type value", () => {
+      const result = parseDraftRecord({ ...validRecord, type: "invalid_type" });
+      expect(result).toBeNull();
+    });
+    it("rejects missing outputs fields", () => {
+      const result = parseDraftRecord({ ...validRecord, outputs: { markdown: "# Bug" } });
+      expect(result).toBeNull();
+    });
+    it("rejects missing privacy array fields", () => {
+      const result = parseDraftRecord({ ...validRecord, privacy: { includedSections: [123], excludedByDefault: [], redactionNotes: [] } });
+      expect(result).toBeNull();
     });
   });
 });
