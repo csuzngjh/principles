@@ -149,8 +149,7 @@ export class ApprovalsConsoleModel {
 
     // If activation failed, roll back approval to pending so the user can retry.
     if (activation && !isActivationSuccess(activation)) {
-      const reason = 'decision' in activation ? activation.decision : 'unknown';
-      const detail = activation.decision === 'refused' ? activation.reason : reason;
+      const detail = 'reason' in activation ? activation.reason : activation.decision;
       let approvalRolledBack = false;
       try {
         const rollbackResult = await this.getWriteQueue().resetToPending(approvalId);
