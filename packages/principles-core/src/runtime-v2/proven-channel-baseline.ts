@@ -227,6 +227,13 @@ function makeInMemoryApprovalQueueStore(): ApprovalQueueStore {
       r.rejectionReason = reason;
       return { ok: true, record: r };
     },
+    resetToPending: async (id: string) => {
+      const r = records.get(id);
+      if (!r) return { ok: false, error: 'not_found' as const };
+      if (r.status !== 'approved') return { ok: false, error: 'not_approved' as const };
+      r.status = 'pending'; r.decidedAt = undefined; r.decidedBy = undefined; r.decisionNote = undefined;
+      return { ok: true };
+    },
   };
 }
 

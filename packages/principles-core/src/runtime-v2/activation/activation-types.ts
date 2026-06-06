@@ -198,6 +198,8 @@ export interface ApprovalQueueStore {
   countByStatus(): Promise<ApprovalStats>;
   approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult>;
   reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
+  /** Roll back an approved approval to pending so it can be re-approved. Used when post-approval activation dispatch fails. */
+  resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }>;
 }
 
 export function makeIdempotencyKey(artifactId: string, channel: InternalizationChannel): string {

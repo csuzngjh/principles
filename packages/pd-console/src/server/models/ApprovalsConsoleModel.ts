@@ -30,6 +30,10 @@ function isMissingTableError(err: unknown): boolean {
   return err.message.includes('no such table');
 }
 
+function isActivationSuccess(activation: ActivationDecision): boolean {
+  return activation.decision === 'activated' || activation.decision === 'already_activated';
+}
+
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
@@ -37,7 +41,8 @@ export type ApproveWithActivationResult =
   | { ok: true; record: ApprovalRecord; activation?: ActivationDecision }
   | { ok: false; error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
-  | { ok: false; error: 'unsupported_channel'; channel: string };
+  | { ok: false; error: 'unsupported_channel'; channel: string }
+  | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean };
 
 function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
@@ -141,6 +146,18 @@ export class ApprovalsConsoleModel {
     }
 
     const activation = await this.dispatchActivationAfterApproval(existing, decidedBy);
+
+    // If activation failed, roll back approval to pending so the user can retry.
+    if (activation && !isActivationSuccess(activation)) {
+      const reason = 'decision' in activation ? activation.decision : 'unknown';
+      const detail = activation.decision === 'refused' ? activation.reason : reason;
+      let approvalRolledBack = false;
+      try {
+        const rollbackResult = await this.getWriteQueue().resetToPending(approvalId);
+        approvalRolledBack = rollbackResult.ok;
+      } catch { /* best-effort rollback */ }
+      return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack };
+    }
 
     return { ok: true, record: approvalResult.record, activation };
   }
