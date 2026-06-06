@@ -16,18 +16,32 @@ import { describe, it, expect } from "vitest";
 // ── i18n copy validation ──────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const enJson = require("../../src/ui/i18n/en.json") as Record<string, unknown>;
+const enJsonUnknown: unknown = require("../../src/ui/i18n/en.json");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const zhJson = require("../../src/ui/i18n/zh-CN.json") as Record<string, unknown>;
+const zhJsonUnknown: unknown = require("../../src/ui/i18n/zh-CN.json");
 
-const enPages = enJson.pages as Record<string, unknown>;
-const zhPages = zhJson.pages as Record<string, unknown>;
+/** Runtime guard: assert value is a non-null object with own properties (EP-01 / ERR-001/013) */
+function expectRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be a non-null object, got ${typeof value}`);
+  }
+  return value;
+}
+
+const enJson = expectRecord(enJsonUnknown, "enJson");
+const zhJson = expectRecord(zhJsonUnknown, "zhJson");
+
+if (!Object.hasOwn(enJson, "pages")) throw new Error("enJson must contain 'pages'");
+if (!Object.hasOwn(zhJson, "pages")) throw new Error("zhJson must contain 'pages'");
+
+const enPages = expectRecord(enJson.pages, "enJson.pages");
+const zhPages = expectRecord(zhJson.pages, "zhJson.pages");
 
 // ── Control Center: "配置就绪" semantics ──────────────────────────────────────
 
 describe("CR9 Control Center: config readiness semantics", () => {
-  const enCC = enPages.controlCenter as Record<string, unknown>;
-  const zhCC = zhPages.controlCenter as Record<string, unknown>;
+  const enCC = expectRecord(enPages.controlCenter, "enPages.controlCenter");
+  const zhCC = expectRecord(zhPages.controlCenter, "zhPages.controlCenter");
 
   it("has i18n keys for controlCenter in both locales", () => {
     expect(enCC).toBeDefined();
@@ -93,8 +107,8 @@ describe("CR9 Control Center: config readiness semantics", () => {
 // ── Feedback: privacy boundary and no-auto-upload ─────────────────────────────
 
 describe("CR9 Feedback: privacy boundary and no-auto-upload", () => {
-  const enRP = enPages.reportProblem as Record<string, unknown>;
-  const zhRP = zhPages.reportProblem as Record<string, unknown>;
+  const enRP = expectRecord(enPages.reportProblem, "enPages.reportProblem");
+  const zhRP = expectRecord(zhPages.reportProblem, "zhPages.reportProblem");
 
   it("has i18n keys for reportProblem in both locales", () => {
     expect(enRP).toBeDefined();
@@ -104,18 +118,18 @@ describe("CR9 Feedback: privacy boundary and no-auto-upload", () => {
   it("has noAutoUpload key emphasizing no automatic upload", () => {
     expect(typeof enRP.noAutoUpload).toBe("string");
     expect(typeof zhRP.noAutoUpload).toBe("string");
-    expect(enRP.noAutoUpload as string).toMatch(/never auto-upload|not auto-upload|no auto/i);
-    expect(zhRP.noAutoUpload as string).toContain("不会自动上传");
+    expect(String(enRP.noAutoUpload)).toMatch(/never auto-upload|not auto-upload|no auto/i);
+    expect(String(zhRP.noAutoUpload)).toContain("不会自动上传");
   });
 
   it("subtitle mentions no auto-upload", () => {
-    expect(enRP.subtitle as string).toMatch(/never auto-upload/i);
-    expect(zhRP.subtitle as string).toContain("不会自动上传");
+    expect(String(enRP.subtitle)).toMatch(/never auto-upload/i);
+    expect(String(zhRP.subtitle)).toContain("不会自动上传");
   });
 
   it("has privacy boundary section keys", () => {
-    const enPrivacy = (enRP.privacy as Record<string, unknown>);
-    const zhPrivacy = (zhRP.privacy as Record<string, unknown>);
+    const enPrivacy = expectRecord(enRP.privacy, "enRP.privacy");
+    const zhPrivacy = expectRecord(zhRP.privacy, "zhRP.privacy");
     expect(typeof enPrivacy.title).toBe("string");
     expect(typeof enPrivacy.included).toBe("string");
     expect(typeof enPrivacy.excluded).toBe("string");
@@ -127,15 +141,15 @@ describe("CR9 Feedback: privacy boundary and no-auto-upload", () => {
   });
 
   it("guarantee mentions no automatic upload", () => {
-    const enPrivacy = (enRP.privacy as Record<string, unknown>);
-    const zhPrivacy = (zhRP.privacy as Record<string, unknown>);
-    expect(enPrivacy.guarantee as string).toMatch(/no automatic upload|not auto-upload/i);
-    expect(zhPrivacy.guarantee as string).toContain("不会自动上传");
+    const enPrivacy = expectRecord(enRP.privacy, "enRP.privacy");
+    const zhPrivacy = expectRecord(zhRP.privacy, "zhRP.privacy");
+    expect(String(enPrivacy.guarantee)).toMatch(/no automatic upload|not auto-upload/i);
+    expect(String(zhPrivacy.guarantee)).toContain("不会自动上传");
   });
 
   it("has feedback form type keys for all 5 types", () => {
-    const enTypes = ((enRP.form as Record<string, unknown>).types as Record<string, unknown>);
-    const zhTypes = ((zhRP.form as Record<string, unknown>).types as Record<string, unknown>);
+    const enTypes = expectRecord(expectRecord(enRP.form, "enRP.form").types, "enRP.form.types");
+    const zhTypes = expectRecord(expectRecord(zhRP.form, "zhRP.form").types, "zhRP.form.types");
     const requiredTypes = ["bug", "confusing", "privacy_concern", "feature_request", "other"];
     for (const type of requiredTypes) {
       expect(typeof enTypes[type], `en form.types.${type}`).toBe("string");
@@ -147,8 +161,8 @@ describe("CR9 Feedback: privacy boundary and no-auto-upload", () => {
 // ── Update: basic version check / history entry points ────────────────────────
 
 describe("CR9 Update: version check and history", () => {
-  const enUpdate = enPages.update as Record<string, unknown>;
-  const zhUpdate = zhPages.update as Record<string, unknown>;
+  const enUpdate = expectRecord(enPages.update, "enPages.update");
+  const zhUpdate = expectRecord(zhPages.update, "zhPages.update");
 
   it("has i18n keys for update page in both locales", () => {
     expect(enUpdate).toBeDefined();
@@ -185,8 +199,8 @@ describe("CR9 Update: version check and history", () => {
 // ── Settings: auth token and workspace management ─────────────────────────────
 
 describe("CR9 Settings: auth and workspace management", () => {
-  const enSettings = enPages.settings as Record<string, unknown>;
-  const zhSettings = zhPages.settings as Record<string, unknown>;
+  const enSettings = expectRecord(enPages.settings, "enPages.settings");
+  const zhSettings = expectRecord(zhPages.settings, "zhPages.settings");
 
   it("has i18n keys for settings page in both locales", () => {
     expect(enSettings).toBeDefined();
@@ -232,7 +246,7 @@ describe("CR9: no mixed zh/en in i18n values", () => {
 
   it("English i18n tool page keys contain no Chinese characters", () => {
     for (const pageKey of toolPageKeys) {
-      const page = enPages[pageKey] as Record<string, unknown>;
+      const page = expectRecord(enPages[pageKey], `enPages.${pageKey}`);
       if (!page) continue;
       const entries = Object.entries(page);
       for (const [key, value] of entries) {
@@ -248,7 +262,7 @@ describe("CR9: no mixed zh/en in i18n values", () => {
     // (not technical terms like "Bearer" or "Markdown" which are proper nouns)
     const rawEnglishPattern = /\b(the|this|your|will|should|must|can|cannot|click|button|page|section)\b/i;
     for (const pageKey of toolPageKeys) {
-      const page = zhPages[pageKey] as Record<string, unknown>;
+      const page = expectRecord(zhPages[pageKey], `zhPages.${pageKey}`);
       if (!page) continue;
       const entries = Object.entries(page);
       for (const [key, value] of entries) {

@@ -238,12 +238,9 @@ function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onDelete 
   );
 }
 
-function SavedDraftsSection({ drafts, onLoad, onCopyMarkdown, onCopyEmail, onOpenGithub, onDelete }: {
+function SavedDraftsSection({ drafts, onLoad, onDelete }: {
   drafts: FeedbackDraftSummary[];
   onLoad: (id: string) => void;
-  onCopyMarkdown: (id: string) => void;
-  onCopyEmail: (id: string) => void;
-  onOpenGithub: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -686,22 +683,6 @@ export function ReportProblemPage() {
       <SavedDraftsSection
         drafts={drafts}
         onLoad={handleLoadDraft}
-        onCopyMarkdown={(id) => {
-          const draft = drafts.find((d) => d.id === id);
-          if (draft) {
-            // Need full draft for copy — load it first
-            handleLoadDraft(id);
-          }
-        }}
-        onCopyEmail={(id) => {
-          const draft = drafts.find((d) => d.id === id);
-          if (draft) {
-            handleLoadDraft(id);
-          }
-        }}
-        onOpenGithub={(id) => {
-          handleLoadDraft(id);
-        }}
         onDelete={handleDeleteDraft}
       />
 
