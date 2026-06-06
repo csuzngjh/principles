@@ -295,9 +295,10 @@ function registerPlugin() {
     if (!config.plugins) { config.plugins = {}; modified = true; }
     const plugins = config.plugins;
 
-    // Add to plugins.allow (idempotent)
-    if (!Array.isArray(plugins.allow)) { plugins.allow = []; modified = true; }
-    if (!plugins.allow.includes('principles-disciple')) {
+    // Add to plugins.allow only if the user already uses an allowlist.
+    // Do NOT create plugins.allow if it doesn't exist — that would block
+    // all other plugins the user hasn't explicitly listed.
+    if (Array.isArray(plugins.allow) && !plugins.allow.includes('principles-disciple')) {
       plugins.allow.push('principles-disciple');
       modified = true;
     }
