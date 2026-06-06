@@ -13,7 +13,7 @@ import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPlugi
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData, type PainEvidenceEntry, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
-import { sanitizeAssistantText } from './message-sanitize.js';
+import { sanitizeAssistantText, sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 
 /**
@@ -348,7 +348,7 @@ export function handleAfterToolCall(
       errorMessage: event.error ? String(event.error) : undefined,
       gfiBefore,
       gfiAfter: updatedState.currentGfi,
-      paramsJson: event.params,
+      paramsJson: sanitizeToolParamsForEvidence(event.params, effectiveWorkspaceDir),
     });
 
     const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
@@ -409,7 +409,7 @@ export function handleAfterToolCall(
       exitCode,
       gfiBefore,
       gfiAfter: resetState.currentGfi,
-      paramsJson: event.params,
+      paramsJson: sanitizeToolParamsForEvidence(event.params, effectiveWorkspaceDir),
     });
     
     const filePath = params.file_path || params.path || params.file;
@@ -512,7 +512,7 @@ export function handleAfterToolCall(
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
     origin: 'system_infer',
-    text: params.text ?? params.content ?? undefined,
+    text: sanitizeForEvidence(params.text ?? params.content, effectiveWorkspaceDir) || undefined,
   });
 
   // Pain signal emitted via emitPainDetectedEvent below — no .pain_flag file written (M8: single-path chain)

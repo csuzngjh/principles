@@ -8,8 +8,9 @@
  */
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
-import * as path from 'path';
+import * as nodePath from 'path';
 import type { PainDetectedData } from './pain-signal-bridge.js';
+import { sanitizeString } from './evidence-sanitizer.js';
 
 export interface PainSignalObservabilityResult {
   eventLogPath?: string;
@@ -39,7 +40,7 @@ function severityFromScore(score: number): 'mild' | 'moderate' | 'severe' {
 }
 
 function appendJsonLine(filePath: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.mkdirSync(nodePath.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
 }
 
@@ -91,13 +92,17 @@ function ensurePainEventsSchema(db: Database.Database): void {
   }
 }
 
-function recordTrajectoryPainEvent(
-  stateDir: string,
-  data: PainDetectedData,
-  timestamp: string,
-): number | undefined {
-  const dbPath = path.join(stateDir, 'trajectory.db');
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+interface TrajectoryRecordOptions {
+  stateDir: string;
+  data: PainDetectedData;
+  timestamp: string;
+  workspaceDir?: string;
+}
+
+function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | undefined {
+  const { stateDir, data, timestamp, workspaceDir } = opts;
+  const dbPath = nodePath.join(stateDir, 'trajectory.db');
+  fs.mkdirSync(nodePath.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   try {
     ensurePainEventsSchema(db);
@@ -127,11 +132,11 @@ function recordTrajectoryPainEvent(
       sessionId,
       data.source,
       data.score ?? 80,
-      data.reason,
+      sanitizeString(data.reason ?? '', workspaceDir),
       severityFromScore(data.score ?? 80),
       data.source === 'manual' ? 'user_manual' : 'system_infer',
       1,
-      data.reason,
+      sanitizeString(data.reason ?? '', workspaceDir),
       timestamp,
     );
     return Number(result.lastInsertRowid);
@@ -157,7 +162,7 @@ export function recordPainSignalObservability(
   const result: PainSignalObservabilityResult = { warnings };
 
   try {
-    const eventLogPath = path.join(opts.stateDir, 'logs', `events_${date}.jsonl`);
+    const eventLogPath = nodePath.join(opts.stateDir, 'logs', `events_${date}.jsonl`);
     appendJsonLine(eventLogPath, {
       ts: timestamp,
       date,
@@ -169,7 +174,7 @@ export function recordPainSignalObservability(
         eventId: opts.data.painId,
         score,
         source: opts.data.source,
-        reason: opts.data.reason,
+        reason: sanitizeString(opts.data.reason ?? '', opts.workspaceDir),
         severity: severityFromScore(score),
         origin: opts.data.source === 'manual' ? 'user_manual' : 'system_infer',
       },
@@ -180,11 +185,22 @@ export function recordPainSignalObservability(
   }
 
   try {
-    const evolutionStreamPath = path.join(opts.workspaceDir, 'memory', 'evolution.jsonl');
+    const evolutionStreamPath = nodePath.join(opts.workspaceDir, 'memory', 'evolution.jsonl');
+    // Sanitize: store only safe bounded fields, not the full PainDetectedData
+    const sanitizedData = {
+      painId: opts.data.painId,
+      painType: opts.data.painType,
+      source: opts.data.source,
+      reason: sanitizeString(opts.data.reason ?? '', opts.workspaceDir),
+      score: opts.data.score,
+      sessionId: opts.data.sessionId,
+      provenance: opts.data.provenance,
+      evidenceCount: opts.data.evidence?.length ?? 0,
+    };
     appendJsonLine(evolutionStreamPath, {
       ts: timestamp,
       type: 'pain_detected',
-      data: opts.data,
+      data: sanitizedData,
     });
     result.evolutionStreamPath = evolutionStreamPath;
   } catch (err) {
@@ -192,7 +208,7 @@ export function recordPainSignalObservability(
   }
 
   try {
-    result.trajectoryPainEventId = recordTrajectoryPainEvent(opts.stateDir, opts.data, timestamp);
+    result.trajectoryPainEventId = recordTrajectoryPainEvent({ stateDir: opts.stateDir, data: opts.data, timestamp, workspaceDir: opts.workspaceDir });
   } catch (err) {
     warnings.push(`trajectory pain_events write failed: ${err instanceof Error ? err.message : String(err)}`);
   }
