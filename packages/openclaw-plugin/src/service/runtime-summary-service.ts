@@ -81,6 +81,8 @@ export interface RuntimeSummary {
     candidatesCreatedToday: number;
     /** Heartbeats that injected diagnostician tasks (today from event log) */
     heartbeatsInjectedToday: number;
+    /** Error querying task store DB (e.g. SQLITE_CORRUPT, readonly, etc.) — null/undefined means healthy */
+    taskStoreError?: string;
   };
   phase3: {
     queueTruthReady: boolean;
@@ -371,6 +373,7 @@ export class RuntimeSummaryService {
     // Read heartbeat diagnosis stats from daily event log
     const diagDailyStats = dailyStats?.[todayStr]?.evolution;
     let pendingRuntimeDiagTasks = 0;
+    let taskStoreError: string | undefined;
     try {
       const taskStoreDbPath = path.join(wctx.stateDir, '.principles', 'db', 'task-store.db');
       if (fs.existsSync(taskStoreDbPath)) {
@@ -382,8 +385,15 @@ export class RuntimeSummaryService {
         pendingRuntimeDiagTasks = row?.count ?? 0;
         db.close();
       }
-    } catch { /* task store not yet initialized — 0 pending */ }
-    // TODO(PRI-XXX): distinguish "not initialized" from permission/corruption/query errors
+    } catch (err) {
+      if (err instanceof Error && 'code' in err && (err as any).code === 'ENOENT') {
+        // task store not yet initialized — 0 pending, this is expected
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        taskStoreError = msg;
+        pushWarning(warnings, `Task store query failed: ${msg}`);
+      }
+    }
     const runtimeDiagnosis = {
       pendingTasks: pendingRuntimeDiagTasks,
       tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
@@ -392,7 +402,17 @@ export class RuntimeSummaryService {
       reportsIncompleteFieldsToday: diagDailyStats?.reportsIncompleteFields ?? 0,
       candidatesCreatedToday: diagDailyStats?.principleCandidatesCreated ?? 0,
       heartbeatsInjectedToday: diagDailyStats?.heartbeatsInjected ?? 0,
+      taskStoreError,
     };
+
+    // D: Task store error — diagnostician query failed (corruption/permission/etc)
+    if (runtimeDiagnosis.taskStoreError) {
+      pushWarning(
+        warnings,
+        `Task store query error: ${runtimeDiagnosis.taskStoreError}. ` +
+        'Diagnostician pipeline status is degraded — pending task count is unreliable.'
+      );
+    }
 
     // D: Stall detection — high-signal warning when the diagnostician loop appears broken.
     // Conditions: tasks are being injected (heartbeats > 0) but no reports are being written.
@@ -489,7 +509,7 @@ export class RuntimeSummaryService {
       },
       gate: gateStats,
       // D: Heartbeat Diagnostician chain
-      runtimeDiagnosis,
+      runtimeDiagnosis: { ...runtimeDiagnosis, taskStoreError },
       ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {
         generatedAt,
