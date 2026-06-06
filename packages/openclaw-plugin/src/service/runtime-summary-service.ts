@@ -198,6 +198,13 @@ function pushWarning(warnings: string[], message: string): void {
   }
 }
 
+/** EP-01 safe: access a string-typed own property on an unknown object without casts. */
+function readStringProp(obj: unknown, key: string): string | undefined {
+  if (typeof obj !== 'object' || obj === null) return undefined;
+  const desc = Object.getOwnPropertyDescriptor(obj, key);
+  return typeof desc?.value === 'string' ? desc.value : undefined;
+}
+
 /**
  * YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats.
  * Returns { count, resolvable } to distinguish "field not found / non-numeric" from "legitimate zero".
@@ -386,7 +393,7 @@ export class RuntimeSummaryService {
         db.close();
       }
     } catch (err) {
-      if (err instanceof Error && 'code' in err && (err as any).code === 'ENOENT') {
+      if (err instanceof Error && readStringProp(err, 'code') === 'ENOENT') {
         // task store not yet initialized — 0 pending, this is expected
       } else {
         const msg = err instanceof Error ? err.message : String(err);
