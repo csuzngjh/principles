@@ -13,8 +13,7 @@ import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPlugi
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData, type PainEvidenceEntry, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
-import { sanitizeAssistantText } from './message-sanitize.js';
-import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
+import { sanitizeAssistantText, sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 
 /**
