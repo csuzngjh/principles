@@ -181,10 +181,21 @@ export function recordPainSignalObservability(
 
   try {
     const evolutionStreamPath = path.join(opts.workspaceDir, 'memory', 'evolution.jsonl');
+    // Sanitize: store only safe bounded fields, not the full PainDetectedData
+    const sanitizedData = {
+      painId: opts.data.painId,
+      painType: opts.data.painType,
+      source: opts.data.source,
+      reason: (opts.data.reason ?? '').slice(0, 300),
+      score: opts.data.score,
+      sessionId: opts.data.sessionId,
+      provenance: opts.data.provenance,
+      evidenceCount: opts.data.evidence?.length ?? 0,
+    };
     appendJsonLine(evolutionStreamPath, {
       ts: timestamp,
       type: 'pain_detected',
-      data: opts.data,
+      data: sanitizedData,
     });
     result.evolutionStreamPath = evolutionStreamPath;
   } catch (err) {

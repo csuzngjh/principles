@@ -30,6 +30,7 @@ import {
   extractMessageContent,
   isMinimalTrigger,
 } from '@principles/core/prompt-builder';
+import { sanitizeForEvidence } from './message-sanitize.js';
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -574,7 +575,7 @@ The empathy observer subagent handles pain detection independently.
                     confidence: result.confidence,
                     detection_mode: 'structured',
                     deduped: false,
-                    trigger_text_excerpt: latestUserMessage.substring(0, 120),
+                    trigger_text_excerpt: sanitizeForEvidence(latestUserMessage).substring(0, 120),
                     raw_score: painScore,
                     calibrated_score: painScore,
                     eventId,
@@ -589,7 +590,7 @@ The empathy observer subagent handles pain detection independently.
                       severity: result.severity,
                       origin: 'system_infer',
                       confidence: result.confidence,
-                      text: latestUserMessage,
+                      text: sanitizeForEvidence(latestUserMessage),
                     });
                   } catch (error) {
                     logger?.warn?.(`[PD:Empathy] Failed to persist trajectory: ${String(error)}`);

@@ -64,7 +64,9 @@ describe('recordPainSignalObservability', () => {
       type: 'pain_detected',
       data: {
         painId: 'manual_test_001',
-        taskId: 'diagnosis_manual_test_001',
+        source: 'manual',
+        score: 95,
+        evidenceCount: 0,
       },
     });
 
