@@ -15,141 +15,11 @@ import type {
   DegradedSignal,
 } from "../../api.js";
 
-// ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
-
-const VALID_STAGNATION_TYPES = new Set(["no_pain", "never_activated"]);
-const VALID_GOVERNANCE_STATES = new Set(["none", "in_progress", "owner_review_ready", "degraded"]);
+// ── Approval group validator (not in validators.ts, page-specific) ─────────
 
 /** Type guard: is this a non-null object with own properties (not inherited)? */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateStagnationSignal(raw: unknown): StagnationSignal | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "type") ||
-    !Object.hasOwn(raw, "principleId") ||
-    !Object.hasOwn(raw, "daysSince")
-  ) {
-    return null;
-  }
-  const type = raw.type;
-  const principleId = raw.principleId;
-  const daysSince = raw.daysSince;
-  if (
-    typeof type !== "string" ||
-    !VALID_STAGNATION_TYPES.has(type) ||
-    typeof principleId !== "string" ||
-    principleId.length === 0 ||
-    typeof daysSince !== "number" ||
-    daysSince < 0
-  ) {
-    return null;
-  }
-  return {
-    type: type as "no_pain" | "never_activated",
-    principleId,
-    daysSince,
-  };
-}
-
-function validateDegradedSignal(raw: unknown): DegradedSignal | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "reason") ||
-    !Object.hasOwn(raw, "nextAction") ||
-    !Object.hasOwn(raw, "source")
-  ) {
-    return null;
-  }
-  const reason = raw.reason;
-  const nextAction = raw.nextAction;
-  const source = raw.source;
-  if (
-    typeof reason !== "string" ||
-    reason.length === 0 ||
-    typeof nextAction !== "string" ||
-    nextAction.length === 0 ||
-    typeof source !== "string" ||
-    source.length === 0
-  ) {
-    return null;
-  }
-  return { reason, nextAction, source };
-}
-
-function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "pendingReviewCount") ||
-    !Object.hasOwn(raw, "behaviorDeviationCount") ||
-    !Object.hasOwn(raw, "stagnationSignals") ||
-    !Object.hasOwn(raw, "governanceState") ||
-    !Object.hasOwn(raw, "stateReason") ||
-    !Object.hasOwn(raw, "nextAction")
-  ) {
-    return null;
-  }
-  const pendingReviewCount = raw.pendingReviewCount;
-  const behaviorDeviationCount = raw.behaviorDeviationCount;
-  const stagnationSignals = raw.stagnationSignals;
-  const governanceState = raw.governanceState;
-  const stateReason = raw.stateReason;
-  const nextAction = raw.nextAction;
-  if (
-    typeof pendingReviewCount !== "number" ||
-    pendingReviewCount < 0 ||
-    typeof behaviorDeviationCount !== "number" ||
-    behaviorDeviationCount < 0 ||
-    !Array.isArray(stagnationSignals) ||
-    typeof governanceState !== "string" ||
-    !VALID_GOVERNANCE_STATES.has(governanceState) ||
-    typeof stateReason !== "string" ||
-    typeof nextAction !== "string"
-  ) {
-    return null;
-  }
-  // Fail loud: any invalid signal rejects the entire payload (ERR-009)
-  const signals: StagnationSignal[] = [];
-  for (const s of stagnationSignals) {
-    const validated = validateStagnationSignal(s);
-    if (validated === null) return null;
-    signals.push(validated);
-  }
-
-  // Validate degradedSignals array if present
-  let degradedSignals: DegradedSignal[] | undefined;
-  if (Object.hasOwn(raw, "degradedSignals")) {
-    const rawDegraded = raw.degradedSignals;
-    if (!Array.isArray(rawDegraded)) return null;
-    degradedSignals = [];
-    for (const d of rawDegraded) {
-      const validated = validateDegradedSignal(d);
-      if (validated === null) return null;
-      degradedSignals.push(validated);
-    }
-  }
-
-  // Validate inProgressSummary if present
-  let inProgressSummary: string | undefined;
-  if (Object.hasOwn(raw, "inProgressSummary")) {
-    if (typeof raw.inProgressSummary !== "string") return null;
-    inProgressSummary = raw.inProgressSummary;
-  }
-
-  return {
-    pendingReviewCount,
-    behaviorDeviationCount,
-    stagnationSignals: signals,
-    governanceState: governanceState as GovernanceQueueData["governanceState"],
-    stateReason,
-    nextAction,
-    inProgressSummary,
-    degradedSignals,
-    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
-    generatedAt: Object.hasOwn(raw, "generatedAt") && typeof raw.generatedAt === "string" ? raw.generatedAt : new Date().toISOString(),
-  };
 }
 
 function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
@@ -175,7 +45,6 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
   ) {
     return null;
   }
-  // Fail loud: any invalid record rejects the entire group (ERR-009)
   const validRecords: ApprovalGroup["records"] = [];
   for (const r of records) {
     if (!isRecord(r)) return null;
@@ -219,7 +88,6 @@ function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null
   if (!Array.isArray(groups) || typeof generatedAt !== "string") {
     return null;
   }
-  // Fail loud: any invalid group rejects the entire payload (ERR-009)
   const validatedGroups: ApprovalGroup[] = [];
   for (const g of groups) {
     const validated = validateApprovalGroup(g);
@@ -231,6 +99,50 @@ function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null
     generatedAt,
     note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
   };
+}
+
+// ── i18n code mapping helpers ─────────────────────────────────────────────
+
+/** Map a stateReasonCode to an i18n key, with optional interpolation params. */
+function getStateReasonText(
+  code: string,
+  t: (key: string, params?: Record<string, unknown>) => string,
+  pendingReviewCount: number,
+): string {
+  const i18nKey = `pages.focus.stateReason.${code}`;
+  const text = t(i18nKey, { count: pendingReviewCount });
+  // If i18n key is not found, t() returns the key itself — fall back to code
+  return text === i18nKey ? code : text;
+}
+
+/** Map a nextActionCode to an i18n key. */
+function getNextActionText(
+  code: string,
+  t: (key: string) => string,
+): string {
+  const i18nKey = `pages.focus.nextAction.${code}`;
+  const text = t(i18nKey);
+  return text === i18nKey ? code : text;
+}
+
+/** Map a degraded signal reasonCode to an i18n key. */
+function getDegradedReasonText(
+  code: string,
+  t: (key: string) => string,
+): string {
+  const i18nKey = `pages.focus.degradedReason.${code}`;
+  const text = t(i18nKey);
+  return text === i18nKey ? code : text;
+}
+
+/** Map a degraded signal nextActionCode to an i18n key. */
+function getDegradedNextActionText(
+  code: string,
+  t: (key: string) => string,
+): string {
+  const i18nKey = `pages.focus.degradedNextAction.${code}`;
+  const text = t(i18nKey);
+  return text === i18nKey ? code : text;
 }
 
 // ── Channel label helper ─────────────────────────────────────────────────────
@@ -370,6 +282,10 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
         ? t("pages.focus.degradedSourceUnavailable")
         : signal.source;
 
+  // Use i18n-mapped text from reasonCode/nextActionCode
+  const reasonText = getDegradedReasonText(signal.reasonCode, t);
+  const nextActionText = getDegradedNextActionText(signal.nextActionCode, t);
+
   return (
     <article className="relative pl-[22px] py-[14px] pr-[18px] bg-panel border border-amber/20 border-l-[3px] border-l-amber rounded-[6px]">
       {/* Source label */}
@@ -378,14 +294,17 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
           {sourceLabel}
         </span>
       </div>
-      {/* Reason */}
+      {/* Reason (i18n heading + English debug detail) */}
       <div className="text-ink-2 text-sm leading-relaxed">
+        {reasonText}
+      </div>
+      <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono">
         {signal.reason}
       </div>
-      {/* Next action */}
+      {/* Next action (i18n) */}
       <div className="mt-2 text-ink-4 text-[13px] leading-snug">
-        <span className="font-medium">{t("pages.focus.degradedNextAction")}</span>{" "}
-        {signal.nextAction}
+        <span className="font-medium">{t("pages.focus.degradedNextActionLabel")}</span>{" "}
+        {nextActionText}
       </div>
     </article>
   );
@@ -472,23 +391,16 @@ export function FocusPage() {
       fetchApprovalsGrouped(),
     ]);
 
-    // Validate queue data (H section / ERR-001/005)
+    // Queue data is already validated by the API layer (validateGovernanceQueue)
     if (!queueResult.success) {
       setLoadingState("error");
       setErrorMessage(queueResult.error);
       return;
     }
-    const validatedQueue = validateGovernanceQueueData(queueResult.data);
-    if (validatedQueue === null) {
-      setLoadingState("error");
-      setErrorMessage("Governance queue data has unexpected shape");
-      return;
-    }
-    setQueueData(validatedQueue);
+    setQueueData(queueResult.data);
 
     // Validate grouped data (ERR-002: degradation with reason)
     if (!groupedResult.success) {
-      // Non-fatal: we can still show queue data without approval groups
       setGroupedData(null);
       setGroupedErrorReason(groupedResult.error ?? "Approvals data unavailable");
     } else {
@@ -544,11 +456,15 @@ export function FocusPage() {
   const stagnationSignals = queueData?.stagnationSignals ?? [];
   const stagnationCount = stagnationSignals.length;
   const governanceState = queueData?.governanceState ?? "none";
-  const stateReason = queueData?.stateReason ?? "";
-  const nextAction = queueData?.nextAction ?? "";
+  const stateReasonCode = queueData?.stateReasonCode ?? "no_pipeline_activity";
+  const nextActionCode = queueData?.nextActionCode ?? "wait_for_pipeline";
   const inProgressSummary = queueData?.inProgressSummary;
   const degradedSignals = queueData?.degradedSignals;
   const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
+
+  // Map codes to i18n text
+  const stateReason = getStateReasonText(stateReasonCode, t, pendingCount);
+  const nextAction = getNextActionText(nextActionCode, t);
 
   return (
     <PageShell>

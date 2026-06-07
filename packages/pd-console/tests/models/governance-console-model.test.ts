@@ -142,6 +142,8 @@ describe('GovernanceConsoleModel — state: none', () => {
 
     expect(result.pendingReviewCount).toBe(0);
     expect(result.governanceState).toBe('none');
+    expect(result.stateReasonCode).toBe('state_db_missing');
+    expect(result.nextActionCode).toBe('run_config_doctor');
     expect(result.stateReason).toBeDefined();
     expect(result.stateReason.length).toBeGreaterThan(0);
     expect(result.nextAction).toBeDefined();
@@ -159,6 +161,8 @@ describe('GovernanceConsoleModel — state: none', () => {
     expect(result.governanceState).toBe('none');
     expect(result.pendingReviewCount).toBe(0);
     expect(result.behaviorDeviationCount).toBe(0);
+    expect(result.stateReasonCode).toBe('no_pipeline_activity');
+    expect(result.nextActionCode).toBe('wait_for_pipeline');
   });
 });
 
@@ -181,6 +185,8 @@ describe('GovernanceConsoleModel — state: in_progress', () => {
 
     expect(result.pendingReviewCount).toBe(0);
     expect(result.governanceState).toBe('in_progress');
+    expect(result.stateReasonCode).toBe('consumed_candidates');
+    expect(result.nextActionCode).toBe('wait_for_pipeline');
     expect(result.stateReason).toBeDefined();
     expect(result.nextAction).toBeDefined();
     expect(result.inProgressSummary).toBeDefined();
@@ -202,6 +208,8 @@ describe('GovernanceConsoleModel — state: in_progress', () => {
 
     expect(result.pendingReviewCount).toBe(0);
     expect(result.governanceState).toBe('in_progress');
+    expect(result.stateReasonCode).toBe('pipeline_active');
+    expect(result.nextActionCode).toBe('check_pipeline_status');
     expect(result.stateReason).toBeDefined();
     expect(result.inProgressSummary).toBeDefined();
   });
@@ -226,12 +234,13 @@ describe('GovernanceConsoleModel — state: owner_review_ready', () => {
 
     expect(result.pendingReviewCount).toBe(1);
     expect(result.governanceState).toBe('owner_review_ready');
-    expect(result.stateReason).toBeDefined();
+    expect(result.stateReasonCode).toBe('pending_approvals');
+    expect(result.nextActionCode).toBe('review_approvals');
     expect(result.stateReason).toContain('1');
     expect(result.nextAction).toBeDefined();
   });
 
-  it('returns governanceState=owner_review_ready when validated artifacts exist', async () => {
+  it('validated artifacts alone do NOT trigger owner_review_ready (P1-2)', async () => {
     const conn = createTestDb();
     const db = conn.getDb();
     const now = new Date().toISOString();
@@ -242,7 +251,7 @@ describe('GovernanceConsoleModel — state: owner_review_ready', () => {
       VALUES ('apr-approved-1', 'artifact-approved', 'prompt', 'low', 'approved', '${now}')
     `);
 
-    // But validated artifact exists
+    // Validated artifact exists — but this should NOT trigger owner_review_ready
     db.exec(`
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, content_json, validation_status, created_at, updated_at)
       VALUES ('artifact-validated', 'candidate', 'task-1', '{}', 'validated', '${now}', '${now}')
@@ -252,9 +261,11 @@ describe('GovernanceConsoleModel — state: owner_review_ready', () => {
 
     const result = await model.getGovernanceQueue();
 
-    expect(result.governanceState).toBe('owner_review_ready');
-    expect(result.stateReason).toBeDefined();
-    expect(result.nextAction).toBeDefined();
+    // P1-2: validatedArtifactCount is too broad; only pendingReviewCount > 0
+    // determines owner_review_ready. The owner-actionable queue read model
+    // (PRI-330) will refine this.
+    expect(result.governanceState).not.toBe('owner_review_ready');
+    expect(result.pendingReviewCount).toBe(0);
   });
 });
 
@@ -276,8 +287,12 @@ describe('GovernanceConsoleModel — state: degraded', () => {
     const result = await model.getGovernanceQueue();
 
     expect(result.governanceState).toBe('degraded');
+    expect(result.stateReasonCode).toBe('degraded_state');
+    expect(result.nextActionCode).toBe('check_degraded_signals');
     expect(result.degradedSignals).toBeDefined();
     expect(result.degradedSignals!.length).toBeGreaterThan(0);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_retry_wait');
+    expect(result.degradedSignals![0].nextActionCode).toBe('check_task_status');
     expect(result.degradedSignals![0].reason).toBeDefined();
     expect(result.degradedSignals![0].nextAction).toBeDefined();
     expect(result.degradedSignals![0].source).toBeDefined();
@@ -302,6 +317,8 @@ describe('GovernanceConsoleModel — state: degraded', () => {
     expect(result.governanceState).toBe('degraded');
     expect(result.degradedSignals).toBeDefined();
     expect(result.degradedSignals!.length).toBe(1);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_failed');
+    expect(result.degradedSignals![0].nextActionCode).toBe('fix_and_retry');
     expect(result.degradedSignals![0].source).toBe('internalization_task');
   });
 });

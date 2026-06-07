@@ -20,19 +20,51 @@ export interface StagnationSignal {
  * - `none`: No governance data exists (workspace not initialized or empty).
  * - `in_progress`: PD has recorded pipeline activity (tasks, candidates) but
  *   no owner-ready decision items are available yet.
- * - `owner_review_ready`: At least one owner decision item exists (pending
- *   approval or validated principle artifact).
+ * - `owner_review_ready`: At least one pending approval awaits owner review.
  * - `degraded`: Pipeline or data source is degraded — decisions may be
  *   incomplete or delayed.
  */
 export type GovernanceState = 'none' | 'in_progress' | 'owner_review_ready' | 'degraded';
 
+/**
+ * Machine-readable codes for degraded signals.
+ * Frontend maps these via i18n; `reason` is English debug text.
+ */
+export type DegradedReasonCode = 'task_retry_wait' | 'task_failed' | 'approval_table_missing';
+export type DegradedNextActionCode = 'check_task_status' | 'fix_and_retry' | 'run_integrity_check';
+
 export interface DegradedSignal {
+  /** Machine-readable code for i18n mapping */
+  reasonCode: DegradedReasonCode;
+  /** Machine-readable code for i18n mapping */
+  nextActionCode: DegradedNextActionCode;
+  /** English debug text with dynamic details (task kind, error) */
   reason: string;
+  /** English debug text for next action */
   nextAction: string;
-  /** Source of the degraded signal, e.g. 'internalization_task', 'chain_integrity' */
+  /** Source of the degraded signal, e.g. 'internalization_task', 'source_unavailable' */
   source: string;
 }
+
+/**
+ * Machine-readable codes for governance state reason/nextAction.
+ * Frontend maps these via i18n; some codes support interpolation
+ * (e.g. {{count}} from pendingReviewCount).
+ */
+export type StateReasonCode =
+  | 'state_db_missing'
+  | 'no_pipeline_activity'
+  | 'pending_approvals'
+  | 'pipeline_active'
+  | 'consumed_candidates'
+  | 'degraded_state';
+
+export type NextActionCode =
+  | 'run_config_doctor'
+  | 'wait_for_pipeline'
+  | 'review_approvals'
+  | 'check_degraded_signals'
+  | 'check_pipeline_status';
 
 export interface GovernanceQueueResponse {
   /** Number of pending approvals awaiting owner review */
@@ -43,9 +75,13 @@ export interface GovernanceQueueResponse {
   stagnationSignals: StagnationSignal[];
   /** Overall governance state */
   governanceState: GovernanceState;
-  /** Human-readable explanation of the governance state */
+  /** Machine-readable code for i18n mapping */
+  stateReasonCode: StateReasonCode;
+  /** Machine-readable code for i18n mapping */
+  nextActionCode: NextActionCode;
+  /** English debug text (fallback / logging) */
   stateReason: string;
-  /** Suggested action for the owner given the current state */
+  /** English debug text (fallback / logging) */
   nextAction: string;
   /** Human-readable summary of pipeline activity when state is 'in_progress' */
   inProgressSummary?: string;
@@ -84,8 +120,10 @@ export class GovernanceConsoleModel {
         behaviorDeviationCount: 0,
         stagnationSignals: [],
         governanceState: 'none',
-        stateReason: '状态数据库未初始化。PD 尚未在此工作空间中运行。',
-        nextAction: '确保 OpenClaw 插件已启用，或运行 pd config doctor 检查配置。',
+        stateReasonCode: 'state_db_missing',
+        nextActionCode: 'run_config_doctor',
+        stateReason: 'State database not initialized. PD has not run in this workspace.',
+        nextAction: 'Ensure the OpenClaw plugin is enabled, or run pd config doctor.',
         generatedAt: new Date().toISOString(),
         note: 'state.db not found — workspace may not be initialized',
       };
@@ -152,21 +190,7 @@ export class GovernanceConsoleModel {
         };
       });
 
-    // 2. Check for validated PI artifacts (owner-ready decision items)
-    let validatedArtifactCount = 0;
-    try {
-      const validatedRow = db.prepare(
-        `SELECT COUNT(*) as c FROM pi_artifacts WHERE validation_status = 'validated'`
-      ).get() as { c: number } | undefined;
-      if (validatedRow && typeof validatedRow.c === 'number') {
-        validatedArtifactCount = validatedRow.c;
-      }
-    } catch (err) {
-      // pi_artifacts table may not exist in old workspaces
-      if (!isMissingTableError(err)) throw err;
-    }
-
-    // 3. Check internalization pipeline activity (tasks)
+    // 2. Check internalization pipeline activity (tasks)
     let hasInternalizationTasks = false;
     let hasRetryWaitTasks = false;
     let hasFailedTasks = false;
@@ -182,12 +206,12 @@ export class GovernanceConsoleModel {
       for (const task of tasks) {
         if (task.status === 'retry_wait') {
           hasRetryWaitTasks = true;
-          const errText = task.last_error ? task.last_error.substring(0, 120) : '未知错误';
+          const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
           retryWaitReasons.push(`${task.task_kind}: ${errText}`);
         }
         if (task.status === 'failed') {
           hasFailedTasks = true;
-          const errText = task.last_error ? task.last_error.substring(0, 120) : '未知错误';
+          const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
           failedReasons.push(`${task.task_kind}: ${errText}`);
         }
       }
@@ -195,7 +219,7 @@ export class GovernanceConsoleModel {
       if (!isMissingTableError(err)) throw err;
     }
 
-    // 4. Check candidates table for pipeline activity
+    // 3. Check candidates table for pipeline activity
     let hasConsumedCandidates = false;
     let hasPendingCandidates = false;
     try {
@@ -211,72 +235,88 @@ export class GovernanceConsoleModel {
       if (!isMissingTableError(err)) throw err;
     }
 
-    // 5. Check for broken chain (integrity read model)
+    // 4. Degraded signals
     const degradedSignals: DegradedSignal[] = [];
 
     if (hasRetryWaitTasks) {
       degradedSignals.push({
-        reason: `内化任务等待重试: ${retryWaitReasons.join('; ')}`,
-        nextAction: '检查内化管线状态，或等待自动重试。',
+        reasonCode: 'task_retry_wait',
+        nextActionCode: 'check_task_status',
+        reason: `Internalization task waiting for retry: ${retryWaitReasons.join('; ')}`,
+        nextAction: 'Check internalization pipeline status, or wait for automatic retry.',
         source: 'internalization_task',
       });
     }
 
     if (hasFailedTasks) {
       degradedSignals.push({
-        reason: `内化任务失败: ${failedReasons.join('; ')}`,
-        nextAction: '检查失败详情，修复问题后重试。',
+        reasonCode: 'task_failed',
+        nextActionCode: 'fix_and_retry',
+        reason: `Internalization task failed: ${failedReasons.join('; ')}`,
+        nextAction: 'Check failure details, fix the issue and retry.',
         source: 'internalization_task',
       });
     }
 
     if (missingApprovalTable) {
       degradedSignals.push({
-        reason: '审批表不存在，无法读取待审批项。这可能是旧版工作空间。',
-        nextAction: '运行 pd runtime internalization integrity 检查并修复表结构。',
+        reasonCode: 'approval_table_missing',
+        nextActionCode: 'run_integrity_check',
+        reason: 'Approval table does not exist. This may be an old workspace.',
+        nextAction: 'Run pd runtime internalization integrity to check and repair table structure.',
         source: 'source_unavailable',
       });
     }
 
     // ── Determine governance state ──────────────────────────────────────
+    // P1-2: Only pendingReviewCount determines owner_review_ready.
+    // Validated artifacts are NOT sufficient — they may be demo/smoke/historical.
+    // The owner-actionable queue read model (PRI-330) will refine this.
 
-    const hasOwnerReadyItems = pendingReviewCount > 0 || validatedArtifactCount > 0;
+    const hasOwnerReadyItems = pendingReviewCount > 0;
     const hasPipelineActivity = hasInternalizationTasks || hasConsumedCandidates || hasPendingCandidates;
     const hasDegradation = degradedSignals.length > 0;
 
     let governanceState: GovernanceState;
+    let stateReasonCode: StateReasonCode;
+    let nextActionCode: NextActionCode;
     let stateReason: string;
     let nextAction: string;
     let inProgressSummary: string | undefined;
 
     if (hasOwnerReadyItems) {
       governanceState = 'owner_review_ready';
-      if (pendingReviewCount > 0) {
-        stateReason = `有 ${pendingReviewCount} 条原则需要你审查并决定是否批准。`;
-        nextAction = '审查待审批的原则，做出批准、拒绝或暂存的决定。';
-      } else {
-        stateReason = `有 ${validatedArtifactCount} 条已验证的原则候选已就绪，等待审查。`;
-        nextAction = '审查已验证的原则候选，做出决定。';
-      }
+      stateReasonCode = 'pending_approvals';
+      nextActionCode = 'review_approvals';
+      stateReason = `${pendingReviewCount} principle(s) pending your review and decision.`;
+      nextAction = 'Review pending principles and approve, reject, or park.';
     } else if (hasDegradation) {
       governanceState = 'degraded';
-      stateReason = '部分治理链路或数据源处于降级状态。';
-      nextAction = '检查降级信号详情，按建议操作修复。';
+      stateReasonCode = 'degraded_state';
+      nextActionCode = 'check_degraded_signals';
+      stateReason = 'Part of the governance pipeline or data source is degraded.';
+      nextAction = 'Check degraded signal details and follow suggested actions.';
     } else if (hasPipelineActivity) {
       governanceState = 'in_progress';
       if (hasInternalizationTasks) {
-        inProgressSummary = 'PD 正在处理内部化管线：已记录诊断、原则候选或内化任务活动，但尚无可审查的决策项。';
-        stateReason = '管线中有活动，但候选原则尚未准备好审查。';
-        nextAction = '等待内化任务完成。如果长期无变化，检查内化管线状态。';
+        stateReasonCode = 'pipeline_active';
+        nextActionCode = 'check_pipeline_status';
+        inProgressSummary = 'PD is processing the internalization pipeline: diagnostics, principle candidates, or internalization task activity recorded, but no owner-reviewable decision items yet.';
+        stateReason = 'Pipeline has activity, but candidate principles are not ready for review.';
+        nextAction = 'Wait for internalization tasks to complete. If no change for a long time, check pipeline status.';
       } else {
-        inProgressSummary = 'PD 已记录到治理链路中的活动（已生成候选人），但候选人尚未准备好审查。';
-        stateReason = '已存在候选人记录，但尚未进入审查阶段。';
-        nextAction = '等待内化管线将候选人转化为可审查的原则。';
+        stateReasonCode = 'consumed_candidates';
+        nextActionCode = 'wait_for_pipeline';
+        inProgressSummary = 'PD has recorded governance chain activity (candidates generated), but candidates are not yet ready for review.';
+        stateReason = 'Candidate records exist, but have not entered the review stage.';
+        nextAction = 'Wait for the internalization pipeline to convert candidates into reviewable principles.';
       }
     } else {
       governanceState = 'none';
-      stateReason = '尚未记录到任何治理链路活动。';
-      nextAction = 'PD 会在捕获到行为偏差并生成可审查候选后，将其放到这里。';
+      stateReasonCode = 'no_pipeline_activity';
+      nextActionCode = 'wait_for_pipeline';
+      stateReason = 'No governance chain activity recorded yet.';
+      nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
     }
 
     const response: GovernanceQueueResponse = {
@@ -284,6 +324,8 @@ export class GovernanceConsoleModel {
       behaviorDeviationCount,
       stagnationSignals,
       governanceState,
+      stateReasonCode,
+      nextActionCode,
       stateReason,
       nextAction,
       generatedAt: new Date().toISOString(),

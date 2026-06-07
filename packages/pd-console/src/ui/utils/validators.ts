@@ -525,7 +525,22 @@ function validateStagnationSignal(v: unknown): StagnationSignalData | null {
 
 const VALID_GOVERNANCE_STATES = new Set(['none', 'in_progress', 'owner_review_ready', 'degraded']);
 
+const VALID_STATE_REASON_CODES = new Set([
+  'state_db_missing', 'no_pipeline_activity', 'pending_approvals',
+  'pipeline_active', 'consumed_candidates', 'degraded_state',
+]);
+
+const VALID_NEXT_ACTION_CODES = new Set([
+  'run_config_doctor', 'wait_for_pipeline', 'review_approvals',
+  'check_degraded_signals', 'check_pipeline_status',
+]);
+
+const VALID_DEGRADED_REASON_CODES = new Set(['task_retry_wait', 'task_failed', 'approval_table_missing']);
+const VALID_DEGRADED_NEXT_ACTION_CODES = new Set(['check_task_status', 'fix_and_retry', 'run_integrity_check']);
+
 export interface DegradedSignalData {
+  reasonCode: string;
+  nextActionCode: string;
   reason: string;
   nextAction: string;
   source: string;
@@ -533,10 +548,20 @@ export interface DegradedSignalData {
 
 function validateDegradedSignal(v: unknown): DegradedSignalData | null {
   if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'reasonCode') || !isString(v.reasonCode)) return null;
+  if (!VALID_DEGRADED_REASON_CODES.has(v.reasonCode)) return null;
+  if (!Object.hasOwn(v, 'nextActionCode') || !isString(v.nextActionCode)) return null;
+  if (!VALID_DEGRADED_NEXT_ACTION_CODES.has(v.nextActionCode)) return null;
   if (!Object.hasOwn(v, 'reason') || !isString(v.reason)) return null;
   if (!Object.hasOwn(v, 'nextAction') || !isString(v.nextAction)) return null;
   if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
-  return { reason: v.reason, nextAction: v.nextAction, source: v.source };
+  return {
+    reasonCode: v.reasonCode,
+    nextActionCode: v.nextActionCode,
+    reason: v.reason,
+    nextAction: v.nextAction,
+    source: v.source,
+  };
 }
 
 export interface GovernanceQueueData {
@@ -544,6 +569,8 @@ export interface GovernanceQueueData {
   behaviorDeviationCount: number;
   stagnationSignals: StagnationSignalData[];
   governanceState: 'none' | 'in_progress' | 'owner_review_ready' | 'degraded';
+  stateReasonCode: string;
+  nextActionCode: string;
   stateReason: string;
   nextAction: string;
   inProgressSummary?: string;
@@ -559,6 +586,10 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
   if (!Object.hasOwn(v, 'stagnationSignals') || !Array.isArray(v.stagnationSignals)) return null;
   if (!Object.hasOwn(v, 'governanceState') || !isString(v.governanceState)) return null;
   if (!VALID_GOVERNANCE_STATES.has(v.governanceState)) return null;
+  if (!Object.hasOwn(v, 'stateReasonCode') || !isString(v.stateReasonCode)) return null;
+  if (!VALID_STATE_REASON_CODES.has(v.stateReasonCode)) return null;
+  if (!Object.hasOwn(v, 'nextActionCode') || !isString(v.nextActionCode)) return null;
+  if (!VALID_NEXT_ACTION_CODES.has(v.nextActionCode)) return null;
   if (!Object.hasOwn(v, 'stateReason') || !isString(v.stateReason)) return null;
   if (!Object.hasOwn(v, 'nextAction') || !isString(v.nextAction)) return null;
 
@@ -570,20 +601,31 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
     behaviorDeviationCount: v.behaviorDeviationCount,
     stagnationSignals: signals,
     governanceState: v.governanceState as GovernanceQueueData['governanceState'],
+    stateReasonCode: v.stateReasonCode,
+    nextActionCode: v.nextActionCode,
     stateReason: v.stateReason,
     nextAction: v.nextAction,
   };
 
-  // Optional fields
-  if (Object.hasOwn(v, 'inProgressSummary') && isString(v.inProgressSummary)) {
+  // Optional fields — fail loud when present but wrong type (ERR-009)
+  if (Object.hasOwn(v, 'inProgressSummary')) {
+    if (!isString(v.inProgressSummary)) return null;
     result.inProgressSummary = v.inProgressSummary;
   }
-  if (Object.hasOwn(v, 'degradedSignals') && Array.isArray(v.degradedSignals)) {
+  if (Object.hasOwn(v, 'degradedSignals')) {
+    if (!Array.isArray(v.degradedSignals)) return null;
     const ds = validateArray(v.degradedSignals, validateDegradedSignal);
-    if (ds !== null) result.degradedSignals = ds;
+    if (ds === null) return null;
+    result.degradedSignals = ds;
   }
-  if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
-  if (Object.hasOwn(v, 'generatedAt') && isString(v.generatedAt)) result.generatedAt = v.generatedAt;
+  if (Object.hasOwn(v, 'note')) {
+    if (!isString(v.note)) return null;
+    result.note = v.note;
+  }
+  if (Object.hasOwn(v, 'generatedAt')) {
+    if (!isString(v.generatedAt)) return null;
+    result.generatedAt = v.generatedAt;
+  }
   return result;
 }
 

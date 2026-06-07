@@ -95,10 +95,35 @@
       "inProgressDetail": "PD will surface a principle candidate here once the internalization pipeline completes and an owner-reviewable artifact is generated.",
       "degradedTitle": "System Signals",
       "degradedStateReason": "Part of the governance pipeline or data source is degraded. Decisions may be incomplete or delayed.",
-      "degradedNextAction": "Next action:",
+      "degradedNextActionLabel": "Next action:",
       "degradedSourceInternalization": "Internalization Task",
       "degradedSourceChainIntegrity": "Chain Integrity",
-      "degradedSourceUnavailable": "Data Source"
+      "degradedSourceUnavailable": "Data Source",
+      "stateReason": {
+        "state_db_missing": "State database not initialized. PD has not run in this workspace yet.",
+        "no_pipeline_activity": "No governance activity recorded yet.",
+        "pending_approvals": "{{count}} principle(s) pending your review and decision.",
+        "pipeline_active": "Pipeline has activity, but candidate principles are not ready for review.",
+        "consumed_candidates": "Candidate records exist, but have not entered the review stage.",
+        "degraded_state": "Part of the governance pipeline or data source is degraded."
+      },
+      "nextAction": {
+        "run_config_doctor": "Ensure the OpenClaw plugin is enabled, or run pd config doctor.",
+        "wait_for_pipeline": "PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.",
+        "review_approvals": "Review pending principles and approve, reject, or park.",
+        "check_degraded_signals": "Check degraded signal details and follow suggested actions.",
+        "check_pipeline_status": "Wait for internalization tasks to complete. If no change for a long time, check pipeline status."
+      },
+      "degradedReason": {
+        "task_retry_wait": "Internalization task waiting for retry",
+        "task_failed": "Internalization task failed",
+        "approval_table_missing": "Approval table does not exist"
+      },
+      "degradedNextAction": {
+        "check_task_status": "Check internalization pipeline status, or wait for automatic retry.",
+        "fix_and_retry": "Check failure details, fix the issue and retry.",
+        "run_integrity_check": "Run pd runtime internalization integrity to check and repair table structure."
+      }
     },
     "pain": {
       "eyebrow": "Behavior Evidence",
