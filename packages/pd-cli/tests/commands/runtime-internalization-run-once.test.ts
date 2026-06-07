@@ -535,7 +535,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(text).toContain('resultRef: philosopher://run-phil-002');
   });
 
-  it('successful dreamer + --enqueue-next returns successorTaskId', async () => {
+  it('auto-enqueue: successful dreamer returns successor info by default', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-enq-001',
@@ -568,7 +568,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorKind).toBe('philosopher');
   });
 
-  it('repeated --enqueue-next returns existing successorTaskId', async () => {
+  it('auto-enqueue: repeated run returns existing successorTaskId', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-enq-002',
@@ -601,7 +601,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorKind).toBe('philosopher');
   });
 
-  it('--enqueue-next with no_successor does not set successorTaskId', async () => {
+  it('auto-enqueue: no_successor does not set successor info', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-enq-003',
@@ -632,7 +632,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorTaskIds).toEqual([]);
   });
 
-  it('--enqueue-next with failed run does not call commitNextTaskProposal', async () => {
+  it('auto-enqueue: failed run does not call commitNextTaskProposal', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-enq-004',
@@ -652,7 +652,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
   });
 
-  it('--enqueue-next without --allow-test-double still blocked', async () => {
+  it('auto-enqueue without --allow-test-double still blocked', async () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', enqueueNext: true });
 
     expect(process.exitCode).toBe(1);
@@ -880,7 +880,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.runnerResult.status).toBe('succeeded');
   });
 
-  it('--runner scribe --enqueue-next creates artificer successor', async () => {
+  it('auto-enqueue: --runner scribe creates artificer successor', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-scribe-enq-001',
@@ -979,7 +979,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.runnerResult.status).toBe('succeeded');
   });
 
-  it('--runner artificer --enqueue-next returns successor decision', async () => {
+  it('auto-enqueue: --runner artificer returns successor decision', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-artificer-enq-001',
@@ -1112,7 +1112,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.runnerResult.status).toBe('succeeded');
   });
 
-  it('--runner evaluator --enqueue-next returns successor decision', async () => {
+  it('auto-enqueue: --runner evaluator returns successor decision', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-evaluator-enq-001',
@@ -1208,7 +1208,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.runnerResult.status).toBe('succeeded');
   });
 
-  it('--runner rollout_reviewer --enqueue-next returns no_successor for prompt channel', async () => {
+  it('auto-enqueue: --runner rollout_reviewer returns no_successor for prompt channel', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-rollout-reviewer-enq-001',
@@ -1504,5 +1504,87 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(text).toContain('successor: task-phil-text-001');
     expect(text).toContain('enqueue_attempted: true');
     expect(text).toContain('successors_created: 1');
+  });
+});
+
+// === Commander parser-level tests for --no-enqueue-next ===
+// These tests verify that Commander correctly maps --no-enqueue-next to opts.enqueueNext.
+// They exercise the real Commander parsing path, NOT the handler directly.
+// See ERR-063: previous code used opts.noEnqueueNext (always undefined) instead of opts.enqueueNext.
+
+describe('Commander --no-enqueue-next parser wiring', () => {
+  function buildRunOnceCommand(capturedOpts: Record<string, unknown>) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Command } = require('commander') as typeof import('commander');
+    const program = new Command();
+    program.exitOverride(); // prevent process.exit during tests
+
+    const internalizationCmd = program.command('internalization');
+    internalizationCmd
+      .command('run-once')
+      .description('Wake-and-run: lease the next PI task and execute it')
+      .option('-w, --workspace <path>', 'Workspace directory')
+      .option('--runner <kind>', 'Runner kind', 'dreamer')
+      .option('--runtime <kind>', 'Runtime adapter kind', 'config')
+      .option('--allow-test-double', 'Acknowledge test-double runtime')
+      .option('--no-enqueue-next', 'Skip successor enqueue after successful runner')
+      .option('--timeout-ms <ms>', 'Runner timeout', parseInt)
+      .option('--json', 'Output raw JSON')
+      .action(async (opts) => {
+        Object.assign(capturedOpts, opts);
+      });
+
+    return program;
+  }
+
+  it('with --no-enqueue-next, Commander sets enqueueNext=false', async () => {
+    const captured: Record<string, unknown> = {};
+    const program = buildRunOnceCommand(captured);
+
+    await program.parseAsync([
+      'node', 'pd', 'internalization', 'run-once',
+      '--no-enqueue-next',
+      '--workspace', '/tmp/test',
+      '--runtime', 'test-double',
+      '--allow-test-double',
+      '--json',
+    ]);
+
+    expect(captured).toHaveProperty('enqueueNext', false);
+    expect(captured).not.toHaveProperty('noEnqueueNext');
+  });
+
+  it('without --no-enqueue-next, Commander sets enqueueNext=true (default)', async () => {
+    const captured: Record<string, unknown> = {};
+    const program = buildRunOnceCommand(captured);
+
+    await program.parseAsync([
+      'node', 'pd', 'internalization', 'run-once',
+      '--workspace', '/tmp/test',
+      '--runtime', 'test-double',
+      '--allow-test-double',
+      '--json',
+    ]);
+
+    expect(captured).toHaveProperty('enqueueNext', true);
+  });
+
+  it('opts has no noEnqueueNext property regardless of flag presence', async () => {
+    const capturedWith: Record<string, unknown> = {};
+    const programWith = buildRunOnceCommand(capturedWith);
+    await programWith.parseAsync([
+      'node', 'pd', 'internalization', 'run-once',
+      '--no-enqueue-next', '--workspace', '/tmp/test',
+    ]);
+
+    const capturedWithout: Record<string, unknown> = {};
+    const programWithout = buildRunOnceCommand(capturedWithout);
+    await programWithout.parseAsync([
+      'node', 'pd', 'internalization', 'run-once',
+      '--workspace', '/tmp/test',
+    ]);
+
+    expect(capturedWith).not.toHaveProperty('noEnqueueNext');
+    expect(capturedWithout).not.toHaveProperty('noEnqueueNext');
   });
 });
