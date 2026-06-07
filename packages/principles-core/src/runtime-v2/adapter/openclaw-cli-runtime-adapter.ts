@@ -20,6 +20,10 @@ import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { StoreEventEmitter} from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
+import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
+import { redactTelemetryString } from '../feedback/redact-sensitive.js';
+import { redactSensitiveFields } from '../feedback/redact-sensitive.js';
+import { repairMalformedJson } from './json-extractor.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -742,6 +746,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // OCRA-03: fetchOutput parses CliOutput.stdout and returns DiagnosticianOutputV1
+  // OCRA-05: Malformed JSON repair + evidence persistence on output_invalid
   async fetchOutput(runId: string): Promise<StructuredRunOutput> {
     const state = this.runStateMap.get(runId);
     if (!state || !state.completed || !state.cliOutput) {
@@ -787,15 +792,75 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       parsed = null;
     }
 
+    // OCRA-05: When initial JSON parse fails, attempt bounded repair via extractJsonObject
+    // and repairMalformedJson on the raw stdout/stderr text before giving up.
     if (parsed === null) {
-      // OCRA-04: JSON parse failure → output_invalid
-      throw new PDRuntimeError('output_invalid', 'Failed to parse CLI output as JSON');
+      // Repair step 1: scan raw text for a JSON object using balanced-bracket extraction
+      const repairSources = [cliOutput.stdout, cliOutput.stderr ?? ''];
+      for (const source of repairSources) {
+        if (!source) continue;
+        const repaired = extractJsonObject(source);
+        if (repaired !== null) {
+          parsed = repaired;
+          break;
+        }
+      }
+
+      // Repair step 2: attempt syntactic repair of malformed JSON (e.g., unescaped quotes)
+      if (parsed === null) {
+        for (const source of repairSources) {
+          if (!source) continue;
+          const repaired = repairMalformedJson(source);
+          if (repaired !== null) {
+            parsed = repaired;
+            break;
+          }
+        }
+      }
+
+      if (parsed === null) {
+        // OCRA-05: Evidence persistence on output_invalid — no silent fallback (ERR-002)
+        // ERR-055/056: redact tokens/paths from raw output before persisting preview
+        const rawText = cliOutput.stdout || cliOutput.stderr || '';
+        const redacted = redactTelemetryString(rawText.substring(0, 2000));
+        const boundedPreview = truncatePreview(
+          typeof redacted === 'string' ? redacted : '',
+          500,
+        );
+        throw new PDRuntimeError(
+          'output_invalid',
+          'Failed to parse CLI output as JSON',
+          {
+            parseFailureReason: 'no_json_object_found',
+            boundedRawOutputPreview: boundedPreview,
+            nextAction: 'Check openclaw agent output format; ensure agent returns valid JSON',
+          },
+        );
+      }
     }
 
     // OCRA-03: Validate DiagnosticianOutputV1Schema
-    // OCRA-04: Schema mismatch → output_invalid
+    // OCRA-05: On schema mismatch, include evidence with bounded preview (ERR-014/016/017)
+    // ERR-055/056: redact sensitive fields from parsed payload before persisting preview
     if (!Value.Check(DiagnosticianOutputV1Schema, parsed)) {
-      throw new PDRuntimeError('output_invalid', 'CLI output does not match DiagnosticianOutputV1 schema');
+      const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, parsed)]
+        .slice(0, 10)
+        .map(e => ({ path: e.path, message: e.message }));
+      const redacted = redactSensitiveFields(parsed);
+      const boundedPreview = redacted.ok
+        ? safeStringifyPreview(redacted.value, 500)
+        : safeStringifyPreview(parsed, 500);
+
+      throw new PDRuntimeError(
+        'output_invalid',
+        'CLI output does not match DiagnosticianOutputV1 schema',
+        {
+          parseFailureReason: 'schema_validation_failed',
+          boundedRawOutputPreview: boundedPreview,
+          schemaErrors,
+          nextAction: 'Review schema errors; check LLM output format and required fields',
+        },
+      );
     }
 
     return { runId, payload: parsed };
