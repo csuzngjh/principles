@@ -618,6 +618,74 @@ describe('validatePrinciplesList', () => {
   it('rejects invalid summary', () => {
     expect(validatePrinciplesList({ ...validList, summary: { candidate: 'zero' } })).toBeNull();
   });
+
+  // PRI-330: categories field validation tests
+  it('accepts valid categories field', () => {
+    const withCategories = {
+      ...validList,
+      categories: { owner_actionable: 3, builtin: 2, demo: 1, historical: 1 },
+    };
+    const result = validatePrinciplesList(withCategories);
+    expect(result).not.toBeNull();
+    expect(result!.categories).toBeDefined();
+    expect(result!.categories!['owner_actionable']).toBe(3);
+    expect(result!.categories!['builtin']).toBe(2);
+  });
+
+  it('accepts missing categories field (optional)', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.categories).toBeUndefined();
+  });
+
+  it('rejects categories with non-number values', () => {
+    const badCategories = {
+      ...validList,
+      categories: { owner_actionable: 'three' },
+    };
+    expect(validatePrinciplesList(badCategories)).toBeNull();
+  });
+
+  it('rejects categories that is not an object', () => {
+    expect(validatePrinciplesList({ ...validList, categories: 'invalid' })).toBeNull();
+    expect(validatePrinciplesList({ ...validList, categories: [1, 2] })).toBeNull();
+  });
+
+  it('rejects categories with empty object (treated as absent)', () => {
+    const emptyCategories = {
+      ...validList,
+      categories: {},
+    };
+    const result = validatePrinciplesList(emptyCategories);
+    expect(result).not.toBeNull();
+    // Empty categories object is treated as absent (no valid entries)
+    expect(result!.categories).toBeUndefined();
+  });
+
+  it('accepts approvalCrossCheckUnavailable string', () => {
+    const withReason = {
+      ...validList,
+      approvalCrossCheckUnavailable: 'approval_db_not_found',
+    };
+    const result = validatePrinciplesList(withReason);
+    expect(result).not.toBeNull();
+    expect(result!.approvalCrossCheckUnavailable).toBe('approval_db_not_found');
+  });
+
+  it('ignores approvalCrossCheckUnavailable when absent', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.approvalCrossCheckUnavailable).toBeUndefined();
+  });
+
+  it('rejects approvalCrossCheckUnavailable when not a string (fail loud)', () => {
+    const badReason = {
+      ...validList,
+      approvalCrossCheckUnavailable: 42,
+    };
+    // ERR-009: field present but wrong type → reject, not silently discard
+    expect(validatePrinciplesList(badReason)).toBeNull();
+  });
 });
 
 // ── validateApprovalsGrouped ──────────────────────────────────────────────────
