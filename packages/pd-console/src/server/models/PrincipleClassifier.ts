@@ -98,16 +98,4 @@ export function filterOwnerActionable(
   return classified.filter((c) => c.category === 'owner_actionable');
 }
 
-// ── Approval-side classification ──────────────────────────────────────────────
 
-/**
- * Classify an approval record. Approvals that are already decided
- * (approved / rejected / cancelled) are "already_decided".
- */
-export function classifyApprovalStatus(status: string): PrincipleCategory {
-  if (status === 'approved' || status === 'rejected' || status === 'cancelled') {
-    return 'already_decided';
-  }
-  // pending → falls through to owner_actionable (subject to other filters)
-  return 'owner_actionable';
-}

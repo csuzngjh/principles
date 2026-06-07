@@ -453,6 +453,157 @@ describe('PrinciplesConsoleModel', () => {
     expect(detail!.principle.conflictsWithPrincipleIds).toEqual(['p-other']);
     expect(detail!.principle.supersedesPrincipleId).toBe('p-old');
   });
+
+  // ── PRI-330: filter and categories tests ────────────────────────────────
+
+  it('listPrinciples returns categories breakdown', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'T-01': {
+          id: 'T-01',
+          text: 'Map before territory',
+          triggerPattern: 'always',
+          action: 'plan first',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_DEMO': {
+          id: 'P_DEMO',
+          text: 'This is a demo principle',
+          triggerPattern: 'demo',
+          action: 'nothing',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_001': {
+          id: 'P_001',
+          text: 'Real principle',
+          triggerPattern: 'error',
+          action: 'fix',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_OLD': {
+          id: 'P_OLD',
+          text: 'Old principle',
+          triggerPattern: 'old',
+          action: 'archive',
+          status: 'archived',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      lastUpdated: '2026-05-01T00:00:00Z',
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+
+    expect(result.categories).toBeDefined();
+    expect(result.categories!['builtin']).toBe(1);
+    expect(result.categories!['demo']).toBe(1);
+    expect(result.categories!['owner_actionable']).toBe(1);
+    expect(result.categories!['historical']).toBe(1);
+  });
+
+  it('listPrinciples with filter=actionable returns only actionable principles', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'T-01': {
+          id: 'T-01',
+          text: 'Map before territory',
+          triggerPattern: 'always',
+          action: 'plan first',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_DEMO': {
+          id: 'P_DEMO',
+          text: 'Demo principle for testing',
+          triggerPattern: 'demo',
+          action: 'nothing',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_001': {
+          id: 'P_001',
+          text: 'Real actionable principle',
+          triggerPattern: 'error',
+          action: 'fix',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_002': {
+          id: 'P_002',
+          text: 'Another actionable principle',
+          triggerPattern: 'warning',
+          action: 'review',
+          status: 'probation',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      lastUpdated: '2026-05-01T00:00:00Z',
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const allResult = await model.listPrinciples('all');
+    const actionableResult = await model.listPrinciples('actionable');
+
+    expect(allResult.principles).toHaveLength(4);
+    expect(actionableResult.principles).toHaveLength(2);
+    expect(actionableResult.principles[0].id).toBe('P_001');
+    expect(actionableResult.principles[1].id).toBe('P_002');
+  });
+
+  it('listPrinciples with filter=all returns all principles', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'T-01': {
+          id: 'T-01',
+          text: 'Builtin axiom',
+          triggerPattern: 'always',
+          action: 'plan',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+        'P_001': {
+          id: 'P_001',
+          text: 'Actionable principle',
+          triggerPattern: 'error',
+          action: 'fix',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      lastUpdated: '2026-05-01T00:00:00Z',
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples('all');
+
+    expect(result.principles).toHaveLength(2);
+  });
 });
 
 function writeLedger(workspaceDir: string, tree: Record<string, unknown>): void {
