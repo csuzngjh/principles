@@ -385,6 +385,45 @@ describe('pd pain retry — validation and error paths', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('RETRY-05c: blank provider/model/apiKeyEnv — refused with missing_required_config', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    // Config returns blank strings for provider/model/apiKeyEnv
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      runtimeKind: 'pi-ai',
+      provider: '',
+      model: '   ',
+      apiKeyEnv: '',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'pi-ai',
+      json: true,
+    });
+
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toContain('missing_required_config');
+    expect(output.reason).toContain('provider');
+    expect(output.reason).toContain('model');
+    expect(output.reason).toContain('apiKeyEnv');
+    expect(output.nextAction).toBeDefined();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('pd pain retry — success paths', () => {

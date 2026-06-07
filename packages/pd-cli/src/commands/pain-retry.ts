@@ -77,6 +77,11 @@ function resolveTaskIdFromPainId(painId: string): { taskId: string } | { reason:
   return { taskId: `diagnosis_${painId}` };
 }
 
+/** Return value as a non-blank string if it is one, otherwise null. */
+function readNonBlankString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 /** Output a refused/not_found result, respecting --json mode. Exits with code 1. */
 function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: string; taskId?: string; reason: string; message?: string; nextAction: string }): never {
   if (opts.json) {
@@ -272,9 +277,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
       // Validate required string fields: must be non-blank strings
       const missing: string[] = [];
-      if (typeof provider !== 'string' || provider.trim().length === 0) missing.push('provider');
-      if (typeof model !== 'string' || model.trim().length === 0) missing.push('model');
-      if (typeof apiKeyEnv !== 'string' || apiKeyEnv.trim().length === 0) missing.push('apiKeyEnv');
+      if (readNonBlankString(provider) === null) missing.push('provider');
+      if (readNonBlankString(model) === null) missing.push('model');
+      if (readNonBlankString(apiKeyEnv) === null) missing.push('apiKeyEnv');
       if (missing.length > 0) {
         refuseExit(opts, {
           painId: opts.painId,
@@ -304,10 +309,18 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       }
 
       // After validation, these are guaranteed non-blank strings.
-      // Type assertion is safe because the validation above checked typeof + trim.
-      const validProvider = provider as string;
-      const validModel = model as string;
-      const validApiKeyEnv = apiKeyEnv as string;
+      const validProvider = readNonBlankString(provider);
+      const validModel = readNonBlankString(model);
+      const validApiKeyEnv = readNonBlankString(apiKeyEnv);
+      if (validProvider === null || validModel === null || validApiKeyEnv === null) {
+        refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: 'internal_validation_error',
+          message: 'Internal error: validated string fields became null after validation.',
+          nextAction: 'This should not happen. Please report this bug.',
+        });
+      }
 
       if (!process.env[validApiKeyEnv]) {
         refuseExit(opts, {
