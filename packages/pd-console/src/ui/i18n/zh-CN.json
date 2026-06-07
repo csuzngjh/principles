@@ -83,7 +83,22 @@
       "onboardingStep2": "捕获证据 — 行为偏差信号以有界上下文记录",
       "onboardingStep3": "生成候选 — 提出原则候选供拥有者审查",
       "onboardingStep4": "审查批准 — 拥有者决定激活哪些原则",
-      "onboardingStep5": "注入行为 — 已批准原则可撤销地影响未来智能体行为"
+      "onboardingStep5": "注入行为 — 已批准原则可撤销地影响未来智能体行为",
+      "stateLabel": {
+        "none": "暂无数据",
+        "in_progress": "进行中",
+        "owner_review_ready": "待审查",
+        "degraded": "降级"
+      },
+      "nextActionLabel": "建议操作：",
+      "inProgressTitle": "PD 正在工作",
+      "inProgressDetail": "当内化管线完成并生成可审查的原则候选后，PD 会在这里展示。",
+      "degradedTitle": "系统信号",
+      "degradedStateReason": "部分治理链路或数据源处于降级状态，决策可能不完整或延迟。",
+      "degradedNextAction": "建议操作：",
+      "degradedSourceInternalization": "内化任务",
+      "degradedSourceChainIntegrity": "链路完整性",
+      "degradedSourceUnavailable": "数据源"
     },
     "pain": {
       "eyebrow": "行为证据",

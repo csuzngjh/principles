@@ -523,11 +523,33 @@ function validateStagnationSignal(v: unknown): StagnationSignalData | null {
   return { type: v.type, principleId: v.principleId, daysSince: v.daysSince };
 }
 
+const VALID_GOVERNANCE_STATES = new Set(['none', 'in_progress', 'owner_review_ready', 'degraded']);
+
+export interface DegradedSignalData {
+  reason: string;
+  nextAction: string;
+  source: string;
+}
+
+function validateDegradedSignal(v: unknown): DegradedSignalData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'reason') || !isString(v.reason)) return null;
+  if (!Object.hasOwn(v, 'nextAction') || !isString(v.nextAction)) return null;
+  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  return { reason: v.reason, nextAction: v.nextAction, source: v.source };
+}
+
 export interface GovernanceQueueData {
   pendingReviewCount: number;
   behaviorDeviationCount: number;
   stagnationSignals: StagnationSignalData[];
+  governanceState: 'none' | 'in_progress' | 'owner_review_ready' | 'degraded';
+  stateReason: string;
+  nextAction: string;
+  inProgressSummary?: string;
+  degradedSignals?: DegradedSignalData[];
   note?: string;
+  generatedAt?: string;
 }
 
 export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null {
@@ -535,14 +557,33 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
   if (!Object.hasOwn(v, 'pendingReviewCount') || !isNumber(v.pendingReviewCount)) return null;
   if (!Object.hasOwn(v, 'behaviorDeviationCount') || !isNumber(v.behaviorDeviationCount)) return null;
   if (!Object.hasOwn(v, 'stagnationSignals') || !Array.isArray(v.stagnationSignals)) return null;
+  if (!Object.hasOwn(v, 'governanceState') || !isString(v.governanceState)) return null;
+  if (!VALID_GOVERNANCE_STATES.has(v.governanceState)) return null;
+  if (!Object.hasOwn(v, 'stateReason') || !isString(v.stateReason)) return null;
+  if (!Object.hasOwn(v, 'nextAction') || !isString(v.nextAction)) return null;
+
   const signals = validateArray(v.stagnationSignals, validateStagnationSignal);
   if (signals === null) return null;
+
   const result: GovernanceQueueData = {
     pendingReviewCount: v.pendingReviewCount,
     behaviorDeviationCount: v.behaviorDeviationCount,
     stagnationSignals: signals,
+    governanceState: v.governanceState as GovernanceQueueData['governanceState'],
+    stateReason: v.stateReason,
+    nextAction: v.nextAction,
   };
+
+  // Optional fields
+  if (Object.hasOwn(v, 'inProgressSummary') && isString(v.inProgressSummary)) {
+    result.inProgressSummary = v.inProgressSummary;
+  }
+  if (Object.hasOwn(v, 'degradedSignals') && Array.isArray(v.degradedSignals)) {
+    const ds = validateArray(v.degradedSignals, validateDegradedSignal);
+    if (ds !== null) result.degradedSignals = ds;
+  }
   if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
+  if (Object.hasOwn(v, 'generatedAt') && isString(v.generatedAt)) result.generatedAt = v.generatedAt;
   return result;
 }
 

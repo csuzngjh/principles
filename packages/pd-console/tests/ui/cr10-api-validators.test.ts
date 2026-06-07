@@ -311,6 +311,10 @@ describe('validateGovernanceQueue', () => {
     pendingReviewCount: 2,
     behaviorDeviationCount: 1,
     stagnationSignals: [{ type: 'never_activated', principleId: 'p1', daysSince: 30 }],
+    governanceState: 'owner_review_ready',
+    stateReason: 'There are 2 pending approvals.',
+    nextAction: 'Review and approve.',
+    generatedAt: '2026-06-07T09:00:00.000Z',
   };
 
   it('accepts a valid governance queue', () => {
@@ -334,6 +338,11 @@ describe('validateGovernanceQueue', () => {
 
   it('rejects invalid stagnation signals', () => {
     expect(validateGovernanceQueue({ ...validQueue, stagnationSignals: [{ type: 123 }] })).toBeNull();
+  });
+
+  it('rejects invalid governanceState', () => {
+    expect(validateGovernanceQueue({ ...validQueue, governanceState: 'invalid' })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, governanceState: 123 })).toBeNull();
   });
 });
 

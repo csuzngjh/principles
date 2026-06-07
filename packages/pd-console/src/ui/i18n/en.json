@@ -83,7 +83,22 @@
       "onboardingStep2": "Capture evidence — Pain signals are recorded with bounded context",
       "onboardingStep3": "Generate candidates — Principle candidates are proposed for owner review",
       "onboardingStep4": "Review & approve — Owners decide which principles to activate",
-      "onboardingStep5": "Inject behavior — Approved principles influence future agent behavior, reversibly"
+      "onboardingStep5": "Inject behavior — Approved principles influence future agent behavior, reversibly",
+      "stateLabel": {
+        "none": "No Data",
+        "in_progress": "In Progress",
+        "owner_review_ready": "Ready for Review",
+        "degraded": "Degraded"
+      },
+      "nextActionLabel": "Suggested action:",
+      "inProgressTitle": "PD Is Working",
+      "inProgressDetail": "PD will surface a principle candidate here once the internalization pipeline completes and an owner-reviewable artifact is generated.",
+      "degradedTitle": "System Signals",
+      "degradedStateReason": "Part of the governance pipeline or data source is degraded. Decisions may be incomplete or delayed.",
+      "degradedNextAction": "Next action:",
+      "degradedSourceInternalization": "Internalization Task",
+      "degradedSourceChainIntegrity": "Chain Integrity",
+      "degradedSourceUnavailable": "Data Source"
     },
     "pain": {
       "eyebrow": "Behavior Evidence",

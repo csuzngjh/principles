@@ -12,11 +12,13 @@ import type {
   ApprovalsGroupedData,
   ApprovalGroup,
   StagnationSignal,
+  DegradedSignal,
 } from "../../api.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
 const VALID_STAGNATION_TYPES = new Set(["no_pain", "never_activated"]);
+const VALID_GOVERNANCE_STATES = new Set(["none", "in_progress", "owner_review_ready", "degraded"]);
 
 /** Type guard: is this a non-null object with own properties (not inherited)? */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -52,24 +54,59 @@ function validateStagnationSignal(raw: unknown): StagnationSignal | null {
   };
 }
 
+function validateDegradedSignal(raw: unknown): DegradedSignal | null {
+  if (!isRecord(raw)) return null;
+  if (
+    !Object.hasOwn(raw, "reason") ||
+    !Object.hasOwn(raw, "nextAction") ||
+    !Object.hasOwn(raw, "source")
+  ) {
+    return null;
+  }
+  const reason = raw.reason;
+  const nextAction = raw.nextAction;
+  const source = raw.source;
+  if (
+    typeof reason !== "string" ||
+    reason.length === 0 ||
+    typeof nextAction !== "string" ||
+    nextAction.length === 0 ||
+    typeof source !== "string" ||
+    source.length === 0
+  ) {
+    return null;
+  }
+  return { reason, nextAction, source };
+}
+
 function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
   if (!isRecord(raw)) return null;
   if (
     !Object.hasOwn(raw, "pendingReviewCount") ||
     !Object.hasOwn(raw, "behaviorDeviationCount") ||
-    !Object.hasOwn(raw, "stagnationSignals")
+    !Object.hasOwn(raw, "stagnationSignals") ||
+    !Object.hasOwn(raw, "governanceState") ||
+    !Object.hasOwn(raw, "stateReason") ||
+    !Object.hasOwn(raw, "nextAction")
   ) {
     return null;
   }
   const pendingReviewCount = raw.pendingReviewCount;
   const behaviorDeviationCount = raw.behaviorDeviationCount;
   const stagnationSignals = raw.stagnationSignals;
+  const governanceState = raw.governanceState;
+  const stateReason = raw.stateReason;
+  const nextAction = raw.nextAction;
   if (
     typeof pendingReviewCount !== "number" ||
     pendingReviewCount < 0 ||
     typeof behaviorDeviationCount !== "number" ||
     behaviorDeviationCount < 0 ||
-    !Array.isArray(stagnationSignals)
+    !Array.isArray(stagnationSignals) ||
+    typeof governanceState !== "string" ||
+    !VALID_GOVERNANCE_STATES.has(governanceState) ||
+    typeof stateReason !== "string" ||
+    typeof nextAction !== "string"
   ) {
     return null;
   }
@@ -80,11 +117,38 @@ function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
     if (validated === null) return null;
     signals.push(validated);
   }
+
+  // Validate degradedSignals array if present
+  let degradedSignals: DegradedSignal[] | undefined;
+  if (Object.hasOwn(raw, "degradedSignals")) {
+    const rawDegraded = raw.degradedSignals;
+    if (!Array.isArray(rawDegraded)) return null;
+    degradedSignals = [];
+    for (const d of rawDegraded) {
+      const validated = validateDegradedSignal(d);
+      if (validated === null) return null;
+      degradedSignals.push(validated);
+    }
+  }
+
+  // Validate inProgressSummary if present
+  let inProgressSummary: string | undefined;
+  if (Object.hasOwn(raw, "inProgressSummary")) {
+    if (typeof raw.inProgressSummary !== "string") return null;
+    inProgressSummary = raw.inProgressSummary;
+  }
+
   return {
     pendingReviewCount,
     behaviorDeviationCount,
     stagnationSignals: signals,
+    governanceState: governanceState as GovernanceQueueData["governanceState"],
+    stateReason,
+    nextAction,
+    inProgressSummary,
+    degradedSignals,
     note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
+    generatedAt: Object.hasOwn(raw, "generatedAt") && typeof raw.generatedAt === "string" ? raw.generatedAt : new Date().toISOString(),
   };
 }
 
@@ -296,6 +360,37 @@ function StagnationSignalCard({ signal }: { signal: StagnationSignal }) {
   );
 }
 
+function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
+  const { t } = useTranslation();
+  const sourceLabel = signal.source === "internalization_task"
+    ? t("pages.focus.degradedSourceInternalization")
+    : signal.source === "chain_integrity"
+      ? t("pages.focus.degradedSourceChainIntegrity")
+      : signal.source === "source_unavailable"
+        ? t("pages.focus.degradedSourceUnavailable")
+        : signal.source;
+
+  return (
+    <article className="relative pl-[22px] py-[14px] pr-[18px] bg-panel border border-amber/20 border-l-[3px] border-l-amber rounded-[6px]">
+      {/* Source label */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+          {sourceLabel}
+        </span>
+      </div>
+      {/* Reason */}
+      <div className="text-ink-2 text-sm leading-relaxed">
+        {signal.reason}
+      </div>
+      {/* Next action */}
+      <div className="mt-2 text-ink-4 text-[13px] leading-snug">
+        <span className="font-medium">{t("pages.focus.degradedNextAction")}</span>{" "}
+        {signal.nextAction}
+      </div>
+    </article>
+  );
+}
+
 function OnboardingGuide() {
   const { t } = useTranslation();
   const steps = [
@@ -319,6 +414,38 @@ function OnboardingGuide() {
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+function InProgressGuide({ summary }: { summary: string }) {
+  const { t } = useTranslation();
+  return (
+    <div className="bg-panel border border-line rounded-[6px] p-6">
+      <SectionTitle>{t("pages.focus.inProgressTitle")}</SectionTitle>
+      <p className="text-ink-2 text-sm leading-relaxed mt-2">
+        {summary}
+      </p>
+      <p className="text-ink-4 text-[13px] leading-relaxed mt-3">
+        {t("pages.focus.inProgressDetail")}
+      </p>
+    </div>
+  );
+}
+
+function DegradedSummary({ signals }: { signals: DegradedSignal[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="bg-panel border border-amber/20 border-l-[3px] border-l-amber rounded-[6px] p-5">
+      <SectionTitle>{t("pages.focus.degradedTitle")}</SectionTitle>
+      <p className="text-ink-2 text-sm leading-relaxed mt-2">
+        {t("pages.focus.degradedStateReason")}
+      </p>
+      <div className="mt-4 space-y-[10px]">
+        {signals.map((signal, i) => (
+          <DegradedSignalCard key={`${signal.source}-${i}`} signal={signal} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -416,7 +543,11 @@ export function FocusPage() {
   const deviationCount = queueData?.behaviorDeviationCount ?? 0;
   const stagnationSignals = queueData?.stagnationSignals ?? [];
   const stagnationCount = stagnationSignals.length;
-  const isAllEmpty = pendingCount === 0 && deviationCount === 0 && stagnationCount === 0;
+  const governanceState = queueData?.governanceState ?? "none";
+  const stateReason = queueData?.stateReason ?? "";
+  const nextAction = queueData?.nextAction ?? "";
+  const inProgressSummary = queueData?.inProgressSummary;
+  const degradedSignals = queueData?.degradedSignals;
   const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
 
   return (
@@ -432,6 +563,34 @@ export function FocusPage() {
         {t("pages.focus.subtitle")}
       </p>
 
+      {/* Governance State Summary */}
+      <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
+        <div className="flex items-center gap-2 mb-1">
+          {/* State badge */}
+          <span
+            className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+              governanceState === "owner_review_ready"
+                ? "bg-gov/10 text-gov border border-gov/20"
+                : governanceState === "degraded"
+                  ? "bg-amber/10 text-amber border border-amber/20"
+                  : governanceState === "in_progress"
+                    ? "bg-green/10 text-green border border-green/20"
+                    : "text-ink-4 border border-line bg-surface/80"
+            }`}
+            role="status"
+          >
+            {t(`pages.focus.stateLabel.${governanceState}`)}
+          </span>
+        </div>
+        <div className="text-ink-2 text-[13px] leading-relaxed mt-1">
+          {stateReason}
+        </div>
+        <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
+          <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
+          {nextAction}
+        </div>
+      </div>
+
       {/* Prose summary — one line, tabular nums */}
       <ProseSummary
         pendingCount={pendingCount}
@@ -439,8 +598,18 @@ export function FocusPage() {
         stagnationCount={stagnationCount}
       />
 
-      {/* Onboarding guide (only when all sections are empty) */}
-      {isAllEmpty && <OnboardingGuide />}
+      {/* State-specific guides */}
+      {governanceState === "none" && pendingCount === 0 && deviationCount === 0 && stagnationCount === 0 && (
+        <OnboardingGuide />
+      )}
+
+      {governanceState === "in_progress" && inProgressSummary && (
+        <InProgressGuide summary={inProgressSummary} />
+      )}
+
+      {governanceState === "degraded" && degradedSignals && degradedSignals.length > 0 && (
+        <DegradedSummary signals={degradedSignals} />
+      )}
 
       {/* Layer 2: Why — three sections with evidence summaries */}
 
