@@ -573,6 +573,20 @@ describe('PRI-42 internalization boundary', () => {
     }
   });
 
+  it('PEAT-B1: evidence-triage has zero openclaw-plugin imports', async () => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const triageDir = resolve(__dirname, '..', 'evidence-triage');
+    expect(existsSync(triageDir)).toBe(true);
+
+    const files = readdirSync(triageDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+    for (const file of files) {
+      const src = readFileSync(join(triageDir, file), 'utf-8');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('../../../openclaw-plugin');
+    }
+  });
+
   it('plugin does not re-define RuleHost contract types locally', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');

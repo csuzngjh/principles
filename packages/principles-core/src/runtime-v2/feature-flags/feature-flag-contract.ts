@@ -102,6 +102,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'feedback_channel', category: 'quiet', enabled: true, since: '2026-06-01', description: 'MVP seed feedback channel — privacy-preserving report drafts' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
+  { id: 'painEvidenceAdmission', category: 'quiet', enabled: false, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1)' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },

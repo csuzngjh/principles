@@ -31,6 +31,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {
   gfi:                { category: 'quiet', enabled: false },
   evolution_worker:   { category: 'quiet', enabled: false },
   empathy_observer:   { category: 'quiet', enabled: false },
+  painEvidenceAdmission:{ category: 'quiet', enabled: false },
 
   // MVP-Gone (ADR-0014 §2.6)
   nocturnal:          { category: 'gone',  enabled: false },
