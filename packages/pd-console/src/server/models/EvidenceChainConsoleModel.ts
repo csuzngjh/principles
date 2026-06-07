@@ -74,6 +74,16 @@ function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
+/**
+ * Coerce a value to string — handles SQLite INTEGER PRIMARY KEY returning number.
+ * Returns empty string only for null/undefined; numbers are stringified.
+ */
+function coerceToString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
@@ -338,7 +348,10 @@ export class EvidenceChainConsoleModel {
           }
         }
       } catch (err) {
-        if (!isMissingTableError(err)) {
+        if (isMissingTableError(err)) {
+          degradedReasons.push('Candidates table not found in state database');
+          degradedNextActions.push('Candidate and internalization chain links are unavailable. Workspace may need initialization.');
+        } else {
           degradedReasons.push('Failed to read candidates table');
           degradedNextActions.push('Check state database integrity.');
         }
@@ -356,7 +369,9 @@ export class EvidenceChainConsoleModel {
 
     // ── 5. Build evidence chain records from pain_events ──────────────────
     for (const event of painEvents) {
-      const eventId = isString(event.id) ? String(event.id) : '';
+      // SQLite INTEGER PRIMARY KEY returns number, not string — must coerce
+      const eventId = coerceToString(event.id);
+      if (!eventId) continue; // Skip records with no valid id (ERR-009: fail loud)
       const source = isString(event.source) ? event.source : 'unknown';
       const reason = isString(event.reason) ? event.reason : '';
       const text = isString(event.text) ? event.text : '';

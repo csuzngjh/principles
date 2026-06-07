@@ -23,6 +23,16 @@ import { formatDate } from '../../utils/format.js';
 
 type StateGroup = 'active_chain' | 'evidence_only' | 'failed';
 
+/**
+ * Translate with fallback — if the i18n key doesn't exist (returns the key itself),
+ * return the fallback instead. Prevents raw keys like "pages.pain.source_unknown_value"
+ * from being displayed to the user.
+ */
+function tFallback(t: (key: string) => string, key: string, fallback: string): string {
+  const result = t(key);
+  return result === key ? fallback : result;
+}
+
 function groupForState(state: EvidenceChainStateData): StateGroup {
   switch (state) {
     case 'pain_recorded':
@@ -253,8 +263,8 @@ interface EvidenceChainCardProps {
 
 function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardProps) {
   const stateVariant = stateToVariant(record.state);
-  const stateLabel = t(`pages.pain.state_${record.state}`);
-  const sourceLabel = t(`pages.pain.source_${record.sourceKind}`);
+  const stateLabel = tFallback(t, `pages.pain.state_${record.state}`, record.state);
+  const sourceLabel = tFallback(t, `pages.pain.source_${record.sourceKind}`, record.sourceKind);
 
   return (
     <Card className="overflow-hidden">
@@ -266,7 +276,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             <Badge variant="outline">{sourceLabel}</Badge>
             {record.admissionDecision && (
               <Badge variant="secondary">
-                {t(`pages.pain.admission_${record.admissionDecision}`)}
+                {tFallback(t, `pages.pain.admission_${record.admissionDecision}`, record.admissionDecision)}
               </Badge>
             )}
           </div>
