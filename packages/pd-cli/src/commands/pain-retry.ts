@@ -266,10 +266,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
       const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
 
+      // Validate required string fields: must be non-blank strings
       const missing: string[] = [];
-      if (!provider) missing.push('provider');
-      if (!model) missing.push('model');
-      if (!apiKeyEnv) missing.push('apiKeyEnv');
+      if (typeof provider !== 'string' || provider.trim().length === 0) missing.push('provider');
+      if (typeof model !== 'string' || model.trim().length === 0) missing.push('model');
+      if (typeof apiKeyEnv !== 'string' || apiKeyEnv.trim().length === 0) missing.push('apiKeyEnv');
       if (missing.length > 0) {
         if (opts.json) {
           console.log(JSON.stringify({
@@ -277,58 +278,71 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             painId: opts.painId,
             taskId,
             reason: `missing_required_config: ${missing.join(', ')}`,
-            message: `Missing required pi-ai config: ${missing.join(', ')}`,
+            message: `Missing or blank required pi-ai config: ${missing.join(', ')}`,
             nextAction: `Pass via --flag or add to workflows.yaml. Example: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY`,
           }));
         } else {
-          console.error(`error: missing required pi-ai config: ${missing.join(', ')}.`);
+          console.error(`error: missing or blank required pi-ai config: ${missing.join(', ')}.`);
           console.error(`nextAction: Pass via --flag or add to workflows.yaml.`);
         }
         process.exit(1);
         return;
       }
 
-      if (typeof provider !== 'string' || typeof model !== 'string' || typeof apiKeyEnv !== 'string') {
-        // Should be unreachable after the missing check above, but guard for type safety
+      // Validate numeric options: must be finite, integer, non-negative if provided
+      const invalidNumeric: string[] = [];
+      if (maxRetries !== undefined && maxRetries !== null && !(Number.isFinite(maxRetries) && Number.isInteger(maxRetries) && maxRetries >= 0)) {
+        invalidNumeric.push(`maxRetries (got: ${maxRetries})`);
+      }
+      if (effectiveTimeoutMs !== undefined && effectiveTimeoutMs !== null && !(Number.isFinite(effectiveTimeoutMs) && effectiveTimeoutMs > 0)) {
+        invalidNumeric.push(`timeoutMs (got: ${effectiveTimeoutMs})`);
+      }
+      if (invalidNumeric.length > 0) {
         if (opts.json) {
           console.log(JSON.stringify({
             status: 'refused',
             painId: opts.painId,
             taskId,
-            reason: 'invalid_config_type',
-            message: 'Provider, model, or apiKeyEnv resolved to a non-string value',
-            nextAction: 'Ensure provider, model, and apiKeyEnv are string values.',
+            reason: `invalid_numeric_config: ${invalidNumeric.join(', ')}`,
+            message: `Invalid numeric pi-ai config: ${invalidNumeric.join(', ')}. maxRetries must be a non-negative integer; timeoutMs must be a positive number.`,
+            nextAction: 'Fix the numeric values and retry.',
           }));
         } else {
-          console.error('error: provider, model, or apiKeyEnv resolved to a non-string value');
-          console.error('nextAction: Ensure provider, model, and apiKeyEnv are string values.');
+          console.error(`error: invalid numeric pi-ai config: ${invalidNumeric.join(', ')}.`);
+          console.error(`nextAction: maxRetries must be a non-negative integer; timeoutMs must be a positive number.`);
         }
         process.exit(1);
         return;
       }
 
-      if (!process.env[apiKeyEnv]) {
+      // After validation, these are guaranteed non-blank strings
+      // Type assertion is safe because the validation above already checked typeof + trim
+      const validProvider = provider as string;
+      const validModel = model as string;
+      const validApiKeyEnv = apiKeyEnv as string;
+
+      if (!process.env[validApiKeyEnv]) {
         if (opts.json) {
           console.log(JSON.stringify({
             status: 'refused',
             painId: opts.painId,
             taskId,
             reason: 'missing_api_key',
-            message: `Environment variable '${apiKeyEnv}' is not set`,
-            nextAction: `Set the environment variable: export ${apiKeyEnv}=<your-api-key>`,
+            message: `Environment variable '${validApiKeyEnv}' is not set`,
+            nextAction: `Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`,
           }));
         } else {
-          console.error(`error: environment variable '${apiKeyEnv}' is not set`);
-          console.error(`nextAction: Set the environment variable: export ${apiKeyEnv}=<your-api-key>`);
+          console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
+          console.error(`nextAction: Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`);
         }
         process.exit(1);
         return;
       }
 
       runtimeAdapter = new PiAiRuntimeAdapter({
-        provider,
-        model,
-        apiKeyEnv,
+        provider: validProvider,
+        model: validModel,
+        apiKeyEnv: validApiKeyEnv,
         baseUrl,
         maxRetries,
         timeoutMs: effectiveTimeoutMs,
