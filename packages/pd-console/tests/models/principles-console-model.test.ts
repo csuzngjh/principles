@@ -565,6 +565,7 @@ describe('PrinciplesConsoleModel', () => {
     const actionableResult = await model.listPrinciples('actionable');
 
     expect(allResult.principles).toHaveLength(4);
+    // Only candidate (P_001) and probation (P_002) are actionable
     expect(actionableResult.principles).toHaveLength(2);
     expect(actionableResult.principles[0].id).toBe('P_001');
     expect(actionableResult.principles[1].id).toBe('P_002');

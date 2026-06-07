@@ -929,8 +929,20 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (!isNumber(candidate) || !isNumber(probation) || !isNumber(active) || !isNumber(deprecated) || !isNumber(archived) || !isNumber(total)) return null;
   const principles = validateArray(v.principles, validatePrincipleListItem);
   if (principles === null) return null;
-  // categories is optional (PRI-330)
-  const categories = Object.hasOwn(v, 'categories') && isObject(v.categories) ? v.categories as Record<string, number> : undefined;
+  // categories is optional (PRI-330) — EP-01: runtime validate, no `as` bypass
+  let categories: Record<string, number> | undefined;
+  if (Object.hasOwn(v, 'categories') && isObject(v.categories)) {
+    const raw = v.categories;
+    const validated: Record<string, number> = {};
+    let valid = true;
+    for (const [key, val] of Object.entries(raw)) {
+      if (!isNumber(val)) { valid = false; break; }
+      validated[key] = val;
+    }
+    if (valid && Object.keys(validated).length > 0) {
+      categories = validated;
+    }
+  }
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },

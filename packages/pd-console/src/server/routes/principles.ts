@@ -41,7 +41,7 @@ export async function handlePrinciplesRoute({
       const params = new URLSearchParams(queryString);
       const filterRaw = params.get('filter');
       const VALID_FILTERS = new Set<string>(['all', 'actionable']);
-      const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'all') as PrincipleFilter;
+      const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
       const result = await model.listPrinciples(filter);
       sendSuccess(res, result);

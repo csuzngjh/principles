@@ -47,10 +47,13 @@ describe('classifyPrinciple', () => {
     expect(classifyPrinciple(makePrinciple({ status: 'deprecated' }))).toBe('historical');
   });
 
-  it('classifies candidate/probation/active as owner_actionable', () => {
+  it('classifies active as already_decided', () => {
+    expect(classifyPrinciple(makePrinciple({ status: 'active' }))).toBe('already_decided');
+  });
+
+  it('classifies candidate/probation as owner_actionable', () => {
     expect(classifyPrinciple(makePrinciple({ status: 'candidate' }))).toBe('owner_actionable');
     expect(classifyPrinciple(makePrinciple({ status: 'probation' }))).toBe('owner_actionable');
-    expect(classifyPrinciple(makePrinciple({ status: 'active' }))).toBe('owner_actionable');
   });
 
   it('prioritizes builtin over historical', () => {
@@ -86,7 +89,7 @@ describe('filterOwnerActionable', () => {
       makePrinciple({ id: 'T-01' }),
       makePrinciple({ id: 'P_001', text: 'demo' }),
       makePrinciple({ id: 'P_002', status: 'candidate' }),
-      makePrinciple({ id: 'P_003', status: 'active' }),
+      makePrinciple({ id: 'P_003', status: 'probation' }),
     ]);
     const filtered = filterOwnerActionable(classified);
     expect(filtered).toHaveLength(2);

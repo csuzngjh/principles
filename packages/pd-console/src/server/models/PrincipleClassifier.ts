@@ -71,12 +71,17 @@ export function classifyPrinciple(
     return 'smoke';
   }
 
-  // 4. Historical: archived or deprecated = already decided long ago
+  // 4. Already decided: active = approved & in effect, no governance needed
+  if (p.status === 'active') {
+    return 'already_decided';
+  }
+
+  // 5. Historical: archived or deprecated
   if (p.status === 'archived' || p.status === 'deprecated') {
     return 'historical';
   }
 
-  // 5. Everything else that is candidate / probation / active is actionable
+  // 6. Only candidate / probation need owner decision
   return 'owner_actionable';
 }
 

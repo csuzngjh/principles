@@ -328,20 +328,8 @@ export function PrinciplesPage() {
               ? t("principles.emptyActionable", { defaultValue: "No owner-actionable principles at this time. When PD captures behavior deviation signals, principle candidates will appear here for your review." })
               : t("principles.emptyDescription")}
           </p>
-        </div>
-      )}
-
-      {/* PRI-330: Honest empty state — actionable filter has no results but principles exist */}
-      {!loading && !error && filtered.length === 0 && principles.length > 0 && filterMode === 'actionable' && (
-        <div className="text-center py-12">
-          <h2 className="text-ink-2 text-lg font-semibold mb-2">
-            {t("principles.noActionableTitle", { defaultValue: "No actionable principles right now" })}
-          </h2>
-          <p className="text-ink-3 text-[14px] max-w-[480px] mx-auto leading-relaxed mb-4">
-            {t("principles.noActionableDescription", { defaultValue: "All current principles are classified as demo, smoke test, historical, or builtin axioms. Switch to \"Show All\" to see them." })}
-          </p>
-          {categories && (
-            <div className="flex justify-center gap-2 flex-wrap">
+          {categories && filterMode === 'actionable' && (
+            <div className="flex justify-center gap-2 flex-wrap mt-4">
               {Object.entries(categories).map(([cat, count]) => (
                 <span
                   key={cat}
