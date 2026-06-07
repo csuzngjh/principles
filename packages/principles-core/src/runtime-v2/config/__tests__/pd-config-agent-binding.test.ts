@@ -667,4 +667,104 @@ describe('createAdapterConfigFromProfile', () => {
     if (openclawResult.runtimeKind !== 'openclaw-cli') return;
     expect(openclawResult.workspaceDir).toBe('/another/workspace/path');
   });
+
+  // ── pi-ai.lmstudio profile resolution ─────────────────────────────────────
+
+  it('pi-ai.lmstudio profile resolves to runtimeKind=pi-ai with baseUrl', () => {
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'pi-ai',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        apiKeyEnv: 'LMSTUDIO_API_KEY',
+        baseUrl: 'http://localhost:12341/v1',
+        timeoutMs: 600_000,
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('pi-ai');
+    if (result.runtimeKind !== 'pi-ai') return;
+    expect(result.provider).toBe('lmstudio');
+    expect(result.model).toBe('qwen3.6-27b-mtp');
+    expect(result.apiKeyEnv).toBe('LMSTUDIO_API_KEY');
+    expect(result.baseUrl).toBe('http://localhost:12341/v1');
+    expect(result.timeoutMs).toBe(600_000);
+  });
+
+  it('pi-ai.lmstudio readiness check with LMSTUDIO_API_KEY set', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        apiKeyEnv: 'LMSTUDIO_API_KEY',
+        baseUrl: 'http://localhost:12341/v1',
+        timeoutMs: 600_000,
+      },
+      (name) => name === 'LMSTUDIO_API_KEY' ? 'lm-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('ready');
+  });
+
+  it('pi-ai.lmstudio readiness check with LMSTUDIO_API_KEY missing', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        apiKeyEnv: 'LMSTUDIO_API_KEY',
+        baseUrl: 'http://localhost:12341/v1',
+        timeoutMs: 600_000,
+      },
+      () => undefined,
+    );
+    expect(result.readiness).toBe('not_ready');
+    expect(result.reason).toContain('LMSTUDIO_API_KEY');
+    expect(result.nextAction).toBeTruthy();
+  });
+
+  it('diagnostician resolves to pi-ai.lmstudio when configured', () => {
+    const config = makeConfigWithOverrides({
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'pi-ai.lmstudio': {
+          type: 'pi-ai',
+          provider: 'lmstudio',
+          model: 'qwen3.6-27b-mtp',
+          apiKeyEnv: 'LMSTUDIO_API_KEY',
+          baseUrl: 'http://localhost:12341/v1',
+          timeoutMs: 600_000,
+        },
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'pi-ai.lmstudio' },
+          dreamer: { enabled: true },
+          philosopher: { enabled: false },
+          scribe: { enabled: true },
+          artificer: { enabled: true },
+          evaluator: { enabled: false },
+          rolloutReviewer: { enabled: false },
+          trainer: { enabled: false },
+          correctionObserver: { enabled: false },
+          empathyObserver: { enabled: false },
+        },
+      },
+    });
+    const effective = computeEffectivePdConfig(config);
+    const result = resolveAgentRuntimeBinding(effective, 'diagnostician');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profileId).toBe('pi-ai.lmstudio');
+    expect(result.profile.type).toBe('pi-ai');
+    if (result.profile.type === 'pi-ai') {
+      expect(result.profile.provider).toBe('lmstudio');
+      expect(result.profile.model).toBe('qwen3.6-27b-mtp');
+      expect(result.profile.baseUrl).toBe('http://localhost:12341/v1');
+    }
+    expect(result.source).toBe('agent_override');
+  });
 });
