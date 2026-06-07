@@ -437,6 +437,7 @@ export type { ApprovalRecordData as ApprovalRecord } from "./utils/validators.js
 export type { WorkspaceEntryData as WorkspaceEntry } from "./utils/validators.js";
 export type { PrincipleListItemData as PrincipleListItem } from "./utils/validators.js";
 export type { StagnationSignalData as StagnationSignal } from "./utils/validators.js";
+export type { DegradedSignalData as DegradedSignal } from "./utils/validators.js";
 export type { ApprovalGroupData as ApprovalGroup } from "./utils/validators.js";
 export type { LifecycleAdherenceData as LifecycleAdherence } from "./utils/validators.js";
 export type { LifecycleRuleMetricData as LifecycleRuleMetric } from "./utils/validators.js";

@@ -83,7 +83,48 @@
       "onboardingStep2": "捕获证据 — 行为偏差信号以有界上下文记录",
       "onboardingStep3": "生成候选 — 提出原则候选供拥有者审查",
       "onboardingStep4": "审查批准 — 拥有者决定激活哪些原则",
-      "onboardingStep5": "注入行为 — 已批准原则可撤销地影响未来智能体行为"
+      "onboardingStep5": "注入行为 — 已批准原则可撤销地影响未来智能体行为",
+      "stateLabel": {
+        "none": "暂无数据",
+        "in_progress": "进行中",
+        "owner_review_ready": "待审查",
+        "degraded": "降级"
+      },
+      "nextActionLabel": "建议操作：",
+      "inProgressTitle": "治理链路进行中",
+      "inProgressDetail": "当内化管线完成并生成可审查的原则候选后，PD 会在这里展示。",
+      "degradedTitle": "系统信号",
+      "degradedStateReason": "部分治理链路或数据源处于降级状态，决策可能不完整或延迟。",
+      "degradedNextActionLabel": "建议操作：",
+      "advancedDiagnostics": "高级诊断",
+      "degradedSourceInternalization": "内化任务",
+      "degradedSourceChainIntegrity": "链路完整性",
+      "degradedSourceUnavailable": "数据源",
+      "stateReason": {
+        "state_db_missing": "状态数据库未初始化。PD 尚未在此工作空间中运行。",
+        "no_pipeline_activity": "尚未记录到任何治理链路活动。",
+        "pending_approvals": "有 {{count}} 条原则需要你审查并决定是否批准。",
+        "pipeline_active": "管线中有活动，但候选原则尚未准备好审查。",
+        "consumed_candidates": "已存在候选人记录，但尚未进入审查阶段。",
+        "degraded_state": "部分治理链路或数据源处于降级状态。"
+      },
+      "nextAction": {
+        "run_config_doctor": "确保 OpenClaw 插件已启用，或运行 pd config doctor 检查配置。",
+        "wait_for_pipeline": "PD 会在捕获到行为偏差并生成可审查候选后，将其放到这里。",
+        "review_approvals": "审查待审批的原则，做出批准、拒绝或暂存的决定。",
+        "check_degraded_signals": "检查降级信号详情，按建议操作修复。",
+        "check_pipeline_status": "等待内化任务完成。如果长期无变化，检查内化管线状态。"
+      },
+      "degradedReason": {
+        "task_retry_wait": "内化任务等待重试",
+        "task_failed": "内化任务失败",
+        "approval_table_missing": "审批表不存在"
+      },
+      "degradedNextAction": {
+        "check_task_status": "检查内化管线状态，或等待自动重试。",
+        "fix_and_retry": "检查失败详情，修复问题后重试。",
+        "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。"
+      }
     },
     "pain": {
       "eyebrow": "行为证据",
