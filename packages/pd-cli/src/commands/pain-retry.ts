@@ -288,32 +288,47 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         return;
       }
 
-      const validProvider: string = provider as string;
-      const validModel: string = model as string;
-      const validApiKeyEnv: string = apiKeyEnv as string;
+      if (typeof provider !== 'string' || typeof model !== 'string' || typeof apiKeyEnv !== 'string') {
+        // Should be unreachable after the missing check above, but guard for type safety
+        if (opts.json) {
+          console.log(JSON.stringify({
+            status: 'refused',
+            painId: opts.painId,
+            taskId,
+            reason: 'invalid_config_type',
+            message: 'Provider, model, or apiKeyEnv resolved to a non-string value',
+            nextAction: 'Ensure provider, model, and apiKeyEnv are string values.',
+          }));
+        } else {
+          console.error('error: provider, model, or apiKeyEnv resolved to a non-string value');
+          console.error('nextAction: Ensure provider, model, and apiKeyEnv are string values.');
+        }
+        process.exit(1);
+        return;
+      }
 
-      if (!process.env[validApiKeyEnv]) {
+      if (!process.env[apiKeyEnv]) {
         if (opts.json) {
           console.log(JSON.stringify({
             status: 'refused',
             painId: opts.painId,
             taskId,
             reason: 'missing_api_key',
-            message: `Environment variable '${validApiKeyEnv}' is not set`,
-            nextAction: `Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`,
+            message: `Environment variable '${apiKeyEnv}' is not set`,
+            nextAction: `Set the environment variable: export ${apiKeyEnv}=<your-api-key>`,
           }));
         } else {
-          console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
-          console.error(`nextAction: Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`);
+          console.error(`error: environment variable '${apiKeyEnv}' is not set`);
+          console.error(`nextAction: Set the environment variable: export ${apiKeyEnv}=<your-api-key>`);
         }
         process.exit(1);
         return;
       }
 
       runtimeAdapter = new PiAiRuntimeAdapter({
-        provider: validProvider,
-        model: validModel,
-        apiKeyEnv: validApiKeyEnv,
+        provider,
+        model,
+        apiKeyEnv,
         baseUrl,
         maxRetries,
         timeoutMs: effectiveTimeoutMs,
