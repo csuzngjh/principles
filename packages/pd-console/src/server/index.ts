@@ -26,6 +26,7 @@ import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
+import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
@@ -285,6 +286,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeLifecycleModels();
   disposeActivationsModels();
   disposeGovernanceModels();
+  disposeEvidenceChainModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -411,6 +413,12 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // CR8: GET /api/v1/governance/queue
       if (urlPath === '/api/v1/governance/queue') {
         asyncHandler(() => handleGovernanceRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // PRI-331: GET /api/v1/evidence-chain
+      if (urlPath === '/api/v1/evidence-chain') {
+        asyncHandler(() => handleEvidenceChainRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 
