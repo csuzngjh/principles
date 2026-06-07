@@ -136,7 +136,19 @@ export function handleAfterToolCall(
   let effectiveWorkspaceDir: string;
   try {
     effectiveWorkspaceDir = resolveWorkspaceDirForRuntimeV2(ctx, api, 'after_tool_call');
-  } catch {
+  } catch (error) {
+    SystemLogger.log(
+      (ctx as any).workspaceDir ?? 'unknown',
+      'WORKSPACE_RESOLUTION_FAILED',
+      JSON.stringify({
+        hook: 'after_tool_call',
+        sessionId: ctx.sessionId ?? 'unknown',
+        toolName: event.toolName,
+        reason: 'workspace_resolution_failed',
+        nextAction: 'check_plugin_config_workspace_resolution',
+        error: String(error).slice(0, 200),
+      }),
+    );
     return;
   }
 
