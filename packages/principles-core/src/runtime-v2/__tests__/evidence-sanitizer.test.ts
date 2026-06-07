@@ -351,8 +351,8 @@ describe('sanitizeToolParams', () => {
     };
     const result = sanitizeToolParams(params, '/repo') as Record<string, unknown>;
     const edits = result.edits as Array<Record<string, unknown>>;
-    expect(edits[0].oldText).toContain('___REDACTED___');
-    expect(edits[0].newText).toBe('safe-value');
+    expect(edits[0]!.oldText).toContain('___REDACTED___');
+    expect(edits[0]!.newText).toBe('safe-value');
     expect(result.file_path).toBe('src/config.ts');
   });
 
