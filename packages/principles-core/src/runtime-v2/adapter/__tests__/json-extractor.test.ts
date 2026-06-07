@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractJsonObject } from '../json-extractor.js';
+import { extractJsonObject, repairMalformedJson } from '../json-extractor.js';
 
 describe('extractJsonObject', () => {
   it('parses pure JSON object', () => {
@@ -171,5 +171,64 @@ describe('extractJsonObject', () => {
     const input = '[{"template":"Use {braces} here"}]';
     const result = extractJsonObject(input);
     expect(result).toBeNull();
+  });
+});
+
+// ── repairMalformedJson ──────────────────────────────────────────────────────
+
+describe('repairMalformedJson', () => {
+  it('returns valid JSON unchanged', () => {
+    const input = '{"diagnosisId":"d1","summary":"ok"}';
+    const result = repairMalformedJson(input);
+    expect(result).toEqual({ diagnosisId: 'd1', summary: 'ok' });
+  });
+
+  it('repairs unescaped double quotes inside string values', () => {
+    // This is the real failure case: LLM outputs "wrong" inside a string value
+    const input = '{"rootCause":"Design: the "wrong" approach caused failure"}';
+    const result = repairMalformedJson(input);
+    expect(result).not.toBeNull();
+    expect(result?.rootCause).toContain('wrong');
+  });
+
+  it('repairs multiple unescaped quotes in different fields', () => {
+    const input = '{"summary":"He said "hello" and "goodbye"","rootCause":"the "bug" was here"}';
+    const result = repairMalformedJson(input);
+    expect(result).not.toBeNull();
+    expect(result?.summary).toContain('hello');
+    expect(result?.rootCause).toContain('bug');
+  });
+
+  it('handles already-escaped quotes correctly (no double-escaping)', () => {
+    const input = '{"msg":"He said \\"hello\\""}';
+    const result = repairMalformedJson(input);
+    expect(result).not.toBeNull();
+    expect(result?.msg).toBe('He said "hello"');
+  });
+
+  it('extracts from prose-wrapped malformed JSON', () => {
+    const input = 'Here is the result:\n{"diagnosisId":"d1","rootCause":"the "bug" was here"}\nEnd.';
+    const result = repairMalformedJson(input);
+    expect(result).not.toBeNull();
+    expect(result?.diagnosisId).toBe('d1');
+  });
+
+  it('returns null for completely unparseable text', () => {
+    const result = repairMalformedJson('no json here at all');
+    expect(result).toBeNull();
+  });
+
+  it('returns null for text with no opening brace', () => {
+    const result = repairMalformedJson('just some text "with quotes"');
+    expect(result).toBeNull();
+  });
+
+  it('repairs DiagnosticianOutputV1-like malformed JSON', () => {
+    const input = '{"diagnosisId":"diag-1","summary":"test","rootCause":"the "primary" issue","violatedPrinciples":[],"evidence":[],"recommendations":[],"confidence":0.8}';
+    const result = repairMalformedJson(input);
+    expect(result).not.toBeNull();
+    expect(result?.diagnosisId).toBe('diag-1');
+    expect(result?.rootCause).toContain('primary');
+    expect(result?.confidence).toBe(0.8);
   });
 });

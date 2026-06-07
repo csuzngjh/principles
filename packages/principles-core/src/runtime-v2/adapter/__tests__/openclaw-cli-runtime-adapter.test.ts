@@ -660,8 +660,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
     it('repairs JSON-like text with unescaped quotes inside string values', async () => {
       const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
       // Simulate LLM output where a string value contains an unescaped quote
-      // e.g., {"rootCause": "Design: the "wrong" approach"} → balanced-bracket extraction finds the object
-      const malformedJson = '{"valid":true,"diagnosisId":"diag-repair-1","summary":"test","rootCause":"Design: the approach","violatedPrinciples":[],"evidence":[],"recommendations":[],"confidence":0.8}';
+      // This is genuinely malformed JSON: the "wrong" inside the rootCause value is not escaped
+      const malformedJson = '{"valid":true,"diagnosisId":"diag-repair-1","summary":"test diagnosis","rootCause":"Design: the "wrong" approach caused failure","violatedPrinciples":[{"rationale":"bad design"}],"evidence":[{"sourceRef":"src","note":"note"}],"recommendations":[{"kind":"principle","description":"fix it"}],"confidence":0.8}';
       const mockOutput = makeCliOutput({ stdout: malformedJson, exitCode: 0 });
       mockRunCliProcess.mockResolvedValue(mockOutput);
 
@@ -674,6 +674,10 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const result = await adapter.fetchOutput(handle.runId);
       expect(result.payload).toMatchObject({ diagnosisId: 'diag-repair-1' });
+      // Verify the unescaped quotes were repaired correctly
+      const payload = result.payload as Record<string, unknown>;
+      expect(typeof payload.rootCause).toBe('string');
+      expect(payload.rootCause).toContain('wrong');
     });
 
     it('repairs JSON embedded in prose with surrounding text', async () => {
@@ -777,7 +781,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
       // Simulate output that might contain sensitive data
       const sensitivePayload = {
         valid: true,
-        apiKey: 'sk-super-secret-key-12345',
+        apiKey: 'sk-super-secret-key-1234567890abcdef',
         trajectory: 'x'.repeat(5000),
       };
       const mockOutput = makeCliOutput({ stdout: JSON.stringify(sensitivePayload), exitCode: 0 });
@@ -803,6 +807,10 @@ describe('OpenClawCliRuntimeAdapter', () => {
         expect(preview.endsWith('...')).toBe(true);
         // The full 5000-char trajectory is not present (only a truncated prefix)
         expect(preview.length).toBeLessThan(JSON.stringify(sensitivePayload).length);
+        // ERR-055/056: API key must be redacted, not leaked verbatim
+        expect(preview).not.toContain('sk-super-secret-key-1234567890abcdef');
+        // The apiKey field should be redacted by redactSensitiveFields
+        expect(preview).toContain('[REDACTED]');
       }
     });
   });
