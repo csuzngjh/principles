@@ -16,6 +16,19 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
 }
 
 /**
+ * Safely read an own string property from an unknown object.
+ * Returns the string value if the key exists and the value is a string,
+ * otherwise undefined. Uses Object.getOwnPropertyDescriptor to avoid
+ * any `as` cast on the row (EP-01 Rule 2).
+ */
+function getOwnStringField(obj: unknown, key: string): string | undefined {
+  if (typeof obj !== 'object' || obj === null) return undefined;
+  const desc = Object.getOwnPropertyDescriptor(obj, key);
+  if (desc === undefined) return undefined;
+  return typeof desc.value === 'string' ? desc.value : undefined;
+}
+
+/**
  * Query the SQLite state.db for principle IDs that have been decided
  * (approved or rejected) via the approval queue.
  *
@@ -33,9 +46,11 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
     return { ids: new Set(), unavailableReason: 'approval_db_not_found' };
   }
 
+  let closeFn: (() => void) | null = null;
   try {
     const { SqliteConnection } = await import('@principles/core/runtime-v2');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
+    closeFn = () => conn.close();
     const db = conn.getDb();
 
     // Join approvals with pi_artifacts to find decided principle IDs
@@ -47,25 +62,21 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
       "AND a.source_principle_id IS NOT NULL"
     ).all();
 
-    conn.close();
-
     // EP-01 Rule 1: treat DB rows as unknown; validate before use
+    // EP-01 Rule 2: no `as` cast — use getOwnStringField instead
     const ids = new Set<string>();
     for (const row of rows) {
-      if (
-        typeof row === 'object' && row !== null &&
-        Object.hasOwn(row, 'source_principle_id')
-      ) {
-        const val = (row as Record<string, unknown>).source_principle_id;
-        if (typeof val === 'string') {
-          ids.add(val);
-        }
+      const val = getOwnStringField(row, 'source_principle_id');
+      if (val !== undefined) {
+        ids.add(val);
       }
     }
     return { ids };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { ids: new Set(), unavailableReason: `approval_query_failed: ${message}` };
+  } finally {
+    closeFn?.();
   }
 }
 

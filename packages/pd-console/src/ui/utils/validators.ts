@@ -948,14 +948,20 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
       categories = validated;
     }
   }
+  // approvalCrossCheckUnavailable — optional string, fail loud if wrong type
+  // (ERR-009: required-ish fields fail loud; ERR-002: no silent degradation)
+  if (Object.hasOwn(v, 'approvalCrossCheckUnavailable') && !isString(v.approvalCrossCheckUnavailable)) {
+    return null;
+  }
+  const approvalCrossCheckUnavailable = isString(v.approvalCrossCheckUnavailable)
+    ? v.approvalCrossCheckUnavailable
+    : undefined;
+
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
     ...(categories !== undefined ? { categories } : {}),
-    // approvalCrossCheckUnavailable — optional string, fail loud if wrong type
-    ...(Object.hasOwn(v, 'approvalCrossCheckUnavailable') && isString(v.approvalCrossCheckUnavailable)
-      ? { approvalCrossCheckUnavailable: v.approvalCrossCheckUnavailable }
-      : {}),
+    ...(approvalCrossCheckUnavailable !== undefined ? { approvalCrossCheckUnavailable } : {}),
   };
 }
 

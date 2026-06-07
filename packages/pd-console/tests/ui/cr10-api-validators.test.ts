@@ -678,14 +678,13 @@ describe('validatePrinciplesList', () => {
     expect(result!.approvalCrossCheckUnavailable).toBeUndefined();
   });
 
-  it('ignores approvalCrossCheckUnavailable when not a string', () => {
+  it('rejects approvalCrossCheckUnavailable when not a string (fail loud)', () => {
     const badReason = {
       ...validList,
       approvalCrossCheckUnavailable: 42,
     };
-    const result = validatePrinciplesList(badReason);
-    expect(result).not.toBeNull();
-    expect(result!.approvalCrossCheckUnavailable).toBeUndefined();
+    // ERR-009: field present but wrong type → reject, not silently discard
+    expect(validatePrinciplesList(badReason)).toBeNull();
   });
 });
 
