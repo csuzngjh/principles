@@ -63,9 +63,13 @@ interface RunOnceOutput {
   conflictReason?: string;
   reason?: string;
   inspectedCount?: number;
-  successorTaskId?: string;
+  successorEnqueueAttempted?: boolean;
+  successorTasksCreated?: number;
+  successorTaskIds?: string[];
   successorKind?: string;
   enqueueDecision?: string;
+  enqueueReason?: string;
+  nextAction?: string;
   effectiveTimeoutMs?: number;
   timeoutSource?: string;
 }
@@ -163,12 +167,28 @@ function formatTextOutput(output: RunOnceOutput): string {
     lines.push(`  reason: ${output.reason}`);
   }
 
-  if (output.successorTaskId) {
-    lines.push(`  successor: ${output.successorTaskId} (${output.successorKind ?? 'unknown'})`);
+  if (output.successorTaskIds && output.successorTaskIds.length > 0) {
+    lines.push(`  successor: ${output.successorTaskIds.join(', ')} (${output.successorKind ?? 'unknown'})`);
+  }
+
+  if (output.successorEnqueueAttempted !== undefined) {
+    lines.push(`  enqueue_attempted: ${output.successorEnqueueAttempted}`);
+  }
+
+  if (output.successorTasksCreated !== undefined) {
+    lines.push(`  successors_created: ${output.successorTasksCreated}`);
   }
 
   if (output.enqueueDecision) {
     lines.push(`  enqueue: ${output.enqueueDecision}`);
+  }
+
+  if (output.enqueueReason) {
+    lines.push(`  enqueue_reason: ${output.enqueueReason}`);
+  }
+
+  if (output.nextAction) {
+    lines.push(`  nextAction: ${output.nextAction}`);
   }
 
   if (output.effectiveTimeoutMs) {
@@ -619,12 +639,43 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       }
     }
 
-    if (opts.enqueueNext && runnerResult?.status === 'succeeded' && wakeResult.decision === 'would_lease') {
-      const commitResult = await orchestrator.commitNextTaskProposal(wakeResult.taskId);
-      output.enqueueDecision = commitResult.decision;
-      if (commitResult.decision === 'successor_created' || commitResult.decision === 'successor_exists') {
-        output.successorTaskId = commitResult.successorTaskId;
-        output.successorKind = commitResult.successorKind;
+    // Default: auto-enqueue successor on runner success (unless opted out via --no-enqueue-next)
+    const shouldEnqueue = opts.enqueueNext !== false;
+
+    if (shouldEnqueue && runnerResult?.status === 'succeeded' && wakeResult.decision === 'would_lease') {
+      output.successorEnqueueAttempted = true;
+      try {
+        const commitResult = await orchestrator.commitNextTaskProposal(wakeResult.taskId);
+        output.enqueueDecision = commitResult.decision;
+        output.successorTasksCreated = 0;
+        output.successorTaskIds = [];
+        if (commitResult.decision === 'successor_created' || commitResult.decision === 'successor_exists') {
+          output.successorKind = commitResult.successorKind;
+          output.successorTaskIds.push(commitResult.successorTaskId);
+          output.successorTasksCreated = commitResult.decision === 'successor_created' ? 1 : 0;
+        } else if (commitResult.decision === 'no_successor') {
+          output.enqueueReason = commitResult.reason;
+          output.nextAction = 'No successor in job graph for this task kind and channel. This is expected for terminal runners.';
+        } else {
+          output.enqueueReason = `Unexpected commitNextTaskProposal decision: ${commitResult.decision}`;
+          output.nextAction = 'Investigate orchestrator logic; re-run with --no-enqueue-next to skip auto-enqueue.';
+        }
+      } catch (enqueueErr: unknown) {
+        const enqueueMessage = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
+        output.enqueueDecision = 'enqueue_failed';
+        output.enqueueReason = enqueueMessage;
+        output.successorTasksCreated = 0;
+        output.successorTaskIds = [];
+        output.nextAction = `Runner succeeded but successor enqueue failed. Run: pd runtime internalization enqueue-successors --workspace ${workspaceDir} --confirm`;
+        // Runner success is real; downgrade to partial_success, not error
+        if (output.decision === 'would_lease') {
+          output.decision = 'partial_success';
+        }
+      }
+    } else if (!shouldEnqueue) {
+      output.successorEnqueueAttempted = false;
+      if (runnerResult?.status === 'succeeded' && wakeResult.decision === 'would_lease') {
+        output.nextAction = 'Successor auto-enqueue was skipped (--no-enqueue-next). To enqueue: pd runtime internalization enqueue-successors --confirm';
       }
     }
 
