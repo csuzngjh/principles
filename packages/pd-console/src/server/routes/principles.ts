@@ -17,17 +17,23 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
 
 /**
  * Query the SQLite state.db for principle IDs that have been decided
- * (approved or rejected) via the approval queue. Returns an empty Set
- * if the database is not available (graceful degradation with reason).
+ * (approved or rejected) via the approval queue.
+ *
+ * Returns { ids, unavailableReason } — if the DB is not available or the
+ * query fails, ids is empty and unavailableReason explains why, so the
+ * caller can surface this to the UI (ERR-002: no silent degradation).
  */
-async function getDecidedPrincipleIds(workspaceDir: string): Promise<Set<string>> {
-  const dbPath = path.join(workspaceDir, '.state', 'state.db');
+async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
+  ids: Set<string>;
+  unavailableReason?: string;
+}> {
+  // Runtime V2 uses <workspace>/.pd/state.db (NOT .state/state.db)
+  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(dbPath)) {
-    return new Set();
+    return { ids: new Set(), unavailableReason: 'approval_db_not_found' };
   }
 
   try {
-    // Dynamic import to avoid loading better-sqlite3 when DB doesn't exist
     const { SqliteConnection } = await import('@principles/core/runtime-v2');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
     const db = conn.getDb();
@@ -39,14 +45,27 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<Set<string>
       "JOIN pi_artifacts a ON a.artifact_id = ap.artifact_id " +
       "WHERE ap.status IN ('approved', 'rejected') " +
       "AND a.source_principle_id IS NOT NULL"
-    ).all() as { source_principle_id: string }[];
+    ).all();
 
     conn.close();
-    return new Set(rows.map((r) => r.source_principle_id));
-  } catch {
-    // Graceful degradation: if DB query fails, return empty set.
-    // The classifier will still work, just without the approval cross-check.
-    return new Set();
+
+    // EP-01 Rule 1: treat DB rows as unknown; validate before use
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (
+        typeof row === 'object' && row !== null &&
+        Object.hasOwn(row, 'source_principle_id')
+      ) {
+        const val = (row as Record<string, unknown>).source_principle_id;
+        if (typeof val === 'string') {
+          ids.add(val);
+        }
+      }
+    }
+    return { ids };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ids: new Set(), unavailableReason: `approval_query_failed: ${message}` };
   }
 }
 
@@ -80,8 +99,12 @@ export async function handlePrinciplesRoute({
       const VALID_FILTERS = new Set<string>(['all', 'actionable']);
       const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
-      const decidedPrincipleIds = await getDecidedPrincipleIds(workspaceDir);
-      const result = await model.listPrinciples(filter, decidedPrincipleIds);
+      const decidedResult = await getDecidedPrincipleIds(workspaceDir);
+      const result = await model.listPrinciples(filter, decidedResult.ids);
+      // Surface approval cross-check unavailability to the UI (ERR-002)
+      if (decidedResult.unavailableReason) {
+        result.approvalCrossCheckUnavailable = decidedResult.unavailableReason;
+      }
       sendSuccess(res, result);
     } catch (err: unknown) {
       sendError(res, 500, 'principles_list_error', (err as Error).message);

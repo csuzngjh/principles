@@ -32,8 +32,8 @@ export interface ClassifiedPrinciple {
 
 // ── Heuristics ────────────────────────────────────────────────────────────────
 
-/** IDs that are known builtin Thinking OS axioms */
-const BUILTIN_ID_PREFIXES = ['T-0', 'T-1']; // T-01..T-10
+/** Regex that matches exactly T-01 through T-10 (Thinking OS axioms) */
+const BUILTIN_ID_REGEX = /^T-(0[1-9]|10)$/;
 
 /** ID prefixes that indicate demo / dogfood data */
 const DEMO_ID_PREFIXES = ['DEMO_', 'demo_', 'story-a', 'story_a', 'dogfood_'];
@@ -59,7 +59,7 @@ function hasKeyword(text: string, keywords: readonly string[]): boolean {
 }
 
 function isBuiltinId(id: string): boolean {
-  return BUILTIN_ID_PREFIXES.some((p) => id.startsWith(p));
+  return BUILTIN_ID_REGEX.test(id);
 }
 
 // ── Classifier ────────────────────────────────────────────────────────────────

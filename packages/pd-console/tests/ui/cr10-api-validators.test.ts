@@ -661,6 +661,32 @@ describe('validatePrinciplesList', () => {
     // Empty categories object is treated as absent (no valid entries)
     expect(result!.categories).toBeUndefined();
   });
+
+  it('accepts approvalCrossCheckUnavailable string', () => {
+    const withReason = {
+      ...validList,
+      approvalCrossCheckUnavailable: 'approval_db_not_found',
+    };
+    const result = validatePrinciplesList(withReason);
+    expect(result).not.toBeNull();
+    expect(result!.approvalCrossCheckUnavailable).toBe('approval_db_not_found');
+  });
+
+  it('ignores approvalCrossCheckUnavailable when absent', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.approvalCrossCheckUnavailable).toBeUndefined();
+  });
+
+  it('ignores approvalCrossCheckUnavailable when not a string', () => {
+    const badReason = {
+      ...validList,
+      approvalCrossCheckUnavailable: 42,
+    };
+    const result = validatePrinciplesList(badReason);
+    expect(result).not.toBeNull();
+    expect(result!.approvalCrossCheckUnavailable).toBeUndefined();
+  });
 });
 
 // ── validateApprovalsGrouped ──────────────────────────────────────────────────

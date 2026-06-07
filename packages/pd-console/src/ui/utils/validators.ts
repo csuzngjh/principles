@@ -920,6 +920,8 @@ export interface PrinciplesListData {
   principles: PrincipleListItemData[];
   summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
   categories?: Record<string, number>;
+  /** If the approval cross-check was unavailable, this explains why (ERR-002) */
+  approvalCrossCheckUnavailable?: string;
 }
 
 export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
@@ -950,6 +952,10 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
     ...(categories !== undefined ? { categories } : {}),
+    // approvalCrossCheckUnavailable — optional string, fail loud if wrong type
+    ...(Object.hasOwn(v, 'approvalCrossCheckUnavailable') && isString(v.approvalCrossCheckUnavailable)
+      ? { approvalCrossCheckUnavailable: v.approvalCrossCheckUnavailable }
+      : {}),
   };
 }
 

@@ -114,6 +114,8 @@ export interface PrinciplesListOutput {
   };
   /** Category breakdown (PRI-330) */
   categories?: Record<string, number>;
+  /** If the approval cross-check was unavailable, this explains why (ERR-002) */
+  approvalCrossCheckUnavailable?: string;
 }
 
 export type PrincipleFilter = 'all' | 'actionable';

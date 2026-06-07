@@ -31,6 +31,12 @@ describe('classifyPrinciple', () => {
     expect(classifyPrinciple(makePrinciple({ id: 'T-10' }))).toBe('builtin');
   });
 
+  it('does NOT classify T-11, T-100, T-0 as builtin', () => {
+    expect(classifyPrinciple(makePrinciple({ id: 'T-11', status: 'candidate' }))).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-100', status: 'candidate' }))).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-0', status: 'candidate' }))).toBe('owner_actionable');
+  });
+
   it('classifies demo principles by keyword', () => {
     expect(classifyPrinciple(makePrinciple({ text: 'This is a [demo] principle' }))).toBe('demo');
     expect(classifyPrinciple(makePrinciple({ id: 'DEMO_001' }))).toBe('demo');
