@@ -38,6 +38,7 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { Value } from '@sinclair/typebox/value';
 import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
+import { redactSensitiveFields } from '../feedback/redact-sensitive.js';
 import { RunnerPhase } from './runner-phase.js';
 import { resolveRunnerOptions } from './diagnostician-runner-options.js';
 
@@ -129,7 +130,6 @@ export class DiagnosticianRunner {
     this.phase = RunnerPhase.Idle;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -310,7 +310,10 @@ export class DiagnosticianRunner {
       const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, result.payload)]
         .slice(0, 5)
         .map(e => ({ path: e.path, message: e.message }));
-      const boundedPreview = safeStringifyPreview(result.payload, 300);
+      const redacted = redactSensitiveFields(result.payload);
+      const boundedPreview = redacted.ok
+        ? safeStringifyPreview(redacted.value, 300)
+        : safeStringifyPreview(result.payload, 300);
 
       throw new PDRuntimeError(
         'output_invalid',
@@ -355,7 +358,6 @@ export class DiagnosticianRunner {
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
-     
     let commitResult: CommitResult | undefined;
     try {
       commitResult = await this.committer.commit({
