@@ -1017,3 +1017,141 @@ export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | nul
   if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
   return result;
 }
+
+// ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
+
+const VALID_EVIDENCE_CHAIN_STATES: ReadonlySet<string> = new Set([
+  'evidence_only',
+  'pain_recorded',
+  'diagnosis_queued',
+  'diagnosis_running',
+  'diagnosis_succeeded',
+  'diagnosis_failed',
+  'diagnosis_retry_wait',
+  'candidate_generated',
+  'internalization_started',
+]);
+
+export type EvidenceChainStateData =
+  | 'evidence_only'
+  | 'pain_recorded'
+  | 'diagnosis_queued'
+  | 'diagnosis_running'
+  | 'diagnosis_succeeded'
+  | 'diagnosis_failed'
+  | 'diagnosis_retry_wait'
+  | 'candidate_generated'
+  | 'internalization_started';
+
+export interface EvidenceChainRecordData {
+  id: string;
+  sourceKind: string;
+  observedAt: string;
+  state: EvidenceChainStateData;
+  summary: string;
+  admissionDecision?: string;
+  linkedPainId?: string;
+  linkedTaskId?: string;
+  linkedTaskStatus?: string;
+  linkedCandidateId?: string;
+  linkedPrincipleId?: string;
+  failureReason?: string;
+  degradedReason?: string;
+  nextAction?: string;
+}
+
+function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
+  if (!isObject(v)) return null;
+  // Required fields (ERR-009: fail loud when missing)
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'sourceKind') || !isString(v.sourceKind)) return null;
+  if (!Object.hasOwn(v, 'observedAt') || !isString(v.observedAt)) return null;
+  if (!Object.hasOwn(v, 'state') || !isString(v.state)) return null;
+  if (!VALID_EVIDENCE_CHAIN_STATES.has(v.state)) return null;
+  if (!Object.hasOwn(v, 'summary') || !isString(v.summary)) return null;
+
+  const result: EvidenceChainRecordData = {
+    id: v.id,
+    sourceKind: v.sourceKind,
+    observedAt: v.observedAt,
+    state: v.state as EvidenceChainStateData,
+    summary: v.summary,
+  };
+
+  // Optional fields — fail loud when present but wrong type (ERR-009)
+  if (Object.hasOwn(v, 'admissionDecision')) {
+    if (!isString(v.admissionDecision)) return null;
+    result.admissionDecision = v.admissionDecision;
+  }
+  if (Object.hasOwn(v, 'linkedPainId')) {
+    if (!isString(v.linkedPainId)) return null;
+    result.linkedPainId = v.linkedPainId;
+  }
+  if (Object.hasOwn(v, 'linkedTaskId')) {
+    if (!isString(v.linkedTaskId)) return null;
+    result.linkedTaskId = v.linkedTaskId;
+  }
+  if (Object.hasOwn(v, 'linkedTaskStatus')) {
+    if (!isString(v.linkedTaskStatus)) return null;
+    result.linkedTaskStatus = v.linkedTaskStatus;
+  }
+  if (Object.hasOwn(v, 'linkedCandidateId')) {
+    if (!isString(v.linkedCandidateId)) return null;
+    result.linkedCandidateId = v.linkedCandidateId;
+  }
+  if (Object.hasOwn(v, 'linkedPrincipleId')) {
+    if (!isString(v.linkedPrincipleId)) return null;
+    result.linkedPrincipleId = v.linkedPrincipleId;
+  }
+  if (Object.hasOwn(v, 'failureReason')) {
+    if (!isString(v.failureReason)) return null;
+    result.failureReason = v.failureReason;
+  }
+  if (Object.hasOwn(v, 'degradedReason')) {
+    if (!isString(v.degradedReason)) return null;
+    result.degradedReason = v.degradedReason;
+  }
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+
+  return result;
+}
+
+export interface EvidenceChainData {
+  records: EvidenceChainRecordData[];
+  generatedAt: string;
+  degradedReason?: string;
+  nextAction?: string;
+  note?: string;
+}
+
+export function validateEvidenceChain(v: unknown): EvidenceChainData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'records') || !Array.isArray(v.records)) return null;
+  if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
+
+  const records = validateArray(v.records, validateEvidenceChainRecord);
+  if (records === null) return null;
+
+  const result: EvidenceChainData = {
+    records,
+    generatedAt: v.generatedAt,
+  };
+
+  if (Object.hasOwn(v, 'degradedReason')) {
+    if (!isString(v.degradedReason)) return null;
+    result.degradedReason = v.degradedReason;
+  }
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+  if (Object.hasOwn(v, 'note')) {
+    if (!isString(v.note)) return null;
+    result.note = v.note;
+  }
+
+  return result;
+}
