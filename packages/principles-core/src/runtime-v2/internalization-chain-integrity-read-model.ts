@@ -276,7 +276,7 @@ export class InternalizationChainIntegrityReadModel {
             severity: 'warning',
             taskId: dreamerTask.task_id,
             reason: `Succeeded dreamer task ${dreamerTask.task_id} has no philosopher successor task`,
-            recommendedAction: 'Check orchestrator successor proposal logic or manually enqueue philosopher task.',
+            recommendedAction: `pd runtime internalization enqueue-successors --workspace <workspace> --confirm, then pd runtime internalization run-once --workspace <workspace> --runner philosopher`,
           });
         }
       }

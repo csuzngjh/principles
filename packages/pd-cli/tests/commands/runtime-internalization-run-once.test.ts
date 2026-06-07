@@ -564,7 +564,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('successor_created');
-    expect(output.successorTaskId).toBe('task-phil-enq-001');
+    expect(output.successorTaskIds![0]).toBe('task-phil-enq-001');
     expect(output.successorKind).toBe('philosopher');
   });
 
@@ -597,7 +597,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('successor_exists');
-    expect(output.successorTaskId).toBe('task-phil-enq-002');
+    expect(output.successorTaskIds![0]).toBe('task-phil-enq-002');
     expect(output.successorKind).toBe('philosopher');
   });
 
@@ -629,7 +629,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('no_successor');
-    expect(output.successorTaskId).toBeUndefined();
+    expect(output.successorTaskIds).toEqual([]);
   });
 
   it('--enqueue-next with failed run does not call commitNextTaskProposal', async () => {
@@ -916,7 +916,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('successor_created');
-    expect(output.successorTaskId).toBe('task-artificer-enq-001');
+    expect(output.successorTaskIds![0]).toBe('task-artificer-enq-001');
     expect(output.successorKind).toBe('artificer');
   });
 
@@ -1022,7 +1022,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('successor_created');
-    expect(output.successorTaskId).toBe('task-evaluator-enq-001');
+    expect(output.successorTaskIds![0]).toBe('task-evaluator-enq-001');
     expect(output.successorKind).toBe('evaluator');
   });
 
@@ -1155,7 +1155,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('successor_created');
-    expect(output.successorTaskId).toBe('task-rollout-reviewer-enq-001');
+    expect(output.successorTaskIds![0]).toBe('task-rollout-reviewer-enq-001');
     expect(output.successorKind).toBe('rollout_reviewer');
   });
 
@@ -1314,5 +1314,195 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.reason).toContain('artifact write failed');
     expect(output.nextAction).toBeTruthy();
     expect(process.exitCode).toBe(1);
+  });
+
+  // === Default enqueue successor tests ===
+
+  it('default behavior (no --no-enqueue-next) auto-enqueues successor on runner success', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-auto-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-auto-001',
+      runId: 'run-auto-001',
+      artifactId: 'pi-art-auto-001',
+      resultRef: 'dreamer://run-auto-001',
+      contextHash: 'ctx-auto',
+      output: { valid: true, taskId: 'task-dreamer-auto-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-dreamer-auto-001',
+      successorTaskId: 'task-phil-auto-001',
+      successorKind: 'philosopher',
+    });
+
+    // No enqueueNext specified — default should auto-enqueue
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.successorEnqueueAttempted).toBe(true);
+    expect(output.successorTasksCreated).toBe(1);
+    expect(output.successorTaskIds).toContain('task-phil-auto-001');
+    expect(output.enqueueDecision).toBe('successor_created');
+    expect(output.successorKind).toBe('philosopher');
+    expect(mockCommitNextTaskProposal).toHaveBeenCalledWith('task-dreamer-auto-001');
+  });
+
+  it('--no-enqueue-next (enqueueNext: false) skips successor enqueue', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-skip-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-skip-001',
+      runId: 'run-skip-001',
+      artifactId: 'pi-art-skip-001',
+      resultRef: 'dreamer://run-skip-001',
+      contextHash: 'ctx-skip',
+      output: { valid: true, taskId: 'task-dreamer-skip-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: false, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.successorEnqueueAttempted).toBe(false);
+    expect(output.nextAction).toContain('--no-enqueue-next');
+    expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
+  });
+
+  it('successor enqueue failure outputs partial_success with reason and nextAction', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-fail-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-fail-001',
+      runId: 'run-fail-001',
+      artifactId: 'pi-art-fail-001',
+      resultRef: 'dreamer://run-fail-001',
+      contextHash: 'ctx-fail',
+      output: { valid: true, taskId: 'task-dreamer-fail-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockRejectedValue(new Error('database locked'));
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('partial_success');
+    expect(output.successorEnqueueAttempted).toBe(true);
+    expect(output.enqueueDecision).toBe('enqueue_failed');
+    expect(output.enqueueReason).toContain('database locked');
+    expect(output.nextAction).toContain('enqueue-successors');
+    expect(output.successorTasksCreated).toBe(0);
+    expect(output.successorTaskIds).toEqual([]);
+  });
+
+  it('runner failure never enqueues successor (default behavior)', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-nofail-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'failed',
+      taskId: 'task-dreamer-nofail-001',
+      errorCategory: 'execution_failed',
+      failureReason: 'Runtime unavailable',
+      attemptCount: 1,
+    });
+
+    // Default behavior (no --no-enqueue-next)
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.successorEnqueueAttempted).toBeUndefined();
+  });
+
+  it('JSON output is single parseable JSON with successor fields', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-json-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-json-001',
+      runId: 'run-json-001',
+      artifactId: 'pi-art-json-001',
+      resultRef: 'dreamer://run-json-001',
+      contextHash: 'ctx-json',
+      output: { valid: true, taskId: 'task-dreamer-json-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-dreamer-json-001',
+      successorTaskId: 'task-phil-json-001',
+      successorKind: 'philosopher',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const rawOutput = consoleLogSpy.mock.calls[0][0];
+    // Must be single parseable JSON
+    const output = JSON.parse(rawOutput);
+    expect(output).toHaveProperty('successorEnqueueAttempted');
+    expect(output).toHaveProperty('successorTasksCreated');
+    expect(output).toHaveProperty('successorTaskIds');
+    // nextAction may be undefined when successor is successfully created
+    // but must be present on partial_success / no_successor / skipped
+  });
+
+  it('text output for auto-enqueue shows successor info', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-text-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-text-001',
+      runId: 'run-text-001',
+      artifactId: 'pi-art-text-001',
+      resultRef: 'dreamer://run-text-001',
+      contextHash: 'ctx-text',
+      output: { valid: true, taskId: 'task-dreamer-text-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-dreamer-text-001',
+      successorTaskId: 'task-phil-text-001',
+      successorKind: 'philosopher',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: false });
+
+    const text = consoleLogSpy.mock.calls.map((c: string[]) => c[0]).join('\n');
+    expect(text).toContain('successor: task-phil-text-001');
+    expect(text).toContain('enqueue_attempted: true');
+    expect(text).toContain('successors_created: 1');
   });
 });

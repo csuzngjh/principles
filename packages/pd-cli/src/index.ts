@@ -548,11 +548,11 @@ internalizationCmd
   .option('--runner <kind>', 'Runner kind to execute (default: dreamer)', 'dreamer')
   .option('--runtime <kind>', 'Runtime adapter kind: config (from workflows.yaml), pi-ai, openclaw-cli, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
-  .option('--enqueue-next', 'After successful runner execution, commit successor task to queue')
+  .option('--no-enqueue-next', 'Skip successor enqueue after successful runner (default: auto-enqueue)')
   .option('--timeout-ms <ms>', 'Runner timeout in milliseconds (default: 300000, overrides workflows.yaml)', parseInt)
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: !opts.noEnqueueNext, timeoutMs: opts.timeoutMs });
   });
 
 internalizationCmd
