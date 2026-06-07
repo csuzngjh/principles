@@ -311,6 +311,12 @@ describe('validateGovernanceQueue', () => {
     pendingReviewCount: 2,
     behaviorDeviationCount: 1,
     stagnationSignals: [{ type: 'never_activated', principleId: 'p1', daysSince: 30 }],
+    governanceState: 'owner_review_ready',
+    stateReasonCode: 'pending_approvals',
+    nextActionCode: 'review_approvals',
+    stateReason: '2 principle(s) pending your review and decision.',
+    nextAction: 'Review pending principles and approve, reject, or park.',
+    generatedAt: '2026-06-07T09:00:00.000Z',
   };
 
   it('accepts a valid governance queue', () => {
@@ -318,6 +324,8 @@ describe('validateGovernanceQueue', () => {
     expect(result).not.toBeNull();
     expect(result!.pendingReviewCount).toBe(2);
     expect(result!.stagnationSignals.length).toBe(1);
+    expect(result!.stateReasonCode).toBe('pending_approvals');
+    expect(result!.nextActionCode).toBe('review_approvals');
   });
 
   it('rejects null', () => {
@@ -328,12 +336,111 @@ describe('validateGovernanceQueue', () => {
     expect(validateGovernanceQueue({ pendingReviewCount: 1 })).toBeNull();
   });
 
+  it('rejects missing stateReasonCode', () => {
+    const { stateReasonCode: _, ...withoutCode } = validQueue;
+    expect(validateGovernanceQueue(withoutCode)).toBeNull();
+  });
+
+  it('rejects missing nextActionCode', () => {
+    const { nextActionCode: _, ...withoutCode } = validQueue;
+    expect(validateGovernanceQueue(withoutCode)).toBeNull();
+  });
+
+  it('rejects invalid stateReasonCode', () => {
+    expect(validateGovernanceQueue({ ...validQueue, stateReasonCode: 'not_a_code' })).toBeNull();
+  });
+
+  it('rejects invalid nextActionCode', () => {
+    expect(validateGovernanceQueue({ ...validQueue, nextActionCode: 'not_a_code' })).toBeNull();
+  });
+
   it('rejects wrong field types', () => {
     expect(validateGovernanceQueue({ ...validQueue, pendingReviewCount: 'two' })).toBeNull();
   });
 
   it('rejects invalid stagnation signals', () => {
     expect(validateGovernanceQueue({ ...validQueue, stagnationSignals: [{ type: 123 }] })).toBeNull();
+  });
+
+  it('rejects invalid governanceState', () => {
+    expect(validateGovernanceQueue({ ...validQueue, governanceState: 'invalid' })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, governanceState: 123 })).toBeNull();
+  });
+
+  // ── P1-3: fail-loud tests for optional fields ───────────────────────────
+
+  it('returns null when inProgressSummary exists but is not a string', () => {
+    expect(validateGovernanceQueue({ ...validQueue, inProgressSummary: 42 })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, inProgressSummary: false })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, inProgressSummary: null })).toBeNull();
+  });
+
+  it('returns null when degradedSignals exists but is not an array', () => {
+    expect(validateGovernanceQueue({ ...validQueue, degradedSignals: 'not-array' })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, degradedSignals: 42 })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, degradedSignals: null })).toBeNull();
+  });
+
+  it('returns null when degradedSignals contains invalid elements', () => {
+    expect(validateGovernanceQueue({
+      ...validQueue,
+      degradedSignals: [{ reason: 'missing code fields' }],
+    })).toBeNull();
+  });
+
+  it('returns null when note exists but is not a string', () => {
+    expect(validateGovernanceQueue({ ...validQueue, note: 123 })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, note: false })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, note: null })).toBeNull();
+  });
+
+  it('returns null when generatedAt exists but is not a string', () => {
+    expect(validateGovernanceQueue({ ...validQueue, generatedAt: 123 })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, generatedAt: false })).toBeNull();
+    expect(validateGovernanceQueue({ ...validQueue, generatedAt: null })).toBeNull();
+  });
+
+  it('accepts valid optional fields when present', () => {
+    const withOptionals = {
+      ...validQueue,
+      inProgressSummary: 'Pipeline is active',
+      note: 'Data may be incomplete',
+      generatedAt: '2026-06-07T09:00:00.000Z',
+      degradedSignals: [{
+        reasonCode: 'task_retry_wait',
+        nextActionCode: 'check_task_status',
+        reason: 'Internalization task waiting for retry: dreamer: LLM output invalid',
+        nextAction: 'Check internalization pipeline status.',
+        source: 'internalization_task',
+      }],
+    };
+    const result = validateGovernanceQueue(withOptionals);
+    expect(result).not.toBeNull();
+    expect(result!.inProgressSummary).toBe('Pipeline is active');
+    expect(result!.note).toBe('Data may be incomplete');
+    expect(result!.generatedAt).toBe('2026-06-07T09:00:00.000Z');
+    expect(result!.degradedSignals!.length).toBe(1);
+    expect(result!.degradedSignals![0].reasonCode).toBe('task_retry_wait');
+    expect(result!.degradedSignals![0].nextActionCode).toBe('check_task_status');
+  });
+
+  it('accepts response without optional fields', () => {
+    const minimal = {
+      pendingReviewCount: 0,
+      behaviorDeviationCount: 0,
+      stagnationSignals: [],
+      governanceState: 'none',
+      stateReasonCode: 'no_pipeline_activity',
+      nextActionCode: 'wait_for_pipeline',
+      stateReason: 'No governance activity.',
+      nextAction: 'Wait for pipeline.',
+    };
+    const result = validateGovernanceQueue(minimal);
+    expect(result).not.toBeNull();
+    expect(result!.inProgressSummary).toBeUndefined();
+    expect(result!.degradedSignals).toBeUndefined();
+    expect(result!.note).toBeUndefined();
+    expect(result!.generatedAt).toBeUndefined();
   });
 });
 
