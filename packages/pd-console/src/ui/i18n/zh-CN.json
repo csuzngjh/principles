@@ -91,11 +91,12 @@
         "degraded": "降级"
       },
       "nextActionLabel": "建议操作：",
-      "inProgressTitle": "PD 正在工作",
+      "inProgressTitle": "治理链路进行中",
       "inProgressDetail": "当内化管线完成并生成可审查的原则候选后，PD 会在这里展示。",
       "degradedTitle": "系统信号",
       "degradedStateReason": "部分治理链路或数据源处于降级状态，决策可能不完整或延迟。",
       "degradedNextActionLabel": "建议操作：",
+      "advancedDiagnostics": "高级诊断",
       "degradedSourceInternalization": "内化任务",
       "degradedSourceChainIntegrity": "链路完整性",
       "degradedSourceUnavailable": "数据源",

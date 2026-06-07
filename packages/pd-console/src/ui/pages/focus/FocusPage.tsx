@@ -294,13 +294,21 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
           {sourceLabel}
         </span>
       </div>
-      {/* Reason (i18n heading + English debug detail) */}
+      {/* Reason (i18n) */}
       <div className="text-ink-2 text-sm leading-relaxed">
         {reasonText}
       </div>
-      <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono">
-        {signal.reason}
-      </div>
+      {/* Raw debug detail — collapsed by default to avoid unsanitized last_error in main view */}
+      {signal.reason && (
+        <details className="mt-1">
+          <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
+            {t("pages.focus.advancedDiagnostics")}
+          </summary>
+          <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
+            {signal.reason}
+          </div>
+        </details>
+      )}
       {/* Next action (i18n) */}
       <div className="mt-2 text-ink-4 text-[13px] leading-snug">
         <span className="font-medium">{t("pages.focus.degradedNextActionLabel")}</span>{" "}

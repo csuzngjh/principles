@@ -91,11 +91,12 @@
         "degraded": "Degraded"
       },
       "nextActionLabel": "Suggested action:",
-      "inProgressTitle": "PD Is Working",
+      "inProgressTitle": "Governance in progress",
       "inProgressDetail": "PD will surface a principle candidate here once the internalization pipeline completes and an owner-reviewable artifact is generated.",
       "degradedTitle": "System Signals",
       "degradedStateReason": "Part of the governance pipeline or data source is degraded. Decisions may be incomplete or delayed.",
       "degradedNextActionLabel": "Next action:",
+      "advancedDiagnostics": "Advanced diagnostics",
       "degradedSourceInternalization": "Internalization Task",
       "degradedSourceChainIntegrity": "Chain Integrity",
       "degradedSourceUnavailable": "Data Source",
