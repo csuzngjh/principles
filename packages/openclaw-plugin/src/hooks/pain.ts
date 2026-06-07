@@ -14,7 +14,8 @@ import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js'
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData, type PainEvidenceEntry, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { sanitizeAssistantText, sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
-import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
+import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -463,6 +464,25 @@ export function handleAfterToolCall(
   const isRisk = isRisky(relPath, profile.risk_paths);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
+
+  // PEAT-B1: Evidence triage (feature-flagged)
+  const painTriageFlag = loadFeatureFlagFromConfig(effectiveWorkspaceDir, 'painEvidenceAdmission');
+  if (painTriageFlag.enabled) {
+    const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
+    const triage = evaluateEvidenceTriage(sourceKind, painScore);
+    if (triage.decision !== 'admit') {
+      SystemLogger.log(effectiveWorkspaceDir, 'TRIAGE_EVIDENCE_ONLY', JSON.stringify({
+        sourceKind: triage.sourceKind,
+        decision: triage.decision,
+        reason: triage.reason,
+        nextAction: triage.nextAction,
+        tool: event.toolName,
+        path: relPath,
+      }));
+      return;
+    }
+  }
+
   const diagnosticGate = evaluatePainDiagnosticGate({
     source: failureSource,
     score: painScore,

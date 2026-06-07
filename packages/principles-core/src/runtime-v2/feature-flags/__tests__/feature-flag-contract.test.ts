@@ -309,6 +309,16 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
       }
     }
   });
+
+  it('PEAT-B1: painEvidenceAdmission is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'painEvidenceAdmission');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('painEvidenceAdmission flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-06-06');
+    expect(flag.description).toContain('PEAT-B1');
+  });
 });
 
 describe('VALID_CATEGORIES', () => {
