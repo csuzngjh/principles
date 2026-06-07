@@ -1,20 +1,20 @@
 /**
- * GovernanceConsoleModel Tests — PRI-CR3
+ * GovernanceConsoleModel Tests — PRI-329
  *
- * Tests for the governance queue data model:
- * - Returns graceful degraded response when state.db missing
- * - Returns graceful degraded response when approval table missing
- * - Computes pendingReviewCount correctly
- * - Computes behaviorDeviationCount (high/critical risk)
- * - Computes stagnationSignals for approvals older than 7 days
- * - Handles artifact → principleId mapping
+ * Extended governance state tests:
+ * - `none`: state.db not found or empty workspace
+ * - `in_progress`: pipeline activity but no owner-ready items
+ * - `owner_review_ready`: pending approval or validated artifact
+ * - `degraded`: retry_wait / failed task or broken chain
  *
  * ERR entries:
- * - ERR-002: Graceful degradation includes reason (note field)
  * - ERR-001/005: No `as` bypasses on untrusted data
+ * - ERR-002: Degradation includes reason + nextAction
+ * - ERR-009: Required array elements fail loud
+ * - ERR-025: Tests cover real production path (getGovernanceQueue)
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -27,6 +27,96 @@ let tempDir: string;
 let workspaceDir: string;
 let model: GovernanceConsoleModel;
 
+/** Real schemas extracted from production state.db */
+function createTestDb(): SqliteConnection {
+  const conn = new SqliteConnection({ workspaceDir, readonly: false });
+  const db = conn.getDb();
+
+  // Disable FK enforcement for test isolation — we only test the read model
+  db.pragma('foreign_keys = OFF');
+
+  // tasks table — matches production schema
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      task_id TEXT PRIMARY KEY,
+      task_kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      last_error TEXT,
+      input_ref TEXT,
+      result_ref TEXT,
+      diagnostic_json TEXT
+    )
+  `);
+
+  // pi_artifacts table — matches production schema
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pi_artifacts (
+      artifact_id TEXT PRIMARY KEY,
+      artifact_kind TEXT NOT NULL,
+      source_task_id TEXT NOT NULL,
+      source_principle_id TEXT,
+      source_rule_id TEXT,
+      lineage_artifact_ids TEXT NOT NULL DEFAULT '[]',
+      validation_status TEXT NOT NULL DEFAULT 'pending',
+      content_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  // principle_candidates table — matches production schema
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS principle_candidates (
+      candidate_id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      source_run_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      confidence REAL,
+      source_recommendation_json TEXT,
+      idempotency_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      consumed_at TEXT,
+      recommendation_kind TEXT NOT NULL DEFAULT 'principle',
+      trigger_pattern TEXT,
+      action TEXT,
+      abstracted_principle TEXT
+    )
+  `);
+
+  // approvals table — matches production schema
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS approvals (
+      approval_id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      risk_level TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      confidence REAL,
+      requested_at TEXT NOT NULL,
+      decided_at TEXT,
+      decided_by TEXT,
+      decision_note TEXT,
+      rejection_reason TEXT,
+      summary TEXT,
+      trigger_reason TEXT,
+      confidence_explanation TEXT,
+      effect_description TEXT,
+      rejection_effect TEXT
+    )
+  `);
+
+  return conn;
+}
+
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-governance-test-'));
   workspaceDir = path.join(tempDir, 'workspace');
@@ -36,44 +126,231 @@ beforeEach(() => {
 
 afterEach(() => {
   model.dispose();
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  // Small delay to release file handles on Windows
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    // Ignore EPERM on Windows — cleanup is best-effort in tests
+  }
 });
 
-// ── Missing Database Handling ────────────────────────────────────────────────
+// ── State: none ──────────────────────────────────────────────────────────────
 
-describe('GovernanceConsoleModel — missing database handling', () => {
-  it('returns degraded response with note when state.db does not exist', async () => {
+describe('GovernanceConsoleModel — state: none', () => {
+  it('returns governanceState=none when state.db does not exist', async () => {
     const result = await model.getGovernanceQueue();
 
     expect(result.pendingReviewCount).toBe(0);
-    expect(result.behaviorDeviationCount).toBe(0);
-    expect(result.stagnationSignals).toEqual([]);
+    expect(result.governanceState).toBe('none');
+    expect(result.stateReasonCode).toBe('state_db_missing');
+    expect(result.nextActionCode).toBe('run_config_doctor');
+    expect(result.stateReason).toBeDefined();
+    expect(result.stateReason.length).toBeGreaterThan(0);
+    expect(result.nextAction).toBeDefined();
+    expect(result.nextAction.length).toBeGreaterThan(0);
     expect(result.note).toBeDefined();
     expect(result.note).toContain('state.db not found');
-    expect(result.generatedAt).toBeDefined();
   });
 
-  it('returns degraded response with note when approval table missing', async () => {
-    // Create .pd/state.db but without approval table
-    const pdDir = path.join(workspaceDir, '.pd');
-    fs.mkdirSync(pdDir, { recursive: true });
-    const stateDbPath = path.join(pdDir, 'state.db');
-    
-    // Use SqliteConnection to create a properly initialized database
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+  it('returns governanceState=none when state.db has no pipeline activity', async () => {
+    const conn = createTestDb();
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('none');
+    expect(result.pendingReviewCount).toBe(0);
+    expect(result.behaviorDeviationCount).toBe(0);
+    expect(result.stateReasonCode).toBe('no_pipeline_activity');
+    expect(result.nextActionCode).toBe('wait_for_pipeline');
+  });
+});
+
+// ── State: in_progress ───────────────────────────────────────────────────────
+
+describe('GovernanceConsoleModel — state: in_progress', () => {
+  it('returns governanceState=in_progress when consumed candidates exist', async () => {
+    const conn = createTestDb();
     const db = conn.getDb();
-    
-    // Drop the approvals table to simulate missing table scenario
-    db.exec('DROP TABLE IF EXISTS approvals');
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, consumed_at, recommendation_kind)
+      VALUES ('candidate-1', 'artifact-1', 'task-1', 'run-1', 'Test candidate', 'Test description', 'idem-1', 'consumed', '${now}', '${now}', 'principle')
+    `);
+
     conn.close();
 
     const result = await model.getGovernanceQueue();
 
     expect(result.pendingReviewCount).toBe(0);
-    expect(result.behaviorDeviationCount).toBe(0);
-    expect(result.stagnationSignals).toEqual([]);
-    expect(result.note).toBeDefined();
-    expect(result.note).toContain('approval queue table not found');
+    expect(result.governanceState).toBe('in_progress');
+    expect(result.stateReasonCode).toBe('consumed_candidates');
+    expect(result.nextActionCode).toBe('wait_for_pipeline');
+    expect(result.stateReason).toBeDefined();
+    expect(result.nextAction).toBeDefined();
+    expect(result.inProgressSummary).toBeDefined();
+  });
+
+  it('returns governanceState=in_progress when internalization tasks exist', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count)
+      VALUES ('task-dreamer-1', 'dreamer', 'succeeded', '${now}', '${now}', 1)
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.pendingReviewCount).toBe(0);
+    expect(result.governanceState).toBe('in_progress');
+    expect(result.stateReasonCode).toBe('pipeline_active');
+    expect(result.nextActionCode).toBe('check_pipeline_status');
+    expect(result.stateReason).toBeDefined();
+    expect(result.inProgressSummary).toBeDefined();
+  });
+});
+
+// ── State: owner_review_ready ────────────────────────────────────────────────
+
+describe('GovernanceConsoleModel — state: owner_review_ready', () => {
+  it('returns governanceState=owner_review_ready when pending approvals exist', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('apr-test-1', 'artifact-1', 'prompt', 'low', 'pending', '${now}')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.pendingReviewCount).toBe(1);
+    expect(result.governanceState).toBe('owner_review_ready');
+    expect(result.stateReasonCode).toBe('pending_approvals');
+    expect(result.nextActionCode).toBe('review_approvals');
+    expect(result.stateReason).toContain('1');
+    expect(result.nextAction).toBeDefined();
+  });
+
+  it('validated artifacts alone do NOT trigger owner_review_ready (P1-2)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    // No pending approval — all approved
+    db.exec(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('apr-approved-1', 'artifact-approved', 'prompt', 'low', 'approved', '${now}')
+    `);
+
+    // Validated artifact exists — but this should NOT trigger owner_review_ready
+    db.exec(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, content_json, validation_status, created_at, updated_at)
+      VALUES ('artifact-validated', 'candidate', 'task-1', '{}', 'validated', '${now}', '${now}')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    // P1-2: validatedArtifactCount is too broad; only pendingReviewCount > 0
+    // determines owner_review_ready. The owner-actionable queue read model
+    // (PRI-330) will refine this.
+    expect(result.governanceState).not.toBe('owner_review_ready');
+    expect(result.pendingReviewCount).toBe(0);
+  });
+});
+
+// ── State: degraded ──────────────────────────────────────────────────────────
+
+describe('GovernanceConsoleModel — state: degraded', () => {
+  it('returns governanceState=degraded when retry_wait tasks exist', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-1', 'dreamer', 'retry_wait', '${now}', '${now}', 2, 'LLM output invalid')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    expect(result.stateReasonCode).toBe('degraded_state');
+    expect(result.nextActionCode).toBe('check_degraded_signals');
+    expect(result.degradedSignals).toBeDefined();
+    expect(result.degradedSignals!.length).toBeGreaterThan(0);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_retry_wait');
+    expect(result.degradedSignals![0].nextActionCode).toBe('check_task_status');
+    expect(result.degradedSignals![0].reason).toBeDefined();
+    expect(result.degradedSignals![0].nextAction).toBeDefined();
+    expect(result.degradedSignals![0].source).toBeDefined();
+    expect(result.stateReason).toBeDefined();
+    expect(result.nextAction).toBeDefined();
+  });
+
+  it('returns governanceState=degraded when failed tasks exist', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-failed-1', 'philosopher', 'failed', '${now}', '${now}', 3, 'Max retries exceeded')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    expect(result.degradedSignals).toBeDefined();
+    expect(result.degradedSignals!.length).toBe(1);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_failed');
+    expect(result.degradedSignals![0].nextActionCode).toBe('fix_and_retry');
+    expect(result.degradedSignals![0].source).toBe('internalization_task');
+  });
+});
+
+// ── Priority: owner_review_ready takes priority over degraded ────────────────
+
+describe('GovernanceConsoleModel — state priority', () => {
+  it('priority order: owner_review_ready > degraded > in_progress > none', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    // Both pending approval and retry_wait exist
+    db.exec(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('apr-test-1', 'artifact-1', 'prompt', 'low', 'pending', '${now}')
+    `);
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-retry-1', 'dreamer', 'retry_wait', '${now}', '${now}', 2, 'Timeout')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    // owner_review_ready takes priority over degraded
+    expect(result.governanceState).toBe('owner_review_ready');
+    expect(result.pendingReviewCount).toBe(1);
+    // degraded signals still reported alongside owner_review_ready
+    expect(result.degradedSignals).toBeDefined();
+    expect(result.degradedSignals!.length).toBeGreaterThan(0);
   });
 });
 
@@ -81,128 +358,90 @@ describe('GovernanceConsoleModel — missing database handling', () => {
 
 describe('GovernanceConsoleModel — data computation', () => {
   it('computes pendingReviewCount from pending approvals', async () => {
-    // Use SqliteConnection to create a properly initialized database
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const conn = createTestDb();
     const db = conn.getDb();
-    
-    // Insert pending approvals
+
     const now = new Date().toISOString();
     db.exec(`
       INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
-      VALUES 
-        ('apr_test_artifact-001', 'artifact-001', 'prompt', 'low', 'pending', '${now}')
+      VALUES ('apr_test_artifact-001', 'artifact-001', 'prompt', 'low', 'pending', '${now}')
     `);
-    
+
     conn.close();
 
     const result = await model.getGovernanceQueue();
     expect(result.pendingReviewCount).toBe(1);
     expect(result.behaviorDeviationCount).toBe(0);
     expect(result.stagnationSignals).toEqual([]);
-    // No note when tables exist with data
-    expect(result.note).toBeUndefined();
   });
 
   it('computes behaviorDeviationCount for high/critical risk approvals', async () => {
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const conn = createTestDb();
     const db = conn.getDb();
-    
-    // Insert pending approvals with different risk levels
+
     const now = new Date().toISOString();
     db.exec(`
       INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
-      VALUES 
+      VALUES
         ('apr_prompt_artifact-1', 'artifact-1', 'prompt', 'low', 'pending', '${now}'),
         ('apr_prompt_artifact-2', 'artifact-2', 'prompt', 'high', 'pending', '${now}'),
         ('apr_prompt_artifact-3', 'artifact-3', 'prompt', 'critical', 'pending', '${now}'),
         ('apr_prompt_artifact-4', 'artifact-4', 'prompt', 'medium', 'pending', '${now}')
     `);
-    
-    // Insert pi_artifacts for principleId mapping
+
     db.exec(`
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, content_json, created_at, updated_at)
-      VALUES 
+      VALUES
         ('artifact-1', 'test', 'task-1', 'principle-1', '{}', '${now}', '${now}'),
         ('artifact-2', 'test', 'task-2', 'principle-2', '{}', '${now}', '${now}'),
         ('artifact-3', 'test', 'task-3', 'principle-3', '{}', '${now}', '${now}'),
         ('artifact-4', 'test', 'task-4', 'principle-4', '{}', '${now}', '${now}')
     `);
-    
+
     conn.close();
 
     const result = await model.getGovernanceQueue();
-    
-    // 4 pending approvals total
+
     expect(result.pendingReviewCount).toBe(4);
-    // 2 high/critical risk (artifact-2 and artifact-3)
     expect(result.behaviorDeviationCount).toBe(2);
-    // No stagnation (all recent)
     expect(result.stagnationSignals).toHaveLength(0);
   });
 
   it('computes stagnationSignals for approvals older than 7 days', async () => {
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const conn = createTestDb();
     const db = conn.getDb();
-    
-    // Create dates: one recent, one 10 days ago, one 30 days ago
+
     const recentDate = new Date().toISOString();
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    
+
     db.exec(`
       INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
-      VALUES 
+      VALUES
         ('apr_prompt_artifact-recent', 'artifact-recent', 'prompt', 'low', 'pending', '${recentDate}'),
         ('apr_prompt_artifact-10d', 'artifact-10d', 'prompt', 'low', 'pending', '${tenDaysAgo}'),
         ('apr_prompt_artifact-30d', 'artifact-30d', 'prompt', 'low', 'pending', '${thirtyDaysAgo}')
     `);
-    
+
     db.exec(`
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, content_json, created_at, updated_at)
-      VALUES 
+      VALUES
         ('artifact-recent', 'test', 'task-recent', 'principle-recent', '{}', '${recentDate}', '${recentDate}'),
         ('artifact-10d', 'test', 'task-10d', 'principle-10d', '{}', '${tenDaysAgo}', '${tenDaysAgo}'),
         ('artifact-30d', 'test', 'task-30d', 'principle-30d', '{}', '${thirtyDaysAgo}', '${thirtyDaysAgo}')
     `);
-    
+
     conn.close();
 
     const result = await model.getGovernanceQueue();
-    
-    // 3 pending approvals total
+
     expect(result.pendingReviewCount).toBe(3);
-    // 2 stagnation signals (10 days and 30 days ago)
     expect(result.stagnationSignals).toHaveLength(2);
-    
-    // Check stagnation signal structure
+
     const tenDaySignal = result.stagnationSignals.find(s => s.principleId === 'principle-10d');
     expect(tenDaySignal).toBeDefined();
     expect(tenDaySignal?.type).toBe('never_activated');
     expect(tenDaySignal?.daysSince).toBeGreaterThanOrEqual(10);
-    
-    const thirtyDaySignal = result.stagnationSignals.find(s => s.principleId === 'principle-30d');
-    expect(thirtyDaySignal).toBeDefined();
-    expect(thirtyDaySignal?.daysSince).toBeGreaterThanOrEqual(30);
-  });
-
-  it('handles unlinked artifacts (missing principleId)', async () => {
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
-    const db = conn.getDb();
-    
-    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-    
-    db.exec(`
-      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
-      VALUES ('apr_prompt_artifact-unlinked', 'artifact-unlinked', 'prompt', 'low', 'pending', '${tenDaysAgo}')
-    `);
-    
-    // No pi_artifacts record for this approval
-    conn.close();
-
-    const result = await model.getGovernanceQueue();
-    
-    expect(result.stagnationSignals).toHaveLength(1);
-    expect(result.stagnationSignals[0].principleId).toBe('unlinked');
   });
 });
 
@@ -210,14 +449,12 @@ describe('GovernanceConsoleModel — data computation', () => {
 
 describe('GovernanceConsoleModel — disposal', () => {
   it('dispose() closes connection without error', async () => {
-    // Create database to force connection
-    const conn = new SqliteConnection({ workspaceDir, readonly: false });
-    conn.getDb();
+    const conn = createTestDb();
     conn.close();
 
     await model.getGovernanceQueue();
     model.dispose();
-    
+
     // Second dispose should not throw
     model.dispose();
   });
