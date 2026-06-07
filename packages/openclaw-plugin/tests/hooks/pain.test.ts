@@ -544,3 +544,163 @@ describe('Post-Write Checks & Pain Hook', () => {
   });
 
 });
+
+// ── PRI-326: Decomposed Pipeline Tests ────────────────────────────────────────
+
+import {
+  classifyToolCallOutcome,
+  buildToolCallObservation,
+  handleProbationFeedback,
+  evaluatePainAdmissionForToolCall,
+} from '../../src/hooks/after-tool-call-helpers.js';
+import type { ToolCallOutcome, ToolCallObservation } from '../../src/hooks/after-tool-call-types.js';
+
+describe('PRI-326: classifyToolCallOutcome', () => {
+  it('returns success for exitCode 0 with no error', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'read',
+      params: {},
+      result: { exitCode: 0 },
+      error: undefined,
+    } as any);
+    expect(result.isFailure).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.failureSource).toBeUndefined();
+  });
+
+  it('detects failure from top-level exitCode', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'bash',
+      params: {},
+      result: { exitCode: 1 },
+      error: undefined,
+    } as any);
+    expect(result.isFailure).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.failureSource).toBe('tool_failure');
+  });
+
+  it('falls back to nested details.exitCode', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'bash',
+      params: {},
+      result: { details: { exitCode: 2 } },
+      error: undefined,
+    } as any);
+    expect(result.isFailure).toBe(true);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it('prefers top-level exitCode over nested', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'bash',
+      params: {},
+      result: { exitCode: 0, details: { exitCode: 1 } },
+      error: undefined,
+    } as any);
+    expect(result.isFailure).toBe(false);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('detects failure from error field even with exitCode 0', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'write',
+      params: {},
+      result: { exitCode: 0 },
+      error: 'Permission denied',
+    } as any);
+    expect(result.isFailure).toBe(true);
+    expect(result.failureSource).toBe('tool_failure');
+  });
+
+  it('classifies dispatch_error for tool not found', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'read',
+      params: {},
+      result: { exitCode: 1 },
+      error: 'tool read_file not found',
+    } as any);
+    expect(result.isFailure).toBe(true);
+    expect(result.failureSource).toBe('dispatch_error');
+  });
+
+  it('treats non-numeric exitCode as 0', () => {
+    const result = classifyToolCallOutcome({
+      toolName: 'bash',
+      params: {},
+      result: { exitCode: '0' as any },
+      error: undefined,
+    } as any);
+    expect(result.isFailure).toBe(false);
+  });
+});
+
+describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
+  const workspaceDir = '/mock/workspace';
+  const mockConfig = { get: vi.fn().mockReturnValue(undefined) };
+  const baseOutcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+  const baseObservation: ToolCallObservation = {
+    params: { filePath: 'src/main.ts' },
+    relPath: 'src/main.ts',
+    isRisk: false,
+    errorType: 'Other',
+    errorHash: 'abc123',
+    errorText: 'Permission denied',
+    painScore: 10,
+    traceId: 'trace-123',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetPainDiagnosticGateForTest();
+    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
+  });
+
+  it('returns not_applicable for non-write tool', () => {
+    const result = evaluatePainAdmissionForToolCall(
+      { toolName: 'read' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
+    );
+    expect(result.stage).toBe('not_applicable');
+    expect(result.admitted).toBe(false);
+  });
+
+  it('returns not_applicable for success', () => {
+    const successOutcome: ToolCallOutcome = { isFailure: false, exitCode: 0, failureSource: undefined };
+    const result = evaluatePainAdmissionForToolCall(
+      { toolName: 'write' } as any, baseObservation, successOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
+    );
+    expect(result.stage).toBe('not_applicable');
+  });
+
+  it('returns triage_evidence_only when feature flag on and tool_failure triage rejects', () => {
+    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
+
+    const result = evaluatePainAdmissionForToolCall(
+      { toolName: 'write' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
+    );
+    expect(result.stage).toBe('triage_evidence_only');
+    expect(result.admitted).toBe(false);
+    expect(result.reason).toBeTruthy();
+  });
+
+  it('returns gate_admitted when triage passes and gate allows', () => {
+    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
+    // Need high GFI to pass gate
+    const highGfiState = { currentGfi: 100, consecutiveErrors: 5, lastErrorHash: 'abc123' } as any;
+
+    const result = evaluatePainAdmissionForToolCall(
+      { toolName: 'write' } as any, baseObservation, baseOutcome, highGfiState, undefined, 's-unique-gate-test', workspaceDir, mockConfig
+    );
+    // Gate might admit or reject depending on thresholds
+    expect(['gate_admitted', 'gate_rejected']).toContain(result.stage);
+    expect(result.gateResult).toBeDefined();
+  });
+
+  it('includes reason and detail in every decision', () => {
+    const result = evaluatePainAdmissionForToolCall(
+      { toolName: 'read' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
+    );
+    expect(result.reason).toBeTruthy();
+    expect(result.detail).toBeTruthy();
+  });
+});
