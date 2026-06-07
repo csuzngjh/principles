@@ -20,6 +20,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { StoreEventEmitter} from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
+import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -742,6 +743,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // OCRA-03: fetchOutput parses CliOutput.stdout and returns DiagnosticianOutputV1
+  // OCRA-05: Malformed JSON repair + evidence persistence on output_invalid
   async fetchOutput(runId: string): Promise<StructuredRunOutput> {
     const state = this.runStateMap.get(runId);
     if (!state || !state.completed || !state.cliOutput) {
@@ -787,15 +789,56 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       parsed = null;
     }
 
+    // OCRA-05: When initial JSON parse fails, attempt bounded repair via extractJsonObject
+    // on the raw stdout/stderr text before giving up.
     if (parsed === null) {
-      // OCRA-04: JSON parse failure → output_invalid
-      throw new PDRuntimeError('output_invalid', 'Failed to parse CLI output as JSON');
+      // Try repair: scan raw text for a JSON object using balanced-bracket extraction
+      const repairSources = [cliOutput.stdout, cliOutput.stderr ?? ''];
+      for (const source of repairSources) {
+        if (!source) continue;
+        const repaired = extractJsonObject(source);
+        if (repaired !== null) {
+          parsed = repaired;
+          break;
+        }
+      }
+
+      if (parsed === null) {
+        // OCRA-05: Evidence persistence on output_invalid — no silent fallback (ERR-002)
+        const boundedPreview = truncatePreview(
+          (cliOutput.stdout || cliOutput.stderr || '').substring(0, 2000),
+          500,
+        );
+        throw new PDRuntimeError(
+          'output_invalid',
+          'Failed to parse CLI output as JSON',
+          {
+            parseFailureReason: 'no_json_object_found',
+            boundedRawOutputPreview: boundedPreview,
+            nextAction: 'Check openclaw agent output format; ensure agent returns valid JSON',
+          },
+        );
+      }
     }
 
     // OCRA-03: Validate DiagnosticianOutputV1Schema
-    // OCRA-04: Schema mismatch → output_invalid
+    // OCRA-05: On schema mismatch, include evidence with bounded preview (ERR-014/016/017)
     if (!Value.Check(DiagnosticianOutputV1Schema, parsed)) {
-      throw new PDRuntimeError('output_invalid', 'CLI output does not match DiagnosticianOutputV1 schema');
+      const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, parsed)]
+        .slice(0, 10)
+        .map(e => ({ path: e.path, message: e.message }));
+      const boundedPreview = safeStringifyPreview(parsed, 500);
+
+      throw new PDRuntimeError(
+        'output_invalid',
+        'CLI output does not match DiagnosticianOutputV1 schema',
+        {
+          parseFailureReason: 'schema_validation_failed',
+          boundedRawOutputPreview: boundedPreview,
+          schemaErrors,
+          nextAction: 'Review schema errors; check LLM output format and required fields',
+        },
+      );
     }
 
     return { runId, payload: parsed };

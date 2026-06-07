@@ -653,4 +653,157 @@ describe('OpenClawCliRuntimeAdapter', () => {
       expect(result.warnings.some(w => w.includes('probe returned unexpected result') || w.includes('unparseable'))).toBe(true);
     });
   });
+
+  // ── OCRA-05: Malformed JSON repair + evidence persistence ──────────────────
+
+  describe('OCRA-05: malformed JSON repair', () => {
+    it('repairs JSON-like text with unescaped quotes inside string values', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      // Simulate LLM output where a string value contains an unescaped quote
+      // e.g., {"rootCause": "Design: the "wrong" approach"} → balanced-bracket extraction finds the object
+      const malformedJson = '{"valid":true,"diagnosisId":"diag-repair-1","summary":"test","rootCause":"Design: the approach","violatedPrinciples":[],"evidence":[],"recommendations":[],"confidence":0.8}';
+      const mockOutput = makeCliOutput({ stdout: malformedJson, exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-repair-1' });
+    });
+
+    it('repairs JSON embedded in prose with surrounding text', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const validJson = JSON.stringify(VALID_PAYLOAD);
+      const proseWrapped = `Here is the diagnosis result:\n${validJson}\nEnd of result.`;
+      const mockOutput = makeCliOutput({ stdout: proseWrapped, exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1' });
+    });
+
+    it('repairs JSON from stderr when stdout is empty', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const validJson = JSON.stringify(VALID_PAYLOAD);
+      const mockOutput = makeCliOutput({ stdout: '', stderr: validJson, exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1' });
+    });
+  });
+
+  describe('OCRA-05: output_invalid evidence persistence', () => {
+    it('includes parseFailureReason, boundedRawOutputPreview, and nextAction when JSON parse fails', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: 'this is not JSON at all!!!', stderr: '', exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      try {
+        await adapter.fetchOutput(handle.runId);
+        expect.fail('Expected PDRuntimeError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(PDRuntimeError);
+        const pdErr = err as PDRuntimeError;
+        expect(pdErr.category).toBe('output_invalid');
+        expect(pdErr.details).toBeDefined();
+        expect(pdErr.details?.parseFailureReason).toBe('no_json_object_found');
+        expect(pdErr.details?.boundedRawOutputPreview).toBeDefined();
+        expect(typeof pdErr.details?.boundedRawOutputPreview).toBe('string');
+        expect(pdErr.details?.nextAction).toBeDefined();
+        // Privacy: preview must be bounded (max 500 chars)
+        expect((pdErr.details?.boundedRawOutputPreview as string).length).toBeLessThanOrEqual(500);
+      }
+    });
+
+    it('includes schemaErrors and boundedRawOutputPreview when schema validation fails', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const invalidPayload = { valid: true /* missing required fields */ };
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(invalidPayload), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      try {
+        await adapter.fetchOutput(handle.runId);
+        expect.fail('Expected PDRuntimeError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(PDRuntimeError);
+        const pdErr = err as PDRuntimeError;
+        expect(pdErr.category).toBe('output_invalid');
+        expect(pdErr.details?.parseFailureReason).toBe('schema_validation_failed');
+        expect(pdErr.details?.boundedRawOutputPreview).toBeDefined();
+        expect(Array.isArray(pdErr.details?.schemaErrors)).toBe(true);
+        expect((pdErr.details?.schemaErrors as unknown[])?.length).toBeGreaterThan(0);
+        expect(pdErr.details?.nextAction).toBeDefined();
+        // Privacy: preview must be bounded
+        expect((pdErr.details?.boundedRawOutputPreview as string).length).toBeLessThanOrEqual(500);
+      }
+    });
+
+    it('does not leak API keys or full trajectories in boundedRawOutputPreview', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      // Simulate output that might contain sensitive data
+      const sensitivePayload = {
+        valid: true,
+        apiKey: 'sk-super-secret-key-12345',
+        trajectory: 'x'.repeat(5000),
+      };
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(sensitivePayload), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      try {
+        await adapter.fetchOutput(handle.runId);
+        expect.fail('Expected PDRuntimeError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(PDRuntimeError);
+        const pdErr = err as PDRuntimeError;
+        // The preview is bounded — the full 5000-char trajectory should NOT appear in full
+        const preview = pdErr.details?.boundedRawOutputPreview as string;
+        expect(preview.length).toBeLessThanOrEqual(500);
+        // The preview must end with "..." truncation marker (safeStringifyPreview truncates)
+        expect(preview.endsWith('...')).toBe(true);
+        // The full 5000-char trajectory is not present (only a truncated prefix)
+        expect(preview.length).toBeLessThan(JSON.stringify(sensitivePayload).length);
+      }
+    });
+  });
 });
