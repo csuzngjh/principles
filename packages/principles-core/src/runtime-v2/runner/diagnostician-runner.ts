@@ -26,6 +26,7 @@ import type {
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import { DiagnosticianPromptBuilder } from '../diagnostician-prompt-builder.js';
 import type { TaskRecord } from '../task-status.js';
 import type { PDErrorCategory } from '../error-categories.js';
@@ -35,6 +36,9 @@ import type { RunnerResult } from './runner-result.js';
 import type { DiagnosticianCommitter, CommitResult } from '../store/commit/diagnostician-committer.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
+import { Value } from '@sinclair/typebox/value';
+import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
+import { redactSensitiveFields } from '../feedback/redact-sensitive.js';
 import { RunnerPhase } from './runner-phase.js';
 import { resolveRunnerOptions } from './diagnostician-runner-options.js';
 
@@ -126,7 +130,6 @@ export class DiagnosticianRunner {
     this.phase = RunnerPhase.Idle;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-    // eslint-disable-next-line @typescript-eslint/init-declarations
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -297,7 +300,36 @@ export class DiagnosticianRunner {
     if (!result || !result.payload) {
       throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
     }
-    return result.payload as DiagnosticianOutputV1;
+
+    // ERR-001/ERR-005: Do NOT use `as DiagnosticianOutputV1` to bypass validation.
+    // The adapter may return payload that passed its own schema check, but the runner
+    // must independently verify the shape before trusting it (defense-in-depth).
+    // Adapters that already validated (e.g., PiAiRuntimeAdapter, OpenClawCliRuntimeAdapter)
+    // will pass this check trivially; adapters that don't validate will be caught here.
+    if (!Value.Check(DiagnosticianOutputV1Schema, result.payload)) {
+      const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, result.payload)]
+        .slice(0, 5)
+        .map(e => ({ path: e.path, message: e.message }));
+      const redacted = redactSensitiveFields(result.payload);
+      const boundedPreview = redacted.ok
+        ? safeStringifyPreview(redacted.value, 300)
+        : safeStringifyPreview(result.payload, 300);
+
+      throw new PDRuntimeError(
+        'output_invalid',
+        `Run ${runId} output failed DiagnosticianOutputV1 schema validation at runner boundary`,
+        {
+          parseFailureReason: 'runner_boundary_schema_check_failed',
+          boundedRawOutputPreview: boundedPreview,
+          schemaErrors,
+          nextAction: 'Adapter returned payload that does not match DiagnosticianOutputV1; check adapter validation logic',
+        },
+      );
+    }
+
+    // Value.Check narrows the type at runtime but not in TS; Value.Cast
+    // performs a safe conversion after validation passes.
+    return Value.Cast(DiagnosticianOutputV1Schema, result.payload);
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
@@ -326,7 +358,6 @@ export class DiagnosticianRunner {
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
-    // eslint-disable-next-line @typescript-eslint/init-declarations
     let commitResult: CommitResult | undefined;
     try {
       commitResult = await this.committer.commit({
