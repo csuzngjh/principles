@@ -853,4 +853,57 @@ describe('DiagnosticianRunner', () => {
       expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
     });
   });
+
+  // ── ERR-001/005: Runner boundary schema validation ──────────────────────────
+
+  describe('Runner boundary schema validation (ERR-001/005)', () => {
+    it('rejects adapter payload that does not match DiagnosticianOutputV1Schema', async () => {
+      const mocks = createMocks();
+      // Adapter returns payload that bypasses its own validation (defense-in-depth test)
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: { wrong: 'shape', missing: 'all required fields' },
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      // Should end up in retry_wait/output_invalid, not silently accepted
+      expect(result.status).toBe('retried');
+      expect(result.errorCategory).toBe('output_invalid');
+    });
+
+    it('includes evidence in output_invalid error when runner boundary rejects payload', async () => {
+      const mocks = createMocks();
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: { invalid: true },
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('retried');
+      expect(result.errorCategory).toBe('output_invalid');
+      // The retry_wait call should have been made with output_invalid
+      expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+        TASK_ID,
+        'output_invalid',
+      );
+    });
+
+    it('accepts valid DiagnosticianOutputV1 payload through runner boundary', async () => {
+      const mocks = createMocks();
+      const validOutput = makeDiagnosticianOutput();
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: validOutput,
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+    });
+  });
 });
