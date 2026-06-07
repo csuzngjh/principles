@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { PrinciplesConsoleModel } from '../models/PrinciplesConsoleModel.js';
+import { PrinciplesConsoleModel, type PrincipleFilter } from '../models/PrinciplesConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, PrinciplesConsoleModel>();
@@ -35,7 +35,15 @@ export async function handlePrinciplesRoute({
 
   if (subPath === '' || subPath === '/') {
     try {
-      const result = await model.listPrinciples();
+      // Parse query string for filter parameter
+      const urlParts = (req.url ?? '').split('?');
+      const queryString = urlParts[1] ?? '';
+      const params = new URLSearchParams(queryString);
+      const filterRaw = params.get('filter');
+      const VALID_FILTERS = new Set<string>(['all', 'actionable']);
+      const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'all') as PrincipleFilter;
+
+      const result = await model.listPrinciples(filter);
       sendSuccess(res, result);
     } catch (err: unknown) {
       sendError(res, 500, 'principles_list_error', (err as Error).message);

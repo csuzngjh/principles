@@ -917,6 +917,7 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
 export interface PrinciplesListData {
   principles: PrincipleListItemData[];
   summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
+  categories?: Record<string, number>;
 }
 
 export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
@@ -928,9 +929,12 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (!isNumber(candidate) || !isNumber(probation) || !isNumber(active) || !isNumber(deprecated) || !isNumber(archived) || !isNumber(total)) return null;
   const principles = validateArray(v.principles, validatePrincipleListItem);
   if (principles === null) return null;
+  // categories is optional (PRI-330)
+  const categories = Object.hasOwn(v, 'categories') && isObject(v.categories) ? v.categories as Record<string, number> : undefined;
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
+    ...(categories !== undefined ? { categories } : {}),
   };
 }
 
