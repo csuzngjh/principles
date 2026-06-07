@@ -402,6 +402,8 @@ export class EvidenceChainConsoleModel {
           record.nextAction = state === 'diagnosis_retry_wait'
             ? 'Diagnosis is waiting for automatic retry. Check pipeline status if it stays in this state.'
             : 'Diagnosis failed. Check the error details and retry if appropriate.';
+        } else if (state === 'diagnosis_succeeded' && !linkedCandidateId) {
+          record.nextAction = 'Diagnosis completed. A candidate principle may be generated shortly.';
         }
       }
 
