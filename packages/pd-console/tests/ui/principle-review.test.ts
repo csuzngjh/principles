@@ -599,11 +599,11 @@ describe("PRI-332: Principle Review readability", () => {
     expect(principlesPageSrc).toMatch(/languageMismatchHint/);
   });
 
-  it("PrinciplesPage uses readabilityWarning from backend", () => {
-    expect(principlesPageSrc).toMatch(/readabilityWarning/);
+  it("PrinciplesPage uses readabilityWarningCode from backend", () => {
+    expect(principlesPageSrc).toMatch(/readabilityWarningCode/);
   });
 
-  it("PrinciplesPage uses bounded fallback title when readabilityWarning exists", () => {
+  it("PrinciplesPage uses bounded fallback title when readabilityWarningCode exists", () => {
     expect(principlesPageSrc).toMatch(/readabilityFallbackTitle/);
     expect(principlesPageSrc).toMatch(/titleUsedFallback/);
   });
@@ -649,27 +649,27 @@ describe("PRI-332: Principle Review readability", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 16. PRI-332: Backend contract — detectedLanguage and readabilityWarning
+// 16. PRI-332: Backend contract — detectedLanguage and readabilityWarningCode
 // ════════════════════════════════════════════════════════════════════════════
 describe("PRI-332: Backend contract validators", () => {
   it("validators.ts includes detectedLanguage in PrincipleListItemData", () => {
     expect(validatorsSrc).toMatch(/detectedLanguage.*string/);
   });
 
-  it("validators.ts includes readabilityWarning as optional in PrincipleListItemData", () => {
-    expect(validatorsSrc).toMatch(/readabilityWarning\?.*string/);
+  it("validators.ts includes readabilityWarningCode as optional in PrincipleListItemData", () => {
+    expect(validatorsSrc).toMatch(/readabilityWarningCode\?.*technical_pattern|diagnostic_residue|title_too_long/);
   });
 
   it("validators.ts validates detectedLanguage with Object.hasOwn (ERR-013)", () => {
     expect(validatorsSrc).toMatch(/Object\.hasOwn.*detectedLanguage/);
   });
 
-  it("validators.ts validates readabilityWarning with Object.hasOwn (ERR-013)", () => {
-    expect(validatorsSrc).toMatch(/Object\.hasOwn.*readabilityWarning/);
+  it("validators.ts validates readabilityWarningCode with Object.hasOwn (ERR-013)", () => {
+    expect(validatorsSrc).toMatch(/Object\.hasOwn.*readabilityWarningCode/);
   });
 
-  it("validators.ts fails loud on non-string readabilityWarning (ERR-009)", () => {
-    // When readabilityWarning is present but not a string, validation should return null
-    expect(validatorsSrc).toMatch(/readabilityWarning.*return null/);
+  it("validators.ts fails loud on invalid readabilityWarningCode (ERR-009)", () => {
+    // When readabilityWarningCode is present but invalid, validation should return null
+    expect(validatorsSrc).toMatch(/readabilityWarningCode.*return null/);
   });
 });

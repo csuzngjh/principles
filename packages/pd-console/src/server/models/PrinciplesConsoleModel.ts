@@ -79,8 +79,8 @@ export interface PrincipleListItem {
   updatedAt: string;
   /** Detected language of the principle text ('en' | 'zh' | 'unknown'). PRI-332 */
   detectedLanguage: 'en' | 'zh' | 'unknown';
-  /** Human-readable warning when the title may be hard to read. PRI-332 */
-  readabilityWarning?: string;
+  /** Structured readability warning code — front-end renders via i18n. PRI-332 P1-5 */
+  readabilityWarningCode?: ReadabilityWarningCode;
 }
 
 export interface RuleItem {
@@ -142,24 +142,28 @@ const CJK_REGEX = /[\u4e00-\u9fff\u3400-\u4dbf]/;
 const REGEX_LIKE_PATTERN = /^[/^.*+?()[\]{}|$\\]|\/.*\/[gimsuy]*$/;
 const TECHNICAL_RESIDUE_PATTERN = /^[a-zA-Z_]+\.[a-zA-Z_]+\(|^Error:|^TypeError:|\{\{.*\}\}|<\/?\w+>/;
 
+/** Structured readability warning codes — front-end renders via i18n (PRI-332 P1-5). */
+export type ReadabilityWarningCode = 'technical_pattern' | 'diagnostic_residue' | 'title_too_long';
+
 /** Simple CJK-based language detection for principle text. */
 function detectLanguage(text: string): 'en' | 'zh' | 'unknown' {
   if (!text || text.trim().length === 0) return 'unknown';
   return CJK_REGEX.test(text) ? 'zh' : 'en';
 }
 
-/** Check if a triggerPattern/title looks like unreadable technical residue. */
-function checkReadabilityWarning(triggerPattern: string, text: string): string | undefined {
+/** Check if a triggerPattern/title looks like unreadable technical residue.
+ *  Returns a structured code instead of an English string (PRI-332 P1-5). */
+function checkReadabilityWarning(triggerPattern: string, text: string): ReadabilityWarningCode | undefined {
   const title = triggerPattern || text.slice(0, 80);
   if (!title) return undefined;
   if (REGEX_LIKE_PATTERN.test(title.trim())) {
-    return 'Title appears to be a technical pattern. Review the behavior evidence below.';
+    return 'technical_pattern';
   }
   if (TECHNICAL_RESIDUE_PATTERN.test(title.trim())) {
-    return 'Title may contain diagnostic residue. Review the full text for context.';
+    return 'diagnostic_residue';
   }
   if (title.length > 120) {
-    return 'Title is unusually long. The readable summary may be in the text below.';
+    return 'title_too_long';
   }
   return undefined;
 }
@@ -310,7 +314,7 @@ export class PrinciplesConsoleModel {
         createdAt: p.createdAt ?? '',
         updatedAt: p.updatedAt ?? '',
         detectedLanguage: detectLanguage(principleText),
-        readabilityWarning: checkReadabilityWarning(principleTrigger, principleText),
+        readabilityWarningCode: checkReadabilityWarning(principleTrigger, principleText),
       });
     }
 
@@ -384,7 +388,7 @@ export class PrinciplesConsoleModel {
       updatedAt: p.updatedAt ?? '',
       rules,
       detectedLanguage: detectLanguage(detailText),
-      readabilityWarning: checkReadabilityWarning(detailTrigger, detailText),
+      readabilityWarningCode: checkReadabilityWarning(detailTrigger, detailText),
     };
 
     return { principle };

@@ -191,7 +191,7 @@ describe('en has no Chinese characters', () => {
 
   // languageSwitcher.chinese = "中文" is intentional: the language picker
   // must display the native name of the target language.
-  const ALLOWED_CJK_IN_EN = ['中文'];
+  const ALLOWED_CJK_IN_EN = ['中文', '中文 (Chinese)'];
 
   it('no CJK characters in English strings (except language switcher native names)', () => {
     const violations = enValues.filter(v => containsChinese(v) && !ALLOWED_CJK_IN_EN.includes(v));

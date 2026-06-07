@@ -10,6 +10,8 @@ import {
   addWorkspace,
   removeWorkspace,
   syncWorkspace,
+  fetchOutputLanguage,
+  updateOutputLanguage,
 } from "../../api.js";
 import type { WorkspaceEntry } from "../../api.js";
 
@@ -110,6 +112,9 @@ export function SettingsPage() {
   const [addName, setAddName] = useState("");
   const [addPath, setAddPath] = useState("");
 
+  // PRI-332: Principle output language state
+  const [outputLanguage, setOutputLanguage] = useState<"zh-CN" | "en">("zh-CN");
+
   // Inline confirm for remove (J.1 pattern)
   const [confirmRemove, setConfirmRemove] = useState<ConfirmState | null>(null);
 
@@ -139,6 +144,17 @@ export function SettingsPage() {
     }
 
     setWorkspaces(validated);
+
+    // PRI-332: Load output language preference
+    const langResult = await fetchOutputLanguage();
+    if (langResult.success && langResult.data) {
+      const lang = langResult.data.outputLanguage;
+      if (lang === "zh-CN" || lang === "en") {
+        setOutputLanguage(lang);
+      }
+    }
+    // Non-fatal: if language load fails, keep default zh-CN
+
     setLoadingState("loaded");
   }, []);
 
@@ -212,6 +228,24 @@ export function SettingsPage() {
       toast.success(t("pages.settings.syncWorkspace"));
     },
     [loadData, t],
+  );
+
+  // ── PRI-332: Output language handler ────────────────────────────────
+
+  const handleOutputLanguageChange = useCallback(
+    async (newLang: "zh-CN" | "en") => {
+      const result = await updateOutputLanguage(newLang);
+      if (!result.success) {
+        toast.error(result.error ?? t("pages.settings.languageLoadError"));
+        return;
+      }
+      // Re-read to confirm persisted state
+      if (result.data && (result.data.outputLanguage === "zh-CN" || result.data.outputLanguage === "en")) {
+        setOutputLanguage(result.data.outputLanguage);
+      }
+      toast.success(t("pages.settings.languageSaved"));
+    },
+    [t],
   );
 
   // ── Loading state ────────────────────────────────────────────────────────
@@ -300,7 +334,34 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* Section 2: Workspaces */}
+      {/* Section 2: PRI-332 Principle Language */}
+      <section className="mb-8" aria-labelledby="section-principle-language">
+        <SectionTitle id="section-principle-language">
+          {t("pages.settings.principleLanguage")}
+        </SectionTitle>
+
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+            {t("pages.settings.principleLanguageDescription")}
+          </p>
+          <div className="flex items-center gap-3">
+            <label htmlFor="output-language-select" className="text-sm font-medium text-ink">
+              {t("pages.settings.principleLanguage")}:
+            </label>
+            <select
+              id="output-language-select"
+              value={outputLanguage}
+              onChange={(e) => handleOutputLanguageChange(e.target.value as "zh-CN" | "en")}
+              className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov"
+            >
+              <option value="zh-CN">{t("pages.settings.languageZhCN")}</option>
+              <option value="en">{t("pages.settings.languageEn")}</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {/* Section 3: Workspaces */}
       <section aria-labelledby="section-workspaces">
         <SectionTitle id="section-workspaces">
           {t("pages.settings.workspace")}

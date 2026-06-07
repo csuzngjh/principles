@@ -323,6 +323,33 @@ describe("FocusPage: validateApprovalsGroupedData edge cases", () => {
 
 // ── Forbidden terms test ─────────────────────────────────────────────────────
 
+// Type guard helpers for untrusted JSON (replaces `as` bypasses — ERR-001/005)
+// Note: isRecord is already defined above (line 157)
+
+function getOwnRecord(obj: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const val = Object.hasOwn(obj, key) ? obj[key] : undefined;
+  return isRecord(val) ? val : undefined;
+}
+
+function getOwnString(obj: Record<string, unknown>, key: string): string | undefined {
+  const val = Object.hasOwn(obj, key) ? obj[key] : undefined;
+  return typeof val === "string" ? val : undefined;
+}
+
+function requireJson(path: string): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const raw: unknown = require(path);
+  if (!isRecord(raw)) throw new Error(`Expected JSON object at ${path}`);
+  return raw;
+}
+
+function loadFocusI18n(langFile: string): Record<string, unknown> {
+  const root = requireJson(langFile);
+  const pages = getOwnRecord(root, "pages");
+  if (!pages) return {};
+  return getOwnRecord(pages, "focus") ?? {};
+}
+
 describe("FocusPage: forbidden terms never appear", () => {
   const forbiddenTerms = [
     "Cockpit",
@@ -341,13 +368,8 @@ describe("FocusPage: forbidden terms never appear", () => {
   ];
 
   // Read real i18n files so the test catches production regressions
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const enJson = require("../../src/ui/i18n/en.json") as Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const zhJson = require("../../src/ui/i18n/zh-CN.json") as Record<string, unknown>;
-
-  const enFocusCopy = (enJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
-  const zhFocusCopy = (zhJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
+  const enFocusCopy = loadFocusI18n("../../src/ui/i18n/en.json");
+  const zhFocusCopy = loadFocusI18n("../../src/ui/i18n/zh-CN.json");
 
   it("English i18n focus keys exist and contain no forbidden terms", () => {
     const entries = Object.entries(enFocusCopy);
@@ -374,10 +396,10 @@ describe("FocusPage: forbidden terms never appear", () => {
   it("empty states guide next steps, not '暂无数据'", () => {
     const emptyKeys = ["emptyPending", "emptyDeviation", "emptySignals"];
     for (const key of emptyKeys) {
-      const value = zhFocusCopy[key];
-      expect(typeof value, `zh.pages.focus.${key} should be a string`).toBe("string");
-      expect(value as string, `zh.pages.focus.${key} should not contain "暂无数据"`).not.toContain("暂无数据");
-      expect((value as string).length, `zh.pages.focus.${key} should have guidance text`).toBeGreaterThan(10);
+      const value = getOwnString(zhFocusCopy, key);
+      expect(value, `zh.pages.focus.${key} should be a string`).toBeDefined();
+      expect(value, `zh.pages.focus.${key} should not contain "暂无数据"`).not.toContain("暂无数据");
+      expect((value ?? "").length, `zh.pages.focus.${key} should have guidance text`).toBeGreaterThan(10);
     }
   });
 
@@ -392,13 +414,13 @@ describe("FocusPage: forbidden terms never appear", () => {
 
   it("evidenceSummary does not duplicate count", () => {
     // evidenceSummary should use {{count}} interpolation, not output the number separately
-    const enValue = enFocusCopy.evidenceSummary;
-    const zhValue = zhFocusCopy.evidenceSummary;
+    const enValue = getOwnString(enFocusCopy, "evidenceSummary");
+    const zhValue = getOwnString(zhFocusCopy, "evidenceSummary");
     expect(typeof enValue).toBe("string");
     expect(typeof zhValue).toBe("string");
     // Should contain exactly one {{count}} placeholder
-    expect((enValue as string).match(/\{\{count\}\}/g)).toHaveLength(1);
-    expect((zhValue as string).match(/\{\{count\}\}/g)).toHaveLength(1);
+    expect((enValue ?? "").match(/\{\{count\}\}/g)).toHaveLength(1);
+    expect((zhValue ?? "").match(/\{\{count\}\}/g)).toHaveLength(1);
   });
 });
 
@@ -415,29 +437,26 @@ describe("FocusPage: component can be imported", () => {
 // ── PRI-332: Zero state clarity tests ─────────────────────────────────────────
 
 describe("FocusPage: PRI-332 zero state clarity", () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const enJson = require("../../src/ui/i18n/en.json") as Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const zhJson = require("../../src/ui/i18n/zh-CN.json") as Record<string, unknown>;
-
-  const enFocus = (enJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
-  const zhFocus = (zhJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
+  const enFocus = loadFocusI18n("../../src/ui/i18n/en.json");
+  const zhFocus = loadFocusI18n("../../src/ui/i18n/zh-CN.json");
 
   it("zeroStateHealthy key exists in both languages", () => {
-    expect(typeof enFocus.zeroStateHealthy).toBe("string");
-    expect(typeof zhFocus.zeroStateHealthy).toBe("string");
-    expect((enFocus.zeroStateHealthy as string).length).toBeGreaterThan(10);
-    expect((zhFocus.zeroStateHealthy as string).length).toBeGreaterThan(5);
+    const en = getOwnString(enFocus, "zeroStateHealthy");
+    const zh = getOwnString(zhFocus, "zeroStateHealthy");
+    expect(typeof en).toBe("string");
+    expect(typeof zh).toBe("string");
+    expect((en ?? "").length).toBeGreaterThan(10);
+    expect((zh ?? "").length).toBeGreaterThan(5);
   });
 
   it("zeroStateDbMissing key exists in both languages", () => {
-    expect(typeof enFocus.zeroStateDbMissing).toBe("string");
-    expect(typeof zhFocus.zeroStateDbMissing).toBe("string");
+    expect(typeof getOwnString(enFocus, "zeroStateDbMissing")).toBe("string");
+    expect(typeof getOwnString(zhFocus, "zeroStateDbMissing")).toBe("string");
   });
 
   it("zeroStateHealthy does not claim PD is broken or inactive", () => {
-    const en = enFocus.zeroStateHealthy as string;
-    const zh = zhFocus.zeroStateHealthy as string;
+    const en = getOwnString(enFocus, "zeroStateHealthy") ?? "";
+    const zh = getOwnString(zhFocus, "zeroStateHealthy") ?? "";
     // Should not contain misleading terms
     expect(en).not.toMatch(/broken|error|not working|disabled/i);
     expect(zh).not.toMatch(/\u6545\u969c|\u9519\u8bef|\u505c\u6b62/);
@@ -472,3 +491,4 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
     expect(src).not.toMatch(/governanceState === "degraded" && degradedSignals/);
   });
 });
+

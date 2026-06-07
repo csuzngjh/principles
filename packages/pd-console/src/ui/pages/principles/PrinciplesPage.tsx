@@ -35,8 +35,8 @@ interface PrincipleCard {
   priority: string;
   /** PRI-332: detected language of the principle text */
   detectedLanguage: string;
-  /** PRI-332: optional readability warning for the title */
-  readabilityWarning?: string;
+  /** PRI-332 P1-5: structured readability warning code */
+  readabilityWarningCode?: string;
 }
 
 // ── Map principle status to review status ───────────────────────────────────
@@ -198,10 +198,10 @@ export function PrinciplesPage() {
     // PRI-332: Determine display title with bounded fallback for unreadable titles
     const rawTitle = p.triggerPattern || p.text.slice(0, 80);
     const detectedLang = p.detectedLanguage ?? 'unknown';
-    const readWarning = p.readabilityWarning;
+    const readWarningCode = p.readabilityWarningCode;
     let displayTitle = rawTitle;
     let usedFallback = false;
-    if (readWarning) {
+    if (readWarningCode) {
       displayTitle = t("principles.readabilityFallbackTitle");
       usedFallback = true;
     }
@@ -219,7 +219,7 @@ export function PrinciplesPage() {
       createdAt: p.createdAt,
       priority: p.priority,
       detectedLanguage: detectedLang,
-      readabilityWarning: readWarning,
+      readabilityWarningCode: readWarningCode,
     };
   });
 
@@ -430,10 +430,10 @@ export function PrinciplesPage() {
                 </span>
               </div>
 
-              {/* PRI-332: Readability warning — gentle hint when title looks technical */}
-              {card.readabilityWarning && (
+              {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
+              {card.readabilityWarningCode && (
                 <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
-                  {card.readabilityWarning}
+                  {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
                 </div>
               )}
 

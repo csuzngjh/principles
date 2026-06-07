@@ -887,8 +887,8 @@ export interface PrincipleListItemData {
   updatedAt: string;
   /** PRI-332: Detected language of the principle text */
   detectedLanguage: string;
-  /** PRI-332: Human-readable warning when the title may be hard to read */
-  readabilityWarning?: string;
+  /** PRI-332 P1-5: Structured readability warning code */
+  readabilityWarningCode?: 'technical_pattern' | 'diagnostic_residue' | 'title_too_long';
 }
 
 function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
@@ -920,10 +920,11 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
     // PRI-332: detectedLanguage defaults to 'unknown' when absent
     detectedLanguage: Object.hasOwn(v, 'detectedLanguage') && isString(v.detectedLanguage) ? v.detectedLanguage : 'unknown',
   };
-  // PRI-332: readabilityWarning is optional — fail loud when present but wrong type (ERR-009)
-  if (Object.hasOwn(v, 'readabilityWarning')) {
-    if (!isString(v.readabilityWarning)) return null;
-    result.readabilityWarning = v.readabilityWarning;
+  // PRI-332 P1-5: readabilityWarningCode is optional — fail loud when present but invalid (ERR-009)
+  if (Object.hasOwn(v, 'readabilityWarningCode')) {
+    const VALID_WARNING_CODES = ['technical_pattern', 'diagnostic_residue', 'title_too_long'] as const;
+    if (!isString(v.readabilityWarningCode) || !VALID_WARNING_CODES.includes(v.readabilityWarningCode as typeof VALID_WARNING_CODES[number])) return null;
+    result.readabilityWarningCode = v.readabilityWarningCode as typeof VALID_WARNING_CODES[number];
   }
   return result;
 }
@@ -1166,4 +1167,21 @@ export function validateEvidenceChain(v: unknown): EvidenceChainData | null {
   }
 
   return result;
+}
+
+// ── Principles Output Language (PRI-332 P1-1) ──────────────────────────────
+
+export interface OutputLanguageData {
+  outputLanguage: string;
+  source: string;
+}
+
+const VALID_OUTPUT_LANGUAGE_VALUES = ['zh-CN', 'en'] as const;
+
+export function validateOutputLanguage(v: unknown): OutputLanguageData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'outputLanguage') || !isString(v.outputLanguage)) return null;
+  if (!(VALID_OUTPUT_LANGUAGE_VALUES as readonly string[]).includes(v.outputLanguage)) return null;
+  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  return { outputLanguage: v.outputLanguage, source: v.source };
 }

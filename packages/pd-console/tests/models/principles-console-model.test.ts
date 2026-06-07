@@ -628,7 +628,7 @@ describe('PrinciplesConsoleModel', () => {
     const result = await model.listPrinciples();
     expect(result.principles).toHaveLength(1);
     expect(result.principles[0].detectedLanguage).toBe('zh');
-    expect(result.principles[0].readabilityWarning).toBeUndefined();
+    expect(result.principles[0].readabilityWarningCode).toBeUndefined();
   });
 
   it('PRI-332: detects English text language as en', async () => {
@@ -675,7 +675,7 @@ describe('PrinciplesConsoleModel', () => {
     expect(result.principles[0].detectedLanguage).toBe('unknown');
   });
 
-  it('PRI-332: sets readabilityWarning for regex-like triggerPattern', async () => {
+  it('PRI-332: sets readabilityWarningCode for regex-like triggerPattern', async () => {
     ws = await createTestWorkspace();
     writeLedger(ws.workspaceDir, {
       principles: {
@@ -694,11 +694,10 @@ describe('PrinciplesConsoleModel', () => {
     const model = new PrinciplesConsoleModel(ws.workspaceDir);
     const result = await model.listPrinciples();
     expect(result.principles).toHaveLength(1);
-    expect(result.principles[0].readabilityWarning).toBeDefined();
-    expect(result.principles[0].readabilityWarning).toMatch(/technical pattern/i);
+    expect(result.principles[0].readabilityWarningCode).toBe('technical_pattern');
   });
 
-  it('PRI-332: sets readabilityWarning for Error:-prefixed triggerPattern', async () => {
+  it('PRI-332: sets readabilityWarningCode for Error:-prefixed triggerPattern', async () => {
     ws = await createTestWorkspace();
     writeLedger(ws.workspaceDir, {
       principles: {
@@ -717,11 +716,10 @@ describe('PrinciplesConsoleModel', () => {
     const model = new PrinciplesConsoleModel(ws.workspaceDir);
     const result = await model.listPrinciples();
     expect(result.principles).toHaveLength(1);
-    expect(result.principles[0].readabilityWarning).toBeDefined();
-    expect(result.principles[0].readabilityWarning).toMatch(/diagnostic residue/i);
+    expect(result.principles[0].readabilityWarningCode).toBe('diagnostic_residue');
   });
 
-  it('PRI-332: no readabilityWarning for normal human-readable title', async () => {
+  it('PRI-332: no readabilityWarningCode for normal human-readable title', async () => {
     ws = await createTestWorkspace();
     writeLedger(ws.workspaceDir, {
       principles: {
@@ -740,7 +738,7 @@ describe('PrinciplesConsoleModel', () => {
     const model = new PrinciplesConsoleModel(ws.workspaceDir);
     const result = await model.listPrinciples();
     expect(result.principles).toHaveLength(1);
-    expect(result.principles[0].readabilityWarning).toBeUndefined();
+    expect(result.principles[0].readabilityWarningCode).toBeUndefined();
   });
 });
 

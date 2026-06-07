@@ -29,6 +29,8 @@ import {
   updateAgentBinding,
   updateDefaultRuntime,
   checkReadiness,
+  getPrinciplesOutputLanguage,
+  updatePrinciplesOutputLanguage,
 } from '../config/pd-config-store.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -195,6 +197,42 @@ export async function handleConfigRoute(
     return;
   }
 
+  // GET/PATCH /principles/output-language — PRI-332 P1-1
+  if (subPath === '/principles/output-language') {
+    if (method === 'GET') {
+      const result = getPrinciplesOutputLanguage(workspaceDir);
+      if (!result.ok) {
+        sendError(res, 400, result.error, result.message);
+        return;
+      }
+      sendSuccess(res, { outputLanguage: result.outputLanguage, source: result.source });
+      return;
+    }
+    if (method === 'PATCH') {
+      let bodyText: string;
+      try {
+        bodyText = await readBody(req);
+      } catch {
+        sendBadRequest(res, 'Request body is too large or unreadable');
+        return;
+      }
+      const body = safeParseBody(bodyText);
+      const result = updatePrinciplesOutputLanguage(workspaceDir, body);
+      if (!result.ok) {
+        sendError(res, 400, result.error, result.message);
+        return;
+      }
+      // Re-read to confirm actual persisted state
+      const confirmResult = getPrinciplesOutputLanguage(workspaceDir);
+      const confirmed = confirmResult.ok ? confirmResult.outputLanguage : result.outputLanguage;
+      sendSuccess(res, { outputLanguage: confirmed, source: 'user_config' });
+      return;
+    }
+    sendMethodNotAllowed(res);
+    return;
+  }
+
   // 404 fallback
   sendNotFound(res, `Route /api/v1/config${subPath} not found`);
 }
+

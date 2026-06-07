@@ -687,7 +687,7 @@ describe('validatePrinciplesList', () => {
     expect(validatePrinciplesList(badReason)).toBeNull();
   });
 
-  // PRI-332: detectedLanguage and readabilityWarning validation
+  // PRI-332: detectedLanguage and readabilityWarningCode validation
   it('accepts principle with detectedLanguage field', () => {
     const withLang = {
       ...validList,
@@ -715,29 +715,29 @@ describe('validatePrinciplesList', () => {
     expect(result!.principles[0].detectedLanguage).toBe('unknown');
   });
 
-  it('accepts principle with readabilityWarning string', () => {
+  it('accepts principle with readabilityWarningCode', () => {
     const withWarning = {
       ...validList,
-      principles: [{ ...validList.principles[0], readabilityWarning: 'Title looks technical' }],
+      principles: [{ ...validList.principles[0], readabilityWarningCode: 'technical_pattern' }],
     };
     const result = validatePrinciplesList(withWarning);
     expect(result).not.toBeNull();
-    expect(result!.principles[0].readabilityWarning).toBe('Title looks technical');
+    expect(result!.principles[0].readabilityWarningCode).toBe('technical_pattern');
   });
 
-  it('accepts principle without readabilityWarning (optional)', () => {
+  it('accepts principle without readabilityWarningCode (optional)', () => {
     const result = validatePrinciplesList(validList);
     expect(result).not.toBeNull();
-    expect(result!.principles[0].readabilityWarning).toBeUndefined();
+    expect(result!.principles[0].readabilityWarningCode).toBeUndefined();
   });
 
-  it('rejects readabilityWarning when not a string (fail loud, ERR-009)', () => {
+  it('rejects readabilityWarningCode when invalid (fail loud, ERR-009)', () => {
     const withBadWarning = {
       ...validList,
-      principles: [{ ...validList.principles[0], readabilityWarning: 123 }],
+      principles: [{ ...validList.principles[0], readabilityWarningCode: 'invalid_code' }],
     };
     const result = validatePrinciplesList(withBadWarning);
-    // readabilityWarning present but wrong type → fail loud
+    // readabilityWarningCode present but invalid value → fail loud
     expect(result).toBeNull();
   });
 });
