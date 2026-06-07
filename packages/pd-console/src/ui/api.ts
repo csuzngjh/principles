@@ -26,6 +26,7 @@ import {
   validateApprovalRecordDirect,
   validatePrinciplesList,
   validateApprovalsGrouped,
+  validateEvidenceChain,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -51,6 +52,7 @@ import type {
   ApprovalListResultData,
   PrinciplesListData,
   ApprovalsGroupedData,
+  EvidenceChainData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -364,6 +366,12 @@ async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {
   return request<UpdateHistoryData>('/api/update/history', undefined, validateUpdateHistory);
 }
 
+// ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
+
+async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
+  return request<EvidenceChainData>('/api/v1/evidence-chain', undefined, validateEvidenceChain);
+}
+
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -399,6 +407,7 @@ export {
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
+  fetchEvidenceChain,
 };
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
@@ -429,6 +438,9 @@ export type {
   ApprovalListResultData,
   PrinciplesListData,
   ApprovalsGroupedData,
+  EvidenceChainData,
+  EvidenceChainRecordData,
+  EvidenceChainStateData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

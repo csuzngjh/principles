@@ -1,23 +1,54 @@
+/**
+ * PainPage — Behavior Evidence page showing real evidence/pain/diagnosis chain states.
+ *
+ * PRI-331: Replaces the old approach of deriving evidence from principle metrics
+ * with a direct read model from pain_events, tasks, candidates, and ledger.
+ *
+ * Privacy boundary (G.2 / F.3 / F.5):
+ * - No raw prompt, chat, trajectory, token, full absolute path, or stack trace
+ * - All summaries are already sanitized by the backend EvidenceChainConsoleModel
+ * - Degraded paths show reason + nextAction, never silent fallback (ERR-002)
+ */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageShell } from '../../components/layout/page-shell.js';
-import { SectionTitle } from '../../components/layout/section-title.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
-import { fetchPrinciples } from '../../api.js';
-import {
-  derivePainEvidenceFromPrinciplesList,
-  isDegraded,
-  getErrorMessage,
-} from './PainEvidenceValidators.js';
-import type { PainEvidence, PainEvidenceListData, PainEvidenceDegraded } from './PainEvidenceValidators.js';
+import { fetchEvidenceChain } from '../../api.js';
+import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
 import { formatDate } from '../../utils/format.js';
+
+// ── State grouping ─────────────────────────────────────────────────────────────
+
+type StateGroup = 'active_chain' | 'evidence_only' | 'failed';
+
+function groupForState(state: EvidenceChainStateData): StateGroup {
+  switch (state) {
+    case 'pain_recorded':
+    case 'diagnosis_queued':
+    case 'diagnosis_running':
+    case 'diagnosis_succeeded':
+    case 'candidate_generated':
+    case 'internalization_started':
+      return 'active_chain';
+    case 'evidence_only':
+      return 'evidence_only';
+    case 'diagnosis_failed':
+    case 'diagnosis_retry_wait':
+      return 'failed';
+    default:
+      return 'evidence_only';
+  }
+}
+
+const GROUP_ORDER: StateGroup[] = ['active_chain', 'failed', 'evidence_only'];
+
+// ── Page state ─────────────────────────────────────────────────────────────────
 
 type PageState =
   | { status: 'loading' }
-  | { status: 'loaded'; data: PainEvidenceListData }
-  | { status: 'degraded'; degraded: PainEvidenceDegraded }
+  | { status: 'loaded'; data: EvidenceChainData }
   | { status: 'error'; message: string };
 
 export function PainPage() {
@@ -27,20 +58,23 @@ export function PainPage() {
 
   const loadData = useCallback(async () => {
     setState({ status: 'loading' });
-    const result = await fetchPrinciples();
+    const result = await fetchEvidenceChain();
 
     if (!result.success) {
       setState({ status: 'error', message: result.error ?? 'Unknown error' });
       return;
     }
 
-    const derived = derivePainEvidenceFromPrinciplesList(result.data);
-    if (isDegraded(derived)) {
-      setState({ status: 'degraded', degraded: derived });
+    if (result.data) {
+      setState({ status: 'loaded', data: result.data });
     } else {
-      setState({ status: 'loaded', data: derived });
+      // Validation returned null — degraded state
+      setState({
+        status: 'error',
+        message: t('pages.pain.validationError'),
+      });
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadData();
@@ -94,46 +128,100 @@ export function PainPage() {
         </div>
       )}
 
-      {state.status === 'degraded' && (
-        <div className="py-8">
-          <div className="p-4 bg-panel border border-line rounded-[var(--radius-md)]">
-            <div className="text-ink-2 text-sm mb-2">{state.degraded.reason}</div>
-            <div className="text-ink-3 text-[13px]">{state.degraded.nextAction}</div>
-          </div>
-          <div className="mt-4">
-            <Button variant="outline" size="sm" onClick={loadData}>
-              {t('common.refresh')}
-            </Button>
-          </div>
+      {state.status === 'loaded' && (
+        <LoadedContent
+          data={state.data}
+          expandedIds={expandedIds}
+          onToggle={toggleExpanded}
+          onRefresh={loadData}
+          t={t}
+        />
+      )}
+    </PageShell>
+  );
+}
+
+// ── Loaded content ─────────────────────────────────────────────────────────────
+
+interface LoadedContentProps {
+  data: EvidenceChainData;
+  expandedIds: Set<string>;
+  onToggle: (id: string) => void;
+  onRefresh: () => void;
+  t: (key: string) => string;
+}
+
+function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedContentProps) {
+  // Show degraded banner if data sources are partially unavailable
+  const hasDegraded = !!data.degradedReason;
+
+  // Group records by state category
+  const grouped = new Map<StateGroup, EvidenceChainRecordData[]>();
+  for (const record of data.records) {
+    const group = groupForState(record.state);
+    const existing = grouped.get(group) ?? [];
+    existing.push(record);
+    grouped.set(group, existing);
+  }
+
+  const hasRecords = data.records.length > 0;
+
+  return (
+    <>
+      {/* Degraded banner (ERR-002: never silent fallback) */}
+      {hasDegraded && (
+        <div className="mb-4 p-3 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-[13px]">
+          <div className="mb-1">{data.degradedReason}</div>
+          {data.nextAction && (
+            <div className="text-ink-3 text-[12px]">{data.nextAction}</div>
+          )}
         </div>
       )}
 
-      {state.status === 'loaded' && (
-        <>
-          {state.data.note && (
-            <div className="mb-4 p-3 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-[13px]">
-              {state.data.note}
-            </div>
-          )}
-
-          {state.data.evidence.length === 0 ? (
-            <EmptyState t={t} />
-          ) : (
-            <div className="space-y-4">
-              {state.data.evidence.map((item) => (
-                <EvidenceCard
-                  key={item.id}
-                  evidence={item}
-                  expanded={expandedIds.has(item.id)}
-                  onToggle={() => toggleExpanded(item.id)}
-                  t={t}
-                />
-              ))}
-            </div>
-          )}
-        </>
+      {/* Note when no records but sources are available */}
+      {!hasRecords && data.note && (
+        <div className="mb-4 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-[13px]">
+          {data.note}
+        </div>
       )}
-    </PageShell>
+
+      {/* Empty state */}
+      {!hasRecords && !hasDegraded && <EmptyState t={t} />}
+
+      {/* Records grouped by state category */}
+      {hasRecords && (
+        <div className="space-y-8">
+          {GROUP_ORDER.map((group) => {
+            const records = grouped.get(group);
+            if (!records || records.length === 0) return null;
+
+            return (
+              <div key={group}>
+                <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-4 mb-3">
+                  {t(`pages.pain.group_${group}`)} ({records.length})
+                </div>
+                <div className="space-y-4">
+                  {records.map((record) => (
+                    <EvidenceChainCard
+                      key={record.id}
+                      record={record}
+                      expanded={expandedIds.has(record.id)}
+                      onToggle={() => onToggle(record.id)}
+                      t={t}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Generated-at timestamp */}
+      <div className="mt-8 font-mono text-[11px] text-ink-4">
+        {t('pages.pain.generatedAt')}: {formatDate(data.generatedAt)}
+      </div>
+    </>
   );
 }
 
@@ -154,27 +242,19 @@ function EmptyState({ t }: { t: (key: string) => string }) {
   );
 }
 
-// ── Evidence card (single-item, three-layer structure) ────────────────────────
+// ── Evidence chain card (single-item, three-layer structure) ───────────────────
 
-interface EvidenceCardProps {
-  evidence: PainEvidence;
+interface EvidenceChainCardProps {
+  record: EvidenceChainRecordData;
   expanded: boolean;
   onToggle: () => void;
   t: (key: string) => string;
 }
 
-function EvidenceCard({ evidence, expanded, onToggle, t }: EvidenceCardProps) {
-  const sourceLabel = t('pages.pain.sourcePrincipleDerivation');
-
-  const stateVariant = evidence.recommendationState === 'pending'
-    ? 'amber'
-    : evidence.recommendationState === 'candidate'
-      ? 'default'
-      : evidence.recommendationState === 'principle'
-        ? 'green'
-        : 'secondary';
-
-  const stateLabel = t(`pages.pain.state_${evidence.recommendationState}`);
+function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardProps) {
+  const stateVariant = stateToVariant(record.state);
+  const stateLabel = t(`pages.pain.state_${record.state}`);
+  const sourceLabel = t(`pages.pain.source_${record.sourceKind}`);
 
   return (
     <Card className="overflow-hidden">
@@ -184,77 +264,122 @@ function EvidenceCard({ evidence, expanded, onToggle, t }: EvidenceCardProps) {
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
             <Badge variant="outline">{sourceLabel}</Badge>
+            {record.admissionDecision && (
+              <Badge variant="secondary">
+                {t(`pages.pain.admission_${record.admissionDecision}`)}
+              </Badge>
+            )}
           </div>
           <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-            {formatDate(evidence.createdAt)}
+            {formatDate(record.observedAt)}
           </span>
         </div>
-        <CardTitle className="mt-2">{evidence.title}</CardTitle>
+        <CardTitle className="mt-2">{record.summary}</CardTitle>
       </CardHeader>
 
       <CardContent>
-        {/* Layer 2: Context and behavior — why */}
-        <SectionTitle>{t('pages.pain.layerContext')}</SectionTitle>
+        {/* Layer 2: Chain context — why */}
         <div className="space-y-3 mb-4">
-          {evidence.context && (
+          {/* Failure reason for failed/retry states */}
+          {record.failureReason && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldContext')}
+                {t('pages.pain.fieldFailureReason')}
               </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{evidence.context}</p>
+              <p className="text-danger text-sm leading-relaxed">{record.failureReason}</p>
             </div>
           )}
-          {evidence.expectedBehavior && (
+
+          {/* Next action guidance */}
+          {record.nextAction && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldExpectedBehavior')}
+                {t('pages.pain.fieldNextAction')}
               </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{evidence.expectedBehavior}</p>
+              <p className="text-ink-2 text-sm leading-relaxed">{record.nextAction}</p>
+            </div>
+          )}
+
+          {/* Degraded reason at record level */}
+          {record.degradedReason && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldDegradedReason')}
+              </div>
+              <p className="text-amber text-sm leading-relaxed">{record.degradedReason}</p>
             </div>
           )}
         </div>
 
-        {/* Layer 3: Pain metadata — collapsed by default (D section) */}
+        {/* Layer 3: Chain links — collapsed by default (D section) */}
         <details open={expanded} onToggle={onToggle}>
           <summary className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 cursor-pointer select-none hover:text-ink transition-colors">
-            {t('pages.pain.trajectoryToggle')}
+            {t('pages.pain.chainToggle')}
           </summary>
           <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPrincipleId')}</span>
-              <span className="font-mono text-ink-2">{evidence.trajectorySummary.principleId}</span>
-              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPainCount')}</span>
-              <span className="font-mono text-ink-2">{evidence.trajectorySummary.painPreventedCount}</span>
-              {evidence.trajectorySummary.lastPainPreventedAt && (
+              <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
+              <span className="font-mono text-ink-2">{record.id}</span>
+
+              {record.linkedTaskId && (
                 <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.trajectoryLastPain')}</span>
-                  <span className="font-mono text-ink-2">{formatDate(evidence.trajectorySummary.lastPainPreventedAt)}</span>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
+                  <span className="font-mono text-ink-2">{record.linkedTaskId}</span>
                 </>
               )}
-              {evidence.trajectorySummary.derivedFromPainIds.length > 0 && (
+
+              {record.linkedTaskStatus && (
                 <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPainIds')}</span>
-                  <span className="font-mono text-ink-2">{evidence.trajectorySummary.derivedFromPainIds.join(', ')}</span>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
+                  <span className="font-mono text-ink-2">{record.linkedTaskStatus}</span>
                 </>
               )}
+
+              {record.linkedCandidateId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
+                  <span className="font-mono text-ink-2">{record.linkedCandidateId}</span>
+                </>
+              )}
+
+              {record.linkedPrincipleId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
+                  <span className="font-mono text-ink-2">{record.linkedPrincipleId}</span>
+                </>
+              )}
+
+              <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
+              <span className="font-mono text-ink-2">{record.sourceKind}</span>
+
+              <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
+              <span className="font-mono text-ink-2">{record.state}</span>
             </div>
           </div>
         </details>
-
-        {/* Sediment action (US-2.4 / J.4) */}
-        {evidence.recommendationState === 'pending' && (
-          <div className="mt-4 pt-4 border-t border-line">
-            <div className="flex items-start gap-3">
-              <Button variant="outline" size="sm" disabled>
-                {t('pages.pain.sedimentAction')}
-              </Button>
-              <span className="text-ink-4 text-[13px] leading-relaxed pt-1">
-                {t('pages.pain.sedimentHint')}
-              </span>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function stateToVariant(state: EvidenceChainStateData): 'default' | 'amber' | 'green' | 'destructive' | 'secondary' {
+  switch (state) {
+    case 'pain_recorded':
+    case 'diagnosis_queued':
+    case 'diagnosis_running':
+      return 'amber';
+    case 'diagnosis_succeeded':
+    case 'candidate_generated':
+    case 'internalization_started':
+      return 'green';
+    case 'diagnosis_failed':
+      return 'destructive';
+    case 'diagnosis_retry_wait':
+      return 'amber';
+    case 'evidence_only':
+    default:
+      return 'secondary';
+  }
 }
