@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handlePainCommand } from '../../src/commands/pain.js';
+import { handlePainCommand, handlePainReportCommand } from '../../src/commands/pain.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 vi.mock('../../src/core/session-tracker.js');
 vi.mock('../../src/core/workspace-context.js');
+vi.mock('../../src/core/pd-config-loader.js', () => ({
+  loadPdConfigForPlugin: vi.fn().mockReturnValue({ ok: true, effective: {}, source: 'defaults', warnings: [], errors: [] }),
+}));
+vi.mock('@principles/core/runtime-v2', () => ({
+  PainToPrincipleService: vi.fn(),
+  PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),
+}));
+
+import { PainToPrincipleService } from '@principles/core/runtime-v2';
 
 describe('Pain Command', () => {
     const workspaceDir = '/mock/workspace';
@@ -104,5 +113,175 @@ describe('Pain Command', () => {
         expect(result.text).toContain('last ingest: 2026-03-19T10:00:00.000Z');
         expect(result.text).toContain('pending samples');
         expect(result.text).toContain('approved samples');
+    });
+});
+
+describe('Pain Report Command (/pd-pain)', () => {
+    const workspaceDir = '/mock/workspace';
+    const sessionId = 's1';
+
+    const mockEvolutionReducer = { emitSync: vi.fn() };
+    const mockWctx = {
+        workspaceDir,
+        stateDir: '/mock/workspace/.state',
+        evolutionReducer: mockEvolutionReducer,
+    };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
+    });
+
+    async function runPainReport(args: string, lang = 'en') {
+        return handlePainReportCommand({
+            args,
+            config: { workspaceDir, language: lang },
+            sessionId,
+        } as any);
+    }
+
+    it('rejects empty args', async () => {
+        const result = await runPainReport('');
+        expect(result.text).toContain('Please provide a pain reason');
+    });
+
+    it('rejects missing session ID', async () => {
+        const result = await handlePainReportCommand({
+            args: 'something broke',
+            config: { workspaceDir, language: 'en' },
+        } as any);
+        expect(result.text).toContain('Session ID not available');
+    });
+
+    it('reports success when recordPain returns succeeded', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'succeeded',
+            painId: 'manual_123_abc',
+            taskId: 'diagnosis_manual_123_abc',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 100,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('Pain recorded');
+        expect(result.text).toContain('manual_');
+        expect(result.text).not.toContain('not accepted');
+    });
+
+    it('reports retried as pain recorded with retry info, NOT as "not accepted"', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'retried',
+            painId: 'manual_456_def',
+            taskId: 'diagnosis_manual_456_def',
+            failureCategory: 'output_invalid',
+            message: 'Diagnostician output failed validation',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 200,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('Pain recorded');
+        expect(result.text).toContain('retry');
+        expect(result.text).toContain('diagnosis_manual_456_def');
+        expect(result.text).toContain('output_invalid');
+        expect(result.text).toContain('/pd-status');
+        // Must NOT say "not accepted" or "failed"
+        expect(result.text).not.toContain('not accepted');
+        expect(result.text).not.toContain('未成功');
+    });
+
+    it('reports retried in Chinese correctly', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'retried',
+            painId: 'manual_789_xyz',
+            taskId: 'diagnosis_manual_789_xyz',
+            failureCategory: 'output_invalid',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 200,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke', 'zh');
+        expect(result.text).toContain('Pain 已记录');
+        expect(result.text).toContain('重试');
+        expect(result.text).not.toContain('未成功');
+        expect(result.text).not.toContain('not accepted');
+    });
+
+    it('reports retried without failureCategory or message', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'retried',
+            painId: 'manual_000_nocat',
+            taskId: 'diagnosis_manual_000_nocat',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 150,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('Pain recorded');
+        expect(result.text).toContain('retry');
+        expect(result.text).toContain('diagnosis_manual_000_nocat');
+        // No error category or detail lines when absent
+        expect(result.text).not.toContain('Error category');
+        expect(result.text).not.toContain('Detail');
+    });
+
+    it('reports failed as "not accepted" with reason', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'failed',
+            painId: 'manual_fail_1',
+            taskId: 'diagnosis_manual_fail_1',
+            failureCategory: 'runtime_unavailable',
+            message: 'No runner available',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 50,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('not accepted');
+        expect(result.text).toContain('failed');
+        expect(result.text).toContain('runtime_unavailable');
+        expect(result.text).toContain('No runner available');
+    });
+
+    it('reports degraded as "not accepted"', async () => {
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'degraded',
+            painId: 'manual_deg_1',
+            taskId: 'diagnosis_manual_deg_1',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 30,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('not accepted');
+        expect(result.text).toContain('degraded');
+    });
+
+    it('reports error on exception', async () => {
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) {
+            throw new Error('DB connection failed');
+        });
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('Failed to record pain');
+        expect(result.text).toContain('DB connection failed');
     });
 });

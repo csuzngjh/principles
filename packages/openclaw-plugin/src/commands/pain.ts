@@ -349,10 +349,31 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       };
     }
 
+    if (result.status === 'retried') {
+      const errorInfo = result.failureCategory
+        ? (isZh ? `\n⚠️ **错误类别**: ${result.failureCategory}` : `\n⚠️ **Error category**: ${result.failureCategory}`)
+        : '';
+      const messageInfo = result.message
+        ? (isZh ? `\n📝 **详情**: ${result.message}` : `\n📝 **Detail**: ${result.message}`)
+        : '';
+      return {
+        text: isZh
+          ? `✅ Pain 已记录，诊断任务已进入重试\n\n📋 **Pain ID**: ${result.painId}\n🔧 **Task ID**: ${result.taskId}${errorInfo}${messageInfo}\n\n诊断任务将在后台自动重试。使用 \`/pd-status\` 查看任务状态。`
+          : `✅ Pain recorded, diagnosis task entered retry\n\n📋 **Pain ID**: ${result.painId}\n🔧 **Task ID**: ${result.taskId}${errorInfo}${messageInfo}\n\nThe diagnosis task will retry automatically in the background. Use \`/pd-status\` to check task status.`,
+      };
+    }
+
+    // status === 'failed' | 'skipped' | 'degraded' — pain was NOT accepted
+    const reasonInfo = result.failureCategory
+      ? (isZh ? `\n⚠️ **原因**: ${result.failureCategory}` : `\n⚠️ **Reason**: ${result.failureCategory}`)
+      : '';
+    const messageInfo = result.message
+      ? (isZh ? `\n📝 **详情**: ${result.message}` : `\n📝 **Detail**: ${result.message}`)
+      : '';
     return {
       text: isZh
-        ? `⚠️ Pain 记录未成功 (status: ${result.status})。请检查系统日志或使用 \`/pd-status\` 查看状态。`
-        : `⚠️ Pain recording not accepted (status: ${result.status}). Check system logs or use \`/pd-status\` for status.`,
+        ? `❌ Pain 记录未成功 (status: ${result.status})${reasonInfo}${messageInfo}\n\n请检查系统日志或使用 \`/pd-status\` 查看状态。`
+        : `❌ Pain recording not accepted (status: ${result.status})${reasonInfo}${messageInfo}\n\nCheck system logs or use \`/pd-status\` for status.`,
     };
   } catch (err) {
     return {
