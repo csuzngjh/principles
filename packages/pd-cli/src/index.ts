@@ -552,7 +552,7 @@ internalizationCmd
   .option('--timeout-ms <ms>', 'Runner timeout in milliseconds (default: 300000, overrides workflows.yaml)', parseInt)
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: !opts.noEnqueueNext, timeoutMs: opts.timeoutMs });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
   });
 
 internalizationCmd
