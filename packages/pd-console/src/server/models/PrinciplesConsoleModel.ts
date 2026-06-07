@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
 
 export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';
@@ -111,7 +112,13 @@ export interface PrinciplesListOutput {
     archived: number;
     total: number;
   };
+  /** Category breakdown (PRI-330) */
+  categories?: Record<string, number>;
+  /** If the approval cross-check was unavailable, this explains why (ERR-002) */
+  approvalCrossCheckUnavailable?: string;
 }
+
+export type PrincipleFilter = 'all' | 'actionable';
 
 export interface PrincipleDetailOutput {
   principle: PrincipleDetail;
@@ -226,7 +233,7 @@ export class PrinciplesConsoleModel {
     return ledger;
   }
 
-  async listPrinciples(): Promise<PrinciplesListOutput> {
+  async listPrinciples(filter?: PrincipleFilter, decidedPrincipleIds?: Set<string>): Promise<PrinciplesListOutput> {
     const ledger = this.loadLedger();
     const principles = Object.values(ledger.tree.principles);
 
@@ -273,7 +280,20 @@ export class PrinciplesConsoleModel {
 
     items.sort((a, b) => b.valueScore - a.valueScore);
 
-    return { principles: items, summary };
+    // PRI-330: classify and optionally filter
+    const classified = classifyPrinciples(items, decidedPrincipleIds);
+    const categories: Record<string, number> = {};
+    for (const c of classified) {
+      categories[c.category] = (categories[c.category] ?? 0) + 1;
+    }
+
+    let outputItems = items;
+    if (filter === 'actionable') {
+      const actionable = filterOwnerActionable(classified);
+      outputItems = actionable.map((c) => c.principle);
+    }
+
+    return { principles: outputItems, summary, categories };
   }
 
   async getPrincipleDetail(principleId: string): Promise<PrincipleDetailOutput | null> {

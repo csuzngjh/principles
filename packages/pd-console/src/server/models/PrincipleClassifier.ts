@@ -1,0 +1,146 @@
+/**
+ * PrincipleClassifier — Read model that classifies principles into
+ * owner-actionable vs noise categories.
+ *
+ * Categories:
+ *  - owner_actionable: Needs a real governance decision (pending, probation, candidate)
+ *  - demo: Demo / example principles planted by the framework
+ *  - smoke: Smoke-test principles for CI validation
+ *  - historical: Archived or deprecated principles (already decided long ago)
+ *  - builtin: Core Thinking OS axioms (T-01..T-10) — not governance targets
+ *  - already_decided: Approved / rejected via approval queue
+ *
+ * Classification is purely read-side; it does NOT mutate any data.
+ */
+
+import type { PrincipleListItem } from './PrinciplesConsoleModel.js';
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
+export type PrincipleCategory =
+  | 'owner_actionable'
+  | 'demo'
+  | 'smoke'
+  | 'historical'
+  | 'builtin'
+  | 'already_decided';
+
+export interface ClassifiedPrinciple {
+  principle: PrincipleListItem;
+  category: PrincipleCategory;
+}
+
+// ── Heuristics ────────────────────────────────────────────────────────────────
+
+/** Regex that matches exactly T-01 through T-10 (Thinking OS axioms) */
+const BUILTIN_ID_REGEX = /^T-(0[1-9]|10)$/;
+
+/** ID prefixes that indicate demo / dogfood data */
+const DEMO_ID_PREFIXES = ['DEMO_', 'demo_', 'story-a', 'story_a', 'dogfood_'];
+
+/** ID prefixes that indicate smoke / test data */
+const SMOKE_ID_PREFIXES = ['SMOKE_', 'smoke_', 'probe_', 'test_principle_'];
+
+/** Substrings that indicate demo/smoke principles (only matched in ID, not in text) */
+const DEMO_ID_KEYWORDS = ['demo', 'example', 'sample', 'placeholder'];
+const SMOKE_ID_KEYWORDS = ['smoke', 'smoketest', 'smoke_test', 'probe'];
+
+/** Substrings in text that indicate demo/smoke — more restrictive than ID matching */
+const DEMO_TEXT_KEYWORDS = ['[demo]', '[example]', '[placeholder]'];
+const SMOKE_TEXT_KEYWORDS = ['[smoke]', '[smoketest]'];
+
+function hasPrefix(id: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((p) => id.toLowerCase().startsWith(p.toLowerCase()));
+}
+
+function hasKeyword(text: string, keywords: readonly string[]): boolean {
+  const lower = text.toLowerCase();
+  return keywords.some((k) => lower.includes(k));
+}
+
+function isBuiltinId(id: string): boolean {
+  return BUILTIN_ID_REGEX.test(id);
+}
+
+// ── Classifier ────────────────────────────────────────────────────────────────
+
+/**
+ * Classify a single principle. Order matters — earlier checks win.
+ *
+ * @param p - The principle to classify
+ * @param decidedPrincipleIds - Set of principle IDs that have been decided
+ *   via the approval queue (approved or rejected). These should be classified
+ *   as already_decided regardless of their ledger status.
+ */
+export function classifyPrinciple(
+  p: PrincipleListItem,
+  decidedPrincipleIds?: Set<string>,
+): PrincipleCategory {
+  // 1. Builtin axioms (T-01..T-10) are never governance targets
+  if (isBuiltinId(p.id)) {
+    return 'builtin';
+  }
+
+  // 2. Demo / dogfood principles — ID prefix is primary signal
+  if (hasPrefix(p.id, DEMO_ID_PREFIXES) || hasKeyword(p.id, DEMO_ID_KEYWORDS)) {
+    return 'demo';
+  }
+  // Text matching is intentionally restrictive (bracketed tags only) to avoid
+  // false positives on real principles that happen to mention "sample" or "template"
+  if (hasKeyword(p.text + p.triggerPattern, DEMO_TEXT_KEYWORDS)) {
+    return 'demo';
+  }
+
+  // 3. Smoke test principles — ID prefix is primary signal
+  if (hasPrefix(p.id, SMOKE_ID_PREFIXES) || hasKeyword(p.id, SMOKE_ID_KEYWORDS)) {
+    return 'smoke';
+  }
+  if (hasKeyword(p.text + p.triggerPattern, SMOKE_TEXT_KEYWORDS)) {
+    return 'smoke';
+  }
+
+  // 4. Already decided via approval queue (approved or rejected)
+  //    This catches principles whose ledger status is still 'candidate' but
+  //    have been decided through the approval workflow.
+  if (decidedPrincipleIds && decidedPrincipleIds.has(p.id)) {
+    return 'already_decided';
+  }
+
+  // 5. Already decided: active = approved & in effect, no governance needed
+  if (p.status === 'active') {
+    return 'already_decided';
+  }
+
+  // 6. Historical: archived or deprecated
+  if (p.status === 'archived' || p.status === 'deprecated') {
+    return 'historical';
+  }
+
+  // 7. Only candidate / probation need owner decision
+  return 'owner_actionable';
+}
+
+/**
+ * Classify a batch of principles. Returns the classified array.
+ *
+ * @param principles - The principles to classify
+ * @param decidedPrincipleIds - Set of principle IDs that have been decided
+ *   via the approval queue (approved or rejected).
+ */
+export function classifyPrinciples(
+  principles: PrincipleListItem[],
+  decidedPrincipleIds?: Set<string>,
+): ClassifiedPrinciple[] {
+  return principles.map((p) => ({ principle: p, category: classifyPrinciple(p, decidedPrincipleIds) }));
+}
+
+/**
+ * Filter to only owner-actionable principles.
+ */
+export function filterOwnerActionable(
+  classified: ClassifiedPrinciple[],
+): ClassifiedPrinciple[] {
+  return classified.filter((c) => c.category === 'owner_actionable');
+}
+
+

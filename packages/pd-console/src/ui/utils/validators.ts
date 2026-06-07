@@ -600,7 +600,9 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
     pendingReviewCount: v.pendingReviewCount,
     behaviorDeviationCount: v.behaviorDeviationCount,
     stagnationSignals: signals,
-    governanceState: v.governanceState as GovernanceQueueData['governanceState'],
+    governanceState: VALID_GOVERNANCE_STATES.has(v.governanceState)
+      ? v.governanceState as 'none' | 'in_progress' | 'owner_review_ready' | 'degraded'
+      : 'none',
     stateReasonCode: v.stateReasonCode,
     nextActionCode: v.nextActionCode,
     stateReason: v.stateReason,
@@ -917,6 +919,9 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
 export interface PrinciplesListData {
   principles: PrincipleListItemData[];
   summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
+  categories?: Record<string, number>;
+  /** If the approval cross-check was unavailable, this explains why (ERR-002) */
+  approvalCrossCheckUnavailable?: string;
 }
 
 export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
@@ -928,9 +933,35 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (!isNumber(candidate) || !isNumber(probation) || !isNumber(active) || !isNumber(deprecated) || !isNumber(archived) || !isNumber(total)) return null;
   const principles = validateArray(v.principles, validatePrincipleListItem);
   if (principles === null) return null;
+  // categories is optional (PRI-330) — EP-01: runtime validate, no `as` bypass
+  // When present but invalid, fail loud (ERR-009: required-ish fields fail loud)
+  let categories: Record<string, number> | undefined;
+  if (Object.hasOwn(v, 'categories')) {
+    if (!isObject(v.categories)) return null; // categories exists but is not an object → reject
+    const raw = v.categories;
+    const validated: Record<string, number> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (!isNumber(val)) return null; // categories value is not a number → reject
+      validated[key] = val;
+    }
+    if (Object.keys(validated).length > 0) {
+      categories = validated;
+    }
+  }
+  // approvalCrossCheckUnavailable — optional string, fail loud if wrong type
+  // (ERR-009: required-ish fields fail loud; ERR-002: no silent degradation)
+  if (Object.hasOwn(v, 'approvalCrossCheckUnavailable') && !isString(v.approvalCrossCheckUnavailable)) {
+    return null;
+  }
+  const approvalCrossCheckUnavailable = isString(v.approvalCrossCheckUnavailable)
+    ? v.approvalCrossCheckUnavailable
+    : undefined;
+
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
+    ...(categories !== undefined ? { categories } : {}),
+    ...(approvalCrossCheckUnavailable !== undefined ? { approvalCrossCheckUnavailable } : {}),
   };
 }
 
