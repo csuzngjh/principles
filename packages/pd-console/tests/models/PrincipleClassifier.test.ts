@@ -32,14 +32,33 @@ describe('classifyPrinciple', () => {
   });
 
   it('classifies demo principles by keyword', () => {
-    expect(classifyPrinciple(makePrinciple({ text: 'This is a demo principle' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ text: 'This is a [demo] principle' }))).toBe('demo');
     expect(classifyPrinciple(makePrinciple({ id: 'DEMO_001' }))).toBe('demo');
-    expect(classifyPrinciple(makePrinciple({ text: 'Example usage pattern' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ id: 'demo_test' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ text: 'This is a [example] usage pattern' }))).toBe('demo');
+  });
+
+  it('does NOT misclassify real principles mentioning "sample" or "template" in text', () => {
+    // These should be owner_actionable because text keywords are now bracket-only
+    expect(classifyPrinciple(makePrinciple({ text: 'Use a sample to verify output' }))).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ text: 'Follow the template pattern for consistency' }))).toBe('owner_actionable');
   });
 
   it('classifies smoke test principles by keyword', () => {
-    expect(classifyPrinciple(makePrinciple({ text: 'Smoke test for CI' }))).toBe('smoke');
+    expect(classifyPrinciple(makePrinciple({ text: 'This is a [smoke] test for CI' }))).toBe('smoke');
     expect(classifyPrinciple(makePrinciple({ id: 'SMOKE_001' }))).toBe('smoke');
+    expect(classifyPrinciple(makePrinciple({ id: 'smoke_test_1' }))).toBe('smoke');
+  });
+
+  it('classifies story-a / dogfood principles as demo', () => {
+    expect(classifyPrinciple(makePrinciple({ id: 'story-a_P_001' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ id: 'story_a_test' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ id: 'dogfood_001' }))).toBe('demo');
+  });
+
+  it('classifies probe / test_principle as smoke', () => {
+    expect(classifyPrinciple(makePrinciple({ id: 'probe_001' }))).toBe('smoke');
+    expect(classifyPrinciple(makePrinciple({ id: 'test_principle_check' }))).toBe('smoke');
   });
 
   it('classifies archived/deprecated as historical', () => {
@@ -62,7 +81,29 @@ describe('classifyPrinciple', () => {
   });
 
   it('prioritizes demo over historical', () => {
-    expect(classifyPrinciple(makePrinciple({ text: 'demo principle', status: 'archived' }))).toBe('demo');
+    expect(classifyPrinciple(makePrinciple({ id: 'DEMO_old', text: '[demo] principle', status: 'archived' }))).toBe('demo');
+  });
+
+  it('classifies principle with decidedPrincipleIds as already_decided', () => {
+    // A candidate principle that was rejected via approval queue
+    const decidedIds = new Set(['P_REJECTED']);
+    expect(classifyPrinciple(makePrinciple({ id: 'P_REJECTED', status: 'candidate' }), decidedIds)).toBe('already_decided');
+  });
+
+  it('classifies principle with decidedPrincipleIds as already_decided even if approved', () => {
+    const decidedIds = new Set(['P_APPROVED']);
+    expect(classifyPrinciple(makePrinciple({ id: 'P_APPROVED', status: 'candidate' }), decidedIds)).toBe('already_decided');
+  });
+
+  it('does not classify principle as already_decided when not in decidedPrincipleIds', () => {
+    const decidedIds = new Set(['P_OTHER']);
+    expect(classifyPrinciple(makePrinciple({ id: 'P_001', status: 'candidate' }), decidedIds)).toBe('owner_actionable');
+  });
+
+  it('builtin takes priority over decidedPrincipleIds', () => {
+    // T-01 should still be builtin even if somehow in decidedPrincipleIds
+    const decidedIds = new Set(['T-01']);
+    expect(classifyPrinciple(makePrinciple({ id: 'T-01', status: 'active' }), decidedIds)).toBe('builtin');
   });
 });
 
@@ -70,7 +111,7 @@ describe('classifyPrinciples', () => {
   it('classifies a batch of principles', () => {
     const principles = [
       makePrinciple({ id: 'T-01' }),
-      makePrinciple({ id: 'P_001', text: 'demo test' }),
+      makePrinciple({ id: 'P_001', text: '[demo] test' }),
       makePrinciple({ id: 'P_002', status: 'candidate' }),
       makePrinciple({ id: 'P_003', status: 'archived' }),
     ];
@@ -81,13 +122,26 @@ describe('classifyPrinciples', () => {
     expect(classified[2].category).toBe('owner_actionable');
     expect(classified[3].category).toBe('historical');
   });
+
+  it('classifies a batch with decidedPrincipleIds', () => {
+    const principles = [
+      makePrinciple({ id: 'P_001', status: 'candidate' }),
+      makePrinciple({ id: 'P_REJECTED', status: 'candidate' }),
+      makePrinciple({ id: 'P_002', status: 'probation' }),
+    ];
+    const decidedIds = new Set(['P_REJECTED']);
+    const classified = classifyPrinciples(principles, decidedIds);
+    expect(classified[0].category).toBe('owner_actionable');
+    expect(classified[1].category).toBe('already_decided');
+    expect(classified[2].category).toBe('owner_actionable');
+  });
 });
 
 describe('filterOwnerActionable', () => {
   it('filters to only owner_actionable principles', () => {
     const classified = classifyPrinciples([
       makePrinciple({ id: 'T-01' }),
-      makePrinciple({ id: 'P_001', text: 'demo' }),
+      makePrinciple({ id: 'P_001', text: '[demo]' }),
       makePrinciple({ id: 'P_002', status: 'candidate' }),
       makePrinciple({ id: 'P_003', status: 'probation' }),
     ]);
@@ -99,9 +153,22 @@ describe('filterOwnerActionable', () => {
   it('returns empty array when no actionable principles', () => {
     const classified = classifyPrinciples([
       makePrinciple({ id: 'T-01' }),
-      makePrinciple({ id: 'P_001', text: 'smoke test' }),
+      makePrinciple({ id: 'P_001', text: '[smoke] test' }),
     ]);
     const filtered = filterOwnerActionable(classified);
     expect(filtered).toHaveLength(0);
+  });
+
+  it('filters out principles in decidedPrincipleIds', () => {
+    const classified = classifyPrinciples(
+      [
+        makePrinciple({ id: 'P_001', status: 'candidate' }),
+        makePrinciple({ id: 'P_REJECTED', status: 'candidate' }),
+      ],
+      new Set(['P_REJECTED']),
+    );
+    const filtered = filterOwnerActionable(classified);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].principle.id).toBe('P_001');
   });
 });

@@ -600,7 +600,9 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
     pendingReviewCount: v.pendingReviewCount,
     behaviorDeviationCount: v.behaviorDeviationCount,
     stagnationSignals: signals,
-    governanceState: v.governanceState as GovernanceQueueData['governanceState'],
+    governanceState: VALID_GOVERNANCE_STATES.has(v.governanceState)
+      ? v.governanceState as 'none' | 'in_progress' | 'owner_review_ready' | 'degraded'
+      : 'none',
     stateReasonCode: v.stateReasonCode,
     nextActionCode: v.nextActionCode,
     stateReason: v.stateReason,
@@ -930,16 +932,17 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   const principles = validateArray(v.principles, validatePrincipleListItem);
   if (principles === null) return null;
   // categories is optional (PRI-330) — EP-01: runtime validate, no `as` bypass
+  // When present but invalid, fail loud (ERR-009: required-ish fields fail loud)
   let categories: Record<string, number> | undefined;
-  if (Object.hasOwn(v, 'categories') && isObject(v.categories)) {
+  if (Object.hasOwn(v, 'categories')) {
+    if (!isObject(v.categories)) return null; // categories exists but is not an object → reject
     const raw = v.categories;
     const validated: Record<string, number> = {};
-    let valid = true;
     for (const [key, val] of Object.entries(raw)) {
-      if (!isNumber(val)) { valid = false; break; }
+      if (!isNumber(val)) return null; // categories value is not a number → reject
       validated[key] = val;
     }
-    if (valid && Object.keys(validated).length > 0) {
+    if (Object.keys(validated).length > 0) {
       categories = validated;
     }
   }

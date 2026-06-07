@@ -231,7 +231,7 @@ export class PrinciplesConsoleModel {
     return ledger;
   }
 
-  async listPrinciples(filter?: PrincipleFilter): Promise<PrinciplesListOutput> {
+  async listPrinciples(filter?: PrincipleFilter, decidedPrincipleIds?: Set<string>): Promise<PrinciplesListOutput> {
     const ledger = this.loadLedger();
     const principles = Object.values(ledger.tree.principles);
 
@@ -279,7 +279,7 @@ export class PrinciplesConsoleModel {
     items.sort((a, b) => b.valueScore - a.valueScore);
 
     // PRI-330: classify and optionally filter
-    const classified = classifyPrinciples(items);
+    const classified = classifyPrinciples(items, decidedPrincipleIds);
     const categories: Record<string, number> = {};
     for (const c of classified) {
       categories[c.category] = (categories[c.category] ?? 0) + 1;

@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import * as path from 'path';
+import * as fs from 'fs';
 import { PrinciplesConsoleModel, type PrincipleFilter } from '../models/PrinciplesConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
@@ -11,6 +13,41 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
     models.set(workspaceDir, model);
   }
   return model;
+}
+
+/**
+ * Query the SQLite state.db for principle IDs that have been decided
+ * (approved or rejected) via the approval queue. Returns an empty Set
+ * if the database is not available (graceful degradation with reason).
+ */
+async function getDecidedPrincipleIds(workspaceDir: string): Promise<Set<string>> {
+  const dbPath = path.join(workspaceDir, '.state', 'state.db');
+  if (!fs.existsSync(dbPath)) {
+    return new Set();
+  }
+
+  try {
+    // Dynamic import to avoid loading better-sqlite3 when DB doesn't exist
+    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const conn = new SqliteConnection({ workspaceDir, readonly: true });
+    const db = conn.getDb();
+
+    // Join approvals with pi_artifacts to find decided principle IDs
+    const rows = db.prepare(
+      "SELECT DISTINCT a.source_principle_id " +
+      "FROM approvals ap " +
+      "JOIN pi_artifacts a ON a.artifact_id = ap.artifact_id " +
+      "WHERE ap.status IN ('approved', 'rejected') " +
+      "AND a.source_principle_id IS NOT NULL"
+    ).all() as { source_principle_id: string }[];
+
+    conn.close();
+    return new Set(rows.map((r) => r.source_principle_id));
+  } catch {
+    // Graceful degradation: if DB query fails, return empty set.
+    // The classifier will still work, just without the approval cross-check.
+    return new Set();
+  }
 }
 
 interface PrinciplesRouteParams {
@@ -43,7 +80,8 @@ export async function handlePrinciplesRoute({
       const VALID_FILTERS = new Set<string>(['all', 'actionable']);
       const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
-      const result = await model.listPrinciples(filter);
+      const decidedPrincipleIds = await getDecidedPrincipleIds(workspaceDir);
+      const result = await model.listPrinciples(filter, decidedPrincipleIds);
       sendSuccess(res, result);
     } catch (err: unknown) {
       sendError(res, 500, 'principles_list_error', (err as Error).message);
