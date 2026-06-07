@@ -126,6 +126,9 @@ export function PrinciplesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
   const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
+  // PRI-330: Default to actionable filter
+  const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('actionable');
+  const [categories, setCategories] = useState<Record<string, number> | undefined>();
 
   // Fetch data
   const loadData = useCallback(async () => {
@@ -133,7 +136,7 @@ export function PrinciplesPage() {
     setError(null);
     try {
       const [pResult, aResult] = await Promise.all([
-        fetchPrinciples(),
+        fetchPrinciples(filterMode),
         fetchApprovalsGrouped(),
       ]);
 
@@ -148,6 +151,8 @@ export function PrinciplesPage() {
         return;
       }
       setPrinciples(pData.principles);
+      // PRI-330: Store categories for UI display
+      setCategories(pData.categories);
 
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
@@ -156,7 +161,7 @@ export function PrinciplesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterMode]);
 
   useEffect(() => {
     loadData();
@@ -231,6 +236,34 @@ export function PrinciplesPage() {
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
+        {/* PRI-330: Actionable filter toggle */}
+        <div className="flex gap-1" role="group" aria-label="Filter mode">
+          <button
+            onClick={() => setFilterMode('actionable')}
+            className={
+              "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
+              (filterMode === 'actionable'
+                ? "bg-gov text-paper border-gov"
+                : "bg-surface text-ink-3 border-line hover:border-line-2")
+            }
+          >
+            {t("principles.filterActionable", { defaultValue: "Actionable" })}
+            {categories?.owner_actionable ? ` (${categories.owner_actionable})` : ''}
+          </button>
+          <button
+            onClick={() => setFilterMode('all')}
+            className={
+              "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
+              (filterMode === 'all'
+                ? "bg-gov text-paper border-gov"
+                : "bg-surface text-ink-3 border-line hover:border-line-2")
+            }
+          >
+            {t("principles.filterAll", { defaultValue: "Show All" })}
+            {categories ? ` (${Object.values(categories).reduce((a, b) => a + b, 0)})` : ''}
+          </button>
+        </div>
+
         {/* Search */}
         <input
           type="text"
@@ -291,8 +324,22 @@ export function PrinciplesPage() {
             {t("principles.emptyTitle")}
           </h2>
           <p className="text-ink-3 text-[14px] max-w-[480px] mx-auto leading-relaxed">
-            {t("principles.emptyDescription")}
+            {filterMode === 'actionable'
+              ? t("principles.emptyActionable", { defaultValue: "No owner-actionable principles at this time. When PD captures behavior deviation signals, principle candidates will appear here for your review." })
+              : t("principles.emptyDescription")}
           </p>
+          {categories && filterMode === 'actionable' && (
+            <div className="flex justify-center gap-2 flex-wrap mt-4">
+              {Object.entries(categories).map(([cat, count]) => (
+                <span
+                  key={cat}
+                  className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4"
+                >
+                  {cat}: {count}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -204,8 +204,9 @@ async function syncWorkspace(name: string): Promise<ApiResponse<SyncResultData>>
 
 // ── Principles ────────────────────────────────────────────────────────────────
 
-async function fetchPrinciples(): Promise<ApiResponse<PrinciplesListData>> {
-  return request<PrinciplesListData>("/api/principles", undefined, validatePrinciplesList);
+async function fetchPrinciples(filter?: 'all' | 'actionable'): Promise<ApiResponse<PrinciplesListData>> {
+  const query = filter && filter !== 'all' ? `?filter=${filter}` : '';
+  return request<PrinciplesListData>(`/api/principles${query}`, undefined, validatePrinciplesList);
 }
 
 // Principle detail is deeply nested; for now we accept unvalidated until a
