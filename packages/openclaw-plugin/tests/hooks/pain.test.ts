@@ -8,9 +8,14 @@ import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
 import { resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
+import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
+vi.mock('../../src/core/pd-config-loader.js', () => ({
+  loadPdConfigForPlugin: vi.fn(() => ({ ok: true, source: 'mock', effective: {}, errors: [] })),
+  loadFeatureFlagFromConfig: vi.fn(() => ({ enabled: false, source: 'mock' })),
+}));
 vi.mock('../../src/core/evolution-engine.js', () => ({
   recordEvolutionSuccess: vi.fn(),
   recordEvolutionFailure: vi.fn(),
@@ -478,6 +483,64 @@ describe('Post-Write Checks & Pain Hook', () => {
       toolName: 'bash',
       outcome: 'failure',
     }));
+  });
+
+  it('PEAT-B1: triage evidence_only returns early before PainDiagnosticGate (no cooldown pollution)', () => {
+    // Enable the evidence triage feature flag
+    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
+
+    const mockCtx = { workspaceDir, sessionId: 's-triage-evidence', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'write',
+      params: { file_path: 'src/main.ts' },
+      error: 'Permission denied',
+      result: { exitCode: 1 },
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    // Core assertion: pain_detected event is NOT emitted — gate was not reached
+    expect(mockEmitSync).not.toHaveBeenCalled();
+    // Core assertion: recordPainSignal is NOT called — triage prevented gate evaluation
+    expect(mockEventLog.recordPainSignal).not.toHaveBeenCalled();
+    // Core assertion: trajectory pain event is NOT recorded — cooldown not polluted
+    expect(mockWctx.trajectory.recordPainEvent).not.toHaveBeenCalled();
+    // But tool call IS still tracked (friction tracking, not diagnosis)
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-triage-evidence',
+      toolName: 'write',
+      outcome: 'failure',
+    }));
+  });
+
+  it('PEAT-B1: triage admit proceeds to PainDiagnosticGate and cooldown', () => {
+    // For owner_reported source kinds, triage admits, so gate IS reached
+    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
+
+    const mockCtx = { workspaceDir, sessionId: 's-triage-admit', api: { logger: {} } };
+    // Manual pain command — triggers the manual pain path
+    const mockEvent = {
+      toolName: 'pain',
+      params: { input: 'test pain' },
+      result: { exitCode: 0 },
+      error: undefined,
+    };
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    // Core assertion: pain_detected event IS emitted — gate WAS reached
+    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'pain_detected',
+    }));
+    // Core assertion: recordPainSignal IS called
+    expect(mockEventLog.recordPainSignal).toHaveBeenCalledWith(
+      's-triage-admit',
+      expect.objectContaining({ score: 100, source: 'manual' }),
+    );
   });
 
 });

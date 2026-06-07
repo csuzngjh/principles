@@ -10,11 +10,17 @@
  * had their own block persistence implementations.
  */
 
+import * as fs from 'fs';
 import { getSession, trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
+import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { isRisky } from '../utils/io.js';
+import { normalizeProfile } from '../core/profile.js';
+import { SystemLogger } from '../core/system-logger.js';
 import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
@@ -114,38 +120,75 @@ export function recordGateBlockAndReturn(
       origin: 'system_infer',
     });
 
-    const session = getSession(sessionId);
-    const gate = evaluatePainDiagnosticGate({
-      source: 'gate_blocked',
-      score: GATE_BLOCK_PAIN_SCORE,
-      currentGfi: session?.currentGfi ?? 0,
-      consecutiveErrors: session?.consecutiveErrors ?? 0,
-      sessionId,
-      errorHash: `${toolName}:${filePath}:${reason}`,
-      thresholds: {
-        painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
-        highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-      },
-    });
-
-    if (gate.shouldDiagnose) {
-      void emitPainDetectedEvent(wctx, {
-        ts: new Date().toISOString(),
-        type: 'pain_detected',
-        data: {
-          painId: `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-          painType: 'user_frustration',
-          source: 'gate_blocked',
-          reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
-          score: GATE_BLOCK_PAIN_SCORE,
-          sessionId,
-          agentId: 'main',
-        },
-      }).catch((emitErr) => {
-        logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+    // PEAT-B1: Evidence triage (feature-flagged)
+    let triageAdmitted = true;
+    const gateBlockTriageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
+    if (gateBlockTriageFlag.enabled) {
+      // Load profile with 1MB size guard, matching pain.ts pattern
+      const profilePath = wctx.resolve('PROFILE');
+      let profile = normalizeProfile({});
+      if (fs.existsSync(profilePath)) {
+        try {
+          const content = fs.readFileSync(profilePath, 'utf8');
+          if (content.length > 1024 * 1024) {
+            logger.warn?.('[PD_GATE] PROFILE.json exceeds 1 MB, skipping');
+            SystemLogger.log(wctx.workspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping — fallback to non-risky');
+          } else {
+            profile = normalizeProfile(JSON.parse(content));
+          }
+        } catch (e) {
+          logger.warn?.(`[PD_GATE] Failed to parse PROFILE.json: ${String(e)}`);
+          SystemLogger.log(wctx.workspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)} — fallback to non-risky`);
+        }
+      }
+      // Real judgment for rulehost blocks: if a principle blocked an action on a risky path,
+      // it IS a high-confidence unsafe action. The pain score (45) is the evidence friction
+      // weight, NOT the action risk severity. The rulehost principle already determined
+      // this action was important enough to block — that is the real signal.
+      const isUnsafe = isRisky(filePath, profile.risk_paths);
+      const triage = evaluateEvidenceTriage('rulehost_block', GATE_BLOCK_PAIN_SCORE, {
+        isUnsafeHighConfidence: isUnsafe,
       });
-    } else {
-      logger.info?.(`[PD_GATE] Gate block recorded without Runtime V2 diagnosis: ${gate.detail}`);
+      if (triage.decision !== 'admit') {
+        triageAdmitted = false;
+        logger.info?.(`[PD_GATE] Triage ${triage.decision}: ${triage.reason}`);
+      }
+    }
+
+    const session = getSession(sessionId);
+    if (triageAdmitted) {
+      const gate = evaluatePainDiagnosticGate({
+        source: 'gate_blocked',
+        score: GATE_BLOCK_PAIN_SCORE,
+        currentGfi: session?.currentGfi ?? 0,
+        consecutiveErrors: session?.consecutiveErrors ?? 0,
+        sessionId,
+        errorHash: `${toolName}:${filePath}:${reason}`,
+        thresholds: {
+          painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
+          highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+        },
+      });
+
+      if (gate.shouldDiagnose) {
+        void emitPainDetectedEvent(wctx, {
+          ts: new Date().toISOString(),
+          type: 'pain_detected',
+          data: {
+            painId: `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+            painType: 'user_frustration',
+            source: 'gate_blocked',
+            reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+            score: GATE_BLOCK_PAIN_SCORE,
+            sessionId,
+            agentId: 'main',
+          },
+        }).catch((emitErr) => {
+          logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+        });
+      } else {
+        logger.info?.(`[PD_GATE] Gate block recorded without Runtime V2 diagnosis: ${gate.detail}`);
+      }
     }
   }
 
