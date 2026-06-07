@@ -99,6 +99,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
 | ERR-061 | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type | PR #823 |
 | ERR-062 | Collapsed details section renders empty-state copy instead of actual data when data exists | PRI-319 / PR #825 |
+| ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
 
 ---
 
@@ -849,6 +850,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When creating a new BasePeerRunner subclass, the PR checklist must include: (1) list all events the runner can emit, (2) verify each is in TelemetryEventType, (3) add a test proving the schema accepts each event. Review trigger: any PR that adds a new runner or new emitEvent() call must also update telemetry-event.ts.
 - **Source**: PR #808/#809/#810
 - **Date**: 2026-06-03
+- **Recurrence**: None
+
+---
+
+**[ERR-063]** | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored
+
+- **What happened**: When changing `--enqueue-next` to `--no-enqueue-next` (inverting the default), the CLI registration used `.option('--no-enqueue-next', ...)` but the `.action()` handler accessed `opts.noEnqueueNext`. Commander's `--no-` prefix convention stores the option as the *positive* form: `--no-enqueue-next` → `opts.enqueueNext`. Since `opts.noEnqueueNext` is always `undefined`, `!opts.noEnqueueNext` is always `true`, meaning the `--no-enqueue-next` flag was silently ignored and enqueue always happened regardless of the flag.
+- **Why it's wrong**: The Commander.js `--no-` prefix negation convention is well-documented but non-obvious. The property name is derived by removing the `--no-` prefix and camelCasing the remainder, NOT by camelCasing the full flag name. Using `opts.noEnqueueNext` (the full flag name camelCased) accesses a non-existent property that is always `undefined`. This makes `--no-enqueue-next` a no-op — the most dangerous kind of bug because the flag appears to work (no error thrown) but has no effect.
+- **Correct approach**: When using Commander's `--no-<flag>` negation, the option value is stored as `opts.<flag>` (positive form). For `--no-enqueue-next`, access `opts.enqueueNext`. Always verify Commander property names by testing with `console.log(JSON.stringify(opts))` or writing a parser-level test that calls `program.parseAsync()` with the flag.
+- **How to prevent**: When registering `--no-<flag>` Commander options, immediately write a parser-level test that verifies the option value is correctly parsed with AND without the flag. The test should assert `opts.<positiveForm> === false` when the flag is present and `opts.<positiveForm> === true` when absent. Review trigger: any PR that uses Commander's `--no-` prefix must include a parser test.
+- **Source**: PR #844
+- **Date**: 2026-06-07
 - **Recurrence**: None
 
 ---
