@@ -130,7 +130,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
     // Select runtime adapter based on --runtime flag (CLI-02)
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let runtimeAdapter: PDRuntimeAdapter;
     if (runtimeKind === 'openclaw-cli') {
       const stateDir = `${workspaceDir}/.state`;
@@ -370,12 +370,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     if (opts.json) {
+      const candidateIds = candidates.map((c) => c.candidateId);
+      const internalizeNextAction = candidateIds.length > 0
+        ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
+        : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         intake: {
           enabled: opts.intake !== false,
           candidates: intakeResults,
         },
+        nextAction: internalizeNextAction,
       };
       console.log(JSON.stringify(jsonOutput, null, 2));
       if (intakeFailed) {
@@ -421,6 +426,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`  To intake manually:`);
       for (const c of candidates) {
         console.log(`    pd candidate intake --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+      }
+    }
+
+    if (candidates.length > 0) {
+      console.log(`\n  Next Action:`);
+      console.log(`  Candidates generated but internalization has NOT started automatically.`);
+      console.log(`  To begin internalization:`);
+      for (const c of candidates) {
+        console.log(`    pd candidate internalize --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
       }
     }
 

@@ -238,6 +238,7 @@ export class RuntimeStateManager {
       status: 'succeeded',
       leaseOwner: null,
       leaseExpiresAt: null,
+      lastError: null,
       resultRef: resultRef ?? null,
     });
 

@@ -57,8 +57,8 @@ export const TaskRecordSchema = Type.Object({
   attemptCount: Type.Integer({ minimum: 0 }),
   /** Maximum number of attempts before forced failure. */
   maxAttempts: Type.Integer({ minimum: 1 }),
-  /** Last error category, if the task is in a failure-related state. */
-  lastError: Type.Optional(PDErrorCategorySchema),
+  /** Last error category, if the task is in a failure-related state. null when cleared (e.g. after successful retry). */
+  lastError: Type.Optional(Type.Union([PDErrorCategorySchema, Type.Null()])),
   /** Reference to the task's input data. */
   inputRef: Type.Optional(Type.String()),
   /** Reference to the task's result data. */
