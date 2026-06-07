@@ -5,7 +5,10 @@
  * then delegates to the existing diagnose run logic.
  *
  * Usage:
- *   pd pain retry --pain-id <painId> --workspace <path> [runtime flags] [--json] [--force]
+ *   pd pain retry --pain-id <painId> --workspace <path> --runtime <kind> [runtime flags] [--json] [--force]
+ *
+ * IMPORTANT: --runtime is required (no default). test-double would generate fake
+ * candidates/ledger in a real workspace, so it must be explicitly requested.
  */
 import {
   RuntimeStateManager,
@@ -74,27 +77,34 @@ function resolveTaskIdFromPainId(painId: string): { taskId: string } | { reason:
   return { taskId: `diagnosis_${painId}` };
 }
 
+/** Output a refused/not_found result, respecting --json mode. Exits with code 1. */
+function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: string; taskId?: string; reason: string; message?: string; nextAction: string }): never {
+  if (opts.json) {
+    console.log(JSON.stringify({
+      status: payload.status ?? 'refused',
+      painId: payload.painId,
+      taskId: payload.taskId ?? null,
+      reason: payload.reason,
+      ...(payload.message ? { message: payload.message } : {}),
+      nextAction: payload.nextAction,
+    }));
+  } else {
+    console.error(`error: ${payload.message ?? payload.reason}`);
+    console.error(`nextAction: ${payload.nextAction}`);
+  }
+  process.exit(1);
+}
+
 // ── Handler ────────────────────────────────────────────────────────────────────
 
 export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateDir = `${workspaceDir}/.state`;
 
   // Step 1: Resolve painId → taskId
   const resolution = resolveTaskIdFromPainId(opts.painId);
   if ('reason' in resolution) {
-    if (opts.json) {
-      console.log(JSON.stringify({
-        status: 'refused',
-        painId: opts.painId,
-        reason: resolution.reason,
-        nextAction: resolution.nextAction,
-      }));
-    } else {
-      console.error(`error: ${resolution.reason}`);
-      console.error(`nextAction: ${resolution.nextAction}`);
-    }
-    process.exit(1);
-    return;
+    refuseExit(opts, { painId: opts.painId, reason: resolution.reason, nextAction: resolution.nextAction });
   }
 
   const { taskId } = resolution;
@@ -107,110 +117,105 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     const task = await stateManager.getTask(taskId);
     if (!task) {
-      if (opts.json) {
-        console.log(JSON.stringify({
-          status: 'not_found',
-          painId: opts.painId,
-          taskId,
-          reason: `No task found for painId '${opts.painId}' (looked for taskId '${taskId}')`,
-          nextAction: `Verify the painId is correct. Use 'pd task list --kind diagnostician' to see all diagnostician tasks.`,
-        }));
-      } else {
-        console.error(`error: No task found for painId '${opts.painId}' (looked for taskId '${taskId}')`);
-        console.error(`nextAction: Verify the painId is correct. Use 'pd task list --kind diagnostician' to see all diagnostician tasks.`);
-      }
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        status: 'not_found',
+        painId: opts.painId,
+        taskId,
+        reason: 'task_not_found',
+        message: `No task found for painId '${opts.painId}' (looked for taskId '${taskId}')`,
+        nextAction: `Verify the painId is correct. Use 'pd task list --kind diagnostician' to see all diagnostician tasks.`,
+      });
     }
 
     if (task.taskKind !== 'diagnostician') {
-      if (opts.json) {
-        console.log(JSON.stringify({
-          status: 'refused',
-          painId: opts.painId,
-          taskId,
-          reason: `Task '${taskId}' is not a diagnostician task (taskKind='${task.taskKind}')`,
-          nextAction: `pd pain retry only retries diagnostician tasks. Use 'pd diagnose run --task-id ${taskId}' for other task kinds.`,
-        }));
-      } else {
-        console.error(`error: Task '${taskId}' is not a diagnostician task (taskKind='${task.taskKind}')`);
-        console.error(`nextAction: pd pain retry only retries diagnostician tasks.`);
-      }
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'wrong_task_kind',
+        message: `Task '${taskId}' is not a diagnostician task (taskKind='${task.taskKind}')`,
+        nextAction: `pd pain retry only retries diagnostician tasks. Use 'pd diagnose run --task-id ${taskId}' for other task kinds.`,
+      });
     }
 
     const previousTaskStatus = task.status;
     const previousLastError = task.lastError ?? null;
 
     if (task.status === 'succeeded' && !opts.force) {
-      if (opts.json) {
-        console.log(JSON.stringify({
-          status: 'refused',
-          painId: opts.painId,
-          taskId,
-          reason: `Task '${taskId}' already succeeded. Use --force to re-run a succeeded task.`,
-          nextAction: `Add --force to retry: pd pain retry --pain-id ${opts.painId} --force`,
-        }));
-      } else {
-        console.error(`error: Task '${taskId}' already succeeded. Use --force to re-run.`);
-        console.error(`nextAction: Add --force to retry: pd pain retry --pain-id ${opts.painId} --force`);
-      }
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'already_succeeded',
+        message: `Task '${taskId}' already succeeded. Use --force to re-run a succeeded task.`,
+        nextAction: `Add --force to retry: pd pain retry --pain-id ${opts.painId} --force`,
+      });
     }
 
     if (!RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
-      // Status like 'pending' or 'leased' — not retryable
-      if (opts.json) {
-        console.log(JSON.stringify({
-          status: 'refused',
-          painId: opts.painId,
-          taskId,
-          reason: `Task '${taskId}' has status '${task.status}' which is not retryable. Retryable statuses: ${[...RETRYABLE_STATUSES].join(', ')}`,
-          nextAction: `Wait for the task to reach a terminal state, or use 'pd diagnose run --task-id ${taskId}' directly.`,
-        }));
-      } else {
-        console.error(`error: Task '${taskId}' has status '${task.status}' which is not retryable.`);
-        console.error(`nextAction: Wait for the task to reach a terminal state (retry_wait, failed, needs_human_review).`);
-      }
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'status_not_retryable',
+        message: `Task '${taskId}' has status '${task.status}' which is not retryable. Retryable statuses: ${[...RETRYABLE_STATUSES].join(', ')}`,
+        nextAction: `Wait for the task to reach a terminal state, or use 'pd diagnose run --task-id ${taskId}' directly.`,
+      });
     }
 
-    // Step 3: Build runtime adapter (same logic as diagnose run)
+    // Step 3: Resolve runtime kind
+    // P1 fix: --openclaw-local and --openclaw-gateway are mutually exclusive.
+    // Must output JSON when --json is set (CLI operator gate).
     if (opts.openclawLocal && opts.openclawGateway) {
-      console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'conflicting_flags',
+        message: '--openclaw-local and --openclaw-gateway are mutually exclusive',
+        nextAction: 'Provide exactly one of --openclaw-local or --openclaw-gateway, not both.',
+      });
     }
 
-    const runtimeKind = opts.runtime ?? 'test-double';
+    // P1 fix: pd pain retry must NOT default to test-double.
+    // This command is for real workspace pain fixes — test-double would generate
+    // fake candidates/ledger in a real .pd/state.db. Require explicit --runtime
+    // or fall back to workflows.yaml config.
+    let runtimeKind = opts.runtime;
+    if (!runtimeKind) {
+      try {
+        const configResult = resolveRuntimeConfig(stateDir);
+        if (!isRuntimeConfigError(configResult) && configResult.runtimeKind) {
+          ({ runtimeKind } = configResult);
+        }
+      } catch {
+        // Config load failed — fall through to refusal
+      }
+    }
 
+    if (!runtimeKind) {
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'missing_runtime',
+        message: 'No --runtime specified and no workflows.yaml config found. pd pain retry must not default to test-double to prevent fake data in real workspaces.',
+        nextAction: `Specify --runtime explicitly: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider <provider> --model <model> --apiKeyEnv <ENV>`,
+      });
+    }
+
+    // Step 4: Build runtime adapter
     let runtimeAdapter: PDRuntimeAdapter;
+
     if (runtimeKind === 'openclaw-cli') {
-      const stateDir = `${workspaceDir}/.state`;
       const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway, requestedRuntimeKind: 'openclaw-cli' });
       if (isRuntimeConfigError(configResult)) {
-        if (opts.json) {
-          console.log(JSON.stringify({ status: 'refused', painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction }));
-        } else {
-          console.error(`error: ${configResult.message}`);
-          console.error(`nextAction: ${configResult.nextAction}`);
-        }
-        process.exit(1);
-        return;
+        refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
       }
       const { openclawMode } = configResult;
       if (!openclawMode) {
-        if (opts.json) {
-          console.log(JSON.stringify({ status: 'refused', painId: opts.painId, taskId, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway' }));
-        } else {
-          console.error('error: runtimeKind is openclaw-cli but no mode resolved');
-          console.error('nextAction: Provide --openclaw-local or --openclaw-gateway');
-        }
-        process.exit(1);
-        return;
+        refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: 'missing_openclaw_mode',
+          message: 'runtimeKind is openclaw-cli but no mode resolved',
+          nextAction: 'Provide --openclaw-local or --openclaw-gateway',
+        });
       }
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
@@ -245,7 +250,6 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         }),
       });
     } else if (runtimeKind === 'pi-ai') {
-      const stateDir = `${workspaceDir}/.state`;
       let policyConfig: RuntimeConfig | null = null;
       try {
         const configResult = resolveRuntimeConfig(stateDir);
@@ -272,21 +276,13 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       if (typeof model !== 'string' || model.trim().length === 0) missing.push('model');
       if (typeof apiKeyEnv !== 'string' || apiKeyEnv.trim().length === 0) missing.push('apiKeyEnv');
       if (missing.length > 0) {
-        if (opts.json) {
-          console.log(JSON.stringify({
-            status: 'refused',
-            painId: opts.painId,
-            taskId,
-            reason: `missing_required_config: ${missing.join(', ')}`,
-            message: `Missing or blank required pi-ai config: ${missing.join(', ')}`,
-            nextAction: `Pass via --flag or add to workflows.yaml. Example: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY`,
-          }));
-        } else {
-          console.error(`error: missing or blank required pi-ai config: ${missing.join(', ')}.`);
-          console.error(`nextAction: Pass via --flag or add to workflows.yaml.`);
-        }
-        process.exit(1);
-        return;
+        refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: `missing_required_config: ${missing.join(', ')}`,
+          message: `Missing or blank required pi-ai config: ${missing.join(', ')}`,
+          nextAction: `Pass via --flag or add to workflows.yaml. Example: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY`,
+        });
       }
 
       // Validate numeric options: must be finite, integer, non-negative if provided
@@ -298,45 +294,29 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         invalidNumeric.push(`timeoutMs (got: ${effectiveTimeoutMs})`);
       }
       if (invalidNumeric.length > 0) {
-        if (opts.json) {
-          console.log(JSON.stringify({
-            status: 'refused',
-            painId: opts.painId,
-            taskId,
-            reason: `invalid_numeric_config: ${invalidNumeric.join(', ')}`,
-            message: `Invalid numeric pi-ai config: ${invalidNumeric.join(', ')}. maxRetries must be a non-negative integer; timeoutMs must be a positive number.`,
-            nextAction: 'Fix the numeric values and retry.',
-          }));
-        } else {
-          console.error(`error: invalid numeric pi-ai config: ${invalidNumeric.join(', ')}.`);
-          console.error(`nextAction: maxRetries must be a non-negative integer; timeoutMs must be a positive number.`);
-        }
-        process.exit(1);
-        return;
+        refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: `invalid_numeric_config: ${invalidNumeric.join(', ')}`,
+          message: `Invalid numeric pi-ai config: ${invalidNumeric.join(', ')}. maxRetries must be a non-negative integer; timeoutMs must be a positive number.`,
+          nextAction: 'Fix the numeric values and retry.',
+        });
       }
 
-      // After validation, these are guaranteed non-blank strings
-      // Type assertion is safe because the validation above already checked typeof + trim
+      // After validation, these are guaranteed non-blank strings.
+      // Type assertion is safe because the validation above checked typeof + trim.
       const validProvider = provider as string;
       const validModel = model as string;
       const validApiKeyEnv = apiKeyEnv as string;
 
       if (!process.env[validApiKeyEnv]) {
-        if (opts.json) {
-          console.log(JSON.stringify({
-            status: 'refused',
-            painId: opts.painId,
-            taskId,
-            reason: 'missing_api_key',
-            message: `Environment variable '${validApiKeyEnv}' is not set`,
-            nextAction: `Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`,
-          }));
-        } else {
-          console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
-          console.error(`nextAction: Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`);
-        }
-        process.exit(1);
-        return;
+        refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: 'missing_api_key',
+          message: `Environment variable '${validApiKeyEnv}' is not set`,
+          nextAction: `Set the environment variable: export ${validApiKeyEnv}=<your-api-key>`,
+        });
       }
 
       runtimeAdapter = new PiAiRuntimeAdapter({
@@ -349,23 +329,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         workspace: workspaceDir,
       });
     } else {
-      if (opts.json) {
-        console.log(JSON.stringify({
-          status: 'refused',
-          painId: opts.painId,
-          taskId,
-          reason: `unknown_runtime: '${runtimeKind}'`,
-          message: `Unknown runtime kind '${runtimeKind}'`,
-          nextAction: `Supported runtimes: openclaw-cli, test-double, pi-ai`,
-        }));
-      } else {
-        console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
-      }
-      process.exit(1);
-      return;
+      refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: `unknown_runtime: '${runtimeKind}'`,
+        message: `Unknown runtime kind '${runtimeKind}'`,
+        nextAction: 'Supported runtimes: openclaw-cli, test-double, pi-ai',
+      });
     }
 
-    // Step 4: Build runner and execute (same as diagnose run)
+    // Step 5: Build runner and execute (same as diagnose run)
     const sqliteConn = stateManager.connection;
     const { taskStore } = stateManager;
     const { runStore } = stateManager;
@@ -441,7 +414,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       return;
     }
 
-    // Step 5: Intake candidates
+    // Step 6: Intake candidates
     const candidates = await stateManager.getCandidatesByTaskId(taskId);
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
     let intakeFailed = false;

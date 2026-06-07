@@ -55,14 +55,22 @@ const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   return { MockPrincipleTreeLedgerAdapter };
 });
 
-const { mockRun } = vi.hoisted(() => {
+const { mockRun, mockResolveRuntimeConfig } = vi.hoisted(() => {
   const mockRun = vi.fn().mockResolvedValue({
     status: 'succeeded',
     taskId: 'diagnosis_test-pain-1',
     runId: 'run-retry-1',
     contextHash: 'abc123',
   });
-  return { mockRun };
+  const mockResolveRuntimeConfig = vi.fn().mockReturnValue({
+    runtimeKind: 'pi-ai',
+    provider: 'test-provider',
+    model: 'test-model',
+    apiKeyEnv: 'TEST_KEY',
+    timeoutMs: 300000,
+    agentId: 'main',
+  });
+  return { mockRun, mockResolveRuntimeConfig };
 });
 
 vi.mock('../../src/resolve-workspace.js', () => ({
@@ -93,14 +101,7 @@ vi.mock('@principles/core/runtime-v2', () => {
       }
     },
     CandidateIntakeService: MockCandidateIntakeService,
-    resolveRuntimeConfig: vi.fn().mockReturnValue({
-      runtimeKind: 'pi-ai',
-      provider: 'test-provider',
-      model: 'test-model',
-      apiKeyEnv: 'TEST_KEY',
-      timeoutMs: 300000,
-      agentId: 'main',
-    }),
+    resolveRuntimeConfig: mockResolveRuntimeConfig,
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
     run: mockRun,
     status: vi.fn(),
@@ -176,6 +177,14 @@ const NON_DIAGNOSTICIAN_TASK = {
 describe('pd pain retry — validation and error paths', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockResolveRuntimeConfig.mockReturnValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
     mockGetTask.mockResolvedValue(null);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -202,11 +211,14 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('not_found');
     expect(output.painId).toBe('nonexistent-pain');
-    expect(output.reason).toContain('nonexistent-pain');
+    expect(output.reason).toContain('task_not_found');
     expect(output.nextAction).toBeDefined();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -221,12 +233,15 @@ describe('pd pain retry — validation and error paths', () => {
     await handlePainRetry({
       painId: 'diagnosis_test-pain-1',
       workspace: '/tmp/fake-workspace',
-      runtime: 'test-double',
       json: true,
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    // Find the JSON output (may be mixed with other logs)
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('refused');
     expect(output.reason).toContain('diagnosis_');
     expect(output.nextAction).toContain('pd diagnose run');
@@ -249,10 +264,13 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('refused');
-    expect(output.reason).toContain('not a diagnostician');
+    expect(output.reason).toContain('wrong_task_kind');
     expect(output.nextAction).toBeDefined();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -273,10 +291,13 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const output = JSON.parse(logSpy.mock.calls[0][0]);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('refused');
-    expect(output.reason).toContain('already succeeded');
+    expect(output.reason).toContain('already_succeeded');
     expect(output.nextAction).toContain('--force');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -300,6 +321,68 @@ describe('pd pain retry — validation and error paths', () => {
     expect(mockGetCandidatesByTaskId).not.toHaveBeenCalled();
     expect(mockIntake).not.toHaveBeenCalled();
 
+    exitSpy.mockRestore();
+  });
+
+  it('RETRY-05a: missing --runtime and no config — refused with reason + nextAction (JSON)', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    // Make resolveRuntimeConfig return an error so no runtime is resolved from config
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      reason: 'config_not_found',
+      message: 'No workflows.yaml found',
+      nextAction: 'Create workflows.yaml or pass --runtime',
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      // No runtime specified
+      json: true,
+    });
+
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toContain('missing_runtime');
+    expect(output.nextAction).toContain('--runtime');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('RETRY-05b: conflicting flags --openclaw-local + --openclaw-gateway — JSON output', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      openclawGateway: true,
+      json: true,
+    });
+
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toContain('conflicting_flags');
+    expect(output.nextAction).toBeDefined();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

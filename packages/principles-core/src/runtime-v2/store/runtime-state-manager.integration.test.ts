@@ -212,7 +212,7 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     task = await mgr.getTask('task-retry-clear-error');
     if (!task) return;
     expect(task.status).toBe('succeeded');
-    expect(task.lastError).toBeFalsy(); // null or undefined — stale error cleared
+    expect(task.lastError).toBeNull(); // stale error cleared (implementation sets lastError: null)
 
     // Verify old run still has its error_category (history preserved)
     const runs = await mgr.getRunsByTask('task-retry-clear-error');

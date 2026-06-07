@@ -116,7 +116,7 @@ export class SqliteTaskStore implements TaskStore {
       leaseExpiresAt: row.lease_expires_at ? String(row.lease_expires_at) : undefined,
       attemptCount: Number(row.attempt_count ?? 0),
       maxAttempts: Number(row.max_attempts ?? 3),
-      lastError: row.last_error ? String(row.last_error) as TaskRecord['lastError'] : undefined,
+      lastError: row.last_error ? String(row.last_error) as TaskRecord['lastError'] : null,
       inputRef: row.input_ref ? String(row.input_ref) : undefined,
       resultRef: row.result_ref ? String(row.result_ref) : undefined,
     };
