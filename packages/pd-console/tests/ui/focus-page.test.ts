@@ -411,3 +411,64 @@ describe("FocusPage: component can be imported", () => {
     expect(typeof mod.FocusPage).toBe("function");
   });
 });
+
+// ── PRI-332: Zero state clarity tests ─────────────────────────────────────────
+
+describe("FocusPage: PRI-332 zero state clarity", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const enJson = require("../../src/ui/i18n/en.json") as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const zhJson = require("../../src/ui/i18n/zh-CN.json") as Record<string, unknown>;
+
+  const enFocus = (enJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
+  const zhFocus = (zhJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
+
+  it("zeroStateHealthy key exists in both languages", () => {
+    expect(typeof enFocus.zeroStateHealthy).toBe("string");
+    expect(typeof zhFocus.zeroStateHealthy).toBe("string");
+    expect((enFocus.zeroStateHealthy as string).length).toBeGreaterThan(10);
+    expect((zhFocus.zeroStateHealthy as string).length).toBeGreaterThan(5);
+  });
+
+  it("zeroStateDbMissing key exists in both languages", () => {
+    expect(typeof enFocus.zeroStateDbMissing).toBe("string");
+    expect(typeof zhFocus.zeroStateDbMissing).toBe("string");
+  });
+
+  it("zeroStateHealthy does not claim PD is broken or inactive", () => {
+    const en = enFocus.zeroStateHealthy as string;
+    const zh = zhFocus.zeroStateHealthy as string;
+    // Should not contain misleading terms
+    expect(en).not.toMatch(/broken|error|not working|disabled/i);
+    expect(zh).not.toMatch(/\u6545\u969c|\u9519\u8bef|\u505c\u6b62/);
+    // Should mention that PD has checked things
+    expect(en).toMatch(/checked|check/i);
+    expect(zh).toMatch(/\u68c0\u67e5/);
+  });
+
+  it("FocusPage source contains ZeroStateHealthy component", () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+      "utf-8",
+    );
+    expect(src).toMatch(/function ZeroStateHealthy/);
+    expect(src).toMatch(/function ZeroStateDbMissing/);
+    expect(src).toMatch(/zeroStateHealthy/);
+    expect(src).toMatch(/zeroStateDbMissing/);
+  });
+
+  it("FocusPage shows degraded signals regardless of governance state", () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+      "utf-8",
+    );
+    // Should always show degraded signals when present, not gated by state === 'degraded'
+    expect(src).toMatch(/degradedSignals && degradedSignals\.length > 0/);
+    // Should NOT have the old pattern that gates on governanceState === "degraded"
+    expect(src).not.toMatch(/governanceState === "degraded" && degradedSignals/);
+  });
+});

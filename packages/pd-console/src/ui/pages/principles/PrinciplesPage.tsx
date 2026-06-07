@@ -22,6 +22,10 @@ type ReviewStatus = "pending" | "approved" | "rejected" | "parked";
 interface PrincipleCard {
   principleId: string;
   title: string;
+  /** Original title before fallback (shown in details when title is unreadable). PRI-332 */
+  originalTitle: string;
+  /** Whether the title was replaced with a bounded fallback. PRI-332 */
+  titleUsedFallback: boolean;
   text: string;
   status: ReviewStatus;
   channels: string[];
@@ -29,6 +33,10 @@ interface PrincipleCard {
   updatedAt: string;
   createdAt: string;
   priority: string;
+  /** PRI-332: detected language of the principle text */
+  detectedLanguage: string;
+  /** PRI-332: optional readability warning for the title */
+  readabilityWarning?: string;
 }
 
 // ── Map principle status to review status ───────────────────────────────────
@@ -114,7 +122,7 @@ function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
 
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrinciplesPage() {
-  const { t } = useTranslation("pages");
+  const { t, i18n } = useTranslation("pages");
   const navigate = useNavigate();
 
   const [principles, setPrinciples] = useState<PrincipleListItem[]>([]);
@@ -186,9 +194,23 @@ export function PrinciplesPage() {
         : p.evaluability === "weak_heuristic"
           ? "low"
           : "medium";
+
+    // PRI-332: Determine display title with bounded fallback for unreadable titles
+    const rawTitle = p.triggerPattern || p.text.slice(0, 80);
+    const detectedLang = p.detectedLanguage ?? 'unknown';
+    const readWarning = p.readabilityWarning;
+    let displayTitle = rawTitle;
+    let usedFallback = false;
+    if (readWarning) {
+      displayTitle = t("principles.readabilityFallbackTitle");
+      usedFallback = true;
+    }
+
     return {
       principleId: p.id,
-      title: p.triggerPattern || p.text.slice(0, 80),
+      title: displayTitle,
+      originalTitle: rawTitle,
+      titleUsedFallback: usedFallback,
       text: p.text,
       status: toReviewStatus(p.status, ag?.status),
       channels: uniqueChannels,
@@ -196,6 +218,8 @@ export function PrinciplesPage() {
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
       priority: p.priority,
+      detectedLanguage: detectedLang,
+      readabilityWarning: readWarning,
     };
   });
 
@@ -387,16 +411,53 @@ export function PrinciplesPage() {
                     key={ch}
                     className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
                   >
-                    {t("principles." + (CHANNEL_LABELS[ch] ?? ch))}
+                    {/* PRI-332: Use known label or display channel name directly — never raw i18n key */}
+                    {CHANNEL_LABELS[ch]
+                      ? t("principles." + CHANNEL_LABELS[ch])
+                      : ch}
                   </span>
                 ))}
+                {/* PRI-332: Language hint badge when principle language differs from UI language */}
+                {card.detectedLanguage && card.detectedLanguage !== 'unknown' && (
+                  <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
+                    {card.detectedLanguage === 'zh'
+                      ? t("principles.languageHintZh")
+                      : t("principles.languageHintEn")}
+                  </span>
+                )}
                 <span className="font-mono text-[11px] text-ink-4">
                   {t("principles.confidence")}: {card.confidence}
                 </span>
               </div>
 
+              {/* PRI-332: Readability warning — gentle hint when title looks technical */}
+              {card.readabilityWarning && (
+                <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
+                  {card.readabilityWarning}
+                </div>
+              )}
+
+              {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
+              {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
+                <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
+                  {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
+                </div>
+              )}
+
               {/* Title */}
               <h3 className="font-semibold text-ink mb-1">{card.title}</h3>
+
+              {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
+              {card.titleUsedFallback && card.originalTitle && (
+                <details className="mb-1">
+                  <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
+                    {t("principles.readabilityOriginalLabel")}
+                  </summary>
+                  <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
+                    {card.originalTitle}
+                  </div>
+                </details>
+              )}
 
               {/* Text preview */}
               <p className="text-ink-3 text-[13px] line-clamp-3 leading-relaxed">

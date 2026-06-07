@@ -124,7 +124,9 @@
         "check_task_status": "检查内化管线状态，或等待自动重试。",
         "fix_and_retry": "检查失败详情，修复问题后重试。",
         "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。"
-      }
+      },
+      "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
+      "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。"
     },
     "pain": {
       "eyebrow": "行为证据",
@@ -263,6 +265,12 @@
       "channelDeferArchive": "延迟归档",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "置信度",
+      "languageHintEn": "以英文生成",
+      "languageHintZh": "以中文生成",
+      "languageHintUnknown": "语言未知",
+      "languageMismatchHint": "此原则以{{lang}}生成。请审查行为本身，而不仅是措辞。",
+      "readabilityFallbackTitle": "原则候选",
+      "readabilityOriginalLabel": "原始技术文本",
       "detail": {
         "loading": "加载中…",
         "backToList": "← 返回列表",

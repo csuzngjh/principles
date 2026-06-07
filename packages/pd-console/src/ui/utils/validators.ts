@@ -885,6 +885,10 @@ export interface PrincipleListItemData {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** PRI-332: Detected language of the principle text */
+  detectedLanguage: string;
+  /** PRI-332: Human-readable warning when the title may be hard to read */
+  readabilityWarning?: string;
 }
 
 function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
@@ -906,14 +910,22 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   if (!Object.hasOwn(v, 'conflictsWithCount') || !isNumber(v.conflictsWithCount)) return null;
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
   if (!Object.hasOwn(v, 'updatedAt') || !isString(v.updatedAt)) return null;
-  return {
+  const result: PrincipleListItemData = {
     id: v.id, text: v.text, triggerPattern: v.triggerPattern, action: v.action,
     status: v.status, priority: v.priority, scope: v.scope,
     domain: domain.value,
     evaluability: v.evaluability, valueScore: v.valueScore, adherenceRate: v.adherenceRate,
     painPreventedCount: v.painPreventedCount, ruleCount: v.ruleCount,
     conflictsWithCount: v.conflictsWithCount, createdAt: v.createdAt, updatedAt: v.updatedAt,
+    // PRI-332: detectedLanguage defaults to 'unknown' when absent
+    detectedLanguage: Object.hasOwn(v, 'detectedLanguage') && isString(v.detectedLanguage) ? v.detectedLanguage : 'unknown',
   };
+  // PRI-332: readabilityWarning is optional — fail loud when present but wrong type (ERR-009)
+  if (Object.hasOwn(v, 'readabilityWarning')) {
+    if (!isString(v.readabilityWarning)) return null;
+    result.readabilityWarning = v.readabilityWarning;
+  }
+  return result;
 }
 
 export interface PrinciplesListData {

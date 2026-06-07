@@ -581,3 +581,95 @@ describe("PrincipleDetail validator normalizes all page-accessed fields", () => 
     expect(principleDetailSrc).toMatch(/safeStringArray\(raw\.derivedFromPainIds\)/);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// 15. PRI-332: Principle Review readability
+// ════════════════════════════════════════════════════════════════════════════
+describe("PRI-332: Principle Review readability", () => {
+  it("PrinciplesPage uses detectedLanguage field from backend", () => {
+    expect(principlesPageSrc).toMatch(/detectedLanguage/);
+  });
+
+  it("PrinciplesPage shows language hint badge", () => {
+    expect(principlesPageSrc).toMatch(/languageHintEn/);
+    expect(principlesPageSrc).toMatch(/languageHintZh/);
+  });
+
+  it("PrinciplesPage shows language mismatch hint", () => {
+    expect(principlesPageSrc).toMatch(/languageMismatchHint/);
+  });
+
+  it("PrinciplesPage uses readabilityWarning from backend", () => {
+    expect(principlesPageSrc).toMatch(/readabilityWarning/);
+  });
+
+  it("PrinciplesPage uses bounded fallback title when readabilityWarning exists", () => {
+    expect(principlesPageSrc).toMatch(/readabilityFallbackTitle/);
+    expect(principlesPageSrc).toMatch(/titleUsedFallback/);
+  });
+
+  it("PrinciplesPage shows original text in details when fallback used", () => {
+    expect(principlesPageSrc).toMatch(/readabilityOriginalLabel/);
+    expect(principlesPageSrc).toMatch(/originalTitle/);
+  });
+
+  it("PrinciplesPage never shows raw i18n key for unknown channels", () => {
+    // Old pattern: t("principles." + (CHANNEL_LABELS[ch] ?? ch))
+    // This would show "principles.model_training" as raw key for unknown channels
+    // New pattern: CHANNEL_LABELS[ch] ? t(...) : ch
+    expect(principlesPageSrc).not.toMatch(/CHANNEL_LABELS\[ch\] \?\? ch/);
+    expect(principlesPageSrc).toMatch(/CHANNEL_LABELS\[ch\]/);
+  });
+
+  it("language hint i18n keys exist in both languages", () => {
+    expect(getPagesKey("principles.languageHintEn")).toBeTruthy();
+    expect(getPagesKeyZh("principles.languageHintEn")).toBeTruthy();
+    expect(getPagesKey("principles.languageHintZh")).toBeTruthy();
+    expect(getPagesKeyZh("principles.languageHintZh")).toBeTruthy();
+    expect(getPagesKey("principles.languageHintUnknown")).toBeTruthy();
+    expect(getPagesKeyZh("principles.languageHintUnknown")).toBeTruthy();
+  });
+
+  it("language mismatch hint supports interpolation", () => {
+    const en = String(getPagesKey("principles.languageMismatchHint"));
+    const zh = String(getPagesKeyZh("principles.languageMismatchHint"));
+    expect(en).toContain("{{lang}}");
+    expect(zh).toContain("{{lang}}");
+  });
+
+  it("readability fallback title exists in both languages", () => {
+    expect(getPagesKey("principles.readabilityFallbackTitle")).toBeTruthy();
+    expect(getPagesKeyZh("principles.readabilityFallbackTitle")).toBeTruthy();
+  });
+
+  it("readability original label exists in both languages", () => {
+    expect(getPagesKey("principles.readabilityOriginalLabel")).toBeTruthy();
+    expect(getPagesKeyZh("principles.readabilityOriginalLabel")).toBeTruthy();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 16. PRI-332: Backend contract — detectedLanguage and readabilityWarning
+// ════════════════════════════════════════════════════════════════════════════
+describe("PRI-332: Backend contract validators", () => {
+  it("validators.ts includes detectedLanguage in PrincipleListItemData", () => {
+    expect(validatorsSrc).toMatch(/detectedLanguage.*string/);
+  });
+
+  it("validators.ts includes readabilityWarning as optional in PrincipleListItemData", () => {
+    expect(validatorsSrc).toMatch(/readabilityWarning\?.*string/);
+  });
+
+  it("validators.ts validates detectedLanguage with Object.hasOwn (ERR-013)", () => {
+    expect(validatorsSrc).toMatch(/Object\.hasOwn.*detectedLanguage/);
+  });
+
+  it("validators.ts validates readabilityWarning with Object.hasOwn (ERR-013)", () => {
+    expect(validatorsSrc).toMatch(/Object\.hasOwn.*readabilityWarning/);
+  });
+
+  it("validators.ts fails loud on non-string readabilityWarning (ERR-009)", () => {
+    // When readabilityWarning is present but not a string, validation should return null
+    expect(validatorsSrc).toMatch(/readabilityWarning.*return null/);
+  });
+});
