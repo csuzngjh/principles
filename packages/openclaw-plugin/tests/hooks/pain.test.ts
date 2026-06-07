@@ -746,3 +746,26 @@ describe('PRI-326: buildToolCallObservation params defense', () => {
     expect(result.relPath).toBe('unknown');
   });
 });
+
+describe('PRI-326: buildToolCallObservation unserializable result defense', () => {
+  const profile = { risk_paths: [] } as any;
+  const outcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+
+  it('handles BigInt result without crashing', () => {
+    const result = buildToolCallObservation(
+      { params: {}, error: undefined, result: { val: BigInt(42) } } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.errorText).toContain('unserializable result');
+  });
+
+  it('handles circular reference result without crashing', () => {
+    const circular: any = { name: 'loop' };
+    circular.self = circular;
+    const result = buildToolCallObservation(
+      { params: {}, error: undefined, result: circular } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.errorText).toContain('unserializable result');
+  });
+});

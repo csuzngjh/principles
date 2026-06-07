@@ -93,7 +93,18 @@ export function buildToolCallObservation(
   const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, workspaceDir) : 'unknown';
   const isRisk = isRisky(relPath, profile.risk_paths);
-  const errorText = String(event.error ?? (typeof event.result === 'string' ? event.result : JSON.stringify(event.result)));
+  let errorText: string;
+  if (event.error) {
+    errorText = String(event.error);
+  } else if (typeof event.result === 'string') {
+    errorText = event.result;
+  } else {
+    try {
+      errorText = JSON.stringify(event.result);
+    } catch {
+      errorText = `[unserializable result: ${typeof event.result}]`;
+    }
+  }
   const denoised = denoiseError(errorText);
   const hash = computeHash(denoised);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, workspaceDir);
