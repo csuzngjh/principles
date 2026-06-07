@@ -526,3 +526,177 @@ describe('EvidenceChainConsoleModel — task-only records', () => {
     expect(taskOnlyRecord!.failureReason).toContain('timeout');
   });
 });
+
+// ── Malformed principle ledger (ERR-002) ──────────────────────────────────────
+
+describe('EvidenceChainConsoleModel — malformed principle ledger', () => {
+  function writeLedger(content: string): void {
+    const ledgerDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(ledgerDir, { recursive: true });
+    fs.writeFileSync(path.join(ledgerDir, 'principle_training_state.json'), content, 'utf-8');
+  }
+
+  it('returns degraded when ledger contains invalid JSON', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    writeLedger('{ invalid json !!!');
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toContain('invalid JSON');
+    expect(result.nextAction).toBeTruthy();
+    // Records from pain_events should still appear
+    expect(result.records.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('returns degraded when ledger root is not an object', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    writeLedger('"just a string"');
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toContain('not a JSON object');
+    expect(result.nextAction).toBeTruthy();
+  });
+
+  it('returns degraded when ledger tree is not an object', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    writeLedger(JSON.stringify({ _tree: 42 }));
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toContain('tree is not a JSON object');
+    expect(result.nextAction).toBeTruthy();
+  });
+
+  it('returns degraded when principles field is missing', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    writeLedger(JSON.stringify({ _tree: { other: 'data' } }));
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toContain('principles field');
+    expect(result.nextAction).toBeTruthy();
+  });
+
+  it('links principle to pain event from valid ledger', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    const painId = `pain_${rowId}`;
+    writeLedger(JSON.stringify({
+      _tree: {
+        principles: {
+          'princ-001': {
+            id: 'princ-001',
+            derivedFromPainIds: [painId],
+            text: 'Always ask before modifying config',
+            status: 'active',
+          },
+        },
+      },
+    }));
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === painId);
+    expect(record).toBeDefined();
+    expect(record!.linkedPrincipleId).toBe('princ-001');
+    expect(record!.state).toBe('internalization_started');
+    expect(result.degradedReason).toBeFalsy();
+  });
+
+  it('no ledger file = no degraded (distinguished from malformed)', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    // No ledger file written — this is "no internalization yet", not an error
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toBeFalsy();
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].state).toBe('pain_recorded');
+  });
+
+  it('empty ledger file = no degraded (distinguished from malformed)', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    writeLedger('');
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toBeFalsy();
+    expect(result.records).toHaveLength(1);
+  });
+
+  it('ledger with prototype-polluted key does not leak inherited properties', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+    const stateDb = createStateDb(); stateDb.close();
+
+    // Ledger where a principle entry has a prototype-inherited key like "toString"
+    writeLedger(JSON.stringify({
+      _tree: {
+        principles: {
+          'princ-001': {
+            id: 'princ-001',
+            derivedFromPainIds: ['pain_1'],
+            text: 'A principle',
+          },
+        },
+      },
+    }));
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toBeFalsy();
+    // Should not crash or produce unexpected keys from prototype chain
+    expect(result.records).toHaveLength(1);
+  });
+});

@@ -75,6 +75,59 @@ function isString(value: unknown): value is string {
 }
 
 /**
+ * Runtime type guard: check if a value is a plain object (Record<string, unknown>).
+ * Rejects null, arrays, primitives. Used instead of `as Record<string, unknown>`
+ * on untrusted DB rows and parsed JSON (ERR-001/005).
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Coerce an array of unknown values (e.g. better-sqlite3 .all() result)
+ * into an array of Record<string, unknown> with runtime validation.
+ * Filters out any non-record entries instead of casting the whole array (ERR-001).
+ */
+function coerceRowsToRecords(rows: unknown[]): Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  for (const row of rows) {
+    if (isRecord(row)) {
+      result.push(row);
+    }
+  }
+  return result;
+}
+
+/**
+ * Safe own-property getter for untrusted records (ERR-013).
+ * Uses Object.hasOwn() instead of `in` to avoid prototype-chain matches.
+ * Returns undefined when key is absent — caller decides whether that's an error.
+ */
+function getOwnValue(record: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/**
+ * Read an own string property from an untrusted record.
+ * Returns undefined when key is absent or value is not a string.
+ */
+function readOwnString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = getOwnValue(record, key);
+  return isString(value) ? value : undefined;
+}
+
+/**
+ * Read an own string-array property from an untrusted record.
+ * Returns empty array when key is absent, value is not an array,
+ * or array contains non-string elements (ERR-005/007).
+ */
+function readOwnStringArray(record: Record<string, unknown>, key: string): string[] {
+  const value = getOwnValue(record, key);
+  if (!Array.isArray(value)) return [];
+  return value.filter(isString);
+}
+
+/**
  * Coerce a value to string — handles SQLite INTEGER PRIMARY KEY returning number.
  * Returns empty string only for null/undefined; numbers are stringified.
  */
@@ -196,45 +249,85 @@ interface LedgerPrinciple {
   createdAt?: string;
 }
 
-function readLedgerPrinciples(workspaceDir: string): LedgerPrinciple[] {
+interface LedgerReadResult {
+  principles: LedgerPrinciple[];
+  /** Present when ledger exists but could not be fully read (ERR-002) */
+  degradedReason?: string;
+  nextAction?: string;
+}
+
+function readLedgerPrinciples(workspaceDir: string): LedgerReadResult {
   const ledgerPath = path.join(workspaceDir, '.state', 'principle_training_state.json');
-  if (!fs.existsSync(ledgerPath)) return [];
+  if (!fs.existsSync(ledgerPath)) return { principles: [] };
 
+  let content: string;
   try {
-    const content = fs.readFileSync(ledgerPath, 'utf-8');
-    if (!content || content.trim() === '') return [];
-    const parsed: unknown = JSON.parse(content);
-    if (typeof parsed !== 'object' || parsed === null) return [];
-
-    const tree = Object.hasOwn(parsed, '_tree')
-      ? (parsed as Record<string, unknown>)._tree
-      : Object.hasOwn(parsed, 'tree')
-        ? (parsed as Record<string, unknown>).tree
-        : parsed;
-
-    if (typeof tree !== 'object' || tree === null) return [];
-    const {principles} = (tree as Record<string, unknown>);
-    if (typeof principles !== 'object' || principles === null) return [];
-
-    const result: LedgerPrinciple[] = [];
-    for (const [, value] of Object.entries(principles)) {
-      if (typeof value === 'object' && value !== null) {
-        const p = value as Record<string, unknown>;
-        result.push({
-          id: isString(p.id) ? p.id : '',
-          derivedFromPainIds: Array.isArray(p.derivedFromPainIds)
-            ? p.derivedFromPainIds.filter(isString)
-            : [],
-          text: isString(p.text) ? p.text : undefined,
-          status: isString(p.status) ? p.status : undefined,
-          createdAt: isString(p.createdAt) ? p.createdAt : undefined,
-        });
-      }
-    }
-    return result;
+    content = fs.readFileSync(ledgerPath, 'utf-8');
   } catch {
-    return [];
+    return {
+      principles: [],
+      degradedReason: 'Failed to read principle ledger file',
+      nextAction: 'Check file permissions for .state/principle_training_state.json',
+    };
   }
+
+  if (!content || content.trim() === '') return { principles: [] };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return {
+      principles: [],
+      degradedReason: 'Principle ledger contains invalid JSON',
+      nextAction: 'Review .state/principle_training_state.json for syntax errors. Consider restoring from backup or re-running internalization.',
+    };
+  }
+
+  if (!isRecord(parsed)) {
+    return {
+      principles: [],
+      degradedReason: 'Principle ledger root is not a JSON object',
+      nextAction: 'Review .state/principle_training_state.json structure. Expected { _tree: { principles: {...} } } or { tree: { principles: {...} } }.',
+    };
+  }
+
+  const treeValue: unknown = Object.hasOwn(parsed, '_tree')
+    ? getOwnValue(parsed, '_tree')
+    : Object.hasOwn(parsed, 'tree')
+      ? getOwnValue(parsed, 'tree')
+      : parsed;
+
+  if (!isRecord(treeValue)) {
+    return {
+      principles: [],
+      degradedReason: 'Principle ledger tree is not a JSON object',
+      nextAction: 'Review .state/principle_training_state.json structure. The _tree or tree field must be an object.',
+    };
+  }
+
+  const principlesValue = getOwnValue(treeValue, 'principles');
+  if (!isRecord(principlesValue)) {
+    return {
+      principles: [],
+      degradedReason: 'Principle ledger principles field is missing or not an object',
+      nextAction: 'Review .state/principle_training_state.json structure. Expected principles to be an object.',
+    };
+  }
+
+  const result: LedgerPrinciple[] = [];
+  for (const [, entry] of Object.entries(principlesValue)) {
+    if (isRecord(entry)) {
+      result.push({
+        id: readOwnString(entry, 'id') ?? '',
+        derivedFromPainIds: readOwnStringArray(entry, 'derivedFromPainIds'),
+        text: readOwnString(entry, 'text'),
+        status: readOwnString(entry, 'status'),
+        createdAt: readOwnString(entry, 'createdAt'),
+      });
+    }
+  }
+  return { principles: result };
 }
 
 // ── Model ──────────────────────────────────────────────────────────────────────
@@ -269,9 +362,9 @@ export class EvidenceChainConsoleModel {
       let trajDb: Database.Database | null = null;
       try {
         trajDb = new Database(trajectoryDbPath, { readonly: true });
-        painEvents = trajDb.prepare(
+        painEvents = coerceRowsToRecords(trajDb.prepare(
           'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
-        ).all() as Record<string, unknown>[];
+        ).all());
         trajectoryDbAvailable = true;
       } catch (err) {
         if (isMissingTableError(err)) {
@@ -298,9 +391,9 @@ export class EvidenceChainConsoleModel {
       try {
         const conn = this.getReadConnection();
         const db = conn.getDb();
-        const tasks = db.prepare(
+        const tasks = coerceRowsToRecords(db.prepare(
           "SELECT task_id, status, last_error, created_at FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
-        ).all() as Record<string, unknown>[];
+        ).all());
 
         for (const task of tasks) {
           const taskId = isString(task.task_id) ? task.task_id : '';
@@ -334,9 +427,9 @@ export class EvidenceChainConsoleModel {
       try {
         const conn = this.getReadConnection();
         const db = conn.getDb();
-        const candidates = db.prepare(
+        const candidates = coerceRowsToRecords(db.prepare(
           'SELECT candidate_id, task_id FROM principle_candidates',
-        ).all() as Record<string, unknown>[];
+        ).all());
 
         for (const c of candidates) {
           const candidateId = isString(c.candidate_id) ? c.candidate_id : '';
@@ -359,7 +452,12 @@ export class EvidenceChainConsoleModel {
     }
 
     // ── 4. Read ledger principles ─────────────────────────────────────────
-    const ledgerPrinciples = readLedgerPrinciples(this.workspaceDir);
+    const ledgerResult = readLedgerPrinciples(this.workspaceDir);
+    const ledgerPrinciples = ledgerResult.principles;
+    if (ledgerResult.degradedReason) {
+      degradedReasons.push(ledgerResult.degradedReason);
+      degradedNextActions.push(ledgerResult.nextAction ?? 'Review principle ledger file.');
+    }
     const painToPrincipleMap = new Map<string, string>(); // painId → principleId
     for (const p of ledgerPrinciples) {
       for (const painId of p.derivedFromPainIds ?? []) {
