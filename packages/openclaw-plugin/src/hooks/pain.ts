@@ -230,7 +230,11 @@ function handleManualPain(
   workspaceDir: string,
   sessionId: string,
 ): void {
-  const params = event.params as { input?: string; arguments?: string };
+  const rawParams = event.params;
+  const params: { input?: string; arguments?: string } =
+    (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams))
+      ? rawParams as { input?: string; arguments?: string }
+      : {};
   const reason = params.input || params.arguments || 'Manual intervention';
   const traceId = createTraceId();
 

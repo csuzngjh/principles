@@ -64,5 +64,12 @@ export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: strin
     }
   }
 
+  if (evidence.length === 0) {
+    evidence.push({
+      sourceRef: 'trajectory:empty',
+      note: 'trajectory_available_but_empty: no user correction or assistant turns found',
+    });
+  }
+
   return evidence.slice(0, MAX_EVIDENCE_ENTRIES);
 }

@@ -86,7 +86,10 @@ export function buildToolCallObservation(
   workspaceDir: string,
   profile: ReturnType<typeof normalizeProfile>,
 ): ToolCallObservation {
-  const params = event.params as ToolParams;
+  const rawParams = event.params;
+  const params: ToolParams = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams))
+    ? rawParams as ToolParams
+    : {};
   const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, workspaceDir) : 'unknown';
   const isRisk = isRisky(relPath, profile.risk_paths);

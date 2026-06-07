@@ -683,17 +683,18 @@ describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
     expect(result.reason).toBeTruthy();
   });
 
-  it('returns gate_admitted when triage passes and gate allows', () => {
+  it('returns gate_admitted when consecutive errors exceed repeatedFailure threshold', () => {
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
-    // Need high GFI to pass gate
-    const highGfiState = { currentGfi: 100, consecutiveErrors: 5, lastErrorHash: 'abc123' } as any;
+    // consecutiveErrors=5 >= default repeatedFailure threshold of 4 → gate admits via repeated_failure
+    const highConsecutiveState = { currentGfi: 0, consecutiveErrors: 5, lastErrorHash: 'abc123' } as any;
 
     const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'write' } as any, baseObservation, baseOutcome, highGfiState, undefined, 's-unique-gate-test', workspaceDir, mockConfig
+      { toolName: 'write' } as any, baseObservation, baseOutcome, highConsecutiveState, undefined, 's-gate-admitted-test', workspaceDir, mockConfig
     );
-    // Gate might admit or reject depending on thresholds
-    expect(['gate_admitted', 'gate_rejected']).toContain(result.stage);
-    expect(result.gateResult).toBeDefined();
+    expect(result.stage).toBe('gate_admitted');
+    expect(result.admitted).toBe(true);
+    expect(result.gateResult?.shouldDiagnose).toBe(true);
+    expect(result.gateResult?.reason).toBe('repeated_failure');
   });
 
   it('includes reason and detail in every decision', () => {
@@ -702,5 +703,46 @@ describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
     );
     expect(result.reason).toBeTruthy();
     expect(result.detail).toBeTruthy();
+  });
+});
+
+describe('PRI-326: buildToolCallObservation params defense', () => {
+  const profile = { risk_paths: [] } as any;
+
+  it('handles null params without crashing', () => {
+    const outcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+    const result = buildToolCallObservation(
+      { params: null, error: 'fail', result: {} } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.relPath).toBe('unknown');
+    expect(result.params.filePath).toBeUndefined();
+  });
+
+  it('handles undefined params without crashing', () => {
+    const outcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+    const result = buildToolCallObservation(
+      { params: undefined, error: 'fail', result: {} } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.relPath).toBe('unknown');
+  });
+
+  it('handles array params without crashing', () => {
+    const outcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+    const result = buildToolCallObservation(
+      { params: ['bad'], error: 'fail', result: {} } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.relPath).toBe('unknown');
+  });
+
+  it('handles string params without crashing', () => {
+    const outcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
+    const result = buildToolCallObservation(
+      { params: 'not-an-object', error: 'fail', result: {} } as any,
+      outcome, '/workspace', profile
+    );
+    expect(result.relPath).toBe('unknown');
   });
 });
