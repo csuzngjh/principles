@@ -27,7 +27,7 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('RuntimeStateManager task/run truth alignment', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-rsm-test-${process.pid}-${Date.now()}`);
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let mgr: RuntimeStateManager;
 
   beforeEach(async () => {
@@ -188,5 +188,42 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     if (!task) return;
     expect(task.attemptCount).toBe(2);
     expect(task.status).toBe('leased');
+  });
+
+  // ── markTaskSucceeded clears stale lastError ──────────────────────────────
+
+  it('markTaskSucceeded clears lastError from previous failed attempt', async () => {
+    // Simulate: task fails → retry_wait → re-lease → succeed
+    await mgr.createTask(makeTaskInput('task-retry-clear-error', { attemptCount: 0, maxAttempts: 3 }));
+
+    // First attempt: lease → fail → retry_wait
+    await mgr.acquireLease({ taskId: 'task-retry-clear-error', owner: 'agent-1', runtimeKind: 'openclaw' });
+    await mgr.markTaskRetryWait('task-retry-clear-error', 'output_invalid');
+
+    let task = await mgr.getTask('task-retry-clear-error');
+    if (!task) return;
+    expect(task.status).toBe('retry_wait');
+    expect(task.lastError).toBe('output_invalid');
+
+    // Second attempt: lease → succeed
+    await mgr.acquireLease({ taskId: 'task-retry-clear-error', owner: 'agent-2', runtimeKind: 'openclaw' });
+    await mgr.markTaskSucceeded('task-retry-clear-error', 'commit://abc123');
+
+    task = await mgr.getTask('task-retry-clear-error');
+    if (!task) return;
+    expect(task.status).toBe('succeeded');
+    expect(task.lastError).toBeFalsy(); // null or undefined — stale error cleared
+
+    // Verify old run still has its error_category (history preserved)
+    const runs = await mgr.getRunsByTask('task-retry-clear-error');
+    expect(runs).toHaveLength(2);
+    // First run: failed
+    const [run0, run1] = runs;
+    if (!run0) return;
+    expect(run0.executionStatus).toBe('failed');
+    expect(run0.errorCategory).toBe('output_invalid');
+    // Second run: succeeded
+    if (!run1) return;
+    expect(run1.executionStatus).toBe('succeeded');
   });
 });
