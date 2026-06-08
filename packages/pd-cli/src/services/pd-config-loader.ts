@@ -252,8 +252,11 @@ function extractWorkspaceDefault(configPath: string): string | null {
     ) {
       return parsed.workspace.default;
     }
-  } catch {
-    // Silently ignore — discovery is best-effort
+  } catch (err) {
+    // Graceful degradation with observability: log but don't throw
+    process.stderr.write(
+      `[PD:workspace] WARN: Failed to parse workspace config at ${configPath}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
   }
   return null;
 }
@@ -261,6 +264,7 @@ function extractWorkspaceDefault(configPath: string): string | null {
 /**
  * Read the OpenClaw plugin config file for workspace field.
  * Reuses the same search locations as PathResolver.
+ * Returns null if no valid config is found (graceful degradation).
  */
 function loadOpenClawPluginConfig(): { workspace?: string } | null {
   const configLocations = [
@@ -272,9 +276,23 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
     if (fs.existsSync(loc)) {
       try {
         const content = fs.readFileSync(loc, 'utf8');
-        return JSON.parse(content) as { workspace?: string };
-      } catch {
-        // ignore malformed config
+        const parsed: unknown = JSON.parse(content);
+        // Runtime type guard: validate workspace is a non-empty string
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed) &&
+          'workspace' in parsed &&
+          typeof (parsed as Record<string, unknown>).workspace === 'string' &&
+          ((parsed as Record<string, unknown>).workspace as string).length > 0
+        ) {
+          return { workspace: (parsed as Record<string, unknown>).workspace as string };
+        }
+      } catch (err) {
+        // Graceful degradation with observability: log but continue to next location
+        process.stderr.write(
+          `[PD:workspace] WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
   }

@@ -179,7 +179,7 @@ workspace:
 
 ### 4.2 新建 workspace 验证测试
 
-**文件**: `packages/principles-core/tests/pd-config-workspace.test.ts`
+**文件**: `packages/principles-core/src/runtime-v2/config/__tests__/pd-config-workspace.test.ts`
 
 测试用例：
 - 接受有效的 workspace.default（绝对路径）
