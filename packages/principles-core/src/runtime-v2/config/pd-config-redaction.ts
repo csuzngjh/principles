@@ -161,6 +161,7 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
   return {
     version: config.version,
     source,
+    workspace: config.workspace,
     features,
     runtimeProfiles,
     defaultRuntime: config.internalAgents.defaultRuntime,

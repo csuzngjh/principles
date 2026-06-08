@@ -91,6 +91,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     }
   },
   RuntimeStateManager: MockRuntimeStateManager,
+  SqliteConnection: vi.fn().mockImplementation(function() {
+    return mockDb;
+  }),
   loadLedger: mockLoadLedger,
   getLedgerFilePathPublic: mockGetLedgerFilePath,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),

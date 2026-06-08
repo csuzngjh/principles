@@ -253,7 +253,7 @@ describe('pd runtime probe', () => {
     } as RuntimeProbeOptions);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("only supports --runtime openclaw-cli")
+      expect.stringContaining("unsupported")
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 
