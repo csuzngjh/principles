@@ -108,7 +108,7 @@ describe('parseTriggerDecisions', () => {
     expect(entries[0].nextAction).toBe('');
   });
 
-  it('PARSER-06: entries sorted newest-first (reverse of parse order)', () => {
+  it('PARSER-06: entries preserve parse order (oldest-first within file)', () => {
     const content = [
       '2026-06-08 10:15:00 [INFO] TRIGGER_DECISION {"outcome":"evidence_only","sourceKind":"a","reason":"r1","nextAction":"n"}',
       '2026-06-08 10:16:00 [INFO] TRIGGER_DECISION {"outcome":"health_only","sourceKind":"b","reason":"r2","nextAction":"n"}',
@@ -118,7 +118,7 @@ describe('parseTriggerDecisions', () => {
     const entries = parseTriggerDecisions(content);
     expect(entries.length).toBe(3);
     // File is parsed top-to-bottom, entries preserve reading order
-    // Test that timestamps are preserved
+    // (readRecentDecisions reverses per-file entries for newest-first)
     expect(entries[0].timestamp).toBe('2026-06-08 10:15:00');
     expect(entries[1].timestamp).toBe('2026-06-08 10:16:00');
     expect(entries[2].timestamp).toBe('2026-06-08 10:17:00');
@@ -162,9 +162,10 @@ describe('real SYSTEM log fixture', () => {
     expect(output.count).toBe(3);
     expect(output.decisions.length).toBe(3);
     expect(output.searchedPath).toContain(path.join('memory', 'logs', 'SYSTEM_*.log'));
-    expect(output.decisions[0].outcome).toBe('evidence_only');
+    // Entries are newest-first after per-file reversal
+    expect(output.decisions[0].outcome).toBe('manual_owner_admitted');
     expect(output.decisions[1].outcome).toBe('health_only');
-    expect(output.decisions[2].outcome).toBe('manual_owner_admitted');
+    expect(output.decisions[2].outcome).toBe('evidence_only');
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

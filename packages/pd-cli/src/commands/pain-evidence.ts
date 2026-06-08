@@ -58,8 +58,12 @@ function parseTriggerDecisions(logContent: string): TriggerDecisionEntry[] {
 
     try {
       const payload = JSON.parse(line.slice(jsonStart));
-      // Extract timestamp from log line prefix (format: YYYY-MM-DD HH:MM:SS ...)
-      const tsMatch = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/.exec(line);
+      // Extract timestamp from log line prefix.
+      // SystemLogger produces two formats:
+      //   - Plain:    "2026-06-08 10:16:00 [INFO] ..."
+      //   - Bracketed ISO: "[2026-06-08T10:16:00.123Z] [INFO] ..."
+      const tsMatch = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/.exec(line)
+        ?? /^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\]/.exec(line);
       entries.push({
         timestamp: tsMatch?.[1] ?? new Date().toISOString(),
         outcome: typeof payload.outcome === 'string' ? payload.outcome : 'unknown',
@@ -73,10 +77,8 @@ function parseTriggerDecisions(logContent: string): TriggerDecisionEntry[] {
         sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
       });
     } catch (e) {
-      // Skip malformed entries — log for operator visibility
-      if (process.env.DEBUG) {
-        console.error(`WARN: Malformed TRIGGER_DECISION entry: ${String(e).slice(0, 100)}`);
-      }
+      // Skip malformed entries — always log for operator visibility (EP-03)
+      console.error(`WARN: Malformed TRIGGER_DECISION entry: ${String(e).slice(0, 100)}`);
     }
   }
 
@@ -104,12 +106,13 @@ function readRecentDecisions(logDir: string, limit: number): TriggerDecisionEntr
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);
-      allEntries.push(...entries);
+      // Reverse per-file entries so combined list is newest-first.
+      // Log files are already sorted newest-first, but entries within
+      // each file are in chronological (oldest-first) order.
+      allEntries.push(...entries.reverse());
     } catch (e) {
-      // Skip unreadable files — log for operator visibility
-      if (process.env.DEBUG) {
-        console.error(`WARN: Could not read log file ${logFile}: ${String(e).slice(0, 100)}`);
-      }
+      // Skip unreadable files — always log for operator visibility (EP-03)
+      console.error(`WARN: Could not read log file ${logFile}: ${String(e).slice(0, 100)}`);
     }
   }
 

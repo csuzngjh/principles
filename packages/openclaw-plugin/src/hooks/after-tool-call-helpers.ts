@@ -23,7 +23,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
-import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
+import { evaluatePainDiagnosticGate, isCooldownActiveForEpisode } from '../core/pain-diagnostic-gate.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
@@ -355,10 +355,17 @@ export function evaluatePainAdmissionForToolCall(
     const triage = evaluateEvidenceTriage(sourceKind, observation.painScore);
 
     // PEAT-B2: Evaluate trigger controller for structured decision
+    // Compute real cooldown state from PainDiagnosticGate's episode map
+    // so trigger decision aligns with the gate's cooldown logic (EP-07).
+    const cooldownActive = isCooldownActiveForEpisode(
+      failureSource,
+      sessionId,
+      latestFailureState?.lastErrorHash,
+    );
     const triggerDecision = evaluateTriggerController({
       triageResult: triage,
       isOwnerManual: false, // tool failures are never owner manual
-      isCooldownActive: false, // cooldown handled by PainDiagnosticGate below
+      isCooldownActive: cooldownActive,
       isValid: true,
       score: observation.painScore,
       sessionId,
