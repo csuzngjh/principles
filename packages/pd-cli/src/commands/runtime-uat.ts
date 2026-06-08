@@ -162,8 +162,6 @@ interface IterationConfig {
 export function runUatIteration(config: IterationConfig): PainRecordResult {
   const { iteration, reason, workspace, timeoutMs = 300_000 } = config;
   const iterStart = Date.now();
-
-   
   let recordOutput: string;
   try {
     recordOutput = pd(['pain', 'record', '--reason', reason, '--score', '85', '--source', 'manual', '--json'], workspace, timeoutMs);
@@ -182,7 +180,6 @@ export function runUatIteration(config: IterationConfig): PainRecordResult {
   }
 
   const wallTimeMs = Date.now() - iterStart;
-   
   let parsed: Record<string, unknown>;
   try {
     parsed = parseJsonOutput(recordOutput) as Record<string, unknown>;
@@ -199,7 +196,6 @@ export function runUatIteration(config: IterationConfig): PainRecordResult {
     };
   }
 
-   
   let auditStatus: string;
   try {
     const auditOut = pd(['candidate', 'audit', '--json'], workspace, 30_000);
@@ -285,6 +281,7 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
   if (!workspace) {
     console.error('Error: --workspace <path> is required');
     process.exit(1);
+    return;
   }
 
   // PRI-334: Guard against writing to production workspace
@@ -306,6 +303,7 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
     }
 
     process.exit(1);
+    return;
   }
 
   if (guardResult.refused && opts.allowProductionWorkspaceForUat) {
@@ -322,6 +320,7 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
   if (!process.env.MINIMAX_CN_API_KEY) {
     console.error('Error: MINIMAX_CN_API_KEY environment variable not set');
     process.exit(1);
+    return;
   }
 
   const results: PainRecordResult[] = [];
