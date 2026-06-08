@@ -18,36 +18,36 @@
 
     <div class="journal-card pd-card">
       <div class="journal-thumb">
-        <img src="/images/abyss/04/abyss-04-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
+        <img src="/images/abyss/05/abyss-05-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
         <div class="thumb-overlay"></div>
       </div>
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #004</span>
+          <span class="journal-series">LOG #005</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-05-28</span>
+          <span class="journal-date">2026-06-08</span>
         </div>
         
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '软硬转换炼金术：从提示词到系统本能的内化之路' : 'The Alchemy of Soft to Hard Rules: Forward Internalization' }}
+          {{ lang === 'zh-CN' ? '协同进化：为什么 Owner 才是智能系统的关键变量？' : 'Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems' }}
         </h3>
         
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '深入探讨原则内化的渠道、策略与陷阱。如何物理阻断低级错误，将高危底线硬化为编译拦截器（RuleHost），并建立规则退役元机制，释放模型注意力。'
-            : 'An in-depth study of the channels, strategies, and traps of principle internalization. How to physically intercept low-level errors by hardening high-risk bottom lines into the RuleHost runtime sandbox while adopting custom pruning policies.'
+            ? '讨论 Owner-Agent 组合体的协同进化：为什么大模型时代最稀缺的是意图带宽，以及如何通过注意力保护层与判例法机制过滤噪音，帮助人类重新握住方向盘。'
+            : 'Explore the co-evolution of the Owner-Agent synthesis: why intention bandwidth is the scarcest system resource in the AI era, and how an attention protection layer and case-law approach help humans steer the wheel.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? 'RuleHost 沙箱' : 'RuleHost Sandbox' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '注意力治理' : 'Context Debt' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '规则剪枝' : 'Rule Pruning' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '协同进化' : 'Co-evolution' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '意图带宽' : 'Intention Bandwidth' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '注意力保护' : 'Attention Protection' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/04-soft-to-hard-rules' : '/abyss/04-soft-to-hard-rules'" class="read-link">
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/05-co-evolution' : '/abyss/05-co-evolution'" class="read-link">
             <span>{{ lang === 'zh-CN' ? '凝视深渊' : 'Gaze into the Abyss' }}</span>
             <span class="arrow">&rarr;</span>
           </a>
