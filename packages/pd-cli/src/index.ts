@@ -9,6 +9,7 @@
 import { Command } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
 import { handlePainRetry } from './commands/pain-retry.js';
+import { handlePainEvidence } from './commands/pain-evidence.js';
 import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
@@ -96,6 +97,16 @@ painCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRetry(opts);
+  });
+
+painCmd
+  .command('evidence')
+  .description('Show recent pain admission/trigger decisions (PEAT-B2)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handlePainEvidence(opts);
   });
 
 const samplesCmd = program

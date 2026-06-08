@@ -88,6 +88,21 @@ export function resetPainDiagnosticGateForTest(): void {
   lastDiagnosedAtByEpisode.clear();
 }
 
+/**
+ * Check whether cooldown is currently active for a given episode.
+ * Used by the trigger controller (PEAT-B2) to align its cooldown decision
+ * with the PainDiagnosticGate's cooldown state.
+ */
+export function isCooldownActiveForEpisode(
+  source: string,
+  sessionId: string | undefined,
+  errorHash: string | undefined,
+  cooldownMs?: number,
+): boolean {
+  const episodeKey = buildEpisodeKey({ source, sessionId, errorHash } as PainDiagnosticGateInput);
+  return withinCooldown({ source, sessionId, errorHash, cooldownMs } as PainDiagnosticGateInput, episodeKey);
+}
+
 export function evaluatePainDiagnosticGate(input: PainDiagnosticGateInput): PainDiagnosticGateDecision {
   const source = normalizedSource(input.source);
   const episodeKey = buildEpisodeKey(input);

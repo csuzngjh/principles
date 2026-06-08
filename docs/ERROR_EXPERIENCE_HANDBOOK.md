@@ -100,6 +100,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-061 | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type | PR #823 |
 | ERR-062 | Collapsed details section renders empty-state copy instead of actual data when data exists | PRI-319 / PR #825 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
+| ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
 
 ---
 
@@ -911,3 +912,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-304 / PR #811
 - **Date**: 2026-06-03
 - **Recurrence**: First occurrence
+
+---
+
+**[ERR-064]** | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during edit
+
+- **What happened**: During PRI-337 implementation, the pd pain retry command lost its --baseUrl, --maxRetries, --timeoutMs, and --force options. These options ended up on a bogus top-level pd canary command that incorrectly called handlePainRetry instead of handleRuntimeCanary. Separately, pd pain evidence was hardcoded to read .state/logs/SYSTEM_*.log instead of the actual SystemLogger path <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
+- **Why it's wrong**: CLI commands with lost options silently stop working. Wrong command handlers produce confusing behavior. Wrong log paths return empty results with no error, making operators think the system is broken.
+- **Correct approach**: (1) Every time you add/remove a Commander .option() call, verify ALL options are present by parsing the full command registration. (2) After any index.ts edit that touches .command(), run a parser-level test that confirms each option routes correctly. (3) For log path code, always read the actual SystemLogger source code to verify the format/format/location, never guess.
+- **How to prevent**: (1) Add parser-level tests for EVERY CLI option on every subcommand — these are trivial to write (10 lines each) and catch regression immediately. (2) When editing Commander registration, diff against the handler's actual option usage, not against the previous registration. (3) When reading log files, trace the exact SystemLogger path resolution before writing reader code.
+- **Source**: PRI-337 / PR #852
+- **Date**: 2026-06-08
+- **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
+[ERR-064]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
