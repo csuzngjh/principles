@@ -472,7 +472,7 @@
       "addNamePlaceholder": "工作空间名称",
       "addPathPlaceholder": "工作空间路径",
       "principleLanguage": "原则语言",
-      "principleLanguageDescription": "设置新原则的生成语言。已有原则不受影响。",
+      "principleLanguageDescription": "保存语言偏好，用于原则展示。生成接线 deferred。",
       "languageZhCN": "中文",
       "languageEn": "英文 (English)",
       "languageSaved": "语言偏好已保存",

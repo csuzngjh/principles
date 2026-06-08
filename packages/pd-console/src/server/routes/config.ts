@@ -202,7 +202,7 @@ export async function handleConfigRoute(
     if (method === 'GET') {
       const result = getPrinciplesOutputLanguage(workspaceDir);
       if (!result.ok) {
-        sendError(res, 400, result.error, result.message);
+        sendError(res, result.statusCode, result.error, result.message);
         return;
       }
       sendSuccess(res, { outputLanguage: result.outputLanguage, source: result.source });
@@ -219,13 +219,16 @@ export async function handleConfigRoute(
       const body = safeParseBody(bodyText);
       const result = updatePrinciplesOutputLanguage(workspaceDir, body);
       if (!result.ok) {
-        sendError(res, 400, result.error, result.message);
+        sendError(res, result.statusCode, result.error, result.message);
         return;
       }
-      // Re-read to confirm actual persisted state
+      // Re-read to confirm actual persisted state — fail loud if re-read fails (ERR-002)
       const confirmResult = getPrinciplesOutputLanguage(workspaceDir);
-      const confirmed = confirmResult.ok ? confirmResult.outputLanguage : result.outputLanguage;
-      sendSuccess(res, { outputLanguage: confirmed, source: 'user_config' });
+      if (!confirmResult.ok) {
+        sendError(res, confirmResult.statusCode, 'confirm_read_failed', `Write succeeded but re-read failed: ${confirmResult.message}`);
+        return;
+      }
+      sendSuccess(res, { outputLanguage: confirmResult.outputLanguage, source: confirmResult.source });
       return;
     }
     sendMethodNotAllowed(res);

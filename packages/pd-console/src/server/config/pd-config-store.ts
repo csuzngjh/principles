@@ -632,6 +632,7 @@ export interface OutputLanguageResultOk {
 export interface OutputLanguageResultErr {
   ok: false;
   error: string;
+  statusCode: number;
   message: string;
   nextAction: string;
 }
@@ -658,7 +659,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
     raw = fs.readFileSync(configPath, 'utf8');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: 'read_error', message: `Failed to read config: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
+    return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
   }
 
   let parsed: unknown;
@@ -666,7 +667,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: 'yaml_error', message: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
+    return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
   }
 
   if (!isRecord(parsed)) {
@@ -683,6 +684,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
     return {
       ok: false,
       error: 'invalid_config',
+      statusCode: 500,
       message: 'principles section must be a mapping',
       nextAction: 'Fix principles section in .pd/config.yaml to be a YAML mapping',
     };
@@ -697,6 +699,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
     return {
       ok: false,
       error: 'invalid_output_language',
+      statusCode: 500,
       message: `principles.outputLanguage must be one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}. Got: ${String(outputLangRaw)}`,
       nextAction: `Set principles.outputLanguage to one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}`,
     };
@@ -715,17 +718,18 @@ export function updatePrinciplesOutputLanguage(
 ): OutputLanguageResult {
   // 1. Validate payload
   if (!isRecord(payload)) {
-    return { ok: false, error: 'bad_request', message: 'Payload must be a JSON object with an outputLanguage field', nextAction: 'Send { outputLanguage: "zh-CN" } or { outputLanguage: "en" }' };
+    return { ok: false, error: 'bad_request', statusCode: 400, message: 'Payload must be a JSON object with an outputLanguage field', nextAction: 'Send { outputLanguage: "zh-CN" } or { outputLanguage: "en" }' };
   }
 
   const outputLangRaw = Object.hasOwn(payload, 'outputLanguage') ? payload.outputLanguage : undefined;
   if (outputLangRaw === undefined) {
-    return { ok: false, error: 'bad_request', message: 'Missing required field: outputLanguage', nextAction: `Send { outputLanguage: "${DEFAULT_OUTPUT_LANGUAGE}" }` };
+    return { ok: false, error: 'bad_request', statusCode: 400, message: 'Missing required field: outputLanguage', nextAction: `Send { outputLanguage: "${DEFAULT_OUTPUT_LANGUAGE}" }` };
   }
   if (!isValidOutputLanguage(outputLangRaw)) {
     return {
       ok: false,
       error: 'bad_request',
+      statusCode: 400,
       message: `outputLanguage must be one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}. Got: ${String(outputLangRaw)}`,
       nextAction: `Set outputLanguage to one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}`,
     };
@@ -735,8 +739,20 @@ export function updatePrinciplesOutputLanguage(
   const configPath = getPdConfigPath(workspaceDir);
   let rawConfig: Record<string, unknown>;
   if (fs.existsSync(configPath)) {
-    const rawContent = fs.readFileSync(configPath, 'utf8');
-    const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    let rawContent: string;
+    try {
+      rawContent = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config for update: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
+    }
+    let rawParsed: unknown;
+    try {
+      rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error during update: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
+    }
     if (isRecord(rawParsed)) {
       rawConfig = { ...rawParsed };
     } else {
@@ -757,13 +773,19 @@ export function updatePrinciplesOutputLanguage(
     return {
       ok: false,
       error: 'validation_error',
+      statusCode: 500,
       message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
       nextAction: 'Fix config validation errors before retrying',
     };
   }
 
   // 5. Atomic write
-  writeConfigAtomic(configPath, rawConfig);
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: 'write_error', statusCode: 500, message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
 
   return { ok: true, outputLanguage: outputLangRaw, source: 'user_config' };
 }

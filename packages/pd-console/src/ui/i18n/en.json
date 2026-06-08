@@ -472,7 +472,7 @@
       "addNamePlaceholder": "Workspace name",
       "addPathPlaceholder": "Workspace path",
       "principleLanguage": "Principle Language",
-      "principleLanguageDescription": "Set the output language for new principle generation. Existing principles are not affected.",
+      "principleLanguageDescription": "Save your language preference for principle display. Generation integration is deferred.",
       "languageZhCN": "中文 (Chinese)",
       "languageEn": "English",
       "languageSaved": "Language preference saved",

@@ -891,6 +891,13 @@ export interface PrincipleListItemData {
   readabilityWarningCode?: 'technical_pattern' | 'diagnostic_residue' | 'title_too_long';
 }
 
+const VALID_WARNING_CODES = ['technical_pattern', 'diagnostic_residue', 'title_too_long'] as const;
+type ReadabilityWarningCode = typeof VALID_WARNING_CODES[number];
+
+function isReadabilityWarningCode(value: unknown): value is ReadabilityWarningCode {
+  return isString(value) && (VALID_WARNING_CODES as readonly string[]).includes(value);
+}
+
 function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
@@ -917,14 +924,17 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
     evaluability: v.evaluability, valueScore: v.valueScore, adherenceRate: v.adherenceRate,
     painPreventedCount: v.painPreventedCount, ruleCount: v.ruleCount,
     conflictsWithCount: v.conflictsWithCount, createdAt: v.createdAt, updatedAt: v.updatedAt,
-    // PRI-332: detectedLanguage defaults to 'unknown' when absent
-    detectedLanguage: Object.hasOwn(v, 'detectedLanguage') && isString(v.detectedLanguage) ? v.detectedLanguage : 'unknown',
+    // PRI-332: detectedLanguage — absent defaults to 'unknown'; present but malformed → fail loud (ERR-009)
+    detectedLanguage: 'unknown',
   };
+  if (Object.hasOwn(v, 'detectedLanguage')) {
+    if (!isString(v.detectedLanguage)) return null;
+    result.detectedLanguage = v.detectedLanguage;
+  }
   // PRI-332 P1-5: readabilityWarningCode is optional — fail loud when present but invalid (ERR-009)
   if (Object.hasOwn(v, 'readabilityWarningCode')) {
-    const VALID_WARNING_CODES = ['technical_pattern', 'diagnostic_residue', 'title_too_long'] as const;
-    if (!isString(v.readabilityWarningCode) || !VALID_WARNING_CODES.includes(v.readabilityWarningCode as typeof VALID_WARNING_CODES[number])) return null;
-    result.readabilityWarningCode = v.readabilityWarningCode as typeof VALID_WARNING_CODES[number];
+    if (!isReadabilityWarningCode(v.readabilityWarningCode)) return null;
+    result.readabilityWarningCode = v.readabilityWarningCode;
   }
   return result;
 }

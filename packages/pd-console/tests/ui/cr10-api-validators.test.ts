@@ -704,15 +704,14 @@ describe('validatePrinciplesList', () => {
     expect(result!.principles[0].detectedLanguage).toBe('unknown');
   });
 
-  it('defaults detectedLanguage to unknown when not a string', () => {
+  it('fails loud when detectedLanguage is present but not a string (ERR-009)', () => {
     const withBadLang = {
       ...validList,
       principles: [{ ...validList.principles[0], detectedLanguage: 42 }],
     };
     const result = validatePrinciplesList(withBadLang);
-    expect(result).not.toBeNull();
-    // detectedLanguage is optional with default 'unknown' — non-string values are ignored
-    expect(result!.principles[0].detectedLanguage).toBe('unknown');
+    // detectedLanguage present but malformed → validateArray rejects the item → null (ERR-009)
+    expect(result).toBeNull();
   });
 
   it('accepts principle with readabilityWarningCode', () => {

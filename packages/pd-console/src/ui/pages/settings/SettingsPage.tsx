@@ -233,7 +233,8 @@ export function SettingsPage() {
   // ── PRI-332: Output language handler ────────────────────────────────
 
   const handleOutputLanguageChange = useCallback(
-    async (newLang: "zh-CN" | "en") => {
+    async (newLang: string) => {
+      if (newLang !== 'zh-CN' && newLang !== 'en') return;
       const result = await updateOutputLanguage(newLang);
       if (!result.success) {
         toast.error(result.error ?? t("pages.settings.languageLoadError"));
@@ -351,7 +352,7 @@ export function SettingsPage() {
             <select
               id="output-language-select"
               value={outputLanguage}
-              onChange={(e) => handleOutputLanguageChange(e.target.value as "zh-CN" | "en")}
+              onChange={(e) => handleOutputLanguageChange(e.target.value)}
               className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov"
             >
               <option value="zh-CN">{t("pages.settings.languageZhCN")}</option>

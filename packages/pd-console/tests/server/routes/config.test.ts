@@ -1032,3 +1032,127 @@ describe('validateBindingPayload — deep secret detection', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// PRI-332: Principles Output Language Route
+// ---------------------------------------------------------------------------
+
+describe('PRI-332: GET/PATCH /principles/output-language', () => {
+  it('GET returns default zh-CN when no config exists', async () => {
+    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ outputLanguage: string; source: string }>(res);
+    expect(data.outputLanguage).toBe('zh-CN');
+    expect(data.source).toBe('default');
+  });
+
+  it('GET returns configured value', async () => {
+    writeConfig({ principles: { outputLanguage: 'en' } });
+    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ outputLanguage: string; source: string }>(res);
+    expect(data.outputLanguage).toBe('en');
+    expect(data.source).toBe('user_config');
+  });
+
+  it('GET returns 500 on malformed YAML (server-side config error)', async () => {
+    writeMalformedConfig('version: [unclosed\n');
+    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(500);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('yaml_error');
+  });
+
+  it('GET returns 500 on invalid outputLanguage in config', async () => {
+    writeConfig({ principles: { outputLanguage: 'fr' } });
+    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(500);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('invalid_output_language');
+  });
+
+  it('PATCH updates language and confirms via re-read', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/principles/output-language',
+      body: { outputLanguage: 'en' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ outputLanguage: string; source: string }>(res);
+    expect(data.outputLanguage).toBe('en');
+  });
+
+  it('PATCH returns 400 on invalid payload', async () => {
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/principles/output-language',
+      body: { outputLanguage: 'fr' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('bad_request');
+  });
+
+  it('PATCH returns 400 on missing outputLanguage field', async () => {
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/principles/output-language',
+      body: {},
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('bad_request');
+  });
+
+  it('PATCH returns 500 on malformed YAML during read-before-write', async () => {
+    writeMalformedConfig('version: [unclosed\n');
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/principles/output-language',
+      body: { outputLanguage: 'en' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(500);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('yaml_error');
+  });
+
+  it('PATCH preserves existing config sections when updating language', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/principles/output-language',
+      body: { outputLanguage: 'en' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(200);
+    // Verify existing config sections are preserved
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(parsed.version).toBe(1);
+    expect((parsed.principles as Record<string, unknown>).outputLanguage).toBe('en');
+    expect(parsed.features).toBeDefined();
+  });
+});
