@@ -6,6 +6,7 @@
  * and failure classification output.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'path';
 
 const mockTraceByPainId = vi.fn();
 const mockPainChainClose = vi.fn().mockResolvedValue(undefined);
@@ -170,7 +171,7 @@ describe('handleTraceShow', () => {
     await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('diagnosis_pain_001'));
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(WS));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(path.resolve(WS)));
   });
 
   it('handles error status with config_missing in JSON mode', async () => {
@@ -301,7 +302,7 @@ describe('handleTraceShow', () => {
     expect(jsonOutput.taskId).toBe('diagnosis_pain_001');
     expect(jsonOutput.status).toBe('not_found');
     expect(jsonOutput.message).toContain('No task found');
-    expect(jsonOutput.workspace).toBe(WS);
+    expect(jsonOutput.workspace).toBe(path.resolve(WS));
     expect(process.exitCode).toBe(1);
   });
 

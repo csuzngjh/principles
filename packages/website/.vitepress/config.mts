@@ -57,6 +57,7 @@ export default defineConfig({
                 { text: '02 | The Illusion of Wisdom', link: '/abyss/02-poisonous-chicken-soup' },
                 { text: '03 | Pain is the Signal: Forward Evolution', link: '/abyss/03-biological-forward-pass' },
                 { text: '04 | The Alchemy of Soft to Hard Rules', link: '/abyss/04-soft-to-hard-rules' },
+                { text: '05 | Co-evolution: Why the Owner is the Crucial Variable', link: '/abyss/05-co-evolution' },
               ]
             }
           ]
@@ -94,6 +95,7 @@ export default defineConfig({
                 { text: '02 | 为什么“硅基鸡汤”注定沦为赛博噪音？', link: '/zh/abyss/02-poisonous-chicken-soup' },
                 { text: '03 | 痛苦即信号：前向进化的生物学硬核启示', link: '/zh/abyss/03-biological-forward-pass' },
                 { text: '04 | 软硬转换炼金术：系统本能的内化之路', link: '/zh/abyss/04-soft-to-hard-rules' },
+                { text: '05 | 协同进化：为什么 Owner 才是智能系统的关键变量？', link: '/zh/abyss/05-co-evolution' },
               ]
             }
           ]
@@ -104,6 +106,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: '/images/logo.svg',
     search: {
       provider: 'local'
     },

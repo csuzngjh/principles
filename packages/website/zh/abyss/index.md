@@ -10,6 +10,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #005 · 2026-06-08</div>
+  <a class="abyss-title" href="/zh/abyss/05-co-evolution">05 | 协同进化：为什么 Owner 才是智能系统的关键变量？</a>
+  <p class="abyss-desc">讨论 Owner-Agent 组合体的协同进化：为什么大模型时代最稀缺的是意图带宽，以及如何通过注意力保护层与判例法机制过滤噪音，帮助人类重新握住方向盘。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #004 · 2026-05-28</div>
   <a class="abyss-title" href="/zh/abyss/04-soft-to-hard-rules">04 | 软硬转换炼金术：从提示词到系统本能的内化之路</a>
   <p class="abyss-desc">深入探讨原则内化的渠道、策略与陷阱。如何物理阻断低级错误，将高危底线硬化为编译拦截器（RuleHost），并建立规则退役元机制，释放模型注意力。</p>
