@@ -38,6 +38,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   auditCandidateLedgerConsistency: mockAuditCandidateLedgerConsistency,
   getLedgerFilePathPublic: vi.fn().mockReturnValue('/fake/workspace/.state/principle_training_state.json'),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({

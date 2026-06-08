@@ -31,6 +31,7 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
 vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: MockRuntimeStateManager,
   decideInternalizationRoute: vi.fn(),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({

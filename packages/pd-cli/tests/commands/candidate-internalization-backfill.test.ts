@@ -89,6 +89,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
       warnings: input.warnings ?? [],
     })),
     remediationAction: vi.fn((input: unknown) => input),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
 });
 

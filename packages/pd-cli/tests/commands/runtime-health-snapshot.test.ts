@@ -20,6 +20,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   OperatorHealthReadModel: vi.fn().mockImplementation(function () {
     return { getSnapshot: mockSnapshotFn, close: mockCloseFn };
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeHealthSnapshot } from '../../src/commands/runtime-health-snapshot.js';

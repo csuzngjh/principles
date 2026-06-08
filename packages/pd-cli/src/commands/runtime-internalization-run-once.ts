@@ -24,8 +24,9 @@ import {
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -589,10 +590,13 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         );
         runnerResult = await runner.run(wakeResult.taskId);
       } else if (runnerKind === 'scribe') {
+        // PRI-336: Read outputLanguage from workspace config
+        const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
+        const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
         const validator = new DefaultScribeValidator();
         const runner = new ScribeRunner(
           { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
         );
         runnerResult = await runner.run(wakeResult.taskId);
       } else if (runnerKind === 'artificer') {

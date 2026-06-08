@@ -36,6 +36,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   auditCandidateLedgerConsistency: mockAuditConsistency,
   buildGfiWorkspaceSnapshot: mockBuildGfiSnapshot,
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/commands/runtime-canary.js', () => ({
