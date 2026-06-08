@@ -130,12 +130,16 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
   // UI: use user config or default
   const ui = userConfig.ui ?? { ...DEFAULT_UI };
 
+  // Principles: use user config or default (PRI-336)
+  const principles = userConfig.principles ?? { outputLanguage: undefined };
+
   const config: PdConfig = {
     version: PD_CONFIG_VERSION,
     features,
     runtimeProfiles,
     internalAgents,
     ui,
+    principles,
   };
 
   return {

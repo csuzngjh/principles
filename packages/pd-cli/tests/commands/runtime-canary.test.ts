@@ -43,6 +43,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   auditCandidateLedgerConsistency: mockAuditConsistency,
   buildGfiWorkspaceSnapshot: mockBuildGfiSnapshot,
   classifyGfiWorkspaceHealth: mockClassifyGfiHealth,
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/services/feature-flag-loader.js', () => ({

@@ -21,6 +21,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   InternalizationOrchestrator: vi.fn().mockImplementation(function () {
     return { wakeOnce: mockWakeOnce };
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeInternalizationWakeOnce } from '../../src/commands/runtime-internalization-wake-once.js';

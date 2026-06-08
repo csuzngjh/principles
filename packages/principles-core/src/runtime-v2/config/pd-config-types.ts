@@ -103,6 +103,16 @@ export interface UiConfig {
   };
 }
 
+// ── Principles Config (PRI-336) ──────────────────────────────────────────────
+
+import type { OutputLanguage } from '../language-directive.js';
+
+/** Configuration for principle generation behavior. */
+export interface PrinciplesConfig {
+  /** Preferred language for generated principle text. Source of truth for generation. */
+  outputLanguage?: OutputLanguage;
+}
+
 // ── Top-Level Config ────────────────────────────────────────────────────────
 
 export interface PdConfig {
@@ -111,6 +121,8 @@ export interface PdConfig {
   runtimeProfiles: Record<string, RuntimeProfile>;
   internalAgents: InternalAgentsConfig;
   ui: UiConfig;
+  /** Principle generation preferences (PRI-336). */
+  principles?: PrinciplesConfig;
 }
 
 // ── Validation Result ───────────────────────────────────────────────────────

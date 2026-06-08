@@ -18,6 +18,7 @@ export type {
   InternalAgentsConfig,
   DiagnosticsMode,
   UiConfig,
+  PrinciplesConfig,
   PdConfig,
   PdConfigValidationError,
   PdConfigValidationResultOk,

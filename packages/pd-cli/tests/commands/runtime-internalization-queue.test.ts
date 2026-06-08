@@ -21,6 +21,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     readModel: { getSnapshot: mockGetSnapshot, close: mockClose },
     close: mockClose,
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/services/feature-flag-loader.js', () => ({

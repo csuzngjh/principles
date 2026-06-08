@@ -78,6 +78,7 @@ vi.mock('@principles/core/runtime-v2', () => {
       agentId: 'main',
     }),
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
     run: vi.fn().mockResolvedValue({
       status: 'succeeded',
       taskId: 'test-task-1',
@@ -99,6 +100,10 @@ vi.mock('@principles/core/runtime-v2', () => {
 
 vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+}));
+
+vi.mock('../../src/config-reader.js', () => ({
+  readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';

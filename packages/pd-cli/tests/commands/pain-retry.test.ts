@@ -103,6 +103,7 @@ vi.mock('@principles/core/runtime-v2', () => {
     CandidateIntakeService: MockCandidateIntakeService,
     resolveRuntimeConfig: mockResolveRuntimeConfig,
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
     run: mockRun,
     status: vi.fn(),
   };
@@ -110,6 +111,10 @@ vi.mock('@principles/core/runtime-v2', () => {
 
 vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+}));
+
+vi.mock('../../src/config-reader.js', () => ({
+  readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handlePainRetry } from '../../src/commands/pain-retry.js';

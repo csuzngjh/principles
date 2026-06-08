@@ -17,6 +17,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PeerRunnerKind } from '../internalization/peer-runner-contracts.js';
 import type { TaskRecord } from '../task-status.js';
+import type { OutputLanguage } from '../language-directive.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,12 @@ export interface PeerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId?: string;
+  /**
+   * Owner's preferred language for principle generation (PRI-336).
+   * When provided, generation prompts include a language directive.
+   * Undefined = no language directive (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 /** Resolved options with defaults applied. */
@@ -38,6 +45,8 @@ export interface ResolvedPeerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 // ── Dependencies ─────────────────────────────────────────────────────────────

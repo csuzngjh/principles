@@ -29,9 +29,10 @@ import {
   CandidateIntakeService,
   run as diagnoseRun,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, RuntimeConfig } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
+import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import * as path from 'path';
 
@@ -362,6 +363,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     const eventEmitter = new StoreEventEmitter();
     const committer = new SqliteDiagnosticianCommitter(sqliteConn);
+
+    // PRI-336: Read outputLanguage from workspace config
+    const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
+    const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
+
     const runner = new DiagnosticianRunner(
       {
         stateManager,
@@ -377,6 +383,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         pollIntervalMs: 100,
         timeoutMs: 300_000,
         agentId: opts.agent,
+        outputLanguage,
       },
     );
 

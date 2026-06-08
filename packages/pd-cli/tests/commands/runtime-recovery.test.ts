@@ -28,6 +28,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     warnings: input.warnings ?? [],
   })),
   remediationAction: vi.fn((input) => input),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeRecoverySweep } from '../../src/commands/runtime-recovery.js';

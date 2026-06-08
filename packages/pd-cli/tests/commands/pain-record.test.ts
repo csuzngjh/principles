@@ -34,6 +34,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     agentId: 'main',
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
