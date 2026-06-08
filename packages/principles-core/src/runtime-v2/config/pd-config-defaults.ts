@@ -95,5 +95,6 @@ export function getDefaultPdConfig(): PdConfig {
     },
     internalAgents: getDefaultInternalAgents(),
     ui: { ...DEFAULT_UI },
+    principles: { outputLanguage: undefined },
   };
 }

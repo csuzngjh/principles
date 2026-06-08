@@ -10,6 +10,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   InternalizationChainIntegrityReadModel: vi.fn().mockImplementation(function () {
     return { check: mockCheck };
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeInternalizationIntegrity } from '../../src/commands/runtime-internalization-integrity.js';

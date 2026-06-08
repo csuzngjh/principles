@@ -14,6 +14,8 @@
 import { PainSignalBridge } from './pain-signal-bridge.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
+import { resolveOutputLanguage } from './language-directive.js';
+import type { OutputLanguage } from './language-directive.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
@@ -400,6 +402,12 @@ export async function createPainSignalBridge(
         workspaceDir: opts.workspaceDir,
       });
 
+  // PRI-336: Resolve outputLanguage from effective config
+  const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
+  const outputLanguage: OutputLanguage | undefined = resolvedLang.degradationWarning
+    ? resolvedLang.outputLanguage // Use default with warning — not silent (ERR-002)
+    : opts.effectiveConfig?.config.principles?.outputLanguage; // Use user config or undefined
+
   const runner = new DiagnosticianRunner(
     {
       stateManager,
@@ -415,6 +423,7 @@ export async function createPainSignalBridge(
       pollIntervalMs: 5000,
       timeoutMs: runtimeConfig.timeoutMs,
       agentId: runtimeConfig.agentId,
+      outputLanguage,
     },
   );
 

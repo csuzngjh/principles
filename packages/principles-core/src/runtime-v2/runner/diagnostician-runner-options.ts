@@ -4,6 +4,8 @@
  * Per CONTEXT.md D-02: pollIntervalMs default 5000, timeout configurable.
  * Per CONTEXT.md D-04: owner and runtimeKind required for lease acquisition.
  */
+import type { OutputLanguage } from '../language-directive.js';
+
 export interface DiagnosticianRunnerOptions {
   /** Polling interval in ms (default: 5000 = 5 seconds). */
   readonly pollIntervalMs?: number;
@@ -20,6 +22,13 @@ export interface DiagnosticianRunnerOptions {
    * Allows CLI to forward --agent flag through to openclaw agent invocation.
    */
   readonly agentId?: string;
+  /**
+   * Owner's preferred language for principle generation (PRI-336).
+   * When provided, the diagnostician prompt includes a language directive
+   * telling the LLM to produce human-readable fields in this language.
+   * Undefined = no language directive (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 /** Resolved options with defaults applied. */
@@ -30,6 +39,8 @@ export interface ResolvedDiagnosticianRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 /** Default option values. */
@@ -49,5 +60,6 @@ export function resolveRunnerOptions(options: DiagnosticianRunnerOptions): Resol
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_RUNNER_OPTIONS.agentId,
+    outputLanguage: options.outputLanguage,
   };
 }

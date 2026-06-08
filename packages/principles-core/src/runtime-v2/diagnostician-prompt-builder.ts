@@ -36,6 +36,8 @@ import type { TSchema } from '@sinclair/typebox';
 import type { SchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
 import { DefaultSchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
 import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
+import type { OutputLanguage } from './language-directive.js';
+import { buildLanguageDirective } from './language-directive.js';
 
 /**
  * PromptInput — the JSON message sent to openclaw agent via --message flag.
@@ -117,9 +119,11 @@ export interface PromptBuildResult {
 export function buildDiagnosticProtocolInstruction(
   adapter: SchemaPromptAdapter = new DefaultSchemaPromptAdapter(),
   schema: TSchema = DiagnosticianOutputV1Schema,
+  outputLanguage?: OutputLanguage,
 ): string {
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
+  const languageDirective = buildLanguageDirective(outputLanguage);
 
   return `You are a root cause analysis expert. Follow this protocol:
 
@@ -172,7 +176,7 @@ IMPORTANT: The example above is ILLUSTRATIVE ONLY. Your recommendations MUST be 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - Do NOT read files, call tools, or write to any database
-${constraints}`;
+${constraints}${languageDirective}`;
 }
 
 /**
@@ -216,6 +220,7 @@ export class DiagnosticianPromptBuilder {
   buildPrompt(
     payload: DiagnosticianContextPayload,
     limits: PromptBuilderLimits = DEFAULT_PROMPT_BUILDER_LIMITS,
+    outputLanguage?: OutputLanguage,
   ): PromptBuildResult {
     const truncationWarnings: string[] = [];
 
@@ -246,7 +251,7 @@ export class DiagnosticianPromptBuilder {
       conversationWindow,
     };
 
-    const diagnosticInstruction = buildDiagnosticProtocolInstruction(this.adapter, this.schema);
+    const diagnosticInstruction = buildDiagnosticProtocolInstruction(this.adapter, this.schema, outputLanguage);
 
     // DPB-04: Explicit top-level fields at the prompt level
     const promptInput: PromptInput = {

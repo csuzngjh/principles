@@ -20,6 +20,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         },
       };
     }),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
 });
 
