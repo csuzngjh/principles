@@ -61,6 +61,7 @@ function resolvePeerRunnerOptions(
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? defaultAgentId,
+    outputLanguage: options.outputLanguage,
   };
 }
 

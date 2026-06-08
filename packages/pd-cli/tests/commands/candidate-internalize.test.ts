@@ -27,6 +27,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     ...original,
     RuntimeStateManager: MockRuntimeStateManager,
     decideInternalizationRoute: vi.fn(),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
 });
 

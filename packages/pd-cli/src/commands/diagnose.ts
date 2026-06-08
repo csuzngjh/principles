@@ -26,9 +26,10 @@ import {
   run as diagnoseRun,
   status as diagnoseStatus,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, RuntimeConfig } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import * as path from 'path';
 
 interface DiagnoseStatusOptions {
@@ -281,6 +282,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     const eventEmitter = new StoreEventEmitter();
     const committer = new SqliteDiagnosticianCommitter(sqliteConn);
+
+    // PRI-336: Read outputLanguage from workspace config
+    const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
+    const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
+
     const runner = new DiagnosticianRunner(
       {
         stateManager,
@@ -296,6 +302,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         pollIntervalMs: 100,
         timeoutMs: 300_000, // 5 min — same as probe timeout for real LLM calls
         agentId: opts.agent,
+        outputLanguage,
       },
     );
 

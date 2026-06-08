@@ -1,8 +1,13 @@
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
+
 export interface ScribePromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourcePhilosopherArtifactId: string;
   philosopherArtifact: unknown;
+  /** Owner's preferred language for principle generation (PRI-336). */
+  outputLanguage?: OutputLanguage;
 }
 
 export interface ScribePromptInput {
@@ -66,14 +71,26 @@ CONSTRAINTS:
 export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v1';
 
 export class ScribePromptBuilder {
+  /**
+   * Build a scribe prompt with optional language directive (PRI-336).
+   *
+   * When `input.outputLanguage` is provided, a language directive is appended
+   * to the scribe instruction telling the LLM to produce human-readable
+   * principle fields in the owner's preferred language.
+   */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: ScribePromptBuilderInput): ScribePromptBuildResult {
+    const languageDirective = buildLanguageDirective(input.outputLanguage);
+    const scribeInstruction = input.outputLanguage
+      ? SCRIBE_PROTOCOL_INSTRUCTION + languageDirective
+      : SCRIBE_PROTOCOL_INSTRUCTION;
+
     const promptInput: ScribePromptInput = {
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourcePhilosopherArtifactId: input.sourcePhilosopherArtifactId,
       philosopherArtifact: input.philosopherArtifact,
-      scribeInstruction: SCRIBE_PROTOCOL_INSTRUCTION,
+      scribeInstruction,
       promptContractVersion: SCRIBE_PROMPT_CONTRACT_VERSION,
     };
 

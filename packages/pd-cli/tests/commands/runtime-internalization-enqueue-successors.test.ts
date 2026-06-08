@@ -54,6 +54,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
       return null;
     }
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/commands/runtime-internalization-enqueue-successors.js';

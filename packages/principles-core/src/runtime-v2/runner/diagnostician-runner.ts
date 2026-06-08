@@ -256,7 +256,7 @@ export class DiagnosticianRunner {
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
     const builder = new DiagnosticianPromptBuilder();
-    const { message } = builder.buildPrompt(context);
+    const { message } = builder.buildPrompt(context, undefined, this.resolvedOptions.outputLanguage);
 
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },

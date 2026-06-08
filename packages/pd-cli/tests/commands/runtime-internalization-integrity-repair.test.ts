@@ -10,6 +10,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   InternalizationIntegrityRemediation: vi.fn().mockImplementation(function () {
     return { repair: mockRepair };
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { Command } from 'commander';
