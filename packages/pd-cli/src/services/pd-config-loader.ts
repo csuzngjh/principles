@@ -229,9 +229,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Check if a path is absolute (Windows or POSIX). */
+function isAbsolutePath(p: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/');
+}
+
 /**
  * Lightweight extraction of workspace.default from a config file.
  * Does NOT run full validation — just parses YAML and reads the field.
+ * Rejects relative paths to prevent PD from writing to unpredictable locations.
  */
 function extractWorkspaceDefault(configPath: string): string | null {
   try {
@@ -241,7 +247,8 @@ function extractWorkspaceDefault(configPath: string): string | null {
       isRecord(parsed) &&
       isRecord(parsed.workspace) &&
       typeof parsed.workspace.default === 'string' &&
-      parsed.workspace.default.length > 0
+      parsed.workspace.default.length > 0 &&
+      isAbsolutePath(parsed.workspace.default)
     ) {
       return parsed.workspace.default;
     }
