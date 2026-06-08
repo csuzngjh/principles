@@ -718,6 +718,15 @@ describe('Commander wiring for pd pain retry', () => {
       .requiredOption('-p, --pain-id <painId>', 'Pain ID')
       .option('-w, --workspace <path>', 'Workspace directory')
       .option('-r, --runtime <kind>', 'Runtime kind')
+      .option('--openclaw-local', 'Use local OpenClaw')
+      .option('--openclaw-gateway', 'Use gateway OpenClaw')
+      .option('-a, --agent <agentId>', 'Agent ID')
+      .option('--provider <name>', 'LLM provider')
+      .option('--model <id>', 'Model ID')
+      .option('--apiKeyEnv <name>', 'API key env var')
+      .option('--baseUrl <url>', 'Custom base URL')
+      .option('--maxRetries <n>', 'Max retries', parseInt)
+      .option('--timeoutMs <ms>', 'Timeout ms', parseInt)
       .option('--force', 'Force retry of succeeded task')
       .option('--json', 'Output raw JSON')
       .action(async (opts) => {
@@ -768,5 +777,60 @@ describe('Commander wiring for pd pain retry', () => {
     const { program, capturedOpts } = createPainRetryProgram();
     await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--runtime', 'pi-ai']);
     expect(capturedOpts.runtime).toBe('pi-ai');
+  });
+
+  // REGRESSION: PRI-337 — all options must route through pain retry
+  it('CMD-08: --baseUrl sets opts.baseUrl', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--baseUrl', 'https://custom.api.com']);
+    expect(capturedOpts.baseUrl).toBe('https://custom.api.com');
+  });
+
+  it('CMD-09: --maxRetries sets opts.maxRetries as number', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--maxRetries', '5']);
+    expect(capturedOpts.maxRetries).toBe(5);
+  });
+
+  it('CMD-10: --timeoutMs sets opts.timeoutMs as number', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--timeoutMs', '60000']);
+    expect(capturedOpts.timeoutMs).toBe(60000);
+  });
+
+  it('CMD-11: --provider sets opts.provider', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--provider', 'openrouter']);
+    expect(capturedOpts.provider).toBe('openrouter');
+  });
+
+  it('CMD-12: --model sets opts.model', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--model', 'anthropic/claude-sonnet-4']);
+    expect(capturedOpts.model).toBe('anthropic/claude-sonnet-4');
+  });
+
+  it('CMD-13: --apiKeyEnv sets opts.apiKeyEnv', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--apiKeyEnv', 'OPENROUTER_KEY']);
+    expect(capturedOpts.apiKeyEnv).toBe('OPENROUTER_KEY');
+  });
+
+  it('CMD-14: -a (--agent) sets opts.agent', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '-a', 'main']);
+    expect(capturedOpts.agent).toBe('main');
+  });
+
+  it('CMD-15: --openclaw-local sets opts.openclawLocal === true', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-local']);
+    expect(capturedOpts.openclawLocal).toBe(true);
+  });
+
+  it('CMD-16: --openclaw-gateway sets opts.openclawGateway === true', async () => {
+    const { program, capturedOpts } = createPainRetryProgram();
+    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway']);
+    expect(capturedOpts.openclawGateway).toBe(true);
   });
 });

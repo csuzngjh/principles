@@ -1482,18 +1482,36 @@ export type {
   CreateReportResult,
 } from './feedback/index.js';
 
-// Evidence triage — PEAT-B1
+// Evidence triage — PEAT-B1 + B2
 export type {
   SourceKind,
   TriageDecision,
   TriageResult,
   TriageInput,
   SourceDescriptor,
+  TriggerOutcome,
+  TriggerDecision,
+  TriggerControllerInput,
+  AdmissionDecisionEvent,
+  DiagnosisTaskCreatedEvent,
+  EvidenceOnlyRecordedEvent,
+  SkippedRefusedEvent,
+  AdmissionEvent,
 } from './evidence-triage/index.js';
 export {
   isSourceKind,
   SOURCE_DESCRIPTORS,
   getSourceDescriptor,
   evaluateTriage,
+  evaluateTriggerController,
+  shouldCreateTask,
+  isAdmittedOutcome,
+  isSkippedOutcome,
+  createAdmissionDecisionEvent,
+  createDiagnosisTaskCreatedEvent,
+  createEvidenceOnlyRecordedEvent,
+  createSkippedRefusedEvent,
+  serializeAdmissionEvent,
+  validateEventPrivacy,
 } from './evidence-triage/index.js';
 
