@@ -49,7 +49,10 @@ export function readOutputLanguageFromWorkspace(workspaceDir: string): ResolvedO
     return resolveOutputLanguage(undefined);
   }
 
-  // Extract principles.outputLanguage — unknown-first, no `as` bypass (ERR-001)
+  // Extract principles.outputLanguage
+  // `as Record<string, unknown>` is safe here because we verified typeof === 'object' && !== null above.
+  // This is a narrowing cast (not a trust-boundary bypass) — the value is still treated as unknown
+  // when accessed via record[key], and resolveOutputLanguage() validates it at the boundary.
   const parsedRecord = parsed as Record<string, unknown>;
   if (!Object.hasOwn(parsedRecord, 'principles')) {
     return resolveOutputLanguage(undefined);
@@ -60,7 +63,7 @@ export function readOutputLanguageFromWorkspace(workspaceDir: string): ResolvedO
     return resolveOutputLanguage(undefined);
   }
 
-  const principlesRecord = principlesRaw as Record<string, unknown>;
+  const principlesRecord = principlesRaw as Record<string, unknown>; // narrowing cast (validated above)
   if (!Object.hasOwn(principlesRecord, 'outputLanguage')) {
     return resolveOutputLanguage(undefined);
   }

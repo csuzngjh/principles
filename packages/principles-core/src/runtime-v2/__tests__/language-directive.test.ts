@@ -167,3 +167,30 @@ describe('constants', () => {
     expect(DEFAULT_OUTPUT_LANGUAGE).toBe('zh-CN');
   });
 });
+
+// ── EP-07 Regression: resolved value must be the canonical source ────────────
+
+describe('EP-07 regression: resolveOutputLanguage result is canonical source', () => {
+  it('undefined input returns default outputLanguage that must be used (not dropped)', () => {
+    // Regression: pain-signal-runtime-factory.ts used to bypass resolvedLang.outputLanguage
+    // when degradationWarning was absent, reading raw input instead. This caused the default
+    // to be dropped when input was undefined, violating EP-07 (use canonical resolved value).
+    const resolved = resolveOutputLanguage(undefined);
+    expect(resolved.outputLanguage).toBe(DEFAULT_OUTPUT_LANGUAGE);
+    // Consumer MUST use resolved.outputLanguage, not re-read the raw input
+    expect(resolved.outputLanguage).toBeDefined();
+  });
+
+  it('valid input returns outputLanguage that must be used (not raw input)', () => {
+    const resolved = resolveOutputLanguage('en');
+    expect(resolved.outputLanguage).toBe('en');
+    // Consumer MUST use resolved.outputLanguage, not the raw 'en' string
+  });
+
+  it('invalid input returns default with warning — consumer must use resolved value', () => {
+    const resolved = resolveOutputLanguage('fr');
+    expect(resolved.outputLanguage).toBe(DEFAULT_OUTPUT_LANGUAGE);
+    expect(resolved.degradationWarning).toBeDefined();
+    // Even with degradation, consumer MUST use resolved.outputLanguage
+  });
+});

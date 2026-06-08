@@ -403,10 +403,9 @@ export async function createPainSignalBridge(
       });
 
   // PRI-336: Resolve outputLanguage from effective config
+  // Per EP-07: use canonical resolved value, not raw input
   const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
-  const outputLanguage: OutputLanguage | undefined = resolvedLang.degradationWarning
-    ? resolvedLang.outputLanguage // Use default with warning — not silent (ERR-002)
-    : opts.effectiveConfig?.config.principles?.outputLanguage; // Use user config or undefined
+  const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
 
   const runner = new DiagnosticianRunner(
     {
