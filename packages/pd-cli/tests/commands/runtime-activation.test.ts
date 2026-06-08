@@ -41,11 +41,14 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     }),
     ActivationDispatcher: vi.fn().mockImplementation(function () {
       return {
-        dispatch: vi.fn().mockResolvedValue({
-          decision: 'would_activate',
-          activationId: 'act-001',
-          action: 'prompt',
-          targetRef: 'P_001',
+        dispatch: vi.fn(async (args) => {
+          if (args.confirm) {
+            return { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
+          }
+          if (args.channel === 'code_tool_hook') {
+            return { decision: 'refused', activationId: 'act-001', action: 'none', targetRef: 'P_001', reason: 'activation_state_read_failed', riskLevel: 'high', channel: 'code_tool_hook' };
+          }
+          return { decision: 'would_activate', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
         }),
       };
     }),

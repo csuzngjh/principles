@@ -38,6 +38,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     timeoutMs: 300000,
     agentId: 'main',
     language: 'zh-CN',
+    warnings: [],
   }),
   resolveRuntimeConfig: vi.fn().mockReturnValue({
     runtimeKind: 'pi-ai',
