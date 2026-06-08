@@ -18,6 +18,38 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         piArtifactStore: {
           getArtifactById: mockGetArtifactById,
         },
+        connection: {
+          getDb: () => ({
+            prepare: () => ({
+              get: () => undefined,
+              all: () => [],
+            }),
+          }),
+        },
+      };
+    }),
+    SqliteActivationStateStore: vi.fn().mockImplementation(function () {
+      return {
+        findByArtifactId: vi.fn().mockResolvedValue(null),
+        insert: vi.fn().mockResolvedValue(undefined),
+      };
+    }),
+    SqliteApprovalQueueStore: vi.fn().mockImplementation(function () {
+      return {
+        enqueue: vi.fn().mockResolvedValue(undefined),
+      };
+    }),
+    ActivationDispatcher: vi.fn().mockImplementation(function () {
+      return {
+        dispatch: vi.fn(async (args) => {
+          if (args.confirm) {
+            return { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
+          }
+          if (args.channel === 'code_tool_hook') {
+            return { decision: 'refused', activationId: 'act-001', action: 'none', targetRef: 'P_001', reason: 'activation_state_read_failed', riskLevel: 'high', channel: 'code_tool_hook' };
+          }
+          return { decision: 'would_activate', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
+        }),
       };
     }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),

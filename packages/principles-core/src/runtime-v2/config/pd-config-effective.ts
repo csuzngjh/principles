@@ -135,6 +135,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
 
   const config: PdConfig = {
     version: PD_CONFIG_VERSION,
+    ...(userConfig.workspace ? { workspace: userConfig.workspace } : {}),
     features,
     runtimeProfiles,
     internalAgents,

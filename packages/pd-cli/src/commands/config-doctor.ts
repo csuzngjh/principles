@@ -12,6 +12,7 @@
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { buildDoctorOutput, type DoctorOutput } from '../services/config-doctor.js';
+import { discoverWorkspaceDefault } from '../services/pd-config-loader.js';
 
 interface DoctorOptions {
   workspace?: string;
@@ -25,6 +26,21 @@ function formatTextOutput(output: DoctorOutput): string {
   lines.push('PD Config Doctor');
   lines.push(`status: ${statusIcon} ${output.status.toUpperCase()}`);
   lines.push(`workspace: ${output.workspaceDir}`);
+
+  // Workspace discovery info
+  const discovery = discoverWorkspaceDefault();
+  if (discovery) {
+    lines.push(`workspace.default: ${discovery.workspaceDefault} (source: ${discovery.source})`);
+    const normalizedResolved = output.workspaceDir.replace(/\\/g, '/').replace(/\/$/, '');
+    const normalizedDefault = discovery.workspaceDefault.replace(/\\/g, '/').replace(/\/$/, '');
+    if (normalizedResolved !== normalizedDefault) {
+      lines.push(`  ⚠ RESOLVED path differs from workspace.default!`);
+    } else {
+      lines.push(`  ✓ resolved path matches workspace.default`);
+    }
+  } else {
+    lines.push('workspace.default: (not configured — add workspace.default to .pd/config.yaml)');
+  }
   lines.push('');
 
   lines.push('PD config paths:');

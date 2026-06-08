@@ -15,6 +15,11 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
+vi.mock('fs', () => ({
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn(),
+}));
+
 vi.mock('@principles/core/runtime-v2', () => ({
   PainToPrincipleService: vi.fn().mockImplementation(function() {
     return {
@@ -25,6 +30,16 @@ vi.mock('@principles/core/runtime-v2', () => ({
     };
   }),
   PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
+  computeEffectivePdConfig: vi.fn().mockReturnValue({
+    runtimeKind: 'pi-ai',
+    provider: 'test-provider',
+    model: 'test-model',
+    apiKeyEnv: 'TEST_KEY',
+    timeoutMs: 300000,
+    agentId: 'main',
+    language: 'zh-CN',
+    warnings: [],
+  }),
   resolveRuntimeConfig: vi.fn().mockReturnValue({
     runtimeKind: 'pi-ai',
     provider: 'test-provider',

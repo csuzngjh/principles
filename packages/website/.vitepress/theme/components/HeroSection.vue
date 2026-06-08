@@ -36,6 +36,8 @@
             controls 
             preload="metadata" 
             class="hero-video-player"
+            @fullscreenchange="onFullscreenChange"
+            @webkitfullscreenchange="onFullscreenChange"
           >
             <track kind="subtitles" src="/promo.vtt" srclang="zh" label="中文" default />
           </video>
@@ -47,6 +49,8 @@
             controls 
             preload="metadata" 
             class="hero-video-player"
+            @fullscreenchange="onFullscreenChange"
+            @webkitfullscreenchange="onFullscreenChange"
           >
             <track kind="subtitles" src="/promo-en.vtt" srclang="en" label="English" default />
           </video>
@@ -58,7 +62,45 @@
 
 <script setup>
 import { useData } from 'vitepress'
+import { onMounted } from 'vue'
+
 const { lang } = useData()
+
+const onFullscreenChange = (e) => {
+  const video = e.target
+  const isFullscreen = document.fullscreenElement === video || 
+                       document.webkitFullscreenElement === video ||
+                       video.webkitDisplayingFullscreen
+  
+  if (video.textTracks && video.textTracks.length > 0) {
+    for (let i = 0; i < video.textTracks.length; i++) {
+      video.textTracks[i].mode = isFullscreen ? 'showing' : 'hidden'
+    }
+  }
+}
+
+onMounted(() => {
+  const videos = document.querySelectorAll('.hero-video-player')
+  videos.forEach(video => {
+    const hideTracks = () => {
+      const isFullscreen = document.fullscreenElement === video || 
+                           document.webkitFullscreenElement === video ||
+                           video.webkitDisplayingFullscreen
+      if (!isFullscreen && video.textTracks) {
+        for (let i = 0; i < video.textTracks.length; i++) {
+          video.textTracks[i].mode = 'hidden'
+        }
+      }
+    }
+    
+    // Initial check
+    hideTracks()
+    
+    // Bind listeners
+    video.addEventListener('loadedmetadata', hideTracks)
+    video.addEventListener('play', hideTracks)
+  })
+})
 </script>
 
 <style scoped>
@@ -162,6 +204,24 @@ const { lang } = useData()
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Custom subtitles styling for fullscreen */
+.hero-video-player::cue {
+  font-family: var(--vp-font-family-sans);
+  background: rgba(17, 24, 39, 0.85) !important;
+  color: #FAFAF7 !important;
+}
+
+/* Hide subtitles visual display when inline (not fullscreen) */
+.hero-video-player:not(:fullscreen)::cue {
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.hero-video-player:not(:-webkit-full-screen)::cue {
+  visibility: hidden !important;
+  opacity: 0 !important;
 }
 
 @media (max-width: 959px) {
