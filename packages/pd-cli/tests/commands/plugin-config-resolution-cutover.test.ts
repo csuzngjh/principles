@@ -1,7 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+// Mock discoverWorkspaceDefault to prevent real config discovery from interfering
+vi.mock('../../src/services/pd-config-loader.js', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    discoverWorkspaceDefault: vi.fn().mockReturnValue(null),
+  };
+});
 
 import {
   resolveRuntimeConfig,

@@ -23,6 +23,7 @@ import {
   type InternalAgentsConfig,
   type UiConfig,
   type DiagnosticsMode,
+  type WorkspaceConfig,
   PD_CONFIG_VERSION,
   VALID_FEATURE_CATEGORIES,
   VALID_PROFILE_TYPES,
@@ -394,6 +395,59 @@ function validateUiConfig(raw: unknown, path: string): { ok: true; value: UiConf
   };
 }
 
+// ── Workspace Config Validation ─────────────────────────────────────────────
+
+function isAbsolutePath(p: string): boolean {
+  // Windows: C:\ or C:/ or \\unc
+  // POSIX: /...
+  return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/');
+}
+
+function validateWorkspaceConfig(
+  raw: unknown,
+  path: string,
+): { ok: true; value: WorkspaceConfig } | { ok: false; errors: PdConfigValidationError[] } {
+  const errors: PdConfigValidationError[] = [];
+
+  if (!isRecord(raw)) {
+    return { ok: false, errors: [err(path, `workspace must be an object, got ${typeof raw}`, 'Fix workspace to be an object with a default field')] };
+  }
+
+  // Reject dangerous keys
+  for (const dk of DANGEROUS_KEYS) {
+    if (Object.hasOwn(raw, dk)) {
+      return { ok: false, errors: [err(`${path}.${dk}`, `workspace contains dangerous key '${dk}'`, `Remove '${dk}' from workspace`)] };
+    }
+  }
+
+  const defaultRaw = readOwn(raw, 'default');
+  if (defaultRaw === undefined) {
+    errors.push(err(`${path}.default`, 'workspace missing required field default', 'Add default path to workspace section (must be an absolute path)'));
+  } else if (!isString(defaultRaw) || defaultRaw.length === 0) {
+    errors.push(err(`${path}.default`, `workspace.default must be a non-empty string, got ${safePreview(defaultRaw)}`, 'Set workspace.default to an absolute directory path'));
+  } else if (!isAbsolutePath(defaultRaw)) {
+    errors.push(err(`${path}.default`, `workspace.default must be an absolute path, got "${defaultRaw}"`, 'Use an absolute path like "D:\\.openclaw\\workspace" or "/home/user/.openclaw/workspace"'));
+  }
+
+  // Reject unknown keys in workspace section
+  const knownWorkspaceKeys = new Set(['default']);
+  for (const key of Object.keys(raw)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    if (!knownWorkspaceKeys.has(key)) {
+      errors.push(err(`${path}.${key}`, `unknown key '${key}' in workspace`, `Remove unknown key '${key}' from workspace`));
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    value: { default: defaultRaw as string },
+  };
+}
+
 // ── Top-Level Validation ────────────────────────────────────────────────────
 
 /**
@@ -430,6 +484,18 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     errors.push(err('version', 'missing required field version', `Add version: ${PD_CONFIG_VERSION} to config`));
   } else if (!isNumber(versionRaw) || versionRaw !== PD_CONFIG_VERSION) {
     errors.push(err('version', `version must be ${PD_CONFIG_VERSION}, got ${safePreview(versionRaw)}`, `Set version to ${PD_CONFIG_VERSION}`));
+  }
+
+  // workspace (optional)
+  const workspaceRaw = readOwn(raw, 'workspace');
+  let workspace: WorkspaceConfig | undefined;
+  if (workspaceRaw !== undefined) {
+    const wsResult = validateWorkspaceConfig(workspaceRaw, 'workspace');
+    if (wsResult.ok) {
+      workspace = wsResult.value;
+    } else {
+      errors.push(...wsResult.errors);
+    }
   }
 
   // features
@@ -514,6 +580,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
 
   const config: PdConfig = {
     version: PD_CONFIG_VERSION,
+    ...(workspace ? { workspace } : {}),
     features,
     runtimeProfiles,
     internalAgents,

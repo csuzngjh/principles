@@ -13,6 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import yaml from 'js-yaml';
 import {
   validatePdConfig,
@@ -210,4 +211,107 @@ export function computeFlagsFromLoadResult(result: PdConfigLoadResult): FeatureF
 export function redactLoadResult(result: PdConfigLoadResult): RedactedPdConfigSummary {
   const effective = result.ok ? result.effective : result.defaults;
   return redactPdConfig(effective);
+}
+
+// ── Workspace Discovery ──────────────────────────────────────────────────────
+
+/** Result of workspace.default discovery from config files. */
+export interface WorkspaceDiscoveryResult {
+  /** The extracted workspace.default path. */
+  workspaceDefault: string;
+  /** Path to the config file that provided workspace.default. */
+  configPath: string;
+  /** How the config location was found. */
+  source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Lightweight extraction of workspace.default from a config file.
+ * Does NOT run full validation — just parses YAML and reads the field.
+ */
+function extractWorkspaceDefault(configPath: string): string | null {
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+    if (
+      isRecord(parsed) &&
+      isRecord(parsed.workspace) &&
+      typeof parsed.workspace.default === 'string' &&
+      parsed.workspace.default.length > 0
+    ) {
+      return parsed.workspace.default;
+    }
+  } catch {
+    // Silently ignore — discovery is best-effort
+  }
+  return null;
+}
+
+/**
+ * Read the OpenClaw plugin config file for workspace field.
+ * Reuses the same search locations as PathResolver.
+ */
+function loadOpenClawPluginConfig(): { workspace?: string } | null {
+  const configLocations = [
+    path.join(process.cwd(), 'principles-disciple.json'),
+    path.join(os.homedir(), '.openclaw', 'principles-disciple.json'),
+    path.join(os.homedir(), '.principles', 'principles-disciple.json'),
+  ];
+  for (const loc of configLocations) {
+    if (fs.existsSync(loc)) {
+      try {
+        const content = fs.readFileSync(loc, 'utf8');
+        return JSON.parse(content) as { workspace?: string };
+      } catch {
+        // ignore malformed config
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Search known locations for a .pd/config.yaml that contains a workspace.default field.
+ * This runs BEFORE workspace resolution and does NOT require knowing the workspace dir.
+ *
+ * Returns the extracted workspace.default path, or null if not found.
+ */
+export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
+  const candidates: { dir: string; source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config' }[] = [];
+
+  // 1. If PD_WORKSPACE_DIR is set, check there first
+  const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
+  if (envWorkspace) {
+    candidates.push({ dir: envWorkspace, source: 'env_var' });
+  }
+
+  // 2. OpenClaw default workspace
+  const homeDir = os.homedir();
+  candidates.push({
+    dir: path.join(homeDir, '.openclaw', 'workspace'),
+    source: 'openclaw_default',
+  });
+
+  // 3. OpenClaw plugin config (principles-disciple.json) may have workspace field
+  const pluginConfig = loadOpenClawPluginConfig();
+  if (pluginConfig?.workspace) {
+    candidates.push({ dir: pluginConfig.workspace, source: 'openclaw_plugin_config' });
+  }
+
+  // Search each candidate for .pd/config.yaml with workspace.default
+  for (const { dir, source } of candidates) {
+    const configPath = path.join(dir, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+    if (fs.existsSync(configPath)) {
+      const workspaceDefault = extractWorkspaceDefault(configPath);
+      if (workspaceDefault) {
+        return { workspaceDefault, configPath, source };
+      }
+    }
+  }
+
+  return null;
 }

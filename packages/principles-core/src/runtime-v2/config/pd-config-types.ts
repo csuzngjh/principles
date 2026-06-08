@@ -113,10 +113,24 @@ export interface PrinciplesConfig {
   outputLanguage?: OutputLanguage;
 }
 
+// ── Workspace Config ────────────────────────────────────────────────────────
+
+/**
+ * Workspace path configuration.
+ * Declares the single source of truth for the PD home workspace.
+ * Optional — unconfigured setups continue to require explicit --workspace or env var.
+ */
+export interface WorkspaceConfig {
+  /** Absolute path to the default PD workspace directory. */
+  default: string;
+}
+
 // ── Top-Level Config ────────────────────────────────────────────────────────
 
 export interface PdConfig {
   version: PdConfigVersion;
+  /** Workspace path configuration (optional). */
+  workspace?: WorkspaceConfig;
   features: Record<string, FeatureFlagEntry>;
   runtimeProfiles: Record<string, RuntimeProfile>;
   internalAgents: InternalAgentsConfig;
@@ -185,6 +199,7 @@ export interface RedactedFeatureSummary {
 export interface RedactedPdConfigSummary {
   version: PdConfigVersion;
   source: 'defaults' | 'user_config';
+  workspace?: WorkspaceConfig;
   features: RedactedFeatureSummary[];
   runtimeProfiles: RedactedRuntimeProfileSummary[];
   defaultRuntime: string;
