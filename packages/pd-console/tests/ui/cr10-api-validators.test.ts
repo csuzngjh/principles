@@ -17,17 +17,30 @@ import {
   validateHeaders,
   validateFeedbackReport,
   validateFeedbackDraftsList,
+  validateFeedbackDraftEnvelope,
   validateDeleteEnvelope,
   validateWorkspaceEntry,
   validateWorkspaceList,
+  validateRemovedEnvelope,
+  validateSyncResult,
   validateConfigSummary,
+  validateConfigCatalog,
+  validateAgentBindingUpdate,
+  validateReadinessCheck,
+  validateDefaultRuntimeUpdate,
+  validateConfigReadiness,
   validateGovernanceQueue,
   validateActivations,
   validateDisableActivation,
+  validateLifecycleMetrics,
   validateUpdateStatus,
+  validateUpdateHistory,
   validateApprovalListResult,
+  validateApprovalRecordDirect,
   validatePrinciplesList,
   validateApprovalsGrouped,
+  validateEvidenceChain,
+  validateOutputLanguage,
 } from '../../src/ui/utils/validators.js';
 
 // ── validateErrorResponse ─────────────────────────────────────────────────────
@@ -764,5 +777,511 @@ describe('validateApprovalsGrouped', () => {
 
   it('rejects invalid groups', () => {
     expect(validateApprovalsGrouped({ ...validGrouped, groups: [{ principleId: 123 }] })).toBeNull();
+  });
+});
+
+// ── validateOutputLanguage ──────────────────────────────────────────────────
+
+describe('validateOutputLanguage', () => {
+  it('accepts valid zh-CN output', () => {
+    const result = validateOutputLanguage({ outputLanguage: 'zh-CN', source: 'default' });
+    expect(result).not.toBeNull();
+    expect(result!.outputLanguage).toBe('zh-CN');
+    expect(result!.source).toBe('default');
+  });
+
+  it('accepts valid en output', () => {
+    const result = validateOutputLanguage({ outputLanguage: 'en', source: 'user_config' });
+    expect(result).not.toBeNull();
+    expect(result!.outputLanguage).toBe('en');
+    expect(result!.source).toBe('user_config');
+  });
+
+  it('rejects null', () => {
+    expect(validateOutputLanguage(null)).toBeNull();
+  });
+
+  it('rejects undefined', () => {
+    expect(validateOutputLanguage(undefined)).toBeNull();
+  });
+
+  it('rejects arrays', () => {
+    expect(validateOutputLanguage(['zh-CN', 'en'])).toBeNull();
+  });
+
+  it('rejects strings', () => {
+    expect(validateOutputLanguage('zh-CN')).toBeNull();
+  });
+
+  it('rejects numbers', () => {
+    expect(validateOutputLanguage(42)).toBeNull();
+  });
+
+  it('rejects missing outputLanguage', () => {
+    expect(validateOutputLanguage({ source: 'default' })).toBeNull();
+  });
+
+  it('rejects missing source', () => {
+    expect(validateOutputLanguage({ outputLanguage: 'zh-CN' })).toBeNull();
+  });
+
+  it('rejects invalid outputLanguage value', () => {
+    expect(validateOutputLanguage({ outputLanguage: 'fr', source: 'default' })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: 'de', source: 'default' })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: 'en-US', source: 'default' })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: '', source: 'default' })).toBeNull();
+  });
+
+  it('rejects wrong type for outputLanguage', () => {
+    expect(validateOutputLanguage({ outputLanguage: 42, source: 'default' })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: ['zh-CN'], source: 'default' })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: { value: 'zh-CN' }, source: 'default' })).toBeNull();
+  });
+
+  it('rejects wrong type for source', () => {
+    expect(validateOutputLanguage({ outputLanguage: 'zh-CN', source: 42 })).toBeNull();
+    expect(validateOutputLanguage({ outputLanguage: 'zh-CN', source: ['default'] })).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const parent = Object.create({ outputLanguage: 'zh-CN' });
+    parent.source = 'default';
+    expect(validateOutputLanguage(parent)).toBeNull();
+  });
+
+  it('rejects object with extra fields (only validates required fields)', () => {
+    const result = validateOutputLanguage({ outputLanguage: 'en', source: 'default', extra: 'field' });
+    expect(result).not.toBeNull();
+    expect(result!.outputLanguage).toBe('en');
+    expect(result!.source).toBe('default');
+  });
+});
+
+// ── validateFeedbackDraftEnvelope ──────────────────────────────────────────────
+
+describe('validateFeedbackDraftEnvelope', () => {
+  it('accepts valid feedback draft envelope', () => {
+    const result = validateFeedbackDraftEnvelope({ report: { id: '1', text: 'test' } });
+    expect(result).not.toBeNull();
+    expect(result!.report).toEqual({ id: '1', text: 'test' });
+  });
+
+  it('rejects null', () => {
+    expect(validateFeedbackDraftEnvelope(null)).toBeNull();
+  });
+
+  it('rejects non-object', () => {
+    expect(validateFeedbackDraftEnvelope('string')).toBeNull();
+    expect(validateFeedbackDraftEnvelope(42)).toBeNull();
+    expect(validateFeedbackDraftEnvelope([])).toBeNull();
+  });
+
+  it('rejects missing report', () => {
+    expect(validateFeedbackDraftEnvelope({})).toBeNull();
+  });
+
+  it('rejects non-object report', () => {
+    expect(validateFeedbackDraftEnvelope({ report: 'string' })).toBeNull();
+    expect(validateFeedbackDraftEnvelope({ report: 42 })).toBeNull();
+    expect(validateFeedbackDraftEnvelope({ report: [] })).toBeNull();
+  });
+});
+
+// ── validateRemovedEnvelope ────────────────────────────────────────────────────
+
+describe('validateRemovedEnvelope', () => {
+  it('accepts valid removed envelope', () => {
+    const result = validateRemovedEnvelope({ removed: 'workspace-name' });
+    expect(result).not.toBeNull();
+    expect(result!.removed).toBe('workspace-name');
+  });
+
+  it('rejects null', () => {
+    expect(validateRemovedEnvelope(null)).toBeNull();
+  });
+
+  it('rejects non-object', () => {
+    expect(validateRemovedEnvelope('string')).toBeNull();
+    expect(validateRemovedEnvelope(42)).toBeNull();
+  });
+
+  it('rejects missing removed', () => {
+    expect(validateRemovedEnvelope({})).toBeNull();
+  });
+
+  it('rejects wrong type for removed', () => {
+    expect(validateRemovedEnvelope({ removed: 42 })).toBeNull();
+    expect(validateRemovedEnvelope({ removed: [] })).toBeNull();
+  });
+});
+
+// ── validateSyncResult ─────────────────────────────────────────────────────────
+
+describe('validateSyncResult', () => {
+  it('accepts valid sync result', () => {
+    const result = validateSyncResult({ success: true, syncedAt: '2026-06-01T00:00:00Z' });
+    expect(result).not.toBeNull();
+    expect(result!.success).toBe(true);
+    expect(result!.syncedAt).toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('accepts sync result with success false', () => {
+    const result = validateSyncResult({ success: false, syncedAt: '2026-06-01T00:00:00Z' });
+    expect(result).not.toBeNull();
+    expect(result!.success).toBe(false);
+  });
+
+  it('rejects null', () => {
+    expect(validateSyncResult(null)).toBeNull();
+  });
+
+  it('rejects missing fields', () => {
+    expect(validateSyncResult({ success: true })).toBeNull();
+    expect(validateSyncResult({ syncedAt: '2026-06-01' })).toBeNull();
+  });
+
+  it('rejects wrong types', () => {
+    expect(validateSyncResult({ success: 'true', syncedAt: '2026-06-01' })).toBeNull();
+    expect(validateSyncResult({ success: true, syncedAt: 42 })).toBeNull();
+  });
+});
+
+// ── validateConfigReadiness ────────────────────────────────────────────────────
+
+describe('validateConfigReadiness', () => {
+  it('accepts valid config readiness', () => {
+    const result = validateConfigReadiness({
+      checks: [
+        { id: 'check1', name: 'Check 1', status: 'ok', message: 'OK', lastCheck: '2026-06-01T00:00:00Z' },
+      ],
+      generatedAt: '2026-06-01T00:00:00Z',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.checks).toHaveLength(1);
+    expect(result!.generatedAt).toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('rejects null', () => {
+    expect(validateConfigReadiness(null)).toBeNull();
+  });
+
+  it('rejects missing checks', () => {
+    expect(validateConfigReadiness({ generatedAt: '2026-06-01' })).toBeNull();
+  });
+
+  it('rejects missing generatedAt', () => {
+    expect(validateConfigReadiness({ checks: [] })).toBeNull();
+  });
+
+  it('rejects non-array checks', () => {
+    expect(validateConfigReadiness({ checks: 'not-array', generatedAt: '2026-06-01' })).toBeNull();
+  });
+
+  it('rejects invalid check item', () => {
+    const result = validateConfigReadiness({
+      checks: [{ id: 123, name: 'Check', status: 'ok', message: 'OK', lastCheck: '2026-06-01' }],
+      generatedAt: '2026-06-01',
+    });
+    expect(result).toBeNull();
+  });
+});
+
+// ── validateConfigCatalog ─────────────────────────────────────────────────────
+
+describe('validateConfigCatalog', () => {
+  it('accepts valid config catalog', () => {
+    const result = validateConfigCatalog({
+      profiles: [{ id: 'profile1', type: 'openclaw', label: 'Profile 1', readiness: 'ready' }],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.profiles).toHaveLength(1);
+  });
+
+  it('accepts catalog with errors', () => {
+    const result = validateConfigCatalog({
+      profiles: [{ id: 'profile1', type: 'openclaw', label: 'Profile 1', readiness: 'ready' }],
+      errors: [{ path: '/runtimeProfiles/test', reason: 'invalid', nextAction: 'fix' }],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.errors).toHaveLength(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateConfigCatalog(null)).toBeNull();
+  });
+
+  it('rejects missing profiles', () => {
+    expect(validateConfigCatalog({})).toBeNull();
+  });
+
+  it('rejects non-array profiles', () => {
+    expect(validateConfigCatalog({ profiles: 'not-array' })).toBeNull();
+  });
+
+  it('rejects invalid profile in array', () => {
+    const result = validateConfigCatalog({ profiles: [{ id: 123 }] });
+    expect(result).toBeNull();
+  });
+});
+
+// ── validateAgentBindingUpdate ─────────────────────────────────────────────────
+
+describe('validateAgentBindingUpdate', () => {
+  it('accepts valid agent binding update', () => {
+    const result = validateAgentBindingUpdate({ agent: 'diagnostician', runtimeProfile: 'openclaw.default', enabled: true });
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('diagnostician');
+    expect(result!.runtimeProfile).toBe('openclaw.default');
+    expect(result!.enabled).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(validateAgentBindingUpdate(null)).toBeNull();
+  });
+
+  it('rejects missing fields', () => {
+    expect(validateAgentBindingUpdate({ agent: 'diag' })).toBeNull();
+    expect(validateAgentBindingUpdate({ runtimeProfile: 'openclaw.default', enabled: true })).toBeNull();
+    expect(validateAgentBindingUpdate({ agent: 'diag', enabled: true })).toBeNull();
+  });
+
+  it('rejects wrong types', () => {
+    expect(validateAgentBindingUpdate({ agent: 123, runtimeProfile: 'openclaw.default', enabled: true })).toBeNull();
+    expect(validateAgentBindingUpdate({ agent: 'diag', runtimeProfile: 123, enabled: true })).toBeNull();
+    expect(validateAgentBindingUpdate({ agent: 'diag', runtimeProfile: 'openclaw.default', enabled: 'yes' })).toBeNull();
+  });
+});
+
+// ── validateReadinessCheck ────────────────────────────────────────────────────
+
+describe('validateReadinessCheck', () => {
+  it('accepts valid readiness check', () => {
+    const result = validateReadinessCheck({
+      agent: 'diagnostician',
+      readiness: 'ready',
+      profileId: 'openclaw.default',
+      profileLabel: 'Default OpenClaw',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe('diagnostician');
+    expect(result!.readiness).toBe('ready');
+  });
+
+  it('accepts readiness with optional reason and nextAction', () => {
+    const result = validateReadinessCheck({
+      agent: 'diagnostician',
+      readiness: 'not_ready',
+      profileId: 'openclaw.default',
+      profileLabel: 'Default',
+      reason: 'Missing API key',
+      nextAction: 'Set ANTHROPIC_API_KEY',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.reason).toBe('Missing API key');
+    expect(result!.nextAction).toBe('Set ANTHROPIC_API_KEY');
+  });
+
+  it('accepts all valid readiness statuses', () => {
+    const statuses = ['ready', 'not_ready', 'needs_setup', 'disabled', 'unknown'] as const;
+    for (const status of statuses) {
+      const result = validateReadinessCheck({
+        agent: 'diag',
+        readiness: status,
+        profileId: 'profile',
+        profileLabel: 'Label',
+      });
+      expect(result).not.toBeNull();
+      expect(result!.readiness).toBe(status);
+    }
+  });
+
+  it('rejects null', () => {
+    expect(validateReadinessCheck(null)).toBeNull();
+  });
+
+  it('rejects missing fields', () => {
+    expect(validateReadinessCheck({ readiness: 'ready', profileId: 'p', profileLabel: 'l' })).toBeNull();
+    expect(validateReadinessCheck({ agent: 'diag', profileId: 'p', profileLabel: 'l' })).toBeNull();
+  });
+
+  it('rejects invalid readiness status', () => {
+    const result = validateReadinessCheck({
+      agent: 'diag',
+      readiness: 'invalid_status',
+      profileId: 'p',
+      profileLabel: 'l',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('rejects wrong types', () => {
+    expect(validateReadinessCheck({
+      agent: 123, readiness: 'ready', profileId: 'p', profileLabel: 'l',
+    })).toBeNull();
+  });
+});
+
+// ── validateDefaultRuntimeUpdate ───────────────────────────────────────────────
+
+describe('validateDefaultRuntimeUpdate', () => {
+  it('accepts valid default runtime update', () => {
+    const result = validateDefaultRuntimeUpdate({ defaultRuntime: 'lmstudio-local' });
+    expect(result).not.toBeNull();
+    expect(result!.defaultRuntime).toBe('lmstudio-local');
+  });
+
+  it('rejects null', () => {
+    expect(validateDefaultRuntimeUpdate(null)).toBeNull();
+  });
+
+  it('rejects missing defaultRuntime', () => {
+    expect(validateDefaultRuntimeUpdate({})).toBeNull();
+  });
+
+  it('rejects wrong type', () => {
+    expect(validateDefaultRuntimeUpdate({ defaultRuntime: 123 })).toBeNull();
+    expect(validateDefaultRuntimeUpdate({ defaultRuntime: [] })).toBeNull();
+  });
+});
+
+// ── validateLifecycleMetrics ───────────────────────────────────────────────────
+
+describe('validateLifecycleMetrics', () => {
+  const validMetrics = {
+    principleId: 'p1',
+    adherence: {
+      insufficientData: false,
+      rate: 0.8,
+      note: 'All good',
+    },
+    ruleMetrics: [
+      { ruleId: 'r1', triggered: 5, lastTriggeredAt: '2026-06-01T00:00:00Z' },
+    ],
+  };
+
+  it('accepts valid lifecycle metrics', () => {
+    const result = validateLifecycleMetrics(validMetrics);
+    expect(result).not.toBeNull();
+    expect(result!.principleId).toBe('p1');
+    expect(result!.adherence.rate).toBe(0.8);
+    expect(result!.ruleMetrics).toHaveLength(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateLifecycleMetrics(null)).toBeNull();
+  });
+
+  it('rejects missing principleId', () => {
+    const { principleId: _, ...withoutId } = validMetrics;
+    expect(validateLifecycleMetrics(withoutId)).toBeNull();
+  });
+
+  it('rejects invalid adherence', () => {
+    const result = validateLifecycleMetrics({ ...validMetrics, adherence: { insufficientData: 'not-boolean', rate: 0.8, note: 'test' } });
+    expect(result).toBeNull();
+  });
+
+  it('rejects non-array ruleMetrics', () => {
+    const result = validateLifecycleMetrics({ ...validMetrics, ruleMetrics: 'not-array' });
+    expect(result).toBeNull();
+  });
+
+  it('rejects invalid rule metric item', () => {
+    const result = validateLifecycleMetrics({
+      ...validMetrics,
+      ruleMetrics: [{ ruleId: 123 }],
+    });
+    expect(result).toBeNull();
+  });
+});
+
+// ── validateUpdateHistory ──────────────────────────────────────────────────────
+
+describe('validateUpdateHistory', () => {
+  it('accepts valid update history', () => {
+    const result = validateUpdateHistory({
+      updates: [
+        { version: '1.0.0', appliedAt: '2026-06-01', notes: 'Initial release' },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.updates).toHaveLength(1);
+  });
+
+  it('rejects null', () => {
+    expect(validateUpdateHistory(null)).toBeNull();
+  });
+
+  it('rejects missing updates', () => {
+    expect(validateUpdateHistory({})).toBeNull();
+  });
+
+  it('rejects non-array updates', () => {
+    expect(validateUpdateHistory({ updates: 'not-array' })).toBeNull();
+  });
+
+  it('rejects invalid update entry', () => {
+    const result = validateUpdateHistory({ updates: [{ version: 1, appliedAt: '2026-06-01', notes: 'Note' }] });
+    expect(result).toBeNull();
+  });
+});
+
+// ── validateApprovalRecordDirect ──────────────────────────────────────────────
+
+describe('validateApprovalRecordDirect', () => {
+  it('accepts valid approval record', () => {
+    const result = validateApprovalRecordDirect({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'medium',
+      status: 'pending',
+      confidence: 0.85,
+      requestedAt: '2026-06-01T00:00:00Z',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.approvalId).toBe('apr_123');
+    expect(result!.confidence).toBe(0.85);
+  });
+
+  it('accepts approval record without optional fields', () => {
+    const result = validateApprovalRecordDirect({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'medium',
+      status: 'pending',
+      requestedAt: '2026-06-01T00:00:00Z',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBeUndefined();
+  });
+
+  it('rejects null', () => {
+    expect(validateApprovalRecordDirect(null)).toBeNull();
+  });
+
+  it('rejects missing required fields', () => {
+    expect(validateApprovalRecordDirect({ approvalId: 'apr_123' })).toBeNull();
+    expect(validateApprovalRecordDirect({ artifactId: 'art_456' })).toBeNull();
+  });
+
+  it('rejects wrong types for required fields', () => {
+    expect(validateApprovalRecordDirect({
+      approvalId: 123, artifactId: 'art', channel: 'prompt', riskLevel: 'low', status: 'pending', requestedAt: '2026-06-01',
+    })).toBeNull();
+  });
+
+  it('rejects invalid confidence type', () => {
+    const result = validateApprovalRecordDirect({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'medium',
+      status: 'pending',
+      confidence: 'high',
+      requestedAt: '2026-06-01T00:00:00Z',
+    });
+    expect(result).toBeNull();
   });
 });
