@@ -369,6 +369,7 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
     console.error(`FAIL: successRate=${summary.successRate} (threshold: ${minSuccessRate}) ` +
       `ledger=${summary.ledgerConsistencyOk} candidates=${summary.allHaveCandidates} ledger=${summary.allHaveLedger}`);
     process.exit(1);
+    return;
   }
 
   console.error('');

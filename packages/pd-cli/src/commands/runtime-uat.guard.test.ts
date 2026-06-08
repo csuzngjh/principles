@@ -154,3 +154,24 @@ describe('PRI-334: Commander flag wiring (ERR-063)', () => {
     expect(noForm).toBeUndefined();
   });
 });
+
+describe('PRI-334: shouldExitWithError exit path (EP-04)', () => {
+  it('exits 1 and does not print ALL CHECKS PASSED when shouldExitWithError is true', async () => {
+    const tempWorkspace = path.join(os.tmpdir(), 'pd-exit-test-' + Date.now());
+    mockExecFileSync.mockClear();
+    // Make all iterations fail (execFileSync throws) so shouldExitWithError returns true
+    mockExecFileSync.mockRejectedValue(new Error('simulated failure'));
+    capturedStderr.length = 0;
+    capturedExitCode = null;
+
+    await handleRuntimeUat({
+      workspace: tempWorkspace,
+      count: 1,
+      minSuccessRate: 1.0,
+    });
+
+    expect(capturedExitCode).toBe(1);
+    const stderrText = capturedStderr.join('\n');
+    expect(stderrText).not.toContain('ALL CHECKS PASSED');
+  });
+});
