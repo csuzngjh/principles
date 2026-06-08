@@ -64,8 +64,11 @@ function parseTriggerDecisions(logContent: string): TriggerDecisionEntry[] {
         score: payload.score,
         sessionId: payload.sessionId,
       });
-    } catch {
-      // Skip malformed entries
+    } catch (e) {
+      // Skip malformed entries - log for operator visibility
+      if (process.env.DEBUG) {
+        console.error(`WARN: Malformed TRIGGER_DECISION entry: ${String(e).slice(0, 100)}`);
+      }
     }
   }
 
@@ -101,8 +104,11 @@ function readRecentDecisions(stateDir: string, limit: number): TriggerDecisionEn
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);
       allEntries.push(...entries);
-    } catch {
-      // Skip unreadable files
+    } catch (e) {
+      // Skip unreadable files - log for operator visibility
+      if (process.env.DEBUG) {
+        console.error(`WARN: Could not read log file ${logFile}: ${String(e).slice(0, 100)}`);
+      }
     }
   }
 

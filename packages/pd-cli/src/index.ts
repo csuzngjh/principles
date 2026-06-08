@@ -83,6 +83,13 @@ painCmd
   .description('Retry a failed diagnosis by pain ID')
   .requiredOption('-p, --pain-id <painId>', 'Pain ID to retry diagnosis for')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double', 'pi-ai'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to invoke')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
+  .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRetry(opts);
