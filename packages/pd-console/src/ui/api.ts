@@ -16,6 +16,7 @@ import {
   validateAgentBindingUpdate,
   validateReadinessCheck,
   validateDefaultRuntimeUpdate,
+  validateOutputLanguage,
   validateGovernanceQueue,
   validateActivations,
   validateDisableActivation,
@@ -42,6 +43,7 @@ import type {
   AgentBindingUpdateData,
   ReadinessCheckData,
   DefaultRuntimeUpdateData,
+  OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
   DisableActivationData,
@@ -328,6 +330,23 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
   );
 }
 
+// ── Principles Output Language (PRI-332 P1-1) ────────────────────────────────
+
+async function fetchOutputLanguage(): Promise<ApiResponse<OutputLanguageData>> {
+  return request<OutputLanguageData>('/api/v1/config/principles/output-language', undefined, validateOutputLanguage);
+}
+
+async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse<OutputLanguageData>> {
+  return request<OutputLanguageData>(
+    '/api/v1/config/principles/output-language',
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ outputLanguage }),
+    },
+    validateOutputLanguage,
+  );
+}
+
 // ── CR8: Backend Data Contract (G.1) ─────────────────────────────────────────
 
 async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>> {
@@ -396,6 +415,8 @@ export {
   updateAgentBinding,
   checkAgentReadiness,
   updateDefaultRuntime,
+  fetchOutputLanguage,
+  updateOutputLanguage,
   fetchWorkspaces,
   addWorkspace,
   removeWorkspace,
@@ -429,6 +450,7 @@ export type {
   AgentBindingUpdateData,
   ReadinessCheckData,
   DefaultRuntimeUpdateData,
+  OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
   DisableActivationData,

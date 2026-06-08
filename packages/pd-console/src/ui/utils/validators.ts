@@ -885,6 +885,17 @@ export interface PrincipleListItemData {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** PRI-332: Detected language of the principle text */
+  detectedLanguage: string;
+  /** PRI-332 P1-5: Structured readability warning code */
+  readabilityWarningCode?: 'technical_pattern' | 'diagnostic_residue' | 'title_too_long';
+}
+
+const VALID_WARNING_CODES = ['technical_pattern', 'diagnostic_residue', 'title_too_long'] as const;
+type ReadabilityWarningCode = typeof VALID_WARNING_CODES[number];
+
+function isReadabilityWarningCode(value: unknown): value is ReadabilityWarningCode {
+  return isString(value) && (VALID_WARNING_CODES as readonly string[]).includes(value);
 }
 
 function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
@@ -906,14 +917,26 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
   if (!Object.hasOwn(v, 'conflictsWithCount') || !isNumber(v.conflictsWithCount)) return null;
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
   if (!Object.hasOwn(v, 'updatedAt') || !isString(v.updatedAt)) return null;
-  return {
+  const result: PrincipleListItemData = {
     id: v.id, text: v.text, triggerPattern: v.triggerPattern, action: v.action,
     status: v.status, priority: v.priority, scope: v.scope,
     domain: domain.value,
     evaluability: v.evaluability, valueScore: v.valueScore, adherenceRate: v.adherenceRate,
     painPreventedCount: v.painPreventedCount, ruleCount: v.ruleCount,
     conflictsWithCount: v.conflictsWithCount, createdAt: v.createdAt, updatedAt: v.updatedAt,
+    // PRI-332: detectedLanguage — absent defaults to 'unknown'; present but malformed → fail loud (ERR-009)
+    detectedLanguage: 'unknown',
   };
+  if (Object.hasOwn(v, 'detectedLanguage')) {
+    if (!isString(v.detectedLanguage)) return null;
+    result.detectedLanguage = v.detectedLanguage;
+  }
+  // PRI-332 P1-5: readabilityWarningCode is optional — fail loud when present but invalid (ERR-009)
+  if (Object.hasOwn(v, 'readabilityWarningCode')) {
+    if (!isReadabilityWarningCode(v.readabilityWarningCode)) return null;
+    result.readabilityWarningCode = v.readabilityWarningCode;
+  }
+  return result;
 }
 
 export interface PrinciplesListData {
@@ -1154,4 +1177,21 @@ export function validateEvidenceChain(v: unknown): EvidenceChainData | null {
   }
 
   return result;
+}
+
+// ── Principles Output Language (PRI-332 P1-1) ──────────────────────────────
+
+export interface OutputLanguageData {
+  outputLanguage: string;
+  source: string;
+}
+
+const VALID_OUTPUT_LANGUAGE_VALUES = ['zh-CN', 'en'] as const;
+
+export function validateOutputLanguage(v: unknown): OutputLanguageData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'outputLanguage') || !isString(v.outputLanguage)) return null;
+  if (!(VALID_OUTPUT_LANGUAGE_VALUES as readonly string[]).includes(v.outputLanguage)) return null;
+  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  return { outputLanguage: v.outputLanguage, source: v.source };
 }

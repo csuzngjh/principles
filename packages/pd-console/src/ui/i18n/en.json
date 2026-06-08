@@ -124,7 +124,9 @@
         "check_task_status": "Check internalization pipeline status, or wait for automatic retry.",
         "fix_and_retry": "Check failure details, fix the issue and retry.",
         "run_integrity_check": "Run pd runtime internalization integrity to check and repair table structure."
-      }
+      },
+      "zeroStateHealthy": "No items need your judgment right now. PD has checked behavior evidence, principle review queue, and system signals.",
+      "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here."
     },
     "pain": {
       "eyebrow": "Behavior Evidence",
@@ -263,6 +265,17 @@
       "channelDeferArchive": "Defer Archive",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "Confidence",
+      "languageHintEn": "Generated in English",
+      "languageHintZh": "Generated in Chinese",
+      "languageHintUnknown": "Language unknown",
+      "languageMismatchHint": "This principle was generated in {{lang}}. Review the behavior, not only the wording.",
+      "readabilityFallbackTitle": "Principle candidate",
+      "readabilityOriginalLabel": "Original technical text",
+      "readabilityWarning": {
+        "technical_pattern": "Title appears to be a technical pattern. Review the behavior evidence below.",
+        "diagnostic_residue": "Title may contain diagnostic residue. Review the full text for context.",
+        "title_too_long": "Title is unusually long. The readable summary may be in the text below."
+      },
       "detail": {
         "loading": "Loading…",
         "backToList": "← Back to list",
@@ -457,7 +470,13 @@
       "lastSync": "Last Sync",
       "loadError": "Unable to load settings. You can try refreshing the page.",
       "addNamePlaceholder": "Workspace name",
-      "addPathPlaceholder": "Workspace path"
+      "addPathPlaceholder": "Workspace path",
+      "principleLanguage": "Principle Language",
+      "principleLanguageDescription": "Save your language preference for principle display. Generation integration is deferred.",
+      "languageZhCN": "中文 (Chinese)",
+      "languageEn": "English",
+      "languageSaved": "Language preference saved",
+      "languageLoadError": "Failed to load language preference"
     },
     "controlCenter": {
       "eyebrow": "Control Center",

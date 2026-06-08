@@ -345,6 +345,39 @@ function OnboardingGuide() {
   );
 }
 
+/**
+ * PRI-332: Shown when all counts are zero and sources are healthy.
+ * Explains to the owner that PD has checked everything — not that PD is broken.
+ */
+function ZeroStateHealthy() {
+  const { t } = useTranslation();
+  return (
+    <div className="bg-panel border border-line rounded-[6px] p-6">
+      <p className="text-ink-2 text-sm leading-relaxed">
+        {t("pages.focus.zeroStateHealthy")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * PRI-332: Shown when state_db_missing — first-time setup explanation.
+ */
+function ZeroStateDbMissing() {
+  const { t } = useTranslation();
+  return (
+    <div className="bg-panel border border-line rounded-[6px] p-6">
+      <p className="text-ink-2 text-sm leading-relaxed">
+        {t("pages.focus.zeroStateDbMissing")}
+      </p>
+      <div className="mt-3 text-ink-4 text-[13px]">
+        <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
+        {getNextActionText("run_config_doctor", t)}
+      </div>
+    </div>
+  );
+}
+
 function InProgressGuide({ summary }: { summary: string }) {
   const { t } = useTranslation();
   return (
@@ -522,16 +555,27 @@ export function FocusPage() {
         stagnationCount={stagnationCount}
       />
 
-      {/* State-specific guides */}
+      {/* State-specific guides — PRI-332: distinguish healthy empty from degraded */}
       {governanceState === "none" && pendingCount === 0 && deviationCount === 0 && stagnationCount === 0 && (
-        <OnboardingGuide />
+        stateReasonCode === "state_db_missing" ? (
+          <ZeroStateDbMissing />
+        ) : (
+          <>
+            <ZeroStateHealthy />
+            <div className="mt-4">
+              <OnboardingGuide />
+            </div>
+          </>
+        )
       )}
 
       {governanceState === "in_progress" && inProgressSummary && (
         <InProgressGuide summary={inProgressSummary} />
       )}
 
-      {governanceState === "degraded" && degradedSignals && degradedSignals.length > 0 && (
+      {/* PRI-332: Always show degraded signals when present, regardless of governance state.
+          Don't hide degraded sources behind state-specific guides (ERR-002). */}
+      {degradedSignals && degradedSignals.length > 0 && (
         <DegradedSummary signals={degradedSignals} />
       )}
 

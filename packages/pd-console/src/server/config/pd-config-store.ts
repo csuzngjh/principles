@@ -613,6 +613,183 @@ export function updateDefaultRuntime(
   };
 }
 
+// ── Principles Output Language (PRI-332 P1-1) ─────────────────────────────
+
+/** Valid values for principles.outputLanguage in config.yaml */
+export const VALID_OUTPUT_LANGUAGES = ['zh-CN', 'en'] as const;
+export type OutputLanguage = typeof VALID_OUTPUT_LANGUAGES[number];
+
+function isValidOutputLanguage(value: unknown): value is OutputLanguage {
+  return typeof value === 'string' && (VALID_OUTPUT_LANGUAGES as readonly string[]).includes(value);
+}
+
+export interface OutputLanguageResultOk {
+  ok: true;
+  outputLanguage: OutputLanguage;
+  source: 'user_config' | 'default';
+}
+
+export interface OutputLanguageResultErr {
+  ok: false;
+  error: string;
+  statusCode: number;
+  message: string;
+  nextAction: string;
+}
+
+export type OutputLanguageResult = OutputLanguageResultOk | OutputLanguageResultErr;
+
+/** Default output language when not configured. */
+const DEFAULT_OUTPUT_LANGUAGE: OutputLanguage = 'zh-CN';
+
+/**
+ * Read principles.outputLanguage from config.yaml.
+ * Returns default ('zh-CN') when not set.
+ * Fail loud if set to an invalid value (ERR-009).
+ */
+export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguageResult {
+  const configPath = getPdConfigPath(workspaceDir);
+
+  if (!fs.existsSync(configPath)) {
+    return { ok: true, outputLanguage: DEFAULT_OUTPUT_LANGUAGE, source: 'default' };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
+  }
+
+  if (!isRecord(parsed)) {
+    return { ok: true, outputLanguage: DEFAULT_OUTPUT_LANGUAGE, source: 'default' };
+  }
+
+  // Extract principles section — unknown-first, no `as` bypass (ERR-001)
+  const principlesRaw = Object.hasOwn(parsed, 'principles') ? parsed.principles : undefined;
+  if (principlesRaw === undefined) {
+    return { ok: true, outputLanguage: DEFAULT_OUTPUT_LANGUAGE, source: 'default' };
+  }
+
+  if (!isRecord(principlesRaw)) {
+    return {
+      ok: false,
+      error: 'invalid_config',
+      statusCode: 500,
+      message: 'principles section must be a mapping',
+      nextAction: 'Fix principles section in .pd/config.yaml to be a YAML mapping',
+    };
+  }
+
+  const outputLangRaw = Object.hasOwn(principlesRaw, 'outputLanguage') ? principlesRaw.outputLanguage : undefined;
+  if (outputLangRaw === undefined) {
+    return { ok: true, outputLanguage: DEFAULT_OUTPUT_LANGUAGE, source: 'default' };
+  }
+
+  if (!isValidOutputLanguage(outputLangRaw)) {
+    return {
+      ok: false,
+      error: 'invalid_output_language',
+      statusCode: 500,
+      message: `principles.outputLanguage must be one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}. Got: ${String(outputLangRaw)}`,
+      nextAction: `Set principles.outputLanguage to one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}`,
+    };
+  }
+
+  return { ok: true, outputLanguage: outputLangRaw, source: 'user_config' };
+}
+
+/**
+ * Update principles.outputLanguage in config.yaml.
+ * Safe partial write: preserves unknown sections, validates before write.
+ */
+export function updatePrinciplesOutputLanguage(
+  workspaceDir: string,
+  payload: unknown,
+): OutputLanguageResult {
+  // 1. Validate payload
+  if (!isRecord(payload)) {
+    return { ok: false, error: 'bad_request', statusCode: 400, message: 'Payload must be a JSON object with an outputLanguage field', nextAction: 'Send { outputLanguage: "zh-CN" } or { outputLanguage: "en" }' };
+  }
+
+  const outputLangRaw = Object.hasOwn(payload, 'outputLanguage') ? payload.outputLanguage : undefined;
+  if (outputLangRaw === undefined) {
+    return { ok: false, error: 'bad_request', statusCode: 400, message: 'Missing required field: outputLanguage', nextAction: `Send { outputLanguage: "${DEFAULT_OUTPUT_LANGUAGE}" }` };
+  }
+  if (!isValidOutputLanguage(outputLangRaw)) {
+    return {
+      ok: false,
+      error: 'bad_request',
+      statusCode: 400,
+      message: `outputLanguage must be one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}. Got: ${String(outputLangRaw)}`,
+      nextAction: `Set outputLanguage to one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}`,
+    };
+  }
+
+  // 2. Read raw config to preserve unknown sections
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  if (fs.existsSync(configPath)) {
+    let rawContent: string;
+    try {
+      rawContent = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config for update: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
+    }
+    let rawParsed: unknown;
+    try {
+      rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error during update: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
+    }
+    if (isRecord(rawParsed)) {
+      rawConfig = { ...rawParsed };
+    } else {
+      rawConfig = {};
+    }
+  } else {
+    rawConfig = {};
+  }
+
+  // 3. Update principles.outputLanguage
+  const existingPrinciples = isRecord(rawConfig.principles) ? { ...rawConfig.principles } : {};
+  existingPrinciples.outputLanguage = outputLangRaw;
+  rawConfig.principles = existingPrinciples;
+
+  // 4. Validate via core (principles is an unknown section — safe to pass through)
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: 'validation_error',
+      statusCode: 500,
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+      nextAction: 'Fix config validation errors before retrying',
+    };
+  }
+
+  // 5. Atomic write
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: 'write_error', statusCode: 500, message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  return { ok: true, outputLanguage: outputLangRaw, source: 'user_config' };
+}
+
 // ── Check Readiness ──────────────────────────────────────────────────────────
 
 export function checkReadiness(

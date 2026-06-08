@@ -605,6 +605,141 @@ describe('PrinciplesConsoleModel', () => {
 
     expect(result.principles).toHaveLength(2);
   });
+
+  // ── PRI-332: Language detection & readability tests ──────────────────────
+
+  it('PRI-332: detects Chinese text language as zh', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-zh': {
+          id: 'p-zh',
+          text: '修改配置前展示影响范围',
+          triggerPattern: '配置变更',
+          action: '展示影响',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].detectedLanguage).toBe('zh');
+    expect(result.principles[0].readabilityWarningCode).toBeUndefined();
+  });
+
+  it('PRI-332: detects English text language as en', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-en': {
+          id: 'p-en',
+          text: 'Always show impact scope before modifying configuration',
+          triggerPattern: 'config change',
+          action: 'show impact',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].detectedLanguage).toBe('en');
+  });
+
+  it('PRI-332: detects empty text as unknown', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-empty': {
+          id: 'p-empty',
+          text: '',
+          triggerPattern: '',
+          action: '',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].detectedLanguage).toBe('unknown');
+  });
+
+  it('PRI-332: sets readabilityWarningCode for regex-like triggerPattern', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-regex': {
+          id: 'p-regex',
+          text: 'Some principle text',
+          triggerPattern: '/^error\\s+\\d+/gi',
+          action: 'log',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].readabilityWarningCode).toBe('technical_pattern');
+  });
+
+  it('PRI-332: sets readabilityWarningCode for Error:-prefixed triggerPattern', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-err': {
+          id: 'p-err',
+          text: 'Handle errors gracefully',
+          triggerPattern: 'Error: ECONNREFUSED',
+          action: 'retry',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].readabilityWarningCode).toBe('diagnostic_residue');
+  });
+
+  it('PRI-332: no readabilityWarningCode for normal human-readable title', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        'p-normal': {
+          id: 'p-normal',
+          text: 'Always confirm before deleting files',
+          triggerPattern: 'User deletes file',
+          action: 'ask confirmation',
+          status: 'candidate',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+    });
+
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    const result = await model.listPrinciples();
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].readabilityWarningCode).toBeUndefined();
+  });
 });
 
 function writeLedger(workspaceDir: string, tree: Record<string, unknown>): void {

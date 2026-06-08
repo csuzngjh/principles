@@ -686,6 +686,59 @@ describe('validatePrinciplesList', () => {
     // ERR-009: field present but wrong type → reject, not silently discard
     expect(validatePrinciplesList(badReason)).toBeNull();
   });
+
+  // PRI-332: detectedLanguage and readabilityWarningCode validation
+  it('accepts principle with detectedLanguage field', () => {
+    const withLang = {
+      ...validList,
+      principles: [{ ...validList.principles[0], detectedLanguage: 'zh' }],
+    };
+    const result = validatePrinciplesList(withLang);
+    expect(result).not.toBeNull();
+    expect(result!.principles[0].detectedLanguage).toBe('zh');
+  });
+
+  it('defaults detectedLanguage to unknown when absent', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.principles[0].detectedLanguage).toBe('unknown');
+  });
+
+  it('fails loud when detectedLanguage is present but not a string (ERR-009)', () => {
+    const withBadLang = {
+      ...validList,
+      principles: [{ ...validList.principles[0], detectedLanguage: 42 }],
+    };
+    const result = validatePrinciplesList(withBadLang);
+    // detectedLanguage present but malformed → validateArray rejects the item → null (ERR-009)
+    expect(result).toBeNull();
+  });
+
+  it('accepts principle with readabilityWarningCode', () => {
+    const withWarning = {
+      ...validList,
+      principles: [{ ...validList.principles[0], readabilityWarningCode: 'technical_pattern' }],
+    };
+    const result = validatePrinciplesList(withWarning);
+    expect(result).not.toBeNull();
+    expect(result!.principles[0].readabilityWarningCode).toBe('technical_pattern');
+  });
+
+  it('accepts principle without readabilityWarningCode (optional)', () => {
+    const result = validatePrinciplesList(validList);
+    expect(result).not.toBeNull();
+    expect(result!.principles[0].readabilityWarningCode).toBeUndefined();
+  });
+
+  it('rejects readabilityWarningCode when invalid (fail loud, ERR-009)', () => {
+    const withBadWarning = {
+      ...validList,
+      principles: [{ ...validList.principles[0], readabilityWarningCode: 'invalid_code' }],
+    };
+    const result = validatePrinciplesList(withBadWarning);
+    // readabilityWarningCode present but invalid value → fail loud
+    expect(result).toBeNull();
+  });
 });
 
 // ── validateApprovalsGrouped ──────────────────────────────────────────────────
