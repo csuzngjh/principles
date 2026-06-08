@@ -19,9 +19,8 @@ import { describe, it, expect } from 'vitest';
 import {
   SOURCE_DESCRIPTORS,
   getSourceDescriptor,
-  type SourceDescriptor,
 } from '../source-descriptors.js';
-import type { SourceKind, TriageDecision } from '../types.js';
+import type { SourceKind } from '../types.js';
 import { isSourceKind } from '../types.js';
 
 // ── Descriptor Registry Completeness ───────────────────────────────────────────
@@ -293,7 +292,7 @@ describe('SOURCE_DESCRIPTORS immutability', () => {
 
   it('descriptor objects are frozen or readonly', () => {
     // Each descriptor should have readonly properties
-    for (const [kind, descriptor] of SOURCE_DESCRIPTORS) {
+    for (const [_kind, descriptor] of SOURCE_DESCRIPTORS) {
       // Attempting to modify should either fail or not affect original
       const originalDecision = descriptor.defaultDecision;
       // This test verifies the descriptor structure is correct

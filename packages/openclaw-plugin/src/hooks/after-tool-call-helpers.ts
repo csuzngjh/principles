@@ -27,6 +27,7 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
+import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from './after-tool-call-types.js';
 
@@ -347,24 +348,37 @@ export function evaluatePainAdmissionForToolCall(
   const failureSource = outcome.failureSource ?? 'tool_failure';
 
   // PEAT-B1: Evidence triage (feature-flagged)
+  // PEAT-B2: Trigger controller adds structured outcome + cooldown awareness
   const painTriageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
   if (painTriageFlag.enabled) {
     const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
     const triage = evaluateEvidenceTriage(sourceKind, observation.painScore);
-    if (triage.decision !== 'admit') {
-      SystemLogger.log(workspaceDir, 'TRIAGE_EVIDENCE_ONLY', JSON.stringify({
-        sourceKind: triage.sourceKind,
-        decision: triage.decision,
-        reason: triage.reason,
-        nextAction: triage.nextAction,
+
+    // PEAT-B2: Evaluate trigger controller for structured decision
+    const triggerDecision = evaluateTriggerController({
+      triageResult: triage,
+      isOwnerManual: false, // tool failures are never owner manual
+      isCooldownActive: false, // cooldown handled by PainDiagnosticGate below
+      isValid: true,
+      score: observation.painScore,
+      sessionId,
+    });
+
+    if (!triggerDecision.shouldCreateDiagnosticTask) {
+      SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
+        outcome: triggerDecision.outcome,
+        sourceKind: triggerDecision.sourceKind,
+        reason: triggerDecision.reason,
+        nextAction: triggerDecision.nextAction,
+        triageDecision: triggerDecision.triageDecision,
         tool: event.toolName,
         path: observation.relPath,
       }));
       return {
         admitted: false,
         stage: 'triage_evidence_only',
-        reason: triage.reason,
-        detail: `sourceKind=${triage.sourceKind}, decision=${triage.decision}, nextAction=${triage.nextAction}`,
+        reason: triggerDecision.reason,
+        detail: `outcome=${triggerDecision.outcome}, sourceKind=${triggerDecision.sourceKind}, nextAction=${triggerDecision.nextAction}`,
       };
     }
   }

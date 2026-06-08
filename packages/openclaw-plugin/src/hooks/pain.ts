@@ -74,6 +74,20 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
     const painData = event.data as PainDetectedData;
     try {
       const service = createPainToPrincipleService(wctx);
+      const isManual = painData.source === 'manual' || painData.source === 'pain' || painData.source === 'skill:pain';
+
+      // PEAT-B2: Record trigger decision for observability
+      if (isManual) {
+        SystemLogger.log(wctx.workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
+          outcome: 'manual_owner_admitted',
+          sourceKind: 'owner_reported',
+          reason: 'Owner explicit manual pain. Bypasses triage and cooldown.',
+          nextAction: 'create_diagnostic_task',
+          painId: painData.painId,
+          score: painData.score,
+        }));
+      }
+
       const result = await service.recordPain({
         painId: painData.painId,
         painType: painData.painType,
@@ -307,6 +321,20 @@ function handleManualPain(
       payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
     }
     SystemLogger.log(workspaceDir, 'PAIN_GATE_REJECTED', payload);
+
+    // PEAT-B2: Record trigger decision even when cooldown blocks manual pain
+    const painTriageFlag = loadPdConfigForPlugin(workspaceDir);
+    if (painTriageFlag.effective) {
+      SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
+        outcome: 'cooldown_skipped',
+        sourceKind: 'owner_reported',
+        reason: `Manual pain within cooldown: ${gate.detail}`,
+        nextAction: 'wait_for_cooldown_or_manual_retrigger',
+        isOwnerManual: true,
+        sessionId,
+        score: 100,
+      }));
+    }
     return;
   }
 
