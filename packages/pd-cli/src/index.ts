@@ -90,6 +90,10 @@ painCmd
   .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
   .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
   .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
+  .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
+  .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
+  .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
+  .option('--force', 'Allow retry of already-succeeded tasks')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRetry(opts);
@@ -103,17 +107,6 @@ painCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainEvidence(opts);
-  });
-
-program
-  .command('canary')
-  .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
-  .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
-  .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
-  .option('--force', 'Allow retry of already-succeeded tasks')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handlePainRetry(opts);
   });
 
 const samplesCmd = program

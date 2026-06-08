@@ -34,6 +34,14 @@ interface TriggerDecisionEntry {
 }
 
 /**
+ * Get the memory/logs directory for a workspace.
+ * SystemLogger writes to <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
+ */
+function getLogDir(workspaceDir: string): string {
+  return path.join(workspaceDir, 'memory', 'logs');
+}
+
+/**
  * Parse TRIGGER_DECISION entries from a log file.
  * Returns entries in reverse chronological order (newest first).
  */
@@ -54,18 +62,18 @@ function parseTriggerDecisions(logContent: string): TriggerDecisionEntry[] {
       const tsMatch = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/.exec(line);
       entries.push({
         timestamp: tsMatch?.[1] ?? new Date().toISOString(),
-        outcome: payload.outcome ?? 'unknown',
-        sourceKind: payload.sourceKind ?? 'unknown',
-        reason: payload.reason ?? '',
-        nextAction: payload.nextAction ?? '',
-        tool: payload.tool,
-        path: payload.path,
-        painId: payload.painId,
-        score: payload.score,
-        sessionId: payload.sessionId,
+        outcome: typeof payload.outcome === 'string' ? payload.outcome : 'unknown',
+        sourceKind: typeof payload.sourceKind === 'string' ? payload.sourceKind : 'unknown',
+        reason: typeof payload.reason === 'string' ? payload.reason : '',
+        nextAction: typeof payload.nextAction === 'string' ? payload.nextAction : '',
+        tool: typeof payload.tool === 'string' ? payload.tool : undefined,
+        path: typeof payload.path === 'string' ? payload.path : undefined,
+        painId: typeof payload.painId === 'string' ? payload.painId : undefined,
+        score: typeof payload.score === 'number' ? payload.score : undefined,
+        sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
       });
     } catch (e) {
-      // Skip malformed entries - log for operator visibility
+      // Skip malformed entries — log for operator visibility
       if (process.env.DEBUG) {
         console.error(`WARN: Malformed TRIGGER_DECISION entry: ${String(e).slice(0, 100)}`);
       }
@@ -76,20 +84,13 @@ function parseTriggerDecisions(logContent: string): TriggerDecisionEntry[] {
 }
 
 /**
- * Get the state directory for a workspace.
+ * Read recent trigger decisions from memory/logs files.
+ * SystemLogger writes date-stamped files: SYSTEM_YYYY-MM-DD.log.
  */
-function getStateDir(workspaceDir: string): string {
-  return path.join(workspaceDir, '.state');
-}
+function readRecentDecisions(logDir: string, limit: number): TriggerDecisionEntry[] {
+  if (!fs.existsSync(logDir)) return [];
 
-/**
- * Read recent trigger decisions from log files.
- */
-function readRecentDecisions(stateDir: string, limit: number): TriggerDecisionEntry[] {
-  const logsDir = path.join(stateDir, 'logs');
-  if (!fs.existsSync(logsDir)) return [];
-
-  const logFiles = fs.readdirSync(logsDir)
+  const logFiles = fs.readdirSync(logDir)
     .filter(f => f.startsWith('SYSTEM_') && f.endsWith('.log'))
     .sort()
     .reverse(); // newest first
@@ -99,13 +100,13 @@ function readRecentDecisions(stateDir: string, limit: number): TriggerDecisionEn
   for (const logFile of logFiles) {
     if (allEntries.length >= limit) break;
 
-    const filePath = path.join(logsDir, logFile);
+    const filePath = path.join(logDir, logFile);
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);
       allEntries.push(...entries);
     } catch (e) {
-      // Skip unreadable files - log for operator visibility
+      // Skip unreadable files — log for operator visibility
       if (process.env.DEBUG) {
         console.error(`WARN: Could not read log file ${logFile}: ${String(e).slice(0, 100)}`);
       }
@@ -134,20 +135,42 @@ function truncate(s: string, maxLen: number): string {
 }
 
 export async function handlePainEvidence(opts: EvidenceOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  const stateDir = getStateDir(workspaceDir);
-  const limit = opts.limit ?? 20;
+  const { workspace, limit: rawLimit, json } = opts;
+  const workspaceDir = resolveWorkspaceDir(workspace);
+  const logDir = getLogDir(workspaceDir);
 
-  const decisions = readRecentDecisions(stateDir, limit);
+  // Validate limit — fail loud for invalid values
+  let effectiveLimit = 20;
+  if (rawLimit !== undefined) {
+    if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 10000) {
+      const err = {
+        status: 'refused',
+        reason: `invalid_limit: limit must be an integer between 1 and 10000, got ${rawLimit}`,
+        nextAction: 'Pass --limit with a valid integer (1-10000)',
+      };
+      const { reason, nextAction } = err;
+      if (json) {
+        console.log(JSON.stringify({ count: 0, error: err }));
+      } else {
+        console.error('Error: ' + reason);
+        console.error('Next: ' + nextAction);
+      }
+      process.exit(1);
+      return; // guard: test stubs of process.exit continue execution
+    }
+    effectiveLimit = rawLimit;
+  }
 
-  if (opts.json) {
-    console.log(JSON.stringify({ count: decisions.length, decisions }, null, 2));
+  const decisions = readRecentDecisions(logDir, effectiveLimit);
+
+  if (json) {
+    console.log(JSON.stringify({ count: decisions.length, decisions, searchedPath: path.join(logDir, 'SYSTEM_*.log') }, null, 2));
     return;
   }
 
   if (decisions.length === 0) {
     console.log('No trigger decisions found in logs.');
-    console.log(`Searched: ${stateDir}/logs/SYSTEM_*.log`);
+    console.log(`Searched: ${path.join(logDir, 'SYSTEM_*.log')}`);
     console.log('Tip: Enable painEvidenceAdmission feature flag to start recording trigger decisions.');
     return;
   }
@@ -178,3 +201,7 @@ export async function handlePainEvidence(opts: EvidenceOptions): Promise<void> {
     console.log(`  ${getOutcomeEmoji(outcome)} ${outcome}: ${count}`);
   }
 }
+
+// Export for testing
+// istanbul ignore next
+export { parseTriggerDecisions, getLogDir };
