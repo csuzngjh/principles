@@ -249,8 +249,11 @@ describe("CR9: no mixed zh/en in i18n values", () => {
       const page = expectRecord(enPages[pageKey], `enPages.${pageKey}`);
       if (!page) continue;
       const entries = Object.entries(page);
+      // languageZhCN intentionally contains native CJK name for the language picker
+      const ALLOWED_CJK_KEYS = ['languageZhCN'];
       for (const [key, value] of entries) {
         if (typeof value !== "string") continue;
+        if (ALLOWED_CJK_KEYS.includes(key)) continue;
         // Skip nested objects like form.types
         expect(value, `en.pages.${pageKey}.${key} should not contain Chinese`).not.toMatch(cjkPattern);
       }

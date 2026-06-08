@@ -77,6 +77,10 @@ export interface PrincipleListItem {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Detected language of the principle text ('en' | 'zh' | 'unknown'). PRI-332 */
+  detectedLanguage: 'en' | 'zh' | 'unknown';
+  /** Structured readability warning code — front-end renders via i18n. PRI-332 P1-5 */
+  readabilityWarningCode?: ReadabilityWarningCode;
 }
 
 export interface RuleItem {
@@ -131,6 +135,38 @@ const VALID_EVALUABILITIES: readonly PrincipleEvaluability[] = ['manual_only', '
 const VALID_RULE_TYPES: readonly RuleType[] = ['hook', 'gate', 'skill', 'lora', 'test', 'prompt'];
 const VALID_RULE_STATUSES: readonly RuleStatus[] = ['proposed', 'implemented', 'enforced', 'retired'];
 const VALID_ENFORCEMENTS: readonly ('block' | 'warn' | 'log')[] = ['block', 'warn', 'log'];
+
+// ── PRI-332: Language detection & readability helpers ────────────────────────
+
+const CJK_REGEX = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+const REGEX_LIKE_PATTERN = /^[/^.*+?()[\]{}|$\\]|\/.*\/[gimsuy]*$/;
+const TECHNICAL_RESIDUE_PATTERN = /^[a-zA-Z_]+\.[a-zA-Z_]+\(|^Error:|^TypeError:|\{\{.*\}\}|<\/?\w+>/;
+
+/** Structured readability warning codes — front-end renders via i18n (PRI-332 P1-5). */
+export type ReadabilityWarningCode = 'technical_pattern' | 'diagnostic_residue' | 'title_too_long';
+
+/** Simple CJK-based language detection for principle text. */
+function detectLanguage(text: string): 'en' | 'zh' | 'unknown' {
+  if (!text || text.trim().length === 0) return 'unknown';
+  return CJK_REGEX.test(text) ? 'zh' : 'en';
+}
+
+/** Check if a triggerPattern/title looks like unreadable technical residue.
+ *  Returns a structured code instead of an English string (PRI-332 P1-5). */
+function checkReadabilityWarning(triggerPattern: string, text: string): ReadabilityWarningCode | undefined {
+  const title = triggerPattern || text.slice(0, 80);
+  if (!title) return undefined;
+  if (REGEX_LIKE_PATTERN.test(title.trim())) {
+    return 'technical_pattern';
+  }
+  if (TECHNICAL_RESIDUE_PATTERN.test(title.trim())) {
+    return 'diagnostic_residue';
+  }
+  if (title.length > 120) {
+    return 'title_too_long';
+  }
+  return undefined;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -258,10 +294,12 @@ export class PrinciplesConsoleModel {
         case 'archived': summary.archived++; break;
       }
 
+      const principleText = p.text ?? '';
+      const principleTrigger = p.triggerPattern ?? '';
       items.push({
         id: p.id,
-        text: p.text ?? '',
-        triggerPattern: p.triggerPattern ?? '',
+        text: principleText,
+        triggerPattern: principleTrigger,
         action: p.action ?? '',
         status,
         priority: safeCastEnum(p.priority, VALID_PRIORITIES, 'P2'),
@@ -275,6 +313,8 @@ export class PrinciplesConsoleModel {
         conflictsWithCount: (p.conflictsWithPrincipleIds ?? []).length,
         createdAt: p.createdAt ?? '',
         updatedAt: p.updatedAt ?? '',
+        detectedLanguage: detectLanguage(principleText),
+        readabilityWarningCode: checkReadabilityWarning(principleTrigger, principleText),
       });
     }
 
@@ -321,10 +361,12 @@ export class PrinciplesConsoleModel {
 
     const status = safeCastEnum(p.status, VALID_STATUSES, 'candidate');
 
+    const detailText = p.text ?? '';
+    const detailTrigger = p.triggerPattern ?? '';
     const principle: PrincipleDetail = {
       id: p.id,
-      text: p.text ?? '',
-      triggerPattern: p.triggerPattern ?? '',
+      text: detailText,
+      triggerPattern: detailTrigger,
       action: p.action ?? '',
       status,
       priority: safeCastEnum(p.priority, VALID_PRIORITIES, 'P2'),
@@ -345,6 +387,8 @@ export class PrinciplesConsoleModel {
       createdAt: p.createdAt ?? '',
       updatedAt: p.updatedAt ?? '',
       rules,
+      detectedLanguage: detectLanguage(detailText),
+      readabilityWarningCode: checkReadabilityWarning(detailTrigger, detailText),
     };
 
     return { principle };

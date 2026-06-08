@@ -124,7 +124,9 @@
         "check_task_status": "检查内化管线状态，或等待自动重试。",
         "fix_and_retry": "检查失败详情，修复问题后重试。",
         "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。"
-      }
+      },
+      "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
+      "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。"
     },
     "pain": {
       "eyebrow": "行为证据",
@@ -263,6 +265,17 @@
       "channelDeferArchive": "延迟归档",
       "channelCodeToolHook": "Code Tool Hook",
       "confidence": "置信度",
+      "languageHintEn": "以英文生成",
+      "languageHintZh": "以中文生成",
+      "languageHintUnknown": "语言未知",
+      "languageMismatchHint": "此原则以{{lang}}生成。请审查行为本身，而不仅是措辞。",
+      "readabilityFallbackTitle": "原则候选",
+      "readabilityOriginalLabel": "原始技术文本",
+      "readabilityWarning": {
+        "technical_pattern": "标题似乎是技术模式。请审查下方的行为证据。",
+        "diagnostic_residue": "标题可能包含诊断残留。请审查全文以获取上下文。",
+        "title_too_long": "标题异常长。可读摘要可能在下方的正文中。"
+      },
       "detail": {
         "loading": "加载中…",
         "backToList": "← 返回列表",
@@ -457,7 +470,13 @@
       "lastSync": "上次同步",
       "loadError": "无法加载设置。你可以尝试刷新页面。",
       "addNamePlaceholder": "工作空间名称",
-      "addPathPlaceholder": "工作空间路径"
+      "addPathPlaceholder": "工作空间路径",
+      "principleLanguage": "原则语言",
+      "principleLanguageDescription": "保存语言偏好，用于原则展示。生成接线 deferred。",
+      "languageZhCN": "中文",
+      "languageEn": "英文 (English)",
+      "languageSaved": "语言偏好已保存",
+      "languageLoadError": "加载语言偏好失败"
     },
     "controlCenter": {
       "eyebrow": "控制中心",
