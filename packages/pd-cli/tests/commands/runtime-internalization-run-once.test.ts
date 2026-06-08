@@ -122,6 +122,11 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
   validateRuntimeConfig: vi.fn(),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+}));
+
+vi.mock('../../src/config-reader.js', () => ({
+  readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';

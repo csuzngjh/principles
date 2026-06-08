@@ -32,6 +32,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     agentId: 'main',
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PDRuntimeError: class PDRuntimeError extends Error {
     constructor(public category: string, message: string) {
       super(message);

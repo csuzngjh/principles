@@ -87,6 +87,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   listPruningReviews: mockListPruningReviews,
   buildMaskedPrincipleSet: mockBuildMaskedPrincipleSet,
   removeOrphanReferencesFromLedger: mockRemoveOrphanReferencesFromLedger,
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from '../../src/commands/runtime-pruning.js';

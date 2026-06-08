@@ -14,6 +14,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PainChainReadModel: vi.fn().mockImplementation(function () {
     return { traceByPainId: mockTraceByPainId, close: mockPainChainClose };
   }),
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({

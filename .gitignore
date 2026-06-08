@@ -65,6 +65,8 @@ plans/
 conductor/
 .principles/
 .state/
+# Prevent test-generated ledger files from being committed outside .state/
+principle_training_state.json
 memory/
 .agent/
 # Exception: .agents/skills/ must be committed (Codex/Gemini shared skills)

@@ -39,6 +39,7 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
+import type { OutputLanguage } from '../language-directive.js';
 
 // ── Scribe-specific context ──────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ export interface ResolvedScribeRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 export const DEFAULT_SCRIBE_RUNNER_OPTIONS: Readonly<Omit<ResolvedScribeRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -94,6 +97,7 @@ export function resolveScribeRunnerOptions(options: ScribeRunnerOptions): Resolv
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_SCRIBE_RUNNER_OPTIONS.agentId,
+    outputLanguage: options.outputLanguage,
   };
 }
 
@@ -181,6 +185,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
       sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId,
+      outputLanguage: this.resolvedOptions.outputLanguage,
     });
 
     return this.runtimeAdapter.startRun({

@@ -93,6 +93,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: MockRuntimeStateManager,
   loadLedger: mockLoadLedger,
   getLedgerFilePathPublic: mockGetLedgerFilePath,
+  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
 vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({

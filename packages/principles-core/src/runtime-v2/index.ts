@@ -235,6 +235,16 @@ export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adap
 export { DiagnosticianPromptBuilder, summarizeConversationWindow } from './diagnostician-prompt-builder.js';
 export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
 
+// Language directive for principle generation (PRI-336)
+export {
+  buildLanguageDirective,
+  resolveOutputLanguage,
+  isValidOutputLanguage,
+  VALID_OUTPUT_LANGUAGES,
+  DEFAULT_OUTPUT_LANGUAGE,
+} from './language-directive.js';
+export type { OutputLanguage, ResolvedOutputLanguage } from './language-directive.js';
+
 // CLI surface (M4)
 export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
 export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';

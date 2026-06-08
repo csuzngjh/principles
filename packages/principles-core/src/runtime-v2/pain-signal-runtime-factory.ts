@@ -14,6 +14,8 @@
 import { PainSignalBridge } from './pain-signal-bridge.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
+import { resolveOutputLanguage } from './language-directive.js';
+import type { OutputLanguage } from './language-directive.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
@@ -400,6 +402,27 @@ export async function createPainSignalBridge(
         workspaceDir: opts.workspaceDir,
       });
 
+  // PRI-336: Resolve outputLanguage from effective config
+  // Per EP-07: use canonical resolved value, not raw input
+  const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
+  const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
+
+  // Per ERR-002: degradation must be observable, not silent fallback
+  if (resolvedLang.degradationWarning) {
+    storeEmitter.emitTelemetry({
+      eventType: 'degradation_triggered',
+      traceId: `output-language-config-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      sessionId: '',
+      payload: {
+        component: 'PainSignalRuntimeFactory',
+        reason: 'invalid_output_language_config',
+        warning: resolvedLang.degradationWarning,
+        fallbackValue: resolvedLang.outputLanguage,
+      },
+    });
+  }
+
   const runner = new DiagnosticianRunner(
     {
       stateManager,
@@ -415,6 +438,7 @@ export async function createPainSignalBridge(
       pollIntervalMs: 5000,
       timeoutMs: runtimeConfig.timeoutMs,
       agentId: runtimeConfig.agentId,
+      outputLanguage,
     },
   );
 
