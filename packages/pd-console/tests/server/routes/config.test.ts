@@ -68,6 +68,10 @@ function createMockResponse(): ServerResponse {
   return res;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function parseResponseBody<T>(res: ServerResponse): T {
   const mockRes = res as unknown as { _body: string };
   return JSON.parse(mockRes._body) as T;
@@ -1147,12 +1151,16 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
 
     expect(res.statusCode).toBe(200);
-    // Verify existing config sections are preserved
+    // Verify existing config sections are preserved (no `as` bypass — ERR-001)
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
     const raw = fs.readFileSync(configPath, 'utf8');
-    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const parsed = yaml.load(raw);
+    expect(isRecord(parsed)).toBe(true);
+    if (!isRecord(parsed)) throw new Error('unreachable: parsed config is not a record');
     expect(parsed.version).toBe(1);
-    expect((parsed.principles as Record<string, unknown>).outputLanguage).toBe('en');
+    expect(isRecord(parsed.principles)).toBe(true);
+    if (!isRecord(parsed.principles)) throw new Error('unreachable: principles is not a record');
+    expect(parsed.principles.outputLanguage).toBe('en');
     expect(parsed.features).toBeDefined();
   });
 });
