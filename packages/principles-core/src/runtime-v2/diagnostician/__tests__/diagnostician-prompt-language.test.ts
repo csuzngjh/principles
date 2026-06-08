@@ -14,6 +14,15 @@ import { describe, it, expect } from 'vitest';
 import { DiagnosticianPromptBuilder, buildDiagnosticProtocolInstruction } from '../../diagnostician-prompt-builder.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 
+/** Trust-boundary helper: validate parsed prompt JSON before property access. */
+function parsePromptJson(raw: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`parsePromptJson: expected object, got ${typeof parsed}`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 const MINIMAL_PAYLOAD: DiagnosticianContextPayload = {
   contextId: 'ctx-1',
   contextHash: 'hash-abc123',
@@ -31,7 +40,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes Chinese language directive when outputLanguage is zh-CN', () => {
     const builder = new DiagnosticianPromptBuilder();
     const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
-    const parsed = JSON.parse(result.message);
+    const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('Simplified Chinese');
     expect(parsed.diagnosticInstruction).toContain('简体中文');
@@ -41,7 +50,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes English language directive when outputLanguage is en', () => {
     const builder = new DiagnosticianPromptBuilder();
     const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'en');
-    const parsed = JSON.parse(result.message);
+    const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('English');
     expect(parsed.diagnosticInstruction).toContain('PRI-336');
@@ -50,7 +59,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('does NOT include language directive when outputLanguage is undefined', () => {
     const builder = new DiagnosticianPromptBuilder();
     const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, undefined);
-    const parsed = JSON.parse(result.message);
+    const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).not.toContain('LANGUAGE DIRECTIVE');
     expect(parsed.diagnosticInstruction).not.toContain('PRI-336');
@@ -59,7 +68,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes technical identifiers not translated instruction', () => {
     const builder = new DiagnosticianPromptBuilder();
     const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
-    const parsed = JSON.parse(result.message);
+    const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('taskId');
     expect(parsed.diagnosticInstruction).toContain('sourcePainId');
@@ -69,7 +78,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes lineage fields not translated instruction', () => {
     const builder = new DiagnosticianPromptBuilder();
     const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'en');
-    const parsed = JSON.parse(result.message);
+    const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('Lineage and evidence fields MUST NOT be translated');
   });
@@ -79,8 +88,8 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
     const resultWithout = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, undefined);
     const resultWith = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
 
-    const parsedWithout = JSON.parse(resultWithout.message);
-    const parsedWith = JSON.parse(resultWith.message);
+    const parsedWithout = parsePromptJson(resultWithout.message);
+    const parsedWith = parsePromptJson(resultWith.message);
 
     // Same fields except diagnosticInstruction
     expect(parsedWith.taskId).toBe(parsedWithout.taskId);

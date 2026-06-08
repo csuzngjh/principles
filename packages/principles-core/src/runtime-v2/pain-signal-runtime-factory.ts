@@ -407,6 +407,22 @@ export async function createPainSignalBridge(
   const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
   const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
 
+  // Per ERR-002: degradation must be observable, not silent fallback
+  if (resolvedLang.degradationWarning) {
+    storeEmitter.emitTelemetry({
+      eventType: 'degradation_triggered',
+      traceId: `output-language-config-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      sessionId: '',
+      payload: {
+        component: 'PainSignalRuntimeFactory',
+        reason: 'invalid_output_language_config',
+        warning: resolvedLang.degradationWarning,
+        fallbackValue: resolvedLang.outputLanguage,
+      },
+    });
+  }
+
   const runner = new DiagnosticianRunner(
     {
       stateManager,
