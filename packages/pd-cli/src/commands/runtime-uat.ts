@@ -17,6 +17,12 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'path';
 import * as fs from 'fs';
+import {
+  guardUatWorkspace,
+  formatGuardRefusal,
+  type GuardResult,
+  type GuardRefusal,
+} from '../utils/production-workspace-guard.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +31,7 @@ interface UatOptions {
   count?: number;
   minSuccessRate?: number;
   json?: boolean;
+  allowProductionWorkspaceForUat?: boolean;
 }
 
 interface PainRecordResult {
@@ -73,6 +80,8 @@ export function parseUatArgs(argv: string[]): UatOptions {
     } else if (argv[i] === '--min-success-rate') {
       const rate = parseFloat(argv[++i] ?? '1.0');
       args.minSuccessRate = isNaN(rate) ? 1.0 : rate;
+    } else if (argv[i] === '--allow-production-workspace-for-uat') {
+      args.allowProductionWorkspaceForUat = true;
     }
   }
   return args;
@@ -154,7 +163,7 @@ export function runUatIteration(config: IterationConfig): PainRecordResult {
   const { iteration, reason, workspace, timeoutMs = 300_000 } = config;
   const iterStart = Date.now();
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let recordOutput: string;
   try {
     recordOutput = pd(['pain', 'record', '--reason', reason, '--score', '85', '--source', 'manual', '--json'], workspace, timeoutMs);
@@ -173,7 +182,7 @@ export function runUatIteration(config: IterationConfig): PainRecordResult {
   }
 
   const wallTimeMs = Date.now() - iterStart;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let parsed: Record<string, unknown>;
   try {
     parsed = parseJsonOutput(recordOutput) as Record<string, unknown>;
@@ -190,7 +199,7 @@ export function runUatIteration(config: IterationConfig): PainRecordResult {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let auditStatus: string;
   try {
     const auditOut = pd(['candidate', 'audit', '--json'], workspace, 30_000);
@@ -276,6 +285,35 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
   if (!workspace) {
     console.error('Error: --workspace <path> is required');
     process.exit(1);
+  }
+
+  // PRI-334: Guard against writing to production workspace
+  const guardResult: GuardResult = guardUatWorkspace(workspace, 'pd runtime uat');
+
+  if (guardResult.refused && !opts.allowProductionWorkspaceForUat) {
+    // Fail loud with structured reason and nextAction (EP-03/EP-04)
+    const refused: GuardRefusal = guardResult;
+    const refusalOutput = formatGuardRefusal(
+      refused,
+      'pd runtime uat',
+      !!opts.json
+    );
+
+    if (opts.json) {
+      console.log(refusalOutput);
+    } else {
+      console.error(refusalOutput);
+    }
+
+    process.exit(1);
+  }
+
+  if (guardResult.refused && opts.allowProductionWorkspaceForUat) {
+    // Escape hatch used: warn but allow
+    console.error('[pd-cli] WARNING: --allow-production-workspace-for-uat is set.');
+    console.error('  Test/synthetic data will be written to your production workspace.');
+    console.error('  This is not recommended and may pollute your real PD state.');
+    console.error('');
   }
 
   console.error(`[${new Date().toISOString()}] Runtime V2 Chain UAT — workspace: ${workspace}, count: ${count}`);

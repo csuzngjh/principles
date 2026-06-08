@@ -475,12 +475,14 @@ runtimeCmd
   .option('--count <n>', 'Number of iterations (default: 5, max: 50)', parseInt)
   .option('--min-success-rate <rate>', 'Minimum success rate threshold (default: 1.0)', parseFloat)
   .option('--json', 'Output machine-readable JSON summary')
+  .option('--allow-production-workspace-for-uat', 'DANGEROUS: Allow UAT to write to production workspace (NOT RECOMMENDED)')
   .action(async (opts) => {
     await handleRuntimeUat({
       workspace: opts.workspace,
       count: opts.count,
       minSuccessRate: opts.minSuccessRate,
       json: opts.json,
+      allowProductionWorkspaceForUat: opts.allowProductionWorkspaceForUat,
     });
   });
 

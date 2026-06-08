@@ -5,6 +5,10 @@
  * Usage:
  *   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count <N>
  *
+ * PRI-334: By default, this script uses a safe temp workspace to prevent
+ * pollution of production workspaces. Use --workspace to override with a
+ * specific path, or --allow-production-workspace to force production writes.
+ *
  * Runs N consecutive pd pain record commands and verifies:
  *   - Every run produces painId, taskId, runId, artifactId, candidateIds, ledgerEntryIds
  *   - Candidate audit returns "ok" after each run
@@ -19,16 +23,44 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+
+// ── Production workspace detection (PRI-334) ───────────────────────────────────
+
+const PRODUCTION_WORKSPACE_PATHS = [
+  path.resolve('D:\\.openclaw\\workspace'),
+  path.resolve('C:\\.openclaw\\workspace'),
+  path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace'),
+  path.resolve('C:\\Users\\Admin\\.openclaw\\workspace'),
+  path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')),
+];
+
+function isProductionWorkspace(resolvedPath) {
+  const normalized = resolvedPath.toLowerCase();
+  for (const prodPath of PRODUCTION_WORKSPACE_PATHS) {
+    const normalizedProd = prodPath.toLowerCase();
+    if (normalized === normalizedProd || normalized.startsWith(normalizedProd + path.sep)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getSafeUatWorkspace() {
+  return path.join(os.tmpdir(), 'pd-uat-workspace');
+}
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const args = { workspace: '', count: 5 };
+  const args = { workspace: '', count: 5, allowProductionWorkspace: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace' || argv[i] === '-w') {
       args.workspace = argv[++i] ?? '';
     } else if (argv[i] === '--count') {
       args.count = parseInt(argv[++i] ?? '5', 10);
+    } else if (argv[i] === '--allow-production-workspace') {
+      args.allowProductionWorkspace = true;
     }
   }
   return args;
@@ -114,13 +146,33 @@ function pd(args, workspace, timeoutMs = 300_000) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!args.workspace) {
-    error('--workspace <path> is required');
+  // PRI-334: Default to safe temp workspace if none specified
+  const workspace = args.workspace ? path.resolve(args.workspace) : getSafeUatWorkspace();
+  const count = Math.max(1, Math.min(args.count, 50));
+
+  // PRI-334: Guard against production workspace writes
+  if (isProductionWorkspace(workspace) && !args.allowProductionWorkspace) {
+    error('');
+    error('⛔ UAT PRODUCTION WORKSPACE GUARD TRIGGERED');
+    error('');
+    error(`This script attempted to write to a production workspace:`);
+    error(`  ${workspace}`);
+    error('');
+    error('This is blocked to prevent UAT/test data from polluting your real PD state.');
+    error('');
+    error('To fix:');
+    error(`  - Remove --workspace flag to use the safe temp workspace: ${getSafeUatWorkspace()}`);
+    error(`  - Or provide a non-production workspace path`);
+    error(`  - Or use --allow-production-workspace flag (NOT RECOMMENDED - this will pollute your production data)`);
+    error('');
     process.exit(1);
   }
 
-  const count = Math.max(1, Math.min(args.count, 50));
-  const workspace = path.resolve(args.workspace);
+  if (isProductionWorkspace(workspace) && args.allowProductionWorkspace) {
+    warn('--allow-production-workspace is set. UAT will write to production workspace.');
+    warn('This is NOT RECOMMENDED and may pollute your real PD state.');
+    warn('');
+  }
 
   log(`Runtime V2 Chain UAT — workspace: ${workspace}, count: ${count}`);
   log('');
