@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@principles/core':
         specifier: ^1.73.0
-        version: 1.102.0(ws@8.20.0)(zod@4.4.3)
+        version: 1.102.0(ws@8.21.0)(zod@4.4.3)
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.49
@@ -71,7 +71,7 @@ importers:
         version: 4.1.8(@types/node@25.9.2)(@vitest/coverage-v8@4.1.8)(jsdom@29.1.1)(vite@8.0.8(@types/node@25.9.2)(esbuild@0.28.0))
       ws:
         specifier: ^8.18.0
-        version: 8.20.0
+        version: 8.21.0
 
 packages:
 
@@ -4434,6 +4434,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -5544,7 +5556,7 @@ snapshots:
       google-auth-library: 10.7.0
       p-retry: 4.6.2
       protobufjs: 7.6.2
-      ws: 8.20.0
+      ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -6087,14 +6099,14 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-ai@0.73.1(ws@8.20.0)(zod@4.4.3)':
+  '@mariozechner/pi-ai@0.73.1(ws@8.21.0)(zod@4.4.3)':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@aws-sdk/client-bedrock-runtime': 3.1063.0
       '@google/genai': 1.52.0
       '@mistralai/mistralai': 2.2.5
       chalk: 5.6.2
-      openai: 6.26.0(ws@8.20.0)(zod@4.4.3)
+      openai: 6.26.0(ws@8.21.0)(zod@4.4.3)
       partial-json: 0.1.7
       proxy-agent: 6.5.0
       typebox: 1.2.2
@@ -6172,7 +6184,7 @@ snapshots:
 
   '@mistralai/mistralai@2.2.5':
     dependencies:
-      ws: 8.20.0
+      ws: 8.21.0
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
@@ -6276,9 +6288,9 @@ snapshots:
 
   '@oxc-project/types@0.124.0': {}
 
-  '@principles/core@1.102.0(ws@8.20.0)(zod@4.4.3)':
+  '@principles/core@1.102.0(ws@8.21.0)(zod@4.4.3)':
     dependencies:
-      '@mariozechner/pi-ai': 0.73.1(ws@8.20.0)(zod@4.4.3)
+      '@mariozechner/pi-ai': 0.73.1(ws@8.21.0)(zod@4.4.3)
       '@sinclair/typebox': 0.34.49
       better-sqlite3: 12.9.0
       js-yaml: 4.2.0
@@ -8816,9 +8828,9 @@ snapshots:
       ws: 8.20.0
       zod: 4.3.6
 
-  openai@6.26.0(ws@8.20.0)(zod@4.4.3):
+  openai@6.26.0(ws@8.21.0)(zod@4.4.3):
     optionalDependencies:
-      ws: 8.20.0
+      ws: 8.21.0
       zod: 4.4.3
 
   openai@6.34.0(ws@8.20.0)(zod@4.3.6):
@@ -9803,6 +9815,8 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@8.20.0: {}
+
+  ws@8.21.0: {}
 
   xml-name-validator@5.0.0: {}
 
