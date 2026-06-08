@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #005 · 2026-06-08</div>
+  <a class="abyss-title" href="/abyss/05-co-evolution">05 | Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems</a>
+  <p class="abyss-desc">Discusses the co-evolution of the Owner-Agent synthesis: why intention bandwidth is the scarcest resource in the LLM era, and how to protect human attention and filter noise using an Attention Protection Layer and a Common Law precedent mechanism.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #004 · 2026-05-28</div>
   <a class="abyss-title" href="/abyss/04-soft-to-hard-rules">04 | The Alchemy of Soft to Hard Rules: The Internalization Path from Prompt to System Instinct</a>
   <p class="abyss-desc">An in-depth study of the channels, strategies, and traps of principle internalization. How to physically intercept low-level errors by hardening high-risk bottom lines into the RuleHost runtime sandbox while adopting custom pruning policies.</p>

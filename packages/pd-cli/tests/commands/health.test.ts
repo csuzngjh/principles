@@ -6,6 +6,7 @@
  * Covers both the no-database path and the state.db path (PainChainReadModel).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'path';
 
 const {
   mockPruningGetHealthSummary,
@@ -122,7 +123,7 @@ describe('handleHealth', () => {
       expect(consoleLogSpy).toHaveBeenCalled();
       const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
       expect(jsonOutput.generatedAt).toBeDefined();
-      expect(jsonOutput.workspace).toBe(WS);
+      expect(jsonOutput.workspace).toBe(path.resolve(WS));
       expect(jsonOutput.ledger.totalPrinciples).toBe(5);
       expect(jsonOutput.ledger.byStatus).toEqual({ probation: 3, active: 2 });
       expect(jsonOutput.candidateLedgerConsistency.status).toBe('ok');
@@ -137,7 +138,7 @@ describe('handleHealth', () => {
       await handleHealth({ workspace: WS, json: false });
 
       const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
-      expect(allOutput).toContain(`workspace: ${WS}`);
+      expect(allOutput).toContain(`workspace: ${path.resolve(WS)}`);
       expect(allOutput).toContain('ledger.totalPrinciples: 5');
       expect(allOutput).toContain('candidateLedgerConsistency.status: ok');
       expect(allOutput).toContain('pdStateDb.exists: false');
