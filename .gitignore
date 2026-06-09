@@ -140,7 +140,6 @@ patches/
 .symphony-*
 feedback-light.png
 overview-light.png
-pnpm-workspace.yaml
 .full-review/
 .pnpm-store/
 
