@@ -72,6 +72,75 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       expect(result.decision).toBe('invalid_candidate');
     });
 
+    // ── PRI-355: candidateId format/length validation (recursive concatenation prevention) ──
+
+    it('candidateId with dreamer- prefix returns invalid_candidate (PRI-355)', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: 'dreamer-abc-prompt',
+      });
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('candidateId_looks_like_taskId');
+      }
+    });
+
+    it('candidateId with pi-art- prefix returns invalid_candidate (PRI-355)', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: 'pi-art-scribe-philosopher-dreamer-abc',
+      });
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('candidateId_looks_like_taskId');
+      }
+    });
+
+    it('candidateId with scribe- prefix returns invalid_candidate (PRI-355)', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: 'scribe-abc-prompt',
+      });
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('candidateId_looks_like_taskId');
+      }
+    });
+
+    it('candidateId with philosopher- prefix returns invalid_candidate (PRI-355)', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: 'philosopher-abc-prompt',
+      });
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('candidateId_looks_like_taskId');
+      }
+    });
+
+    it('candidateId exceeding 200 characters returns invalid_candidate (PRI-355)', () => {
+      const longId = 'c' + '0123456789'.repeat(20); // 201 chars
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: longId,
+      });
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('candidateId_too_long');
+      }
+    });
+
+    it('normal UUID candidateId passes validation (PRI-355)', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        candidateId: 'c2659976-c3ad-43fb-bd7c-c67dd2277669',
+      });
+      expect(result.decision).toBe('seeded');
+      if (result.decision === 'seeded') {
+        expect(result.taskId).toBe('dreamer-c2659976-c3ad-43fb-bd7c-c67dd2277669-prompt');
+      }
+    });
+
     it('unknown route returns not_internalizable', () => {
       const result = computeBridgeDecision({
         ...validInput,

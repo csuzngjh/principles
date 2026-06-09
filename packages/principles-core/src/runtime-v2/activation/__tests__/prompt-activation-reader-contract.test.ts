@@ -163,6 +163,18 @@ describe('prompt-activation-reader-contract', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.warning).toContain('artifact_not_found');
+        expect(result.warning).toContain('nextAction=');
+      }
+    });
+
+    it('stale activation with null artifact row includes nextAction for cleanup (PRI-355)', () => {
+      const activation = makeActivation({ artifactId: 'art-mvp-acceptance-001' });
+      const result = resolvePrincipleFromArtifact(null, activation);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.warning).toContain('artifact_query_unexpected');
+        expect(result.warning).toContain('nextAction=');
+        expect(result.warning).toContain('art-mvp-acceptance-001');
       }
     });
 

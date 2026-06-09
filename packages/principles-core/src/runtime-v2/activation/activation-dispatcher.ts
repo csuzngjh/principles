@@ -257,7 +257,14 @@ export class ActivationDispatcher {
     try {
       const result = await this.artifactReadModel.getArtifactById(artifactId);
       if (!result) {
-        return { artifact: null, decision: { decision: 'invalid_artifact', reason: 'artifact_not_found' } };
+        return {
+          artifact: null,
+          decision: {
+            decision: 'invalid_artifact',
+            reason: 'artifact_not_found',
+            nextAction: 'check_pi_artifacts_table_or_remove_stale_activation',
+          },
+        };
       }
       return { artifact: result, decision: null };
     } catch {

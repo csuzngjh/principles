@@ -50,9 +50,9 @@ export class PromptActivationReader {
         }
 
         if (artifactRow === null) {
-          const warning = `artifact_not_found: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table`;
+          const warning = `artifact_not_found: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table_or_remove_stale_activation`;
           warnings.push(warning);
-          this.deps.logger?.warn?.(`[PD:RuntimeV2] ${warning}`);
+          this.deps.logger?.info?.(`[PD:RuntimeV2] ${warning}`);
           continue;
         }
 
