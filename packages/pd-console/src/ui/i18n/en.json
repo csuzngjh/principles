@@ -169,7 +169,15 @@
       "chainCandidateId": "Candidate ID",
       "chainPrincipleId": "Linked Principle ID",
       "chainSourceKind": "Source Kind",
-      "chainState": "Chain State"
+      "chainState": "Chain State",
+      "fieldTrigger": "Trigger",
+      "fieldConclusion": "PD's Conclusion",
+      "fieldApplicability": "Applicability",
+      "fieldConfidence": "Confidence",
+      "confidenceHigh": "High",
+      "confidenceMid": "Medium",
+      "confidenceLow": "Low",
+      "techDetails": "Technical Details"
     },
     "principles": {
       "title": "Principles",

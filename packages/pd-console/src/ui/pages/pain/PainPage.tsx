@@ -18,6 +18,7 @@ import { Button } from '../../components/ui/button.js';
 import { fetchEvidenceChain } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
 import { formatDate } from '../../utils/format.js';
+import { mapConfidenceLabel, buildCardLayers } from './pain-card-helpers.js';
 
 // ── State grouping ─────────────────────────────────────────────────────────────
 
@@ -266,10 +267,20 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
   const stateLabel = tFallback(t, `pages.pain.state_${record.state}`, record.state);
   const sourceLabel = tFallback(t, `pages.pain.source_${record.sourceKind}`, record.sourceKind);
 
+  const layers = buildCardLayers(record);
+
+  // Confidence i18n key
+  const confidenceI18nKey = layers.layer2.confidence
+    ? `pages.pain.confidence${layers.layer2.confidence.label.charAt(0).toUpperCase() + layers.layer2.confidence.label.slice(1)}`
+    : null;
+  const confidenceDisplay = confidenceI18nKey
+    ? `${tFallback(t, confidenceI18nKey, layers.layer2.confidence!.label)} (${layers.layer2.confidence!.raw.toFixed(2)})`
+    : null;
+
   return (
     <Card className="overflow-hidden">
       <CardHeader>
-        {/* Layer 1: Summary — what happened */}
+        {/* Layer 1: Status badges + source + timestamp */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
@@ -284,86 +295,123 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             {formatDate(record.observedAt)}
           </span>
         </div>
-        <CardTitle className="mt-2">{record.summary}</CardTitle>
       </CardHeader>
 
       <CardContent>
-        {/* Layer 2: Chain context — why */}
+        {/* Layer 2: Human-readable content */}
         <div className="space-y-3 mb-4">
+          {/* Trigger behavior */}
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              {t('pages.pain.fieldTrigger')}
+            </div>
+            <CardTitle className="text-[15px] leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
+          </div>
+
+          {/* PD's conclusion (conditional: candidateTitle exists) */}
+          {layers.layer2.conclusion && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldConclusion')}
+              </div>
+              <p className="text-ink text-sm leading-relaxed font-medium">{layers.layer2.conclusion}</p>
+            </div>
+          )}
+
+          {/* Applicability (conditional: candidateSummary or rootCauseSummary) */}
+          {layers.layer2.applicability && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldApplicability')}
+              </div>
+              <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.applicability}</p>
+            </div>
+          )}
+
+          {/* Confidence (conditional: confidence exists) */}
+          {confidenceDisplay && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldConfidence')}
+              </div>
+              <p className="text-ink-2 text-sm">{confidenceDisplay}</p>
+            </div>
+          )}
+
           {/* Failure reason for failed/retry states */}
-          {record.failureReason && (
+          {layers.layer2.failureReason && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldFailureReason')}
               </div>
-              <p className="text-danger text-sm leading-relaxed">{record.failureReason}</p>
-            </div>
-          )}
-
-          {/* Next action guidance */}
-          {record.nextAction && (
-            <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
-                {t('pages.pain.fieldNextAction')}
-              </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{record.nextAction}</p>
+              <p className="text-danger text-sm leading-relaxed">{layers.layer2.failureReason}</p>
             </div>
           )}
 
           {/* Degraded reason at record level */}
-          {record.degradedReason && (
+          {layers.layer2.degradedReason && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldDegradedReason')}
               </div>
-              <p className="text-amber text-sm leading-relaxed">{record.degradedReason}</p>
+              <p className="text-amber text-sm leading-relaxed">{layers.layer2.degradedReason}</p>
+            </div>
+          )}
+
+          {/* Next action guidance */}
+          {layers.layer2.nextAction && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldNextAction')}
+              </div>
+              <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.nextAction}</p>
             </div>
           )}
         </div>
 
-        {/* Layer 3: Chain links — collapsed by default (D section) */}
+        {/* Layer 3: Technical details (collapsed by default) */}
         <details open={expanded} onToggle={onToggle}>
           <summary className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 cursor-pointer select-none hover:text-ink transition-colors">
-            {t('pages.pain.chainToggle')}
+            {t('pages.pain.techDetails')}
           </summary>
           <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
               <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
-              <span className="font-mono text-ink-2">{record.id}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.id}</span>
 
-              {record.linkedTaskId && (
+              {layers.layer3.linkedTaskId && (
                 <>
                   <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
-                  <span className="font-mono text-ink-2">{record.linkedTaskId}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskId}</span>
                 </>
               )}
 
-              {record.linkedTaskStatus && (
+              {layers.layer3.linkedTaskStatus && (
                 <>
                   <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
-                  <span className="font-mono text-ink-2">{record.linkedTaskStatus}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskStatus}</span>
                 </>
               )}
 
-              {record.linkedCandidateId && (
+              {layers.layer3.linkedCandidateId && (
                 <>
                   <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
-                  <span className="font-mono text-ink-2">{record.linkedCandidateId}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedCandidateId}</span>
                 </>
               )}
 
-              {record.linkedPrincipleId && (
+              {layers.layer3.linkedPrincipleId && (
                 <>
                   <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
-                  <span className="font-mono text-ink-2">{record.linkedPrincipleId}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.linkedPrincipleId}</span>
                 </>
               )}
 
               <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
-              <span className="font-mono text-ink-2">{record.sourceKind}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.sourceKind}</span>
 
               <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
-              <span className="font-mono text-ink-2">{record.state}</span>
+              <span className="font-mono text-ink-2">{layers.layer3.state}</span>
             </div>
           </div>
         </details>
