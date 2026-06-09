@@ -69,7 +69,7 @@
     }
   },
   "dependencies": {
-    "@principles/core": "^1.73.0",
+    "@principles/core": "workspace:*",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
