@@ -18,9 +18,11 @@ const SENSENOVA_DEFAULT_BASE_URL = 'https://token.sensenova.cn/v1';
 const SENSENOVA_DEFAULT_MODEL = 'deepseek-v4-flash';
 
 export function getLlmE2eConfig(): LlmE2eTestConfig | null {
+  if (process.env.LLM_E2E_ENABLED !== 'true') {
+    return null;
+  }
+
   const llmE2eApiKey = process.env.LLM_E2E_API_KEY;
-  // Only use SENSENOVA_API_KEY; ANTHROPIC_AUTH_TOKEN is not a valid SenseNova
-  // key and must not trigger E2E tests when set by other tools.
   const sensenovaApiKey = process.env.SENSENOVA_API_KEY;
 
   if (llmE2eApiKey) {
