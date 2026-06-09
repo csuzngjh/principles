@@ -80,6 +80,7 @@ export interface OpenClawPluginService {
 }
 
 export interface OpenClawPluginApi {
+  id: string;
   rootDir?: string;
   pluginConfig?: Record<string, unknown>;
   logger: PluginLogger;

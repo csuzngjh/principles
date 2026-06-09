@@ -10,6 +10,20 @@
  * needs to check conversation access state (PRI-346).
  */
 
+/**
+ * PRI-348: Extract the full plugin entry (including hooks) from the global OpenClaw config.
+ * Unlike api.pluginConfig (which is only the entry.config sub-object), this returns
+ * the entire entry including hooks, config, enabled, etc.
+ */
+export function getPluginEntry(config: unknown, pluginId: string): unknown {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return undefined;
+  const plugins = (config as Record<string, unknown>).plugins;
+  if (!plugins || typeof plugins !== 'object' || Array.isArray(plugins)) return undefined;
+  const entries = (plugins as Record<string, unknown>).entries;
+  if (!entries || typeof entries !== 'object' || Array.isArray(entries)) return undefined;
+  return (entries as Record<string, unknown>)[pluginId];
+}
+
 /** Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
 
