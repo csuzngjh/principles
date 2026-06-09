@@ -34,7 +34,7 @@ function safeStringifyValue(value: unknown, ctx: StringifyCtx): void {
     return;
   }
   if (t === 'number') {
-    out.result += Number.isFinite(value as number) ? String(value) : '"NaN"';
+    out.result += Number.isFinite(value) ? String(value) : '"NaN"';
     return;
   }
   if (t === 'boolean') {
@@ -57,7 +57,7 @@ function safeStringifyValue(value: unknown, ctx: StringifyCtx): void {
     out.result += '"<deep>"';
     return;
   }
-  const obj = value as object;
+  const obj = value;
   if (ctx.seen.has(obj)) {
     out.result += '"<circular>"';
     return;

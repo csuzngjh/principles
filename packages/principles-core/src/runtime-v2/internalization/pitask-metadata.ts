@@ -106,7 +106,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   const trimmed = diagnosticJson.trim();
   if (!trimmed) return null;
 
-  let parsed: Record<string, unknown>; // eslint-disable-line @typescript-eslint/init-declarations
+  let parsed: Record<string, unknown>;  
   try {
     parsed = JSON.parse(trimmed);
   } catch {

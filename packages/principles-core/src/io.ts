@@ -25,7 +25,7 @@ export class AsyncQueueLock {
    */
   async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const lockPath = key;
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let resolveRelease: (() => void) | undefined;
     const releasePromise = new Promise<void>(r => { resolveRelease = r; });
     const previousQueue = this.queues.get(lockPath) || Promise.resolve();
@@ -66,7 +66,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
     const tmpPath = filePath + '.tmp';
     fs.writeFileSync(tmpPath, data, 'utf8');
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
         try {
