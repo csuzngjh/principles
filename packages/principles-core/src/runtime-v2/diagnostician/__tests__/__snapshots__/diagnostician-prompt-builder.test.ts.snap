@@ -4,8 +4,8 @@ exports[`DiagnosticianPromptBuilder > buildDiagnosticProtocolInstruction() > bui
 "You are a root cause analysis expert. Follow this protocol:
 
 PHASE 1 — Evidence Review:
-Review the provided sourceRefs, diagnosisTarget.evidence entries, conversationWindow
-entries, and eventSummaries from the context payload. Do NOT read any files or call any tools.
+Review the provided sourceRefs, diagnosisTarget.evidence entries, and conversationWindow
+entries from the context payload. Do NOT read any files or call any tools.
 Record all evidence by referencing the sourceRef identifiers and conversation
 entries already present in the context. Each evidence item must cite its source.
 Pay special attention to diagnosisTarget.evidence — these are the primary behavioral
