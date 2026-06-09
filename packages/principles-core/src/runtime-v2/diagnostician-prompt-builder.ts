@@ -165,6 +165,10 @@ EVIDENCE SCOPE GUARD:
 - The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
 - If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
   owner message or agent action context, return confidence < 0.3 and kind="defer".
+- If diagnosisTarget.evidence is an empty array (length === 0), you MUST NOT fabricate evidence entries.
+  You MUST output confidence < 0.3 and kind = "defer".
+  Set description to: "Insufficient evidence: diagnosisTarget.evidence is empty.
+  Re-trigger diagnosis after evidence is collected."
 
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
@@ -270,13 +274,26 @@ export class DiagnosticianPromptBuilder {
     let message = JSON.stringify(promptInput);
 
     // If message exceeds maxMessageChars, truncate the diagnostic instruction
+    // PRI-342: Extract and preserve EVIDENCE SCOPE GUARD before truncating
     if (message.length > limits.maxMessageChars) {
       const surplus = message.length - limits.maxMessageChars;
       const instruction = diagnosticInstruction;
+
+      // Extract EVIDENCE SCOPE GUARD to preserve it through truncation
+      const guardMatch = /EVIDENCE SCOPE GUARD:\s*[\s\S]*?(?=\nCRITICAL:|\nCOMPLETE EXAMPLE)/.exec(instruction);
+      const guardBlock = guardMatch ? guardMatch[0] : '';
+
       // Keep at least the first 200 chars of the instruction + a note
       const keepLength = Math.max(200, instruction.length - surplus - 100);
-      const truncatedInstruction = instruction.slice(0, keepLength) +
+      let truncatedInstruction = instruction.slice(0, keepLength) +
         '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
+
+      // If the guard block was cut off by truncation, re-append it
+      if (guardBlock && !truncatedInstruction.includes('EVIDENCE SCOPE GUARD')) {
+        truncatedInstruction = truncatedInstruction +
+          `\n\n${guardBlock}`;
+      }
+
       promptInput.diagnosticInstruction = truncatedInstruction;
       promptInput.truncationWarnings = [
         ...truncationWarnings,

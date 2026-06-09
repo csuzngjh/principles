@@ -63,7 +63,8 @@ function createStateDb(withCandidates = true): Database.Database {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       last_error TEXT,
-      attempt_count INTEGER NOT NULL DEFAULT 0
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      diagnostic_json TEXT
     )
   `);
 
@@ -73,7 +74,12 @@ function createStateDb(withCandidates = true): Database.Database {
         candidate_id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        title TEXT,
+        description TEXT,
+        abstracted_principle TEXT,
+        confidence REAL,
+        recommendation_kind TEXT
       )
     `);
   }
@@ -110,9 +116,10 @@ function insertTask(db: Database.Database, task: {
   status?: string;
   createdAt?: string;
   lastError?: string;
+  diagnosticJson?: string;
 }): void {
   db.prepare(
-    'INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, last_error, attempt_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, last_error, attempt_count, diagnostic_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.taskId,
     task.taskKind ?? 'diagnostician',
@@ -121,6 +128,7 @@ function insertTask(db: Database.Database, task: {
     task.createdAt ?? '2026-06-07T10:00:00.000Z',
     task.lastError ?? null,
     1,
+    task.diagnosticJson ?? null,
   );
 }
 
@@ -129,14 +137,24 @@ function insertCandidate(db: Database.Database, candidate: {
   taskId: string;
   status?: string;
   createdAt?: string;
+  title?: string;
+  description?: string;
+  abstractedPrinciple?: string;
+  confidence?: number;
+  recommendationKind?: string;
 }): void {
   db.prepare(
-    'INSERT INTO principle_candidates (candidate_id, task_id, status, created_at) VALUES (?, ?, ?, ?)',
+    'INSERT INTO principle_candidates (candidate_id, task_id, status, created_at, title, description, abstracted_principle, confidence, recommendation_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     candidate.candidateId,
     candidate.taskId,
     candidate.status ?? 'pending',
     candidate.createdAt ?? '2026-06-07T10:00:00.000Z',
+    candidate.title ?? null,
+    candidate.description ?? null,
+    candidate.abstractedPrinciple ?? null,
+    candidate.confidence ?? null,
+    candidate.recommendationKind ?? null,
   );
 }
 
@@ -698,5 +716,158 @@ describe('EvidenceChainConsoleModel — malformed principle ledger', () => {
     expect(result.degradedReason).toBeFalsy();
     // Should not crash or produce unexpected keys from prototype chain
     expect(result.records).toHaveLength(1);
+  });
+});
+
+// ── PRI-340: Human-readable evidence fields ──────────────────────────────────
+
+describe('EvidenceChainConsoleModel — PRI-340 human-readable fields', () => {
+  // 用例 A：principle_candidates 有 title/confidence + 关联 task → candidateTitle, confidence, summary 非 ID
+  it('A: surfaces candidateTitle and confidence from principle_candidates', async () => {
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_42',
+      status: 'succeeded',
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-001',
+      taskId: 'diagnosis_pain_42',
+      title: '备份前必须确认',
+      confidence: 0.8,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === 'pain_42');
+    expect(record).toBeDefined();
+    expect(record!.candidateTitle).toBe('备份前必须确认');
+    expect(record!.confidence).toBe(0.8);
+    expect(record!.summary).not.toContain('diagnosis_');
+    expect(record!.summary).not.toContain('task:');
+  });
+
+  // 用例 B：无 candidate，diagnostic_json 有 rootCause → rootCauseSummary 填充，summary 包含根因文本
+  it('B: extracts rootCauseSummary from diagnostic_json', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: '',
+      reason: '',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb(false);
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+      diagnosticJson: '{"rootCause":"删除前未确认备份"}',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.rootCauseSummary).toBe('删除前未确认备份');
+    expect(record!.summary).toContain('删除前未确认备份');
+    expect(record!.summary).not.toContain('diagnosis_');
+  });
+
+  // 用例 C：只有 pain_events（reason='用户手动反馈'，text=''）无 task/candidate → summary 取 reason
+  it('C: uses pain reason as summary when no task or candidate', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: '',
+      reason: '用户手动反馈',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].summary).toBe('用户手动反馈');
+  });
+
+  // 用例 D（关键回归）：section 6 路径——有 task + candidate，但 pain_events 为空
+  it('D: section 6 summary is candidate title, not hard-coded ID string', async () => {
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_999',
+      status: 'succeeded',
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-002',
+      taskId: 'diagnosis_pain_999',
+      title: '部署前运行测试',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === 'pain_999');
+    expect(record).toBeDefined();
+    expect(record!.summary).toBe('部署前运行测试');
+    expect(record!.summary).not.toContain('Manual pain signal');
+    expect(record!.summary).not.toContain('task:');
+  });
+
+  // 用例 E：candidate description 含绝对路径 → candidateSummary 已脱敏
+  it('E: candidateSummary is sanitized (no absolute paths)', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Some pain',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-003',
+      taskId: `diagnosis_pain_${rowId}`,
+      title: 'Sensitive data principle',
+      description: 'Error at C:\\Users\\admin\\secrets\\key.pem: token leaked',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.candidateSummary).toBeDefined();
+    expect(record!.candidateSummary!).not.toContain('C:\\Users\\admin\\secrets');
+  });
+
+  // 用例 F：diagnostic_json 是非法 JSON → 不抛异常，degradedReason 非空，其他字段正常
+  it('F: invalid diagnostic_json does not throw, sets degradedReason', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain with bad diagnostic_json',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+      diagnosticJson: '{invalid json!!!',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    // Should NOT throw — record should still exist
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    // Other fields should be normal
+    expect(record!.state).toBe('diagnosis_succeeded');
+    // rootCauseSummary should not be set (invalid JSON)
+    expect(record!.rootCauseSummary).toBeUndefined();
+    // degradedReason should be set (ERR-002)
+    expect(record!.degradedReason).toBeTruthy();
   });
 });

@@ -41,6 +41,10 @@ EVIDENCE SCOPE GUARD:
 - The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
 - If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
   owner message or agent action context, return confidence < 0.3 and kind="defer".
+- If diagnosisTarget.evidence is an empty array (length === 0), you MUST NOT fabricate evidence entries.
+  You MUST output confidence < 0.3 and kind = "defer".
+  Set description to: "Insufficient evidence: diagnosisTarget.evidence is empty.
+  Re-trigger diagnosis after evidence is collected."
 
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 

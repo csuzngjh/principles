@@ -169,7 +169,15 @@
       "chainCandidateId": "候选 ID",
       "chainPrincipleId": "关联原则 ID",
       "chainSourceKind": "来源类型",
-      "chainState": "链路状态"
+      "chainState": "链路状态",
+      "fieldTrigger": "触发行为",
+      "fieldConclusion": "PD 的结论",
+      "fieldApplicability": "适用/说明",
+      "fieldConfidence": "置信度",
+      "confidenceHigh": "高",
+      "confidenceMid": "中",
+      "confidenceLow": "低",
+      "techDetails": "技术细节"
     },
     "principles": {
       "title": "原则",
