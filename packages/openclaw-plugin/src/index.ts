@@ -20,8 +20,8 @@ import type {
 } from './openclaw-sdk.js';
 import * as path from 'path';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
-import { checkConversationAccessConfig } from './core/config-health.js';
-export { checkConversationAccessConfig } from './core/config-health.js';
+import { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
+export { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
@@ -171,7 +171,7 @@ const plugin = {
       }
 
       // PRI-343: Check allowConversationAccess — warn if llm_output/trajectory hooks blocked
-      const accessCheck = checkConversationAccessConfig(api.pluginConfig);
+      const accessCheck = checkConversationAccessConfig(getPluginEntry(api.config, api.id));
       if (!accessCheck.authorized) {
         api.logger.error(
           `[PD:health] conversation hooks (llm_output / trajectory) will be BLOCKED by OpenClaw.\n` +
@@ -539,7 +539,7 @@ const plugin = {
           TrajectoryCollector.handleBeforeMessageWrite(event, {
             ...ctx,
             workspaceDir: wsResult.workspaceDir,
-            pluginConfig: api.pluginConfig,
+            pluginConfig: getPluginEntry(api.config, api.id),
           });
         } catch (err) {
           // Non-critical: don't surface to user
