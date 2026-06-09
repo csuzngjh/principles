@@ -185,6 +185,7 @@ describe('PainSignalBridge admission gate integration', () => {
       reason: 'Valid reason',
       sessionId: 'session-123',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'session-trace-1', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('succeeded');
@@ -216,6 +217,7 @@ describe('PainSignalBridge admission gate integration', () => {
       reason: 'Test',
       sessionId: 'session-456',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'session-trace-2', note: 'test evidence' }],
     });
 
     expect(result.ledgerEntryIds).toHaveLength(0);
@@ -281,6 +283,7 @@ describe('PainSignalBridge admission gate integration', () => {
       reason: 'Mixed',
       sessionId: 'session-789',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'session-trace-3', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('degraded');
@@ -449,6 +452,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       reason: 'Test dreamer seeding',
       sessionId: 'session-dreamer',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'dreamer-src', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('succeeded');
@@ -483,6 +487,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       reason: 'Test non-MVP channel',
       sessionId: 'session-impl',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'impl-src', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('succeeded');
@@ -517,6 +522,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       reason: 'Test seed failure',
       sessionId: 'session-fail',
       provenance: 'openclaw_context_bound',
+      evidence: [{ sourceRef: 'fail-src', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('degraded');
