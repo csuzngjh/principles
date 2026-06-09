@@ -885,6 +885,11 @@ describe('validateFeedbackDraftEnvelope', () => {
     expect(validateFeedbackDraftEnvelope({ report: 42 })).toBeNull();
     expect(validateFeedbackDraftEnvelope({ report: [] })).toBeNull();
   });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({ report: { id: '1' } });
+    expect(validateFeedbackDraftEnvelope(obj)).toBeNull();
+  });
 });
 
 // ── validateRemovedEnvelope ────────────────────────────────────────────────────
@@ -912,6 +917,11 @@ describe('validateRemovedEnvelope', () => {
   it('rejects wrong type for removed', () => {
     expect(validateRemovedEnvelope({ removed: 42 })).toBeNull();
     expect(validateRemovedEnvelope({ removed: [] })).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({ removed: 'workspace-name' });
+    expect(validateRemovedEnvelope(obj)).toBeNull();
   });
 });
 
@@ -943,6 +953,11 @@ describe('validateSyncResult', () => {
   it('rejects wrong types', () => {
     expect(validateSyncResult({ success: 'true', syncedAt: '2026-06-01' })).toBeNull();
     expect(validateSyncResult({ success: true, syncedAt: 42 })).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({ success: true, syncedAt: '2026-06-01T00:00:00Z' });
+    expect(validateSyncResult(obj)).toBeNull();
   });
 });
 
@@ -1050,6 +1065,11 @@ describe('validateAgentBindingUpdate', () => {
     expect(validateAgentBindingUpdate({ agent: 'diag', runtimeProfile: 123, enabled: true })).toBeNull();
     expect(validateAgentBindingUpdate({ agent: 'diag', runtimeProfile: 'openclaw.default', enabled: 'yes' })).toBeNull();
   });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({ agent: 'diagnostician', runtimeProfile: 'openclaw.default', enabled: true });
+    expect(validateAgentBindingUpdate(obj)).toBeNull();
+  });
 });
 
 // ── validateReadinessCheck ────────────────────────────────────────────────────
@@ -1141,6 +1161,11 @@ describe('validateDefaultRuntimeUpdate', () => {
   it('rejects wrong type', () => {
     expect(validateDefaultRuntimeUpdate({ defaultRuntime: 123 })).toBeNull();
     expect(validateDefaultRuntimeUpdate({ defaultRuntime: [] })).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({ defaultRuntime: 'lmstudio-local' });
+    expect(validateDefaultRuntimeUpdate(obj)).toBeNull();
   });
 });
 
@@ -1283,5 +1308,17 @@ describe('validateApprovalRecordDirect', () => {
       requestedAt: '2026-06-01T00:00:00Z',
     });
     expect(result).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({
+      approvalId: 'apr_123',
+      artifactId: 'art_456',
+      channel: 'prompt',
+      riskLevel: 'medium',
+      status: 'pending',
+      requestedAt: '2026-06-01T00:00:00Z',
+    });
+    expect(validateApprovalRecordDirect(obj)).toBeNull();
   });
 });
