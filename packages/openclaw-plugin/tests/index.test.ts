@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import plugin from '../src/index';
+import { checkConversationAccessConfig } from '../src/index';
 import type { PluginCommandDefinition, OpenClawPluginApi, PluginCommandContext } from '../src/openclaw-sdk.js';
 
 function createMockApi(): { registeredCommands: PluginCommandDefinition[]; api: OpenClawPluginApi } {
@@ -98,5 +99,44 @@ describe('Command Registration', () => {
     expect(result).toBeDefined();
     expect(result.text).toBeDefined();
     expect(ctx.workspaceDir).toBe('/mock/workspace');
+  });
+});
+
+describe('checkConversationAccessConfig — PRI-343', () => {
+  it('returns authorized:false with reason and nextAction when allowConversationAccess is not true', () => {
+    const result = checkConversationAccessConfig({ hooks: { allowConversationAccess: false } });
+    expect(result.authorized).toBe(false);
+    expect(result.reason).toBeDefined();
+    expect(typeof result.reason).toBe('string');
+    expect(result.reason!.length).toBeGreaterThan(0);
+    expect(result.nextAction).toBeDefined();
+    expect(typeof result.nextAction).toBe('string');
+    expect(result.nextAction!.length).toBeGreaterThan(0);
+  });
+
+  it('returns authorized:true when allowConversationAccess is true', () => {
+    const result = checkConversationAccessConfig({ hooks: { allowConversationAccess: true } });
+    expect(result.authorized).toBe(true);
+    expect(result.reason).toBeUndefined();
+    expect(result.nextAction).toBeUndefined();
+  });
+
+  it('returns authorized:false when hooks object is missing', () => {
+    const result = checkConversationAccessConfig({ enabled: true });
+    expect(result.authorized).toBe(false);
+    expect(result.reason).toBeDefined();
+    expect(result.nextAction).toBeDefined();
+  });
+
+  it('returns authorized:false when pluginConfig is null', () => {
+    const result = checkConversationAccessConfig(null);
+    expect(result.authorized).toBe(false);
+    expect(result.reason).toBeDefined();
+  });
+
+  it('returns authorized:false when pluginConfig is undefined', () => {
+    const result = checkConversationAccessConfig(undefined);
+    expect(result.authorized).toBe(false);
+    expect(result.reason).toBeDefined();
   });
 });

@@ -63,7 +63,7 @@ export function listCorrectionSamples(
 ): CorrectionSampleRecord[] {
   const dbPath = getDbPath(workspaceDir);
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true });
@@ -124,7 +124,7 @@ export function reviewCorrectionSample(
 ): CorrectionSampleRecord {
   const dbPath = getDbPath(workspaceDir);
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let db: Database.Database;
   try {
     db = new Database(dbPath);

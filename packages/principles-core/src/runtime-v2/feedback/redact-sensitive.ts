@@ -195,7 +195,7 @@ function redactInner(value: unknown, ctx: RedactContext): RedactResult {
   if (ctx.depth >= REDACT_MAX_DEPTH) {
     return { ok: true, value: '<deep>', notes: [] };
   }
-  const obj = value as object;
+  const obj = value;
   if (ctx.seen.has(obj)) {
     ctx.notes.push('circular reference detected');
     return { ok: true, value: '<circular>', notes: [] };

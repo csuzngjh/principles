@@ -74,7 +74,7 @@ export function getDefaultInternalAgents(): InternalAgentsConfig {
   }
   return {
     defaultRuntime: DEFAULT_RUNTIME_PROFILE_ID,
-    agents: agents as Record<InternalAgentName, InternalAgentBinding>,
+    agents: agents,
   };
 }
 

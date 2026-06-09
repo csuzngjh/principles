@@ -20,6 +20,12 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
+vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
+  buildTrajectoryEvidenceFromDb: vi.fn().mockReturnValue([
+    { sourceRef: 'owner_reported:cli', note: 'No session context available' },
+  ]),
+}));
+
 vi.mock('@principles/core/runtime-v2', () => ({
   PainToPrincipleService: vi.fn().mockImplementation(function() {
     return {
@@ -328,5 +334,51 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.score).toBe(90);
     expect(lastRecordPainInput!.sessionId).toBe('cli');
     expect(lastRecordPainInput!.agentId).toBe('pd-cli');
+    // PRI-341: evidence field is now always provided
+    expect(lastRecordPainInput!.evidence).toBeTruthy();
+    expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
+  });
+
+  // ── PRI-341: evidence passthrough and --session flag ──────────────────────
+
+  // 用例 C: recordPain receives non-empty evidence field when session provided
+  it('C: passes evidence to recordPain when --session is provided', async () => {
+    // Mock buildTrajectoryEvidenceFromDb to return evidence
+    const mockEvidence = [
+      { sourceRef: 'agent_turn:2026-01-01T10:00:00Z', note: 'assistant text evidence' },
+    ];
+    vi.doMock('../../src/commands/build-trajectory-evidence.js', () => ({
+      buildTrajectoryEvidenceFromDb: vi.fn().mockReturnValue(mockEvidence),
+    }));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'sess-123', json: true });
+
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.evidence).toBeTruthy();
+    expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
+    expect(lastRecordPainInput!.sessionId).toBe('sess-123');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 用例 C2: without session, evidence field still has a placeholder (not empty)
+  it('C2: passes placeholder evidence when no --session provided', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', json: true });
+
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.evidence).toBeTruthy();
+    expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
+    // Default evidence should be a CLI placeholder
+    expect(lastRecordPainInput!.evidence![0].sourceRef).toBe('owner_reported:cli');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });

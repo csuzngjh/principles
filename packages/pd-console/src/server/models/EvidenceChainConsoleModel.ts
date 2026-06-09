@@ -56,6 +56,12 @@ export interface EvidenceChainRecord {
   failureReason?: string;
   degradedReason?: string;
   nextAction?: string;
+  /** PRI-340: human-readable evidence fields (all optional for backward compat) */
+  candidateTitle?: string;
+  candidateSummary?: string;
+  rootCauseSummary?: string;
+  confidence?: number;
+  recommendationKind?: string;
 }
 
 export interface EvidenceChainResponse {
@@ -140,6 +146,11 @@ function coerceToString(value: unknown): string {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+function isMissingColumnError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes('no such column');
 }
 
 /**
@@ -330,6 +341,35 @@ function readLedgerPrinciples(workspaceDir: string): LedgerReadResult {
   return { principles: result };
 }
 
+// ── PRI-340: Candidate info for human-readable fields ────────────────────────
+
+interface CandidateInfo {
+  candidateId: string;
+  title?: string;
+  description?: string;
+  confidence?: number;
+  recommendationKind?: string;
+}
+
+/**
+ * PRI-340: Resolve the best human-readable summary for an evidence chain record.
+ * Priority: candidateTitle > rootCauseSummary > painText > painReason > fallback.
+ * Pure function for testability.
+ */
+export function resolveSummary(fields: {
+  candidateTitle?: string;
+  rootCauseSummary?: string;
+  painText?: string;
+  painReason?: string;
+  fallback: string;
+}): string {
+  if (fields.candidateTitle) return fields.candidateTitle;
+  if (fields.rootCauseSummary) return fields.rootCauseSummary;
+  if (fields.painText) return fields.painText;
+  if (fields.painReason) return fields.painReason;
+  return fields.fallback;
+}
+
 // ── Model ──────────────────────────────────────────────────────────────────────
 
 export class EvidenceChainConsoleModel {
@@ -384,26 +424,55 @@ export class EvidenceChainConsoleModel {
 
     // ── 2. Read diagnostician tasks from state.db ─────────────────────────
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
-    let taskMap = new Map<string, { taskId: string; status: string; lastError: string | null; createdAt: string }>();
+    let taskMap = new Map<string, { taskId: string; status: string; lastError: string | null; createdAt: string; rootCauseSummary?: string; diagnosticJsonDegraded?: boolean }>();
     let stateDbAvailable = false;
 
     if (fs.existsSync(stateDbPath)) {
       try {
         const conn = this.getReadConnection();
         const db = conn.getDb();
-        const tasks = coerceRowsToRecords(db.prepare(
-          "SELECT task_id, status, last_error, created_at FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
-        ).all());
+        // PRI-340: try to read diagnostic_json for rootCause summary
+        let tasks: Record<string, unknown>[];
+        try {
+          tasks = coerceRowsToRecords(db.prepare(
+            "SELECT task_id, status, last_error, created_at, diagnostic_json FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
+          ).all());
+        } catch (colErr) {
+          if (isMissingColumnError(colErr)) {
+            tasks = coerceRowsToRecords(db.prepare(
+              "SELECT task_id, status, last_error, created_at FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
+            ).all());
+          } else {
+            throw colErr;
+          }
+        }
 
         for (const task of tasks) {
           const taskId = isString(task.task_id) ? task.task_id : '';
           // Diagnostician task IDs follow pattern "diagnosis_<painId>"
           const painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : taskId;
+          // PRI-340: parse diagnostic_json for rootCause (ERR-001: no `as`, runtime guards)
+          let rootCauseSummary: string | undefined;
+          let diagnosticJsonDegraded = false;
+          const dj = getOwnValue(task, 'diagnostic_json');
+          if (isString(dj)) {
+            try {
+              const parsed: unknown = JSON.parse(dj);
+              if (isRecord(parsed) && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
+                rootCauseSummary = parsed.rootCause;
+              }
+            } catch {
+              // Invalid JSON — degrade gracefully (ERR-002)
+              diagnosticJsonDegraded = true;
+            }
+          }
           taskMap.set(painId, {
             taskId,
             status: isString(task.status) ? task.status : 'unknown',
             lastError: isString(task.last_error) ? task.last_error : null,
             createdAt: isString(task.created_at) ? task.created_at : '',
+            rootCauseSummary,
+            diagnosticJsonDegraded,
           });
         }
         stateDbAvailable = true;
@@ -422,14 +491,28 @@ export class EvidenceChainConsoleModel {
     }
 
     // ── 3. Read candidates from state.db ──────────────────────────────────
-    let candidateMap = new Map<string, string>(); // painId → candidateId
+    let candidateMap = new Map<string, CandidateInfo>(); // painId → CandidateInfo
     if (stateDbAvailable) {
       try {
         const conn = this.getReadConnection();
         const db = conn.getDb();
-        const candidates = coerceRowsToRecords(db.prepare(
-          'SELECT candidate_id, task_id FROM principle_candidates',
-        ).all());
+        // PRI-340: try rich query first, fall back to basic on missing columns
+        let candidates: Record<string, unknown>[];
+        let hasRichColumns = true;
+        try {
+          candidates = coerceRowsToRecords(db.prepare(
+            'SELECT candidate_id, task_id, title, description, abstracted_principle, confidence, recommendation_kind FROM principle_candidates',
+          ).all());
+        } catch (colErr) {
+          if (isMissingColumnError(colErr)) {
+            candidates = coerceRowsToRecords(db.prepare(
+              'SELECT candidate_id, task_id FROM principle_candidates',
+            ).all());
+            hasRichColumns = false;
+          } else {
+            throw colErr;
+          }
+        }
 
         for (const c of candidates) {
           const candidateId = isString(c.candidate_id) ? c.candidate_id : '';
@@ -437,7 +520,14 @@ export class EvidenceChainConsoleModel {
           // Reverse-map: taskId → painId
           const painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : '';
           if (painId && candidateId) {
-            candidateMap.set(painId, candidateId);
+            candidateMap.set(painId, {
+              candidateId,
+              title: hasRichColumns ? readOwnString(c, 'title') : undefined,
+              description: hasRichColumns ? readOwnString(c, 'description') : undefined,
+              confidence: hasRichColumns && typeof c.confidence === 'number' && Number.isFinite(c.confidence)
+                ? c.confidence : undefined,
+              recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
+            });
           }
         }
       } catch (err) {
@@ -483,19 +573,25 @@ export class EvidenceChainConsoleModel {
 
       // Look up linked task, candidate, principle
       const linkedTask = taskMap.get(painId);
-      const linkedCandidateId = candidateMap.get(painId) || undefined;
+      const linkedCandidate = candidateMap.get(painId);
       const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
 
       // Determine state
       const state = determineState({
         sourceKind,
         linkedTaskStatus: linkedTask?.status,
-        linkedCandidateId,
+        linkedCandidateId: linkedCandidate?.candidateId,
         linkedPrincipleId,
       });
 
-      // Build bounded, sanitized summary
-      const rawSummary = text || reason || `Pain signal (source: ${source}, score: ${score})`;
+      // PRI-340: Build summary using priority resolution
+      const rawSummary = resolveSummary({
+        candidateTitle: linkedCandidate?.title,
+        rootCauseSummary: linkedTask?.rootCauseSummary,
+        painText: text,
+        painReason: reason,
+        fallback: `Pain signal (source: ${source}, score: ${score})`,
+      });
       const summary = sanitizeString(rawSummary, this.workspaceDir);
 
       const record: EvidenceChainRecord = {
@@ -507,6 +603,28 @@ export class EvidenceChainConsoleModel {
         admissionDecision: inferAdmissionDecision(sourceKind),
       };
 
+      // PRI-340: Populate human-readable candidate fields
+      if (linkedCandidate) {
+        record.linkedCandidateId = linkedCandidate.candidateId;
+        if (linkedCandidate.title) {
+          record.candidateTitle = sanitizeString(linkedCandidate.title, this.workspaceDir);
+        }
+        if (linkedCandidate.description) {
+          record.candidateSummary = sanitizeString(linkedCandidate.description, this.workspaceDir);
+        }
+        if (typeof linkedCandidate.confidence === 'number' && Number.isFinite(linkedCandidate.confidence)) {
+          record.confidence = linkedCandidate.confidence;
+        }
+        if (linkedCandidate.recommendationKind) {
+          record.recommendationKind = linkedCandidate.recommendationKind;
+        }
+      }
+
+      // PRI-340: Populate rootCause summary from diagnostic_json
+      if (linkedTask?.rootCauseSummary) {
+        record.rootCauseSummary = sanitizeString(linkedTask.rootCauseSummary, this.workspaceDir);
+      }
+
       if (linkedTask) {
         record.linkedTaskId = linkedTask.taskId;
         record.linkedTaskStatus = linkedTask.status;
@@ -515,13 +633,16 @@ export class EvidenceChainConsoleModel {
           record.nextAction = state === 'diagnosis_retry_wait'
             ? 'Diagnosis is waiting for automatic retry. Check pipeline status if it stays in this state.'
             : 'Diagnosis failed. Check the error details and retry if appropriate.';
-        } else if (state === 'diagnosis_succeeded' && !linkedCandidateId) {
+        } else if (state === 'diagnosis_succeeded' && !linkedCandidate) {
           record.nextAction = 'Diagnosis completed. A candidate principle may be generated shortly.';
         }
-      }
-
-      if (linkedCandidateId) {
-        record.linkedCandidateId = linkedCandidateId;
+        // PRI-340: diagnostic_json parse failure → degrade (ERR-002)
+        if (linkedTask.diagnosticJsonDegraded) {
+          record.degradedReason = 'Diagnostic data for this record could not be parsed';
+          if (!record.nextAction) {
+            record.nextAction = 'Check task diagnostic data integrity.';
+          }
+        }
       }
 
       if (linkedPrincipleId) {
@@ -538,26 +659,32 @@ export class EvidenceChainConsoleModel {
     for (const [painId, task] of taskMap.entries()) {
       if (coveredPainIds.has(painId)) continue;
 
-      const linkedCandidateId = candidateMap.get(painId) || undefined;
+      const linkedCandidate = candidateMap.get(painId);
       const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
 
       const state = determineState({
         sourceKind: 'manual',
         linkedTaskStatus: task.status,
-        linkedCandidateId,
+        linkedCandidateId: linkedCandidate?.candidateId,
         linkedPrincipleId,
       });
 
-      records.push({
+      // PRI-340: Use resolveSummary instead of hard-coded ID string
+      const rawSummary = resolveSummary({
+        candidateTitle: linkedCandidate?.title,
+        rootCauseSummary: task.rootCauseSummary,
+        fallback: `Manual pain signal (task: ${task.taskId})`,
+      });
+
+      const record: EvidenceChainRecord = {
         id: painId,
         sourceKind: 'manual',
         observedAt: task.createdAt,
         state,
-        summary: sanitizeString(`Manual pain signal (task: ${task.taskId})`, this.workspaceDir),
+        summary: sanitizeString(rawSummary, this.workspaceDir),
         admissionDecision: 'store_signal',
         linkedTaskId: task.taskId,
         linkedTaskStatus: task.status,
-        linkedCandidateId,
         linkedPrincipleId,
         failureReason: (task.lastError && (state === 'diagnosis_failed' || state === 'diagnosis_retry_wait'))
           ? sanitizeString(task.lastError, this.workspaceDir)
@@ -567,7 +694,39 @@ export class EvidenceChainConsoleModel {
           : (state === 'diagnosis_failed')
             ? 'Diagnosis failed. Check error details and retry.'
             : undefined,
-      });
+      };
+
+      // PRI-340: Populate human-readable candidate fields
+      if (linkedCandidate) {
+        record.linkedCandidateId = linkedCandidate.candidateId;
+        if (linkedCandidate.title) {
+          record.candidateTitle = sanitizeString(linkedCandidate.title, this.workspaceDir);
+        }
+        if (linkedCandidate.description) {
+          record.candidateSummary = sanitizeString(linkedCandidate.description, this.workspaceDir);
+        }
+        if (typeof linkedCandidate.confidence === 'number' && Number.isFinite(linkedCandidate.confidence)) {
+          record.confidence = linkedCandidate.confidence;
+        }
+        if (linkedCandidate.recommendationKind) {
+          record.recommendationKind = linkedCandidate.recommendationKind;
+        }
+      }
+
+      // PRI-340: Populate rootCause summary from diagnostic_json
+      if (task.rootCauseSummary) {
+        record.rootCauseSummary = sanitizeString(task.rootCauseSummary, this.workspaceDir);
+      }
+
+      // PRI-340: diagnostic_json parse failure → degrade (ERR-002)
+      if (task.diagnosticJsonDegraded) {
+        record.degradedReason = 'Diagnostic data for this record could not be parsed';
+        if (!record.nextAction) {
+          record.nextAction = 'Check task diagnostic data integrity.';
+        }
+      }
+
+      records.push(record);
     }
 
     // Sort by observedAt descending

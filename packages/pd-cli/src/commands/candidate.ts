@@ -553,7 +553,7 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let conn: SqliteConnection | undefined;
 
   try {

@@ -392,7 +392,7 @@ export class InternalizationOrchestrator {
       correlationId: proposal.correlationId,
     };
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let successorRecord: TaskRecord;
     try {
       successorRecord = await this.stateManager.createTask({
