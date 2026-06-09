@@ -111,7 +111,7 @@ export interface PromptBuildResult {
  * Per DPB-02 (LOCKED): Output is ONLY JSON — no markdown, no file ops, no tool calls.
  * Per DPB-04: LLM can only analyze the context provided in the prompt; it must NOT
  *   read files, call tools, or write to databases. All evidence must be drawn from
- *   the context payload (sourceRefs, conversationWindow, eventSummaries).
+ *   the context payload (sourceRefs, conversationWindow).
  *
  * The 5-phase protocol is embedded directly in the prompt so the LLM follows it
  * regardless of whether OpenClaw loads SKILL.md as the agent system prompt.
@@ -128,8 +128,8 @@ export function buildDiagnosticProtocolInstruction(
   return `You are a root cause analysis expert. Follow this protocol:
 
 PHASE 1 — Evidence Review:
-Review the provided sourceRefs, diagnosisTarget.evidence entries, conversationWindow
-entries, and eventSummaries from the context payload. Do NOT read any files or call any tools.
+Review the provided sourceRefs, diagnosisTarget.evidence entries, and conversationWindow
+entries from the context payload. Do NOT read any files or call any tools.
 Record all evidence by referencing the sourceRef identifiers and conversation
 entries already present in the context. Each evidence item must cite its source.
 Pay special attention to diagnosisTarget.evidence — these are the primary behavioral

@@ -209,7 +209,6 @@ export const ContextPayloadSchema = Type.Object({
   targetAgent: Type.Optional(Type.String({ minLength: 1 })),
   diagnosisTarget: Type.Optional(DiagnosisTargetSchema),
   conversationWindow: Type.Array(HistoryQueryEntrySchema),
-  eventSummaries: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()))),
   artifactRefs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
   summary: Type.String({ minLength: 1 }),
@@ -227,7 +226,6 @@ export const DiagnosticianContextPayloadSchema = Type.Object({
   sourceRefs: Type.Array(Type.String({ minLength: 1 })),
   diagnosisTarget: DiagnosisTargetSchema,
   conversationWindow: Type.Array(HistoryQueryEntrySchema),
-  eventSummaries: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()))),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
   fullTrace: Type.Optional(Type.Union([FullTracePayloadSchema, FullTracePayloadV2SchemaImport, Type.Null()])),
 });
