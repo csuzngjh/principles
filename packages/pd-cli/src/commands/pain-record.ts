@@ -112,10 +112,13 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     if (!config.apiKeyEnv) missing.push('apiKeyEnv');
     if (config.provider) {
       try {
-        // pi-ai is an optional peer; TS2307 suppressed — try/catch handles absence
-        // @ts-expect-error: optional dependency, may not be installed
+        // pi-ai is an optional peer; the package may or may not resolve depending on
+        // the package manager (pnpm local vs npm in CI). @ts-ignore (not @ts-expect-error)
+        // is intentional: it suppresses TS2307 when absent and is silently ignored when present.
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
         const { getProviders } = await import('@mariozechner/pi-ai');
-        const knownProviders = getProviders();
+        const knownProviders = getProviders() as readonly string[];
         if (!knownProviders.includes(config.provider) && !config.baseUrl) {
           missing.push('baseUrl');
         }
