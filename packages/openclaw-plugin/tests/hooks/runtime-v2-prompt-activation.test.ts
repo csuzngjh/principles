@@ -387,13 +387,13 @@ describe('Runtime V2 prompt activation injection', () => {
 
     await insertPromptActivation({ artifactId, principleId });
 
-    const warnSpy = vi.fn();
+    const infoSpy = vi.fn();
     const ctx = {
       workspaceDir: tempWorkspaceDir,
       trigger: 'user',
       sessionId: 'test-session-v2',
       api: {
-        logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
+        logger: { info: infoSpy, warn: vi.fn(), error: vi.fn() },
         runtime: {},
         config: {},
       },
@@ -404,8 +404,8 @@ describe('Runtime V2 prompt activation injection', () => {
 
     expect(result).toBeDefined();
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
-    const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-    const hasActivationWarning = warnCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
+    const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const hasActivationWarning = infoCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
     expect(hasActivationWarning).toBe(true);
   });
 

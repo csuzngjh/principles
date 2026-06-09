@@ -123,13 +123,19 @@ describe('ActivationDispatcher', () => {
     }
   });
 
-  it('missing artifact → invalid_artifact', async () => {
+  it('missing artifact → invalid_artifact with structured nextAction (PRI-355)', async () => {
     const { dispatcher } = makeDispatcher();
     const result = await dispatcher.dispatch(makeDispatchInput());
     expect(result.decision).toBe('invalid_artifact');
     if (result.decision === 'invalid_artifact') {
       expect(result.reason).toBe('artifact_not_found');
+      expect(result.nextAction).toBe('check_pi_artifacts_table_or_remove_stale_activation');
     }
+  });
+
+  it('missing artifact does not throw — graceful skip (PRI-355)', async () => {
+    const { dispatcher } = makeDispatcher();
+    await expect(dispatcher.dispatch(makeDispatchInput({ artifactId: 'art-mvp-acceptance-001' }))).resolves.not.toThrow();
   });
 
   it('malformed artifact → invalid_artifact', async () => {
