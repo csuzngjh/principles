@@ -12,7 +12,6 @@ import {
   resolveRuntimeConfig,
   isRuntimeConfigError,
 } from '@principles/core/runtime-v2';
-import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
 import { buildTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
@@ -113,9 +112,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     if (!config.apiKeyEnv) missing.push('apiKeyEnv');
     if (config.provider) {
       try {
+        // pi-ai is an optional peer; the package may or may not resolve depending on
+        // the package manager (pnpm local vs npm in CI). @ts-ignore (not @ts-expect-error)
+        // is intentional: it suppresses TS2307 when absent and is silently ignored when present.
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
         const { getProviders } = await import('@mariozechner/pi-ai');
-        const knownProviders = getProviders();
-        if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
+        const knownProviders = getProviders() as readonly string[];
+        if (!knownProviders.includes(config.provider) && !config.baseUrl) {
           missing.push('baseUrl');
         }
       } catch {
