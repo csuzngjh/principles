@@ -113,8 +113,8 @@ importers:
   packages/openclaw-plugin:
     dependencies:
       '@principles/core':
-        specifier: workspace:*
-        version: link:../principles-core
+        specifier: ^1.73.0
+        version: 1.102.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.49
@@ -180,8 +180,8 @@ importers:
   packages/pd-cli:
     dependencies:
       '@principles/core':
-        specifier: workspace:*
-        version: link:../principles-core
+        specifier: ^1.73.0
+        version: 1.102.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
       better-sqlite3:
         specifier: ^12.9.0
         version: 12.10.0
@@ -214,8 +214,8 @@ importers:
         specifier: ^5.2.8
         version: 5.2.8
       '@principles/core':
-        specifier: workspace:*
-        version: link:../principles-core
+        specifier: '*'
+        version: 1.102.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.15
         version: 1.1.16(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -329,6 +329,9 @@ importers:
         specifier: ^4.1.1
         version: 4.2.0
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -1814,6 +1817,9 @@ packages:
   '@pnpm/npm-conf@3.0.2':
     resolution: {integrity: sha512-h104Kh26rR8tm+a3Qkc5S4VLYint3FE48as7+/5oCEcKR2idC/pF1G6AhIXKI+eHPJa/3J9i5z0Al47IeGHPkA==}
     engines: {node: '>=12'}
+
+  '@principles/core@1.102.0':
+    resolution: {integrity: sha512-Yt6s7We3EknlyS2bJ4Mqh9f4EQjFPWhfDG+j4oRsTpCr3+elxkcjHMvKh/jgxaoCBAZieJhvQoE0OgCwOpcpzg==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -7835,6 +7841,20 @@ snapshots:
       '@pnpm/config.env-replace': 1.1.0
       '@pnpm/network.ca-file': 1.0.2
       config-chain: 1.1.13
+
+  '@principles/core@1.102.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)':
+    dependencies:
+      '@mariozechner/pi-ai': 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
+      '@sinclair/typebox': 0.34.49
+      better-sqlite3: 12.10.0
+      js-yaml: 4.2.0
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
   '@protobufjs/aspromise@1.1.2': {}
 
