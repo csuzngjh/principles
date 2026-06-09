@@ -1470,4 +1470,110 @@ describe('SqliteContextAssembler', () => {
       expect(notesInclude(payload.ambiguityNotes, 'Trajectory fallback')).toBe(true);
     } finally { cleanupFixture(f); }
   });
+
+  // ── PRI-351: fullTrace cascade regression + CLI path preservation ──
+
+  it('PRI-351 回归: openclaw_context_bound + 有效 trajectory → fullTrace 非 null (PRI-349 级联已恢复)', async () => {
+    const sessionId = 'sess-pri351-cascade';
+    const sourceTaskId = 'task_source_pri351';
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-pri351-cascade',
+      reasonSummary: 'PRI-351 cascade regression test',
+      source: 'pain',
+      severity: 'severe',
+      sessionIdHint: sessionId,
+      provenance: 'openclaw_context_bound',
+      provenanceReason: 'Pain reported from an OpenClaw host session',
+      workspaceDir: '/real/workspace/path',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_pri351',
+      sourcePainId: 'pain-pri351-cascade',
+      sessionIdHint: sessionId,
+      reasonSummary: 'PRI-351 cascade regression test',
+      workspaceDir: '/real/workspace/path',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      // Source task with matching sourcePainId in its diagnosticJson
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-pri351-cascade' });
+      await createRunWithPayloads(f, sourceTaskId, {
+        inputPayload: JSON.stringify({
+          type: 'session_history',
+          sessionId,
+          userTurns: [{ turnIndex: 1, text: 'user asked about PRI-351' }],
+          toolCalls: [{ toolName: 'Read', status: 'succeeded', params: { file: 'src/test.ts' } }],
+        }),
+        outputPayload: JSON.stringify({
+          type: 'assistant_turns',
+          sessionId,
+          turns: [{ provider: 'openai', model: 'gpt-4', text: 'response for PRI-351' }],
+        }),
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      // Core assertion: fullTrace is NOT null (PRI-349 workspaceDir fix enables cascade)
+      expect(payload.fullTrace).not.toBeNull();
+      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('available');
+      // Validate fullTrace structure
+      const ft = payload.fullTrace;
+      if (ft && 'sourcePainId' in ft) {
+        expect(ft.sourcePainId).toBe('pain-pri351-cascade');
+        expect(ft.sourceTaskId).toBe(sourceTaskId);
+        expect(ft.timeline.length).toBeGreaterThan(0);
+        // Tool call evidence is present
+        const toolCallEntries = ft.timeline.filter((e) => e.kind === 'tool_call');
+        expect(toolCallEntries.length).toBeGreaterThan(0);
+        expect(toolCallEntries.some((e) => e.summary.includes('Read'))).toBe(true);
+      }
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('PRI-351 回归: owner_reported_no_host_trace → fullTrace=null + traceUnavailableDetail 非空 (PRI-255 不回归)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-pri351-cli',
+      reasonSummary: 'CLI pain - PRI-255 design decision',
+      source: 'manual',
+      severity: 'severe',
+      sessionIdHint: 'cli-session',
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'No authenticated host session provenance available for CLI-submitted pain',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_pri351_cli',
+      sourcePainId: 'pain-pri351-cli',
+      reasonSummary: 'CLI pain - PRI-255 design decision',
+      sessionIdHint: 'cli-session',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    const locator = f.sourceTraceLocator;
+    expect(locator).toBeDefined();
+    if (!locator) return;
+    const locateSpy = vi.spyOn(locator, 'locate');
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      // PRI-255 design decision: fullTrace must be null for CLI path
+      expect(payload.fullTrace).toBeNull();
+      // traceAvailability must be unavailable_with_reason
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
+      // traceUnavailableDetail must be non-empty (ERR-009: fail loud)
+      expect(payload.diagnosisTarget.traceUnavailableDetail).toBeDefined();
+      expect(payload.diagnosisTarget.traceUnavailableDetail?.reason).toBeTruthy();
+      expect(payload.diagnosisTarget.traceUnavailableDetail?.reason).toContain('CLI-submitted pain');
+      expect(payload.diagnosisTarget.traceUnavailableDetail?.nextAction).toBeTruthy();
+      // SourceTraceLocator must NOT have been called
+      expect(locateSpy).not.toHaveBeenCalled();
+      // Ambiguity note about owner_reported_no_host_trace must be present
+      expect(notesInclude(payload.ambiguityNotes, 'owner_reported_no_host_trace')).toBe(true);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); locateSpy.mockRestore(); }
+  });
 });
