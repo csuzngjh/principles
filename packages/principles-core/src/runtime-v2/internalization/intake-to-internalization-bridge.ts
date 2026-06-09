@@ -46,6 +46,16 @@ export function computeBridgeDecision(
     return { decision: 'invalid_candidate', reason: 'candidateId must be a non-empty string' };
   }
 
+  // PRI-355: Prevent recursive concatenation — reject candidateIds that look like taskIds
+  if (/^(dreamer|pi-art|scribe|philosopher)[-_]/.test(input.candidateId)) {
+    return { decision: 'invalid_candidate', reason: 'candidateId_looks_like_taskId_not_candidateId' };
+  }
+
+  // PRI-355: Reject excessively long candidateIds (normal UUID is 36 chars)
+  if (input.candidateId.length > 200) {
+    return { decision: 'invalid_candidate', reason: 'candidateId_too_long' };
+  }
+
   if (!input.ready) {
     return { decision: 'not_internalizable', reason: `Route "${input.route}" is not ready — missing required fields` };
   }
