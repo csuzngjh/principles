@@ -40,7 +40,7 @@ export type ActivationDecision =
   | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
   | { decision: 'refused'; reason: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel }
-  | { decision: 'invalid_artifact'; reason: string };
+  | { decision: 'invalid_artifact'; reason: string; nextAction?: string };
 
 export interface PIArtifactSnapshot {
   artifactId: string;
