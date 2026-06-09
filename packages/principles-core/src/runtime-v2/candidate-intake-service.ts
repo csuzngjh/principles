@@ -95,7 +95,7 @@ export class CandidateIntakeService {
 
     // 4b. Parse recommendation from candidate.sourceRecommendationJson FIRST (canonical source)
     // Fall back to artifact.contentJson for backwards-compatibility with legacy/manual inserts.
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let recommendation!: Recommendation;
     const sourceRecJson = candidate.sourceRecommendationJson;
     try {
