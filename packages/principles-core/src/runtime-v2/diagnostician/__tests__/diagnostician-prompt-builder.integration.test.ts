@@ -40,7 +40,6 @@ const REALISTIC_PAYLOAD: DiagnosticianContextPayload = {
     { ts: '2026-04-24T10:00:01Z', role: 'assistant', text: 'I will use the planner agent', toolName: undefined, toolResultSummary: undefined, eventType: undefined },
     { ts: '2026-04-24T10:00:02Z', role: 'tool', text: undefined, toolName: 'planner_agent', toolResultSummary: 'Agent not found in registry', eventType: undefined },
   ],
-  eventSummaries: [{ eventType: 'tool-call-failure', toolName: 'planner_agent' }],
   ambiguityNotes: ['Multiple failure modes detected — gate rejection vs agent not found'],
 };
 
