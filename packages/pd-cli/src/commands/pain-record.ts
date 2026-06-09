@@ -4,7 +4,7 @@
  * Uses PainToPrincipleService as the single write-side orchestration API.
  *
  * Usage:
- *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--json]
+ *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]
  */
 import {
   PainToPrincipleService,
@@ -15,6 +15,7 @@ import {
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
+import { buildTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
 
 interface RecordOptions {
   reason?: string;
@@ -22,12 +23,13 @@ interface RecordOptions {
   source?: string;
   workspace?: string;
   json?: boolean;
+  session?: string;
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   if (!opts.reason) {
     console.error('Error: --reason <text> is required');
-    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--json]');
+    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]');
     process.exit(1);
   }
 
@@ -39,6 +41,10 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateDir = `${workspaceDir}/.state`;
   const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  // PRI-341: Build evidence from trajectory DB if session provided
+  const effectiveSessionId = opts.session ?? 'cli';
+  const evidence = buildTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
 
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
   // PRI-306: Load .pd/config.yaml for config-driven runtime binding
@@ -68,9 +74,10 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     source: opts.source ?? 'manual',
     reason: opts.reason,
     score: opts.score ?? 80,
-    sessionId: 'cli',
+    sessionId: effectiveSessionId,
     agentId: 'pd-cli',
     provenance: 'owner_reported_no_host_trace',
+    evidence,
     recordObservability: true,
   });
 
