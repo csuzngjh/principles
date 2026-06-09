@@ -464,4 +464,57 @@ describe('DiagnosticianPromptBuilder', () => {
       expect(Value.Check(DiagnosticianOutputV1Schema, parsed)).toBe(true);
     });
   });
+
+  // ── PRI-342: Empty evidence degradation guard ────────────────────────────
+
+  describe('empty evidence degradation guard (PRI-342)', () => {
+    const adapter = new DefaultSchemaPromptAdapter();
+
+    // 用例 1: prompt must contain explicit empty-evidence → confidence<0.3 + defer instruction
+    it('contains empty evidence degradation instruction with confidence<0.3 and defer', () => {
+      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+
+      // Must reference diagnosisTarget.evidence emptiness
+      expect(instruction).toContain('diagnosisTarget.evidence');
+      expect(instruction).toMatch(/empty|length.*0|is empty/i);
+
+      // Must require confidence < 0.3
+      expect(instruction).toMatch(/confidence.*0\.3|0\.3.*confidence/i);
+
+      // Must require kind = "defer"
+      expect(instruction).toContain('"defer"');
+    });
+
+    // 用例 1b: must explicitly prohibit fabricating evidence
+    it('prohibits fabricating evidence when input evidence is empty', () => {
+      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+
+      expect(instruction).toMatch(/MUST NOT.*fabricat|fabricat.*MUST NOT/i);
+    });
+
+    // 用例 2: truncation safety — guard text survives truncation
+    it('key guard constraints survive prompt truncation', () => {
+      const builder = new DiagnosticianPromptBuilder(adapter, DiagnosticianOutputV1Schema);
+      const hugePayload: DiagnosticianContextPayload = {
+        ...MINIMAL_PAYLOAD,
+        conversationWindow: Array.from({ length: 100 }, (_, i) => ({
+          ts: `2026-04-24T10:${String(i).padStart(2, '0')}:00Z`,
+          role: (i % 2 === 0 ? 'user' : 'assistant'),
+          text: 'A'.repeat(2000), // max entry text
+          toolName: undefined,
+          toolResultSummary: undefined,
+          eventType: undefined,
+        })),
+      };
+      const limits = { maxConversationEntries: 100, maxEntryTextChars: 2000, maxMessageChars: 500 };
+      const result = builder.buildPrompt(hugePayload, limits);
+
+      // Truncation should have occurred
+      expect(result.promptInput.truncationWarnings).toBeDefined();
+      expect(result.promptInput.truncationWarnings?.length).toBeTruthy();
+      // Even after truncation, the instruction still contains key guard words
+      expect(result.promptInput.diagnosticInstruction).toContain('"defer"');
+      expect(result.promptInput.diagnosticInstruction).toMatch(/confidence|evidence/i);
+    });
+  });
 });
