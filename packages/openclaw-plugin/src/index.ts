@@ -16,9 +16,13 @@ import type {
   PluginHookSubagentSpawningEvent,
   PluginHookSubagentSpawningResult,
   PluginHookSubagentContext,
+  PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
+import { checkConversationAccessConfig } from './core/config-health.js';
+export { checkConversationAccessConfig } from './core/config-health.js';
+export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
@@ -28,6 +32,7 @@ import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
+import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
@@ -70,57 +75,8 @@ const startedWorkspaces = new Set<string>();
 const pendingShadowObservations = new Map<string, string>();
 
 // ── Conversation Access Health Check (PRI-343) ────────────────────────────
-// Pure function for checking whether OpenClaw plugin config has
-// allowConversationAccess set to true. When missing, llm_output and
-// trajectory hooks are silently blocked by OpenClaw, causing evidence
-// to always be empty (PRI-338 root cause).
-
-/** Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
-const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
-
-export interface ConversationAccessCheckResult {
-  authorized: boolean;
-  reason?: string;
-  nextAction?: string;
-}
-
-const CONVERSATION_ACCESS_FIX_COMMAND =
-  'openclaw config set plugins.entries.principles-disciple.hooks.allowConversationAccess true --strict-json';
-
-/**
- * PRI-343: Pure function — checks if pluginConfig has hooks.allowConversationAccess === true.
- * Returns a structured result with reason and nextAction when not authorized (ERR-002).
- */
-export function checkConversationAccessConfig(pluginConfig: unknown): ConversationAccessCheckResult {
-  if (pluginConfig === null || pluginConfig === undefined || typeof pluginConfig !== 'object' || Array.isArray(pluginConfig)) {
-    return {
-      authorized: false,
-      reason: 'pluginConfig is missing or invalid — conversation hooks cannot be registered',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
-    };
-  }
-
-  const config = pluginConfig as Record<string, unknown>;
-
-  if (typeof config.hooks !== 'object' || config.hooks === null || Array.isArray(config.hooks)) {
-    return {
-      authorized: false,
-      reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
-    };
-  }
-
-  const hooks = config.hooks as Record<string, unknown>;
-  if (hooks[CONVERSATION_ACCESS_CONFIG_KEY] !== true) {
-    return {
-      authorized: false,
-      reason: 'allowConversationAccess is not set to true',
-      nextAction: CONVERSATION_ACCESS_FIX_COMMAND,
-    };
-  }
-
-  return { authorized: true };
-}
+// Re-exported from core/config-health.ts for backward compatibility.
+// Implementation moved to avoid circular imports with trajectory-collector.ts.
 
 // ── Feature Flag Loader (plugin I/O boundary) ─────────────────────────────
 // Reads workspace feature-flags.yaml and checks a specific flag.
@@ -566,6 +522,31 @@ const plugin = {
       }
       return handleAfterCompaction(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
+
+    // ── Hook: Before Message Write (PRI-346) ──
+    // Fallback trajectory collection when llm_output is blocked by
+    // missing allowConversationAccess. Not in CONVERSATION_HOOK_NAMES
+    // so OpenClaw always delivers it.
+    api.on(
+      'before_message_write',
+      guardHook('hook:before_message_write', api.logger, (event: PluginHookBeforeMessageWriteEvent, ctx: PluginHookAgentContext): void => {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_message_write');
+        if (!wsResult.ok) {
+          api.logger.warn(`[PD:before_message_write] workspaceDir resolution failed: ${wsResult.reason}`);
+          return;
+        }
+        try {
+          TrajectoryCollector.handleBeforeMessageWrite(event, {
+            ...ctx,
+            workspaceDir: wsResult.workspaceDir,
+            pluginConfig: api.pluginConfig,
+          });
+        } catch (err) {
+          // Non-critical: don't surface to user
+          api.logger.warn(`[PD:before_message_write] error: ${String(err)}`);
+        }
+      })
+    );
 
     // ── Service Registration (surface-guarded) ──
     // PRI-294: EvolutionWorker service registration removed — it starts via
