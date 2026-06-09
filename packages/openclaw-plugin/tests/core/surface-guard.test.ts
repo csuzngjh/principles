@@ -93,8 +93,8 @@ describe('surface-guard', () => {
     });
 
     it('allows override for quiet surface', () => {
-      const result = isSurfaceEnabled('hook:after_tool_call.trajectory', {
-        'hook:after_tool_call.trajectory': true,
+      const result = isSurfaceEnabled('hook:subagent_spawning', {
+        'hook:subagent_spawning': true,
       });
       expect(result.enabled).toBe(true);
     });
@@ -308,15 +308,13 @@ describe('surface-guard', () => {
       }
     });
 
-    it('trajectory hook disabledReason is opt-in and ADR-anchored (PRI-298)', () => {
-      const trajectory = PLUGIN_SURFACE_REGISTRY.find(
-        s => s.id === 'hook:after_tool_call.trajectory',
+    it('subagent hook disabledReason is opt-in and ADR-anchored (PRI-298)', () => {
+      const subagent = PLUGIN_SURFACE_REGISTRY.find(
+        s => s.id === 'hook:subagent_spawning',
       );
-      expect(trajectory?.disabledReason).toBeDefined();
-      const reason = trajectory!.disabledReason!.toLowerCase();
+      expect(subagent?.disabledReason).toBeDefined();
+      const reason = subagent!.disabledReason!.toLowerCase();
       // Quiet hook copy is opt-in / opt-out anchored on a real ADR section
-      // (no MVP-phase residue, no promise of a feature-flag override that
-      // the production guard path does not actually consume — chatgpt P2).
       expect(reason).toContain('opt-in');
       expect(reason).toContain('default off');
       expect(reason).toMatch(/adr-?0014/);
