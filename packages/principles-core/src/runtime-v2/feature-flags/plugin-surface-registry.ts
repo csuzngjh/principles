@@ -99,6 +99,14 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     disabledReason: 'Disabled by default: lifecycle hooks are opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
+    id: 'hook:before_message_write',
+    kind: 'hook',
+    category: 'core',
+    enabledByDefault: true,
+    since: '2026-06-09',
+    description: 'Fallback trajectory collection (SQLite) when llm_output is blocked by missing allowConversationAccess (PRI-346)',
+  },
+  {
     id: 'service:evolution-worker',
     kind: 'service',
     category: 'quiet',
