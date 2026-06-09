@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
-import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin } from '../src/installer.js';
+import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess } from '../src/installer.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
@@ -178,5 +178,81 @@ describe('checkBuiltPlugin validation', () => {
     }));
 
     await expect(checkBuiltPlugin('/test/plugin')).rejects.toThrow(/does not include "hook"/);
+  });
+});
+
+describe('ensureConversationAccess — PRI-343', () => {
+  it('sets hooks.allowConversationAccess to true when missing', () => {
+    const config = {
+      plugins: {
+        allow: ['principles-disciple'],
+        entries: {
+          'principles-disciple': {
+            enabled: true,
+            model: 'gpt-4',
+            provider: 'openai',
+            hooks: {},
+          },
+        },
+      },
+    };
+
+    const result = ensureConversationAccess(config);
+    const pdEntry = (result.plugins as Record<string, unknown>).entries as Record<string, unknown>;
+    const entry = pdEntry['principles-disciple'] as Record<string, unknown>;
+    const hooks = entry.hooks as Record<string, unknown>;
+
+    expect(hooks.allowConversationAccess).toBe(true);
+    // Other fields preserved
+    expect(entry.enabled).toBe(true);
+    expect(entry.model).toBe('gpt-4');
+    expect(entry.provider).toBe('openai');
+  });
+
+  it('is idempotent when allowConversationAccess is already true', () => {
+    const config = {
+      plugins: {
+        allow: ['principles-disciple'],
+        entries: {
+          'principles-disciple': {
+            enabled: true,
+            hooks: { allowConversationAccess: true },
+          },
+        },
+      },
+    };
+
+    const result = ensureConversationAccess(config);
+    const pdEntry = (result.plugins as Record<string, unknown>).entries as Record<string, unknown>;
+    const entry = pdEntry['principles-disciple'] as Record<string, unknown>;
+    const hooks = entry.hooks as Record<string, unknown>;
+
+    expect(hooks.allowConversationAccess).toBe(true);
+    expect(entry.enabled).toBe(true);
+  });
+
+  it('creates hooks object when hooks field is completely absent', () => {
+    const config = {
+      plugins: {
+        allow: ['principles-disciple'],
+        entries: {
+          'principles-disciple': {
+            enabled: true,
+            model: 'gpt-4',
+            // hooks field does not exist at all
+          },
+        },
+      },
+    };
+
+    const result = ensureConversationAccess(config);
+    const pdEntry = (result.plugins as Record<string, unknown>).entries as Record<string, unknown>;
+    const entry = pdEntry['principles-disciple'] as Record<string, unknown>;
+    const hooks = entry.hooks as Record<string, unknown>;
+
+    expect(hooks.allowConversationAccess).toBe(true);
+    // Other fields preserved
+    expect(entry.enabled).toBe(true);
+    expect(entry.model).toBe('gpt-4');
   });
 });

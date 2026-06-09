@@ -1081,6 +1081,12 @@ export interface EvidenceChainRecordData {
   failureReason?: string;
   degradedReason?: string;
   nextAction?: string;
+  /** PRI-340: human-readable evidence fields */
+  candidateTitle?: string;
+  candidateSummary?: string;
+  rootCauseSummary?: string;
+  confidence?: number;
+  recommendationKind?: string;
 }
 
 function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
@@ -1137,6 +1143,28 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
   if (Object.hasOwn(v, 'nextAction')) {
     if (!isString(v.nextAction)) return null;
     result.nextAction = v.nextAction;
+  }
+
+  // PRI-340: human-readable evidence fields (all optional)
+  if (Object.hasOwn(v, 'candidateTitle')) {
+    if (!isString(v.candidateTitle)) return null;
+    result.candidateTitle = v.candidateTitle;
+  }
+  if (Object.hasOwn(v, 'candidateSummary')) {
+    if (!isString(v.candidateSummary)) return null;
+    result.candidateSummary = v.candidateSummary;
+  }
+  if (Object.hasOwn(v, 'rootCauseSummary')) {
+    if (!isString(v.rootCauseSummary)) return null;
+    result.rootCauseSummary = v.rootCauseSummary;
+  }
+  if (Object.hasOwn(v, 'confidence')) {
+    if (typeof v.confidence !== 'number' || !Number.isFinite(v.confidence)) return null;
+    result.confidence = v.confidence;
+  }
+  if (Object.hasOwn(v, 'recommendationKind')) {
+    if (!isString(v.recommendationKind)) return null;
+    result.recommendationKind = v.recommendationKind;
   }
 
   return result;

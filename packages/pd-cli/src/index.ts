@@ -73,6 +73,7 @@ painCmd
   .option('-s, --score <number>', 'Pain score 0-100', parseInt)
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--session <id>', 'OpenClaw session ID for trajectory evidence extraction')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRecord(opts);
