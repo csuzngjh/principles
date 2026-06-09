@@ -57,6 +57,8 @@ export interface PainSignalBridgeOptions {
   ledgerAdapter: LedgerAdapter;
   owner?: string;
   autoIntakeEnabled?: boolean;
+  /** Workspace directory — written into diagnosticJson so the diagnostician can locate files. */
+  workspaceDir?: string;
   eventEmitter?: {
     emitTelemetry: (event: { eventType: string; traceId: string; timestamp: string; payload: Record<string, unknown> }) => void;
   };
@@ -94,7 +96,7 @@ function provenanceReason(provenance: PainProvenance): string {
   }
 }
 
-function buildDiagnosticJson(data: PainDetectedData): string {
+function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): string {
   const provenance = data.provenance ?? inferProvenance(data);
   return JSON.stringify({
     sourcePainId: data.painId,
@@ -106,6 +108,7 @@ function buildDiagnosticJson(data: PainDetectedData): string {
     provenance,
     provenanceReason: provenanceReason(provenance),
     evidence: data.evidence ?? [],
+    workspaceDir: workspaceDir ?? null,
   });
 }
 
@@ -116,6 +119,7 @@ export class PainSignalBridge {
   private readonly ledgerAdapter: LedgerAdapter;
   private readonly owner: string;
   private readonly autoIntakeEnabled: boolean;
+  private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
 
   constructor(opts: PainSignalBridgeOptions) {
@@ -125,6 +129,7 @@ export class PainSignalBridge {
     this.ledgerAdapter = opts.ledgerAdapter;
     this.owner = opts.owner ?? 'pain-signal-bridge';
     this.autoIntakeEnabled = opts.autoIntakeEnabled ?? true;
+    this.workspaceDir = opts.workspaceDir;
     this.eventEmitter = opts.eventEmitter;
   }
 
@@ -190,7 +195,7 @@ export class PainSignalBridge {
         });
       }
     } else {
-      const diagnosticJson = buildDiagnosticJson(data);
+      const diagnosticJson = buildDiagnosticJson(data, this.workspaceDir);
       await this.stateManager.createTask({
         taskId,
         taskKind: 'diagnostician',

@@ -453,6 +453,7 @@ export async function createPainSignalBridge(
     intakeService,
     ledgerAdapter: opts.ledgerAdapter,
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
+    workspaceDir: opts.workspaceDir,
   });
 
   bridgeCache.set(cacheKey, bridge);
