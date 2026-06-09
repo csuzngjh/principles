@@ -186,18 +186,16 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       }
     });
 
-    it('after_tool_call has two registrations: core + trajectory', () => {
+    it('after_tool_call has one registration: core only', () => {
       const afterToolCallRegs = registrations.filter(r => r.event === 'after_tool_call');
-      expect(afterToolCallRegs.length).toBe(2);
+      expect(afterToolCallRegs.length).toBe(1);
       expect(afterToolCallRegs[0].surfaceId).toBe('hook:after_tool_call');
-      expect(afterToolCallRegs[1].surfaceId).toBe('hook:after_tool_call.trajectory');
     });
 
-    it('llm_output has two registrations: core + trajectory', () => {
+    it('llm_output has one registration: core only', () => {
       const llmOutputRegs = registrations.filter(r => r.event === 'llm_output');
-      expect(llmOutputRegs.length).toBe(2);
+      expect(llmOutputRegs.length).toBe(1);
       expect(llmOutputRegs[0].surfaceId).toBe('hook:llm_output');
-      expect(llmOutputRegs[1].surfaceId).toBe('hook:llm_output.trajectory');
     });
 
     it('total api.on registrations with guardHook match registry hook count', () => {
@@ -375,14 +373,14 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
 
     it('isSurfaceEnabled returns false for quiet surfaces by default', async () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
-      const result = isSurfaceEnabled('hook:after_tool_call.trajectory');
+      const result = isSurfaceEnabled('hook:subagent_spawning');
       expect(result.enabled).toBe(false);
       expect(result.reason).toBeDefined();
     });
 
     it('isSurfaceEnabled allows quiet surfaces with explicit override', async () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
-      const result = isSurfaceEnabled('hook:after_tool_call.trajectory', { 'hook:after_tool_call.trajectory': true });
+      const result = isSurfaceEnabled('hook:subagent_spawning', { 'hook:subagent_spawning': true });
       expect(result.enabled).toBe(true);
     });
 

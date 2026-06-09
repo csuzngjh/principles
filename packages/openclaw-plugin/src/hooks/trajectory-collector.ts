@@ -1,16 +1,14 @@
 /**
- * Trajectory Collector - 行为进化引擎 Phase 0 数据收集
- * 
- * 收集工具调用和 LLM 输出到 memory/trajectories/ 目录
- * 用于分析工具使用模式、识别原则应用案例、评估行为质量
+ * Trajectory Collector - message write trajectory recording
+ *
+ * Records message data to memory/trajectories/ JSONL files.
+ * PRI-347 removed tool_call and llm_output JSONL writers (no consumers).
+ * PRI-346 will repurpose handleBeforeMessageWrite for SQLite collection.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
-  PluginHookAfterToolCallEvent,
-  PluginHookToolContext,
-  PluginHookLlmOutputEvent,
   PluginHookAgentContext,
   PluginHookBeforeMessageWriteEvent
 } from '../openclaw-sdk.js';
@@ -21,19 +19,16 @@ const TRAJECTORY_DIR = 'memory/trajectories/';
 // 敏感字段匹配正则
 const SENSITIVE_KEY_PATTERN = /password|token|authorization|secret|api[_-]?key|credential|cookie|session/i;
 
-// 最大结果长度（不同于 MAX_STRING_LENGTH）
-const MAX_RESULT_LENGTH = 500;
-
 /**
  * 递归脱敏处理：遍历对象/数组，移除敏感字段值
  */
 function scrubSensitive(obj: unknown, depth = 0): unknown {
   // 防止无限递归
   if (depth > 10) return '[MAX_DEPTH]';
-  
+
   // 处理 null/undefined
   if (obj == null) return obj;
-  
+
   // 处理基本类型
   if (typeof obj !== 'object') {
     if (typeof obj === 'string' && obj.length > MAX_STRING_LENGTH) {
@@ -41,12 +36,12 @@ function scrubSensitive(obj: unknown, depth = 0): unknown {
     }
     return obj;
   }
-  
+
   // 处理数组
   if (Array.isArray(obj)) {
     return obj.map(item => scrubSensitive(item, depth + 1));
   }
-  
+
   // 处理对象
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
@@ -65,20 +60,20 @@ function scrubSensitive(obj: unknown, depth = 0): unknown {
 class AsyncWriteQueue {
   private readonly queue: (() => Promise<void>)[] = [];
   private processing = false;
-  
+
   async enqueue(task: () => Promise<void>): Promise<void> {
     this.queue.push(task);
     if (!this.processing) {
       this.processNext();
     }
   }
-  
+
   private async processNext(): Promise<void> {
     if (this.queue.length === 0) {
       this.processing = false;
       return;
     }
-    
+
     this.processing = true;
     const task = this.queue.shift();
 
@@ -92,7 +87,7 @@ class AsyncWriteQueue {
     } catch {
       // Silently fail - trajectory collection should not block main functionality
     }
-    
+
     // 处理下一个任务
     this.processNext();
   }
@@ -109,11 +104,11 @@ const dirCache = new Map<string, boolean>();
  */
 async function ensureTrajectoryDirAsync(workspaceDir: string): Promise<string> {
   const dir = path.join(workspaceDir, TRAJECTORY_DIR);
-  
+
   if (dirCache.get(dir)) {
     return dir;
   }
-  
+
   try {
     await fs.promises.mkdir(dir, { recursive: true });
     dirCache.set(dir, true);
@@ -121,7 +116,7 @@ async function ensureTrajectoryDirAsync(workspaceDir: string): Promise<string> {
     // 目录可能已存在，忽略错误
     dirCache.set(dir, true);
   }
-  
+
   return dir;
 }
 
@@ -140,7 +135,7 @@ function getTodayFilename(): string {
  */
 function writeTrajectoryRecord(workspaceDir: string, record: object): void {
   const line = JSON.stringify(record) + '\n';
-  
+
   writeQueue.enqueue(async () => {
     const dir = await ensureTrajectoryDirAsync(workspaceDir);
     const filepath = path.join(dir, getTodayFilename());
@@ -149,70 +144,11 @@ function writeTrajectoryRecord(workspaceDir: string, record: object): void {
 }
 
 /**
- * 工具调用完成后的处理
- * 记录：工具名、参数、结果、错误、执行时间
- */
-export function handleAfterToolCall(
-  event: PluginHookAfterToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir?: string }
-): void {
-  const {workspaceDir} = ctx;
-  if (!workspaceDir) return;
-
-  // 递归脱敏处理所有字段
-  const sanitizedParams = scrubSensitive(event.params);
-  const sanitizedResult = event.result == null 
-    ? null 
-    : String(scrubSensitive(event.result)).slice(0, MAX_RESULT_LENGTH);
-  const sanitizedError = event.error == null 
-    ? null 
-    : String(scrubSensitive(event.error));
-
-  writeTrajectoryRecord(workspaceDir, {
-    type: 'tool_call',
-    timestamp: new Date().toISOString(),
-    sessionId: ctx.sessionId || 'unknown',
-    toolName: event.toolName,
-    params: sanitizedParams,
-    result: sanitizedResult,
-    error: sanitizedError,
-    durationMs: event.durationMs,
-    success: !event.error,
-    runId: event.runId || null,
-    toolCallId: event.toolCallId || null
-  });
-}
-
-/**
- * LLM 输出处理
- * 记录：provider、model、输出长度、token 使用量
- */
-export function handleLlmOutput(
-  event: PluginHookLlmOutputEvent,
-  ctx: PluginHookAgentContext & { workspaceDir?: string }
-): void {
-  const {workspaceDir} = ctx;
-  if (!workspaceDir) return;
-
-  const totalTextLength = event.assistantTexts?.reduce((sum, text) => sum + (text?.length || 0), 0) || 0;
-
-  writeTrajectoryRecord(workspaceDir, {
-    type: 'llm_output',
-    timestamp: new Date().toISOString(),
-    sessionId: ctx.sessionId || 'unknown',
-    provider: event.provider,
-    model: event.model,
-    textLength: totalTextLength,
-    outputCount: event.assistantTexts?.length || 0,
-    usage: event.usage ? scrubSensitive(event.usage) : null
-  });
-}
-
-/**
  * 消息写入前的处理
  * 记录：用户/助手消息内容
+ *
+ * PRI-346 will repurpose this to write to SQLite instead of JSONL.
  */
-     
 export function handleBeforeMessageWrite(
   event: PluginHookBeforeMessageWriteEvent,
   ctx: PluginHookAgentContext & { workspaceDir?: string }
@@ -229,9 +165,6 @@ export function handleBeforeMessageWrite(
   // 提取文本内容
   let content = '';
   if (typeof msg.content === 'string') {
-     
-    // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
-     
     content = msg.content;
   } else if (Array.isArray(msg.content)) {
     content = msg.content
@@ -252,44 +185,4 @@ export function handleBeforeMessageWrite(
     contentPreview: typeof sanitizedPreview === 'string' ? sanitizedPreview : '[sanitized]',
     agentId: event.agentId || null
   });
-}
-
-/**
- * 脱敏处理：移除敏感参数（保留旧函数签名以兼容）
- * @deprecated 使用 scrubSensitive 替代
- */
-/**
- * 轨迹汇总统计（供 cron 任务调用）
- */
-export function computeTrajectoryStats(workspaceDir: string): object {
-  const dir = path.join(workspaceDir, TRAJECTORY_DIR);
-  const todayFile = path.join(dir, getTodayFilename());
-  
-  if (!fs.existsSync(todayFile)) {
-    return { date: getTodayFilename(), totalRecords: 0, toolCalls: 0, llmOutputs: 0, messages: 0 };
-  }
-
-  const content = fs.readFileSync(todayFile, 'utf8');
-  const lines = content.split('\n').filter(line => line.trim());
-  
-  const toolCalls = lines.filter(line => {
-    try { return JSON.parse(line).type === 'tool_call'; } catch { return false; }
-  }).length;
-  
-  const llmOutputs = lines.filter(line => {
-    try { return JSON.parse(line).type === 'llm_output'; } catch { return false; }
-  }).length;
-  
-  const messages = lines.filter(line => {
-    try { return JSON.parse(line).type === 'message'; } catch { return false; }
-  }).length;
-
-  return {
-    date: getTodayFilename(),
-    totalRecords: lines.length,
-    toolCalls,
-    llmOutputs,
-    messages,
-    generatedAt: new Date().toISOString()
-  };
 }

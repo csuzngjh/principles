@@ -29,7 +29,6 @@ import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
-import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
@@ -432,36 +431,6 @@ const plugin = {
             error: String(err)
           });
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
-        }
-      })
-    );
-
-    // ── Hook: Trajectory Collection (Behavior Evolution Phase 0) ──
-    // Note: after_tool_call and llm_output are safe to collect
-    api.on(
-      'after_tool_call',
-      guardHook('hook:after_tool_call.trajectory', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        try {
-          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.after_tool_call');
-          if (!workspaceDir) return;
-          TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
-        } catch (_err) {
-          // Non-critical: don't log, just skip
-        }
-      })
-    );
-
-    api.on(
-      'llm_output',
-      guardHook('hook:llm_output.trajectory', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        try {
-          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.llm_output');
-          if (!workspaceDir) return;
-          TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
-        } catch (_err) {
-          // Non-critical: don't log, just skip
         }
       })
     );

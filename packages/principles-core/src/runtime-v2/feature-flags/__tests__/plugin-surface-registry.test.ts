@@ -86,10 +86,10 @@ describe('plugin-surface-registry', () => {
 
     it('allows quiet surface override', () => {
       const enabled = getEnabledSurfaces(PLUGIN_SURFACE_REGISTRY, {
-        'hook:after_tool_call.trajectory': true,
+        'hook:subagent_spawning': true,
       });
-      const trajectoryHook = enabled.find(s => s.id === 'hook:after_tool_call.trajectory');
-      expect(trajectoryHook).toBeDefined();
+      const subagentHook = enabled.find(s => s.id === 'hook:subagent_spawning');
+      expect(subagentHook).toBeDefined();
     });
 
     it('ignores gone surface override', () => {
