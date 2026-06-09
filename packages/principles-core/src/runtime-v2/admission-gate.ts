@@ -1,4 +1,5 @@
 import type { DiagnosticianOutputV1, RecommendationKind } from './diagnostician-output.js';
+import { isOwnerExplicitManual } from './evidence-guards.js';
 
 export type PainProvenance =
   | 'openclaw_context_bound'
@@ -13,6 +14,7 @@ export interface AdmissionGateInput {
   recommendationKind: RecommendationKind;
   confidence: number;
   evidenceCount: number;
+  inputEvidenceCount: number;
   provenance: PainProvenance | undefined;
 }
 
@@ -29,6 +31,15 @@ export function evaluateAdmission(input: AdmissionGateInput): AdmissionGateResul
       decision: 'deferred',
       reason: 'recommendation_kind_defer_not_actionable',
       nextAction: 'review_defer_disposition_manually',
+      evidenceStatus: input.provenance ?? 'unknown',
+    };
+  }
+
+  if (input.inputEvidenceCount === 0 && !isOwnerExplicitManual(input.provenance)) {
+    return {
+      decision: 'needs_evidence',
+      reason: 'input_evidence_empty',
+      nextAction: 'collect_evidence_before_diagnosis',
       evidenceStatus: input.provenance ?? 'unknown',
     };
   }
@@ -68,13 +79,15 @@ export interface CandidateAdmissionResult {
 export function evaluateCandidateAdmissions(
   candidates: readonly { candidateId: string; recommendationKind: RecommendationKind }[],
   output: DiagnosticianOutputV1,
-  provenance: PainProvenance | undefined,
+  options: { provenance?: PainProvenance; inputEvidenceCount?: number } = {},
 ): CandidateAdmissionResult[] {
+  const { provenance, inputEvidenceCount = 0 } = options;
   return candidates.map((candidate) => {
     const gateInput: AdmissionGateInput = {
       recommendationKind: candidate.recommendationKind,
       confidence: output.confidence,
       evidenceCount: output.evidence.length,
+      inputEvidenceCount,
       provenance,
     };
     return {

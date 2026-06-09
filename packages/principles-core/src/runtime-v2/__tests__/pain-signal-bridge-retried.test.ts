@@ -99,6 +99,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
+      evidence: [{ sourceRef: 'test-src', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('retried');
@@ -133,6 +134,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
+      evidence: [{ sourceRef: 'test-src', note: 'test evidence' }],
     });
 
     expect(mocks._stateManager.getCandidatesByTaskId).not.toHaveBeenCalled();
@@ -173,6 +175,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
+      evidence: [{ sourceRef: 'test-src', note: 'test evidence' }],
     });
 
     expect(result.status).toBe('retried');
