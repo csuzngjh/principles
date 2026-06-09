@@ -144,6 +144,7 @@ describe('PRI-294: Surface registry coverage audit', () => {
     'hook:before_reset',
     'hook:before_compaction',
     'hook:after_compaction',
+    'hook:before_message_write',  // PRI-346: SQLite fallback trajectory collection
     // Services registered via guardService
     'service:correction-observer',
     'service:trajectory',

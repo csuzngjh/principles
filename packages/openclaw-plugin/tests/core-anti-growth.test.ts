@@ -125,6 +125,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'workspace-guidance-migrator.ts',
     'surface-guard.ts',
     'pd-config-loader.ts',
+    'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
   ] as const;
 
   // Category 6: Test files

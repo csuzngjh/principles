@@ -13,6 +13,10 @@ import type {
   PluginHookBeforeMessageWriteEvent
 } from '../openclaw-sdk.js';
 import { MAX_STRING_LENGTH } from '../config/defaults/runtime.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
+import { SystemLogger } from '../core/system-logger.js';
+import { sanitizeForEvidence } from './message-sanitize.js';
+import { checkConversationAccessConfig } from '../core/config-health.js';
 
 const TRAJECTORY_DIR = 'memory/trajectories/';
 
@@ -144,25 +148,32 @@ function writeTrajectoryRecord(workspaceDir: string, record: object): void {
 }
 
 /**
- * 消息写入前的处理
- * 记录：用户/助手消息内容
+ * PRI-346: Message write hook with SQLite fallback trajectory recording.
  *
- * PRI-346 will repurpose this to write to SQLite instead of JSONL.
+ * When allowConversationAccess is NOT set (unauthorized), llm_output is silently
+ * blocked by OpenClaw and trajectory.db has no data. This hook is NOT in
+ * CONVERSATION_HOOK_NAMES, so it always fires — making it the natural fallback.
+ *
+ * De-duplication: only writes to SQLite when llm_output is blocked (unauthorized).
+ * When llm_output is working (authorized), this hook degrades to JSONL-only.
+ *
+ * ERR-002: structured observability when fallback fires.
+ * ERR-001/005: content is sanitized before persisting.
  */
 export function handleBeforeMessageWrite(
   event: PluginHookBeforeMessageWriteEvent,
-  ctx: PluginHookAgentContext & { workspaceDir?: string }
+  ctx: PluginHookAgentContext & { workspaceDir?: string; pluginConfig?: unknown }
 ): void {
-  const {workspaceDir} = ctx;
+  const { workspaceDir } = ctx;
   if (!workspaceDir) return;
 
   const msg = event.message;
   if (!msg || !msg.role) return;
 
-  // 只记录 user 和 assistant 消息
+  // Only record user and assistant messages
   if (msg.role !== 'user' && msg.role !== 'assistant') return;
 
-  // 提取文本内容
+  // Extract text content (consistent with existing implementation)
   let content = '';
   if (typeof msg.content === 'string') {
     content = msg.content;
@@ -173,16 +184,70 @@ export function handleBeforeMessageWrite(
       .join('\n');
   }
 
-  // 脱敏处理内容预览
+  // Sanitize content preview for JSONL
   const sanitizedPreview = scrubSensitive(content.slice(0, 200));
 
+  // Existing JSONL write (always, for backward compatibility)
   writeTrajectoryRecord(workspaceDir, {
     type: 'message',
     timestamp: new Date().toISOString(),
-    sessionId: event.sessionKey || 'unknown',
+    sessionId: event.sessionKey || event.sessionId || 'unknown',
     role: msg.role,
     contentLength: content.length,
     contentPreview: typeof sanitizedPreview === 'string' ? sanitizedPreview : '[sanitized]',
-    agentId: event.agentId || null
+    agentId: event.agentId || null,
+    fallback: 'before_message_write',
   });
+
+  // ── SQLite fallback (PRI-346): only when conversation hooks are blocked ──
+  const accessCheck = checkConversationAccessConfig(ctx.pluginConfig);
+  if (accessCheck.authorized) {
+    // llm_output is working — do NOT duplicate write to SQLite (de-dup, case D)
+    return;
+  }
+
+  // Conversation hooks blocked — this hook is the fallback trajectory writer
+  if (msg.role === 'assistant') {
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir, logger: ctx.logger });
+      const sanitized = sanitizeForEvidence(content.slice(0, MAX_STRING_LENGTH), workspaceDir);
+      const sessionId = (event.sessionKey as string | undefined) ?? ctx.sessionId ?? 'unknown';
+      wctx.trajectory?.recordAssistantTurn?.({
+        sessionId,
+        runId: 'before_message_write_fallback',
+        provider: 'unknown',
+        model: 'unknown',
+        rawText: content,
+        sanitizedText: sanitized,
+        usageJson: {},
+        empathySignalJson: { detected: false, severity: 'mild', confidence: 1 },
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      ctx.logger?.warn?.(`[PD:before_message_write] SQLite fallback write failed: ${String(err)}`);
+    }
+  } else if (msg.role === 'user') {
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir, logger: ctx.logger });
+      const sessionId = (event.sessionKey as string | undefined) ?? ctx.sessionId ?? 'unknown';
+      wctx.trajectory?.recordUserTurn?.({
+        sessionId,
+        turnIndex: 0,
+        rawText: content.slice(0, MAX_STRING_LENGTH),
+        correctionDetected: false,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      ctx.logger?.warn?.(`[PD:before_message_write] SQLite user turn fallback failed: ${String(err)}`);
+    }
+  }
+
+  // ERR-002: Structured observability — no silent fallback
+  SystemLogger.log(workspaceDir, 'CONVERSATION_HOOK_BLOCKED', JSON.stringify({
+    reason: accessCheck.reason,
+    nextAction: accessCheck.nextAction,
+    hook: 'llm_output',
+    fallback: 'before_message_write',
+    role: msg.role,
+  }));
 }
