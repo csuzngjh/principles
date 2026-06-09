@@ -26,6 +26,19 @@ import type { DiagnosticianTaskRecord } from '../../task-status.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { RunRecord, RunExecutionStatus } from '../../runtime-protocol.js';
 import type { TaskStore } from '../task/task-store.js';
+import type { TrajectoryTurnReader, TrajectoryUserTurn, TrajectoryAssistantTurn } from './trajectory-turn-reader.js';
+
+// ── Mock TrajectoryTurnReader ──
+
+function createMockTrajectoryTurnReader(
+  userTurns: Map<string, TrajectoryUserTurn[]>,
+  assistantTurns: Map<string, TrajectoryAssistantTurn[]>,
+): TrajectoryTurnReader {
+  return {
+    listUserTurnsForSession: vi.fn((sessionId: string) => userTurns.get(sessionId) ?? []),
+    listAssistantTurns: vi.fn((sessionId: string) => assistantTurns.get(sessionId) ?? []),
+  };
+}
 
 // ── Mock TaskStore that returns DiagnosticianTaskRecord ──
 
@@ -71,9 +84,10 @@ interface TestFixture {
   taskStore: TaskStore;
   taskMap: Map<string, TaskRecord>;
   assembler: SqliteContextAssembler;
+  trajectoryTurnReader?: TrajectoryTurnReader;
 }
 
-function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: { withLocator?: boolean }): TestFixture {
+function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: { withLocator?: boolean; trajectoryTurnReader?: TrajectoryTurnReader }): TestFixture {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-context-assembler-test-'));
   const connection = new SqliteConnection(tmpDir);
   const sqliteTaskStore = new SqliteTaskStore(connection);
@@ -84,8 +98,9 @@ function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: {
   const sourceTraceLocator = options?.withLocator
     ? new SqliteSourceTraceLocator(taskStore, new SqliteTrajectoryLocator(connection))
     : undefined;
-  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
-  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, sourceTraceLocator, taskStore, taskMap, assembler };
+  const trajectoryTurnReader = options?.trajectoryTurnReader;
+  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator, trajectoryTurnReader });
+  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, sourceTraceLocator, taskStore, taskMap, assembler, trajectoryTurnReader };
 }
 
 function cleanupFixture(fixture: TestFixture): void {
@@ -1294,6 +1309,165 @@ describe('SqliteContextAssembler', () => {
       // this would fall back to '<unknown>'.
       expect(payload.workspaceDir).toBe('/tmp/test-workspace');
       expect(payload.workspaceDir).not.toBe('<unknown>');
+    } finally { cleanupFixture(f); }
+  });
+
+  // ── PRI-350: TrajectoryDB fallback for conversationWindow ──
+
+  it('用例 A: trajectory has turns → conversationWindow non-empty', async () => {
+    const sessionId = 'sess-traj';
+    const userTurns = new Map<string, TrajectoryUserTurn[]>([
+      [sessionId, [
+        { id: 1, turnIndex: 0, rawExcerpt: 'Hello, can you help me?', correctionDetected: false, correctionCue: null, createdAt: '2026-06-09T10:00:00.000Z' },
+        { id: 3, turnIndex: 2, rawExcerpt: 'That is not what I asked', correctionDetected: true, correctionCue: 'correction', createdAt: '2026-06-09T10:02:00.000Z' },
+      ]],
+    ]);
+    const assistantTurns = new Map<string, TrajectoryAssistantTurn[]>([
+      [sessionId, [
+        { id: 2, sessionId, runId: 'run-1', provider: 'openai', model: 'gpt-4', sanitizedText: 'Sure, I can help with that.', createdAt: '2026-06-09T10:01:00.000Z' },
+      ]],
+    ]);
+    const trajectoryTurnReader = createMockTrajectoryTurnReader(userTurns, assistantTurns);
+
+    const task = makeDiagnosticianTask({
+      taskId: 'task_traj_fallback_a',
+      sessionIdHint: sessionId,
+      workspaceDir: '/real/workspace',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { trajectoryTurnReader });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      // conversationWindow should be populated from trajectory
+      expect(payload.conversationWindow.length).toBe(3);
+      // Sorted by timestamp ascending
+      expect(payload.conversationWindow[0]?.role).toBe('user');
+      expect(payload.conversationWindow[0]?.ts).toBe('2026-06-09T10:00:00.000Z');
+      expect(payload.conversationWindow[1]?.role).toBe('assistant');
+      expect(payload.conversationWindow[1]?.ts).toBe('2026-06-09T10:01:00.000Z');
+      expect(payload.conversationWindow[2]?.role).toBe('user');
+      expect(payload.conversationWindow[2]?.ts).toBe('2026-06-09T10:02:00.000Z');
+      // User turn text comes from rawExcerpt
+      expect(payload.conversationWindow[0]?.text).toBe('Hello, can you help me?');
+      // Assistant text is sanitized
+      expect(payload.conversationWindow[1]?.text).toBe('Sure, I can help with that.');
+      // No "no conversation history" ambiguity note (entries exist)
+      expect(notesInclude(payload.ambiguityNotes, 'No conversation history')).toBe(false);
+      // Schema still valid
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('用例 B: historyQuery returns non-empty → do NOT override with trajectory', async () => {
+    const sessionId = 'sess-hist-priority';
+    const userTurns = new Map<string, TrajectoryUserTurn[]>([
+      [sessionId, [
+        { id: 10, turnIndex: 0, rawExcerpt: 'Trajectory user turn', correctionDetected: false, correctionCue: null, createdAt: '2026-06-09T10:00:00.000Z' },
+      ]],
+    ]);
+    const assistantTurns = new Map<string, TrajectoryAssistantTurn[]>([
+      [sessionId, [
+        { id: 11, sessionId, runId: 'run-traj', provider: 'openai', model: 'gpt-4', sanitizedText: 'Trajectory assistant turn', createdAt: '2026-06-09T10:01:00.000Z' },
+      ]],
+    ]);
+    const trajectoryTurnReader = createMockTrajectoryTurnReader(userTurns, assistantTurns);
+
+    const task = makeDiagnosticianTask({
+      taskId: 'task_hist_priority',
+      sessionIdHint: sessionId,
+      workspaceDir: '/real/workspace',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { trajectoryTurnReader });
+    try {
+      // Create a run so historyQuery returns entries
+      await createRunWithPayloads(f, task.taskId, { inputPayload: 'history input', outputPayload: 'history output' });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      // conversationWindow should come from historyQuery (has entries from the run)
+      expect(payload.conversationWindow.length).toBeGreaterThanOrEqual(2);
+      // Should NOT contain trajectory text
+      const allTexts = payload.conversationWindow.map(e => e.text ?? '').join('|');
+      expect(allTexts).not.toContain('Trajectory user turn');
+      expect(allTexts).not.toContain('Trajectory assistant turn');
+      // Schema still valid
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('用例 C1: sessionIdHint missing → no trajectory fallback, ambiguityNote present', async () => {
+    const trajectoryTurnReader = createMockTrajectoryTurnReader(new Map(), new Map());
+    const task = makeDiagnosticianTask({
+      taskId: 'task_no_session_hint',
+      sessionIdHint: undefined,
+      workspaceDir: '/real/workspace',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { trajectoryTurnReader });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.conversationWindow).toEqual([]);
+      expect(notesInclude(payload.ambiguityNotes, 'No conversation history')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('用例 C2: workspaceDir=<unknown> → no trajectory fallback, ambiguityNote present', async () => {
+    const trajectoryTurnReader = createMockTrajectoryTurnReader(new Map(), new Map());
+    const task = makeDiagnosticianTask({
+      taskId: 'task_unknown_workspace',
+      sessionIdHint: 'sess-unknown-ws',
+      workspaceDir: '<unknown>',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { trajectoryTurnReader });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.conversationWindow).toEqual([]);
+      expect(notesInclude(payload.ambiguityNotes, 'No conversation history')).toBe(true);
+      // trajectoryTurnReader should NOT have been called
+      expect(f.trajectoryTurnReader?.listUserTurnsForSession).not.toHaveBeenCalled();
+    } finally { cleanupFixture(f); }
+  });
+
+  it('用例 C3: trajectoryTurnReader not provided → no fallback, ambiguityNote present', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_no_reader',
+      sessionIdHint: 'sess-no-reader',
+      workspaceDir: '/real/workspace',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.conversationWindow).toEqual([]);
+      expect(notesInclude(payload.ambiguityNotes, 'No conversation history')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('用例 C4: trajectory returns empty → ambiguityNote about trajectory fallback failure', async () => {
+    const sessionId = 'sess-empty-traj';
+    const trajectoryTurnReader = createMockTrajectoryTurnReader(
+      new Map([[sessionId, []]]),
+      new Map([[sessionId, []]]),
+    );
+    const task = makeDiagnosticianTask({
+      taskId: 'task_empty_traj',
+      sessionIdHint: sessionId,
+      workspaceDir: '/real/workspace',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { trajectoryTurnReader });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.conversationWindow).toEqual([]);
+      // Should have ambiguity note about trajectory fallback failure (ERR-002: no silent degradation)
+      expect(notesInclude(payload.ambiguityNotes, 'Trajectory fallback')).toBe(true);
     } finally { cleanupFixture(f); }
   });
 });

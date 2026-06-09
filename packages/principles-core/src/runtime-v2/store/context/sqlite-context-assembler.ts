@@ -15,6 +15,7 @@ import type { RunStore } from '../run/run-store.js';
 import type { HistoryQuery } from '../history/history-query.js';
 import type { ContextAssembler } from './context-assembler.js';
 import type { SourceTraceLocator } from '../trajectory/source-trace-locator.js';
+import type { TrajectoryTurnReader } from './trajectory-turn-reader.js';
 import {
   type DiagnosticianContextPayload,
   type DiagnosisTarget,
@@ -26,10 +27,12 @@ import {
   buildFullTraceTimeline,
   buildSourceRefs,
 } from '../../context-payload.js';
+import type { HistoryQueryEntry } from '../../context-payload.js';
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../../pain-signal-bridge.js';
+import { sanitizeString } from '../../evidence-sanitizer.js';
 
 const PAIN_PROVENANCE_VALUES = ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
@@ -49,12 +52,14 @@ export class SqliteContextAssembler implements ContextAssembler {
     private readonly taskStore: TaskStore,
     private readonly historyQuery: HistoryQuery,
     private readonly runStore: RunStore,
-    options?: { sourceTraceLocator?: SourceTraceLocator },
+    options?: { sourceTraceLocator?: SourceTraceLocator; trajectoryTurnReader?: TrajectoryTurnReader },
   ) {
     this.sourceTraceLocator = options?.sourceTraceLocator;
+    this.trajectoryTurnReader = options?.trajectoryTurnReader;
   }
 
   private readonly sourceTraceLocator?: SourceTraceLocator;
+  private readonly trajectoryTurnReader?: TrajectoryTurnReader;
 
   async assemble(taskId: string): Promise<DiagnosticianContextPayload> {
     const task = await this.taskStore.getTask(taskId);
@@ -86,8 +91,7 @@ export class SqliteContextAssembler implements ContextAssembler {
     });
 
     const contextId = randomUUID();
-    const serialized = JSON.stringify(historyResult.entries);
-    const contextHash = createHash('sha256').update(serialized).digest('hex');
+    let conversationEntries = historyResult.entries;
 
     const diagnosisTarget: DiagnosisTarget = {
       reasonSummary: dt.reasonSummary || undefined,
@@ -108,6 +112,23 @@ export class SqliteContextAssembler implements ContextAssembler {
     if (convAmbiguityNotes) {
       ambiguityNotes.push(...convAmbiguityNotes);
     }
+
+    // PRI-350: Fallback to TrajectoryDB when historyQuery is empty
+    if (conversationEntries.length === 0 && dt.sessionIdHint && dt.workspaceDir !== '<unknown>' && this.trajectoryTurnReader) {
+      const trajectoryEntries = this.readTrajectoryTurns(dt.sessionIdHint, ambiguityNotes);
+      if (trajectoryEntries.length > 0) {
+        conversationEntries = trajectoryEntries;
+        // Remove the "No conversation history" note since we now have entries
+        const noHistIdx = ambiguityNotes.findIndex((n) => n.includes('No conversation history'));
+        if (noHistIdx !== -1) {
+          ambiguityNotes.splice(noHistIdx, 1);
+        }
+      }
+    }
+
+    // Compute contextHash after trajectory fallback so it reflects final conversationWindow
+    const serialized = JSON.stringify(conversationEntries);
+    const contextHash = createHash('sha256').update(serialized).digest('hex');
 
     // PRI-255: For CLI-only pain, add explicit degradation note about missing trace
     // and SKIP source trace lookup entirely — no-host-trace pain must not attempt
@@ -163,7 +184,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       workspaceDir: dt.workspaceDir,
       sourceRefs: [taskId, ...runIds, ...evidenceSourceRefs],
       diagnosisTarget,
-      conversationWindow: historyResult.entries,
+      conversationWindow: conversationEntries,
       ambiguityNotes: ambiguityNotes.length > 0 ? ambiguityNotes : undefined,
       fullTrace,
     };
@@ -293,6 +314,49 @@ export class SqliteContextAssembler implements ContextAssembler {
     }
 
     return notes.length > 0 ? notes : undefined;
+  }
+
+  /**
+   * PRI-350: Read turns from TrajectoryDB and convert to HistoryQueryEntry[].
+   * Returns empty array if no turns found, with ambiguityNote added (ERR-002).
+   */
+  private readTrajectoryTurns(sessionId: string, ambiguityNotes: string[]): HistoryQueryEntry[] {
+    const reader = this.trajectoryTurnReader;
+    // Caller guarantees reader is defined; guard for type safety
+    if (!reader) return [];
+
+    const userTurns = reader.listUserTurnsForSession(sessionId);
+    const assistantTurns = reader.listAssistantTurns(sessionId);
+
+    const entries: HistoryQueryEntry[] = [];
+
+    for (const turn of userTurns) {
+      entries.push({
+        ts: turn.createdAt,
+        role: 'user',
+        text: turn.rawExcerpt,
+      });
+    }
+
+    for (const turn of assistantTurns) {
+      entries.push({
+        ts: turn.createdAt,
+        role: 'assistant',
+        text: sanitizeString(turn.sanitizedText),
+      });
+    }
+
+    // Sort by timestamp ascending
+    entries.sort((a, b) => a.ts.localeCompare(b.ts));
+
+    // ERR-002: No silent degradation — if trajectory also has no turns, add note
+    if (entries.length === 0) {
+      ambiguityNotes.push(
+        `Trajectory fallback attempted for sessionId=${sessionId} but no turns found in trajectory database`,
+      );
+    }
+
+    return entries;
   }
 
   private static extractStringField(obj: Record<string, unknown>, key: string): string | undefined {
