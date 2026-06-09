@@ -17,7 +17,7 @@ interface EvolutionTasksShowOptions {
 export async function handleEvolutionTasksShow(opts: EvolutionTasksShowOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir();
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let foundTask;
   try {
     const numericId = isNaN(Number(opts.id)) ? undefined : Number(opts.id);

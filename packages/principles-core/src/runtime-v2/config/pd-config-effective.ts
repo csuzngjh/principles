@@ -11,7 +11,6 @@ import {
   type EffectivePdConfig,
   type FeatureFlagEntry,
   type InternalAgentBinding,
-  type InternalAgentName,
   type InternalAgentsConfig,
   type RuntimeProfile,
   PD_CONFIG_VERSION,
@@ -124,7 +123,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
 
   const internalAgents: InternalAgentsConfig = {
     defaultRuntime: userConfig.internalAgents.defaultRuntime,
-    agents: agents as Record<InternalAgentName, InternalAgentBinding>,
+    agents: agents,
   };
 
   // UI: use user config or default

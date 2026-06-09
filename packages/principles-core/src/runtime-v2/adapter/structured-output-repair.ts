@@ -238,7 +238,7 @@ export async function attemptStructuredOutputRepair<T>(
     const attemptValidationErrors = buildValidationErrorEntries(currentErrors);
     const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try block below
+     
     let rawResponse: string | null;
     try {
       rawResponse = await callbacks.llmCaller(prompt);

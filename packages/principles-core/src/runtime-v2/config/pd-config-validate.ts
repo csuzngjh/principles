@@ -355,7 +355,7 @@ function validateInternalAgents(raw: unknown, path: string): { ok: true; value: 
     ok: true,
     value: {
       defaultRuntime: defaultRuntimeRaw as string,
-      agents: agents as Record<InternalAgentName, InternalAgentBinding>,
+      agents: agents,
     },
   };
 }
