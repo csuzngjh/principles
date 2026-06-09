@@ -24,6 +24,54 @@ import {
   type VerificationResult,
 } from './mvp-config.js';
 
+/** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
+export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
+
+/**
+ * PRI-343: Pure function — deep-merges allowConversationAccess: true into
+ * the openclaw.json config without mutating the input.
+ *
+ * Ensures plugins.entries['principles-disciple'].hooks.allowConversationAccess
+ * is set to true, creating intermediate objects if missing.
+ * Preserves all other fields.
+ */
+export function ensureConversationAccess(config: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...config };
+
+  // Guard: plugins must be a non-null object
+  if (typeof result.plugins !== 'object' || result.plugins === null || Array.isArray(result.plugins)) {
+    return result;
+  }
+  const plugins = { ...(result.plugins as Record<string, unknown>) };
+
+  // Guard: plugins.entries must be a non-null object
+  if (typeof plugins.entries !== 'object' || plugins.entries === null || Array.isArray(plugins.entries)) {
+    return result;
+  }
+  const entries = { ...(plugins.entries as Record<string, unknown>) };
+
+  // Guard: principles-disciple entry must be a non-null object (or missing)
+  const rawEntry = entries['principles-disciple'];
+  const entry = (typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry))
+    ? { ...(rawEntry as Record<string, unknown>) }
+    : { enabled: true };
+
+  // Guard: hooks must be a non-null object (or missing)
+  const rawHooks = entry.hooks;
+  const hooks = (typeof rawHooks === 'object' && rawHooks !== null && !Array.isArray(rawHooks))
+    ? { ...(rawHooks as Record<string, unknown>) }
+    : {};
+
+  // Set allowConversationAccess: true (idempotent)
+  hooks[CONVERSATION_ACCESS_CONFIG_KEY] = true;
+  entry.hooks = hooks;
+  entries['principles-disciple'] = entry;
+  plugins.entries = entries;
+  result.plugins = plugins;
+
+  return result;
+}
+
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
 
 // 超时常量
@@ -303,8 +351,10 @@ async function updateOpenClawConfig(): Promise<void> {
   // openclaw.json on every write. Writing it here causes duplicate
   // registration and config corruption loops.
 
-  configObj.plugins = plugins;
-  writeFileSync(configPath, JSON.stringify(configObj, null, 2));
+  // PRI-343: Deep-merge allowConversationAccess: true into the config
+  // This ensures the field survives openclaw doctor --fix backup restores
+  const mergedConfigObj = ensureConversationAccess(configObj);
+  writeFileSync(configPath, JSON.stringify(mergedConfigObj, null, 2));
 
   // Write install record to installs.json (the canonical store)
   const installsDir = path.join(configDir, 'plugins');
