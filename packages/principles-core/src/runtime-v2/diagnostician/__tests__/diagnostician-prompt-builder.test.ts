@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { DiagnosticianPromptBuilder, buildDiagnosticProtocolInstruction } from '../../diagnostician-prompt-builder.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
+import { DiagnosticianContextPayloadSchema, ContextPayloadSchema } from '../../context-payload.js';
 import { extractJsonObject } from '../../adapter/json-extractor.js';
 import { DefaultSchemaPromptAdapter } from '../../adapter/schema-prompt-adapter.js';
 import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
@@ -462,6 +463,34 @@ describe('DiagnosticianPromptBuilder', () => {
       const parsed = extractJsonObject(instruction);
       expect(parsed).not.toBeNull();
       expect(Value.Check(DiagnosticianOutputV1Schema, parsed)).toBe(true);
+    });
+  });
+
+  // ── PRI-352: eventSummaries removal (dangling field with no producer) ────
+
+  describe('eventSummaries removal (PRI-352)', () => {
+    const adapter = new DefaultSchemaPromptAdapter();
+
+    it('buildDiagnosticProtocolInstruction() does NOT reference eventSummaries', () => {
+      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      expect(instruction).not.toContain('eventSummaries');
+    });
+
+    it('DiagnosticianContextPayloadSchema does NOT contain eventSummaries field', () => {
+      const schemaKeys = Object.keys(DiagnosticianContextPayloadSchema.properties);
+      expect(schemaKeys).not.toContain('eventSummaries');
+    });
+
+    it('ContextPayloadSchema does NOT contain eventSummaries field', () => {
+      const schemaKeys = Object.keys(ContextPayloadSchema.properties);
+      expect(schemaKeys).not.toContain('eventSummaries');
+    });
+
+    it('buildPrompt() output JSON does NOT contain eventSummaries', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const parsed = JSON.parse(result.message);
+      expect(parsed.context).not.toHaveProperty('eventSummaries');
     });
   });
 
