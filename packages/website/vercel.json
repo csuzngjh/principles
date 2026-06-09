@@ -1,15 +1,5 @@
 {
-  "buildCommand": "cd packages/website && npm run docs:build",
-  "outputDirectory": "packages/website/.vitepress/dist",
-  "installCommand": "cd packages/website && npm install",
-  "framework": null,
   "cleanUrls": true,
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/packages/website/.vitepress/dist/$1"
-    }
-  ],
   "headers": [
     {
       "source": "/assets/(.*)",

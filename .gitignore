@@ -158,3 +158,4 @@ evidence/*
 .opencode/
 .trae/
 .plan/
+.vercel
