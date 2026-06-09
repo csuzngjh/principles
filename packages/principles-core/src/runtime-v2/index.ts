@@ -281,6 +281,9 @@ export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincip
 export { evaluateAdmission, evaluateCandidateAdmissions, ADMISSION_CONFIDENCE_THRESHOLD } from './admission-gate.js';
 export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
 
+// Evidence guards (PRI-345) — shared owner-exemption + short-circuit logic
+export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+
 // Pain-chain read model (PRI-14)
 export { PainChainReadModel } from './pain-chain-read-model.js';
 export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';

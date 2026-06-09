@@ -6,6 +6,7 @@ import type { RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
+import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import type { IntakeToInternalizationBridgeInput } from './internalization/intake-to-internalization-bridge.js';
 
@@ -145,6 +146,20 @@ export class PainSignalBridge {
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
 
+    // PRI-345: short-circuit before any I/O when input evidence is empty
+    // and source is not owner-initiated (manual/pain/skill:pain).
+    // Zero side effects: no task creation, no runner call, no ledger writes.
+    if (shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
+      return {
+        status: 'skipped',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        message: 'short_circuited: input evidence empty; re-trigger after evidence collected',
+      };
+    }
+
     const existingTask = await this.stateManager.getTask(taskId);
 
     if (existingTask) {
@@ -207,7 +222,7 @@ export class PainSignalBridge {
 
     const diagnosticianOutput = result.output;
     const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, provenance)
+      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount: data.evidence?.length ?? 0 })
       : candidates.map((c) => ({
           candidateId: c.candidateId,
           recommendationKind: c.recommendationKind,

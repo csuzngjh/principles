@@ -11,6 +11,7 @@ const makeInput = (overrides: Partial<AdmissionGateInput> = {}): AdmissionGateIn
   recommendationKind: 'principle',
   confidence: 0.8,
   evidenceCount: 2,
+  inputEvidenceCount: 2,
   provenance: 'openclaw_context_bound',
   ...overrides,
 });
@@ -104,7 +105,7 @@ describe('evaluateCandidateAdmissions', () => {
       { candidateId: 'c-3', recommendationKind: 'rule' as const },
     ];
     const output = makeDiagnosticianOutput({ confidence: 0.8 });
-    const results = evaluateCandidateAdmissions(candidates, output, 'openclaw_context_bound');
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'openclaw_context_bound', inputEvidenceCount: 2 });
 
     expect(results).toHaveLength(3);
     const admitted = results.find((r) => r.candidateId === 'c-1');
@@ -121,7 +122,7 @@ describe('evaluateCandidateAdmissions', () => {
       { candidateId: 'c-2', recommendationKind: 'rule' as const },
     ];
     const output = makeDiagnosticianOutput({ confidence: 0.8 });
-    const results = evaluateCandidateAdmissions(candidates, output, 'owner_reported_no_host_trace');
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 1 });
 
     const first = results.find((r) => r.candidateId === 'c-1');
     const second = results.find((r) => r.candidateId === 'c-2');
@@ -141,7 +142,7 @@ describe('evaluateCandidateAdmissions', () => {
       confidence: 0.35,
       evidence: [],
     });
-    const results = evaluateCandidateAdmissions(candidates, output, 'owner_reported_no_host_trace');
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 1 });
 
     const actionable = results.filter((r) => r.admission.decision === 'admitted');
     const deferred = results.filter((r) => r.admission.decision === 'deferred');
@@ -227,5 +228,75 @@ describe('evaluateCandidateAdmissions', () => {
       makeInput({ recommendationKind: 'defer', evidenceCount: 0 }),
     );
     expect(result.decision).toBe('deferred');
+  });
+});
+
+// ── PRI-345: input-evidence hard gate + owner manual exemption ────────────────
+
+describe('PRI-345: input-evidence hard gate', () => {
+  // 用例 A（核心）: inputEvidenceCount=0, model fabricates evidence → gated
+  it('gates when inputEvidenceCount=0 even if model fabricates high confidence + output evidence', () => {
+    const candidates = [
+      { candidateId: 'c-fab', recommendationKind: 'principle' as const },
+    ];
+    const output = makeDiagnosticianOutput({
+      confidence: 0.85,
+      evidence: [
+        { sourceRef: 'fabricated-1', note: 'model made this up' },
+        { sourceRef: 'fabricated-2', note: 'also fabricated' },
+        { sourceRef: 'fabricated-3', note: 'not real evidence' },
+      ],
+    });
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'openclaw_context_bound', inputEvidenceCount: 0 });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.admission.decision).toBe('needs_evidence');
+    expect(results[0]?.admission.reason).toBe('input_evidence_empty');
+    expect(results[0]?.admission.nextAction).toBe('collect_evidence_before_diagnosis');
+  });
+
+  // 用例 B（回归保护）: inputEvidenceCount=2, normal → admitted
+  it('admits when inputEvidenceCount=2 with sufficient confidence and output evidence', () => {
+    const result = evaluateAdmission(
+      makeInput({ inputEvidenceCount: 2, confidence: 0.7, evidenceCount: 2 }),
+    );
+    expect(result.decision).toBe('admitted');
+    expect(result.reason).toBe('evidence_sufficient');
+  });
+
+  // 用例 C（owner 手动豁免 — 非 owner provenance 被拦）
+  it('gates openclaw_context_bound when inputEvidenceCount=0', () => {
+    const result = evaluateAdmission(
+      makeInput({ inputEvidenceCount: 0, provenance: 'openclaw_context_bound', confidence: 0.9, evidenceCount: 3 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toBe('input_evidence_empty');
+  });
+
+  // 用例 C（owner 手动豁免 — owner_reported_no_host_trace 不被误杀）
+  it('does NOT gate owner_reported_no_host_trace when inputEvidenceCount=0 (PRI-311 regression guard)', () => {
+    const result = evaluateAdmission(
+      makeInput({ inputEvidenceCount: 0, provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 3 }),
+    );
+    expect(result.decision).toBe('admitted');
+    expect(result.reason).toBe('evidence_sufficient');
+  });
+
+  // Defer still takes priority over input evidence gate
+  it('defer priority over input_evidence_empty', () => {
+    const result = evaluateAdmission(
+      makeInput({ recommendationKind: 'defer', inputEvidenceCount: 0, provenance: 'openclaw_context_bound' }),
+    );
+    expect(result.decision).toBe('deferred');
+    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
+  });
+
+  // inputEvidenceCount=0 gates automatic_hook too
+  it('gates automatic_hook when inputEvidenceCount=0', () => {
+    const result = evaluateAdmission(
+      makeInput({ inputEvidenceCount: 0, provenance: 'automatic_hook', confidence: 0.9, evidenceCount: 5 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toBe('input_evidence_empty');
   });
 });
