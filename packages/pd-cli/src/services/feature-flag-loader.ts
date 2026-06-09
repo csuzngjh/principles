@@ -29,7 +29,7 @@ export function loadEffectiveFeatureFlags(workspaceDir: string): EffectiveFeatur
 
   const raw = fs.readFileSync(configPath, 'utf8');
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- reassigned in try block below
+   
   let parsed: unknown;
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
