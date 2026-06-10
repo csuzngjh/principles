@@ -333,6 +333,7 @@ Therefore, PD must make a crucial distinction:
 > Tendency can be left to the model.
 >
 > Boundaries must be left to the system.
+
 Five hundred years ago, the Eastern philosopher Wang Yangming proposed a profound cognitive thesis: "**There is no knowing without acting. Knowing but not acting is simply not knowing.**"
 
 If we translate this into the cyber age: writing over 40 bottom lines into the Prompt means the large model has "read" them, but due to the squeeze of context debt, it cannot guarantee 100% deterministic compliance in action. For the system, this is "knowing but not acting."
@@ -1333,13 +1334,13 @@ Can it be not just a better "coder," but an entrepreneurial partner capable of c
 
 In the next part, we will enter a more macroscopic layer of the PD system:
 
-**Time Scales and Evolution Engines.**
+**Co-evolution and the Return of the Owner.**
 
-When a system possesses multi-scale feedback loops, how will it move from short-term error correction to long-term evolution?
+As AI Agents' execution bandwidth becomes increasingly wide, how should we build human "intention bandwidth" to retake the steering wheel in human-machine co-evolution?
 
 ---
 
-*Series 5 "Time Scales and Evolution Engines: The Multi-scale Feedback System of Agents" is coming soon. Stay tuned for the final chapter of the series.*
+*Series 5 "Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems" is out now. Welcome to read.*
 
 ---
 
