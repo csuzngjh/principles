@@ -340,7 +340,8 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
   });
 
   it('respects MAX_EVIDENCE_ENTRIES constant', () => {
-    expect(MAX_EVIDENCE_ENTRIES).toBe(4);
+    // PRI-359: Increased from 4 to 8 to accommodate failed tool_calls evidence
+    expect(MAX_EVIDENCE_ENTRIES).toBe(8);
   });
 
   it('respects MAX_EVIDENCE_NOTE_CHARS constant', () => {

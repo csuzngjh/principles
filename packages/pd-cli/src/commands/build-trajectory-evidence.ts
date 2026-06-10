@@ -131,6 +131,41 @@ export function buildTrajectoryEvidenceFromDb(
       }
     }
 
+    // PRI-358: Try to read failed tool_calls (last 3 failures, chronological order)
+    try {
+      const failedToolCalls = db.prepare(`
+        SELECT tool_name, error_type, exit_code, created_at
+        FROM (
+          SELECT tool_name, error_type, exit_code, created_at
+          FROM tool_calls
+          WHERE session_id = ? AND outcome = 'failure'
+          ORDER BY created_at DESC
+          LIMIT 3
+        )
+        ORDER BY created_at ASC
+      `).all(sessionId) as Record<string, unknown>[];
+
+      for (const tc of failedToolCalls) {
+        if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
+        const toolName = typeof tc.tool_name === 'string' ? tc.tool_name : 'unknown';
+        const errorType = typeof tc.error_type === 'string' ? tc.error_type : 'unknown';
+        const exitCode = tc.exit_code != null ? String(tc.exit_code) : 'N/A';
+        const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})`;
+        evidence.push({
+          sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
+          note: sanitizeString(note.slice(0, MAX_EVIDENCE_NOTE_CHARS), workspaceDir),
+        });
+      }
+    } catch {
+      // tool_calls table may not exist — degrade gracefully (only when no other evidence)
+      if (evidence.length === 0) {
+        evidence.push({
+          sourceRef: 'tool_call_failure:unavailable',
+          note: 'trajectory_tool_calls_unavailable',
+        });
+      }
+    }
+
     // If no evidence at all from trajectory, provide a meaningful placeholder
     if (evidence.length === 0) {
       evidence.push({
