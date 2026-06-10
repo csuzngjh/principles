@@ -24,7 +24,7 @@
 
 ```text
 Pain → Reflection → Principle → Skill / RuleHost → Behavioral Delta
-````
+```
 
 但当我继续往下思考时，一个更深的问题浮了出来：
 
