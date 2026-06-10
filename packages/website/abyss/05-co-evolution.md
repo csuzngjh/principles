@@ -2,7 +2,7 @@
 
 **Subtitle**: From Execution Bandwidth to Intention Bandwidth: How PD Helps Humans Retake the Steering Wheel
 
-![Cover Illustration Prompt: Dark blue-black background. An abstract human Owner sits at a steering wheel/console resembling a spaceship. Ahead is not a normal road, but a star map composed of Agent toolchains, feedback loops, rule nodes, and long-term goals. To the right is a powerful blue-purple Agent engine; to the left, amber human value anchors. Overall style: restrained, semi-abstract, futuristic engineering fable, premium texture. No cheap cyberpunk, no concrete robot faces, no readable text, 21:9 banner.](/images/abyss/05/abyss-05-cover.png)
+![Cover Illustration Prompt: Dark blue-black background. An abstract human Owner sits at a steering wheel/console resembling a spaceship. Ahead is not a normal road, but a star map composed of Agent toolchains, feedback loops, rule nodes, and long-term goals. To the right is a powerful blue-purple Agent engine; to the left, amber human value anchors. Overall style: restrained, semi-abstract, futuristic engineering fable, premium texture. No cheap cyberpunk, no concrete robot faces, no readable text, 21:9 banner.]()
 
 ---
 
@@ -87,7 +87,7 @@ But when we plug a large model into memory, tools, file systems, runtime framewo
 
 It transforms into a complex system that accumulates history, builds momentum, generates feedback, creates debt, and alters human behavior.
 
-![Illustration Prompt: On the left, a simple black-box function structure—an input beam enters the model and outputs text; on the right, it gradually unfolds into a complex ecosystem: Agent, tools, memory, RuleHost, Skill, Pain Signal, Owner feedback, and the environment forming multi-layered feedback loops. The scene morphs from a "function" on the left to an "ecosystem" on the right. Dark blue-black background, cyan-purple system lines, sparse amber feedback nodes, semi-abstract information design style, 21:9.](/images/abyss/05/abyss-05-function-to-ecosystem.png)
+![Illustration Prompt: On the left, a simple black-box function structure—an input beam enters the model and outputs text; on the right, it gradually unfolds into a complex ecosystem: Agent, tools, memory, RuleHost, Skill, Pain Signal, Owner feedback, and the environment forming multi-layered feedback loops. The scene morphs from a "function" on the left to an "ecosystem" on the right. Dark blue-black background, cyan-purple system lines, sparse amber feedback nodes, semi-abstract information design style, 21:9.]()
 
 At this point, the quality of a single response is no longer sufficient.
 
@@ -257,7 +257,7 @@ They are often vague, implicit, contextual, and sometimes even the Owner isn't f
 
 Thus, many collaboration failures aren't due to the Agent lacking execution ability, but because the Owner cannot transmit their true intent to the Agent without heavy loss.
 
-![Illustration Prompt: On the left, the human Owner's mental/cognitive space, containing vague fragments of experience, pain, goals, boundaries, and intuition; on the right, the massive Agent execution engine and tool network. Between them is only a narrow, glowing channel, filled with information compression, distortion, blockage, and amber bottleneck nodes. The theme is "Intention Bandwidth Bottleneck." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-intention-bandwidth.png)
+![Illustration Prompt: On the left, the human Owner's mental/cognitive space, containing vague fragments of experience, pain, goals, boundaries, and intuition; on the right, the massive Agent execution engine and tool network. Between them is only a narrow, glowing channel, filled with information compression, distortion, blockage, and amber bottleneck nodes. The theme is "Intention Bandwidth Bottleneck." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.]()
 
 This echoes John Boyd's OODA Loop:
 
@@ -377,7 +377,7 @@ The Owner should not be the system's customer service representative.
 
 The Owner should be the system's Supreme Court.
 
-![Illustration Prompt: A semi-abstract vision of a future tribunal/control room: massive blue-purple data streams, error signals, and principle proposals swirl on the periphery, but only a few filtered, amber high-value cases are delivered to the Owner's bench/console in the center. The image emphasizes attention protection, information filtering, and the Supreme Court metaphor. No concrete human faces, no text, dark blue-black background, premium and restrained, 21:9.](/images/abyss/05/abyss-05-attention-court.png)
+![Illustration Prompt: A semi-abstract vision of a future tribunal/control room: massive blue-purple data streams, error signals, and principle proposals swirl on the periphery, but only a few filtered, amber high-value cases are delivered to the Owner's bench/console in the center. The image emphasizes attention protection, information filtering, and the Supreme Court metaphor. No concrete human faces, no text, dark blue-black background, premium and restrained, 21:9.]()
 
 This isn't about elevating the Owner's status, but about protecting the system's most critical value generator from burning out.
 
@@ -457,96 +457,8 @@ PD's principle system should be exactly the same.
 
 ---
 
-## 06 A Small Boat: How Do Those Chased by AI Stand Back Up?
 
-At this point, PD is no longer just a technical issue.
-
-It touches upon a massive zeitgeist.
-
-AI's advancement will inevitably reshape work.
-
-Many roles will vanish.
-
-Many skills will depreciate.
-
-Many people who once relied on proficient execution for a stable life will suddenly find themselves pushed to the edge of the cliff by the era.
-
-This isn't just a simple technical problem.
-
-It's a human problem.
-
-If the AI era only rewards the few who are best at harnessing models, while directly abandoning the vast majority who couldn't turn around in time, then this era, no matter how efficient, will seem too cold.
-
-PD certainly cannot stop this tidal wave.
-
-Nor should it promise to save everyone.
-
-But at the very least, it can choose a direction:
-
-> To help those who refuse to "lie flat" to gradually precipitate their past experiences, industry intuition, lessons from failure, judgment principles, and working methods into an Agent system capable of collaborative work.
-
-This is what I understand as Co-evolution.
-
-It is not letting AI unilaterally replace humans.
-
-It is not demanding everyone become a top-tier AI engineer.
-
-It is giving an ordinary person the chance to reorganize their capabilities with the help of AI.
-
-A customer service rep might lose the job of repeatedly answering questions, but their years of accumulated user emotion judgment, sense of boundaries, and crisis management experience should not be wasted.
-
-An operator might lose the job of manually organizing reports, but their judgment on user growth pacing, content tone, and channel placement should not be discarded.
-
-A programmer might no longer need to write every line of CRUD by hand, but their sensitivity to architectural boundaries, engineering risks, and maintenance costs remains a precious asset.
-
-The problem is:
-
-In the past, these experiences often existed only within the human body, in their intuition, or in oral expression.
-
-They were very difficult to be inherited by a system.
-
-What PD aims to do is provide a pathway:
-
-```text
-Human Experience → Principle
-Human Pain → Pain Signal
-Human Know-how → Skill
-Human Bottom Lines → RuleHost
-Human Judgment → Owner Arbitration
-Human Growth → Owner-Agent Co-evolution
-```
-
-This brings to mind Wang Yangming's concept of "Achieving the Innate Knowing" (Zhi Liangzhi).
-
-If "Innate Knowing" is only spoken of, it becomes just another moral cliché. True "Achieving" must occur in action, in conflict, in each specific choice.
-
-People do not become better people simply by memorizing many philosophies.
-
-People only gradually turn certain principles into instinct through repeated action, error, reflection, and calibration in real situations.
-
-This is deeply aligned with PD's understanding of Agents.
-
-We do not believe that writing principles into a Prompt grants a system wisdom.
-
-Similarly, we do not believe that a person can turn their life around in the AI era simply by understanding a few "large model methodologies."
-
-A true turnaround must occur in action.
-
-The Owner executes via the Agent, the Agent exposes deviations, PD captures the pain, the diagnostician distills principles, the Owner arbitrates, and the principles return to the next action.
-
-In this loop, the Agent is trained, the system is trained, and the Owner is also trained.
-
-If the unity of knowledge and action ("Zhi Xing He Yi") means human knowledge must be verified in action, then what PD cares about is: How can the Owner's knowledge, through the Agent's action, be continuously calibrated, made explicit, and brought back to themselves through feedback?
-
-So-called co-evolution isn't just the Agent getting stronger.
-
-It is also the Owner, through iteration after iteration of feedback, stepping ever closer to the person they wish to become.
-
-![Illustration Prompt: A massive, tide-like wave of blue-purple AI information surges from the distance. In the center is a small boat, containing not a specific person, but an abstract silhouette of an Owner holding a glowing oar. Surrounding the boat are Agent engines, principle nodes, and feedback lines acting as supports, like an exoskeleton or navigation system. Overall emotion: small but resolute, compassionate but not pessimistic. Dark blue-black background, amber human value anchors, 21:9 banner.](/images/abyss/05/abyss-05-boat.png)
-
----
-
-## 07 Feedback Loops: How Does PD Evolve from a Single Correction to Long-Term Evolution?
+## 06 Feedback Loops: How Does PD Evolve from a Single Correction to Long-Term Evolution?
 
 As we've been discussing "co-evolution", if we unpack this term, it is not just a heartwarming slogan, but a set of real feedback loops.
 
@@ -651,7 +563,7 @@ Smart systems also forget.
 
 ---
 
-## 08 Feedback Delay: Why Late Feedback Causes System Oscillation?
+## 07 Feedback Delay: Why Late Feedback Causes System Oscillation?
 
 When discussing feedback loops, one variable is particularly easy to underestimate:
 
@@ -805,11 +717,11 @@ What PD aims to do is **place different feedback into the correct time scales**.
 A truly mature system isn't always "the faster, the better."
 It is fast where it needs to be fast, slow where it needs to be slow, waits when it should wait, and forgets when it should forget.
 
-![Illustration Prompt: A multi-timescale feedback system diagram. The image features five horizontal time tracks: seconds, minutes, hours, days/weeks, and long-term evolution. Each track has different forms of feedback nodes: second-level looks like lightning intercepts, minute-level like deviation alarms, hour-level like post-mortem pods, day/week-level like principle evaluations, and long-term looks like the trajectory of Owner-Agent co-growth. Dark blue-black background, cyan-purple feedback lines, amber key nodes, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-feedback-delay.png)
+![Illustration Prompt: A multi-timescale feedback system diagram. The image features five horizontal time tracks: seconds, minutes, hours, days/weeks, and long-term evolution. Each track has different forms of feedback nodes: second-level looks like lightning intercepts, minute-level like deviation alarms, hour-level like post-mortem pods, day/week-level like principle evaluations, and long-term looks like the trajectory of Owner-Agent co-growth. Dark blue-black background, cyan-purple feedback lines, amber key nodes, semi-abstract futuristic engineering fable style, 21:9.]()
 
 ---
 
-## 09 Bottlenecks and Leverage Points: They Are Not the Same Thing
+## 08 Bottlenecks and Leverage Points: They Are Not the Same Thing
 
 Having discussed feedback loops and feedback delays, we need to introduce another concept:
 
@@ -986,11 +898,11 @@ Precipitable
 Reusable
 ```
 
-![Illustration Prompt: A bottleneck protection system diagram. On the left is a massive, chaotic flow of blue-purple event streams, Pain signals, and tool logs; in the middle are four filtering layers symbolizing Filter, Cluster, Package, Schedule; on the right is the protected Owner decision core, receiving only a few amber, high-quality case packages. Overall theme: "Bottleneck Protection and High-Quality Input." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-bottleneck-protection.png)
+![Illustration Prompt: A bottleneck protection system diagram. On the left is a massive, chaotic flow of blue-purple event streams, Pain signals, and tool logs; in the middle are four filtering layers symbolizing Filter, Cluster, Package, Schedule; on the right is the protected Owner decision core, receiving only a few amber, high-quality case packages. Overall theme: "Bottleneck Protection and High-Quality Input." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.]()
 
 ---
 
-## 10 Where Are the True Leverage Points?
+## 09 Where Are the True Leverage Points?
 
 In *Thinking in Systems*, Donella Meadows discussed an important concept regarding Leverage Points:
 
@@ -1172,36 +1084,68 @@ This is not traditional software engineering.
 It isn't just machine learning either.
 It is a form of emerging **AI Systems Engineering**: designing an intelligent system that can execute, reflect, and be governed by humans within a long-cycle, multi-feedback, human-machine hybrid ecosystem.
 
-But more important than "systems engineering" are the humans behind it.
+At this point, PD is no longer just a technical issue. It touches upon a massive zeitgeist.
 
-The AI era will be fast.
-It will also be cold.
+AI's advancement will inevitably reshape work. Many roles will vanish. Many skills will depreciate. Many people who once relied on proficient execution for a stable life will suddenly find themselves pushed to the edge of the cliff by the era.
 
-It will reward those who adapt fastest, and ruthlessly eliminate many who worked diligently but couldn't turn around in time.
+This isn't just a simple technical problem. It's a human problem.
 
-PD cannot change this entire tidal wave.
-It is not Noah's Ark, and it shouldn't promise to save everyone.
+If the AI era only rewards the few who are best at harnessing models, while directly abandoning the vast majority who couldn't turn around in time, then this era, no matter how efficient, will seem too cold.
 
-But I still hope it can become a small boat.
+PD certainly cannot stop this tidal wave.
+
+Nor should it promise to save everyone.
+
+But at the very least, it can choose a direction:
+
+> To help those who refuse to "lie flat" to gradually precipitate their past experiences, industry intuition, lessons from failure, judgment principles, and working methods into an Agent system capable of collaborative work.
+
+A customer service rep might lose the job of repeatedly answering questions, but their years of accumulated user emotion judgment, sense of boundaries, and crisis management experience should not be wasted.
+
+An operator might lose the job of manually organizing reports, but their judgment on user growth pacing, content tone, and channel placement should not be discarded.
+
+A programmer might no longer need to write every line of CRUD by hand, but their sensitivity to architectural boundaries, engineering risks, and maintenance costs remains a precious asset.
+
+The problem is: In the past, these experiences often existed only within the human body, in their intuition, or in oral expression. They were very difficult to be inherited by a system.
+
+What PD aims to do is provide a pathway:
+
+```text
+Human Experience → Principle
+Human Pain → Pain Signal
+Human Know-how → Skill
+Human Bottom Lines → RuleHost
+Human Judgment → Owner Arbitration
+Human Growth → Owner-Agent Co-evolution
+```
+
+This brings to mind Wang Yangming's concept of "Achieving the Innate Knowing" (Zhi Liangzhi).
+
+If "Innate Knowing" is only spoken of, it becomes just another moral cliché. True "Achieving" must occur in action, in conflict, in each specific choice.
+
+People do not become better people simply by memorizing many philosophies. People only gradually turn certain principles into instinct through repeated action, error, reflection, and calibration in real situations.
+
+This is deeply aligned with PD's understanding of Agents.
+
+We do not believe that writing principles into a Prompt grants a system wisdom. Similarly, we do not believe that a person can turn their life around in the AI era simply by understanding a few "large model methodologies."
+
+A true turnaround must occur in action.
+
+The Owner executes via the Agent, the Agent exposes deviations, PD captures the pain, the diagnostician distills principles, the Owner arbitrates, and the principles return to the next action. In this loop, the Agent is trained, the system is trained, and the Owner is also trained.
+
+So-called co-evolution isn't just the Agent getting stronger. It is also the Owner, through iteration after iteration of feedback, stepping ever closer to the person they wish to become.
+
+I am not sure if it can be everyone's Noah's Ark, but I still hope it can become a small boat.
 
 When this towering wave of AI strikes, some will be crushed by the surf, some will choose to lie flat, and some will still want to grab hold of something, stand back up, relearn, and reorganize their capabilities.
 
-PD wants to stand beside these people.
+PD wants to stand beside these people. It hopes to help them turn past experiences into principles, principles into a system, and the system into new productivity.
 
-It hopes to help them turn past experiences into principles, principles into a system, and the system into new productivity.
-
-It hopes that a person won't just be replaced by AI, but can use AI to extend their hands, eyes, brain, and judgment.
-
-It hopes that the Owner isn't just someone giving commands to an Agent, but someone who, through feedback, pain, reflection, and action, slowly becomes a more clear-headed, resolute, and creative person.
-
-This is my understanding of co-evolution.
-
-It's not racing against AI.
-It's evolving alongside AI.
-It's not handing over the steering wheel.
-It's becoming a helmsman worthy of a powerful engine.
+This is not just racing against AI, but evolving alongside AI; not just handing over the steering wheel, but striving to become a helmsman worthy of a powerful engine.
 
 If this era is destined to have massive waves, then at least let those who refuse to lie flat possess an oar they can hold onto.
+
+![Illustration Prompt: A massive, tide-like wave of blue-purple AI information surges from the distance. In the center is a small boat, containing not a specific person, but an abstract silhouette of an Owner holding a glowing oar. Surrounding the boat are Agent engines, principle nodes, and feedback lines acting as supports, like an exoskeleton or navigation system. Overall emotion: small but resolute, compassionate but not pessimistic. Dark blue-black background, amber human value anchors, 21:9 banner.]()
 
 ---
 
