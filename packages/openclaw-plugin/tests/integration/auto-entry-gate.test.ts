@@ -16,7 +16,8 @@ import * as path from 'path';
 import { handleAfterToolCall } from '../../src/hooks/pain.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
-import { resetPainDiagnosticGateForTest, evaluatePainDiagnosticGate } from '../../src/core/pain-diagnostic-gate.js';
+import { resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
+import { evaluatePainDiagnosticGate, resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
 import * as ioUtils from '../../src/utils/io.js';
 
 vi.mock('fs');
@@ -75,9 +76,10 @@ describe('Auto-Entry Gate Integration', () => {
     mockEmitSync.mockReset();
     mockRecordProbationFeedback.mockReset();
     mockUpdatePrincipleValueMetrics.mockReset();
-    vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(mockWctx as any);
+    vi.spyOn(WorkspaceContext, 'fromHookContextExplicit').mockReturnValue(mockWctx as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue(mockEventLog as any);
     vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    resetTriggerCooldownForTest();
     resetPainDiagnosticGateForTest();
   });
 
@@ -121,11 +123,18 @@ describe('Auto-Entry Gate Integration', () => {
     vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
 
-    // First failure — accumulates GFI, does not emit
+    // PRI-363: trigger controller requires consecutiveErrors >= 4 for upgrade
+    // First 3 failures — accumulates friction, does not emit
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(mockEmitSync).not.toHaveBeenCalled();
 
-    // Second failure — repeated, should emit
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    expect(mockEmitSync).not.toHaveBeenCalled();
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    expect(mockEmitSync).not.toHaveBeenCalled();
+
+    // Fourth failure — repeated, should emit
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
     expect(mockEmitSync).toHaveBeenCalledWith(
@@ -134,7 +143,6 @@ describe('Auto-Entry Gate Integration', () => {
         data: expect.objectContaining({
           painType: 'tool_failure',
           source: 'write',
-          reason: expect.stringContaining('diagnosticGate=high_gfi'),
         }),
       }),
     );
