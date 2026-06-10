@@ -28,81 +28,54 @@ import {
 // ── Source Kind Resolution ───────────────────────────────────────────────────
 
 /**
+ * Map RawObservation to SourceKind.
+ *
+ * This is the unified entry point for source-kind classification.
+ * It replaces the scattered resolveSourceKindFrom* functions.
+ */
+export { resolveSourceKind } from './raw-observation-adapter.js';
+
+/**
  * Map after_tool_call hook context to SourceKind.
  *
- * Classifies based on:
- * - toolName: 'pain' or 'skill:pain' → agent_on_owner_request
- * - failureSource: 'dispatch_error' vs 'tool_failure'
- * - isRisky + score: only used for rulehost_block upgrade, not for kind resolution
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromToolFailure(
-  toolName: string | undefined,
-  failureSource: 'tool_failure' | 'dispatch_error',
-  provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook',
-): SourceKind {
-  // Manual pain via agent tool call
-  if (toolName === 'pain' || toolName === 'skill:pain') {
-    return provenance === 'openclaw_context_bound' ? 'agent_on_owner_request' : 'owner_reported';
-  }
-
-  // Dispatch errors (tool not found, unknown tool)
-  if (failureSource === 'dispatch_error') {
-    return 'dispatch_error';
-  }
-
-  // Regular tool failure
-  return 'tool_failure';
-}
+export { resolveSourceKindFromToolFailure } from './raw-observation-adapter.js';
 
 /**
  * Map empathy/semantic detection context to SourceKind.
  *
- * Classifies based on detection source prefix:
- * - 'llm_paralysis' → llm_paralysis
- * - 'llm_*' (detection rule) → semantic
- * - 'user_empathy' or empathy keyword match → empathy_inferred
- * - GFI threshold crossed → gfi_threshold
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromLlmDetection(
-  detectionSource: string,
-  isGfiTriggered: boolean,
-): SourceKind {
-  if (isGfiTriggered) return 'gfi_threshold';
-  if (detectionSource === 'llm_paralysis') return 'llm_paralysis';
-  if (detectionSource.startsWith('llm_')) return 'semantic';
-  if (detectionSource === 'user_empathy') return 'empathy_inferred';
-  return 'unknown';
-}
+export { resolveSourceKindFromLlmDetection } from './raw-observation-adapter.js';
 
 /**
  * Map gate-block context to SourceKind.
+ *
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromGateBlock(): SourceKind {
-  return 'rulehost_block';
-}
+export { resolveSourceKindFromGateBlock } from './raw-observation-adapter.js';
 
 /**
  * Map /pd-pain command to SourceKind.
+ *
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromCommand(): SourceKind {
-  return 'owner_reported';
-}
+export { resolveSourceKindFromCommand } from './raw-observation-adapter.js';
 
 /**
  * Map provider/rate-limit failure to SourceKind.
+ *
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromProvider(
-  isRateLimit: boolean,
-): SourceKind {
-  return isRateLimit ? 'rate_limit' : 'provider_failure';
-}
+export { resolveSourceKindFromProvider } from './raw-observation-adapter.js';
 
 /**
  * Map subagent error to SourceKind.
+ *
+ * @deprecated Use resolveSourceKind directly with RawObservation.
  */
-export function resolveSourceKindFromSubagent(): SourceKind {
-  return 'subagent_error';
-}
+export { resolveSourceKindFromSubagent } from './raw-observation-adapter.js';
 
 // ── Triage Evaluation ───────────────────────────────────────────────────────
 
