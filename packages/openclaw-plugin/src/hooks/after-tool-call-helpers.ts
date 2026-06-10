@@ -25,7 +25,6 @@ import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolutio
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isCooldownActive as isTriggerCooldownActive, markEpisodeAsDiagnosed, clearCooldownState } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
-import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
@@ -40,8 +39,13 @@ import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from
  * Extracts exitCode logic, determines failure/success, classifies failure source.
  */
 export function classifyToolCallOutcome(event: PluginHookAfterToolCallEvent): ToolCallOutcome {
-  const resultObj = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : null;
-  const details = resultObj?.details && typeof resultObj.details === 'object' ? resultObj.details as Record<string, unknown> : null;
+  // EP-01: Validate event.result at runtime instead of `as` cast
+  const resultObj = (event.result && typeof event.result === 'object' && !Array.isArray(event.result))
+    ? event.result as Record<string, unknown>  // safe: guarded by typeof + Array.isArray checks above
+    : null;
+  const details = (resultObj && resultObj.details && typeof resultObj.details === 'object' && !Array.isArray(resultObj.details))
+    ? resultObj.details as Record<string, unknown>  // safe: guarded by typeof + Array.isArray checks above
+    : null;
   const topExitCode = resultObj?.exitCode;
   const detailExitCode = details?.exitCode;
 
@@ -346,7 +350,7 @@ export function evaluatePainAdmissionForToolCall(
   sessionState: SessionState | undefined,
   sessionId: string,
   workspaceDir: string,
-  config: { get: (key: string) => unknown },
+  _config: { get: (key: string) => unknown },
 ): PainAdmissionDecision {
   // Only write-tool failures enter the pain path
   if (!WRITE_TOOLS.includes(event.toolName) || !outcome.isFailure) {
@@ -368,10 +372,11 @@ export function evaluatePainAdmissionForToolCall(
     TRIGGER_COOLDOWN_MAP,
   );
 
-  // PEAT-B1: Evidence triage (with consecutiveErrors for upgrade logic)
+  // PEAT-B1: Evidence triage (with consecutiveErrors and isRisky for upgrade logic)
   const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
   const triage = evaluateEvidenceTriage(sourceKind, observation.painScore, {
     consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors,
+    isRisky: observation.isRisk,
   });
 
   // PEAT-B2: Trigger controller — single source of truth for task creation

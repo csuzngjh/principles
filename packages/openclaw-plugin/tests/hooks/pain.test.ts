@@ -7,7 +7,7 @@ import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
-import { resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
+import { resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 
 vi.mock('fs');
@@ -140,12 +140,12 @@ describe('Post-Write Checks & Pain Hook', () => {
     mockEmitSync.mockReset();
     mockRecordProbationFeedback.mockReset();
     mockUpdatePrincipleValueMetrics.mockReset();
-    vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(mockWctx as any);
+    vi.spyOn(WorkspaceContext, 'fromHookContextExplicit').mockReturnValue(mockWctx as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue(mockEventLog as any);
     clearSession('s-success');
     clearSession('s-low-value-failure');
     clearSession('s-repeated-failure');
-    resetPainDiagnosticGateForTest();
+    resetTriggerCooldownForTest();
   });
 
   afterEach(() => {
@@ -158,7 +158,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     
     // Should still create context
-    expect(WorkspaceContext.fromHookContext).toHaveBeenCalled();
+    expect(WorkspaceContext.fromHookContextExplicit).toHaveBeenCalled();
     expect(fs.writeFileSync).not.toHaveBeenCalled();
     expect(mockEmitSync).not.toHaveBeenCalled();
   });
@@ -178,7 +178,7 @@ describe('Post-Write Checks & Pain Hook', () => {
 
     handleAfterToolCall(mockEvent as any, mockCtx as any, mockApi as any);
 
-    expect(WorkspaceContext.fromHookContext).not.toHaveBeenCalled();
+    expect(WorkspaceContext.fromHookContextExplicit).not.toHaveBeenCalled();
     expect(mockEmitSync).not.toHaveBeenCalled();
   });
 
@@ -221,6 +221,13 @@ describe('Post-Write Checks & Pain Hook', () => {
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
+    // PRI-363: trigger controller requires consecutiveErrors >= 4 for upgrade
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    expect(mockEmitSync).not.toHaveBeenCalled();
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    expect(mockEmitSync).not.toHaveBeenCalled();
+
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(mockEmitSync).not.toHaveBeenCalled();
 
@@ -231,7 +238,6 @@ describe('Post-Write Checks & Pain Hook', () => {
       data: expect.objectContaining({
         painType: 'tool_failure',
         source: 'write',
-        reason: expect.stringContaining('diagnosticGate=high_gfi'),
       }),
     }));
     expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
@@ -309,6 +315,8 @@ describe('Post-Write Checks & Pain Hook', () => {
       contextTags: ['write'],
     });
 
+    // PRI-363: risky high-score write triggers admission via trigger controller
+    // (isRisky=true + score >= 70 → risky_high_score upgrade → admit)
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
     expect(mockUpdatePrincipleValueMetrics).toHaveBeenCalledWith(
@@ -652,7 +660,7 @@ describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    resetPainDiagnosticGateForTest();
+    resetTriggerCooldownForTest();
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
   });
 
@@ -672,29 +680,27 @@ describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
     expect(result.stage).toBe('not_applicable');
   });
 
-  it('returns triage_evidence_only when feature flag on and tool_failure triage rejects', () => {
+  it('returns trigger_rejected when tool_failure triage rejects', () => {
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
 
     const result = evaluatePainAdmissionForToolCall(
       { toolName: 'write' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
     );
-    expect(result.stage).toBe('triage_evidence_only');
+    expect(result.stage).toBe('trigger_rejected');
     expect(result.admitted).toBe(false);
     expect(result.reason).toBeTruthy();
   });
 
-  it('returns gate_admitted when consecutive errors exceed repeatedFailure threshold', () => {
+  it('returns trigger_admitted when consecutive errors exceed repeatedFailure threshold', () => {
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
-    // consecutiveErrors=5 >= default repeatedFailure threshold of 4 → gate admits via repeated_failure
+    // consecutiveErrors=5 >= default repeatedFailure threshold of 4 → trigger admits via repeated_failure
     const highConsecutiveState = { currentGfi: 0, consecutiveErrors: 5, lastErrorHash: 'abc123' } as any;
 
     const result = evaluatePainAdmissionForToolCall(
       { toolName: 'write' } as any, baseObservation, baseOutcome, highConsecutiveState, undefined, 's-gate-admitted-test', workspaceDir, mockConfig
     );
-    expect(result.stage).toBe('gate_admitted');
+    expect(result.stage).toBe('trigger_admitted');
     expect(result.admitted).toBe(true);
-    expect(result.gateResult?.shouldDiagnose).toBe(true);
-    expect(result.gateResult?.reason).toBe('repeated_failure');
   });
 
   it('includes reason and detail in every decision', () => {
