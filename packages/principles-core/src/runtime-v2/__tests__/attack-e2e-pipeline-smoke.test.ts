@@ -350,6 +350,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
       painType: 'tool_failure',
       source: 'write',
       reason: 'Attack test: empty recommendations',
+      evidence: [{ sourceRef: 'attack-test', note: 'Attack test evidence entry' }],
     });
 
     expect(result.status).toBe('failed');
@@ -420,6 +421,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
       painType: 'tool_failure' as const,
       source: 'write',
       reason: 'Duplicate pain test',
+      evidence: [{ sourceRef: 'attack-test', note: 'Attack test evidence entry' }],
     };
 
     await bridge.onPainDetected(painData);
