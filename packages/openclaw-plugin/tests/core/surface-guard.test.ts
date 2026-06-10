@@ -278,17 +278,17 @@ describe('surface-guard', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
       const service: OpenClawPluginService = { id: 'test-service' };
 
-      // First registration call: the disabled reason is logged once.
-      const first = guardService('service:trajectory', service, mockLogger);
+      // service:evolution-worker is quiet/disabled — use it for the rate-limit test.
+      const first = guardService('service:evolution-worker', service, mockLogger);
       expect(first).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('SKIP service service:trajectory'),
+        expect.stringContaining('SKIP service service:evolution-worker'),
       );
 
       // Subsequent guardService calls for the same surfaceId stay silent.
-      guardService('service:trajectory', service, mockLogger);
-      guardService('service:trajectory', service, mockLogger);
+      guardService('service:evolution-worker', service, mockLogger);
+      guardService('service:evolution-worker', service, mockLogger);
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
     });
   });
