@@ -24,24 +24,26 @@ import {
   PromptWriter,
   DeferArchiveWriter,
 } from '../low-risk-writers';
-import type { PIArtifactSnapshot, CanActivateResult, WriterInput, WriterResult, PIArtifactValidationStatus } from '../activation-types';
+import type { PIArtifactSnapshot, PIArtifactValidationStatus, WriterInput } from '../activation-types';
 
 // ── extractPrincipleId Tests ──────────────────────────────────────────────────
 
-function createArtifact(
-  contentJson: string,
-  sourcePrincipleId?: string,
-  artifactKind: 'principle' | 'rule' = 'principle',
-  validationStatus: PIArtifactValidationStatus = 'validated',
-): PIArtifactSnapshot {
+interface CreateArtifactInput {
+  contentJson: string;
+  sourcePrincipleId?: string;
+  artifactKind?: 'principle' | 'rule';
+  validationStatus?: PIArtifactValidationStatus;
+}
+
+function createArtifact(input: CreateArtifactInput): PIArtifactSnapshot {
   return {
     artifactId: 'art-001',
-    artifactKind,
+    artifactKind: input.artifactKind ?? 'principle',
     sourceTaskId: 'task-001',
-    sourcePrincipleId,
+    sourcePrincipleId: input.sourcePrincipleId,
     lineageArtifactIds: [],
-    validationStatus,
-    contentJson,
+    validationStatus: input.validationStatus ?? 'validated',
+    contentJson: input.contentJson,
     createdAt: '2026-05-17T00:00:00Z',
     updatedAt: '2026-05-17T00:00:00Z',
   };
@@ -50,180 +52,180 @@ function createArtifact(
 describe('extractPrincipleId', () => {
   // Source principle ID from artifact property
   it('extracts principle ID from sourcePrincipleId property', () => {
-    const artifact = createArtifact('{}', 'PRI-001');
+    const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: 'PRI-001' });
     expect(extractPrincipleId(artifact)).toBe('PRI-001');
   });
 
   it('extracts principle ID from sourcePrincipleId with whitespace', () => {
-    const artifact = createArtifact('{}', '  PRI-002  ');
+    const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: '  PRI-002  ' });
     expect(extractPrincipleId(artifact)).toBe('PRI-002');
   });
 
   it('returns null for empty sourcePrincipleId', () => {
-    const artifact = createArtifact('{}', '');
+    const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: '' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for whitespace-only sourcePrincipleId', () => {
-    const artifact = createArtifact('{}', '   ');
+    const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: '   ' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   // Content JSON extraction
   it('extracts principle ID from contentJson principleId field', () => {
-    const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-003' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-003' }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-003');
   });
 
   it('extracts principle ID from contentJson sourcePrincipleId field', () => {
-    const artifact = createArtifact(JSON.stringify({ sourcePrincipleId: 'PRI-004' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ sourcePrincipleId: 'PRI-004' }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-004');
   });
 
   it('extracts principle ID from contentJson principleDraft.title field', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: { title: 'PRI-005' },
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-005');
   });
 
   // Priority: sourcePrincipleId property takes precedence over contentJson
   it('sourcePrincipleId property takes precedence over contentJson', () => {
-    const artifact = createArtifact(
-      JSON.stringify({ principleId: 'PRI-006' }),
-      'PRI-007',
-    );
+    const artifact = createArtifact({
+      contentJson: JSON.stringify({ principleId: 'PRI-006' }),
+      sourcePrincipleId: 'PRI-007',
+    });
     expect(extractPrincipleId(artifact)).toBe('PRI-007');
   });
 
   // Whitespace trimming
   it('trims whitespace from principleId in contentJson', () => {
-    const artifact = createArtifact(JSON.stringify({ principleId: '  PRI-008  ' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: '  PRI-008  ' }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-008');
   });
 
   it('trims whitespace from sourcePrincipleId in contentJson', () => {
-    const artifact = createArtifact(JSON.stringify({ sourcePrincipleId: '  PRI-009  ' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ sourcePrincipleId: '  PRI-009  ' }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-009');
   });
 
   it('trims whitespace from principleDraft.title', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: { title: '  PRI-010  ' },
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-010');
   });
 
   // Empty/invalid contentJson
   it('returns null for empty contentJson', () => {
-    const artifact = createArtifact('');
+    const artifact = createArtifact({ contentJson: '' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for invalid JSON contentJson', () => {
-    const artifact = createArtifact('not valid json');
+    const artifact = createArtifact({ contentJson: 'not valid json' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for JSON array contentJson', () => {
-    const artifact = createArtifact('[1, 2, 3]');
+    const artifact = createArtifact({ contentJson: '[1, 2, 3]' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for JSON primitive contentJson', () => {
-    const artifact = createArtifact('"just a string"');
+    const artifact = createArtifact({ contentJson: '"just a string"' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for JSON null contentJson', () => {
-    const artifact = createArtifact('null');
+    const artifact = createArtifact({ contentJson: 'null' });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   // Empty principle ID fields
   it('returns null for empty principleId in contentJson', () => {
-    const artifact = createArtifact(JSON.stringify({ principleId: '' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: '' }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for empty sourcePrincipleId in contentJson', () => {
-    const artifact = createArtifact(JSON.stringify({ sourcePrincipleId: '' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ sourcePrincipleId: '' }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for empty principleDraft.title', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: { title: '' },
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for non-string principleId', () => {
-    const artifact = createArtifact(JSON.stringify({ principleId: 123 }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 123 }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for non-string sourcePrincipleId', () => {
-    const artifact = createArtifact(JSON.stringify({ sourcePrincipleId: null }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ sourcePrincipleId: null }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for non-object principleDraft', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: 'not an object',
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   it('returns null for non-string principleDraft.title', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: { title: 456 },
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   // Complex contentJson structures
   it('extracts from nested JSON structure', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       metadata: { version: '1.0' },
       principleId: 'PRI-011',
       content: 'Some content',
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-011');
   });
 
   it('returns null when no principle ID fields present', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       title: 'Some Title',
       description: 'Some description',
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   // Boundary: principleDraft without title
   it('returns null for principleDraft without title field', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleDraft: { description: 'No title here' },
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBeNull();
   });
 
   // Real-world patterns
   it('extracts from typical principle artifact content', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       principleId: 'PRI-012',
       title: 'Test Principle',
       description: 'A test principle for validation',
       ruleIds: ['RULE-001'],
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-012');
   });
 
   it('extracts from artifact with sourcePrincipleId reference', () => {
-    const artifact = createArtifact(JSON.stringify({
+    const artifact = createArtifact({ contentJson: JSON.stringify({
       sourcePrincipleId: 'PRI-013',
       derivedFrom: 'original principle',
-    }));
+    }) });
     expect(extractPrincipleId(artifact)).toBe('PRI-013');
   });
 });
@@ -239,18 +241,17 @@ describe('PromptWriter', () => {
 
   describe('canActivate', () => {
     it('returns ok:true for validated principle artifact with principle ID', async () => {
-      const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
 
     it('returns ok:false for non-principle artifact kind', async () => {
-      const artifact = createArtifact(
-        JSON.stringify({ principleId: 'PRI-002' }),
-        undefined,
-        'rule',
-      );
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleId: 'PRI-002' }),
+        artifactKind: 'rule',
+      });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('artifact_kind_not_principle');
@@ -258,12 +259,10 @@ describe('PromptWriter', () => {
     });
 
     it('returns ok:false for pending validation status', async () => {
-      const artifact = createArtifact(
-        JSON.stringify({ principleId: 'PRI-003' }),
-        undefined,
-        'principle',
-        'pending',
-      );
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleId: 'PRI-003' }),
+        validationStatus: 'pending',
+      });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('artifact_validation_status_pending');
@@ -271,12 +270,10 @@ describe('PromptWriter', () => {
     });
 
     it('returns ok:false for rejected validation status', async () => {
-      const artifact = createArtifact(
-        JSON.stringify({ principleId: 'PRI-004' }),
-        undefined,
-        'principle',
-        'rejected',
-      );
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleId: 'PRI-004' }),
+        validationStatus: 'rejected',
+      });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('artifact_validation_status_rejected');
@@ -284,7 +281,7 @@ describe('PromptWriter', () => {
     });
 
     it('returns ok:false for artifact without principle ID', async () => {
-      const artifact = createArtifact('{}');
+      const artifact = createArtifact({ contentJson: '{}' });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('no_principle_id_in_artifact');
@@ -292,7 +289,7 @@ describe('PromptWriter', () => {
     });
 
     it('returns ok:false for artifact with empty contentJson', async () => {
-      const artifact = createArtifact('');
+      const artifact = createArtifact({ contentJson: '' });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('no_principle_id_in_artifact');
@@ -300,7 +297,7 @@ describe('PromptWriter', () => {
     });
 
     it('returns ok:true when sourcePrincipleId property is present', async () => {
-      const artifact = createArtifact('{}', 'PRI-005');
+      const artifact = createArtifact({ contentJson: '{}', sourcePrincipleId: 'PRI-005' });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
@@ -309,7 +306,7 @@ describe('PromptWriter', () => {
 
   describe('activate', () => {
     it('creates activation record with correct format', async () => {
-      const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
       const input: WriterInput = {
         artifactId: 'art-001',
         channel: 'prompt',
@@ -324,7 +321,7 @@ describe('PromptWriter', () => {
     });
 
     it('ignores artifact in activate (uses input.principleId)', async () => {
-      const artifact = createArtifact('{}'); // No principle ID
+      const artifact = createArtifact({ contentJson: '{}' }); // No principle ID
       const input: WriterInput = {
         artifactId: 'art-002',
         channel: 'prompt',
@@ -337,7 +334,7 @@ describe('PromptWriter', () => {
     });
 
     it('creates unique activationId per principleId', async () => {
-      const artifact = createArtifact('{}');
+      const artifact = createArtifact({ contentJson: '{}' });
       const input1: WriterInput = {
         artifactId: 'art-001',
         channel: 'prompt',
@@ -370,18 +367,17 @@ describe('DeferArchiveWriter', () => {
 
   describe('canActivate', () => {
     it('returns ok:true for validated principle artifact with principle ID', async () => {
-      const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(true);
       expect(result.riskLevel).toBe('low');
     });
 
     it('returns ok:false for non-principle artifact kind', async () => {
-      const artifact = createArtifact(
-        JSON.stringify({ principleId: 'PRI-002' }),
-        undefined,
-        'rule',
-      );
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleId: 'PRI-002' }),
+        artifactKind: 'rule',
+      });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('artifact_kind_not_principle');
@@ -389,12 +385,10 @@ describe('DeferArchiveWriter', () => {
     });
 
     it('returns ok:false for pending validation status', async () => {
-      const artifact = createArtifact(
-        JSON.stringify({ principleId: 'PRI-003' }),
-        undefined,
-        'principle',
-        'pending',
-      );
+      const artifact = createArtifact({
+        contentJson: JSON.stringify({ principleId: 'PRI-003' }),
+        validationStatus: 'pending',
+      });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('artifact_validation_status_pending');
@@ -402,7 +396,7 @@ describe('DeferArchiveWriter', () => {
     });
 
     it('returns ok:false for artifact without principle ID', async () => {
-      const artifact = createArtifact('{}');
+      const artifact = createArtifact({ contentJson: '{}' });
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('no_principle_id_in_artifact');
@@ -412,10 +406,10 @@ describe('DeferArchiveWriter', () => {
     it('shares same validation logic as PromptWriter', async () => {
       const promptWriter = new PromptWriter();
       const artifacts = [
-        createArtifact(JSON.stringify({ principleId: 'PRI-001' })),
-        createArtifact('{}', undefined, 'rule'),
-        createArtifact('{}', undefined, 'principle', 'pending'),
-        createArtifact('{}'),
+        createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) }),
+        createArtifact({ contentJson: '{}', artifactKind: 'rule' }),
+        createArtifact({ contentJson: '{}', validationStatus: 'pending' }),
+        createArtifact({ contentJson: '{}' }),
       ];
       for (const artifact of artifacts) {
         const promptResult = await promptWriter.canActivate(artifact);
@@ -430,7 +424,7 @@ describe('DeferArchiveWriter', () => {
 
   describe('activate', () => {
     it('creates activation record with defer_archive action', async () => {
-      const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+      const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
       const input: WriterInput = {
         artifactId: 'art-001',
         channel: 'defer_archive',
@@ -445,7 +439,7 @@ describe('DeferArchiveWriter', () => {
     });
 
     it('targetRef includes #archived suffix', async () => {
-      const artifact = createArtifact('{}');
+      const artifact = createArtifact({ contentJson: '{}' });
       const input: WriterInput = {
         artifactId: 'art-002',
         channel: 'defer_archive',
@@ -459,7 +453,7 @@ describe('DeferArchiveWriter', () => {
 
     it('creates different activationId format than PromptWriter', async () => {
       const promptWriter = new PromptWriter();
-      const artifact = createArtifact('{}');
+      const artifact = createArtifact({ contentJson: '{}' });
       const promptInput: WriterInput = {
         artifactId: 'art-001',
         channel: 'prompt',
@@ -492,9 +486,9 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
     const archiveWriter = new DeferArchiveWriter();
 
     const invalidArtifacts = [
-      createArtifact('{}', undefined, 'rule'), // wrong kind
-      createArtifact('{}', undefined, 'principle', 'pending'), // wrong status
-      createArtifact('{}'), // no principle ID
+      createArtifact({ contentJson: '{}', artifactKind: 'rule' }), // wrong kind
+      createArtifact({ contentJson: '{}', validationStatus: 'pending' }), // wrong status
+      createArtifact({ contentJson: '{}' }), // no principle ID
     ];
 
     for (const artifact of invalidArtifacts) {
@@ -509,7 +503,7 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
     const promptWriter = new PromptWriter();
     const archiveWriter = new DeferArchiveWriter();
 
-    const validArtifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+    const validArtifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
 
     const promptResult = await promptWriter.canActivate(validArtifact);
     const archiveResult = await archiveWriter.canActivate(validArtifact);
@@ -523,7 +517,7 @@ describe('integration: PromptWriter + DeferArchiveWriter', () => {
   it('both writers produce different activation records for same principle', async () => {
     const promptWriter = new PromptWriter();
     const archiveWriter = new DeferArchiveWriter();
-    const artifact = createArtifact(JSON.stringify({ principleId: 'PRI-001' }));
+    const artifact = createArtifact({ contentJson: JSON.stringify({ principleId: 'PRI-001' }) });
 
     const promptResult = await promptWriter.activate({
       artifactId: 'art-001',

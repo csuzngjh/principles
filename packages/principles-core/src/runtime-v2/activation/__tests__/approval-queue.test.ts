@@ -419,7 +419,7 @@ describe('ApprovalQueue', () => {
       riskLevel: 'medium',
     }, '2026-05-17T00:00:00Z');
 
-    const created3 = await queue.enqueue({
+    await queue.enqueue({
       artifactId: 'art-003',
       channel: 'skill',
       riskLevel: 'medium',

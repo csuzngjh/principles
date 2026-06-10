@@ -84,19 +84,19 @@ function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOu
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-m9-${process.pid}`);
 
 describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let testDir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let stateManager: RuntimeStateManager;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let sqliteConn: SqliteConnection;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let contextAssembler: SqliteContextAssembler;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let eventEmitter: StoreEventEmitter;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let ledgerAdapter: InMemoryLedgerAdapter;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let intakeService: CandidateIntakeService;
 
   beforeEach(async () => {
@@ -149,7 +149,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
       autoIntakeEnabled: true,
     });
 
-    const result = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test failure', evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }] });
+    const result = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test failure', evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }] });
 
     expect(result.status).toBe('succeeded');
     expect(result.painId).toBe(painId);
@@ -189,7 +189,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
       autoIntakeEnabled: true,
     });
 
-    const result1 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test', evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }] });
+    const result1 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test', evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }] });
     expect(result1.status).toBe('succeeded');
 
     const db = sqliteConn.getDb();
@@ -198,7 +198,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
     const firstLedgerCount = result1.ledgerEntryIds.length;
 
     // Second call — same painId, NOOP path (task already succeeded)
-    const result2 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test' });
+    const result2 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test', evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }] });
     expect(result2.status).toBe('succeeded');
 
     const secondCandidates = db.prepare('SELECT * FROM principle_candidates WHERE task_id = ?').all(expectedTaskId) as { candidate_id: string }[];

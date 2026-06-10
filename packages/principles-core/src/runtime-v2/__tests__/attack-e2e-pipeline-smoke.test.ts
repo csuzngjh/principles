@@ -350,7 +350,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
       painType: 'tool_failure',
       source: 'write',
       reason: 'Attack test: empty recommendations',
-      evidence: [{ sourceRef: 'attack-test', note: 'Attack test evidence entry' }],
+      evidence: [{ sourceRef: 'test', note: 'Attack test evidence' }],
     });
 
     expect(result.status).toBe('failed');
