@@ -212,8 +212,7 @@ export interface RedactedPdConfigSummary {
 
 export const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-// ── OpenClaw Plugin Config Keys (PRI-343) ──────────────────────────────────
-// Shared constant for the hooks.allowConversationAccess field in
-// openclaw.json plugins.entries['principles-disciple'].hooks.
+// ── Conversation Access Config Key (PRI-343) ────────────────────────────────
+// Shared constant for the allowConversationAccess field in plugin hooks.
 // Used by both the installer and the plugin health check to ensure consistency.
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;

@@ -40,7 +40,7 @@ export class EmpathyObserver {
 
   constructor(deps: EmpathyObserverDeps, options?: EmpathyObserverOptions) {
     this.runtimeAdapter = deps.runtimeAdapter;
-    this.timeoutMs = options?.timeoutMs ?? 30_000;
+    this.timeoutMs = options?.timeoutMs ?? 120_000;
     this.agentId = options?.agentId ?? 'empathy-observer';
   }
 
