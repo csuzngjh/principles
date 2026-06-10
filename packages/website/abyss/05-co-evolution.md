@@ -2,7 +2,7 @@
 
 **Subtitle**: From Execution Bandwidth to Intention Bandwidth: How PD Helps Humans Retake the Steering Wheel
 
-![Cover Illustration Prompt: Dark blue-black background. An abstract human Owner sits at a steering wheel/console resembling a spaceship. Ahead is not a normal road, but a star map composed of Agent toolchains, feedback loops, rule nodes, and long-term goals. To the right is a powerful blue-purple Agent engine; to the left, amber human value anchors. Overall style: restrained, semi-abstract, futuristic engineering fable, premium texture. No cheap cyberpunk, no concrete robot faces, no readable text, 21:9 banner.]()
+![Cover Illustration Prompt: Dark blue-black background. An abstract human Owner sits at a steering wheel/console resembling a spaceship. Ahead is not a normal road, but a star map composed of Agent toolchains, feedback loops, rule nodes, and long-term goals. To the right is a powerful blue-purple Agent engine; to the left, amber human value anchors. Overall style: restrained, semi-abstract, futuristic engineering fable, premium texture. No cheap cyberpunk, no concrete robot faces, no readable text, 21:9 banner.](/images/abyss/05/abyss-05-cover.png)
 
 ---
 
@@ -257,7 +257,7 @@ They are often vague, implicit, contextual, and sometimes even the Owner isn't f
 
 Thus, many collaboration failures aren't due to the Agent lacking execution ability, but because the Owner cannot transmit their true intent to the Agent without heavy loss.
 
-![Illustration Prompt: On the left, the human Owner's mental/cognitive space, containing vague fragments of experience, pain, goals, boundaries, and intuition; on the right, the massive Agent execution engine and tool network. Between them is only a narrow, glowing channel, filled with information compression, distortion, blockage, and amber bottleneck nodes. The theme is "Intention Bandwidth Bottleneck." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.]()
+![Illustration Prompt: On the left, the human Owner's mental/cognitive space, containing vague fragments of experience, pain, goals, boundaries, and intuition; on the right, the massive Agent execution engine and tool network. Between them is only a narrow, glowing channel, filled with information compression, distortion, blockage, and amber bottleneck nodes. The theme is "Intention Bandwidth Bottleneck." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-intention-bandwidth.png)
 
 This echoes John Boyd's OODA Loop:
 
@@ -377,7 +377,7 @@ The Owner should not be the system's customer service representative.
 
 The Owner should be the system's Supreme Court.
 
-![Illustration Prompt: A semi-abstract vision of a future tribunal/control room: massive blue-purple data streams, error signals, and principle proposals swirl on the periphery, but only a few filtered, amber high-value cases are delivered to the Owner's bench/console in the center. The image emphasizes attention protection, information filtering, and the Supreme Court metaphor. No concrete human faces, no text, dark blue-black background, premium and restrained, 21:9.]()
+![Illustration Prompt: A semi-abstract vision of a future tribunal/control room: massive blue-purple data streams, error signals, and principle proposals swirl on the periphery, but only a few filtered, amber high-value cases are delivered to the Owner's bench/console in the center. The image emphasizes attention protection, information filtering, and the Supreme Court metaphor. No concrete human faces, no text, dark blue-black background, premium and restrained, 21:9.](/images/abyss/05/abyss-05-attention-court.png)
 
 This isn't about elevating the Owner's status, but about protecting the system's most critical value generator from burning out.
 
