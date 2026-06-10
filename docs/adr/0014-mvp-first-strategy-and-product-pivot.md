@@ -94,6 +94,7 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
 | pd-console 三页（Pain / Principle / Approval）| 待精简 |
 | pd-cli 核心命令 (`pd diagnose run` / `pd status` / `pd trace show` / `pd activation list`) | 已落地 |
 | PainChainReadModel | 已落地 |
+| **Trajectory Collector** (hooks + service) | 已落地。从 MVP-Quiet 升级为 MVP-Core（PRI-353）：PainChain 和诊断链路依赖 trajectory 数据构建 evidence，关闭时诊断代理只能 defer |
 
 ### 2.5 MVP-Quiet 清单（关闭，留代码）
 
@@ -108,7 +109,7 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
 | Shadow Observation / Local Worker Routing | OpenClaw 内部优化，外部用户不可见 |
 | Central Sync Service | 跨工作区，MVP 单 workspace |
 | message-sanitize hook | COMPONENTS.md 自标"建议删除" |
-| Trajectory Collector（默认开关）| 评估后决定；如果 PainChain 不依赖则关闭 |
+| ~~Trajectory Collector（默认开关）~~ | ~~评估后决定；如果 PainChain 不依赖则关闭~~ → 已升级为 MVP-Core（PRI-353） |
 | **skill 通道** + SkillFileWriter | 尚未实施且没有客户验证；仅在需求被观察后重新评估 |
 
 ### 2.6 MVP-Gone 清单（删除/归档）

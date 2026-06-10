@@ -1,4 +1,4 @@
-# Episode V | Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems
+# Series 5 | Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems
 
 **Subtitle**: From Execution Bandwidth to Intention Bandwidth: How PD Helps Humans Retake the Steering Wheel
 
@@ -546,7 +546,451 @@ It is also the Owner, through iteration after iteration of feedback, stepping ev
 
 ---
 
-## 07 Where Are the True Leverage Points?
+## 07 Feedback Loops: How Does PD Evolve from a Single Correction to Long-Term Evolution?
+
+As we've been discussing "co-evolution", if we unpack this term, it is not just a heartwarming slogan, but a set of real feedback loops.
+
+Whether a system can evolve depends not on whether it has feedback, but on how it processes that feedback:
+
+Which feedback gets amplified?
+Which feedback gets dampened?
+Which feedback should trigger immediately?
+Which feedback should be delayed, clustered, and compressed before processing?
+Which feedback should enter the Owner's attention?
+Which feedback should remain in the system's background?
+
+PD's governance goal is not to strengthen all feedback, but to enhance the correct feedback loops and dampen the flawed ones.
+
+### Loop 1: The Co-evolution Enhancing Loop
+
+The positive feedback loop PD most wants to form is this:
+
+```text
+High-quality Owner intervention
+→ Pain Evidence is captured
+→ Diagnostician extracts principle
+→ Principle enters Skill / RuleHost / Prompt
+→ Agent's subsequent behavior improves
+→ Owner's trust increases
+→ Owner becomes more willing to make high-quality interventions
+→ System continues to evolve
+```
+
+Once this loop is established, the Owner's intervention is no longer a one-time sunk cost, but a system asset.
+
+The more seriously an Owner provides feedback, the better the system understands their judgment.
+The better the system understands their judgment, the fewer similar mistakes the Agent makes.
+The fewer similar mistakes the Agent makes, the more willing the Owner is to invest high-quality attention.
+
+This is the co-evolution flywheel PD strives for.
+
+### Loop 2: The Attention Overload Vicious Loop
+
+But feedback loops aren't always positive.
+
+If the system is poorly designed, a vicious loop quickly emerges:
+
+```text
+Agent deviations increase
+→ System reports massive Pain
+→ Low-quality principle proposals increase
+→ Owner suffers approval fatigue
+→ Flawed principles enter the system
+→ Agent behavior becomes more chaotic
+→ More deviations occur
+```
+
+This is the Attention Overload Loop mentioned earlier.
+
+Its danger lies in the fact that the system superficially appears to be "learning actively," but in reality, it is burning the Owner's attention on low-quality governance.
+
+This kind of system gets noisier.
+Heavier.
+More annoying.
+
+Eventually, the Owner loses patience and begins blindly approving, or gives up on governance entirely.
+Once the Owner gives up governance, PD loses its source of value.
+
+### Loop 3: The Rule Debt Loop
+
+Episode IV discussed rule explosions.
+
+From a system dynamics perspective, this is also a feedback loop:
+
+```text
+More Pain
+→ More principles
+→ More rules
+→ More activation noise
+→ Agent becomes overly conservative or chaotic
+→ Task completion quality drops
+→ New Pain increases
+→ System continues to generate more rules
+```
+
+This is the rule debt loop.
+
+The problem with many systems is not that they "don't learn," but that they learn "too fragmentedly, too hastily, and too shallowly."
+
+Every pain generates a rule.
+Every exception gets a patch.
+Every failure stuffs a reminder into the Prompt.
+
+In the end, the system superficially accumulates a lot of wisdom, but actually takes on massive debt.
+
+A truly mature system must be able to distinguish:
+
+> Which pain is worth precipitating?
+> Which pain is just noise?
+> Which principles should be retained?
+> Which rules should be pruned?
+> Which experiences have been overridden by model capabilities and should exit the stage?
+
+Smart systems don't just remember.
+Smart systems also forget.
+
+---
+
+## 08 Feedback Delay: Why Late Feedback Causes System Oscillation?
+
+When discussing feedback loops, one variable is particularly easy to underestimate:
+
+> **Feedback Delay.**
+
+Feedback delay is the time gap between an event occurring and the system capturing, understanding, and processing it, to ultimately altering future behavior.
+
+In PD, this delay can appear in many places:
+
+```text
+Agent makes an error → Owner discovers it
+Owner discovers it → Pain Evidence is recorded
+Pain is recorded → Diagnostician completes post-mortem
+Principle is extracted → Owner approves
+Owner approves → Deployed to Skill / RuleHost
+Deployment complete → Agent demonstrates behavioral delta in similar tasks
+```
+
+This pipeline looks natural, but every segment contains delays.
+Once the delay is too long, the system faces three types of problems.
+
+### First, Broken Causal Chains
+
+If feedback arrives too late, both the Owner and the system forget what actually happened.
+
+The error scene has dissipated.
+The context is lost.
+Why the Agent did what it did, why the Owner was angry, and what the real pain point was—all become blurred.
+
+Thus, the diagnostician can only extract principles based on fragmented information.
+This leads to a very dangerous consequence:
+
+> The system might not learn the true root cause of the accident, but only the superficial traces left behind.
+
+For example, a failed refactoring might actually be caused by "acting before understanding the call chain."
+But if the feedback is late, the system might only remember "too many files were modified this time," thus generating a mechanical rule:
+
+> Do not modify more than 3 files.
+
+This rule seems useful, but it misses the true principle.
+Next time, the Agent might only modify 2 files, yet still cause a disaster because it didn't understand the call chain.
+
+### Second, Deviations Accumulate During the Delay
+
+Feedback delay has an even more practical problem: before the feedback arrives, the system might have already traveled far down the wrong path.
+
+An Agent starts acting based on flawed assumptions.
+The Owner doesn't discover it in time.
+Pain is not triggered in time.
+Diagnosis has not yet occurred.
+Rules have not yet been deployed.
+
+So the Agent keeps executing.
+Keeps modifying.
+Keeps calling tools.
+Keeps expanding the blast radius.
+
+By the time the feedback truly arrives, the system is no longer facing a minor deviation, but a chain of accidents.
+
+This is why high-execution systems are particularly afraid of feedback delay.
+A low-execution human employee deviating for a day might only do one or two things wrong.
+A high-execution Agent deviating for ten minutes might have modified dozens of files, generated flawed docs, and submitted a batch of mutually polluting patches.
+
+The faster the execution, the more dangerous the feedback delay.
+
+### Third, System Oscillation
+
+Both cybernetics and system dynamics highly emphasize feedback delays.
+Because overly delayed feedback causes the system to "overcorrect."
+
+A simple example:
+If a room is already getting cold, but the thermostat only senses it much later, it turns the heat on full blast; once the room is too hot, it again realizes it too late, and turns the AC on full blast.
+
+The result is not stability, but alternating hot and cold oscillation.
+
+PD is the same.
+If the Owner discovers the Agent has been overly aggressive much later, they might add many strict rules at once.
+With too many rules, the Agent becomes overly conservative.
+The Owner then feels the system is too slow, too timid, and too annoying, and starts relaxing the restrictions.
+Once relaxed, the system deviates again.
+
+This is governance oscillation:
+
+```text
+Deviation
+→ Late feedback
+→ Over-adding rules
+→ System rigidity
+→ Late feedback
+→ Over-relaxing
+→ Deviation again
+```
+
+Many complex systems don't die from a lack of feedback; they die from late feedback, crude feedback, and overreactions.
+
+### Delay Is Not Always Bad
+
+But one thing must be clarified here:
+
+Feedback delay is not always bad.
+
+Some feedback must be fast.
+Some feedback must be slow.
+
+Second-level feedback is suited for hard risks:
+
+```text
+Deleting files
+Executing dangerous commands
+Database migrations
+Unauthorized pushes
+Permission anomalies
+```
+
+These cannot wait for the Owner's evening post-mortem; they must be intercepted immediately by RuleHost or runtime guardrails before tool execution.
+
+Minute-level feedback is suited for task deviations:
+
+```text
+Repeated retries
+Tool loops
+Goal drift
+Rising GFI (Ghost Feedback Index)
+Meaningless Diff expansion
+```
+
+These can first be handled by the system slowing down, prompting, or switching strategies, not necessarily bothering the Owner immediately.
+
+Hour-level feedback is suited for task post-mortems:
+
+```text
+Where did this task go wrong?
+Where were the Owner intervention points?
+Did a recurring pattern emerge?
+Does a Pain Evidence need to be formed?
+```
+
+Day-level or week-level feedback is suited for principle evaluation:
+
+```text
+Did a certain principle actually improve behavior?
+Did a certain rule cause false positives?
+Did a certain Skill reduce the Owner's burden?
+Have certain old guardrails been overridden by stronger model capabilities?
+```
+
+In other words, PD is not trying to turn all feedback into instant feedback.
+
+What PD aims to do is **place different feedback into the correct time scales**.
+
+A truly mature system isn't always "the faster, the better."
+It is fast where it needs to be fast, slow where it needs to be slow, waits when it should wait, and forgets when it should forget.
+
+![Illustration Prompt: A multi-timescale feedback system diagram. The image features five horizontal time tracks: seconds, minutes, hours, days/weeks, and long-term evolution. Each track has different forms of feedback nodes: second-level looks like lightning intercepts, minute-level like deviation alarms, hour-level like post-mortem pods, day/week-level like principle evaluations, and long-term looks like the trajectory of Owner-Agent co-growth. Dark blue-black background, cyan-purple feedback lines, amber key nodes, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-feedback-delay.png)
+
+---
+
+## 09 Bottlenecks and Leverage Points: They Are Not the Same Thing
+
+Having discussed feedback loops and feedback delays, we need to introduce another concept:
+
+> Bottlenecks and leverage points are not the same thing.
+
+They are often used interchangeably, but in PD, they must be clearly distinguished.
+
+**Bottlenecks** answer:
+
+> What is currently constraining the system?
+
+**Leverage points** answer:
+
+> Where can we intervene with the lowest cost to leverage the biggest change?
+
+A bottleneck is the point limiting the system's throughput, quality, or evolutionary speed.
+A leverage point is a high-impact intervention point.
+
+A bottleneck is often a high-leverage point, but a leverage point is not necessarily a bottleneck.
+
+For example:
+
+```text
+Owner Attention = Bottleneck + Leverage Point
+Intention Compression Quality = Bottleneck + Leverage Point
+Feedback Delay Control = Leverage Point, sometimes Bottleneck
+Time Scale Separation = Leverage Point, not necessarily a single Bottleneck
+Rule Dissipation Mechanism = Leverage Point, used to prevent the bottleneck from clogging with debt
+```
+
+This distinction is crucial.
+Because if we treat all leverage points as bottlenecks, we overprotect them, leading to system rigidity.
+If we treat true bottlenecks as ordinary modules, we casually deplete them, leading to system collapse.
+
+### Several Key Bottlenecks in PD
+
+#### First, Owner Cognition Bottleneck
+
+This is the highest-level bottleneck.
+
+The Agent can execute, but the Owner decides the direction.
+The Agent can generate proposals, but the Owner judges what is worth doing.
+The Agent can call tools, but the Owner bears the irreversible consequences.
+
+If the Owner's sense of purpose, judgment, and value hierarchy are unclear, the stronger the Agent, the faster the deviation.
+
+Therefore, the Owner's cognition is not a normal input; it is the system's ceiling.
+
+#### Second, Owner Attention Bottleneck
+
+The Owner cannot process infinite Pain, principle proposals, rule conflicts, and exception approvals.
+If all problems are pushed to the Owner, the Owner degrades from the "Supreme Court" into "System Customer Service."
+
+Once the Owner enters customer service mode, the system's value source gets flooded by low-quality tasks.
+
+#### Third, Intention Compression Bottleneck
+
+The Owner's experience, intuition, pain, and know-how cannot be stuffed into the Agent completely intact.
+They must be compressed.
+
+But the compression quality determines the system's learning quality.
+
+Too specific, it becomes a dead rule.
+Too abstract, it becomes a platitude.
+Only when compressed well does it become a transferable principle.
+
+Therefore, the diagnostician's intention compression capability is also a key bottleneck in PD.
+
+#### Fourth, Structured Input Bottleneck
+
+Different modules need different quality inputs.
+
+The Owner needs actionable cases, not raw logs.
+The Diagnostician needs complete accident scenes, not a single complaint.
+The RuleHost needs structured states, not vague wishes.
+
+If you feed garbage into the bottleneck, the bottleneck will output garbage judgments.
+This is why bottleneck links must be protected.
+
+### Why Must Bottlenecks Be Heavily Protected?
+
+Here we can borrow Eliyahu M. Goldratt's Theory of Constraints (TOC).
+
+The Theory of Constraints has a very simple but powerful intuition:
+
+> The overall throughput of a system is constrained by its narrowest link.
+
+Optimizing a non-bottleneck often just creates localized busyness.
+Protecting the bottleneck is the only way to protect the throughput quality of the entire system.
+
+Applied to PD:
+
+> Wasting a minute of the Agent's time might just be wasting compute.
+> Wasting a minute of the Owner's time might be wasting the entire system's value judgment capability.
+
+Agents can scale horizontally.
+The Owner's high-quality judgment is very hard to scale horizontally.
+
+Models can be swapped.
+Tools can be added.
+Scripts can run in parallel.
+
+But the Owner—who truly understands the project's long-term goals, bears the real consequences, and knows what a certain Pain truly means—is usually only one person, or very few people.
+
+So the Owner is not a normal resource.
+The Owner is the constraint resource.
+
+### Giving Bottlenecks High-Quality, Predictable Inputs
+
+Protecting the bottleneck is not just "keeping it from being too busy."
+More importantly:
+
+> Give the bottleneck high-quality, predictable, and actionable inputs.
+
+What is delivered to the Owner shouldn't be a pile of raw logs, but a "Case Package":
+
+```text
+1. What Pain occurred?
+2. Is this a recurring pattern?
+3. How severe is the impact?
+4. What high-level principle did the Diagnostician extract?
+5. What is the candidate rule or Skill?
+6. What are the potential side effects?
+7. Suggested action: Ignore / Observe / L1 / Skill / RuleHost / Retire
+```
+
+What is delivered to the Diagnostician shouldn't be "The Agent messed up again," but a complete accident scene:
+
+```text
+Goal
+Context
+Trajectory
+Tool Calls
+Modified Content
+Point of Failure
+Owner Intervention Point
+Cost
+Similar History
+```
+
+What is delivered to the RuleHost shouldn't be "Please be careful" (a natural language wish), but structured states:
+
+```text
+Operation Type
+Impacted Files
+Risk Level
+Is Synced?
+Has Tests?
+Needs Approval?
+Current Task Scope
+```
+
+A good system doesn't make the bottleneck busier.
+A good system ensures the bottleneck only processes what it absolutely should process.
+
+This is PD's Owner Constraint Protection.
+
+It contains at least four actions:
+
+```text
+Filter: Filter out low-value inputs
+Cluster: Cluster similar Pains
+Package: Package into actionable cases
+Schedule: Deliver to the Owner at a predictable cadence
+```
+
+The ultimate goal is not to have the Owner manage more, but to ensure every Owner intervention has higher leverage:
+
+```text
+Fewer Interruptions
+High Quality
+Actionable
+Precipitable
+Reusable
+```
+
+![Illustration Prompt: A bottleneck protection system diagram. On the left is a massive, chaotic flow of blue-purple event streams, Pain signals, and tool logs; in the middle are four filtering layers symbolizing Filter, Cluster, Package, Schedule; on the right is the protected Owner decision core, receiving only a few amber, high-quality case packages. Overall theme: "Bottleneck Protection and High-Quality Input." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-bottleneck-protection.png)
+
+---
+
+## 10 Where Are the True Leverage Points?
 
 In *Thinking in Systems*, Donella Meadows discussed an important concept regarding Leverage Points:
 
@@ -564,7 +1008,7 @@ If we view the Agent system as an ecosystem, the true leverage points aren't sim
 
 These are useful, of course, but they are rarely the highest leverage points.
 
-There are at least five critical leverage points in PD.
+There are at least seven critical leverage points in PD.
 
 ### Leverage Point 1: Sensing Bandwidth
 
@@ -586,7 +1030,6 @@ Then the system gains the opportunity to learn higher-level behavioral patterns.
 The sensing layer determines the ceiling of governance.
 
 Unseen pain cannot be reflected upon.
-
 Unreflected pain will only recur.
 
 ### Leverage Point 2: Owner Attention Protection
@@ -594,15 +1037,12 @@ Unreflected pain will only recur.
 The Owner is the source of value, but the Owner's attention is a finite resource.
 
 If the system continuously bombards the Owner with low-quality signals, the Owner will suffer fatigue.
-
 Once fatigued, they will either blindly approve or completely abandon governance.
 
 Therefore, PD cannot solely pursue discovering more problems.
-
 It must pursue presenting fewer, but more accurate, problems.
 
 A truly good governance system does not make the Owner manage more.
-
 It ensures the Owner only intervenes at critical leverage points.
 
 ### Leverage Point 3: Intention Compression Quality
@@ -610,9 +1050,7 @@ It ensures the Owner only intervenes at critical leverage points.
 Whether a single piece of Owner feedback can be compressed into a high-quality principle is the key to the system's evolutionary efficiency.
 
 Low-quality compression produces junk rules.
-
 Overly specific compression leads to overfitting.
-
 Overly abstract compression degrades into platitudes.
 
 A good diagnostician must compress a specific Pain into a principle that is abstract enough yet still actionable.
@@ -625,17 +1063,14 @@ Good compression: Understand the current state before acting; never operate base
 ```
 
 The former only solves one Git scenario.
-
 The latter can migrate to refactoring, debugging, deleting files, executing commands, and product decisions.
 
 ### Leverage Point 4: Activation Precision and Dissipation Mechanisms
 
 More principles are not always better.
-
 Harder rules are not always better.
 
 If a principle is activated in the wrong context, it becomes interference.
-
 If a rule is outdated but doesn't exit the stage, it becomes debt.
 
 Thus, the system must possess a metabolism:
@@ -648,10 +1083,40 @@ Thus, the system must possess a metabolism:
 This is exactly the pruning mechanism discussed in Episode IV.
 
 A smart system doesn't just remember.
-
 A smart system also forgets.
 
-### Leverage Point 5: Time Scale Separation
+### Leverage Point 5: Feedback Delay Control
+
+If feedback is too fast, the system overreacts to noise.
+If feedback is too slow, the system loses the causal chain and may even oscillate.
+
+Therefore, PD doesn't pursue a "real-time feedback cult," but establishes a tiered feedback cadence:
+
+```text
+High-risk actions: Instant interception
+Task deviations: Minute-level deceleration
+Task post-mortem: Hour-level precipitation
+Principle evaluation: Day/week-level observation
+System evolution: Month-level pruning and migration
+```
+
+Feedback delay itself is not the enemy.
+Uncontrollable feedback delay is the enemy.
+
+### Leverage Point 6: Bottleneck Protection
+
+The Owner, the Diagnostician, and the RuleHost can all become bottlenecks at different levels.
+
+A bottleneck is not a bad thing.
+A bottleneck simply tells us: where the system's true scarcity lies.
+
+If the bottleneck is Owner attention, the Owner cannot be treated as customer service.
+If the bottleneck is diagnosis quality, the structure of Pain Evidence must be improved.
+If the bottleneck is the RuleHost's judgment stability, it must be given definitive, structured states.
+
+Protecting the bottleneck means protecting the evolutionary quality of the entire system.
+
+### Leverage Point 7: Time Scale Separation
 
 PD is not a single-scale system.
 
@@ -669,7 +1134,6 @@ Longer cycles: Are the Owner and Agent leveling up together?
 Many systems fail because they mix all feedback into a single time scale.
 
 A second-level error shouldn't always alarm the Owner.
-
 A month-level value judgment shouldn't be left to local tool feedback.
 
 Time scale separation is a necessary condition for intelligent systems to move toward stable evolution.
@@ -687,29 +1151,35 @@ PD's ultimate destination is not making decisions for humans.
 Its goal is to help humans precipitate their judgment, principles, pain, and experiences into system capabilities.
 
 The Agent expands execution bandwidth.
-
 PD precipitates feedback and principles.
-
 The Owner provides direction, meaning, and ultimate arbitration.
 
 Together, the three form a multi-scale feedback system.
 
-This isn't traditional software engineering.
+But whether this system can truly run depends on whether it respects the most fundamental laws of complex systems:
 
+Correct feedback loops must be enhanced.
+Flawed feedback loops must be dampened.
+Feedback delays must be managed in tiers.
+Bottleneck links must be heavily protected.
+The Owner's attention cannot be treated as a cheap resource.
+The Diagnostician cannot blindly summarize from fragmented scenes.
+The RuleHost cannot enforce hard rules based on vague wishes.
+
+True co-evolution is not making AI execute faster on behalf of humans, but allowing human judgment to be continuously made explicit, precipitated, calibrated, and amplified through feedback loops.
+
+This is not traditional software engineering.
 It isn't just machine learning either.
-
 It is a form of emerging **AI Systems Engineering**: designing an intelligent system that can execute, reflect, and be governed by humans within a long-cycle, multi-feedback, human-machine hybrid ecosystem.
 
 But more important than "systems engineering" are the humans behind it.
 
 The AI era will be fast.
-
 It will also be cold.
 
 It will reward those who adapt fastest, and ruthlessly eliminate many who worked diligently but couldn't turn around in time.
 
 PD cannot change this entire tidal wave.
-
 It is not Noah's Ark, and it shouldn't promise to save everyone.
 
 But I still hope it can become a small boat.
@@ -727,11 +1197,8 @@ It hopes that the Owner isn't just someone giving commands to an Agent, but some
 This is my understanding of co-evolution.
 
 It's not racing against AI.
-
 It's evolving alongside AI.
-
 It's not handing over the steering wheel.
-
 It's becoming a helmsman worthy of a powerful engine.
 
 If this era is destined to have massive waves, then at least let those who refuse to lie flat possess an oar they can hold onto.
