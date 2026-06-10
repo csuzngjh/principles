@@ -206,6 +206,7 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'principle-internalization/lifecycle-read-model.ts',
   'principle-internalization/filesystem-lifecycle-datasource.ts',
   'config-service.ts',
+  'config-health.ts', // PRI-346: Pure conversation access config check — plugin-specific due to OpenClaw config shape dependency
   'principle-compiler/index.ts',
   'principle-internalization/lifecycle-refresh.ts',
 
@@ -341,7 +342,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
     // PRI-307: Added pd-config-loader.ts (96 → 97)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-346: Added config-health.ts (97 → 98)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 

@@ -40,7 +40,7 @@ describe('EmpathyObserver Real E2E & Mock Fallback', () => {
           model,
           apiKeyEnv,
           baseUrl,
-          timeoutMs: 15000,
+          timeoutMs: 60000,
         });
         isRealLlm = true;
         console.log(`[E2E Test] LM Studio detected at ${baseUrl}. Running E2E test with real model: ${model}`);
@@ -67,5 +67,5 @@ describe('EmpathyObserver Real E2E & Mock Fallback', () => {
       expect(result.damageDetected).toBe(true);
       expect(result.reason).toBe('Frustration detected via stable mock fallback');
     }
-  }, 30000);
+  }, 120000);
 });

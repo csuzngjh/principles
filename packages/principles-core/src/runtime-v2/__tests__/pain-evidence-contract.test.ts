@@ -326,7 +326,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
     const painData: PainDetectedData = {
       painId: 'pain_no_evidence',
       painType: 'tool_failure',
-      source: 'write',
+      source: 'manual',
       reason: 'No evidence test',
       score: 40,
       sessionId: 'sess-noev',
