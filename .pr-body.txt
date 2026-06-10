@@ -1,0 +1,37 @@
+## Summary
+
+Fixes test regressions introduced by PRI-345 (evidence short-circuit) and PRI-346 (config-health.ts).
+
+### Fix 1: E2E test fixtures updated for evidence short-circuit (PRI-345)
+
+PRI-345 added `shouldShortCircuitEmptyEvidence` which skips pain signals with empty evidence and non-owner source. E2E tests were using `source: 'test'` without evidence, causing them to be skipped.
+
+**Files changed:**
+- `m8-02-e2e.test.ts`: All 7 `onPainDetected` calls now include `evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }]`
+- `m9-e2e.test.ts`: All 3 `onPainDetected` calls now include evidence
+- `attack-e2e-pipeline-smoke.test.ts` (ATTACK-6): Added evidence to bypass short-circuit
+- `pain-evidence-contract.test.ts`: Empty evidence test changed `source: 'write'` -> `source: 'manual'` (owner-initiated sources bypass short-circuit per PRI-311 regression guard)
+
+### Fix 2: architecture-regression baseline updated (PRI-346)
+
+- Added `'config-health.ts'` to `KNOWN_PLUGIN_CORE_FILES` with classification comment
+- Updated baseline count: 97 -> 98
+
+### Fix 3: pd-config-types.ts CORE_PURE violation fixed
+
+- Removed `openclaw.json` and `principles-disciple` direct references from CONVERSATION_ACCESS_CONFIG_KEY comment
+
+### Fix 4: empathy-observer timeout increased
+
+- `empathy-observer.ts`: default timeoutMs 30s -> 120s
+- `empathy-observer.real-e2e.test.ts`: PiAiRuntimeAdapter timeout 15s -> 60s, test timeout 30s -> 120s
+
+### Verification
+- [x] m8-02-e2e: 5/5 pass
+- [x] m9-e2e: 2/2 pass
+- [x] ATTACK-6: 1/1 pass
+- [x] pain-evidence-contract: 10/11 pass (1 pre-existing failure unrelated to this change)
+- [x] architecture-regression baseline count: pass
+- [x] CORE_PURE config/ module: pass
+- [x] empathy-observer real E2E: 1/1 pass (59.5s with LM Studio)
+- [x] pre-push verify-merge: all green

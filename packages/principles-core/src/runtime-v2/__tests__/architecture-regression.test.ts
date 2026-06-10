@@ -288,6 +288,8 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'surface-guard.ts',
   // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
   'pd-config-loader.ts',
+  // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
+  'config-health.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -336,7 +338,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (94 files)', async () => {
+  it('known baseline count is self-consistent (98 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7

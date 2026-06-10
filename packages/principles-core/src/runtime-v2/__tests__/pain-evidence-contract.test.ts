@@ -157,6 +157,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
       sessionId: 'sess-hook-123',
       agentId: 'main',
       provenance: 'automatic_hook',
+      evidence: [{ sourceRef: 'test-hook', note: 'Hook evidence entry' }],
     };
 
     await bridge.onPainDetected(painData);
@@ -330,6 +331,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
       reason: 'No evidence test',
       score: 40,
       sessionId: 'sess-noev',
+      provenance: 'owner_reported_no_host_trace',
     };
 
     await bridge.onPainDetected(painData);
