@@ -327,7 +327,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
     const painData: PainDetectedData = {
       painId: 'pain_no_evidence',
       painType: 'tool_failure',
-      source: 'manual', // Use owner-initiated source to avoid PRI-345 short-circuit
+      source: 'manual',
       reason: 'No evidence test',
       score: 40,
       sessionId: 'sess-noev',
