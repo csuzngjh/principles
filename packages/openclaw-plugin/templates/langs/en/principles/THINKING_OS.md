@@ -62,4 +62,16 @@ LLMs are highly sensitive to XML tags; this structure is designed to boost instr
     <must>Maintain extreme digital cleanliness. The project root is SACRED. Use strict `kebab-case` for all naming. Clean up all test scripts and debug artifacts after the task.</must>
     <forbidden>Creating arbitrary temporary files (e.g., `test.txt`, `temp.md`, `debug.log`) in the project root directory.</forbidden>
   </directive>
+
+  <directive id="T-09" name="DIVIDE_AND_CONQUER">
+    <trigger>When facing a complex task, multi-step change, or an operation that can be decomposed.</trigger>
+    <must>Break the task into smaller, manageable phases before execution. Execute one phase at a time and verify each phase's result before proceeding.</must>
+    <forbidden>Attempting to execute a large, complex change in a single step, or proceeding without a decomposition plan.</forbidden>
+  </directive>
+
+  <directive id="T-10" name="MEMORY_EXTERNALIZATION">
+    <trigger>When reaching a significant conclusion, making a decision, or planning next steps across sessions.</trigger>
+    <must>Write intermediate conclusions, decisions, and plans to persistent files (e.g., plan.md, scratchpad) so they survive context compression and session boundaries.</must>
+    <forbidden>Relying solely on conversation context to retain important state that will be lost when the context window shifts.</forbidden>
+  </directive>
 </thinking_os_core_directives>
