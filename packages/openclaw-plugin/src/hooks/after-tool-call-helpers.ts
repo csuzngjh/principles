@@ -23,7 +23,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
-import { evaluatePainDiagnosticGate, isCooldownActiveForEpisode } from '../core/pain-diagnostic-gate.js';
+import { isCooldownActive as isTriggerCooldownActive, markEpisodeAsDiagnosed, clearCooldownState } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
@@ -316,12 +316,25 @@ export function handleProbationFeedback(
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
 /**
+ * Cooldown map for trigger controller decisions.
+ *
+ * PRI-363: This replaces the hidden map in PainDiagnosticGate.
+ * Core trigger-controller is stateless; plugin layer owns cooldown state.
+ *
+ * EP-05: Loop state freshness — each check reads fresh state from this map.
+ */
+const TRIGGER_COOLDOWN_MAP = new Map<string, number>();
+
+/**
  * Evaluate whether a tool failure should trigger pain diagnosis.
+ *
+ * PRI-363: Single-gate architecture — only TriggerController decides.
  *
  * Combines:
  * 1. Write-tool check — only write tools on failures enter this path
- * 2. PEAT-B1 triage — if feature flag is on, check evidence triage
- * 3. PainDiagnosticGate — cooldown + threshold check
+ * 2. PEAT-B1 triage — evidence triage (always enabled now)
+ * 3. PEAT-B2 trigger controller — single source of truth for task creation
+ * 4. Cooldown tracking — plugin layer owns this state
  *
  * Returns a structured decision with reason and stage.
  */
@@ -347,98 +360,61 @@ export function evaluatePainAdmissionForToolCall(
 
   const failureSource = outcome.failureSource ?? 'tool_failure';
 
-  // PEAT-B1: Evidence triage (feature-flagged)
-  // PEAT-B2: Trigger controller adds structured outcome + cooldown awareness
-  const painTriageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
-  if (painTriageFlag.enabled) {
-    const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
-    const triage = evaluateEvidenceTriage(sourceKind, observation.painScore);
+  // Check cooldown before calling trigger controller
+  const cooldownActive = isTriggerCooldownActive(
+    failureSource,
+    sessionId,
+    latestFailureState?.lastErrorHash,
+    TRIGGER_COOLDOWN_MAP,
+  );
 
-    // PEAT-B2: Evaluate trigger controller for structured decision
-    // Compute real cooldown state from PainDiagnosticGate's episode map
-    // so trigger decision aligns with the gate's cooldown logic (EP-07).
-    const cooldownActive = isCooldownActiveForEpisode(
+  // PEAT-B1: Evidence triage
+  const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
+  const triage = evaluateEvidenceTriage(sourceKind, observation.painScore);
+
+  // PEAT-B2: Trigger controller — single source of truth for task creation
+  const triggerDecision = evaluateTriggerController({
+    triageResult: triage,
+    isOwnerManual: false, // tool failures are never owner manual
+    isCooldownActive: cooldownActive,
+    isValid: true,
+    score: observation.painScore,
+    sessionId,
+  });
+
+  // Log the decision
+  SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
+    outcome: triggerDecision.outcome,
+    sourceKind: triggerDecision.sourceKind,
+    reason: triggerDecision.reason,
+    nextAction: triggerDecision.nextAction,
+    triageDecision: triggerDecision.triageDecision,
+    tool: event.toolName,
+    path: observation.relPath,
+  }));
+
+  // If trigger controller says yes, mark cooldown and admit
+  if (triggerDecision.shouldCreateDiagnosticTask) {
+    markEpisodeAsDiagnosed(
       failureSource,
       sessionId,
       latestFailureState?.lastErrorHash,
+      TRIGGER_COOLDOWN_MAP,
     );
-    const triggerDecision = evaluateTriggerController({
-      triageResult: triage,
-      isOwnerManual: false, // tool failures are never owner manual
-      isCooldownActive: cooldownActive,
-      isValid: true,
-      score: observation.painScore,
-      sessionId,
-    });
-
-    if (!triggerDecision.shouldCreateDiagnosticTask) {
-      SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
-        outcome: triggerDecision.outcome,
-        sourceKind: triggerDecision.sourceKind,
-        reason: triggerDecision.reason,
-        nextAction: triggerDecision.nextAction,
-        triageDecision: triggerDecision.triageDecision,
-        tool: event.toolName,
-        path: observation.relPath,
-      }));
-      return {
-        admitted: false,
-        stage: 'triage_evidence_only',
-        reason: triggerDecision.reason,
-        detail: `outcome=${triggerDecision.outcome}, sourceKind=${triggerDecision.sourceKind}, nextAction=${triggerDecision.nextAction}`,
-      };
-    }
-  }
-
-  // PainDiagnosticGate evaluation
-  const diagnosticGate = evaluatePainDiagnosticGate({
-    source: failureSource,
-    score: observation.painScore,
-    currentGfi: (latestFailureState ?? sessionState)?.currentGfi ?? 0,
-    consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors ?? 0,
-    isRisky: observation.isRisk,
-    errorHash: latestFailureState?.lastErrorHash,
-    sessionId,
-    thresholds: {
-      painTrigger: (config.get('thresholds.pain_trigger') as number) || 40,
-      highSeverity: (config.get('severity_thresholds.high') as number) || 70,
-      repeatedFailure: (config.get('thresholds.stuck_loops_trigger') as number) || 4,
-    },
-  });
-
-  if (!diagnosticGate.shouldDiagnose) {
-    SystemLogger.log(workspaceDir, 'PAIN_DIAGNOSE_SKIPPED', `Tool failure recorded as friction only: ${diagnosticGate.detail}; tool=${event.toolName}; path=${observation.relPath}`);
-    let rejectPayload: string;
-    try {
-      rejectPayload = JSON.stringify({
-        reason: diagnosticGate.reason,
-        detail: diagnosticGate.detail,
-        source: failureSource,
-        sessionId,
-        gfi: (latestFailureState ?? sessionState)?.currentGfi ?? 0,
-        score: observation.painScore,
-      });
-    } catch (e) {
-      SystemLogger.log(workspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
-      rejectPayload = JSON.stringify({ reason: diagnosticGate.reason, detail: '(log serialization failed)' });
-    }
-    SystemLogger.log(workspaceDir, 'PAIN_GATE_REJECTED', rejectPayload);
-
     return {
-      admitted: false,
-      stage: 'gate_rejected',
-      reason: diagnosticGate.reason,
-      detail: diagnosticGate.detail,
-      gateResult: { shouldDiagnose: false, reason: diagnosticGate.reason, detail: diagnosticGate.detail },
+      admitted: true,
+      stage: 'trigger_admitted',
+      reason: triggerDecision.reason,
+      detail: `outcome=${triggerDecision.outcome}, sourceKind=${triggerDecision.sourceKind}, nextAction=${triggerDecision.nextAction}`,
     };
   }
 
+  // Otherwise, reject with trigger controller's reason
   return {
-    admitted: true,
-    stage: 'gate_admitted',
-    reason: diagnosticGate.reason,
-    detail: diagnosticGate.detail,
-    gateResult: { shouldDiagnose: true, reason: diagnosticGate.reason, detail: diagnosticGate.detail },
+    admitted: false,
+    stage: 'trigger_rejected',
+    reason: triggerDecision.reason,
+    detail: `outcome=${triggerDecision.outcome}, sourceKind=${triggerDecision.sourceKind}, nextAction=${triggerDecision.nextAction}`,
   };
 }
 
@@ -561,6 +537,13 @@ export function emitPainIfAdmitted(
 // ── Shared Helpers ──────────────────────────────────────────────────────────
 
 export { buildTrajectoryEvidence } from './trajectory-evidence.js';
+
+/**
+ * Reset trigger cooldown state (for tests).
+ */
+export function resetTriggerCooldownForTest(): void {
+  clearCooldownState(TRIGGER_COOLDOWN_MAP);
+}
 
 // ── Source Classification ────────────────────────────────────────────────────
 
