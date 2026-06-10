@@ -69,23 +69,17 @@ export interface ToolCallObservation {
 /**
  * Result of evaluating whether a tool failure should trigger pain diagnosis.
  *
- * Encapsulates the combined triage + PainDiagnosticGate decision.
+ * Encapsulates the single-gate trigger controller decision.
  */
 export interface PainAdmissionDecision {
   /** Whether the tool failure should proceed to pain emission */
   readonly admitted: boolean;
   /** The admission stage that made the decision */
-  readonly stage: 'triage_evidence_only' | 'gate_rejected' | 'gate_admitted' | 'not_applicable';
+  readonly stage: 'not_applicable' | 'trigger_admitted' | 'trigger_rejected';
   /** Human-readable reason for the decision */
   readonly reason: string;
   /** Detail about the decision */
   readonly detail: string;
-  /** The diagnostic gate result (if gate was evaluated) */
-  readonly gateResult?: {
-    readonly shouldDiagnose: boolean;
-    readonly reason: string;
-    readonly detail: string;
-  };
 }
 
 // ── Friction Update Result ──────────────────────────────────────────────────
