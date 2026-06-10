@@ -333,6 +333,7 @@ Therefore, PD must make a crucial distinction:
 > Tendency can be left to the model.
 >
 > Boundaries must be left to the system.
+
 Five hundred years ago, the Eastern philosopher Wang Yangming proposed a profound cognitive thesis: "**There is no knowing without acting. Knowing but not acting is simply not knowing.**"
 
 If we translate this into the cyber age: writing over 40 bottom lines into the Prompt means the large model has "read" them, but due to the squeeze of context debt, it cannot guarantee 100% deterministic compliance in action. For the system, this is "knowing but not acting."
