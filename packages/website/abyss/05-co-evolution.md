@@ -87,7 +87,7 @@ But when we plug a large model into memory, tools, file systems, runtime framewo
 
 It transforms into a complex system that accumulates history, builds momentum, generates feedback, creates debt, and alters human behavior.
 
-![Illustration Prompt: On the left, a simple black-box function structure—an input beam enters the model and outputs text; on the right, it gradually unfolds into a complex ecosystem: Agent, tools, memory, RuleHost, Skill, Pain Signal, Owner feedback, and the environment forming multi-layered feedback loops. The scene morphs from a "function" on the left to an "ecosystem" on the right. Dark blue-black background, cyan-purple system lines, sparse amber feedback nodes, semi-abstract information design style, 21:9.]()
+![Illustration Prompt: On the left, a simple black-box function structure—an input beam enters the model and outputs text; on the right, it gradually unfolds into a complex ecosystem: Agent, tools, memory, RuleHost, Skill, Pain Signal, Owner feedback, and the environment forming multi-layered feedback loops. The scene morphs from a "function" on the left to an "ecosystem" on the right. Dark blue-black background, cyan-purple system lines, sparse amber feedback nodes, semi-abstract information design style, 21:9.](/images/abyss/05/abyss-05-function-to-ecosystem.png)
 
 At this point, the quality of a single response is no longer sufficient.
 
@@ -1145,7 +1145,7 @@ This is not just racing against AI, but evolving alongside AI; not just handing 
 
 If this era is destined to have massive waves, then at least let those who refuse to lie flat possess an oar they can hold onto.
 
-![Illustration Prompt: A massive, tide-like wave of blue-purple AI information surges from the distance. In the center is a small boat, containing not a specific person, but an abstract silhouette of an Owner holding a glowing oar. Surrounding the boat are Agent engines, principle nodes, and feedback lines acting as supports, like an exoskeleton or navigation system. Overall emotion: small but resolute, compassionate but not pessimistic. Dark blue-black background, amber human value anchors, 21:9 banner.]()
+![Illustration Prompt: A massive, tide-like wave of blue-purple AI information surges from the distance. In the center is a small boat, containing not a specific person, but an abstract silhouette of an Owner holding a glowing oar. Surrounding the boat are Agent engines, principle nodes, and feedback lines acting as supports, like an exoskeleton or navigation system. Overall emotion: small but resolute, compassionate but not pessimistic. Dark blue-black background, amber human value anchors, 21:9 banner.](/images/abyss/05/abyss-05-boat.png)
 
 ---
 
