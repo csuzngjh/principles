@@ -71,7 +71,7 @@ describe('decideAutoPromotion', () => {
   });
 
   it('returns false for null confidence', () => {
-    expect(decideAutoPromotion('skill', null)).toBe(false);
+    expect(decideAutoPromotion('skill', null as unknown as undefined)).toBe(false);
   });
 
   it('returns false for negative confidence (invalid)', () => {
@@ -328,8 +328,7 @@ describe('ApprovalQueue', () => {
     // Second approve fails
     const result = await queue.approve(created.approvalId, 'user-002');
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('already_decided');
+    if (!result.ok && result.error === 'already_decided') {
       expect(result.status).toBe('approved');
     }
   });

@@ -24,7 +24,7 @@ import {
   PromptWriter,
   DeferArchiveWriter,
 } from '../low-risk-writers';
-import type { PIArtifactSnapshot, CanActivateResult, WriterInput, WriterResult } from '../activation-types';
+import type { PIArtifactSnapshot, CanActivateResult, WriterInput, WriterResult, PIArtifactValidationStatus } from '../activation-types';
 
 // ── extractPrincipleId Tests ──────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ function createArtifact(
   contentJson: string,
   sourcePrincipleId?: string,
   artifactKind: 'principle' | 'rule' = 'principle',
-  validationStatus: 'validated' | 'pending' | 'invalid' = 'validated',
+  validationStatus: PIArtifactValidationStatus = 'validated',
 ): PIArtifactSnapshot {
   return {
     artifactId: 'art-001',
@@ -270,16 +270,16 @@ describe('PromptWriter', () => {
       expect(result.riskLevel).toBe('low');
     });
 
-    it('returns ok:false for invalid validation status', async () => {
+    it('returns ok:false for rejected validation status', async () => {
       const artifact = createArtifact(
         JSON.stringify({ principleId: 'PRI-004' }),
         undefined,
         'principle',
-        'invalid',
+        'rejected',
       );
       const result = await writer.canActivate(artifact);
       expect(result.ok).toBe(false);
-      expect(result.reason).toBe('artifact_validation_status_invalid');
+      expect(result.reason).toBe('artifact_validation_status_rejected');
       expect(result.riskLevel).toBe('low');
     });
 

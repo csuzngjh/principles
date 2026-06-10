@@ -210,7 +210,7 @@ describe('mapConfidenceToLabel', () => {
   });
 
   it('returns medium for null confidence', () => {
-    expect(mapConfidenceToLabel(null)).toBe('medium');
+    expect(mapConfidenceToLabel(null as unknown as undefined)).toBe('medium');
   });
 
   // Boundary tests
