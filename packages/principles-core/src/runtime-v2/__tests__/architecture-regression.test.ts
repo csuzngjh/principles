@@ -287,6 +287,8 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'surface-guard.ts',
   // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
   'pd-config-loader.ts',
+  // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
+  'config-health.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -335,13 +337,15 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (94 files)', async () => {
+  it('known baseline count is self-consistent (98 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
-    // PRI-307: Added pd-config-loader.ts (96 → 97)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-307: Added pd-config-loader.ts (94 → 95)
+    // PRI-346: Added config-health.ts (95 → 96)
+    // PRI-347: Removed JSONL trajectory writers (96 → 95 → 94 → ... → 98 after cleanup)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 
