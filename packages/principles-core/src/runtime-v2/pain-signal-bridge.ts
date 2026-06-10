@@ -12,7 +12,8 @@ import type { IntakeToInternalizationBridgeInput } from './internalization/intak
 
 export type { PainProvenance };
 
-export const MAX_EVIDENCE_ENTRIES = 4;
+/** PRI-359: Increased from 4 to 8 to accommodate failed tool_calls evidence */
+export const MAX_EVIDENCE_ENTRIES = 8;
 export const MAX_EVIDENCE_NOTE_CHARS = 200;
 
 export interface PainEvidenceEntry {
