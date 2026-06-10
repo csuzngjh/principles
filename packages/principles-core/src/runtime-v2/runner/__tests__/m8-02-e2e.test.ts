@@ -320,6 +320,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
 
     // E2E-01 assertion 1: taskId is distinct from painId
@@ -384,6 +385,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
 
     // E2E-02: .state/diagnostician_tasks.json does NOT exist
@@ -417,6 +419,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
     expect(firstResult.taskId).toBe(expectedTaskId);
     expect(firstResult.status).toBe('succeeded');
@@ -477,6 +480,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
     expect(result.taskId).toBe(expectedTaskId);
 
@@ -557,6 +561,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
 
     // Wait 50ms — first call should be inside pollUntilTerminal by now
@@ -568,6 +573,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
+      evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }],
     });
 
     const secondCallReturnTime = Date.now() - startTime;

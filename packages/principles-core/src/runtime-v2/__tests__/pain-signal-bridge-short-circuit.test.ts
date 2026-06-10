@@ -82,8 +82,13 @@ function createMocks() {
 
 describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
   // 用例 D（短路）: evidence=[], source='tool_failure' → runner.run NOT called
+  // IMPORTANT: Idempotency check (getTask) is called FIRST before short-circuit decision.
+  // This ensures that existing succeeded tasks are returned correctly.
   it('short-circuits when evidence is empty and source is tool_failure (not owner-initiated)', async () => {
     const mocks = createMocks();
+    // getTask returns null → no existing task → short-circuit applies
+    mocks._stateManager.getTask.mockResolvedValue(null);
+
     const bridge = new PainSignalBridge({
       stateManager: mocks.stateManager,
       runner: mocks.runner,
@@ -101,8 +106,9 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
 
     // runner.run must NOT be called
     expect(mocks._runner.run).not.toHaveBeenCalled();
-    // stateManager must NOT be called (zero side effects)
-    expect(mocks._stateManager.getTask).not.toHaveBeenCalled();
+    // stateManager.getTask IS called for idempotency check (priority over short-circuit)
+    expect(mocks._stateManager.getTask).toHaveBeenCalledTimes(1);
+    // createTask must NOT be called (zero side effects after short-circuit)
     expect(mocks._stateManager.createTask).not.toHaveBeenCalled();
 
     // Result must be skipped with reason + nextAction (ERR-002)
@@ -225,6 +231,9 @@ describe('PRI-345: PainSignalBridge empty-evidence short circuit', () => {
 
   it('short-circuits when evidence is undefined (treated as empty) and source is not owner', async () => {
     const mocks = createMocks();
+    // getTask returns null → no existing task → short-circuit applies
+    mocks._stateManager.getTask.mockResolvedValue(null);
+
     const bridge = new PainSignalBridge({
       stateManager: mocks.stateManager,
       runner: mocks.runner,
