@@ -151,10 +151,14 @@ export class PainSignalBridge {
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
 
+    // Check for existing task FIRST — idempotency takes priority over short-circuit
+    const existingTask = await this.stateManager.getTask(taskId);
+
     // PRI-345: short-circuit before any I/O when input evidence is empty
     // and source is not owner-initiated (manual/pain/skill:pain).
     // Zero side effects: no task creation, no runner call, no ledger writes.
-    if (shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
+    // IMPORTANT: Only short-circuit when there is NO existing task — idempotency must work.
+    if (!existingTask && shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
       return {
         status: 'skipped',
         painId,
@@ -164,8 +168,6 @@ export class PainSignalBridge {
         message: 'short_circuited: input evidence empty; re-trigger after evidence collected',
       };
     }
-
-    const existingTask = await this.stateManager.getTask(taskId);
 
     if (existingTask) {
       const { status, leaseExpiresAt } = existingTask;

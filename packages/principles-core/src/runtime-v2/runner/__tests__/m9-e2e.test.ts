@@ -149,7 +149,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
       autoIntakeEnabled: true,
     });
 
-    const result = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test failure' });
+    const result = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test failure', evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }] });
 
     expect(result.status).toBe('succeeded');
     expect(result.painId).toBe(painId);
@@ -189,7 +189,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
       autoIntakeEnabled: true,
     });
 
-    const result1 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test' });
+    const result1 = await bridge.onPainDetected({ painId, painType: 'tool_failure', source: 'test', reason: 'test', evidence: [{ sourceRef: 'test-e2e', note: 'E2E test evidence entry' }] });
     expect(result1.status).toBe('succeeded');
 
     const db = sqliteConn.getDb();
