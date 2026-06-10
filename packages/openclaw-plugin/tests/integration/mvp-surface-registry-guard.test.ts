@@ -435,11 +435,11 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(guarded).toBeNull();
     });
 
-    it('guardService returns null for quiet surfaces', async () => {
+    it('guardService returns the service for core surfaces (trajectory is now core)', async () => {
       const { guardService } = await import('../../src/core/surface-guard.js');
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:trajectory', service);
-      expect(guarded).toBeNull();
+      expect(guarded).toBe(service);
     });
 
     it('guardService returns null for unregistered surfaces', async () => {

@@ -126,11 +126,10 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
   {
     id: 'service:trajectory',
     kind: 'service',
-    category: 'quiet',
-    enabledByDefault: false,
+    category: 'core',
+    enabledByDefault: true,
     since: '2026-05-24',
-    description: 'Trajectory collection service',
-    disabledReason: 'Disabled by default: trajectory service is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
+    description: 'Trajectory collection service — pre-initializes TrajectoryDB registry; hooks (llm_output, before_message_write) are the primary writers (PRI-346/353)',
   },
   {
     id: 'service:pd-task',
