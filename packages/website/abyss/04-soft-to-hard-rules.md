@@ -5,6 +5,7 @@ date: 2026-05-28
 lang: en
 ---
 
+
 # Series 4 | The Alchemy of Soft to Hard Rules: The Internalization Path from Prompt to System Instinct
 
 **Subtitle**: Channels, strategies, and traps of internalization—why the best governance requires only a few vital bottom lines
@@ -299,7 +300,9 @@ This is not because the model is dumb.
 
 In fact, the latest reasoning models show astonishing capabilities in math, coding, and complex analysis.
 
-But even with the strongest model, when the context is filled with soft principles of "both clean and efficient, both compatible and safe," the probability of it ignoring a certain rule at some point is never zero.
+But this is exactly the core dilemma revealed by Daniel Kahneman in *Noise*: **the underlying architecture of large models (probability-based autoregressive sampling) determines that they inevitably carry systemic noise.** Their random variability is highly valuable creativity during content generation, but in engineering environments requiring absolute certainty, it becomes fatal execution deviation.
+
+Even with the strongest model, when the context is filled with soft principles of "both clean and efficient, both compatible and safe," the probability of it ignoring a certain rule at some point is never zero. In the face of this system-level noise, simply relying on more soft prompts is ineffective.
 
 I encountered a memorable case during PD development.
 
@@ -330,7 +333,6 @@ Therefore, PD must make a crucial distinction:
 > Tendency can be left to the model.
 >
 > Boundaries must be left to the system.
-
 Five hundred years ago, the Eastern philosopher Wang Yangming proposed a profound cognitive thesis: "**There is no knowing without acting. Knowing but not acting is simply not knowing.**"
 
 If we translate this into the cyber age: writing over 40 bottom lines into the Prompt means the large model has "read" them, but due to the squeeze of context debt, it cannot guarantee 100% deterministic compliance in action. For the system, this is "knowing but not acting."
@@ -520,7 +522,9 @@ In PD, this "security gate" is called **RuleHost**.
 
 RuleHost is not another large model, nor is it a block of longer Prompts.
 
-It is a rule gatekeeper running before the Agent calls tools.
+It is a rule gatekeeper running before the Agent calls tools. In Atul Gawande's words, it is the life-saving "hardcore checklist" from *The Checklist Manifesto*.
+
+Disasters in modern software engineering are often not because the Agent is "ignorant" (doesn't know how to write code), but because it is "inept" (forgetting or executing improperly in complex environments). RuleHost is the "Decision Hygiene" mechanism forcibly introduced before the system executes high-risk actions.
 
 When the Agent is ready to make a move, such as:
 
