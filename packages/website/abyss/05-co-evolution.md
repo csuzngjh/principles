@@ -717,7 +717,7 @@ What PD aims to do is **place different feedback into the correct time scales**.
 A truly mature system isn't always "the faster, the better."
 It is fast where it needs to be fast, slow where it needs to be slow, waits when it should wait, and forgets when it should forget.
 
-![Illustration Prompt: A multi-timescale feedback system diagram. The image features five horizontal time tracks: seconds, minutes, hours, days/weeks, and long-term evolution. Each track has different forms of feedback nodes: second-level looks like lightning intercepts, minute-level like deviation alarms, hour-level like post-mortem pods, day/week-level like principle evaluations, and long-term looks like the trajectory of Owner-Agent co-growth. Dark blue-black background, cyan-purple feedback lines, amber key nodes, semi-abstract futuristic engineering fable style, 21:9.]()
+![Illustration Prompt: A multi-timescale feedback system diagram. The image features five horizontal time tracks: seconds, minutes, hours, days/weeks, and long-term evolution. Each track has different forms of feedback nodes: second-level looks like lightning intercepts, minute-level like deviation alarms, hour-level like post-mortem pods, day/week-level like principle evaluations, and long-term looks like the trajectory of Owner-Agent co-growth. Dark blue-black background, cyan-purple feedback lines, amber key nodes, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-feedback-delay.png)
 
 ---
 
@@ -898,7 +898,7 @@ Precipitable
 Reusable
 ```
 
-![Illustration Prompt: A bottleneck protection system diagram. On the left is a massive, chaotic flow of blue-purple event streams, Pain signals, and tool logs; in the middle are four filtering layers symbolizing Filter, Cluster, Package, Schedule; on the right is the protected Owner decision core, receiving only a few amber, high-quality case packages. Overall theme: "Bottleneck Protection and High-Quality Input." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.]()
+![Illustration Prompt: A bottleneck protection system diagram. On the left is a massive, chaotic flow of blue-purple event streams, Pain signals, and tool logs; in the middle are four filtering layers symbolizing Filter, Cluster, Package, Schedule; on the right is the protected Owner decision core, receiving only a few amber, high-quality case packages. Overall theme: "Bottleneck Protection and High-Quality Input." Dark blue-black background, semi-abstract futuristic engineering fable style, 21:9.](/images/abyss/05/abyss-05-bottleneck-protection.png)
 
 ---
 
