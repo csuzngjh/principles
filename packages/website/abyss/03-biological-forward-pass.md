@@ -76,8 +76,8 @@ In other words:
 
 Here, we must clarify a core concept: **In this context, "Pain" and "Failure" are absolutely not synonyms.** Setting the driving force as "Pain" rather than "Failure" is precisely one of the most exquisite underlying logics in this system. We can understand this from three dimensions:
 
-1. **Process Friction vs. Endpoint Qualification**
-   **Failure** is a discrete, binary result (either success or failure); it is a post-hoc, static qualification. **Pain**, on the other hand, is a continuous, real-time process signal representing "friction". An Agent might retry 50 times and waste massive tokens just to fix one bug. From the result perspective, it didn't "fail", but the process was full of "pain". If driven only by "failure", the system wouldn't optimize as long as the result is successful. But a "pain-driven" system captures these frictions and triggers reflection, ensuring it gets it right the first time next around.
+1. **Degree of Deviation from Expectations vs. Endpoint Binary Qualification**
+   **Failure** is a discrete, binary result (either success or failure); it is a post-hoc, static qualification. **Pain**, on the other hand, is essentially the **degree of deviation from expectations**; it is a continuous, real-time process signal. An Agent might retry 50 times and waste massive tokens just to fix one bug. From the result perspective, it didn't "fail", but the process severely deviated from the expectation of a "one-time elegant fix", generating massive "pain". If driven only by "failure", the system wouldn't optimize as long as the result is successful. But a "pain-driven" system captures these deviations and frictions, triggering reflection, and ensuring it gets it right the first time next around.
 
 2. **Biological Feedback Signal vs. Objective Event Judgment**
    A person or a system can experience **failure**, but if they don't perceive **pain** (e.g., they just don't care), no evolution will occur. Pain is a profound biological signal for protection and evolution (like the muscle memory of immediately withdrawing your hand from a hot stove). **Pain is the true biological current that can alter neural network weights.** Therefore, the formula is `Pain + Reflection`, not `Failure + Reflection`.
@@ -189,7 +189,7 @@ But I must clarify one point first:
 > Pain is not a punishment.
 > Pain is also not anthropomorphizing AI into a lifeform that suffers.
 >
-> In PD, Pain is a system signal: when AI's behavior causes rework, risk, entropy increase, permission blocks, or goal deviation, the system must make this cost explicit and trigger deceleration, recording, and reflection.
+> In PD, Pain is a system signal: it measures the **"degree of deviation of behavior from expectations."** When AI's behavior causes rework, risk, entropy increase, permission blocks, or final goal deviation, the system must make this cost explicit and trigger deceleration, recording, and reflection.
 
 Human pain is for the body to recognize harm.
 PD's pain is for the Agent to recognize the cost of behavior.
