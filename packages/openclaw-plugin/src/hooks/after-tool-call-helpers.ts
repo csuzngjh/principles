@@ -368,9 +368,11 @@ export function evaluatePainAdmissionForToolCall(
     TRIGGER_COOLDOWN_MAP,
   );
 
-  // PEAT-B1: Evidence triage
+  // PEAT-B1: Evidence triage (with consecutiveErrors for upgrade logic)
   const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
-  const triage = evaluateEvidenceTriage(sourceKind, observation.painScore);
+  const triage = evaluateEvidenceTriage(sourceKind, observation.painScore, {
+    consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors,
+  });
 
   // PEAT-B2: Trigger controller — single source of truth for task creation
   const triggerDecision = evaluateTriggerController({

@@ -96,6 +96,7 @@ export function evaluateEvidenceTriage(
   options?: {
     isUnsafeHighConfidence?: boolean;
     provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+    consecutiveErrors?: number;
   },
 ): TriageResult {
   const input: TriageInput = {
@@ -105,7 +106,24 @@ export function evaluateEvidenceTriage(
     provenance: options?.provenance,
   };
 
-  return evaluateTriage(input);
+  let result = evaluateTriage(input);
+
+  // PEAT-B1 upgrade logic: repeated failures override evidence_only
+  // Threshold: 4 consecutive failures (matches PainDiagnosticGate.repeatedFailure)
+  if (
+    result.decision === 'evidence_only' &&
+    options?.consecutiveErrors !== undefined &&
+    options.consecutiveErrors >= 4
+  ) {
+    result = {
+      ...result,
+      decision: 'admit',
+      reason: 'Repeated failures override evidence-only decision. Pattern suggests systemic issue requiring diagnosis.',
+      nextAction: 'create_diagnostic_task',
+    };
+  }
+
+  return result;
 }
 
 // ── High-Confidence Unsafe Action Detection ──────────────────────────────────
