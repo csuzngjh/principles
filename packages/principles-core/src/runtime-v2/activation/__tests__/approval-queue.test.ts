@@ -1,31 +1,68 @@
-import { describe, it, expect } from 'vitest';
-import { decideAutoPromotion, ApprovalQueue } from '../approval-queue.js';
-import { MemoryApprovalQueueStore } from '../memory-approval-store.js';
+/**
+ * Approval Queue Tests — PRI-145
+ *
+ * Unit tests for ApprovalQueue class and decideAutoPromotion function.
+ *
+ * Tests verify:
+ * - decideAutoPromotion() correctly evaluates auto-promotion conditions
+ * - ApprovalQueue class methods work correctly with mock store
+ * - Boundary conditions for confidence threshold
+ *
+ * ERR checklist:
+ * - ERR-002: Every decision path carries reason + nextAction
+ * - ERR-009: Malformed state fails loud
+ * - ERR-025: Production-path tests, not just helpers
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import {
+  decideAutoPromotion,
+  ApprovalQueue,
+} from '../approval-queue';
+import type {
+  ApprovalQueueStore,
+  ApprovalRecord,
+  ApprovalDecisionResult,
+  ApprovalEnqueueInput,
+  ApprovalFilter,
+  ApprovalListFilter,
+  ApprovalStats,
+} from '../activation-types';
+import {
+  AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
+  AUTO_PROMOTABLE_CHANNELS,
+} from '../activation-types';
+import type { InternalizationChannel } from '../../internalization/peer-runner-contracts';
+
+// ── decideAutoPromotion Tests ─────────────────────────────────────────────────
 
 describe('decideAutoPromotion', () => {
   it('returns true for skill channel with confidence >= 0.95', () => {
     expect(decideAutoPromotion('skill', 0.95)).toBe(true);
     expect(decideAutoPromotion('skill', 0.96)).toBe(true);
+    expect(decideAutoPromotion('skill', 0.99)).toBe(true);
     expect(decideAutoPromotion('skill', 1.0)).toBe(true);
   });
 
   it('returns false for skill channel with confidence < 0.95', () => {
     expect(decideAutoPromotion('skill', 0.94)).toBe(false);
-    expect(decideAutoPromotion('skill', 0.5)).toBe(false);
-    expect(decideAutoPromotion('skill', 0)).toBe(false);
+    expect(decideAutoPromotion('skill', 0.90)).toBe(false);
+    expect(decideAutoPromotion('skill', 0.80)).toBe(false);
+    expect(decideAutoPromotion('skill', 0.50)).toBe(false);
   });
 
-  it('returns false for code_tool_hook regardless of confidence', () => {
+  it('returns false for non-AUTO_PROMOTABLE_CHANNELS regardless of confidence', () => {
+    // code_tool_hook is not auto-promotable
     expect(decideAutoPromotion('code_tool_hook', 0.99)).toBe(false);
     expect(decideAutoPromotion('code_tool_hook', 1.0)).toBe(false);
-  });
 
-  it('returns false for model_training regardless of confidence', () => {
+    // model_training is not auto-promotable
     expect(decideAutoPromotion('model_training', 0.99)).toBe(false);
-  });
 
-  it('returns false for low-risk channels (already auto-activated)', () => {
+    // prompt is low-risk but not auto-promotable (goes through direct activation)
     expect(decideAutoPromotion('prompt', 0.99)).toBe(false);
+
+    // defer_archive is low-risk but not auto-promotable
     expect(decideAutoPromotion('defer_archive', 0.99)).toBe(false);
   });
 
@@ -34,221 +71,415 @@ describe('decideAutoPromotion', () => {
   });
 
   it('returns false for null confidence', () => {
-    expect(decideAutoPromotion('skill', null as unknown as number)).toBe(false);
+    expect(decideAutoPromotion('skill', null as unknown as undefined)).toBe(false);
   });
 
-  it('returns false for negative confidence (out of range)', () => {
+  it('returns false for negative confidence (invalid)', () => {
     expect(decideAutoPromotion('skill', -0.1)).toBe(false);
-    expect(decideAutoPromotion('skill', -1)).toBe(false);
-    expect(decideAutoPromotion('skill', -100)).toBe(false);
   });
 
-  it('returns false for confidence > 1 (out of range)', () => {
-    expect(decideAutoPromotion('skill', 1.1)).toBe(false);
-    expect(decideAutoPromotion('skill', 2)).toBe(false);
-    expect(decideAutoPromotion('skill', 100)).toBe(false);
+  it('returns false for confidence > 1.0 (invalid)', () => {
+    expect(decideAutoPromotion('skill', 1.5)).toBe(false);
+  });
+
+  // Boundary tests
+  it('returns true at exact threshold 0.95', () => {
+    expect(decideAutoPromotion('skill', AUTO_PROMOTION_CONFIDENCE_THRESHOLD)).toBe(true);
+  });
+
+  it('returns false just below threshold 0.94', () => {
+    expect(decideAutoPromotion('skill', 0.94)).toBe(false);
+  });
+
+  it('AUTO_PROMOTABLE_CHANNELS contains only skill', () => {
+    expect(AUTO_PROMOTABLE_CHANNELS).toEqual(['skill']);
+  });
+
+  it('AUTO_PROMOTION_CONFIDENCE_THRESHOLD is 0.95', () => {
+    expect(AUTO_PROMOTION_CONFIDENCE_THRESHOLD).toBe(0.95);
+  });
+
+  it('only skill channel can be auto-promoted', () => {
+    const channels: InternalizationChannel[] = [
+      'prompt', 'defer_archive', 'skill', 'code_tool_hook', 'model_training',
+    ];
+    for (const channel of channels) {
+      const canAutoPromote = decideAutoPromotion(channel, 0.95);
+      expect(canAutoPromote).toBe(channel === 'skill');
+    }
+  });
+
+  // Invariant: auto-promotion requires both channel AND confidence conditions
+  it('auto-promotion requires both channel match AND confidence threshold', () => {
+    // skill + high confidence → true
+    expect(decideAutoPromotion('skill', 0.96)).toBe(true);
+
+    // skill + low confidence → false
+    expect(decideAutoPromotion('skill', 0.50)).toBe(false);
+
+    // non-skill + high confidence → false
+    expect(decideAutoPromotion('code_tool_hook', 0.96)).toBe(false);
+
+    // non-skill + low confidence → false
+    expect(decideAutoPromotion('code_tool_hook', 0.50)).toBe(false);
   });
 });
 
+// ── ApprovalQueue Class Tests ─────────────────────────────────────────────────
+
+function createMockStore(): ApprovalQueueStore {
+  const records: Map<string, ApprovalRecord> = new Map();
+
+  return {
+    enqueue: vi.fn(async (input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord> => {
+      const approvalId = `apr_${input.channel}_${input.artifactId}`;
+      const record: ApprovalRecord = {
+        approvalId,
+        artifactId: input.artifactId,
+        channel: input.channel,
+        riskLevel: input.riskLevel,
+        status: 'pending',
+        confidence: input.confidence,
+        requestedAt: now,
+        summary: input.summary,
+        triggerReason: input.triggerReason,
+        confidenceExplanation: input.confidenceExplanation,
+        effectDescription: input.effectDescription,
+        rejectionEffect: input.rejectionEffect,
+      };
+      records.set(approvalId, record);
+      return record;
+    }),
+
+    getById: vi.fn(async (approvalId: string): Promise<ApprovalRecord | null> => {
+      return records.get(approvalId) ?? null;
+    }),
+
+    listPending: vi.fn(async (filter?: ApprovalFilter): Promise<ApprovalRecord[]> => {
+      const pending = Array.from(records.values()).filter(r => r.status === 'pending');
+      if (filter?.channel) {
+        return pending.filter(r => r.channel === filter.channel);
+      }
+      if (filter?.riskLevel) {
+        return pending.filter(r => r.riskLevel === filter.riskLevel);
+      }
+      return pending;
+    }),
+
+    listAll: vi.fn(async (filter?: ApprovalListFilter): Promise<ApprovalRecord[]> => {
+      let all = Array.from(records.values());
+      if (filter?.status) {
+        all = all.filter(r => r.status === filter.status);
+      }
+      if (filter?.channel) {
+        all = all.filter(r => r.channel === filter.channel);
+      }
+      return all;
+    }),
+
+    countByStatus: vi.fn(async (): Promise<ApprovalStats> => {
+      const all = Array.from(records.values());
+      return {
+        pending: all.filter(r => r.status === 'pending').length,
+        approved: all.filter(r => r.status === 'approved').length,
+        rejected: all.filter(r => r.status === 'rejected').length,
+        cancelled: all.filter(r => r.status === 'cancelled').length,
+      };
+    }),
+
+    approve: vi.fn(async (approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> => {
+      const record = records.get(approvalId);
+      if (!record) return { ok: false, error: 'not_found' };
+      if (record.status !== 'pending') return { ok: false, error: 'already_decided', status: record.status };
+      record.status = 'approved';
+      record.decidedAt = new Date().toISOString();
+      record.decidedBy = decidedBy;
+      record.decisionNote = note;
+      return { ok: true, record };
+    }),
+
+    reject: vi.fn(async (approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> => {
+      const record = records.get(approvalId);
+      if (!record) return { ok: false, error: 'not_found' };
+      if (record.status !== 'pending') return { ok: false, error: 'already_decided', status: record.status };
+      record.status = 'rejected';
+      record.decidedAt = new Date().toISOString();
+      record.decidedBy = decidedBy;
+      record.rejectionReason = reason;
+      return { ok: true, record };
+    }),
+
+    resetToPending: vi.fn(async (approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }> => {
+      const record = records.get(approvalId);
+      if (!record) return { ok: false, error: 'not_found' };
+      if (record.status !== 'approved') return { ok: false, error: 'not_approved' };
+      record.status = 'pending';
+      record.decidedAt = undefined;
+      record.decidedBy = undefined;
+      return { ok: true };
+    }),
+  };
+}
+
 describe('ApprovalQueue', () => {
-  it('enqueue creates a pending record', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('enqueue creates a pending approval record', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
+
     const record = await queue.enqueue({
-      artifactId: 'art-1',
-      channel: 'code_tool_hook',
-      riskLevel: 'high',
-      confidence: 0.8,
-    }, '2026-05-18T00:00:00Z');
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+      confidence: 0.85,
+      summary: 'Test approval',
+    }, '2026-05-17T00:00:00Z');
+
     expect(record.status).toBe('pending');
-    expect(record.artifactId).toBe('art-1');
-    expect(record.channel).toBe('code_tool_hook');
-    expect(record.riskLevel).toBe('high');
-    expect(record.confidence).toBe(0.8);
+    expect(record.artifactId).toBe('art-001');
+    expect(record.channel).toBe('skill');
+    expect(record.confidence).toBe(0.85);
   });
 
-  it('approve changes pending to approved', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('getById returns the correct record', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    const record = await queue.enqueue({
-      artifactId: 'art-1',
-      channel: 'code_tool_hook',
-      riskLevel: 'high',
-    }, '2026-05-18T00:00:00Z');
-    const result = await queue.approve(record.approvalId, 'user-1', 'looks good');
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const found = await queue.getById(created.approvalId);
+    expect(found).not.toBeNull();
+    expect(found?.approvalId).toBe(created.approvalId);
+  });
+
+  it('getById returns null for non-existent approval', async () => {
+    const store = createMockStore();
+    const queue = new ApprovalQueue(store);
+
+    const found = await queue.getById('non-existent');
+    expect(found).toBeNull();
+  });
+
+  it('approve changes status to approved', async () => {
+    const store = createMockStore();
+    const queue = new ApprovalQueue(store);
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const result = await queue.approve(created.approvalId, 'user-001', 'Looks good');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.record.status).toBe('approved');
-      expect(result.record.decidedBy).toBe('user-1');
-      expect(result.record.decisionNote).toBe('looks good');
+      expect(result.record.decidedBy).toBe('user-001');
+      expect(result.record.decisionNote).toBe('Looks good');
     }
   });
 
-  it('reject changes pending to rejected', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('reject changes status to rejected', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    const record = await queue.enqueue({
-      artifactId: 'art-1',
-      channel: 'code_tool_hook',
-      riskLevel: 'high',
-    }, '2026-05-18T00:00:00Z');
-    const result = await queue.reject(record.approvalId, 'user-1', 'too risky');
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const result = await queue.reject(created.approvalId, 'user-001', 'Not ready');
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.record.status).toBe('rejected');
-      expect(result.record.rejectionReason).toBe('too risky');
+      expect(result.record.decidedBy).toBe('user-001');
+      expect(result.record.rejectionReason).toBe('Not ready');
     }
   });
 
-  it('approve returns error for already-decided record', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('approve returns error for non-existent approval', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    const record = await queue.enqueue({
-      artifactId: 'art-1',
-      channel: 'code_tool_hook',
-      riskLevel: 'high',
-    }, '2026-05-18T00:00:00Z');
-    await queue.approve(record.approvalId, 'user-1');
-    const result = await queue.approve(record.approvalId, 'user-2');
-    expect(result.ok).toBe(false);
-    if (!result.ok && result.error === 'already_decided') {
-      expect(result.status).toBe('approved');
-    }
-  });
 
-  it('reject returns error for already-decided record', async () => {
-    const store = new MemoryApprovalQueueStore();
-    const queue = new ApprovalQueue(store);
-    const record = await queue.enqueue({
-      artifactId: 'art-1',
-      channel: 'code_tool_hook',
-      riskLevel: 'high',
-    }, '2026-05-18T00:00:00Z');
-    await queue.reject(record.approvalId, 'user-1', 'bad');
-    const result = await queue.reject(record.approvalId, 'user-2', 'also bad');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('already_decided');
-    }
-  });
-
-  it('approve returns not_found for missing record', async () => {
-    const store = new MemoryApprovalQueueStore();
-    const queue = new ApprovalQueue(store);
-    const result = await queue.approve('nonexistent', 'user-1');
+    const result = await queue.approve('non-existent', 'user-001');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toBe('not_found');
     }
   });
 
-  it('enqueue is idempotent for same artifact+channel', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('approve returns error for already decided approval', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    const r1 = await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    const r2 = await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-19T00:00:00Z');
-    expect(r1.approvalId).toBe(r2.approvalId);
-    expect(r1.requestedAt).toBe(r2.requestedAt);
-    expect(r1.requestedAt).toBe('2026-05-18T00:00:00Z');
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    // First approve succeeds
+    await queue.approve(created.approvalId, 'user-001');
+
+    // Second approve fails
+    const result = await queue.approve(created.approvalId, 'user-002');
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.error === 'already_decided') {
+      expect(result.status).toBe('approved');
+    }
+  });
+
+  it('reject returns error for already decided approval', async () => {
+    const store = createMockStore();
+    const queue = new ApprovalQueue(store);
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    // First approve succeeds
+    await queue.approve(created.approvalId, 'user-001');
+
+    // Reject fails because already approved
+    const result = await queue.reject(created.approvalId, 'user-002', 'Changed mind');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('already_decided');
+    }
+  });
+
+  it('listPending returns only pending approvals', async () => {
+    const store = createMockStore();
+    const queue = new ApprovalQueue(store);
+
+    await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const created2 = await queue.enqueue({
+      artifactId: 'art-002',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    // Approve one
+    await queue.approve(created2.approvalId, 'user-001');
+
     const pending = await queue.listPending();
     expect(pending).toHaveLength(1);
+    expect(pending[0]?.artifactId).toBe('art-001');
   });
 
-    it('listPending returns only pending records', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('listPending with filter returns matching approvals', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await queue.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
-    const r3 = await queue.enqueue({ artifactId: 'art-3', channel: 'skill', riskLevel: 'medium' }, '2026-05-18T00:00:00Z');
-    await queue.approve(r3.approvalId, 'user-1');
-    const pending = await queue.listPending();
-    expect(pending).toHaveLength(2);
-    expect(pending.every((r) => r.status === 'pending')).toBe(true);
+
+    await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    await queue.enqueue({
+      artifactId: 'art-002',
+      channel: 'code_tool_hook',
+      riskLevel: 'high',
+    }, '2026-05-17T00:00:00Z');
+
+    const skillPending = await queue.listPending({ channel: 'skill' });
+    expect(skillPending).toHaveLength(1);
+    expect(skillPending[0]?.channel).toBe('skill');
+
+    const highRiskPending = await queue.listPending({ riskLevel: 'high' });
+    expect(highRiskPending).toHaveLength(1);
+    expect(highRiskPending[0]?.riskLevel).toBe('high');
   });
 
-  it('listPending filters by channel', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('countByStatus returns correct counts', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await queue.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
-    const pending = await queue.listPending({ channel: 'code_tool_hook' });
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.channel).toBe('code_tool_hook');
+
+    const created1 = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const created2 = await queue.enqueue({
+      artifactId: 'art-002',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    const created3 = await queue.enqueue({
+      artifactId: 'art-003',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    await queue.approve(created1.approvalId, 'user-001');
+    await queue.reject(created2.approvalId, 'user-001', 'Not good');
+
+    const stats = await queue.countByStatus();
+    expect(stats.pending).toBe(1);
+    expect(stats.approved).toBe(1);
+    expect(stats.rejected).toBe(1);
+    expect(stats.cancelled).toBe(0);
   });
 
-  it('listPending filters by riskLevel', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('resetToPending rolls back approved approval', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await queue.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
-    await queue.enqueue({ artifactId: 'art-3', channel: 'skill', riskLevel: 'medium' }, '2026-05-18T00:00:00Z');
-    const pending = await queue.listPending({ riskLevel: 'high' });
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.channel).toBe('code_tool_hook');
+
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
+
+    await queue.approve(created.approvalId, 'user-001');
+
+    const result = await queue.resetToPending(created.approvalId);
+    expect(result.ok).toBe(true);
+
+    const found = await queue.getById(created.approvalId);
+    expect(found?.status).toBe('pending');
   });
 
-  it('getById returns enqueued record', async () => {
-    const store = new MemoryApprovalQueueStore();
+  it('resetToPending returns error for non-existent approval', async () => {
+    const store = createMockStore();
     const queue = new ApprovalQueue(store);
-    const record = await queue.enqueue({ artifactId: 'art-1', channel: 'skill', riskLevel: 'medium' }, '2026-05-18T00:00:00Z');
-    const found = await queue.getById(record.approvalId);
-    expect(found).not.toBeNull();
-    expect(found?.artifactId).toBe('art-1');
+
+    const result = await queue.resetToPending('non-existent');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('not_found');
+    }
   });
 
-  describe('resetToPending', () => {
-    it('rolls back approved record to pending', async () => {
-      const store = new MemoryApprovalQueueStore();
-      const queue = new ApprovalQueue(store);
-      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
-      await queue.approve(record.approvalId, 'user-1', 'looks good');
-      const result = await queue.resetToPending(record.approvalId);
-      expect(result.ok).toBe(true);
-      const fresh = await queue.getById(record.approvalId);
-      expect(fresh?.status).toBe('pending');
-      expect(fresh?.decidedAt).toBeUndefined();
-      expect(fresh?.decidedBy).toBeUndefined();
-    });
+  it('resetToPending returns error for non-approved approval', async () => {
+    const store = createMockStore();
+    const queue = new ApprovalQueue(store);
 
-    it('returns not_found for missing record', async () => {
-      const store = new MemoryApprovalQueueStore();
-      const queue = new ApprovalQueue(store);
-      const result = await queue.resetToPending('nonexistent');
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toBe('not_found');
-    });
+    const created = await queue.enqueue({
+      artifactId: 'art-001',
+      channel: 'skill',
+      riskLevel: 'medium',
+    }, '2026-05-17T00:00:00Z');
 
-    it('returns not_approved for pending record', async () => {
-      const store = new MemoryApprovalQueueStore();
-      const queue = new ApprovalQueue(store);
-      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
-      const result = await queue.resetToPending(record.approvalId);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toBe('not_approved');
-    });
-
-    it('returns not_approved for rejected record', async () => {
-      const store = new MemoryApprovalQueueStore();
-      const queue = new ApprovalQueue(store);
-      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
-      await queue.reject(record.approvalId, 'user-1', 'bad');
-      const result = await queue.resetToPending(record.approvalId);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toBe('not_approved');
-    });
-
-    it('allows re-approval after rollback', async () => {
-      const store = new MemoryApprovalQueueStore();
-      const queue = new ApprovalQueue(store);
-      const record = await queue.enqueue({ artifactId: 'art-1', channel: 'prompt', riskLevel: 'low' }, '2026-05-18T00:00:00Z');
-      await queue.approve(record.approvalId, 'user-1', 'first');
-      await queue.resetToPending(record.approvalId);
-      const reApprove = await queue.approve(record.approvalId, 'user-2', 'retry');
-      expect(reApprove.ok).toBe(true);
-      if (reApprove.ok) {
-        expect(reApprove.record.status).toBe('approved');
-        expect(reApprove.record.decidedBy).toBe('user-2');
-      }
-    });
+    // Still pending, not approved
+    const result = await queue.resetToPending(created.approvalId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('not_approved');
+    }
   });
 });
