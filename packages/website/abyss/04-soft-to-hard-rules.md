@@ -1340,7 +1340,7 @@ As AI Agents' execution bandwidth becomes increasingly wide, how should we build
 
 ---
 
-*Series 5 "Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems" is out now. Welcome to read the final chapter of the series.*
+*Series 5 "Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems" is out now. Welcome to read.*
 
 ---
 
