@@ -23,6 +23,7 @@ describe('buildTrajectoryEvidence', () => {
     mockTrajectory = {
       listUserTurnsForSession: vi.fn(),
       listAssistantTurns: vi.fn(),
+      listToolCallsForSession: vi.fn(),
     };
     mockWctx = {
       trajectory: mockTrajectory as TrajectoryDatabase,
@@ -190,5 +191,90 @@ describe('buildTrajectoryEvidence', () => {
 
     // Note should be truncated to MAX_EVIDENCE_NOTE_CHARS (1000 from core)
     expect(result[0].note.length).toBeLessThanOrEqual(1000);
+  });
+
+  // ── PRI-358: Failed tool_calls evidence ────────────────────────────────────
+
+  describe('PRI-358: failed tool_calls evidence', () => {
+    it('extracts failed tool_calls as evidence entries', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockReturnValue([
+        { id: 1, toolName: 'bash', outcome: 'failure', errorType: 'non_zero_exit', exitCode: 1, errorMessage: 'Command failed', filePath: null, durationMs: 500, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:00:00Z' },
+        { id: 2, toolName: 'write_file', outcome: 'success', errorType: null, exitCode: 0, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:01:00Z' },
+        { id: 3, toolName: 'bash', outcome: 'failure', errorType: 'timeout', exitCode: 124, errorMessage: 'Timed out', filePath: null, durationMs: 30000, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:02:00Z' },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const failureEntries = result.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(2);
+      expect(failureEntries[0].note).toContain('bash');
+      expect(failureEntries[0].note).toContain('non_zero_exit');
+      expect(failureEntries[1].note).toContain('timeout');
+    });
+
+    it('does not add tool_call_failure entries when no failures exist', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockReturnValue([
+        { id: 1, toolName: 'bash', outcome: 'success', errorType: null, exitCode: 0, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:00:00Z' },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const failureEntries = result.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(0);
+    });
+
+    it('limits failed tool_calls to 3 entries', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockReturnValue([
+        { id: 1, toolName: 'bash', outcome: 'failure', errorType: 'err1', exitCode: 1, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:00:00Z' },
+        { id: 2, toolName: 'bash', outcome: 'failure', errorType: 'err2', exitCode: 2, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:01:00Z' },
+        { id: 3, toolName: 'bash', outcome: 'failure', errorType: 'err3', exitCode: 3, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:02:00Z' },
+        { id: 4, toolName: 'bash', outcome: 'failure', errorType: 'err4', exitCode: 4, errorMessage: null, filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, createdAt: '2024-01-15T10:03:00Z' },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const failureEntries = result.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(3);
+    });
+
+    it('handles listToolCallsForSession throwing gracefully', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockImplementation(() => {
+        throw new Error('DB read error');
+      });
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const unavailableEntry = result.find(e => e.sourceRef === 'tool_call_failure:unavailable');
+      expect(unavailableEntry).toBeDefined();
+      expect(unavailableEntry!.note).toContain('trajectory_tool_calls_unavailable');
+    });
+
+    it('does not add unavailable entry when other evidence exists and tool_calls throws', () => {
+      const mockUserTurn = {
+        createdAt: '2024-01-15T10:00:00Z',
+        correctionDetected: true,
+        rawExcerpt: 'Owner correction',
+      };
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([mockUserTurn] as any);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockImplementation(() => {
+        throw new Error('DB read error');
+      });
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      // Should have owner message but NOT a tool_call_failure:unavailable entry
+      // because we already have evidence
+      expect(result.some(e => e.sourceRef.startsWith('owner_message:'))).toBe(true);
+      expect(result.some(e => e.sourceRef === 'tool_call_failure:unavailable')).toBe(false);
+    });
   });
 });

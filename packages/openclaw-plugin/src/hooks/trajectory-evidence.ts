@@ -64,6 +64,28 @@ export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: strin
     }
   }
 
+  // PRI-358: Extract failed tool_calls as evidence
+  try {
+    const allToolCalls = wctx.trajectory.listToolCallsForSession(sessionId) ?? [];
+    const failedToolCalls = allToolCalls.filter(tc => tc.outcome === 'failure').slice(-3);
+    for (const tc of failedToolCalls) {
+      if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
+      const note = `Tool ${tc.toolName} failed: ${tc.errorType ?? 'unknown'} (exitCode: ${tc.exitCode ?? 'N/A'})`;
+      evidence.push({
+        sourceRef: `tool_call_failure:${tc.createdAt}`,
+        note: sanitizeAssistantText(note.slice(0, MAX_EVIDENCE_NOTE_CHARS)),
+      });
+    }
+  } catch (e) {
+    // Only add unavailable entry when no other evidence exists (avoid noise)
+    if (evidence.length === 0) {
+      evidence.push({
+        sourceRef: 'tool_call_failure:unavailable',
+        note: `trajectory_tool_calls_unavailable: ${String(e).slice(0, 100)}`,
+      });
+    }
+  }
+
   if (evidence.length === 0) {
     evidence.push({
       sourceRef: 'trajectory:empty',

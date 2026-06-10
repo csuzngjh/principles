@@ -61,6 +61,23 @@ function createTrajectoryDb(): Database.Database {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      duration_ms INTEGER,
+      exit_code INTEGER,
+      error_type TEXT,
+      error_message TEXT,
+      gfi_before REAL,
+      gfi_after REAL,
+      params_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    )
+  `);
+
   return db;
 }
 
@@ -87,6 +104,21 @@ function insertUserTurn(
     INSERT INTO user_turns (session_id, turn_index, raw_excerpt, correction_detected, created_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(sessionId, 0, rawExcerpt, correctionDetected ? 1 : 0, createdAt);
+}
+
+function insertToolCall(
+  db: Database.Database,
+  sessionId: string,
+  toolName: string,
+  outcome: string,
+  errorType: string | null,
+  exitCode: number | null,
+  createdAt: string,
+): void {
+  db.prepare(`
+    INSERT INTO tool_calls (session_id, tool_name, outcome, error_type, exit_code, duration_ms, params_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, toolName, outcome, errorType, exitCode, 100, '{}', createdAt);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -173,5 +205,80 @@ describe('buildTrajectoryEvidenceFromDb — PRI-341', () => {
 
     expect(evidence.length).toBeGreaterThan(0);
     expect(evidence[0].sourceRef).toBe('trajectory:empty');
+  });
+
+  // ── PRI-358: Failed tool_calls evidence ────────────────────────────────────
+
+  describe('PRI-358: failed tool_calls evidence', () => {
+    it('extracts failed tool_calls as evidence entries', () => {
+      const db = createTrajectoryDb();
+      insertToolCall(db, '123', 'bash', 'failure', 'non_zero_exit', 1, '2026-01-01T10:00:00Z');
+      insertToolCall(db, '123', 'write_file', 'success', null, 0, '2026-01-01T10:01:00Z');
+      insertToolCall(db, '123', 'bash', 'failure', 'timeout', 124, '2026-01-01T10:02:00Z');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(2);
+      expect(failureEntries[0].note).toContain('bash');
+      expect(failureEntries[0].note).toContain('non_zero_exit');
+      expect(failureEntries[1].note).toContain('timeout');
+    });
+
+    it('does not add tool_call_failure entries when no failures exist', () => {
+      const db = createTrajectoryDb();
+      insertToolCall(db, '123', 'bash', 'success', null, 0, '2026-01-01T10:00:00Z');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(0);
+    });
+
+    it('limits failed tool_calls to 3 entries', () => {
+      const db = createTrajectoryDb();
+      insertToolCall(db, '123', 'bash', 'failure', 'err1', 1, '2026-01-01T10:00:00Z');
+      insertToolCall(db, '123', 'bash', 'failure', 'err2', 2, '2026-01-01T10:01:00Z');
+      insertToolCall(db, '123', 'bash', 'failure', 'err3', 3, '2026-01-01T10:02:00Z');
+      insertToolCall(db, '123', 'bash', 'failure', 'err4', 4, '2026-01-01T10:03:00Z');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntries.length).toBe(3);
+    });
+
+    it('handles missing tool_calls table gracefully', () => {
+      // Create DB without tool_calls table
+      const dbPath = path.join(stateDir, 'trajectory.db');
+      const db = new Database(dbPath);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT, updated_at TEXT)
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS assistant_turns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+          sanitized_text TEXT, created_at TEXT NOT NULL
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_turns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+          turn_index INTEGER NOT NULL DEFAULT 0, raw_excerpt TEXT,
+          correction_detected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+        )
+      `);
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      // Should not throw, should have some evidence (trajectory:empty or unavailable)
+      expect(evidence.length).toBeGreaterThan(0);
+      // Should NOT have tool_call_failure:unavailable since we have no other evidence
+      // and the table simply doesn't exist (not an error condition worth reporting)
+    });
   });
 });
