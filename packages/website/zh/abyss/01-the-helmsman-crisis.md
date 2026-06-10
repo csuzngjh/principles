@@ -9,7 +9,7 @@ lang: zh-CN
 
 **副标题**：为什么在 AI 执行力泛滥的时代，认知外脑比代码更稀缺
 
-![开发者与 AI 认知网络](/images/1.png)
+![开发者与 AI 认知网络](/images/abyss/01/abyss-01-developer-ai-network.png)
 
 ---
 
@@ -38,7 +38,7 @@ lang: zh-CN
 
 > 如果你还为“AI 几秒钟写出几百行代码”而沾沾自喜，你可能该问自己：在这个工作流里，你不可替代的认知究竟是什么？
 
-![赛博垃圾围城](/images/2.png)
+![赛博垃圾围城](/images/abyss/01/abyss-01-cyber-garbage-siege.png)
 
 ---
 
@@ -61,7 +61,7 @@ lang: zh-CN
 - 进行反脆弱式创新  
 - 构建系统化反馈循环
 
-![AI 流水线被无限复制](/images/3.png)
+![AI 流水线被无限复制](/images/abyss/01/abyss-01-replicated-ai-pipelines.png)
 
 ---
 
@@ -76,7 +76,7 @@ lang: zh-CN
 
 这种零摩擦交互，剥夺了我们在行动前深思熟虑的机会，让人产生虚假多巴胺，退化成盲目下发指令的“打字员”。
 
-![打字员困境](/images/4.png)
+![打字员困境](/images/abyss/01/abyss-01-typist-trapped-by-rules.png)
 
 ---
 
@@ -103,7 +103,7 @@ PD 绝非简单的系统提示词。它是原则驱动的决策系统：
 - 判断任务风险等级，关键决策制造高强度摩擦  
 - 记录人类妥协与坚持，实现心智融合
 
-![建设性摩擦核心场景](/images/5.png)
+![建设性摩擦核心场景](/images/abyss/01/abyss-01-constructive-friction.png)
 
 ---
 
@@ -115,7 +115,7 @@ PD 绝非简单的系统提示词。它是原则驱动的决策系统：
 2. **必须有真实世界痛感**：所有战略反问最终需形成闭环（变现、流量、反馈）  
 3. **杀掉过时的自己**：原则库非教条，环境变化时持续迭代认知外脑
 
-![AI 大脑自我进化重构](/images/6.png)
+![AI 大脑自我进化重构](/images/abyss/01/abyss-01-ai-brain-self-renewal.png)
 
 ---
 
@@ -127,7 +127,7 @@ PD 绝非简单的系统提示词。它是原则驱动的决策系统：
 
 如果你不满足于 AI 替你干活，而希望 AI 逼你变聪明；如果你手握行业 Know-how，却苦于单点试错——PD 项目的后续，正为第一批敢于拥抱建设性摩擦的破局者准备。
 
-![人类与 AI 并肩驾船远航](/images/7.png)
+![人类与 AI 并肩驾船远航](/images/abyss/01/abyss-01-human-ai-sailing.png)
 
 ---
 

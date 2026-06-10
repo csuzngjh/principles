@@ -9,7 +9,7 @@ lang: en
 
 **Subtitle**: Why Cognitive Exo-Brains Are Scarcer Than Code in the Era of Infinite AI Execution
 
-![Developer + AI network](/images/1.png)
+![Developer + AI network](/images/abyss/01/abyss-01-developer-ai-network.png)
 
 ---
 
@@ -38,7 +38,7 @@ In the past, "I can build this feature" was a moat in itself. But today, the pre
 
 > If you are still complacent because "AI can write hundreds of lines of code in seconds," you should probably ask yourself: In this workflow, what is your irreplaceable cognitive value?
 
-![Cyber garbage siege](/images/2.png)
+![Cyber garbage siege](/images/abyss/01/abyss-01-cyber-garbage-siege.png)
 
 ---
 
@@ -61,7 +61,7 @@ The true moat is a **dynamic evolutionary system (a plane)** centered on **high-
 - Engaging in anti-fragile innovation
 - Building systematized feedback loops
 
-![Replicated AI pipelines](/images/3.png)
+![Replicated AI pipelines](/images/abyss/01/abyss-01-replicated-ai-pipelines.png)
 
 ---
 
@@ -76,7 +76,7 @@ The reason lies in the "zero-friction" interaction habits of consumer-grade AI a
 
 This zero-friction interaction deprives us of the opportunity to think deeply before acting, generating fake dopamine and degrading us into "typists" who blindly issue commands.
 
-![Typist trapped by rules](/images/4.png)
+![Typist trapped by rules](/images/abyss/01/abyss-01-typist-trapped-by-rules.png)
 
 ---
 
@@ -103,7 +103,7 @@ PD is by no means a simple system prompt. It is a principle-driven decision-maki
 - Assesses task risk levels and introduces high-intensity friction at key decision points.
 - Records human compromises and persistence, achieving mind meld.
 
-![Constructive friction](/images/5.png)
+![Constructive friction](/images/abyss/01/abyss-01-constructive-friction.png)
 
 ---
 
@@ -115,7 +115,7 @@ If friction spirals out of control, PD itself will degenerate into an annoying n
 2. **Must have real-world pain**: All strategic rhetorical questions must ultimately form a closed loop (monetization, traffic, feedback).
 3. **Kill the outdated self**: The principle library is not dogmatic; the cognitive exo-brain must iterate continuously as the environment changes.
 
-![AI brain self-renewal](/images/6.png)
+![AI brain self-renewal](/images/abyss/01/abyss-01-ai-brain-self-renewal.png)
 
 ---
 
@@ -127,7 +127,7 @@ Of the ten commands you give to AI today, how many are asking "Is it worth doing
 
 If you are not satisfied with AI just doing the work for you, but hope AI forces you to become smarter; if you hold industry know-how but struggle with isolated trial and error—the next phase of the PD project is prepared for the first wave of trailblazers who dare to embrace constructive friction.
 
-![Human + AI sailing](/images/7.png)
+![Human + AI sailing](/images/abyss/01/abyss-01-human-ai-sailing.png)
 
 ---
 
