@@ -1334,13 +1334,13 @@ Can it be not just a better "coder," but an entrepreneurial partner capable of c
 
 In the next part, we will enter a more macroscopic layer of the PD system:
 
-**Time Scales and Evolution Engines.**
+**Co-evolution and the Return of the Owner.**
 
-When a system possesses multi-scale feedback loops, how will it move from short-term error correction to long-term evolution?
+As AI Agents' execution bandwidth becomes increasingly wide, how should we build human "intention bandwidth" to retake the steering wheel in human-machine co-evolution?
 
 ---
 
-*Series 5 "Time Scales and Evolution Engines: The Multi-scale Feedback System of Agents" is coming soon. Stay tuned for the final chapter of the series.*
+*Series 5 "Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems" is out now. Welcome to read the final chapter of the series.*
 
 ---
 
