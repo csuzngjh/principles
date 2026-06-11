@@ -62,4 +62,16 @@
     <must>保持极致的数字洁癖。项目根目录是神圣的。所有命名必须严格使用 `kebab-case`。任务结束后清理所有的测试脚本和 Debug 遗留物。</must>
     <forbidden>在项目根目录下随意创建临时文件（如 `test.txt`、`temp.md`、`debug.log`）。</forbidden>
   </directive>
+
+  <directive id="T-09" name="DIVIDE_AND_CONQUER">
+    <trigger>当面对复杂任务、多步骤变更或可分解的操作时。</trigger>
+    <must>在执行前将任务拆分为更小的、可管理的阶段。逐阶段执行，并在进入下一阶段前验证当前阶段的结果。</must>
+    <forbidden>试图在单一步骤中执行大型复杂变更，或在没有分解计划的情况下直接推进。</forbidden>
+  </directive>
+
+  <directive id="T-10" name="MEMORY_EXTERNALIZATION">
+    <trigger>当得出重要结论、做出决策或规划跨会话的后续步骤时。</trigger>
+    <must>将中间结论、决策和计划写入持久化文件（如 plan.md、scratchpad），使其在上下文压缩和会话边界后仍然可用。</must>
+    <forbidden>仅依赖对话上下文来保持重要状态，这些状态在上下文窗口切换时将丢失。</forbidden>
+  </directive>
 </thinking_os_core_directives>
