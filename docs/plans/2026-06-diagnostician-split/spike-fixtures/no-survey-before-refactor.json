@@ -1,0 +1,49 @@
+{
+  "name": "no-survey-before-refactor",
+  "description": "Agent started refactoring without understanding the module structure",
+  "expectedAxiomViolation": "T-01",
+  "payload": {
+    "contextId": "ctx-spike-003",
+    "contextHash": "hash-003",
+    "taskId": "task-spike-003",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-003"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-003",
+      "reasonSummary": "Agent began refactoring the payment module without reading existing code structure",
+      "severity": "high",
+      "source": "tool-call-gate",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-003",
+          "note": "Agent called edit_file on payment.ts without any prior glob/grep/read to understand module structure"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Refactor the payment module to use the new API"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will refactor the payment module now"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "edit_file",
+        "toolResultSummary": "Rewrote payment.ts from scratch"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "You deleted the error handling that was already there — you should have read the file first"
+      }
+    ]
+  }
+}
