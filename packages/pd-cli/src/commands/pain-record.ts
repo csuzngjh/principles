@@ -11,9 +11,10 @@ import {
   PrincipleTreeLedgerAdapter,
   resolveRuntimeConfig,
   isRuntimeConfigError,
+  isFeatureEnabled,
 } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { loadPdConfig } from '../services/pd-config-loader.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { buildTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
 
 interface RecordOptions {
@@ -23,6 +24,7 @@ interface RecordOptions {
   workspace?: string;
   json?: boolean;
   session?: string;
+  wait?: boolean;
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
@@ -57,6 +59,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     }
   }
   const effectiveConfig = configResult.ok ? configResult.effective : configResult.defaults;
+
+  // PRI-369: Determine async mode from feature flag + --wait override
+  const featureFlags = computeFlagsFromLoadResult(configResult);
+  const asyncFlagEnabled = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+  const asyncMode = asyncFlagEnabled && !opts.wait; // --wait overrides flag to force sync
+
   const service = new PainToPrincipleService({
     workspaceDir,
     stateDir,
@@ -65,6 +73,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     autoIntakeEnabled: true,
     effectiveConfig,
     getEnvVar: (name: string) => process.env[name],
+    asyncMode,
   });
 
   const result = await service.recordPain({
@@ -159,7 +168,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
-    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried') process.exit(1);
+    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') process.exit(1);
   } else {
     if (result.status === 'succeeded') {
       console.log('[OK] Pain signal recorded via PainToPrincipleService');
@@ -176,6 +185,13 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       if (result.latencyMs !== undefined) console.log(`   Latency: ${result.latencyMs}ms`);
       console.log(`\nDiagnostician pipeline running. Check progress with:`);
       console.log(`   pd task show ${result.taskId} --workspace "${workspaceDir}"`);
+    } else if (result.status === 'submitted') {
+      console.log('[SUBMITTED] Pain signal submitted for async diagnosis');
+      console.log(`   Pain ID: ${result.painId}`);
+      console.log(`   Task ID: ${result.taskId}`);
+      console.log(`   Status: submitted`);
+      console.log(`   Next action: pd task show ${result.taskId} --workspace "${workspaceDir}"`);
+      if (result.latencyMs !== undefined) console.log(`   Submit latency: ${result.latencyMs}ms`);
     } else if (result.status === 'skipped') {
       console.log(`[SKIP] Task already in progress: ${result.message ?? 'unknown'}`);
       console.log(`   Pain ID: ${result.painId}`);
