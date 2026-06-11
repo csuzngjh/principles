@@ -147,6 +147,29 @@ export class PainSignalBridge {
     });
   }
 
+  /**
+   * Submit a pain signal without running diagnosis.
+   * Creates the task as 'pending' for later execution by orchestrator wakeOnce/recovery-sweep.
+   * Returns the taskId for progress tracking.
+   * PRI-369: async pain-record CLI — fire-and-forget submission.
+   */
+  async submitPainSignal(data: PainDetectedData): Promise<{ taskId: string }> {
+    const taskId = data.taskId ?? createDiagnosticianTaskId(data.painId);
+    const diagnosticJson = buildDiagnosticJson(data, this.workspaceDir);
+
+    await this.stateManager.createTask({
+      taskId,
+      taskKind: 'diagnostician',
+      inputRef: data.painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson,
+    });
+
+    return { taskId };
+  }
+
   async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);

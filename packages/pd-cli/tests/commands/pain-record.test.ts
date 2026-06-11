@@ -56,6 +56,23 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+  isFeatureEnabled: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: vi.fn().mockReturnValue({
+    ok: true,
+    effective: { config: {}, source: 'defaults', warnings: [] },
+    source: 'defaults',
+    configPath: '/tmp/fake-workspace/.pd/config.yaml',
+    warnings: [],
+    legacyFilesDetected: [],
+  }),
+  computeFlagsFromLoadResult: vi.fn().mockReturnValue({
+    flags: {},
+    enabledChannels: [],
+    warnings: [],
+  }),
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
