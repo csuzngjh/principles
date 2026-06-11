@@ -456,6 +456,7 @@ export async function createPainSignalBridge(
       timeoutMs: runtimeConfig.timeoutMs,
       agentId: runtimeConfig.agentId,
       outputLanguage,
+      effectiveConfig: opts.effectiveConfig,
     },
   );
 
