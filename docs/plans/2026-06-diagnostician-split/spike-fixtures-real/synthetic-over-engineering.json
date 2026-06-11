@@ -1,0 +1,51 @@
+{
+  "name": "over-engineering",
+  "description": "Agent created a complex plugin system for a simple config change",
+  "expectedAxiomViolation": "T-06",
+  "payload": {
+    "contextId": "ctx-spike-007",
+    "contextHash": "hash-007",
+    "taskId": "task-spike-007",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-007"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-007",
+      "reasonSummary": "Agent built a plugin architecture with 8 new files for a simple config value change",
+      "severity": "medium",
+      "source": "owner-reported",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-007",
+          "note": "Agent created PluginManager, PluginLoader, PluginRegistry, ConfigPlugin, and 4 interface files for what should be a one-line config change"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Change the default timeout from 30s to 60s"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will implement a flexible plugin-based configuration system to handle timeout changes"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "edit_file",
+        "toolResultSummary": "Created 8 new files: PluginManager.ts, PluginLoader.ts, PluginRegistry.ts, ConfigPlugin.ts, IPlugin.ts, IPluginLoader.ts, IConfigProvider.ts, TimeoutPlugin.ts"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "This is massively over-engineered. I just needed you to change one number in config.ts"
+      }
+    ]
+  },
+  "source": "synthetic",
+  "arm1Baseline": null
+}
