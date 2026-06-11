@@ -209,7 +209,7 @@ function getFallbackName(id: string): string {
 
 function getFallbackDescription(id: string): string {
   const entry = CORE_PRINCIPLES.find(p => p.id === id);
-  return entry?.description ?? '';
+  return entry?.statement ?? '';
 }
 
 // ---------------------------------------------------------------------------

@@ -160,7 +160,7 @@ export const CORE_THINKING_MODELS: Array<{
 }> = CORE_PRINCIPLES.map(p => ({
   id: p.id,
   name: p.name,
-  description: p.description,
+  description: p.statement,
 }));
 
 /**
