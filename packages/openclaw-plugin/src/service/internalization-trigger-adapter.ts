@@ -18,7 +18,7 @@ import type { TaskRecord } from '@principles/core/runtime-v2';
 
 import {
   validateInternalizationTaskReady,
-  isPeerRunnerKind,
+  isRunnerKind,
   hydratePITaskRecord,
   type PITaskRecord,
   type RunnerKind,
@@ -169,12 +169,12 @@ export function createInternalizationTrigger(
       // Filter to only PeerRunner tasks, then hydrate PI metadata from diagnosticJson.
       // Tasks without valid PI metadata in diagnosticJson return null and are filtered out.
       const pendingPITasks = pendingTasks
-        .filter(t => isPeerRunnerKind(t.taskKind))
+        .filter(t => isRunnerKind(t.taskKind))
         .map(t => hydratePITaskRecord(t))
         .filter((t): t is PITaskRecord => t !== null);
 
       const retryWaitPITasks = retryWaitTasks
-        .filter(t => isPeerRunnerKind(t.taskKind))
+        .filter(t => isRunnerKind(t.taskKind))
         .map(t => hydratePITaskRecord(t))
         .filter((t): t is PITaskRecord => t !== null);
 
@@ -299,4 +299,4 @@ export function createInternalizationTrigger(
 
 // ── Re-export types for consumers ────────────────────────────────────────────
 
-export type { PITaskRecord, PeerRunnerKind } from '@principles/core/runtime-v2';
+export type { PITaskRecord, RunnerKind } from '@principles/core/runtime-v2';

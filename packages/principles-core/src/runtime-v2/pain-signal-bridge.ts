@@ -5,6 +5,7 @@ import type { LedgerAdapter } from './candidate-intake.js';
 import type { RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
+import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
@@ -248,12 +249,33 @@ export class PainSignalBridge {
       };
     }
 
+    return this.onDiagnosisComplete({
+      taskId,
+      diagnosticianOutput: result.output,
+      painId,
+      provenance,
+      inputEvidenceCount: data.evidence?.length ?? 0,
+    });
+  }
+
+  /**
+   * PRI-372 (T-G): Post-diagnosis processing extracted from onPainDetected().
+   * Handles admission → intake → seedDreamer after a successful diagnosis.
+   * Also called by DiagRouterRunner's onDiagnosisComplete callback.
+   */
+  async onDiagnosisComplete(opts: {
+    taskId: string;
+    diagnosticianOutput: DiagnosticianOutputV1 | undefined;
+    painId: string;
+    provenance: PainProvenance;
+    inputEvidenceCount?: number;
+  }): Promise<PainSignalBridgeResult> {
+    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0 } = opts;
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
 
-    const diagnosticianOutput = result.output;
     const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount: data.evidence?.length ?? 0 })
+      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount })
       : candidates.map((c) => ({
           candidateId: c.candidateId,
           recommendationKind: c.recommendationKind,
@@ -343,7 +365,6 @@ export class PainSignalBridge {
         status: 'failed',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         candidateIds,
         ledgerEntryIds,
@@ -360,7 +381,6 @@ export class PainSignalBridge {
         status: 'failed',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -375,7 +395,6 @@ export class PainSignalBridge {
         status: 'degraded',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -390,7 +409,6 @@ export class PainSignalBridge {
         status: 'degraded',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -404,7 +422,6 @@ export class PainSignalBridge {
       status: seedFailureNote ? 'degraded' : 'succeeded',
       painId,
       taskId,
-      runnerStatus: result.status,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       candidateIds,

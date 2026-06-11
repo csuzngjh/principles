@@ -248,4 +248,48 @@ describe('Internalization Trigger Adapter', () => {
       expect(src).not.toMatch(/isValidPITaskRecord\s*\(\s*t\s*\)/);
     });
   });
+
+  describe('PRI-372: diagnostician stage task kinds are discovered', () => {
+    it('diag_rootcause task → logs INTERNALIZATION_TRIGGER_WAKE', async () => {
+      const task = makePITask('task-rc', 'diag_rootcause', 'prompt', { status: 'pending', dependencyTaskIds: [] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE',
+        expect.objectContaining({ taskId: 'task-rc', taskKind: 'diag_rootcause', gateDecision: 'proceed' }),
+      );
+    });
+
+    it('diag_distiller task → logs INTERNALIZATION_TRIGGER_WAKE', async () => {
+      const task = makePITask('task-dist', 'diag_distiller', 'prompt', { status: 'pending', dependencyTaskIds: [] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE',
+        expect.objectContaining({ taskId: 'task-dist', taskKind: 'diag_distiller', gateDecision: 'proceed' }),
+      );
+    });
+
+    it('diag_router task → logs INTERNALIZATION_TRIGGER_WAKE', async () => {
+      const task = makePITask('task-router', 'diag_router', 'prompt', { status: 'pending', dependencyTaskIds: [] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE',
+        expect.objectContaining({ taskId: 'task-router', taskKind: 'diag_router', gateDecision: 'proceed' }),
+      );
+    });
+
+    it('diag_rootcause task with unmet dep → logs INTERNALIZATION_TRIGGER_BLOCKED', async () => {
+      const depTask = makePITask('dep-1', 'diag_rootcause', 'prompt', { status: 'pending', dependencyTaskIds: [] });
+      const task = makePITask('task-rc-blocked', 'diag_distiller', 'prompt', { status: 'pending', dependencyTaskIds: ['dep-1'] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      mockProvider.getTask.mockResolvedValue(depTask);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_BLOCKED',
+        expect.objectContaining({ taskId: 'task-rc-blocked', gateDecision: 'blocked' }),
+      );
+    });
+  });
 });

@@ -164,9 +164,18 @@ const REQUIRED_SOURCE_FILES = [
   'feedback/render-markdown.ts',
   'feedback/render-github-url.ts',
   'feedback/privacy-preview.ts',
-  'feedback/create-report.ts',
   'feedback/safe-stringify.ts',
+  'feedback/create-report.ts',
   'feedback/index.ts',
+  // PRI-372 (T-G)
+  'diagnostician/diag-rootcause-output.ts',
+  'diagnostician/diag-distiller-output.ts',
+  'diagnostician/rootcause-prompt-builder.ts',
+  'diagnostician/distiller-prompt-builder.ts',
+  'diagnostician/router-prompt-builder.ts',
+  'internalization/diag-rootcause-runner.ts',
+  'internalization/diag-distiller-runner.ts',
+  'internalization/diag-router-runner.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -417,6 +426,16 @@ const REQUIRED_TEST_FILES = [
   '../feature-flags/__tests__/feature-flag-contract.test.ts',
   // PRI-295
   '../activation/__tests__/prompt-activation-reader-contract.test.ts',
+  // PRI-372 (T-G)
+  '../diagnostician/__tests__/diag-rootcause-output.test.ts',
+  '../diagnostician/__tests__/diag-distiller-output.test.ts',
+  '../diagnostician/__tests__/rootcause-prompt-builder.test.ts',
+  '../diagnostician/__tests__/distiller-prompt-builder.test.ts',
+  '../diagnostician/__tests__/router-prompt-builder.test.ts',
+  '../internalization/__tests__/diag-rootcause-runner.test.ts',
+  '../internalization/__tests__/diag-distiller-runner.test.ts',
+  '../internalization/__tests__/diag-router-runner.test.ts',
+  '../internalization/__tests__/diag-chain-e2e.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -3548,6 +3567,26 @@ describe('PRI-304: PD-Owned Config Contract barrel exports and purity', () => {
       expect(src).not.toContain('eval(');
       expect(src).not.toContain('new Function');
     }
+  });
+});
+
+describe('PRI-372: split diagnostician runners extend BasePeerRunner', () => {
+  it('DiagRootCauseRunner extends BasePeerRunner', async () => {
+    const { DiagRootCauseRunner } = await import('../internalization/diag-rootcause-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagRootCauseRunner.prototype).toBeInstanceOf(BasePeerRunner);
+  });
+
+  it('DiagDistillerRunner extends BasePeerRunner', async () => {
+    const { DiagDistillerRunner } = await import('../internalization/diag-distiller-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagDistillerRunner.prototype).toBeInstanceOf(BasePeerRunner);
+  });
+
+  it('DiagRouterRunner extends BasePeerRunner', async () => {
+    const { DiagRouterRunner } = await import('../internalization/diag-router-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagRouterRunner.prototype).toBeInstanceOf(BasePeerRunner);
   });
 });
 

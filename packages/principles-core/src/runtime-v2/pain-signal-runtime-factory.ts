@@ -425,17 +425,42 @@ export async function createPainSignalBridge(
     });
   }
 
-  // PRI-370 (INF-6): Gate on diagnostician_split_pipeline flag
-  // When flag is on, split pipeline runners should be used (T-G implements).
-  // When flag is off (default), fall back to monolith DiagnosticianRunner.
+  // PRI-370 (INF-6) / PRI-372 (T-G): Gate on diagnostician_split_pipeline flag
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
-    if (isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline')) {
-      // Split pipeline is enabled — but T-G hasn't implemented the runners yet.
-      // This is the seam: throw not_implemented until T-G fills in the runners.
+    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
+    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+
+    if (splitPipeline && !asyncCli) {
       throw new PDRuntimeError(
-        'capability_missing',
-        'diagnostician_split_pipeline is enabled but split runners are not yet implemented (T-G)',
+        'input_invalid',
+        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
+      );
+    }
+
+    if (splitPipeline) {
+      // Instantiate 3 split runners for orchestrator pickup
+      // The bridge still uses the monolith for now — split execution path
+      // will be wired when the orchestrator can handle diag stage task kinds
+      const { DiagRootCauseRunner } = await import('./internalization/diag-rootcause-runner.js');
+      const { DiagDistillerRunner } = await import('./internalization/diag-distiller-runner.js');
+      const { DiagRouterRunner } = await import('./internalization/diag-router-runner.js');
+      const { DefaultDiagRootCauseValidator } = await import('./diagnostician/diag-rootcause-output.js');
+      const { DefaultDiagDistillerValidator } = await import('./diagnostician/diag-distiller-output.js');
+
+      // Runners are instantiated but not yet wired into the bridge
+      // (void silences unused variable lint until orchestrator integration)
+      void new DiagRootCauseRunner(
+        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+      );
+      void new DiagDistillerRunner(
+        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+      );
+      void new DiagRouterRunner(
+        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer, onDiagnosisComplete: async (_taskId, _output) => { /* placeholder — bridge reference set after construction */ } },
+        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
       );
     }
   }
