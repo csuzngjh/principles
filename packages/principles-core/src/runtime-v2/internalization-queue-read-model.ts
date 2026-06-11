@@ -18,8 +18,8 @@
 import type { TaskRecord } from './task-status.js';
 import type { RuntimeStateHandle } from './runtime-state-handle.js';
 import { createRuntimeStateHandle } from './runtime-state-handle.js';
-import type { PeerRunnerKind, InternalizationChannel } from './internalization/peer-runner-contracts.js';
-import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
+import type { RunnerKind, InternalizationChannel } from './internalization/peer-runner-contracts.js';
+import { isRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { validateInternalizationTaskReady } from './internalization/internalization-state-machine.js';
 import { isUnresolvable } from './internalization/internalization-task-guards.js';
@@ -29,19 +29,19 @@ import { classifyTaskActionability, type ActionabilityPolicyInput, MVP_CORE_TASK
 
 export interface BlockedSample {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   blockedBy: string[];
 }
 
 export interface DependencyFailedSample {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   failedDependencies: string[];
 }
 
 export interface ReadyTask {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   channel: InternalizationChannel;
 }
 
@@ -61,20 +61,20 @@ export interface NoReadyTasksDiagnosis {
 
 export interface RetryWaitPendingSample {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   retryAfter: string;
 }
 
 export interface LeaseConflictSample {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   leaseOwner: string;
   leaseExpiresAt: string;
 }
 
 export interface UnresolvableSample {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   rejectionCount: number;
 }
 
@@ -128,8 +128,8 @@ export class InternalizationQueueReadModel {
       this.stateManager.listTasks({ status: 'retry_wait' }),
     ]);
 
-    // Filter to PeerRunnerKind tasks first — all counts below are PI-specific
-    const peerTasks = [...pending, ...retryWait].filter(t => isPeerRunnerKind(t.taskKind));
+    // Filter to RunnerKind tasks — includes both PeerRunnerKind and DiagnosticianStageKind
+    const runnerTasks = [...pending, ...retryWait].filter(t => isRunnerKind(t.taskKind));
 
     let pendingCount = 0;
     let retryWaitCount = 0;
@@ -157,7 +157,7 @@ export class InternalizationQueueReadModel {
 
     const nowMs = Date.now();
 
-    for (const rawTask of peerTasks) {
+    for (const rawTask of runnerTasks) {
       const piTask = hydratePITaskRecord(rawTask);
 
       if (!piTask) {

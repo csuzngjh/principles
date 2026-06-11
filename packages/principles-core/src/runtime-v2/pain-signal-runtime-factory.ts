@@ -16,6 +16,8 @@ import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
+import { PDRuntimeError } from './error-categories.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
@@ -421,6 +423,21 @@ export async function createPainSignalBridge(
         fallbackValue: resolvedLang.outputLanguage,
       },
     });
+  }
+
+  // PRI-370 (INF-6): Gate on diagnostician_split_pipeline flag
+  // When flag is on, split pipeline runners should be used (T-G implements).
+  // When flag is off (default), fall back to monolith DiagnosticianRunner.
+  if (opts.effectiveConfig) {
+    const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
+    if (isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline')) {
+      // Split pipeline is enabled — but T-G hasn't implemented the runners yet.
+      // This is the seam: throw not_implemented until T-G fills in the runners.
+      throw new PDRuntimeError(
+        'capability_missing',
+        'diagnostician_split_pipeline is enabled but split runners are not yet implemented (T-G)',
+      );
+    }
   }
 
   const runner = new DiagnosticianRunner(

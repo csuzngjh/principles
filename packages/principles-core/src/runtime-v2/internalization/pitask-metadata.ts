@@ -31,7 +31,7 @@ import type {
   InternalizationChannel,
   ArtifactRef,
 } from './peer-runner-contracts.js';
-import { isInternalizationChannel, isPeerRunnerKind } from './peer-runner-contracts.js';
+import { isInternalizationChannel, isRunnerKind } from './peer-runner-contracts.js';
 
 /** Namespace key used inside diagnosticJson to isolate PI metadata. */
 export const PI_METADATA_KEY = 'pi_metadata' as const;
@@ -173,12 +173,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
  * Hydrate a raw TaskRecord (as returned by SqliteTaskStore.getTask or listTasks)
  * into a PITaskRecord by reading and parsing its diagnosticJson.
  *
- * Fail-closed: returns null for any non-peer-runner taskKind (e.g. diagnostician)
+ * Fail-closed: returns null for any non-RunnerKind taskKind
  * even if diagnosticJson contains valid pi_metadata. This prevents the
  * InternalizationOrchestrator from treating a non-PI task as a PITaskRecord.
  *
  * Returns null if:
- *   - taskKind is not a PeerRunnerKind (e.g. diagnostician)
+ *   - taskKind is not a valid RunnerKind (PeerRunnerKind or DiagnosticianStageKind)
  *   - diagnosticJson is missing or whitespace
  *   - diagnosticJson is not valid JSON
  *   - pi_metadata key is missing or invalid
@@ -186,8 +186,9 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
  *   - Optional field present but not a non-empty string
  */
 export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
-  // Guard: reject non-peer-runner task kinds — lineage/kind invariant
-  if (!isPeerRunnerKind(task.taskKind)) return null;
+  // Guard: reject non-runner task kinds — lineage/kind invariant
+  // Accept both PeerRunnerKind and DiagnosticianStageKind
+  if (!isRunnerKind(task.taskKind)) return null;
 
   // Read diagnosticJson from the runtime object (not typed on TaskRecord)
   const raw = task as Record<string, unknown>;

@@ -20,11 +20,13 @@ import type { PDTaskStatus, TaskRecord } from '../task-status.js';
 import type {
   PITaskRecord,
   PeerRunnerKind,
+  RunnerKind,
   InternalizationChannel,
   PIArtifact,
   ArtifactRef,
 } from './peer-runner-contracts.js';
-import { getAllowedSuccessors, isAcyclic, validateEdge } from './internalization-job-graph.js';
+import { isPeerRunnerKind, isDiagnosticianStageKind } from './peer-runner-contracts.js';
+import { getAllowedSuccessors, isAcyclic, validateEdge, validateDiagEdge } from './internalization-job-graph.js';
 
 import {
   canAcquireLease,
@@ -100,7 +102,7 @@ export type RejectionFeedbackResult =
 // ── Next Task Proposal Types ─────────────────────────────────────────────────
 
 export interface NextTaskProposal {
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   parentTaskId: string;
   dependencyTaskIds: string[];
   inputArtifactRefs: ArtifactRef[];
@@ -258,6 +260,19 @@ export function decideArtifactRejectionFeedback(
   artifact: PIArtifact,
   task: PITaskRecord,
 ): RejectionFeedbackResult {
+  // Only peer runner tasks have artifact rejection feedback.
+  // Diagnostician stage tasks should not reach this path — if they do,
+  // escalate with an explicit reason rather than fabricating a PeerRunnerKind.
+  if (!isPeerRunnerKind(task.taskKind)) {
+    return {
+      action: 'escalate',
+      rejectedArtifactId: artifact.artifactId,
+      sourceTaskId: artifact.sourceTaskId,
+      sourceTaskKind: 'dreamer', // sentinel — diagnostician tasks must not reach here; caller must guard
+      rejectionReason: `unexpected_diagnostician_taskKind:${task.taskKind}`,
+    };
+  }
+
   const base = {
     rejectedArtifactId: artifact.artifactId,
     sourceTaskId: artifact.sourceTaskId,
@@ -328,12 +343,20 @@ export function createNextTaskProposal(
     return null;
   }
 
+  // Diagnostician chain tasks are handled by the orchestrator via getDiagSuccessors,
+  // not by this function which uses the peer runner job graph.
+  if (!isPeerRunnerKind(currentTask.taskKind)) {
+    return null;
+  }
+
+  // After the guard, currentTask.taskKind is narrowed to PeerRunnerKind
+  const { taskKind } = currentTask;
   const effectiveChannel = channel ?? currentTask.channel;
-  const successors = getAllowedSuccessors(currentTask.taskKind);
+  const successors = getAllowedSuccessors(taskKind);
 
   // Filter to only channel-valid successors (M1: prevent invalid trainer proposal)
   const validSuccessors = successors.filter(s =>
-    validateEdge(currentTask.taskKind, s, effectiveChannel),
+    validateEdge(taskKind, s, effectiveChannel),
   );
 
   if (validSuccessors.length === 0) {
@@ -403,7 +426,16 @@ export function validateInternalizationGraph(tasks: PITaskRecord[]): GraphValida
       }
 
       // Use the current task's channel for edge validation
-      const edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel);
+      // Peer runner edges use validateEdge; diagnostician edges use validateDiagEdge
+      let edgeValid: boolean;
+      if (isDiagnosticianStageKind(dep.taskKind) && isDiagnosticianStageKind(task.taskKind)) {
+        edgeValid = validateDiagEdge(dep.taskKind, task.taskKind);
+      } else if (isPeerRunnerKind(dep.taskKind) && isPeerRunnerKind(task.taskKind)) {
+        edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel);
+      } else {
+        // Cross-pipeline edge — not allowed
+        edgeValid = false;
+      }
       if (!edgeValid) {
         errors.push({
           type: 'disallowed_edge',
