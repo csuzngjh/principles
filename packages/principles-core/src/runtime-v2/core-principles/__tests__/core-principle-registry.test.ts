@@ -49,7 +49,7 @@ describe('Core Principle Registry', () => {
     // Attempting mutation should not change the value
     expect(() => {
       (CORE_PRINCIPLES as typeof CORE_PRINCIPLES[number][]).push(
-        Object.freeze({ id: 'T-99', name: 'Fake', nameZh: '假', statement: 'Fake', statementZh: '假', description: 'Fake', descriptionZh: '假' })
+        Object.freeze({ id: 'T-99', name: 'Fake', nameZh: '假', statement: 'Fake', statementZh: '假' })
       );
     }).toThrow();
   });
@@ -65,8 +65,6 @@ describe('Core Principle Registry', () => {
       expect(p.statement.length).toBeGreaterThan(0);
       expect(typeof p.statementZh).toBe('string');
       expect(p.statementZh.length).toBeGreaterThan(0);
-      expect(typeof p.description).toBe('string');
-      expect(typeof p.descriptionZh).toBe('string');
     }
   });
 
