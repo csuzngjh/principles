@@ -1,0 +1,51 @@
+{
+  "name": "no-task-division",
+  "description": "Agent attempted a large migration as a single monolithic change",
+  "expectedAxiomViolation": "T-09",
+  "payload": {
+    "contextId": "ctx-spike-009",
+    "contextHash": "hash-009",
+    "taskId": "task-spike-009",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-009"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-009",
+      "reasonSummary": "Agent attempted to migrate the entire codebase from REST to GraphQL in one go",
+      "severity": "high",
+      "source": "owner-reported",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-009",
+          "note": "Agent tried to rewrite 12 API endpoints to GraphQL in a single edit session, causing cascading failures"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Migrate the API from REST to GraphQL"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will migrate all 12 endpoints to GraphQL now"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "edit_file",
+        "toolResultSummary": "Attempted to rewrite all 12 endpoint files simultaneously — 8 files have syntax errors"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "This should have been done incrementally, one endpoint at a time"
+      }
+    ]
+  },
+  "source": "synthetic",
+  "arm1Baseline": null
+}

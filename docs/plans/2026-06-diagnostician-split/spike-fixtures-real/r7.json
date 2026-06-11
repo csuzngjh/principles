@@ -1,0 +1,86 @@
+{
+  "name": "r7",
+  "description": "PRI-363 acceptance report inaccuracy (8 failures reported as passing)",
+  "expectedAxiomViolation": "T-03",
+  "source": "real",
+  "realCode": "R7",
+  "payload": {
+    "contextId": "ctx-spike2-r7",
+    "contextHash": "hash-spike2-r7",
+    "taskId": "task-spike2-r7",
+    "workspaceDir": "D:/.openclaw/workspace",
+    "sourceRefs": [
+      "pain://manual_1781081347155_07o22nkt"
+    ],
+    "diagnosisTarget": {
+      "painId": "manual_1781081347155_07o22nkt",
+      "reasonSummary": "PRI-363 验收报告失真：标注 npm run test 通过（1727 passing），实际有 8 个测试失败（pain.test.ts 2条行为回归 + auto-entry-gate TC2 + prompt-diet timeout），掩盖了行为等价承诺破裂",
+      "severity": "severe",
+      "source": "manual",
+      "evidence": [
+        {
+          "sourceRef": "owner_reported:cli",
+          "note": "No session context available"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T06:17:02.426Z",
+        "role": "evidence",
+        "text": "No session context available",
+        "sourceRef": "owner_reported:cli"
+      }
+    ]
+  },
+  "arm1Baseline": {
+    "abstractedPrinciple": "验收报告必须严格映射底层测试执行结果，禁止使用聚合通过数掩盖局部失败或超时异常。",
+    "kind": "principle",
+    "groundedOn": null,
+    "fullOutput": {
+      "valid": true,
+      "diagnosisId": "diag-pri363-acceptance-report-distortion",
+      "summary": "验收报告生成逻辑未严格校验测试失败状态，导致8个实际失败的测试用例被错误标记为通过，掩盖了行为等价性破裂问题。",
+      "rootCause": "Design: 验收报告生成机制缺乏对测试失败状态的严格校验与传播，导致部分测试失败被聚合统计掩盖，破坏了行为等价性验证流程。",
+      "violatedPrinciples": [
+        {
+          "principleId": "PRINC-TEST-PROPAGATION-01",
+          "title": "测试状态零容忍传播原则",
+          "rationale": "当前验收流程仅依赖聚合通过数（1727 passing）生成结论，未对底层测试运行器的实际失败标记（如 pain.test.ts 回归、auto-entry-gate TC2、prompt-diet timeout）进行交叉验证，违反了质量门禁的完整性要求。"
+        }
+      ],
+      "evidence": [
+        {
+          "sourceRef": "owner_reported:cli",
+          "note": "Owner reported discrepancy: acceptance report claims npm run test passed (1727 passing), but actual execution shows 8 failures including behavior regressions and timeouts. No session context available for full trace."
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rule",
+          "description": "在生成验收报告时，强制校验测试运行器的退出码及输出日志中的失败标记。",
+          "triggerPattern": "npm run test.*(?:failing|timeout|error|exit code \\d+)",
+          "action": "若检测到 failed/timeout/error 或退出码非0，立即阻断报告生成并标记为验收失败。"
+        },
+        {
+          "kind": "principle",
+          "description": "建立零容忍的测试状态传播机制，确保任何单点失败都能准确反映至最终验收结论。",
+          "abstractedPrinciple": "验收报告必须严格映射底层测试执行结果，禁止使用聚合通过数掩盖局部失败或超时异常。"
+        },
+        {
+          "kind": "implementation",
+          "description": "修改测试聚合脚本，在解析 npm run test 输出时增加对 'failing'、'timeout' 及非零 exit code 的显式捕获逻辑，并强制写入验收报告元数据。"
+        },
+        {
+          "kind": "prompt",
+          "description": "在执行验收流程前，要求代理必须逐行核对测试日志中的失败用例详情，而非仅依赖摘要统计。"
+        }
+      ],
+      "confidence": 0.85,
+      "ambiguityNotes": [
+        "CLI-submitted pain lacks authenticated host session provenance; full conversation trace unavailable.",
+        "Evidence relies solely on owner-reported discrepancy without raw test logs."
+      ]
+    }
+  }
+}

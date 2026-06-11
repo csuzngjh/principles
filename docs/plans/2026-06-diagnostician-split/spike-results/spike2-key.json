@@ -1,0 +1,62 @@
+{
+  "row-1": {
+    "label": "real/r1 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-2": {
+    "label": "real/r2 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-3": {
+    "label": "real/r3 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-4": {
+    "label": "real/r5 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-5": {
+    "label": "real/r6 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-6": {
+    "label": "real/r7 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-7": {
+    "label": "real/r8 × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-8": {
+    "label": "synthetic/blast-radius-too-large × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-9": {
+    "label": "synthetic/irreversible-change × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-10": {
+    "label": "synthetic/no-memory-externalization × qwen3.6-27b",
+    "optionA": "Arm1 (Monolith)",
+    "optionB": "Arm3 (Split)"
+  },
+  "row-11": {
+    "label": "synthetic/no-task-division × qwen3.6-27b",
+    "optionA": "Arm3 (Split)",
+    "optionB": "Arm1 (Monolith)"
+  },
+  "row-12": {
+    "label": "synthetic/over-engineering × qwen3.6-27b",
+    "optionA": "Arm1 (Monolith)",
+    "optionB": "Arm3 (Split)"
+  }
+}
