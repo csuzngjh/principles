@@ -31,7 +31,9 @@ import type { RunHandle } from '../runtime-protocol.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
+import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../diagnostician/diag-distiller-output.js';
+import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-output.js';
 import type { DiagnosticianCommitter, CommitResult } from '../store/commit/diagnostician-committer.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
@@ -152,18 +154,36 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
 
       if (depTask.taskKind === 'diag_rootcause' && !rootCauseArtifactId) {
         rootCauseArtifactId = artifact.artifactId;
+        let parsedRootCause: unknown;
         try {
-          rootCauseOutput = JSON.parse(artifact.contentJson);
+          parsedRootCause = JSON.parse(artifact.contentJson);
         } catch {
           throw new PDRuntimeError('input_invalid', `Failed to parse root cause artifact content for predecessor task ${depId}`);
         }
+        // EP-01: Runtime validation of parsed DB content before typed assignment
+        if (!Value.Check(DiagRootCauseOutputV1Schema, parsedRootCause)) {
+          const errors = [...Value.Errors(DiagRootCauseOutputV1Schema, parsedRootCause)]
+            .slice(0, 3)
+            .map((e) => `${e.path}: ${e.message}`);
+          throw new PDRuntimeError('input_invalid', `Root cause artifact content failed schema validation for predecessor task ${depId}: ${errors.join('; ')}`);
+        }
+        rootCauseOutput = parsedRootCause;
       } else if (depTask.taskKind === 'diag_distiller' && !distillerArtifactId) {
         distillerArtifactId = artifact.artifactId;
+        let parsedDistiller: unknown;
         try {
-          distillerOutput = JSON.parse(artifact.contentJson);
+          parsedDistiller = JSON.parse(artifact.contentJson);
         } catch {
           throw new PDRuntimeError('input_invalid', `Failed to parse distiller artifact content for predecessor task ${depId}`);
         }
+        // EP-01: Runtime validation of parsed DB content before typed assignment
+        if (!Value.Check(DiagDistillerOutputV1Schema, parsedDistiller)) {
+          const errors = [...Value.Errors(DiagDistillerOutputV1Schema, parsedDistiller)]
+            .slice(0, 3)
+            .map((e) => `${e.path}: ${e.message}`);
+          throw new PDRuntimeError('input_invalid', `Distiller artifact content failed schema validation for predecessor task ${depId}: ${errors.join('; ')}`);
+        }
+        distillerOutput = parsedDistiller;
       }
     }
 

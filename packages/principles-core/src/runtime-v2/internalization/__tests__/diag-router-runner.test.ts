@@ -497,4 +497,84 @@ describe('DiagRouterRunner V-slice', () => {
     expect(result.status).toBe('succeeded');
     expect(callOrder.indexOf('updateRunOutput')).toBeLessThan(callOrder.indexOf('commit'));
   });
+
+  it('corrupted rootcause artifact content fails schema validation (EP-01)', async () => {
+    // Write a corrupted rootcause artifact (missing required fields)
+    const corruptedStore = new MemoryPIArtifactStore();
+    corruptedStore.upsertArtifact({
+      artifactId: ROOTCAUSE_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: ROOTCAUSE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ invalid: true, missing: 'required fields' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    // Valid distiller artifact
+    corruptedStore.upsertArtifact({
+      artifactId: DISTILLER_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: DISTILLER_TASK_ID,
+      lineageArtifactIds: [ROOTCAUSE_ARTIFACT_ID],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify(makeDistillerOutput()),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const deps = createMockDeps({ artifactStore: corruptedStore });
+
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+  });
+
+  it('corrupted distiller artifact content fails schema validation (EP-01)', async () => {
+    // Valid rootcause artifact
+    const corruptedStore = new MemoryPIArtifactStore();
+    corruptedStore.upsertArtifact({
+      artifactId: ROOTCAUSE_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: ROOTCAUSE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify(makeRootCauseOutput()),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    // Corrupted distiller artifact
+    corruptedStore.upsertArtifact({
+      artifactId: DISTILLER_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: DISTILLER_TASK_ID,
+      lineageArtifactIds: [ROOTCAUSE_ARTIFACT_ID],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ invalid: true, missing: 'required fields' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const deps = createMockDeps({ artifactStore: corruptedStore });
+
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+  });
 });

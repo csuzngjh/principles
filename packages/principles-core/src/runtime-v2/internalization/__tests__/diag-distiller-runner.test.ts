@@ -466,4 +466,34 @@ describe('DiagDistillerRunner V-slice', () => {
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('input_invalid');
   });
+
+  it('corrupted predecessor artifact content fails schema validation (EP-01)', async () => {
+    // Write a corrupted artifact (missing required fields) to the store
+    const corruptedStore = new MemoryPIArtifactStore();
+    corruptedStore.upsertArtifact({
+      artifactId: ROOTCAUSE_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: ROOTCAUSE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ invalid: true, missing: 'required fields' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const deps = createMockDeps({ artifactStore: corruptedStore });
+
+    const runner = new DiagDistillerRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(DISTILLER_TASK_ID);
+
+    // Should fail because predecessor artifact content fails schema validation
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+  });
 });

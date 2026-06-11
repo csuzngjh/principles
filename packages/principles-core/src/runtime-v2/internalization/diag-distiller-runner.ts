@@ -22,9 +22,11 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 
+import { Value } from '@sinclair/typebox/value';
 import type { RunHandle } from '../runtime-protocol.js';
 import type { DiagDistillerOutputV1, DiagDistillerValidator } from '../diagnostician/diag-distiller-output.js';
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
+import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
 import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
@@ -126,14 +128,24 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     }
     const rootCauseArtifactId = rootCauseArtifact.artifactId;
 
-    // Parse predecessor output as DiagRootCauseOutputV1
-    // ERR-001: Treat parsed artifact content as unknown before validation
+    // Parse predecessor output — ERR-001: treat parsed artifact content as unknown
+    // before runtime validation (Runtime Contract Rule 1).
     let rootCauseOutput: DiagRootCauseOutputV1;
+    let parsedRootCause: unknown;
     try {
-      rootCauseOutput = JSON.parse(rootCauseArtifact.contentJson);
+      parsedRootCause = JSON.parse(rootCauseArtifact.contentJson);
     } catch {
       throw new PDRuntimeError('input_invalid', `Failed to parse root cause artifact content for predecessor task ${depId}`);
     }
+
+    // EP-01: Runtime validation of parsed DB content before typed assignment
+    if (!Value.Check(DiagRootCauseOutputV1Schema, parsedRootCause)) {
+      const errors = [...Value.Errors(DiagRootCauseOutputV1Schema, parsedRootCause)]
+        .slice(0, 3)
+        .map((e) => `${e.path}: ${e.message}`);
+      throw new PDRuntimeError('input_invalid', `Root cause artifact content failed schema validation for predecessor task ${depId}: ${errors.join('; ')}`);
+    }
+    rootCauseOutput = parsedRootCause;
 
     // Read coreGrounding flag from effectiveConfig
     let coreGrounding = false;
