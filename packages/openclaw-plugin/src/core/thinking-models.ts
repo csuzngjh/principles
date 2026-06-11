@@ -1,16 +1,18 @@
 /**
  * Thinking Models — Detection Engine
  *
- * THINKING_OS.md is the single source of truth for model definitions (id, name, description).
+ * Core principle metadata (id, name, description) comes from the
+ * Core Principle Registry in @principles/core/runtime-v2.
  * Detection patterns are carefully tuned regexes that match AI output text.
  *
  * Flow:
- *   THINKING_OS.md (authority) → id, name, description, antiPattern
+ *   Core Principle Registry (authority) → id, name, description
  *   BUILTIN_PATTERNS (engine) → detection regexes per model id
  *   THINKING_MODELS (merged) → full definitions with patterns
  */
 
 import { loadThinkingOsFromWorkspace, generateDetectionPatterns } from './thinking-os-parser.js';
+import { CORE_PRINCIPLES } from '@principles/core/runtime-v2';
 
 export interface ThinkingModelDefinition {
   id: string;
@@ -199,37 +201,15 @@ const BUILTIN_PATTERNS: BuiltinPatternEntry[] = [
 
 const BUILTIN_PATTERN_MAP = new Map(BUILTIN_PATTERNS.map((p) => [p.id, p]));
 
-// Fallback name/description lookup tables (must be defined before listThinkingModels uses them)
+// Fallback name/description lookup — delegates to Core Principle Registry
 function getFallbackName(id: string): string {
-  const names: Record<string, string> = {
-    'T-01': 'Survey Before Acting',
-    'T-02': 'Respect Constraints',
-    'T-03': 'Evidence Over Assumption',
-    'T-04': 'Reversible First',
-    'T-05': 'Safety Rails',
-    'T-06': 'Simplicity First',
-    'T-07': 'Minimal Change Surface',
-    'T-08': 'Pain As Signal',
-    'T-09': 'Divide And Conquer',
-    'T-10': 'Memory Externalization',
-  };
-  return names[id] ?? id;
+  const entry = CORE_PRINCIPLES.find(p => p.id === id);
+  return entry?.name ?? id;
 }
 
 function getFallbackDescription(id: string): string {
-  const descs: Record<string, string> = {
-    'T-01': 'Understand the structure first before making changes.',
-    'T-02': 'Trust files, not your context window. Write conclusions to files.',
-    'T-03': 'Use logs, code, and outputs before inferring causes.',
-    'T-04': 'Prefer changes that are safe to roll back when risk is high.',
-    'T-05': 'Call out guardrails, prohibitions, and failure-prevention constraints.',
-    'T-06': 'Prefer the smallest understandable solution over over-engineering.',
-    'T-07': 'Limit the blast radius and touch only what is necessary.',
-    'T-08': 'Treat failures and friction as clues to step back and rethink.',
-    'T-09': 'Split the task into smaller phases before execution.',
-    'T-10': 'Write intermediate conclusions to files for persistence.',
-  };
-  return descs[id] ?? '';
+  const entry = CORE_PRINCIPLES.find(p => p.id === id);
+  return entry?.description ?? '';
 }
 
 // ---------------------------------------------------------------------------
