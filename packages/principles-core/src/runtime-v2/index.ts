@@ -336,6 +336,17 @@ export type {
   ValidationResultErr as FeatureFlagValidationResultErr,
 } from './feature-flags/index.js';
 
+// Core Principle Registry (PRI-367) — T-01..T-10 canonical definitions
+export {
+  CORE_PRINCIPLES,
+  CORE_PRINCIPLE_IDS,
+  isCorePrincipleId,
+  getCorePrinciple,
+  CorePrincipleSchema,
+} from './core-principles/index.js';
+
+export type { CorePrinciple } from './core-principles/index.js';
+
 // Plugin Surface Registry (PRI-289) — MVP hook/service/startup surface guard
 
 export {
