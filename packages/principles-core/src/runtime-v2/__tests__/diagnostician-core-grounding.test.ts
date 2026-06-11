@@ -87,7 +87,7 @@ describe('Core grounding on single agent (T-E)', () => {
     const validatedIds = ids.filter(id => isCorePrincipleId(id));
     const uniqueIds = new Set(validatedIds);
     expect(uniqueIds.size).toBe(3); // T-01, T-03, T-07 (T-99 is not a valid core principle id)
-    expect((uniqueIds.size / 10) * 100).toBe(30);
+    expect((uniqueIds.size / CORE_PRINCIPLES.length) * 100).toBe(30);
   });
 
   // 7. Downstream contract unchanged

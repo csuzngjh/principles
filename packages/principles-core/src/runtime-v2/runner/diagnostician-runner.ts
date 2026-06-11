@@ -42,7 +42,7 @@ import { redactSensitiveFields } from '../feedback/redact-sensitive.js';
 import { RunnerPhase } from './runner-phase.js';
 import { resolveRunnerOptions } from './diagnostician-runner-options.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
-import { isCorePrincipleId } from '../core-principles/core-principle-registry.js';
+import { CORE_PRINCIPLES, isCorePrincipleId } from '../core-principles/core-principle-registry.js';
 
 /** Dependencies injected into DiagnosticianRunner. */
 export interface DiagnosticianRunnerDeps {
@@ -132,6 +132,7 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     this.phase = RunnerPhase.Idle;
+    this.coreGroundingActive = false;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
     let leasedTask: TaskRecord;
@@ -444,7 +445,7 @@ export class DiagnosticianRunner {
       const axiomIdMatches = allNotes.match(/T-\d{2}/g) ?? [];
       const validatedIds = axiomIdMatches.filter(id => isCorePrincipleId(id));
       const uniqueIds = new Set(validatedIds);
-      const linkagePercent = (uniqueIds.size / 10) * 100;
+      const linkagePercent = (uniqueIds.size / CORE_PRINCIPLES.length) * 100;
 
       this.emitDiagnosticianEvent('diagnostician_core_grounding_result', ctx.taskId, {
         taskId: ctx.taskId,
