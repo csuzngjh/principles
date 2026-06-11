@@ -235,6 +235,49 @@ describe('computeEffectiveFlags', () => {
       expect(goneFlag.enabled).toBe(false);
     }
   });
+
+  // PRI-369: Invalid flag combo — split pipeline requires async_cli
+  it('disables diagnostician_split_pipeline when diagnostician_async_cli is not enabled', () => {
+    const userFlags = {
+      diagnostician_split_pipeline: { enabled: true },
+      // diagnostician_async_cli NOT enabled
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const splitFlag = result.flags.diagnostician_split_pipeline;
+    expect(splitFlag).toBeDefined();
+    if (splitFlag) {
+      expect(splitFlag.enabled).toBe(false);
+    }
+    expect(result.warnings.some(w => w.includes('invalid combo'))).toBe(true);
+  });
+
+  it('allows diagnostician_split_pipeline when diagnostician_async_cli is also enabled', () => {
+    const userFlags = {
+      diagnostician_async_cli: { enabled: true },
+      diagnostician_split_pipeline: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const splitFlag = result.flags.diagnostician_split_pipeline;
+    const asyncFlag = result.flags.diagnostician_async_cli;
+    if (splitFlag) {
+      expect(splitFlag.enabled).toBe(true);
+    }
+    if (asyncFlag) {
+      expect(asyncFlag.enabled).toBe(true);
+    }
+    expect(result.warnings.some(w => w.includes('invalid combo'))).toBe(false);
+  });
+
+  it('allows diagnostician_async_cli to be enabled independently', () => {
+    const userFlags = {
+      diagnostician_async_cli: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const asyncFlag = result.flags.diagnostician_async_cli;
+    if (asyncFlag) {
+      expect(asyncFlag.enabled).toBe(true);
+    }
+  });
 });
 
 describe('DEFAULT_FEATURE_FLAGS', () => {
@@ -318,6 +361,32 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.enabled).toBe(false);
     expect(flag.since).toBe('2026-06-06');
     expect(flag.description).toContain('PEAT-B1');
+  });
+
+  it('PRI-369: diagnostician_async_cli is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_async_cli');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('diagnostician_async_cli flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-06-11');
+    expect(flag.description).toContain('Async pain-record CLI');
+  });
+
+  it('PRI-369: diagnostician_core_grounding is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_core_grounding');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('diagnostician_core_grounding flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+  });
+
+  it('PRI-369: diagnostician_split_pipeline is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_split_pipeline');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('diagnostician_split_pipeline flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
   });
 });
 
