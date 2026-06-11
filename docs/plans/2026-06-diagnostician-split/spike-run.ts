@@ -24,7 +24,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildBaselinePrompt, buildGroundedPrompt, findFabricatedAxiomRefs, isValidAxiomRef, extractAxiomRefs } from './spike-distiller-prompt.js';
 import { SPIKE_FIXTURES } from './spike-fixtures.js';
-import type { DiagnosticianContextPayload } from '../../packages/principles-core/src/runtime-v2/context-payload.js';
+import type { DiagnosticianContextPayload } from '../../../packages/principles-core/src/runtime-v2/context-payload.js';
 
 // ── Configuration ────────────────────────────────────────────────────────
 

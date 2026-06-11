@@ -12,12 +12,12 @@
  * axiom data is always in sync with the single authoritative source.
  */
 
-import { buildDiagnosticProtocolInstruction } from '../../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.js';
-import { DefaultSchemaPromptAdapter } from '../../packages/principles-core/src/runtime-v2/adapter/schema-prompt-adapter.js';
-import { DiagnosticianOutputV1Schema } from '../../packages/principles-core/src/runtime-v2/diagnostician-output.js';
-import { CORE_PRINCIPLES, CORE_PRINCIPLE_IDS } from '../../packages/principles-core/src/runtime-v2/core-principles/core-principle-registry.js';
-import type { DiagnosticianContextPayload } from '../../packages/principles-core/src/runtime-v2/context-payload.js';
-import type { PromptInput } from '../../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.js';
+import { buildDiagnosticProtocolInstruction } from '../../../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.js';
+import { DefaultSchemaPromptAdapter } from '../../../packages/principles-core/src/runtime-v2/adapter/schema-prompt-adapter.js';
+import { DiagnosticianOutputV1Schema } from '../../../packages/principles-core/src/runtime-v2/diagnostician-output.js';
+import { CORE_PRINCIPLES, CORE_PRINCIPLE_IDS } from '../../../packages/principles-core/src/runtime-v2/core-principles/core-principle-registry.js';
+import type { DiagnosticianContextPayload } from '../../../packages/principles-core/src/runtime-v2/context-payload.js';
+import type { PromptInput } from '../../../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.js';
 
 const adapter = new DefaultSchemaPromptAdapter();
 const schema = DiagnosticianOutputV1Schema;
@@ -87,6 +87,7 @@ export function buildGroundedPrompt(payload: DiagnosticianContextPayload): Promp
 
   if (phase3EndIndex === -1) {
     // Fallback: append grounding block at the end if Phase 4 marker not found
+    console.warn('[spike] Phase 4 marker not found in baseline instruction — appending grounding block at end');
     const groundedInstruction = baselineInstruction + '\n\n' + buildAxiomGroundingBlock() + '\n\n' + buildGroundedPhase4Addition();
     return {
       taskId: payload.taskId,

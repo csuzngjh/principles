@@ -11,7 +11,7 @@
  * the expected axiom violation (if any) for validation purposes.
  */
 
-import type { DiagnosticianContextPayload } from '../../../../packages/principles-core/src/runtime-v2/context-payload.js';
+import type { DiagnosticianContextPayload } from '../../../packages/principles-core/src/runtime-v2/context-payload.js';
 
 export interface SpikeFixture {
   name: string;
