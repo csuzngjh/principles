@@ -1,0 +1,49 @@
+{
+  "name": "multiple-violations",
+  "description": "Agent skipped survey, ignored evidence, and made a large change — T-01 + T-03 + T-07",
+  "expectedAxiomViolation": "T-01",
+  "payload": {
+    "contextId": "ctx-spike-011",
+    "contextHash": "hash-011",
+    "taskId": "task-spike-011",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-011"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-011",
+      "reasonSummary": "Agent rewrote 6 files based on assumptions without reading any of them first",
+      "severity": "urgent",
+      "source": "tool-call-gate",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-011",
+          "note": "Agent edited 6 files without reading any. Changes were based on assumed structure that did not match reality"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Update the authentication system to use JWT"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will update the auth system to use JWT tokens"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "edit_file",
+        "toolResultSummary": "Modified auth.ts, session.ts, middleware.ts, routes.ts, config.ts, and types.ts without reading any file first"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "Nothing works. You assumed the old system used cookies but it already used JWT — you just broke it"
+      }
+    ]
+  }
+}
