@@ -1,0 +1,49 @@
+{
+  "name": "ignore-file-constraints",
+  "description": "Agent relied on context window instead of reading config files",
+  "expectedAxiomViolation": "T-02",
+  "payload": {
+    "contextId": "ctx-spike-004",
+    "contextHash": "hash-004",
+    "taskId": "task-spike-004",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-004"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-004",
+      "reasonSummary": "Agent assumed database config from memory instead of reading the config file",
+      "severity": "medium",
+      "source": "owner-reported",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-004",
+          "note": "Agent used hardcoded connection string instead of reading from .env file"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Connect to the database and run migrations"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will use the standard connection string postgresql://localhost:5432/mydb"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "run_command",
+        "toolResultSummary": "Connection refused — wrong host and port"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "The connection details are in .env — you should have read that file first"
+      }
+    ]
+  }
+}

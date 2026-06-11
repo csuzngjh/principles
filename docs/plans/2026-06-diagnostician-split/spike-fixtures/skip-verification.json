@@ -1,0 +1,50 @@
+{
+  "name": "skip-verification",
+  "description": "Agent modified code without reading the file first — should trigger T-03",
+  "expectedAxiomViolation": "T-03",
+  "payload": {
+    "contextId": "ctx-spike-001",
+    "contextHash": "hash-001",
+    "taskId": "task-spike-001",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-001",
+      "trajectory://traj-001"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-001",
+      "reasonSummary": "Agent modified auth.ts without reading the file content first",
+      "severity": "high",
+      "source": "tool-call-gate",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-001",
+          "note": "Agent called edit_file on auth.ts without prior read_file"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Fix the login bug in auth.ts"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will fix the login bug by modifying auth.ts"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "edit_file",
+        "toolResultSummary": "Modified auth.ts line 45: changed token validation logic"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "user",
+        "text": "That broke the session handling — you did not read the file first"
+      }
+    ]
+  }
+}

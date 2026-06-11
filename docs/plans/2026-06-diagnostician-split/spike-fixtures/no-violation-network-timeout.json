@@ -1,0 +1,43 @@
+{
+  "name": "no-violation-network-timeout",
+  "description": "Network timeout — no agent behavioral violation, should produce kind=defer",
+  "payload": {
+    "contextId": "ctx-spike-012",
+    "contextHash": "hash-012",
+    "taskId": "task-spike-012",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-012"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-012",
+      "reasonSummary": "API call timed out after 30 seconds",
+      "severity": "low",
+      "source": "automatic-hook",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-012",
+          "note": "External API call to https://api.example.com timed out — network issue, not agent behavior"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "assistant",
+        "text": "I will fetch the data from the API"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "tool",
+        "toolName": "http_request",
+        "toolResultSummary": "Request timed out after 30s"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "assistant",
+        "text": "The API request timed out. I will retry with a longer timeout."
+      }
+    ]
+  }
+}

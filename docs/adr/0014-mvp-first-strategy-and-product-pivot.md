@@ -238,3 +238,60 @@ To resolve this bottleneck, we have promoted the **Empathy Observer** (previousl
 ### Reclassified Items
 1. **Empathy Observer**: Reclassified from **MVP-Quiet** to **MVP-Core** (wired asynchronously in the prompt build hook).
 2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core**. Originally triggered on evolution heartbeat; extracted to an independent service with its own feature flag (`correction_observer`, quiet category with enabled=true default, to allow runtime disabling) per PRI-293, so it no longer depends on the default-off EvolutionWorker. Surface registry entries remain `core` for triage; feature flag is `quiet` to preserve the runtime kill switch.
+
+---
+
+## Amendment (2026-06-10): Owner Exception — Diagnostician Multi-Agent Split & Core-Principle Grounding
+
+> **Status of amendment**: Accepted (maintainer-driven, owner exception)
+> **Scope**: `DiagnosticianRunner` and its supporting context/output contracts only.
+> **Does NOT reopen**: BALM / LRAS / GAP / MissionScheduler / Trainer / model_training / Attribution Pipeline. Those remain deferred under §6 and post-mvp-conditional-roadmap.md.
+
+### A. Context — why this is an explicit exception
+
+ADR-0014 §2.4 lists `Diagnostician + DiagnosticianRunner` as **MVP-Core** and the body of this ADR pauses architectural expansion. Under the default rule, splitting one agent into several would be "architectural expansion" and rejected.
+
+The maintainer (owner) is making a **scoped exception** for the diagnostician because dogfooding surfaced four concrete defects that block Story A' quality, not future-proofing wishes:
+
+| # | Defect (observed, not speculative) | Evidence |
+|---|------------------------------------|----------|
+| **Q1** | `pd pain record` blocks 256–480s synchronously. The 5-layer `await` chain (CLI → Service → Bridge → Runner → Adapter.completeSimple) gives the operator no submit/complete separation. Under dogfood, OpenClaw appears hung and the operator Ctrl-C's, aborting the diagnosis. | Manual pain signals `manual_1781081305247_*` took 256–480s; one CLI call never returned. |
+| **Q2** | `DiagnosticianRunner` is the **only** runner that does not extend `BasePeerRunner`. It re-implements the entire lease→poll→fetch→validate→retry pipeline, duplicating ~300 lines and drifting from the 7 unified peer runners. | `diagnostician-runner.ts` vs `philosopher-runner.ts`/`scribe-runner.ts`. |
+| **Q3** | The single agent emits "rule-like", insufficiently abstract principles because one LLM call must simultaneously do root-cause analysis, principle distillation, AND taxonomy routing across 5 kinds. A small/local model cannot carry that load. | `diagnostician-prompt-builder.ts` Phase 4 crams taxonomy + distillation into one instruction. |
+| **Q6** | The agent generates principles "in a vacuum": `DiagnosticianContextPayload` has no field for the T-01..T-09 core axioms (think-os), so distilled principles do not grow from the existing principle hierarchy. | `context-payload.ts` `DiagnosticianContextPayloadSchema` has no `corePrinciples`. |
+
+These are **product-boundary-internal**: PD owns owner-reviewed, reversible behavior internalization, and the diagnostician is the entry point of that pipeline. Improving its output quality and operability is core to Story A', not scope creep.
+
+### B. Decision
+
+1. **Release the "no multi-agent split" constraint for the diagnostician only.** The diagnostician may be decomposed into a small, fixed chain of peer runners that each extend `BasePeerRunner`, reusing the existing `dependencyTaskIds` + `PIArtifact` chaining already used by Dreamer→Philosopher→Scribe.
+2. **Grounding in core principles is in-scope.** T-01..T-09 (think-os axioms) may be promoted from markdown-only to a structured, read-only **Core Principle Registry** in `@principles/core`, injected into the distillation stage. This is a narrow reclassification of "Thinking OS injection" (previously §2.5 MVP-Quiet) **for diagnostician grounding only** — it is NOT a re-activation of general Thinking-OS prompt injection into every agent turn.
+3. **CLI async (Q1) is the prerequisite and ships first**, behind a flag, using the CLI-layer fire-and-forget pattern (default async submit + `--wait` for legacy sync). No `core`-layer event-driven rearchitecture (ADR-0014 §9 anti-pattern stays in force).
+4. **Old single-agent path is retained, flag-gated, until the new chain proves equal-or-better** on a 3-arm comparison (baseline single-agent vs grounded-single-agent vs multi-agent-split). This makes the refactor reversible.
+
+### C. MVP Three Questions (mandatory, answered)
+
+1. **What happens if we DON'T do this?** The diagnostician stays a sync-blocking, monolithic agent producing rule-like principles ungrounded in core axioms. Dogfood and the first seed customer will keep hitting hangs and low-quality principles — this WILL be raised again well within 30 days. Not rejected.
+2. **How is it observed?** (a) CLI returns `< 5s` with `painId + taskId`; `pd task show <taskId>` reflects progress. (b) New per-stage telemetry events (`diag_rootcause_*`, `diag_distiller_*`, `diag_router_*`). (c) The 3-arm comparison report scores abstraction quality and core-principle linkage. (d) Each distilled principle records `groundedOnCorePrincipleIds`.
+3. **How is it disabled?** Three independent feature flags (see §D). Every new behavior is flag-gated default-off (except CLI async which is operability-critical and ships with `--wait` escape hatch). Disable = flip flag, no PR revert needed. Satisfies the "anything requiring revert must ship with a flag" rule.
+
+### D. Feature flags (registered per PRI-239 contract)
+
+| Flag | Category | Default | Controls |
+|------|----------|---------|----------|
+| `diagnostician_async_cli` | quiet | `false` | CLI fire-and-forget submit. When off, legacy sync behavior. |
+| `diagnostician_split_pipeline` | quiet | `false` | Route diagnosis through the multi-agent chain. When off, the existing single-agent `DiagnosticianRunner` runs unchanged. |
+| `diagnostician_core_grounding` | quiet | `false` | Inject Core Principle Registry into the distillation stage. Independent of split so grounding can be A/B-tested on the single agent too. |
+
+All three must be wired through the production loader and exercised by a test before counting as registered. Until then, the new code paths stay dormant.
+
+### E. Scope guard (what this amendment does NOT authorize)
+
+- No new activation channels, no SkillFileWriter/TrainingExporter changes.
+- No change to the 5 recommendation kinds' downstream contract (`CandidateIntakeService`, committer) — only *which agent produces which kind* changes.
+- No host-side scheduler, no event bus, no `core`-layer async runtime. Q1 is solved at the CLI process boundary only.
+- No reopening of any deferred ADR. If the split design appears to need BALM/MissionScheduler, STOP and reassess.
+
+### F. Reversibility & exit
+
+If the 3-arm comparison shows the split is not better, flip `diagnostician_split_pipeline` off and the system reverts to the single-agent runner with zero data migration (both paths write the same `DiagnosticianOutputV1` + `PIArtifact` shape). The split runners then become MVP-Quiet code pending deletion.
