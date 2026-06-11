@@ -22,14 +22,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { buildBaselinePrompt, buildGroundedPrompt, findFabricatedAxiomRefs, isValidAxiomRef, extractAxiomRefs } from './spike-distiller-prompt.js';
 import { SPIKE_FIXTURES } from './spike-fixtures.js';
 import type { DiagnosticianContextPayload } from '../../../packages/principles-core/src/runtime-v2/context-payload.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // ── Configuration ────────────────────────────────────────────────────────
 
-const LM_STUDIO_BASE = 'http://localhost:1234';
-const LM_STUDIO_URL = `${LM_STUDIO_BASE}/v1/chat/completions`;
+const LM_STUDIO_BASE = 'http://localhost:12341';
+const LM_STUDIO_CHAT_URL = `${LM_STUDIO_BASE}/api/v1/chat`;
+const LM_STUDIO_MODELS_URL = `${LM_STUDIO_BASE}/api/v1/models`;
 
 interface ModelConfig {
   name: string;
@@ -38,47 +43,62 @@ interface ModelConfig {
   maxTokens: number;
 }
 
-// Default configs — will be overridden by auto-detected models from LM Studio
+// Use qwen3.6-27b-mtp as the primary model (already loaded)
+// Add more models here if loaded in LM Studio
 const DEFAULT_MODEL_CONFIGS: ModelConfig[] = [
-  { name: 'qwen3', model: 'qwen3:8b', temperature: 0.3, maxTokens: 4096 },
-  { name: 'glm5.1', model: 'glm-5.1', temperature: 0.3, maxTokens: 4096 },
+  { name: 'qwen3.6-27b', model: 'qwen3.6-27b-mtp', temperature: 0.3, maxTokens: 4096 },
 ];
 
 let MODEL_CONFIGS: ModelConfig[] = [...DEFAULT_MODEL_CONFIGS];
 
 const RESULTS_DIR = path.join(__dirname, 'spike-results');
-const TIMEOUT_MS = 120_000; // 2 minutes per request
+const TIMEOUT_MS = 300_000; // 5 minutes per request (27B model can be slow with reasoning)
 
 // ── Health check & model auto-detection ─────────────────────────────────
 
-async function checkLmStudioHealth(): Promise<{ available: boolean; models: string[]; error?: string }> {
+interface LmStudioModel {
+  key: string;
+  display_name: string;
+  type: string;
+  loaded_instances: Array<{ id: string }>;
+}
+
+async function checkLmStudioHealth(): Promise<{ available: boolean; models: LmStudioModel[]; loadedModels: string[]; error?: string }> {
   try {
-    const response = await fetch(`${LM_STUDIO_BASE}/v1/models`, {
+    const response = await fetch(LM_STUDIO_MODELS_URL, {
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
-      return { available: false, models: [], error: `HTTP ${response.status}` };
+      return { available: false, models: [], loadedModels: [], error: `HTTP ${response.status}` };
     }
-    const data = await response.json() as { data?: Array<{ id: string }> };
-    const models = (data.data ?? []).map(m => m.id);
-    return { available: true, models };
+    const data = await response.json() as { models?: LmStudioModel[] };
+    const models = data.models ?? [];
+    const loadedModels = models
+      .filter(m => m.type === 'llm' && m.loaded_instances && m.loaded_instances.length > 0)
+      .map(m => m.key);
+    return { available: true, models, loadedModels };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { available: false, models: [], error: msg };
+    return { available: false, models: [], loadedModels: [], error: msg };
   }
 }
 
-function matchModelConfigs(availableModels: string[]): ModelConfig[] {
+function matchModelConfigs(availableModels: LmStudioModel[], loadedModels: string[]): ModelConfig[] {
   const matched: ModelConfig[] = [];
 
   for (const config of DEFAULT_MODEL_CONFIGS) {
-    // Try exact match first
-    if (availableModels.includes(config.model)) {
+    // Check if model is loaded (preferred)
+    if (loadedModels.includes(config.model)) {
       matched.push(config);
       continue;
     }
-    // Try partial match (LM Studio may prefix model names)
-    const partial = availableModels.find(m =>
+    // Check if model exists (not loaded but available)
+    if (availableModels.some(m => m.key === config.model)) {
+      matched.push({ ...config, model: config.model }); // will try to load on first call
+      continue;
+    }
+    // Try partial match on loaded models
+    const partial = loadedModels.find(m =>
       m.toLowerCase().includes(config.model.split(':')[0].toLowerCase())
     );
     if (partial) {
@@ -87,9 +107,9 @@ function matchModelConfigs(availableModels: string[]): ModelConfig[] {
     }
   }
 
-  // If no default models matched, use all available models
-  if (matched.length === 0 && availableModels.length > 0) {
-    for (const modelId of availableModels) {
+  // If no default models matched, use all loaded LLM models
+  if (matched.length === 0 && loadedModels.length > 0) {
+    for (const modelId of loadedModels) {
       const name = modelId.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 20);
       matched.push({ name, model: modelId, temperature: 0.3, maxTokens: 4096 });
     }
@@ -130,15 +150,12 @@ async function callLlm(
     sourceRefs: promptInput.context.sourceRefs,
   });
 
+  // LM Studio native API format
   const body = {
     model: modelConfig.model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage },
-    ],
+    system_prompt: systemPrompt,
+    input: userMessage,
     temperature: modelConfig.temperature,
-    max_tokens: modelConfig.maxTokens,
-    stream: false,
   };
 
   const startTime = Date.now();
@@ -147,7 +164,7 @@ async function callLlm(
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(LM_STUDIO_URL, {
+    const response = await fetch(LM_STUDIO_CHAT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -157,12 +174,24 @@ async function callLlm(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${response.statusText} ${errorText}`);
     }
 
-    const data = await response.json() as Record<string, unknown>;
-    const choices = data.choices as Array<{ message: { content: string } }>;
-    const content = choices?.[0]?.message?.content ?? '';
+    const data = await response.json() as {
+      output?: Array<{ type: string; content: string }>;
+      stats?: { tokens_per_second?: number };
+    };
+
+    // Extract message content from LM Studio response
+    // output array contains { type: "reasoning", content: "..." } and { type: "message", content: "..." }
+    const messageOutput = (data.output ?? []).find(o => o.type === 'message');
+    const content = messageOutput?.content ?? '';
+
+    const tps = data.stats?.tokens_per_second;
+    if (tps) {
+      console.log(`  (${tps.toFixed(1)} tokens/s)`);
+    }
 
     return {
       rawOutput: content,
@@ -280,18 +309,18 @@ async function runSpike(): Promise<void> {
     console.error(`   Error: ${health.error}`);
     console.error('\n   Please ensure:');
     console.error('   1. LM Studio is running');
-    console.error('   2. Local Server is started (click "Start Server" in LM Studio)');
-    console.error('   3. Port is 1234 (default)');
-    console.error('   4. At least one model is loaded');
+    console.error('   2. Local Server is started');
+    console.error('   3. At least one model is loaded');
     process.exit(1);
   }
-  console.log(`✓ LM Studio connected. Available models: ${health.models.join(', ')}`);
+  console.log(`✓ LM Studio connected. Loaded models: ${health.loadedModels.join(', ') || '(none)'}`);
 
   // Auto-detect and match models
-  MODEL_CONFIGS = matchModelConfigs(health.models);
+  MODEL_CONFIGS = matchModelConfigs(health.models, health.loadedModels);
   if (MODEL_CONFIGS.length === 0) {
-    console.error('\n❌ No matching models found. Available: ' + health.models.join(', '));
-    console.error('   Expected: qwen3:8b, glm-5.1 (or similar names)');
+    console.error('\n❌ No matching models found.');
+    console.error('   Loaded: ' + health.loadedModels.join(', '));
+    console.error('   Available: ' + health.models.map(m => m.key).join(', '));
     process.exit(1);
   }
   console.log(`✓ Using models: ${MODEL_CONFIGS.map(m => `${m.name} (${m.model})`).join(', ')}\n`);

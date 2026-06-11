@@ -1,0 +1,448 @@
+{
+  "generatedAt": "2026-06-11T04:43:44.366Z",
+  "fixturesCount": 12,
+  "models": [
+    "qwen3.6-27b"
+  ],
+  "byModelAndVariant": {
+    "baseline/qwen3.6-27b": {
+      "total": 12,
+      "parseFailures": 2,
+      "requestErrors": 2,
+      "principleCount": 10,
+      "ruleCount": 10,
+      "implementationCount": 3,
+      "promptCount": 10,
+      "deferCount": 0,
+      "groundedOnCount": 0,
+      "fabricatedCount": 0,
+      "avgLatencyMs": 64914,
+      "axiomRefDistribution": {}
+    },
+    "grounded/qwen3.6-27b": {
+      "total": 12,
+      "parseFailures": 0,
+      "requestErrors": 0,
+      "principleCount": 11,
+      "ruleCount": 11,
+      "implementationCount": 1,
+      "promptCount": 11,
+      "deferCount": 1,
+      "groundedOnCount": 11,
+      "fabricatedCount": 0,
+      "avgLatencyMs": 49906,
+      "axiomRefDistribution": {
+        "T-01": 4,
+        "T-07": 1,
+        "T-05": 3,
+        "T-06": 1,
+        "T-08": 1,
+        "T-09": 1,
+        "T-10": 1
+      }
+    }
+  },
+  "detailedResults": [
+    {
+      "fixtureName": "skip-verification",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 40812
+    },
+    {
+      "fixtureName": "blast-radius-too-large",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 58840
+    },
+    {
+      "fixtureName": "no-survey-before-refactor",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 44466
+    },
+    {
+      "fixtureName": "ignore-file-constraints",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": "Failed to parse LLM output as JSON",
+      "requestError": "This operation was aborted",
+      "recommendationKinds": [],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 0
+    },
+    {
+      "fixtureName": "irreversible-change",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt",
+        "implementation"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 98102
+    },
+    {
+      "fixtureName": "ignore-safety-rails",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt",
+        "implementation"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 90131
+    },
+    {
+      "fixtureName": "over-engineering",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 77952
+    },
+    {
+      "fixtureName": "ignore-pain-signal",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 93321
+    },
+    {
+      "fixtureName": "no-task-division",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 70288
+    },
+    {
+      "fixtureName": "no-memory-externalization",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": "Failed to parse LLM output as JSON",
+      "requestError": "This operation was aborted",
+      "recommendationKinds": [],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 0
+    },
+    {
+      "fixtureName": "multiple-violations",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "rule",
+        "principle",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 138968
+    },
+    {
+      "fixtureName": "no-violation-network-timeout",
+      "model": "qwen3.6-27b",
+      "promptVariant": "baseline",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "implementation",
+        "prompt"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 66082
+    },
+    {
+      "fixtureName": "skip-verification",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-01"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 44275
+    },
+    {
+      "fixtureName": "blast-radius-too-large",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-07"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 58295
+    },
+    {
+      "fixtureName": "no-survey-before-refactor",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-01"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 65235
+    },
+    {
+      "fixtureName": "ignore-file-constraints",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-01"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 52037
+    },
+    {
+      "fixtureName": "irreversible-change",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt",
+        "implementation"
+      ],
+      "axiomRefs": [
+        "T-05"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 49811
+    },
+    {
+      "fixtureName": "ignore-safety-rails",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-05"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 50530
+    },
+    {
+      "fixtureName": "over-engineering",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-06"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 47479
+    },
+    {
+      "fixtureName": "ignore-pain-signal",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-05",
+        "T-08"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 42117
+    },
+    {
+      "fixtureName": "no-task-division",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-09"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 62851
+    },
+    {
+      "fixtureName": "no-memory-externalization",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-10"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 46871
+    },
+    {
+      "fixtureName": "multiple-violations",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "principle",
+        "rule",
+        "prompt"
+      ],
+      "axiomRefs": [
+        "T-01"
+      ],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": true,
+      "latencyMs": 61542
+    },
+    {
+      "fixtureName": "no-violation-network-timeout",
+      "model": "qwen3.6-27b",
+      "promptVariant": "grounded",
+      "parseError": null,
+      "requestError": null,
+      "recommendationKinds": [
+        "defer"
+      ],
+      "axiomRefs": [],
+      "fabricatedAxiomRefs": [],
+      "hasGroundedOn": false,
+      "latencyMs": 17825
+    }
+  ]
+}

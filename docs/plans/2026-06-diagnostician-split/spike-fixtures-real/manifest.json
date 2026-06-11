@@ -1,0 +1,64 @@
+{
+  "generatedAt": "2026-06-11T06:17:02.449Z",
+  "realCount": 7,
+  "syntheticCount": 5,
+  "real": [
+    {
+      "code": "R1",
+      "name": "r1",
+      "hasArm1": true
+    },
+    {
+      "code": "R2",
+      "name": "r2",
+      "hasArm1": true
+    },
+    {
+      "code": "R3",
+      "name": "r3",
+      "hasArm1": true
+    },
+    {
+      "code": "R5",
+      "name": "r5",
+      "hasArm1": true
+    },
+    {
+      "code": "R6",
+      "name": "r6",
+      "hasArm1": true
+    },
+    {
+      "code": "R7",
+      "name": "r7",
+      "hasArm1": true
+    },
+    {
+      "code": "R8",
+      "name": "r8",
+      "hasArm1": false
+    }
+  ],
+  "synthetic": [
+    {
+      "name": "irreversible-change",
+      "expectedAxiom": "T-04"
+    },
+    {
+      "name": "over-engineering",
+      "expectedAxiom": "T-06"
+    },
+    {
+      "name": "blast-radius-too-large",
+      "expectedAxiom": "T-07"
+    },
+    {
+      "name": "no-task-division",
+      "expectedAxiom": "T-09"
+    },
+    {
+      "name": "no-memory-externalization",
+      "expectedAxiom": "T-10"
+    }
+  ]
+}

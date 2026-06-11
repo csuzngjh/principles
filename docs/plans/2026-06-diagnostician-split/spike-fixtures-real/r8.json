@@ -1,0 +1,36 @@
+{
+  "name": "r8",
+  "description": "GFI crossed threshold, matched \"wrong\"",
+  "source": "real",
+  "realCode": "R8",
+  "payload": {
+    "contextId": "ctx-spike2-r8",
+    "contextHash": "hash-spike2-r8",
+    "taskId": "task-spike2-r8",
+    "workspaceDir": "D:/.openclaw/workspace",
+    "sourceRefs": [
+      "pain://empathy_gfi_1780909080715"
+    ],
+    "diagnosisTarget": {
+      "painId": "empathy_gfi_1780909080715",
+      "reasonSummary": "Accumulated GFI (74.6) crossed highGfi threshold (70). Matched: wrong",
+      "severity": "moderate",
+      "source": "user_empathy",
+      "evidence": [
+        {
+          "sourceRef": "trajectory:empty",
+          "note": "trajectory_available_but_empty: no user correction or assistant turns found"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T06:17:02.426Z",
+        "role": "evidence",
+        "text": "trajectory_available_but_empty: no user correction or assistant turns found",
+        "sourceRef": "trajectory:empty"
+      }
+    ]
+  },
+  "arm1Baseline": null
+}

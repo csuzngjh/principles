@@ -1,0 +1,68 @@
+{
+  "name": "no-memory-externalization",
+  "description": "Agent kept intermediate findings in context instead of writing to files",
+  "expectedAxiomViolation": "T-10",
+  "payload": {
+    "contextId": "ctx-spike-010",
+    "contextHash": "hash-010",
+    "taskId": "task-spike-010",
+    "workspaceDir": "D:/work",
+    "sourceRefs": [
+      "pain://event-010"
+    ],
+    "diagnosisTarget": {
+      "painId": "pain-010",
+      "reasonSummary": "Agent accumulated analysis in context window instead of writing to files, causing context overflow",
+      "severity": "medium",
+      "source": "automatic-hook",
+      "evidence": [
+        {
+          "sourceRef": "pain://event-010",
+          "note": "Agent read 15 files and kept all analysis in conversation context. Context window overflow caused the agent to lose track of earlier findings"
+        }
+      ]
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-11T10:00:00Z",
+        "role": "user",
+        "text": "Analyze the codebase for performance issues"
+      },
+      {
+        "ts": "2026-06-11T10:00:01Z",
+        "role": "assistant",
+        "text": "I will read all the source files"
+      },
+      {
+        "ts": "2026-06-11T10:00:02Z",
+        "role": "tool",
+        "toolName": "read_file",
+        "toolResultSummary": "Read main.ts (500 lines)"
+      },
+      {
+        "ts": "2026-06-11T10:00:03Z",
+        "role": "tool",
+        "toolName": "read_file",
+        "toolResultSummary": "Read router.ts (800 lines)"
+      },
+      {
+        "ts": "2026-06-11T10:00:04Z",
+        "role": "tool",
+        "toolName": "read_file",
+        "toolResultSummary": "Read db.ts (600 lines)"
+      },
+      {
+        "ts": "2026-06-11T10:00:05Z",
+        "role": "assistant",
+        "text": "I found issues in main.ts line 45, router.ts lines 120-150, db.ts line 200... wait, what was in main.ts again? I lost track"
+      },
+      {
+        "ts": "2026-06-11T10:00:06Z",
+        "role": "user",
+        "text": "You should have written your findings to a file as you went along"
+      }
+    ]
+  },
+  "source": "synthetic",
+  "arm1Baseline": null
+}
