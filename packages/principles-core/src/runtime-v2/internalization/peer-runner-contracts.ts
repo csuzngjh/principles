@@ -45,6 +45,24 @@ export type PeerRunnerKind =
   | 'trainer'
   | 'rollout_reviewer';
 
+/**
+ * The 3 diagnostician stage kinds for the split pipeline.
+ * These are NOT PeerRunnerKinds — they belong to a separate execution pipeline.
+ *
+ * @see 02-review-response-and-amendments.md §2.3
+ */
+export type DiagnosticianStageKind =
+  | 'diag_rootcause'
+  | 'diag_distiller'
+  | 'diag_router';
+
+/**
+ * Broad execution-kind union — used by orchestrator for task dispatch.
+ * Preserves the "7 peer runners" invariant: PeerRunnerKind and
+ * DiagnosticianStageKind are disjoint sets.
+ */
+export type RunnerKind = PeerRunnerKind | DiagnosticianStageKind;
+
 // ── Artifact Types ────────────────────────────────────────────────────────────
 
 /**
@@ -103,7 +121,7 @@ export interface PIArtifact {
  * Internalization task record that extends TaskRecord with internalization metadata.
  *
  * Critical rules:
- *   - taskKind MUST be one of the 7 PeerRunnerKind values
+ *   - taskKind MUST be a valid RunnerKind (PeerRunnerKind or DiagnosticianStageKind)
  *   - status uses PDTaskStatus (pending | leased | succeeded | retry_wait | failed)
  *   - running is NOT a PDTaskStatus — it belongs to RunExecutionStatus
  *   - Terminal task states: succeeded and failed only
@@ -113,7 +131,7 @@ export interface PIArtifact {
  * @see ADR-0003 Section 3.4
  */
 export interface PITaskRecord extends TaskRecord {
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   parentTaskId?: string;
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
@@ -137,6 +155,15 @@ export const PEER_RUNNER_KINDS: readonly PeerRunnerKind[] = [
   'evaluator',
   'trainer',
   'rollout_reviewer',
+] as const;
+
+/**
+ * All valid diagnostician stage kinds.
+ */
+export const DIAGNOSTICIAN_STAGE_KINDS: readonly DiagnosticianStageKind[] = [
+  'diag_rootcause',
+  'diag_distiller',
+  'diag_router',
 ] as const;
 
 /**
@@ -169,6 +196,20 @@ export function isPeerRunnerKind(value: string): value is PeerRunnerKind {
 }
 
 /**
+ * Type guard for DiagnosticianStageKind.
+ */
+export function isDiagnosticianStageKind(value: string): value is DiagnosticianStageKind {
+  return DIAGNOSTICIAN_STAGE_KINDS.includes(value as DiagnosticianStageKind);
+}
+
+/**
+ * Type guard for RunnerKind (either PeerRunnerKind or DiagnosticianStageKind).
+ */
+export function isRunnerKind(value: string): value is RunnerKind {
+  return isPeerRunnerKind(value) || isDiagnosticianStageKind(value);
+}
+
+/**
  * Type guard for InternalizationChannel.
  */
 export function isInternalizationChannel(value: string): value is InternalizationChannel {
@@ -196,7 +237,7 @@ export function isTerminalTaskStatus(status: string): boolean {
  *
  * Checks that a TaskRecord has all required internalization fields.
  * This is a structural check — the record must have:
- *   - taskKind in the set of 7 peer runner kinds
+ *   - taskKind in the set of valid RunnerKind values (PeerRunnerKind or DiagnosticianStageKind)
  *   - dependencyTaskIds as array
  *   - channel as string (valid InternalizationChannel)
  *   - timeoutMs as number
@@ -205,8 +246,8 @@ export function isTerminalTaskStatus(status: string): boolean {
  *   - rejectionCount as finite non-negative number (PRI-141)
  */
 export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord {
-  // Must have a valid peer runner kind
-  if (!isPeerRunnerKind(record.taskKind)) {
+  // Must have a valid runner kind (PeerRunnerKind or DiagnosticianStageKind)
+  if (!isRunnerKind(record.taskKind)) {
     return false;
   }
 
@@ -256,7 +297,7 @@ export function injectRunnerLineageIfAbsent(
  */
 export function createMinimalPITaskRecord(
   taskId: string,
-  taskKind: PeerRunnerKind,
+  taskKind: RunnerKind,
   channel: InternalizationChannel,
 ): PITaskRecord {
   return {

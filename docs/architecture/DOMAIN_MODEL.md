@@ -41,6 +41,14 @@ Principle (probation)
     │
     ▼ Internalization Pipeline（7 个 Peer Runner）
 PIArtifact (validated)
+
+> **ADR-0014 Amendment (2026-06-11)**: The "7 Peer Runner" invariant refers to the
+> Internalization Pipeline only. The Diagnostician Pipeline introduces a separate
+> `DiagnosticianStageKind` type (diag_rootcause, diag_distiller, diag_router) that
+> is NOT a PeerRunnerKind. The union type `RunnerKind = PeerRunnerKind | DiagnosticianStageKind`
+> is used by the orchestrator for task dispatch, but the two pipelines remain
+> architecturally distinct.
+
     │
     ▼ Activation Pipeline（5 通道）
 实际生效（agent 行为改变）
@@ -368,6 +376,14 @@ disabled（自动 deactivate）
 | Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | - | ✅ Done |
 | **PIArtifact** | `packages/principles-core/src/runtime-v2/internalization/pi-artifact.ts` | - | ✅ Done（ADR-0003）|
 | **7 Peer Runners** | `packages/principles-core/src/runtime-v2/internalization/*-runner.ts` | - | ✅ Done |
+
+> **ADR-0014 Amendment (2026-06-11)**: The "7 Peer Runner" invariant refers to the
+> Internalization Pipeline only. The Diagnostician Pipeline introduces a separate
+> `DiagnosticianStageKind` type (diag_rootcause, diag_distiller, diag_router) that
+> is NOT a PeerRunnerKind. The union type `RunnerKind = PeerRunnerKind | DiagnosticianStageKind`
+> is used by the orchestrator for task dispatch, but the two pipelines remain
+> architecturally distinct.
+
 | **InternalizationOrchestrator** | `packages/principles-core/src/runtime-v2/internalization/internalization-orchestrator.ts` | - | ✅ Done |
 | **CorrectionProposal** | `packages/principles-core/src/runtime-v2/internalization/correction-proposal.ts` | - | ✅ Done（ADR-0004）|
 | **GoldenTrace** | `packages/principles-core/src/runtime-v2/golden-trace.ts` | - | ✅ Done |

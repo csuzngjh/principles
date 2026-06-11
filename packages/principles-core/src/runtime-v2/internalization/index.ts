@@ -77,6 +77,8 @@ export type { LedgerTreeStore } from '../../principle-tree-ledger.js';
 export type {
   InternalizationChannel,
   PeerRunnerKind,
+  DiagnosticianStageKind,
+  RunnerKind,
   PIArtifactKind,
   PIArtifactValidationStatus,
   ArtifactRef,
@@ -87,9 +89,12 @@ export type {
 
 export {
   PEER_RUNNER_KINDS,
+  DIAGNOSTICIAN_STAGE_KINDS,
   INTERNALIZATION_CHANNELS,
   PI_ARTIFACT_KINDS,
   isPeerRunnerKind,
+  isDiagnosticianStageKind,
+  isRunnerKind,
   isInternalizationChannel,
   isPIArtifactKind,
   isTerminalTaskStatus,
@@ -101,9 +106,12 @@ export {
 
 export {
   ALLOWED_EDGES,
+  DIAGNOSTICIAN_EDGES,
   MODEL_TRAINING_CHANNEL,
   TRAINER_KIND,
   validateEdge,
+  validateDiagEdge,
+  getDiagSuccessors,
   isAcyclic,
   getAllowedSuccessors,
   getAllowedPredecessors,

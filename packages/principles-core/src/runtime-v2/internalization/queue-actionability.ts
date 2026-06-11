@@ -10,7 +10,7 @@
  * files or loads configuration.
  */
 
-import type { PeerRunnerKind, InternalizationChannel } from './peer-runner-contracts.js';
+import type { RunnerKind, PeerRunnerKind, InternalizationChannel } from './peer-runner-contracts.js';
 
 // ── MVP-Core task kinds ──────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ export interface ActionabilityPolicyInput {
 
 export interface SuppressedDiagnostic {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   channel: InternalizationChannel;
   reason: 'channel_disabled' | 'task_kind_not_mvp_actionable';
 }
@@ -42,7 +42,7 @@ export type TaskActionabilityResult =
 
 export interface TaskClassificationInput {
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   channel: InternalizationChannel;
 }
 

@@ -12,7 +12,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import type { InternalizationChannel, PeerRunnerKind } from './peer-runner-contracts.js';
+import type { InternalizationChannel, PeerRunnerKind, DiagnosticianStageKind } from './peer-runner-contracts.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,15 @@ export const ALLOWED_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])
   ['artificer', 'evaluator'] as const,
   ['evaluator', 'rollout_reviewer'] as const,
   ['rollout_reviewer', 'trainer'] as const,
+] as const;
+
+/**
+ * Allowed edges in the diagnostician chain.
+ * diag_rootcause → diag_distiller → diag_router
+ */
+export const DIAGNOSTICIAN_EDGES: readonly (readonly [DiagnosticianStageKind, DiagnosticianStageKind])[] = [
+  ['diag_rootcause', 'diag_distiller'] as const,
+  ['diag_distiller', 'diag_router'] as const,
 ] as const;
 
 /**
@@ -70,6 +79,25 @@ export function validateEdge(
 
   // Non-trainer targets: check allowed edges
   return ALLOWED_EDGES.some(([f, t]) => f === from && t === to);
+}
+
+/**
+ * Validates whether a diagnostician chain transition is legal.
+ */
+export function validateDiagEdge(
+  from: DiagnosticianStageKind,
+  to: DiagnosticianStageKind,
+): boolean {
+  return DIAGNOSTICIAN_EDGES.some(([f, t]) => f === from && t === to);
+}
+
+/**
+ * Returns allowed successor for a diagnostician stage kind.
+ */
+export function getDiagSuccessors(from: DiagnosticianStageKind): DiagnosticianStageKind[] {
+  return DIAGNOSTICIAN_EDGES
+    .filter(([f]) => f === from)
+    .map(([, t]) => t);
 }
 
 // ── DAG Validation (Kahn's Algorithm) ────────────────────────────────────────
