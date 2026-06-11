@@ -1,4 +1,6 @@
-﻿# 第一性原理分析：Principles Disciple
+> **⚠️ Non-canonical document**: The authoritative source for core principle definitions (T-01..T-10) is `packages/openclaw-plugin/src/core/thinking-models.ts`. This file is a historical analysis document; its T-0x names and descriptions may differ from the runtime canonical set. Do not use this file as the source of truth for principle IDs or semantics.
+
+# 第一性原理分析：Principles Disciple
 
 > **分析日期**: 2026-03-11
 > **目的**: 深入理解系统本质，设计核心测试用例
@@ -24,7 +26,7 @@
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  before_prompt_build Hook                                       │
-│  ├─ 注入 Thinking OS（9个思维模型）                             │
+│  ├─ 注入 Thinking OS（10个思维模型）                             │
 │  ├─ 注入 OKR Focus（目标对齐）                                  │
 │  └─ 注入 Pain Signals（问题感知）                               │
 └─────────────────────────────────────────────────────────────────┘
@@ -73,7 +75,7 @@
 - **AGENT_SCORECARD.json**: Trust Score, Stage, Grace Failures, History
 - **PROFILE.json**: risk_paths, trust配置
 - **PLAN.md**: STATUS (READY/NOT_READY), 实施计划
-- **THINKING_OS.md**: 9个思维模型定义
+- **THINKING_OS.md**: 10个思维模型定义
 - **.pain_flag**: Pain signals
 
 #### 处理过程（系统逻辑）
@@ -249,7 +251,7 @@ prependSystemContext({
   okr_focus: currentFocus
 });
 
-// 9个思维模型
+// 10个思维模型
 T-01: Map Before Territory
 T-02: Constraints as Lighthouses
 T-03: Evidence Over Intuition
@@ -259,6 +261,7 @@ T-06: Occam's Razor
 T-07: Minimum Viable Change
 T-08: Pain as Signal
 T-09: Divide and Conquer
+T-10: Memory Externalization
 ```
 
 **关键观察点**:
