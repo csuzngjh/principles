@@ -28,7 +28,8 @@ import type { DiagnosticianContextPayload } from '../../../packages/principles-c
 
 // ── Configuration ────────────────────────────────────────────────────────
 
-const LM_STUDIO_URL = 'http://localhost:1234/v1/chat/completions';
+const LM_STUDIO_BASE = 'http://localhost:1234';
+const LM_STUDIO_URL = `${LM_STUDIO_BASE}/v1/chat/completions`;
 
 interface ModelConfig {
   name: string;
@@ -37,13 +38,65 @@ interface ModelConfig {
   maxTokens: number;
 }
 
-const MODEL_CONFIGS: ModelConfig[] = [
+// Default configs — will be overridden by auto-detected models from LM Studio
+const DEFAULT_MODEL_CONFIGS: ModelConfig[] = [
   { name: 'qwen3', model: 'qwen3:8b', temperature: 0.3, maxTokens: 4096 },
   { name: 'glm5.1', model: 'glm-5.1', temperature: 0.3, maxTokens: 4096 },
 ];
 
+let MODEL_CONFIGS: ModelConfig[] = [...DEFAULT_MODEL_CONFIGS];
+
 const RESULTS_DIR = path.join(__dirname, 'spike-results');
 const TIMEOUT_MS = 120_000; // 2 minutes per request
+
+// ── Health check & model auto-detection ─────────────────────────────────
+
+async function checkLmStudioHealth(): Promise<{ available: boolean; models: string[]; error?: string }> {
+  try {
+    const response = await fetch(`${LM_STUDIO_BASE}/v1/models`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      return { available: false, models: [], error: `HTTP ${response.status}` };
+    }
+    const data = await response.json() as { data?: Array<{ id: string }> };
+    const models = (data.data ?? []).map(m => m.id);
+    return { available: true, models };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { available: false, models: [], error: msg };
+  }
+}
+
+function matchModelConfigs(availableModels: string[]): ModelConfig[] {
+  const matched: ModelConfig[] = [];
+
+  for (const config of DEFAULT_MODEL_CONFIGS) {
+    // Try exact match first
+    if (availableModels.includes(config.model)) {
+      matched.push(config);
+      continue;
+    }
+    // Try partial match (LM Studio may prefix model names)
+    const partial = availableModels.find(m =>
+      m.toLowerCase().includes(config.model.split(':')[0].toLowerCase())
+    );
+    if (partial) {
+      matched.push({ ...config, model: partial });
+      continue;
+    }
+  }
+
+  // If no default models matched, use all available models
+  if (matched.length === 0 && availableModels.length > 0) {
+    for (const modelId of availableModels) {
+      const name = modelId.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 20);
+      matched.push({ name, model: modelId, temperature: 0.3, maxTokens: 4096 });
+    }
+  }
+
+  return matched;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -219,6 +272,30 @@ function analyzeResult(parsed: Record<string, unknown> | null): {
 // ── Main execution ───────────────────────────────────────────────────────
 
 async function runSpike(): Promise<void> {
+  // ── Health check ─────────────────────────────────────────────────────
+  console.log('Checking LM Studio connection...');
+  const health = await checkLmStudioHealth();
+  if (!health.available) {
+    console.error(`\n❌ LM Studio not reachable at ${LM_STUDIO_BASE}`);
+    console.error(`   Error: ${health.error}`);
+    console.error('\n   Please ensure:');
+    console.error('   1. LM Studio is running');
+    console.error('   2. Local Server is started (click "Start Server" in LM Studio)');
+    console.error('   3. Port is 1234 (default)');
+    console.error('   4. At least one model is loaded');
+    process.exit(1);
+  }
+  console.log(`✓ LM Studio connected. Available models: ${health.models.join(', ')}`);
+
+  // Auto-detect and match models
+  MODEL_CONFIGS = matchModelConfigs(health.models);
+  if (MODEL_CONFIGS.length === 0) {
+    console.error('\n❌ No matching models found. Available: ' + health.models.join(', '));
+    console.error('   Expected: qwen3:8b, glm-5.1 (or similar names)');
+    process.exit(1);
+  }
+  console.log(`✓ Using models: ${MODEL_CONFIGS.map(m => `${m.name} (${m.model})`).join(', ')}\n`);
+
   // Ensure results directory exists
   if (!fs.existsSync(RESULTS_DIR)) {
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
@@ -328,6 +405,125 @@ async function runSpike(): Promise<void> {
       console.log(`  has groundedOn: ${groundedOnCount}/${variantResults.length}`);
     }
   }
+
+  // ── Generate human rating sheet ──────────────────────────────────────
+
+  const ratingSheetPath = path.join(RESULTS_DIR, 'human-rating-sheet.md');
+  generateHumanRatingSheet(allResults, ratingSheetPath);
+  console.log(`\nHuman rating sheet written to ${ratingSheetPath}`);
+  console.log('   → Open this file and fill in the "Abstraction (1-5)" column for each row');
+}
+
+function generateHumanRatingSheet(results: SpikeResult[], filePath: string): void {
+  const lines: string[] = [];
+  lines.push('# Human Rating Sheet — Distiller Grounding Spike');
+  lines.push('');
+  lines.push('## Instructions');
+  lines.push('');
+  lines.push('For each row, read the LLM output and rate its **abstraction level** (1-5):');
+  lines.push('');
+  lines.push('| Score | Meaning |');
+  lines.push('|-------|---------|');
+  lines.push('| 1 | Specific code patch ("change line 45 in auth.ts") |');
+  lines.push('| 2 | Rule-level constraint ("always read files before editing") |');
+  lines.push('| 3 | Scenario-level advice ("when modifying unfamiliar code, survey first") |');
+  lines.push('| 4 | Domain-level principle ("evidence must precede action in all code modifications") |');
+  lines.push('| 5 | Cross-domain abstraction ("decisions require validated premises regardless of domain") |');
+  lines.push('');
+  lines.push('Also check: **Is the axiom reference correct?** (should match expected violation, not fabricated)');
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  // Group by fixture for easier comparison
+  for (let i = 0; i < SPIKE_FIXTURES.length; i++) {
+    const fixture = SPIKE_FIXTURES[i];
+    const fixtureResults = results.filter(r => r.fixtureIndex === i);
+
+    lines.push(`## ${i + 1}. ${fixture.name}`);
+    lines.push(`**Scenario**: ${fixture.description}`);
+    lines.push(`**Expected axiom**: ${fixture.expectedAxiomViolation ?? 'none (noise)'}`);
+    lines.push('');
+
+    // Table header
+    lines.push('| Variant | Model | Kind | Axiom Ref | GroundedOn | Fabricated? | Abstraction (1-5) | Notes |');
+    lines.push('|---------|-------|------|-----------|------------|-------------|-------------------|-------|');
+
+    for (const r of fixtureResults) {
+      const kinds = r.recommendationKinds.join(', ') || '(parse failed)';
+      const axiomRefs = r.axiomRefs.join(', ') || '—';
+      const groundedOn = r.hasGroundedOn ? 'Yes' : 'No';
+      const fabricated = r.fabricatedAxiomRefs.length > 0 ? `⚠ ${r.fabricatedAxiomRefs.join(', ')}` : 'No';
+      const parseNote = r.parseError ? ' [PARSE FAILED]' : '';
+      const errorNote = r.error ? ' [REQUEST ERROR]' : '';
+
+      lines.push(`| ${r.promptVariant} | ${r.model} | ${kinds}${parseNote}${errorNote} | ${axiomRefs} | ${groundedOn} | ${fabricated} | _fill_ | _fill_ |`);
+    }
+
+    lines.push('');
+
+    // Include raw output excerpts for each result
+    for (const r of fixtureResults) {
+      lines.push(`<details>`);
+      lines.push(`<summary>${r.promptVariant}/${r.model} raw output (${r.latencyMs}ms)</summary>`);
+      lines.push('');
+      lines.push('```');
+      // Show first 500 chars of raw output, or error
+      if (r.error) {
+        lines.push(`REQUEST ERROR: ${r.error}`);
+      } else if (r.parseError) {
+        lines.push(`PARSE ERROR: ${r.parseError}`);
+        lines.push('');
+        lines.push(r.rawOutput.slice(0, 800));
+      } else {
+        // Show parsed recommendations
+        const parsed = r.parsedOutput;
+        if (parsed) {
+          const recs = parsed.recommendations;
+          const summary = parsed.summary;
+          const rootCause = parsed.rootCause;
+          const notes = parsed.ambiguityNotes;
+          lines.push(`Summary: ${typeof summary === 'string' ? summary : '(none)'}`);
+          lines.push(`RootCause: ${typeof rootCause === 'string' ? rootCause : '(none)'}`);
+          lines.push(`AmbiguityNotes: ${JSON.stringify(notes)}`);
+          lines.push(`Recommendations:`);
+          if (Array.isArray(recs)) {
+            for (const rec of recs) {
+              if (typeof rec === 'object' && rec !== null) {
+                lines.push(`  - kind=${rec.kind}: ${rec.description}`);
+                if (rec.abstractedPrinciple) lines.push(`    abstractedPrinciple: ${rec.abstractedPrinciple}`);
+              }
+            }
+          }
+        }
+      }
+      lines.push('```');
+      lines.push('</details>');
+      lines.push('');
+    }
+
+    lines.push('---');
+    lines.push('');
+  }
+
+  // Summary section
+  lines.push('## Summary (fill in after rating all rows)');
+  lines.push('');
+  lines.push('| Metric | Baseline | Grounded | Delta |');
+  lines.push('|--------|----------|----------|-------|');
+  lines.push('| principle kind count | _fill_ | _fill_ | _fill_ |');
+  lines.push('| rule kind count | _fill_ | _fill_ | _fill_ |');
+  lines.push('| Average abstraction | _fill_ | _fill_ | _fill_ |');
+  lines.push('| Fabricated axiom refs | _fill_ | _fill_ | _fill_ |');
+  lines.push('');
+  lines.push('## GO / NO-GO');
+  lines.push('');
+  lines.push('- [ ] **GO** — Grounded prompt produces >=30% more "principle" kind, zero fabricated refs, avg abstraction >=1pt higher');
+  lines.push('- [ ] **NO-GO** — Drop Q3/Q6, keep Q1+Q2 only');
+  lines.push('');
+  lines.push('Rationale: _fill_');
+
+  fs.writeFileSync(filePath, lines.join('\n'));
 }
 
 function generateSummary(results: SpikeResult[]): Record<string, unknown> {
