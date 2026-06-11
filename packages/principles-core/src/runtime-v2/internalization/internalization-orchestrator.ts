@@ -16,15 +16,16 @@
 
 import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { PeerRunnerKind } from './peer-runner-contracts.js';
+import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
 import type { PITaskMetadata } from './pitask-metadata.js';
-import { isPeerRunnerKind } from './peer-runner-contracts.js';
+import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
 import {
   validateInternalizationTaskReady,
   createNextTaskProposal,
 } from './internalization-state-machine.js';
+import { getDiagSuccessors } from './internalization-job-graph.js';
 import { PDRuntimeError } from '../error-categories.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
@@ -39,28 +40,28 @@ export interface NoReadyTasksResult {
 export interface BlockedResult {
   decision: 'blocked';
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   blockedBy: string[];
 }
 
 export interface DependencyFailedResult {
   decision: 'dependency_failed';
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   failedDependencies: string[];
 }
 
 export interface LeasedResult {
   decision: 'leased';
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   attemptCount: number;
 }
 
 export interface WouldLeaseResult {
   decision: 'would_lease';
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   gateResult: DependencyGateResult;
 }
 
@@ -104,7 +105,7 @@ export type WakeOnceResult =
 export interface ProposalCreatedResult {
   decision: 'proposal_created';
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   proposal: NextTaskProposal;
 }
 
@@ -113,8 +114,8 @@ export type ProposeNextTaskResult = ProposalCreatedResult | null;
 // ── Commit Next Task Result Types (PRI-88) ────────────────────────────────────
 
 export type CommitNextTaskResult =
-  | { decision: 'successor_created'; sourceTaskId: string; successorTaskId: string; successorKind: PeerRunnerKind }
-  | { decision: 'successor_exists'; sourceTaskId: string; successorTaskId: string; successorKind: PeerRunnerKind }
+  | { decision: 'successor_created'; sourceTaskId: string; successorTaskId: string; successorKind: RunnerKind }
+  | { decision: 'successor_exists'; sourceTaskId: string; successorTaskId: string; successorKind: RunnerKind }
   | { decision: 'no_successor'; sourceTaskId: string; reason: string }
   | { decision: 'invalid_task_metadata'; taskId: string; reason: string }
   | { decision: 'source_not_succeeded'; taskId: string; status: PDTaskStatus }
@@ -167,7 +168,7 @@ export class InternalizationOrchestrator {
    *   5. On proceed + dryRun → would_lease; on proceed + !dryRun → acquireLease
    *   6. On lease_conflict PDRuntimeError → structured LeaseConflictResult
    */
-  async wakeOnce(taskKind?: PeerRunnerKind): Promise<WakeOnceResult> {
+  async wakeOnce(taskKind?: RunnerKind): Promise<WakeOnceResult> {
     const candidates = await this.findCandidates(taskKind);
     const inspectedCount = candidates.length;
 
@@ -310,12 +311,36 @@ export class InternalizationOrchestrator {
       return null;
     }
 
-    // Guard against non-PI task kinds (would cause getAllowedSuccessors to return undefined)
-    if (!isPeerRunnerKind(piTask.taskKind)) {
+    if (piTask.status !== 'succeeded') {
       return null;
     }
 
-    if (piTask.status !== 'succeeded') {
+    // Diagnostician chain: use getDiagSuccessors instead of peer runner job graph
+    if (isDiagnosticianStageKind(piTask.taskKind)) {
+      const diagSuccessors = getDiagSuccessors(piTask.taskKind);
+      if (diagSuccessors.length === 0) {
+        // diag_router is terminal — no successor
+        return null;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const nextKind = diagSuccessors[0]!;
+      return {
+        decision: 'proposal_created',
+        taskId: piTask.taskId,
+        taskKind: piTask.taskKind,
+        proposal: {
+          taskKind: nextKind,
+          parentTaskId: piTask.taskId,
+          dependencyTaskIds: [piTask.taskId],
+          inputArtifactRefs: [...piTask.outputArtifactRefs],
+          channel: piTask.channel,
+          correlationId: piTask.correlationId,
+        },
+      };
+    }
+
+    // Guard against non-PI task kinds (would cause getAllowedSuccessors to return undefined)
+    if (!isPeerRunnerKind(piTask.taskKind)) {
       return null;
     }
 
@@ -438,7 +463,7 @@ export class InternalizationOrchestrator {
    */
   private async findExistingSuccessor(
     parentTaskId: string,
-    successorKind: PeerRunnerKind,
+    successorKind: RunnerKind,
     channel: string,
   ): Promise<TaskRecord | null> {
     const pendingTasks = await this.stateManager.listTasks({ status: 'pending' });
@@ -459,8 +484,8 @@ export class InternalizationOrchestrator {
    * Find candidate PI tasks by querying pending and retry_wait statuses.
    * Filters to only PeerRunnerKind taskKinds and hydrates to PITaskRecord.
    */
-  private async findCandidates(taskKind?: PeerRunnerKind): Promise<TaskRecord[]> {
-    if (taskKind && !isPeerRunnerKind(taskKind)) {
+  private async findCandidates(taskKind?: RunnerKind): Promise<TaskRecord[]> {
+    if (taskKind && !isRunnerKind(taskKind)) {
       throw new PDRuntimeError('input_invalid', `findCandidates: invalid taskKind filter: ${taskKind}`);
     }
 
@@ -474,13 +499,13 @@ export class InternalizationOrchestrator {
       throw new PDRuntimeError('runtime_unavailable', 'findCandidates failed', { cause: error });
     }
 
-    let peerTasks = allCandidates.filter(t => isPeerRunnerKind(t.taskKind));
+    let runnerTasks = allCandidates.filter(t => isRunnerKind(t.taskKind));
 
     if (taskKind) {
-      peerTasks = peerTasks.filter(t => t.taskKind === taskKind);
+      runnerTasks = runnerTasks.filter(t => t.taskKind === taskKind);
     }
 
-    return peerTasks;
+    return runnerTasks;
   }
 
   /**

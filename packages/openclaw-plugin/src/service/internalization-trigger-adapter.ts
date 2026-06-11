@@ -21,7 +21,7 @@ import {
   isPeerRunnerKind,
   hydratePITaskRecord,
   type PITaskRecord,
-  type PeerRunnerKind,
+  type RunnerKind,
 } from '@principles/core/runtime-v2';
 
 // ── Structured log event types ───────────────────────────────────────────────
@@ -30,7 +30,7 @@ type TriggerWakeEvent = {
   event: 'INTERNALIZATION_TRIGGER_WAKE';
   workspaceDir: string;
   taskId: string;
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   correlationId?: string;
   gateDecision: 'proceed';
   timestamp: string;
