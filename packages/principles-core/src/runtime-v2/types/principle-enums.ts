@@ -27,11 +27,12 @@ export const PrinciplePrioritySchema = Type.Union([
   Type.Literal('P2'),
 ]);
 
-export type PrincipleScope = 'general' | 'domain';
+export type PrincipleScope = 'general' | 'domain' | 'scenario';
 
 export const PrincipleScopeSchema = Type.Union([
   Type.Literal('general'),
   Type.Literal('domain'),
+  Type.Literal('scenario'),
 ]);
 
 export type PrincipleEvaluability =
