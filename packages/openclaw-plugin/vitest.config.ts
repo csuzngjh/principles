@@ -19,7 +19,7 @@ import { defineConfig } from 'vitest/config';
 
 // Integration tests: use real SQLite database
 // These tests require better-sqlite3 to be compiled
-const integrationTests = [
+export const integrationTests = [
   // Core DB tests
   'tests/core/control-ui-db.test.ts',
   'tests/core/evolution-logger.test.ts',
@@ -31,7 +31,6 @@ const integrationTests = [
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies
   'tests/hooks/subagent.test.ts',
-  'tests/hooks/gate-pipeline-integration.test.ts',
   'tests/hooks/gate-rule-host-pipeline.test.ts',
   // Script tests with DB
   'tests/scripts/validate-live-path.test.ts',
