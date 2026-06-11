@@ -45,6 +45,24 @@ export type PeerRunnerKind =
   | 'trainer'
   | 'rollout_reviewer';
 
+/**
+ * The 3 diagnostician stage kinds for the split pipeline.
+ * These are NOT PeerRunnerKinds — they belong to a separate execution pipeline.
+ *
+ * @see 02-review-response-and-amendments.md §2.3
+ */
+export type DiagnosticianStageKind =
+  | 'diag_rootcause'
+  | 'diag_distiller'
+  | 'diag_router';
+
+/**
+ * Broad execution-kind union — used by orchestrator for task dispatch.
+ * Preserves the "7 peer runners" invariant: PeerRunnerKind and
+ * DiagnosticianStageKind are disjoint sets.
+ */
+export type RunnerKind = PeerRunnerKind | DiagnosticianStageKind;
+
 // ── Artifact Types ────────────────────────────────────────────────────────────
 
 /**
@@ -113,7 +131,7 @@ export interface PIArtifact {
  * @see ADR-0003 Section 3.4
  */
 export interface PITaskRecord extends TaskRecord {
-  taskKind: PeerRunnerKind;
+  taskKind: RunnerKind;
   parentTaskId?: string;
   dependencyTaskIds: string[];
   channel: InternalizationChannel;
@@ -137,6 +155,15 @@ export const PEER_RUNNER_KINDS: readonly PeerRunnerKind[] = [
   'evaluator',
   'trainer',
   'rollout_reviewer',
+] as const;
+
+/**
+ * All valid diagnostician stage kinds.
+ */
+export const DIAGNOSTICIAN_STAGE_KINDS: readonly DiagnosticianStageKind[] = [
+  'diag_rootcause',
+  'diag_distiller',
+  'diag_router',
 ] as const;
 
 /**
@@ -166,6 +193,20 @@ export const PI_ARTIFACT_KINDS: readonly PIArtifactKind[] = [
  */
 export function isPeerRunnerKind(value: string): value is PeerRunnerKind {
   return PEER_RUNNER_KINDS.includes(value as PeerRunnerKind);
+}
+
+/**
+ * Type guard for DiagnosticianStageKind.
+ */
+export function isDiagnosticianStageKind(value: string): value is DiagnosticianStageKind {
+  return DIAGNOSTICIAN_STAGE_KINDS.includes(value as DiagnosticianStageKind);
+}
+
+/**
+ * Type guard for RunnerKind (either PeerRunnerKind or DiagnosticianStageKind).
+ */
+export function isRunnerKind(value: string): value is RunnerKind {
+  return isPeerRunnerKind(value) || isDiagnosticianStageKind(value);
 }
 
 /**
@@ -205,8 +246,8 @@ export function isTerminalTaskStatus(status: string): boolean {
  *   - rejectionCount as finite non-negative number (PRI-141)
  */
 export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord {
-  // Must have a valid peer runner kind
-  if (!isPeerRunnerKind(record.taskKind)) {
+  // Must have a valid runner kind (PeerRunnerKind or DiagnosticianStageKind)
+  if (!isRunnerKind(record.taskKind)) {
     return false;
   }
 
@@ -256,7 +297,7 @@ export function injectRunnerLineageIfAbsent(
  */
 export function createMinimalPITaskRecord(
   taskId: string,
-  taskKind: PeerRunnerKind,
+  taskKind: RunnerKind,
   channel: InternalizationChannel,
 ): PITaskRecord {
   return {
