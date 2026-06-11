@@ -41,6 +41,8 @@ import { safeStringifyPreview } from '../adapter/output-repair-contract.js';
 import { redactSensitiveFields } from '../feedback/redact-sensitive.js';
 import { RunnerPhase } from './runner-phase.js';
 import { resolveRunnerOptions } from './diagnostician-runner-options.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
+import { CORE_PRINCIPLES, isCorePrincipleId } from '../core-principles/core-principle-registry.js';
 
 /** Dependencies injected into DiagnosticianRunner. */
 export interface DiagnosticianRunnerDeps {
@@ -86,6 +88,8 @@ export class DiagnosticianRunner {
   private readonly eventEmitter: StoreEventEmitter;
   private readonly validator: DiagnosticianValidator;
   private readonly committer: DiagnosticianCommitter;
+  /** Whether core grounding was active for the current run (set in invokeRuntime, read in succeedTask). */
+  private coreGroundingActive = false;
 
   constructor(deps: DiagnosticianRunnerDeps, options: DiagnosticianRunnerOptions) {
     this.stateManager = deps.stateManager;
@@ -128,6 +132,7 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     this.phase = RunnerPhase.Idle;
+    this.coreGroundingActive = false;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
     let leasedTask: TaskRecord;
@@ -255,8 +260,17 @@ export class DiagnosticianRunner {
   }
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
+    // T-E (PRI-371): Read diagnostician_core_grounding flag from effective config.
+    // EP-03: Flag off (default) = no change to prompt. Flag on = inject PHASE 3.5.
+    let coreGrounding = false;
+    if (this.resolvedOptions.effectiveConfig) {
+      const featureFlags = computeFeatureFlagsFromConfig(this.resolvedOptions.effectiveConfig);
+      coreGrounding = isFeatureEnabled(featureFlags, 'diagnostician_core_grounding');
+    }
+    this.coreGroundingActive = coreGrounding;
+
     const builder = new DiagnosticianPromptBuilder();
-    const { message } = builder.buildPrompt(context, undefined, this.resolvedOptions.outputLanguage);
+    const { message } = builder.buildPrompt(context, { outputLanguage: this.resolvedOptions.outputLanguage, coreGrounding });
 
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -421,6 +435,24 @@ export class DiagnosticianRunner {
       commitId: commitResult.commitId,
       candidateCount: commitResult.candidateCount,
     });
+
+    // T-E (PRI-371): Emit core grounding telemetry when flag was on.
+    // EP-01: axiom IDs from ambiguityNotes are untrusted LLM output —
+    // validate with regex + isCorePrincipleId() before counting.
+    if (this.coreGroundingActive) {
+      const ambiguityNotes = ctx.output.ambiguityNotes ?? [];
+      const allNotes = ambiguityNotes.join(' ');
+      const axiomIdMatches = allNotes.match(/T-\d{2}/g) ?? [];
+      const validatedIds = axiomIdMatches.filter(id => isCorePrincipleId(id));
+      const uniqueIds = new Set(validatedIds);
+      const linkagePercent = (uniqueIds.size / CORE_PRINCIPLES.length) * 100;
+
+      this.emitDiagnosticianEvent('diagnostician_core_grounding_result', ctx.taskId, {
+        taskId: ctx.taskId,
+        axiomRefCount: uniqueIds.size,
+        linkagePercent,
+      });
+    }
 
     this.phase = RunnerPhase.Completed;
     return {
