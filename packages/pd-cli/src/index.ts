@@ -74,6 +74,7 @@ painCmd
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--session <id>', 'OpenClaw session ID for trajectory evidence extraction')
+  .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRecord(opts);

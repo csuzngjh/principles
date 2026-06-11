@@ -39,6 +39,9 @@ export interface PainToPrincipleServiceOptions {
   effectiveConfig?: EffectivePdConfig;
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
+  /** PRI-369: When true, recordPain returns immediately after task creation (status='submitted').
+   *  The diagnosis runs in background via orchestrator wakeOnce/recovery-sweep. */
+  asyncMode?: boolean;
 }
 
 export interface PainToPrincipleInput {
@@ -57,7 +60,7 @@ export interface PainToPrincipleInput {
 }
 
 export interface PainToPrincipleOutput {
-  status: 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
+  status: 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded' | 'submitted';
   painId: string;
   taskId: string;
   runId?: string;
@@ -128,6 +131,46 @@ export class PainToPrincipleService {
     };
 
     try {
+      // ── Async mode: create task as pending, return immediately ──
+      if (this.opts.asyncMode) {
+        const bridge = await createPainSignalBridge({
+          workspaceDir: this.opts.workspaceDir,
+          stateDir: this.opts.stateDir,
+          ledgerAdapter: this.opts.ledgerAdapter,
+          owner: this.opts.owner,
+          autoIntakeEnabled: false, // No intake in async mode — intake happens after diagnosis completes
+          effectiveConfig: this.opts.effectiveConfig,
+          getEnvVar: this.opts.getEnvVar,
+        });
+
+        // Create task as pending (does not run diagnosis)
+        const taskIdResult = await bridge.submitPainSignal(painData);
+
+        // Record observability
+        let observabilityWarnings: string[] = [];
+        if (input.recordObservability !== false) {
+          const obs = recordPainSignalObservability({
+            workspaceDir: this.opts.workspaceDir,
+            stateDir: this.opts.stateDir,
+            data: painData,
+          });
+          observabilityWarnings = obs.warnings;
+        }
+
+        const latencyMs = Date.now() - startTime;
+
+        return {
+          status: 'submitted',
+          painId,
+          taskId: taskIdResult.taskId,
+          candidateIds: [],
+          ledgerEntryIds: [],
+          observabilityWarnings,
+          latencyMs,
+          message: `Diagnosis submitted. Use 'pd task show ${taskIdResult.taskId}' to check progress.`,
+        };
+      }
+
       const bridge = await createPainSignalBridge({
         workspaceDir: this.opts.workspaceDir,
         stateDir: this.opts.stateDir,
