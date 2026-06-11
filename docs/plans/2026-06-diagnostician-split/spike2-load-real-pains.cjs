@@ -12,7 +12,7 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = 'D:/.openclaw/workspace/.pd/state.db';
+const DB_PATH = process.env.STATE_DB_PATH || 'D:/.openclaw/workspace/.pd/state.db';
 const OUTPUT_DIR = path.join(__dirname, 'spike-fixtures-real');
 
 // ── §2.5 Real pain signal task IDs ──────────────────────────────────────
@@ -162,25 +162,22 @@ function main() {
 function findTask(db, painId) {
   // Try exact match on input_ref first
   let task = db.prepare(
-    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND input_ref = ?"
+    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND input_ref = ? ORDER BY created_at DESC LIMIT 1"
   ).get(painId);
 
   if (task) return task;
 
-  // Try matching painId in diagnostic_json
   const tasks = db.prepare(
-    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND diagnostic_json LIKE ?"
+    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND diagnostic_json LIKE ? ORDER BY created_at DESC"
   ).all(`%${painId}%`);
 
   if (tasks.length > 0) {
-    // DEDUP: for R6/R7 there may be multiple — pick the first succeeded one
     const succeeded = tasks.find(t => t.status === 'succeeded');
     return succeeded || tasks[0];
   }
 
-  // Try matching painId in task_id itself
   task = db.prepare(
-    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND task_id LIKE ?"
+    "SELECT * FROM tasks WHERE task_kind = 'diagnostician' AND task_id LIKE ? ORDER BY created_at DESC LIMIT 1"
   ).get(`%${painId}%`);
 
   return task;
@@ -229,7 +226,7 @@ function buildPayload(code, painId, diagJson) {
     for (const ev of evidence.slice(0, 5)) {
       conversationWindow.push({
         ts: ev.ts || new Date().toISOString(),
-        role: 'evidence',
+        role: 'user',
         text: ev.note || ev.text || (typeof ev === 'string' ? ev : JSON.stringify(ev)),
         sourceRef: ev.sourceRef,
       });

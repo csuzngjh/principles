@@ -527,9 +527,9 @@ function generateSummary(results: FixtureResult[], realCount: number, syntheticC
 
 // ── Generate blind scoring sheet ─────────────────────────────────────────
 
-function generateBlindScoring(results: FixtureResult[]): { scoringMd: string; keyJson: Record<string, { label: string; arm: string }> } {
+function generateBlindScoring(results: FixtureResult[]): { scoringMd: string; keyJson: Record<string, { label: string; optionA: string; optionB: string }> } {
   const lines: string[] = [];
-  const keyJson: Record<string, { label: string; arm: string }> = {};
+  const keyJson: Record<string, { label: string; optionA: string; optionB: string }> = {};
 
   lines.push('# Spike-2 Blind Abstraction Scoring');
   lines.push('');

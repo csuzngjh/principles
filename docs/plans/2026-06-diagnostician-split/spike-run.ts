@@ -373,7 +373,9 @@ async function runSpike(): Promise<void> {
           console.error(`  ERROR: ${error}`);
         }
 
-        const { parsed: parsedOutput, error: parseError } = parseOutput(rawOutput);
+        const { parsed: parsedOutput, error: parseError } = error
+          ? { parsed: null, error: null }
+          : parseOutput(rawOutput);
         const analysis = analyzeResult(parsedOutput);
 
         const spikeResult: SpikeResult = {
@@ -496,7 +498,7 @@ function generateHumanRatingSheet(results: SpikeResult[], filePath: string): voi
       lines.push(`<details>`);
       lines.push(`<summary>${r.promptVariant}/${r.model} raw output (${r.latencyMs}ms)</summary>`);
       lines.push('');
-      lines.push('```');
+      lines.push('```text');
       // Show first 500 chars of raw output, or error
       if (r.error) {
         lines.push(`REQUEST ERROR: ${r.error}`);

@@ -27,7 +27,7 @@
     "conversationWindow": [
       {
         "ts": "2026-06-11T06:17:02.424Z",
-        "role": "evidence",
+        "role": "user",
         "text": "trajectory_available_but_empty: no user correction or assistant turns found",
         "sourceRef": "trajectory:empty"
       }

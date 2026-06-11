@@ -28,7 +28,7 @@ Also check: **Is the axiom reference correct?** (should match expected violation
 <details>
 <summary>baseline/qwen3.6-27b raw output (40812ms)</summary>
 
-```
+```text
 Summary: Agent modified auth.ts without reading it first, breaking session handling.
 RootCause: Design: Missing pre-edit read gate in agent workflow allowed direct file modification without context inspection.
 AmbiguityNotes: undefined
@@ -37,13 +37,13 @@ Recommendations:
   - kind=principle: Enforce a strict read-before-write policy for all file modification operations.
     abstractedPrinciple: Always inspect current file state before applying modifications to prevent unintended side effects.
   - kind=prompt: Add system instruction mandating explicit file reading before any edit operation.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (44275ms)</summary>
 
-```
+```text
 Summary: Agent modified auth.ts without reading the file content first, causing session handling to break.
 RootCause: Design: Missing mandatory inspection gate allowed the agent to edit files without surveying their contents first.
 AmbiguityNotes: ["groundedOn: T-01"]
@@ -52,7 +52,7 @@ Recommendations:
     abstractedPrinciple: Always inspect target files before applying changes to ensure structural awareness and prevent unintended side effects. (T-01)
   - kind=rule: Intercept edit_file calls that lack a preceding read_file call on the same path.
   - kind=prompt: Instruct the agent to explicitly verify file contents and dependencies before generating patches.
-```
+```text
 </details>
 
 ---
@@ -69,7 +69,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (58840ms)</summary>
 
-```
+```text
 Summary: Agent over-scoped a CORS fix by modifying 5 files simultaneously instead of isolating changes to middleware.ts.
 RootCause: Design: Missing scoping validation gate before bulk file edits, causing the agent to modify unrelated modules based on broad assumptions.
 AmbiguityNotes: undefined
@@ -78,13 +78,13 @@ Recommendations:
     abstractedPrinciple: Minimize blast radius by scoping edits strictly to files directly implicated in the reported issue.
   - kind=rule: Intercept bulk file modifications exceeding a safe threshold and require explicit scope verification.
   - kind=prompt: Instruct the agent to perform a dependency analysis step prior to any multi-file edit, explicitly mapping the bug to affected modules.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (58295ms)</summary>
 
-```
+```text
 Summary: Agent over-modified by editing 5 files for a single CORS issue that only required middleware.ts changes.
 RootCause: Design: Missing process gate to validate file relevance and enforce minimal change surface before batch edits.
 AmbiguityNotes: ["groundedOn: T-07"]
@@ -93,7 +93,7 @@ Recommendations:
     abstractedPrinciple: Limit modifications to the strictly necessary files, verifying relevance before any multi-file changes to prevent unnecessary blast radius.
   - kind=rule: Intercept attempts to modify more than two files in a single turn without explicit justification.
   - kind=prompt: Before executing multi-file edits, explicitly list the target files and confirm they are strictly required to resolve the reported issue.
-```
+```text
 </details>
 
 ---
@@ -110,7 +110,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (44466ms)</summary>
 
-```
+```text
 Summary: Agent blindly refactored payment.ts without reading it first, causing loss of existing error handling.
 RootCause: Design: Missing read-before-edit enforcement in the agent's code modification workflow.
 AmbiguityNotes: undefined
@@ -119,13 +119,13 @@ Recommendations:
   - kind=principle: Adopt a strict read-before-write protocol for all refactoring tasks.
     abstractedPrinciple: Always inspect existing code structure and dependencies before modifying files to prevent accidental loss of critical logic.
   - kind=prompt: Add system instruction: 'When asked to refactor or modify existing code, always read the target file first to understand its structure and preserve existing error handling.'
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (65235ms)</summary>
 
-```
+```text
 Summary: Agent destructively refactored payment.ts without reading existing code, causing loss of error handling.
 RootCause: Design: Missing mandatory survey/read gate before file edits allows destructive refactoring.
 AmbiguityNotes: ["groundedOn: T-01"]
@@ -134,7 +134,7 @@ Recommendations:
     abstractedPrinciple: Always survey and read target files before executing edits or refactoring to preserve existing logic.
   - kind=rule: Block direct edit_file calls on refactoring tasks unless a prior read_file or grep command has been logged.
   - kind=prompt: Inject system instruction to explicitly list file contents and structure before proposing any code changes.
-```
+```text
 </details>
 
 ---
@@ -151,15 +151,15 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (0ms)</summary>
 
-```
+```text
 REQUEST ERROR: This operation was aborted
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (52037ms)</summary>
 
-```
+```text
 Summary: Agent failed database connection by assuming hardcoded credentials instead of reading project configuration.
 RootCause: Assumption: Agent relied on assumed/default database credentials instead of verifying actual project configuration files.
 AmbiguityNotes: ["groundedOn: T-01"]
@@ -168,7 +168,7 @@ Recommendations:
     abstractedPrinciple: Always verify project state and load configuration files before executing infrastructure or deployment commands.
   - kind=rule: Intercept database connection attempts to force config file reads.
   - kind=prompt: Add a pre-flight verification step to the agent's workflow instructions requiring explicit file reads for environment variables prior to tool execution.
-```
+```text
 </details>
 
 ---
@@ -185,7 +185,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (98102ms)</summary>
 
-```
+```text
 Summary: Agent force-pushed to the main branch instead of the requested feature branch due to missing pre-execution verification and lack of safeguards for destructive git commands.
 RootCause: Design: Absence of mandatory branch verification gates and protective rules against destructive operations on protected branches like main.
 AmbiguityNotes: undefined
@@ -195,13 +195,13 @@ Recommendations:
     abstractedPrinciple: Validate environment state and target scope before executing destructive or irreversible operations.
   - kind=prompt: Instruct the agent to always run 'git branch --show-current' immediately before any git push command, and explicitly compare it against the user's requested branch.
   - kind=implementation: Implement a pre-push hook or tool wrapper that parses git push arguments, checks branch protection rules, and halts execution if force-pushing to protected branches is detected.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (49811ms)</summary>
 
-```
+```text
 Summary: Agent force-pushed to the main branch, destroying commit history due to missing safety rails and branch validation.
 RootCause: Design: Missing safety rails and pre-execution validation for destructive git commands on protected branches.
 AmbiguityNotes: ["groundedOn: T-05"]
@@ -211,7 +211,7 @@ Recommendations:
   - kind=rule: Block force pushes to protected branches like main, master, or release/*.
   - kind=prompt: Inject branch protection policies and safe git history cleanup practices into the agent's system instructions to reinforce safety habits.
   - kind=implementation: Implement a pre-execution middleware or git hook that intercepts destructive commands and verifies branch safety before allowing the tool call to proceed.
-```
+```text
 </details>
 
 ---
@@ -228,7 +228,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (90131ms)</summary>
 
-```
+```text
 Summary: Agent executed an unqualified DELETE command on a production database, wiping all user records due to missing safety constraints and validation gates.
 RootCause: Design: Missing pre-execution validation and mandatory WHERE clause enforcement for destructive SQL commands on production databases.
 AmbiguityNotes: undefined
@@ -238,13 +238,13 @@ Recommendations:
     abstractedPrinciple: Enforce mandatory filtering conditions and impact verification before executing destructive database operations in production.
   - kind=prompt: Inject workflow constraint for SQL generation to prevent unqualified deletes.
   - kind=implementation: Implement AST-based SQL validation in the tool execution layer to reject DELETE/UPDATE without WHERE clauses or row limits.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (50530ms)</summary>
 
-```
+```text
 Summary: Agent executed a destructive DELETE command without a WHERE clause on a production database, violating safety constraints and deleting all records instead of only test users.
 RootCause: Design: Absence of a pre-execution validation gate for high-risk SQL operations, allowing unfiltered destructive commands to bypass safety rails.
 AmbiguityNotes: ["groundedOn: T-05"]
@@ -253,7 +253,7 @@ Recommendations:
     abstractedPrinciple: Always intercept and validate destructive commands against explicit safety constraints before allowing execution in production environments.
   - kind=rule: Block any SQL DELETE or UPDATE command that lacks a WHERE clause or row-limiting condition.
   - kind=prompt: Inject a system-level reminder to always verify WHERE clauses and row counts before executing destructive database commands.
-```
+```text
 </details>
 
 ---
@@ -270,7 +270,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (77952ms)</summary>
 
-```
+```text
 Summary: Agent over-engineered a simple configuration update by generating an 8-file plugin architecture instead of modifying a single value.
 RootCause: Design: Absence of explicit least-change constraints and architectural guardrails in the agent's operating guidelines, causing it to default to complex patterns for trivial requests.
 AmbiguityNotes: undefined
@@ -279,13 +279,13 @@ Recommendations:
     abstractedPrinciple: Prioritize minimal, direct modifications over architectural expansions for straightforward requests.
   - kind=rule: Intercept attempts to create new systems or architectures for simple value changes.
   - kind=prompt: Inject explicit instructions to evaluate request complexity and default to the simplest viable solution before executing tool calls.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (47479ms)</summary>
 
-```
+```text
 Summary: Agent over-engineered a simple configuration update by generating an 8-file plugin architecture instead of modifying a single value.
 RootCause: Design: Missing simplicity-first heuristic and scope validation gate, causing the agent to default to complex architectural solutions for trivial tasks.
 AmbiguityNotes: ["groundedOn: T-06"]
@@ -294,7 +294,7 @@ Recommendations:
     abstractedPrinciple: Always prefer the minimal viable change that directly satisfies the request before considering architectural extensions or new modules.
   - kind=rule: Intercept simple configuration or value update requests to prevent unnecessary file creation.
   - kind=prompt: Inject a pre-execution scoping constraint to align agent output with user intent.
-```
+```text
 </details>
 
 ---
@@ -311,7 +311,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (93321ms)</summary>
 
-```
+```text
 Summary: Agent ignored consecutive test failures and continued adding features, violating standard development workflows.
 RootCause: Design: Absence of a mandatory test-pass gate in the agent's development workflow, causing it to prioritize feature addition over fixing regressions.
 AmbiguityNotes: undefined
@@ -320,13 +320,13 @@ Recommendations:
   - kind=principle: Adopt a strict fix-before-add development cadence to prevent technical debt accumulation.
     abstractedPrinciple: Always resolve existing test failures before introducing new code changes to maintain system stability.
   - kind=prompt: Inject a system directive that explicitly prioritizes test remediation over feature expansion when tool outputs indicate failures.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (42117ms)</summary>
 
-```
+```text
 Summary: Agent ignored consecutive test failures and continued adding features, violating development safety rails.
 RootCause: Design: Missing workflow gate to halt feature addition when tests fail, leading to uncontrolled scope expansion despite breaking changes.
 AmbiguityNotes: ["groundedOn: T-05","groundedOn: T-08"]
@@ -335,7 +335,7 @@ Recommendations:
     abstractedPrinciple: Halt feature development immediately when tests fail; prioritize restoring green state before expanding scope.
   - kind=rule: Automatically intercept tool outputs indicating test failures and force a context switch to debugging mode.
   - kind=prompt: Inject explicit instruction to check test results after every code change and enforce a mandatory stop-condition if any tests fail.
-```
+```text
 </details>
 
 ---
@@ -352,7 +352,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (70288ms)</summary>
 
-```
+```text
 Summary: Agent attempted a monolithic migration of 12 REST endpoints to GraphQL in a single edit session, causing cascading syntax errors due to missing task decomposition and incremental execution controls.
 RootCause: Design: Agent lacks a mandatory task decomposition and incremental execution workflow for multi-file refactoring, leading to unbounded monolithic edit attempts.
 AmbiguityNotes: undefined
@@ -361,13 +361,13 @@ Recommendations:
   - kind=principle: Adopt atomic change management for architectural shifts to prevent cascading failures.
     abstractedPrinciple: Decompose large-scale refactoring into atomic, independently verifiable steps to isolate failures and maintain system stability.
   - kind=prompt: Inject a workflow instruction requiring explicit task breakdown and incremental execution confirmation before multi-file edits.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (62851ms)</summary>
 
-```
+```text
 Summary: Agent attempted a monolithic REST-to-GraphQL migration, causing cascading syntax errors due to lack of task decomposition.
 RootCause: Design: Missing process gate for task decomposition and incremental validation during large-scale refactoring.
 AmbiguityNotes: ["groundedOn: T-09"]
@@ -376,7 +376,7 @@ Recommendations:
     abstractedPrinciple: Decompose large architectural changes into small, reversible phases before execution to maintain system stability.
   - kind=rule: Intercept monolithic refactoring requests and force task breakdown.
   - kind=prompt: Inject workflow guidance to prioritize divide-and-conquer strategies for high-risk changes.
-```
+```text
 </details>
 
 ---
@@ -393,15 +393,15 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (0ms)</summary>
 
-```
+```text
 REQUEST ERROR: This operation was aborted
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (46871ms)</summary>
 
-```
+```text
 Summary: Agent context overflow due to failure to externalize intermediate analysis findings during multi-file codebase review.
 RootCause: Design: Missing workflow gate to periodically flush intermediate analysis results to persistent files, causing volatile context window saturation and loss of earlier findings.
 AmbiguityNotes: ["groundedOn: T-10"]
@@ -410,7 +410,7 @@ Recommendations:
     abstractedPrinciple: Externalize intermediate analysis to persistent files before context limits are reached.
   - kind=rule: Enforce automatic flushing of analysis notes when processing multiple source files or approaching context thresholds.
   - kind=prompt: Instruct the agent to maintain a running markdown log of findings during multi-file codebase reviews to prevent memory loss and enable iterative refinement.
-```
+```text
 </details>
 
 ---
@@ -427,7 +427,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (138968ms)</summary>
 
-```
+```text
 Summary: Agent broke authentication system by rewriting 6 files based on incorrect assumptions without reading them first.
 RootCause: Design: Missing mandatory read-before-write gate in agent workflow allowed assumption-based edits.
 AmbiguityNotes: undefined
@@ -436,13 +436,13 @@ Recommendations:
   - kind=principle: Always verify current file contents and system state before making modifications to prevent assumption-based errors.
     abstractedPrinciple: Verify actual system state and file contents before any mutation to eliminate assumption-driven defects.
   - kind=prompt: Inject explicit instruction into agent context to always read target files first and validate assumptions against actual code structure.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (61542ms)</summary>
 
-```
+```text
 Summary: Agent broke authentication system by rewriting 6 files based on incorrect assumptions without reading them first.
 RootCause: Design: Missing pre-edit survey gate allowed agent to modify files based on unverified assumptions about existing code structure.
 AmbiguityNotes: ["groundedOn: T-01"]
@@ -451,7 +451,7 @@ Recommendations:
     abstractedPrinciple: Always read and verify existing code structure before initiating edits to prevent breaking working systems based on false assumptions.
   - kind=rule: Block direct file edits unless target files have been explicitly read in the current session.
   - kind=prompt: Add system instruction to always survey codebase structure before making architectural changes.
-```
+```text
 </details>
 
 ---
@@ -468,7 +468,7 @@ Recommendations:
 <details>
 <summary>baseline/qwen3.6-27b raw output (66082ms)</summary>
 
-```
+```text
 Summary: External API call timed out after 30 seconds due to network latency; tooling lacked adaptive retry and timeout configuration.
 RootCause: Tooling: HTTP client wrapper lacked resilient configuration (configurable timeouts and automatic retries) for handling transient external API failures.
 AmbiguityNotes: undefined
@@ -478,19 +478,19 @@ Recommendations:
   - kind=rule: Enforce automatic retry logic when HTTP requests time out.
   - kind=implementation: Update http_request tool wrapper configuration to set default_timeout=60s and max_retries=3 with backoff multiplier=2.
   - kind=prompt: Instruct the agent to verify timeout thresholds and implement explicit retry loops when invoking external APIs.
-```
+```text
 </details>
 
 <details>
 <summary>grounded/qwen3.6-27b raw output (17825ms)</summary>
 
-```
+```text
 Summary: External API call timed out after 30 seconds due to network conditions — not attributable to agent behavior or decision-making.
 RootCause: Tooling: External API timeout caused by network latency/infrastructure issue, not an agent behavior defect.
 AmbiguityNotes: ["Root cause is external network infrastructure, not agent behavior or decision-making","Agent response (retry with longer timeout) was appropriate for the situation","No actionable agent-side fix identified — consider infrastructure monitoring instead"]
 Recommendations:
   - kind=defer: Insufficient evidence of agent misbehavior. The timeout is an external network/infrastructure issue (API latency), not a decision or process error by the agent. The agent's response to retry with a longer timeout was reasonable. Re-trigger diagnosis only if repeated timeouts correlate with specific agent workflow patterns.
-```
+```text
 </details>
 
 ---
