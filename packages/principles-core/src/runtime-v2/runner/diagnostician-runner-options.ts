@@ -5,6 +5,7 @@
  * Per CONTEXT.md D-04: owner and runtimeKind required for lease acquisition.
  */
 import type { OutputLanguage } from '../language-directive.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 
 export interface DiagnosticianRunnerOptions {
   /** Polling interval in ms (default: 5000 = 5 seconds). */
@@ -29,6 +30,13 @@ export interface DiagnosticianRunnerOptions {
    * Undefined = no language directive (backward compatible).
    */
   readonly outputLanguage?: OutputLanguage;
+  /**
+   * Effective PD config for feature flag resolution (PRI-371).
+   * When provided, the runner reads `diagnostician_core_grounding` flag
+   * to decide whether to inject core axioms into the prompt.
+   * Undefined = flag off (backward compatible).
+   */
+  readonly effectiveConfig?: EffectivePdConfig;
 }
 
 /** Resolved options with defaults applied. */
@@ -41,6 +49,8 @@ export interface ResolvedDiagnosticianRunnerOptions {
   readonly agentId: string;
   /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
   readonly outputLanguage?: OutputLanguage;
+  /** Effective PD config for feature flag resolution (PRI-371). Undefined = flags off. */
+  readonly effectiveConfig?: EffectivePdConfig;
 }
 
 /** Default option values. */
@@ -61,5 +71,6 @@ export function resolveRunnerOptions(options: DiagnosticianRunnerOptions): Resol
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_RUNNER_OPTIONS.agentId,
     outputLanguage: options.outputLanguage,
+    effectiveConfig: options.effectiveConfig,
   };
 }

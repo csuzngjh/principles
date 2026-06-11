@@ -39,7 +39,7 @@ const MINIMAL_PAYLOAD: DiagnosticianContextPayload = {
 describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes Chinese language directive when outputLanguage is zh-CN', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
+    const result = builder.buildPrompt(MINIMAL_PAYLOAD, { outputLanguage: 'zh-CN' });
     const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('Simplified Chinese');
@@ -49,7 +49,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
   it('includes English language directive when outputLanguage is en', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'en');
+    const result = builder.buildPrompt(MINIMAL_PAYLOAD, { outputLanguage: 'en' });
     const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('English');
@@ -58,7 +58,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
   it('does NOT include language directive when outputLanguage is undefined', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, undefined);
+    const result = builder.buildPrompt(MINIMAL_PAYLOAD);
     const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).not.toContain('LANGUAGE DIRECTIVE');
@@ -67,7 +67,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
   it('includes technical identifiers not translated instruction', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
+    const result = builder.buildPrompt(MINIMAL_PAYLOAD, { outputLanguage: 'zh-CN' });
     const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('taskId');
@@ -77,7 +77,7 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
   it('includes lineage fields not translated instruction', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'en');
+    const result = builder.buildPrompt(MINIMAL_PAYLOAD, { outputLanguage: 'en' });
     const parsed = parsePromptJson(result.message);
 
     expect(parsed.diagnosticInstruction).toContain('Lineage and evidence fields MUST NOT be translated');
@@ -85,8 +85,8 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
   it('preserves all other prompt fields when outputLanguage is provided', () => {
     const builder = new DiagnosticianPromptBuilder();
-    const resultWithout = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, undefined);
-    const resultWith = builder.buildPrompt(MINIMAL_PAYLOAD, undefined, 'zh-CN');
+    const resultWithout = builder.buildPrompt(MINIMAL_PAYLOAD);
+    const resultWith = builder.buildPrompt(MINIMAL_PAYLOAD, { outputLanguage: 'zh-CN' });
 
     const parsedWithout = parsePromptJson(resultWithout.message);
     const parsedWith = parsePromptJson(resultWith.message);
@@ -103,13 +103,13 @@ describe('DiagnosticianPromptBuilder — outputLanguage (PRI-336)', () => {
 
 describe('buildDiagnosticProtocolInstruction — outputLanguage (PRI-336)', () => {
   it('includes language directive when outputLanguage is provided', () => {
-    const instruction = buildDiagnosticProtocolInstruction(undefined, undefined, 'zh-CN');
+    const instruction = buildDiagnosticProtocolInstruction({ outputLanguage: 'zh-CN' });
     expect(instruction).toContain('LANGUAGE DIRECTIVE');
     expect(instruction).toContain('Simplified Chinese');
   });
 
   it('does not include language directive when outputLanguage is undefined', () => {
-    const instruction = buildDiagnosticProtocolInstruction(undefined, undefined, undefined);
+    const instruction = buildDiagnosticProtocolInstruction();
     expect(instruction).not.toContain('LANGUAGE DIRECTIVE');
   });
 });

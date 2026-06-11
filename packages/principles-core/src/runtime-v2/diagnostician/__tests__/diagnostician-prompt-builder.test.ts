@@ -303,7 +303,7 @@ describe('DiagnosticianPromptBuilder', () => {
 
   describe('prompt contract hardening (PRI-109)', () => {
     const adapter = new DefaultSchemaPromptAdapter();
-    const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+    const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
 
     it('instruction contains CRITICAL JSON-only emphasis', () => {
       expect(instruction).toContain('CRITICAL');
@@ -383,45 +383,45 @@ describe('DiagnosticianPromptBuilder', () => {
     const adapter = new DefaultSchemaPromptAdapter();
 
     it('buildDiagnosticProtocolInstruction matches snapshot', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toMatchSnapshot();
     });
 
     it('contains 5-phase protocol keywords', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toContain('PHASE 1');
       expect(instruction).toContain('5 Whys');
       expect(instruction).toContain('Root Cause Classification');
     });
 
     it('contains taxonomy definitions', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toContain('TAXONOMY DEFINITIONS');
       expect(instruction).toContain('"rule"');
       expect(instruction).toContain('"principle"');
     });
 
     it('contains schema-derived JSON example', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toContain('COMPLETE EXAMPLE OUTPUT');
       const parsed = extractJsonObject(instruction);
       expect(parsed).not.toBeNull();
     });
 
     it('example passes Value.Check', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       const parsed = extractJsonObject(instruction);
       expect(Value.Check(DiagnosticianOutputV1Schema, parsed)).toBe(true);
     });
 
     it('contains schema-derived constraints', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toContain('CONSTRAINTS');
       expect(instruction).toContain('category prefix');
     });
 
     it('contains CRITICAL JSON-only emphasis', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).toContain('CRITICAL');
       expect(instruction).toContain('ONLY the JSON object');
     });
@@ -472,7 +472,7 @@ describe('DiagnosticianPromptBuilder', () => {
     const adapter = new DefaultSchemaPromptAdapter();
 
     it('buildDiagnosticProtocolInstruction() does NOT reference eventSummaries', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
       expect(instruction).not.toContain('eventSummaries');
     });
 
@@ -501,7 +501,7 @@ describe('DiagnosticianPromptBuilder', () => {
 
     // 用例 1: prompt must contain explicit empty-evidence → confidence<0.3 + defer instruction
     it('contains empty evidence degradation instruction with confidence<0.3 and defer', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
 
       // Must reference diagnosisTarget.evidence emptiness
       expect(instruction).toContain('diagnosisTarget.evidence');
@@ -516,7 +516,7 @@ describe('DiagnosticianPromptBuilder', () => {
 
     // 用例 1b: must explicitly prohibit fabricating evidence
     it('prohibits fabricating evidence when input evidence is empty', () => {
-      const instruction = buildDiagnosticProtocolInstruction(adapter, DiagnosticianOutputV1Schema);
+      const instruction = buildDiagnosticProtocolInstruction({ adapter, schema: DiagnosticianOutputV1Schema });
 
       expect(instruction).toMatch(/MUST NOT.*fabricat|fabricat.*MUST NOT/i);
     });
@@ -536,7 +536,7 @@ describe('DiagnosticianPromptBuilder', () => {
         })),
       };
       const limits = { maxConversationEntries: 100, maxEntryTextChars: 2000, maxMessageChars: 500 };
-      const result = builder.buildPrompt(hugePayload, limits);
+      const result = builder.buildPrompt(hugePayload, { limits });
 
       // Truncation should have occurred
       expect(result.promptInput.truncationWarnings).toBeDefined();
