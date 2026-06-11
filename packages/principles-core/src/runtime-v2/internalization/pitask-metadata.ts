@@ -173,12 +173,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
  * Hydrate a raw TaskRecord (as returned by SqliteTaskStore.getTask or listTasks)
  * into a PITaskRecord by reading and parsing its diagnosticJson.
  *
- * Fail-closed: returns null for any non-peer-runner taskKind (e.g. diagnostician)
+ * Fail-closed: returns null for any non-RunnerKind taskKind
  * even if diagnosticJson contains valid pi_metadata. This prevents the
  * InternalizationOrchestrator from treating a non-PI task as a PITaskRecord.
  *
  * Returns null if:
- *   - taskKind is not a PeerRunnerKind (e.g. diagnostician)
+ *   - taskKind is not a valid RunnerKind (PeerRunnerKind or DiagnosticianStageKind)
  *   - diagnosticJson is missing or whitespace
  *   - diagnosticJson is not valid JSON
  *   - pi_metadata key is missing or invalid

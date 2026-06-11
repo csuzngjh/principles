@@ -25,6 +25,7 @@ import {
   serializePITaskMetadata,
   parsePITaskMetadata,
 } from '../pitask-metadata.js';
+import { decideArtifactRejectionFeedback } from '../internalization-state-machine.js';
 import { DEFAULT_FEATURE_FLAGS } from '../../feature-flags/feature-flag-contract.js';
 import type { TaskRecord } from '../../task-status.js';
 
@@ -251,6 +252,26 @@ describe('INF-8: Metadata envelope supports DiagnosticianStageKind', () => {
     if (parsed) {
       expect(parsed.channel).toBe('prompt');
       expect(parsed.timeoutMs).toBe(60000);
+    }
+  });
+});
+
+// ── Regression: decideArtifactRejectionFeedback for diagnostician tasks ─────
+
+describe('Regression: decideArtifactRejectionFeedback for diagnostician tasks', () => {
+  it('escalates with rejectionReason when taskKind is DiagnosticianStageKind', () => {
+    const artifact = {
+      artifactId: 'art-1',
+      artifactKind: 'principle' as const,
+      sourceTaskId: 'task-1',
+      lineageRefs: [],
+      validationStatus: 'rejected' as const,
+    };
+    const diagTask = createMinimalPITaskRecord('task-1', 'diag_rootcause', 'prompt');
+    const result = decideArtifactRejectionFeedback(artifact, diagTask);
+    expect(result.action).toBe('escalate');
+    if (result.action === 'escalate') {
+      expect(result.rejectionReason).toContain('unexpected_diagnostician_taskKind:diag_rootcause');
     }
   });
 });

@@ -121,7 +121,7 @@ export interface PIArtifact {
  * Internalization task record that extends TaskRecord with internalization metadata.
  *
  * Critical rules:
- *   - taskKind MUST be one of the 7 PeerRunnerKind values
+ *   - taskKind MUST be a valid RunnerKind (PeerRunnerKind or DiagnosticianStageKind)
  *   - status uses PDTaskStatus (pending | leased | succeeded | retry_wait | failed)
  *   - running is NOT a PDTaskStatus — it belongs to RunExecutionStatus
  *   - Terminal task states: succeeded and failed only
@@ -237,7 +237,7 @@ export function isTerminalTaskStatus(status: string): boolean {
  *
  * Checks that a TaskRecord has all required internalization fields.
  * This is a structural check — the record must have:
- *   - taskKind in the set of 7 peer runner kinds
+ *   - taskKind in the set of valid RunnerKind values (PeerRunnerKind or DiagnosticianStageKind)
  *   - dependencyTaskIds as array
  *   - channel as string (valid InternalizationChannel)
  *   - timeoutMs as number

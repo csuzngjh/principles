@@ -261,13 +261,15 @@ export function decideArtifactRejectionFeedback(
   task: PITaskRecord,
 ): RejectionFeedbackResult {
   // Only peer runner tasks have artifact rejection feedback.
-  // Diagnostician stage tasks should not reach this path.
+  // Diagnostician stage tasks should not reach this path — if they do,
+  // escalate with an explicit reason rather than fabricating a PeerRunnerKind.
   if (!isPeerRunnerKind(task.taskKind)) {
     return {
       action: 'escalate',
       rejectedArtifactId: artifact.artifactId,
       sourceTaskId: artifact.sourceTaskId,
-      sourceTaskKind: 'dreamer', // fallback — diagnostician tasks should not reach here
+      sourceTaskKind: 'dreamer', // sentinel — diagnostician tasks must not reach here; caller must guard
+      rejectionReason: `unexpected_diagnostician_taskKind:${task.taskKind}`,
     };
   }
 
