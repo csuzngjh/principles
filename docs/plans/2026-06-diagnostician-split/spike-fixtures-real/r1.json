@@ -1,0 +1,87 @@
+{
+  "name": "r1",
+  "description": "PR#838 tests green but missed production-path side effects / unreachable high-confidence upgrade",
+  "expectedAxiomViolation": "T-03",
+  "source": "real",
+  "realCode": "R1",
+  "payload": {
+    "contextId": "ctx-spike2-r1",
+    "contextHash": "hash-spike2-r1",
+    "taskId": "task-spike2-r1",
+    "workspaceDir": "D:/.openclaw/workspace",
+    "sourceRefs": [
+      "pain://manual_1780787633659_8im5rx7t"
+    ],
+    "diagnosisTarget": {
+      "painId": "manual_1780787633659_8im5rx7t",
+      "reasonSummary": "PEAT-B1 PR #838: test绿灯遗漏生产路径副作用和不可达high-confidence upgrade，owner无法信任PR质量。证据：llm.ts triage后仍调用evaluatePainDiagnosticGate、gate-block-helper.ts hardcoded isUnsafeHighConfidence=false、PD未自动产生pain/candidate。",
+      "severity": "severe",
+      "source": "code_review",
+      "evidence": []
+    },
+    "conversationWindow": []
+  },
+  "arm1Baseline": {
+    "abstractedPrinciple": "Safety gates must dynamically evaluate runtime context; test suites must explicitly validate production path side effects to prevent silent bypasses.",
+    "kind": "principle",
+    "groundedOn": null,
+    "fullOutput": {
+      "valid": true,
+      "diagnosisId": "diag-manual-1780787633659-8im5rx7t",
+      "summary": "PR #838 tests passed despite missing production path side effects and unreachable high-confidence upgrade logic due to hardcoded unsafe flags and incorrect triage fallbacks.",
+      "rootCause": "Design: The diagnostic gate architecture relies on hardcoded safety flags (isUnsafeHighConfidence=false) and lacks dynamic evaluation, causing the test suite to bypass critical production path validations.",
+      "violatedPrinciples": [
+        {
+          "principleId": "PRINC-DYN-GATE-01",
+          "title": "Dynamic Safety Evaluation",
+          "rationale": "Safety gates must be evaluated dynamically based on runtime context rather than hardcoded to false, ensuring production-side effects are never silently bypassed."
+        },
+        {
+          "principleId": "PRINC-TRIAGE-ALIGN-02",
+          "title": "Triage-Production Alignment",
+          "rationale": "Agent triage logic must not fall back to legacy diagnostic gates when a safe path is identified, preventing test suites from diverging from actual production behavior."
+        }
+      ],
+      "evidence": [
+        {
+          "sourceRef": "diagnosis_manual_1780787633659_8im5rx7t",
+          "note": "Owner report indicates llm.ts triage incorrectly calls evaluatePainDiagnosticGate post-triage, and gate-block-helper.ts hardcodes isUnsafeHighConfidence=false."
+        },
+        {
+          "sourceRef": "diagnosis_manual_1780787633659_8im5rx7t",
+          "note": "Pain Diagnostic (PD) failed to auto-generate pain/candidate, indicating missing trigger logic for production path side effects."
+        },
+        {
+          "sourceRef": "run_diagnosis_manual_1780787633659_8im5rx7t_1",
+          "note": "CLI-submitted pain lacks host trace, but owner reason explicitly cites hardcoded flags and triage fallback as direct causes of test green-light failure."
+        }
+      ],
+      "recommendations": [
+        {
+          "kind": "rule",
+          "description": "Block PRs containing hardcoded unsafe confidence flags or incorrect post-triage gate calls.",
+          "triggerPattern": "(isUnsafeHighConfidence\\s*=\\s*false|evaluatePainDiagnosticGate)",
+          "action": "Fail CI check and require dynamic evaluation logic before merge."
+        },
+        {
+          "kind": "principle",
+          "description": "Enforce dynamic safety gate evaluation and production-path mirroring in all diagnostic workflows.",
+          "abstractedPrinciple": "Safety gates must dynamically evaluate runtime context; test suites must explicitly validate production path side effects to prevent silent bypasses."
+        },
+        {
+          "kind": "implementation",
+          "description": "Refactor gate-block-helper.ts to compute isUnsafeHighConfidence based on actual diagnostic state, and update llm.ts triage to short-circuit evaluatePainDiagnosticGate when safe."
+        },
+        {
+          "kind": "prompt",
+          "description": "Instruct the agent to verify that all diagnostic gates use dynamic evaluation and that test coverage explicitly includes production path side effects before marking PR as green."
+        }
+      ],
+      "confidence": 0.82,
+      "ambiguityNotes": [
+        "CLI-submitted pain lacks authenticated host session provenance; conversation trace unavailable.",
+        "Evidence relies solely on owner-reported code review findings without runtime execution logs."
+      ]
+    }
+  }
+}
