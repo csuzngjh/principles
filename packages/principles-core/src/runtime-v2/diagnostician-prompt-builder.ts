@@ -38,6 +38,17 @@ import { DefaultSchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
 import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
 import type { OutputLanguage } from './language-directive.js';
 import { buildLanguageDirective } from './language-directive.js';
+import { CORE_PRINCIPLES } from './core-principles/core-principle-registry.js';
+
+/** Options for DiagnosticianPromptBuilder.buildPrompt() beyond the required payload. */
+export interface BuildPromptOptions {
+  /** Size limits to prevent token overflow (default: DEFAULT_PROMPT_BUILDER_LIMITS) */
+  limits?: PromptBuilderLimits;
+  /** Output language directive (default: none) */
+  outputLanguage?: OutputLanguage;
+  /** T-E (PRI-371): Inject core axiom grounding as PHASE 3.5 (default: false) */
+  coreGrounding?: boolean;
+}
 
 /**
  * PromptInput — the JSON message sent to openclaw agent via --message flag.
@@ -106,6 +117,21 @@ export interface PromptBuildResult {
 }
 
 /**
+ * Options for buildDiagnosticProtocolInstruction.
+ * Uses an options object to stay within max-params limit.
+ */
+export interface DiagnosticProtocolInstructionOptions {
+  /** Schema prompt adapter (default: DefaultSchemaPromptAdapter) */
+  adapter?: SchemaPromptAdapter;
+  /** TypeBox schema for output validation (default: DiagnosticianOutputV1Schema) */
+  schema?: TSchema;
+  /** Output language directive (default: none) */
+  outputLanguage?: OutputLanguage;
+  /** T-E (PRI-371): Inject core axiom grounding as PHASE 3.5 (default: false) */
+  coreGrounding?: boolean;
+}
+
+/**
  * 5-phase diagnostic protocol instruction for the LLM.
  *
  * Per DPB-02 (LOCKED): Output is ONLY JSON — no markdown, no file ops, no tool calls.
@@ -117,13 +143,31 @@ export interface PromptBuildResult {
  * regardless of whether OpenClaw loads SKILL.md as the agent system prompt.
  */
 export function buildDiagnosticProtocolInstruction(
-  adapter: SchemaPromptAdapter = new DefaultSchemaPromptAdapter(),
-  schema: TSchema = DiagnosticianOutputV1Schema,
-  outputLanguage?: OutputLanguage,
+  opts: DiagnosticProtocolInstructionOptions = {},
 ): string {
+  const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
+  const schema = opts.schema ?? DiagnosticianOutputV1Schema;
+  const { outputLanguage, coreGrounding } = opts;
+
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
   const languageDirective = buildLanguageDirective(outputLanguage);
+
+  // T-E (PRI-371): When coreGrounding is true, insert PHASE 3.5 between
+  // PHASE 3 and PHASE 4. When false or undefined, output is byte-identical
+  // to the original (EP-03: no silent fallback).
+  const phase35Block = coreGrounding
+    ? `
+PHASE 3.5 — Core Axiom Grounding:
+The following core axioms are the system's foundational behavioral principles.
+If the root cause relates to any of these axioms, note the axiom ID (e.g. T-01)
+in the ambiguityNotes field of your output.
+
+Core Axioms:
+${CORE_PRINCIPLES.map(p => `${p.id}: ${p.statement}`).join('\n')}
+
+`
+    : '\n';
 
   return `You are a root cause analysis expert. Follow this protocol:
 
@@ -150,8 +194,7 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Design: architecture defects, missing gates, process gaps
 - Assumption: wrong assumptions about env/versions/deps
 - Tooling: tool misconfiguration, API changes
-
-PHASE 4 — Recommendation Taxonomy & Distillation:
+${phase35Block}PHASE 4 — Recommendation Taxonomy & Distillation:
 Analyze the root cause and propose actionable recommendations. Classify each recommendation into one of FIVE categories based on the taxonomy below.
 
 TAXONOMY DEFINITIONS:
@@ -213,7 +256,7 @@ export class DiagnosticianPromptBuilder {
    * then serialize to JSON for the --message argument.
    *
    * @param payload — DiagnosticianContextPayload from context assembly (DPB-01)
-   * @param limits — Size limits to prevent token overflow (default: DEFAULT_PROMPT_BUILDER_LIMITS)
+   * @param opts — Build options (limits, outputLanguage, coreGrounding)
    * @returns PromptBuildResult with JSON string + PromptInput object (DPB-02, DPB-03, DPB-04, DPB-06)
    *
    * Per DPB-05: This method only builds the prompt; it does NOT commit to PD database.
@@ -223,9 +266,11 @@ export class DiagnosticianPromptBuilder {
    */
   buildPrompt(
     payload: DiagnosticianContextPayload,
-    limits: PromptBuilderLimits = DEFAULT_PROMPT_BUILDER_LIMITS,
-    outputLanguage?: OutputLanguage,
+    opts: BuildPromptOptions = {},
   ): PromptBuildResult {
+    const limits = opts.limits ?? DEFAULT_PROMPT_BUILDER_LIMITS;
+    const { outputLanguage, coreGrounding } = opts;
+
     const truncationWarnings: string[] = [];
 
     // DPB-04: Apply truncation to conversationWindow to prevent token overflow
@@ -255,7 +300,12 @@ export class DiagnosticianPromptBuilder {
       conversationWindow,
     };
 
-    const diagnosticInstruction = buildDiagnosticProtocolInstruction(this.adapter, this.schema, outputLanguage);
+    const diagnosticInstruction = buildDiagnosticProtocolInstruction({
+      adapter: this.adapter,
+      schema: this.schema,
+      outputLanguage,
+      coreGrounding,
+    });
 
     // DPB-04: Explicit top-level fields at the prompt level
     const promptInput: PromptInput = {
