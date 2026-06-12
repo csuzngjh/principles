@@ -25,7 +25,7 @@ import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolutio
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isCooldownActive as isTriggerCooldownActive, markEpisodeAsDiagnosed, clearCooldownState } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
-import { resolveSourceKind, type RawObservation } from './raw-observation-adapter.js';
+import { resolveSourceKind, buildToolFailureObservation, type RawObservation } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
@@ -56,21 +56,14 @@ export function classifyToolCallOutcome(event: PluginHookAfterToolCallEvent): To
     : 0;
   const isFailure = !!event.error || exitCode !== 0;
 
-  // PRI-360 S1: classifyToolFailureSource logic inlined here
-  // (this will later be used to build RawObservation for resolveSourceKind)
-  let failureSource: 'tool_failure' | 'dispatch_error' | undefined = undefined;
-  if (isFailure) {
-    if (!event.toolName || event.toolName.trim() === '') {
-      failureSource = 'dispatch_error';
-    } else {
-      const msg = String(event.error ?? '');
-      if (/\btool\s+(?:\S+\s+)?not\s+found\b/i.test(msg) || /\bunknown\s+tool\b/i.test(msg)) {
-        failureSource = 'dispatch_error';
-      } else {
-        failureSource = 'tool_failure';
-      }
-    }
-  }
+  // PRI-360 S1: Use centralized builder for tool failure classification
+  // All dispatch/tool_failure rules live in raw-observation-adapter.ts
+  const obs = buildToolFailureObservation({
+    toolName: event.toolName,
+    error: event.error,
+    exitCode,
+  });
+  const failureSource = isFailure ? obs.failureSource : undefined;
 
   return {
     isFailure,

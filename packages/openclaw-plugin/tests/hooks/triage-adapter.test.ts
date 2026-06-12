@@ -1,8 +1,11 @@
 /**
- * Triage Adapter Tests — PEAT-B1
+ * Triage Adapter Tests — PEAT-B1 / PRI-360 S1
  *
- * Tests the plugin-side adapter that maps hook context to SourceKind
- * and calls the pure triage policy from principles-core.
+ * Tests the unified RawObservation → SourceKind resolution path
+ * and the evidence triage policy.
+ *
+ * All legacy resolveSourceKindFrom* wrappers have been removed.
+ * Every test uses resolveSourceKind(RawObservation) directly.
  *
  * ERR checklist:
  * - ERR-001: Source kind resolved from runtime values, not `as` casts.
@@ -13,93 +16,165 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveSourceKind,
+  buildToolFailureObservation,
+  buildLlmDetectionObservation,
   type RawObservation,
   evaluateEvidenceTriage,
   isHighConfidenceUnsafeAction,
 } from '../../src/hooks/triage-adapter.js';
 
-// ── resolveSourceKindFromToolFailure ────────────────────────────────────────
+// ── resolveSourceKind: Tool Failure Path ─────────────────────────────────────
 
-describe('resolveSourceKindFromToolFailure', () => {
+describe('resolveSourceKind: tool failure path', () => {
   it('maps pain tool to agent_on_owner_request with openclaw_context_bound', () => {
-    expect(resolveSourceKindFromToolFailure('pain', 'tool_failure', 'openclaw_context_bound')).toBe('agent_on_owner_request');
+    const obs: RawObservation = { observedAt: 't', toolName: 'pain', failureSource: 'tool_failure', provenance: 'openclaw_context_bound' };
+    expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
   });
 
   it('maps pain tool to owner_reported without openclaw_context_bound', () => {
-    expect(resolveSourceKindFromToolFailure('pain', 'tool_failure')).toBe('owner_reported');
-    expect(resolveSourceKindFromToolFailure('pain', 'tool_failure', 'automatic_hook')).toBe('owner_reported');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'pain', failureSource: 'tool_failure' })).toBe('owner_reported');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'pain', failureSource: 'tool_failure', provenance: 'automatic_hook' })).toBe('owner_reported');
   });
 
   it('maps skill:pain to agent_on_owner_request with openclaw_context_bound', () => {
-    expect(resolveSourceKindFromToolFailure('skill:pain', 'tool_failure', 'openclaw_context_bound')).toBe('agent_on_owner_request');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'skill:pain', failureSource: 'tool_failure', provenance: 'openclaw_context_bound' })).toBe('agent_on_owner_request');
   });
 
   it('maps dispatch_error to dispatch_error', () => {
-    expect(resolveSourceKindFromToolFailure('read', 'dispatch_error')).toBe('dispatch_error');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'read', failureSource: 'dispatch_error' })).toBe('dispatch_error');
   });
 
   it('maps regular tool failure to tool_failure', () => {
-    expect(resolveSourceKindFromToolFailure('write', 'tool_failure')).toBe('tool_failure');
-    expect(resolveSourceKindFromToolFailure('exec', 'tool_failure')).toBe('tool_failure');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'write', failureSource: 'tool_failure' })).toBe('tool_failure');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'exec', failureSource: 'tool_failure' })).toBe('tool_failure');
   });
 
-  it('maps undefined tool name with tool_failure to tool_failure', () => {
-    expect(resolveSourceKindFromToolFailure(undefined, 'tool_failure')).toBe('tool_failure');
+  it('maps undefined tool name with tool_failure to dispatch_error via toolNotFound', () => {
+    expect(resolveSourceKind({ observedAt: 't', toolName: undefined, failureSource: 'tool_failure' })).toBe('tool_failure');
   });
 });
 
-// ── resolveSourceKindFromLlmDetection ───────────────────────────────────────
+// ── resolveSourceKind: LLM Detection Path ────────────────────────────────────
 
-describe('resolveSourceKindFromLlmDetection', () => {
+describe('resolveSourceKind: LLM detection path', () => {
   it('maps gfi triggered to gfi_threshold', () => {
-    expect(resolveSourceKindFromLlmDetection('llm_some_rule', true)).toBe('gfi_threshold');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_some_rule', isGfiTriggered: true })).toBe('gfi_threshold');
   });
 
   it('maps llm_paralysis to llm_paralysis', () => {
-    expect(resolveSourceKindFromLlmDetection('llm_paralysis', false)).toBe('llm_paralysis');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_paralysis', isGfiTriggered: false })).toBe('llm_paralysis');
   });
 
   it('maps llm_* detection rules to semantic', () => {
-    expect(resolveSourceKindFromLlmDetection('llm_repetition', false)).toBe('semantic');
-    expect(resolveSourceKindFromLlmDetection('llm_loop', false)).toBe('semantic');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_repetition', isGfiTriggered: false })).toBe('semantic');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_loop', isGfiTriggered: false })).toBe('semantic');
   });
 
   it('maps user_empathy to empathy_inferred', () => {
-    expect(resolveSourceKindFromLlmDetection('user_empathy', false)).toBe('empathy_inferred');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'user_empathy', isGfiTriggered: false })).toBe('empathy_inferred');
   });
 
   it('maps unknown source to unknown', () => {
-    expect(resolveSourceKindFromLlmDetection('something_else', false)).toBe('unknown');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'something_else', isGfiTriggered: false })).toBe('unknown');
   });
 });
 
-// ── Other resolve functions ─────────────────────────────────────────────────
+// ── resolveSourceKind: Other Context Paths ───────────────────────────────────
 
-describe('resolveSourceKindFromGateBlock', () => {
+describe('resolveSourceKind: gate block path', () => {
   it('returns rulehost_block', () => {
-    expect(resolveSourceKindFromGateBlock()).toBe('rulehost_block');
+    expect(resolveSourceKind({ observedAt: 't', isGateBlock: true })).toBe('rulehost_block');
   });
 });
 
-describe('resolveSourceKindFromCommand', () => {
+describe('resolveSourceKind: manual command path', () => {
   it('returns owner_reported', () => {
-    expect(resolveSourceKindFromCommand()).toBe('owner_reported');
+    expect(resolveSourceKind({ observedAt: 't', isManualEntry: true })).toBe('owner_reported');
   });
 });
 
-describe('resolveSourceKindFromProvider', () => {
+describe('resolveSourceKind: provider path', () => {
   it('returns provider_failure for non-rate-limit', () => {
-    expect(resolveSourceKindFromProvider(false)).toBe('provider_failure');
+    expect(resolveSourceKind({ observedAt: 't', isRateLimit: false })).toBe('provider_failure');
   });
 
   it('returns rate_limit for rate-limit', () => {
-    expect(resolveSourceKindFromProvider(true)).toBe('rate_limit');
+    expect(resolveSourceKind({ observedAt: 't', isRateLimit: true })).toBe('rate_limit');
   });
 });
 
-describe('resolveSourceKindFromSubagent', () => {
+describe('resolveSourceKind: subagent path', () => {
   it('returns subagent_error', () => {
-    expect(resolveSourceKindFromSubagent()).toBe('subagent_error');
+    expect(resolveSourceKind({ observedAt: 't', isSubagentError: true })).toBe('subagent_error');
+  });
+});
+
+// ── buildToolFailureObservation ──────────────────────────────────────────────
+
+describe('buildToolFailureObservation', () => {
+  it('classifies empty tool name as dispatch_error', () => {
+    const obs = buildToolFailureObservation({ toolName: undefined, error: 'tool not found', exitCode: 1 });
+    expect(obs.failureSource).toBe('dispatch_error');
+    expect(resolveSourceKind(obs)).toBe('dispatch_error');
+  });
+
+  it('classifies "tool not found" error as dispatch_error', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'tool read_file not found', exitCode: 1 });
+    expect(obs.failureSource).toBe('dispatch_error');
+    expect(resolveSourceKind(obs)).toBe('dispatch_error');
+  });
+
+  it('classifies "Unknown tool" error as dispatch_error', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'Unknown Tool', exitCode: 1 });
+    expect(obs.failureSource).toBe('dispatch_error');
+  });
+
+  it('classifies real errors (ENOENT) as tool_failure', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'ENOENT: no such file', exitCode: 1 });
+    expect(obs.failureSource).toBe('tool_failure');
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
+  });
+
+  it('classifies no error + no exit as non-failure (undefined failureSource)', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: undefined, exitCode: 0 });
+    expect(obs.failureSource).toBeUndefined();
+  });
+
+  it('classifies whitespace-only tool name as dispatch_error', () => {
+    const obs = buildToolFailureObservation({ toolName: '   ', error: 'tool not found', exitCode: 1 });
+    expect(obs.failureSource).toBe('dispatch_error');
+  });
+
+  it('word-boundary: "report_tool_not_found" does NOT match dispatch pattern', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'report_tool_not_found', exitCode: 1 });
+    expect(obs.failureSource).toBe('tool_failure');
+  });
+
+  it('word-boundary: "atoolnotfound" does NOT match dispatch pattern', () => {
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'atoolnotfound', exitCode: 1 });
+    expect(obs.failureSource).toBe('tool_failure');
+  });
+
+  it('preserves provenance', () => {
+    const obs = buildToolFailureObservation({ toolName: 'pain', error: 'fail', exitCode: 1, provenance: 'openclaw_context_bound' });
+    expect(obs.provenance).toBe('openclaw_context_bound');
+    expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
+  });
+});
+
+// ── buildLlmDetectionObservation ─────────────────────────────────────────────
+
+describe('buildLlmDetectionObservation', () => {
+  it('builds observation for GFI-triggered detection', () => {
+    const obs = buildLlmDetectionObservation({ detectionSource: 'llm_some_rule', isGfiTriggered: true });
+    expect(obs.detectionSource).toBe('llm_some_rule');
+    expect(obs.isGfiTriggered).toBe(true);
+    expect(resolveSourceKind(obs)).toBe('gfi_threshold');
+  });
+
+  it('builds observation for llm_paralysis', () => {
+    const obs = buildLlmDetectionObservation({ detectionSource: 'llm_paralysis', isGfiTriggered: false });
+    expect(resolveSourceKind(obs)).toBe('llm_paralysis');
   });
 });
 
