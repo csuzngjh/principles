@@ -405,10 +405,14 @@ export async function createPainSignalBridge(
     const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
 
     if (splitPipeline && !asyncCli) {
-      throw new PDRuntimeError(
-        'input_invalid',
-        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-      );
+      const isExplicitSplit = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_split_pipeline') ?? false;
+      const isExplicitAsync = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_async_cli') ?? false;
+      if (isExplicitSplit || isExplicitAsync) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
+        );
+      }
     }
 
     useSplitPipeline = splitPipeline;

@@ -36,10 +36,12 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       config: getDefaultPdConfig(),
       source: 'defaults',
       warnings: [],
+      featuresChangedFromDefault: [],
     };
   }
 
   const warnings: string[] = [];
+  const featuresChangedFromDefault: string[] = [];
 
   // Merge features: user overrides for known flags, defaults for missing
   const features: Record<string, FeatureFlagEntry> = {};
@@ -54,13 +56,18 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       if (defaultEntry.category === 'gone' && userEntry.enabled) {
         features[flagId] = { ...defaultEntry };
         warnings.push(`feature '${flagId}': gone flag cannot be re-enabled`);
+        featuresChangedFromDefault.push(flagId);
         continue;
       }
       // Core flags can never be disabled
       if (defaultEntry.category === 'core' && !userEntry.enabled) {
         features[flagId] = { ...defaultEntry };
         warnings.push(`feature '${flagId}': core flag cannot be disabled`);
+        featuresChangedFromDefault.push(flagId);
         continue;
+      }
+      if (userEntry.category !== defaultEntry.category || userEntry.enabled !== defaultEntry.enabled) {
+        featuresChangedFromDefault.push(flagId);
       }
       features[flagId] = { category: userEntry.category, enabled: userEntry.enabled };
     } else {
@@ -72,6 +79,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
   for (const [flagId, userEntry] of Object.entries(userConfig.features)) {
     if (DANGEROUS_KEYS.has(flagId)) continue;
     if (!Object.hasOwn(features, flagId)) {
+      featuresChangedFromDefault.push(flagId);
       features[flagId] = { ...userEntry };
       warnings.push(`feature '${flagId}': unknown flag accepted as-is`);
     }
@@ -146,5 +154,6 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     config,
     source: 'user_config',
     warnings,
+    featuresChangedFromDefault,
   };
 }
