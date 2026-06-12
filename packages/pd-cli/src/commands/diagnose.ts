@@ -14,8 +14,14 @@ import {
   SqliteSourceTraceLocator,
   StoreEventEmitter,
   storeEmitter,
-  DiagnosticianRunner,
-  DefaultDiagnosticianValidator,
+  SplitDiagnosticianRunner,
+  DiagRootCauseRunner,
+  DiagDistillerRunner,
+  DiagRouterRunner,
+  DefaultDiagRootCauseValidator,
+  DefaultDiagDistillerValidator,
+  DisabledDiagnosticianRunner,
+  type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
@@ -295,24 +301,32 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
     const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
 
-    const runner = new DiagnosticianRunner(
-      {
+    let runner: DiagnosticianRunnerLike;
+    if (isSplitPipeline) {
+      const rootCauseRunner = new DiagRootCauseRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        { owner: 'pd-cli-diagnose', runtimeKind, outputLanguage },
+      );
+      const distillerRunner = new DiagDistillerRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        { owner: 'pd-cli-diagnose', runtimeKind, outputLanguage },
+      );
+      const routerRunner = new DiagRouterRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+        { owner: 'pd-cli-diagnose', runtimeKind, outputLanguage },
+      );
+
+      runner = new SplitDiagnosticianRunner({
+        rootCauseRunner,
+        distillerRunner,
+        routerRunner,
         stateManager,
-        contextAssembler,
-        runtimeAdapter,
-        eventEmitter,
-        validator: new DefaultDiagnosticianValidator(),
         committer,
-      },
-      {
-        owner: 'pd-cli-diagnose',
-        runtimeKind,
-        pollIntervalMs: 100,
-        timeoutMs: pipelineTimeoutMs,
-        agentId: opts.agent,
-        outputLanguage,
-      },
-    );
+        perStageTimeoutMs: pipelineTimeoutMs / 3,
+      });
+    } else {
+      runner = new DisabledDiagnosticianRunner();
+    }
 
     if (!opts.json) {
       console.log(`\nRunning diagnostician for task: ${opts.taskId}`);

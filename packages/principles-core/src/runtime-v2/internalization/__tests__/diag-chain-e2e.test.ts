@@ -22,18 +22,15 @@ import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../diag-rootcause-runner.js';
-import type { ContextAssembler } from '../../store/context/context-assembler.js';
 import { DiagDistillerRunner } from '../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../diag-distiller-runner.js';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
-import type { DiagnosticianCommitter, CommitResult } from '../../store/commit/diagnostician-committer.js';
+import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
-import type { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
-import type { LedgerAdapter } from '../../candidate-intake.js';
+import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -283,11 +280,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -316,7 +313,7 @@ describe('Diag chain e2e', () => {
 
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -353,10 +350,10 @@ describe('Diag chain e2e', () => {
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -379,18 +376,18 @@ describe('Diag chain e2e', () => {
 
   // ── Flag matrix guard tests ────────────────────────────────────────────────
 
-  it('flag off: monolith runs unchanged (DiagnosticianRunner, not split runners)', () => {
-    // When split_pipeline flag is off (default), the factory creates the
-    // monolith DiagnosticianRunner, not the split runners.
+  it('flag off: splitPipeline flag can be disabled via config', () => {
     const effectiveConfig: EffectivePdConfig = {
       config: {
         version: 1,
-        features: {},
+        features: {
+          diagnostician_split_pipeline: { category: 'quiet', enabled: false },
+        },
         runtimeProfiles: {},
         internalAgents: makeDefaultInternalAgents(),
         ui: { diagnostics: { mode: 'simple' } },
       },
-      source: 'defaults',
+      source: 'user_config',
       warnings: [],
     };
 
@@ -406,7 +403,7 @@ describe('Diag chain e2e', () => {
         version: 1,
         features: {
           diagnostician_split_pipeline: { category: 'quiet', enabled: true },
-          // diagnostician_async_cli NOT enabled (default off)
+          diagnostician_async_cli: { category: 'quiet', enabled: false },
         },
         runtimeProfiles: {},
         internalAgents: makeDefaultInternalAgents(),
@@ -572,11 +569,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -589,7 +586,7 @@ describe('Diag chain e2e', () => {
     // Stage B runner
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -612,10 +609,10 @@ describe('Diag chain e2e', () => {
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -631,7 +628,7 @@ describe('Diag chain e2e', () => {
       distillerRunner,
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     });
 
     // Run the split pipeline
@@ -687,11 +684,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -702,14 +699,14 @@ describe('Diag chain e2e', () => {
     });
 
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
     const committer = { commit: vi.fn() };
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer as unknown as DiagnosticianCommitter },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -718,7 +715,7 @@ describe('Diag chain e2e', () => {
       distillerRunner,
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     });
 
     const result = await splitRunner.run(PARENT_TASK_ID);
@@ -794,7 +791,7 @@ describe('Diag chain e2e', () => {
     const rootCauseRunner = new DiagRootCauseRunnerImpl(
       {
         stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        runtimeAdapter: runtimeAdapter,
         eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
         artifactStore: stateManager.piArtifactStore,
         validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -805,7 +802,7 @@ describe('Diag chain e2e', () => {
     const distillerRunner = new DiagDistillerRunnerImpl(
       {
         stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        runtimeAdapter: runtimeAdapter,
         eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
         artifactStore: stateManager.piArtifactStore,
         validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -815,7 +812,7 @@ describe('Diag chain e2e', () => {
     const routerRunner = new DiagRouterRunnerImpl(
       {
         stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        runtimeAdapter: runtimeAdapter,
         eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
@@ -837,14 +834,14 @@ describe('Diag chain e2e', () => {
     };
     const intakeService = new CandidateIntakeService({
       stateManager,
-      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
+      ledgerAdapter: ledgerAdapter,
     });
 
     const bridge = new PainSignalBridge({
       stateManager,
       runner: splitRunner,
       intakeService,
-      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
+      ledgerAdapter: ledgerAdapter,
       autoIntakeEnabled: true,
       workspaceDir: tmpDir,
     });

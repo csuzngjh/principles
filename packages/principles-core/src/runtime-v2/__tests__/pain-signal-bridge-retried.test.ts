@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from '../runner/diagnostician-runner.js';
+import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
@@ -55,7 +55,7 @@ function createMocks() {
 
   return {
     stateManager: stateManager as unknown as RuntimeStateManager,
-    runner: runner as unknown as DiagnosticianRunner,
+    runner: runner as unknown as DiagnosticianRunnerLike,
     intakeService: intakeService as unknown as CandidateIntakeService,
     ledgerAdapter,
     _stateManager: stateManager,

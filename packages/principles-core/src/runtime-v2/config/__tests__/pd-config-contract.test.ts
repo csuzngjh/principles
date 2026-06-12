@@ -770,18 +770,18 @@ describe('Regression: Flag Registry Consistency', () => {
   it('diagnostician_async_cli is in defaults', () => {
     const defaults = getDefaultPdConfig();
     expect(Object.hasOwn(defaults.features, 'diagnostician_async_cli')).toBe(true);
-    expect(defaults.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: false });
+    expect(defaults.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: true });
   });
 
   it('diagnostician_split_pipeline is in defaults', () => {
     const defaults = getDefaultPdConfig();
     expect(Object.hasOwn(defaults.features, 'diagnostician_split_pipeline')).toBe(true);
-    expect(defaults.features.diagnostician_split_pipeline).toEqual({ category: 'quiet', enabled: false });
+    expect(defaults.features.diagnostician_split_pipeline).toEqual({ category: 'quiet', enabled: true });
   });
 
   it('diagnostician_core_grounding is in defaults', () => {
     const defaults = getDefaultPdConfig();
     expect(Object.hasOwn(defaults.features, 'diagnostician_core_grounding')).toBe(true);
-    expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: false });
+    expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: true });
   });
 });

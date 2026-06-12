@@ -271,3 +271,11 @@ Based on the evaluation of both weak and strong models:
 
 ### **FINAL RECOMMENDATION: Owner override: strong-model-only GO**
 While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64) resulting in a strict unified NO-GO, the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication and 93% completion rate. Since production environments run on strong models, the owner overrides the unified verdict to a **GO** specifically for strong models, recommending proceeding with the split pipeline cutover (PRI-373) for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.
+
+---
+
+### Subsequent Owner Decision (2026-06-12)
+- **Decision**: Owner explicitly rejected retaining two parallel implementations (monolith + split).
+- **Rationale**: There are no seed users yet. It is priority to clean up complexity rather than keeping legacy compatibility baggage.
+- **Resolution**: Monolith path is completely deleted. Split pipeline is the only implementation. Weak-model fallback is rejected; if quality or schema issues occur on weak models, they will be addressed by configuring strong models, tuning prompts, or adding repair loops rather than keeping the monolith.
+

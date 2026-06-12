@@ -77,7 +77,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Queue V2 Schema - Supports background evolution task kinds.
  *
  * Pain diagnosis is Runtime v2 only: after_tool_call / pd pain record ->
- * PainSignalBridge -> DiagnosticianRunner. EvolutionWorker does not read
+ * PainSignalBridge -> SplitDiagnosticianRunner. EvolutionWorker does not read
  * .pain_flag or process pain_diagnosis queue items.
  */
 /** @deprecated Use PDTaskStatus from '@principles/core/runtime-v2'. M2 migration will replace this. */

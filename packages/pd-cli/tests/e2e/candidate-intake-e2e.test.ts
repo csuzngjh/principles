@@ -150,11 +150,21 @@ describe('E2E: pd candidate intake flow', () => {
   }
 
   function readLedgerFile(workspace: string): any[] {
-    const ledgerPath = join(workspace, '.pd', 'principle-tree-ledger.json');
+    const ledgerPath = join(workspace, '.state', 'principle_training_state.json');
     if (!existsSync(ledgerPath)) return [];
     const content = readFileSync(ledgerPath, 'utf-8');
     const data = JSON.parse(content);
-    return data.principles || [];
+    const tree = data._tree || data.tree || {};
+    const principles = tree.principles || {};
+    return Object.values(principles).map((p: any) => {
+      const candidateId = p.derivedFromPainIds?.[0] || '';
+      return {
+        id: p.id,
+        sourceRef: `candidate://${candidateId}`,
+        status: p.status === 'candidate' ? 'probation' : p.status,
+        evaluability: p.evaluability,
+      };
+    });
   }
 
   it('Test 1 (Happy path E2E): pending candidate → intake → consumed → ledgerEntryId in output', () => {
