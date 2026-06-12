@@ -44,6 +44,7 @@ interface DiagnoseStatusOptions {
   taskId: string;
   workspace?: string;
   json?: boolean;
+  stalledThreshold?: number;
 }
 
 interface DiagnoseRunOptions {
@@ -77,6 +78,7 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     const result = await diagnoseStatus({
       taskId: opts.taskId,
       stateManager,
+      stalledThresholdSeconds: opts.stalledThreshold,
     });
 
     if (!result) {
@@ -101,6 +103,15 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     }
     if (result.lastError) {
       console.log(`  Last Error:   ${result.lastError}`);
+    }
+    if (result.reason) {
+      console.log(`  Reason:       ${result.reason}`);
+    }
+    if (result.age !== undefined && result.age !== null) {
+      console.log(`  Age:          ${result.age}s`);
+    }
+    if (result.nextAction) {
+      console.log(`  Next Action:  ${result.nextAction}`);
     }
     console.log('');
   } finally {

@@ -127,6 +127,10 @@ export class RuntimeStateManager {
     return this._initialized;
   }
 
+  get workspaceDir(): string {
+    return this.options.workspaceDir;
+  }
+
   /** Readonly accessors for internal stores — used by CLI DiagnosticianRunner setup. */
   get connection(): SqliteConnection {
     this.assertInitialized();

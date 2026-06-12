@@ -306,6 +306,7 @@ diagnoseCmd
   .description('Inspect diagnostician task status')
   .requiredOption('-t, --task-id <taskId>', 'Task ID to inspect')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--stalled-threshold <seconds>', 'Age threshold in seconds for classifying task as stalled', parseInt)
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseStatus(opts);
