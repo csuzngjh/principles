@@ -163,6 +163,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
       if (result.message) console.error(`  Details: ${result.message}`);
       process.exit(1);
+      return;
     }
   }
 
@@ -175,7 +176,10 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       }
     }
     console.log(JSON.stringify(out, null, 2));
-    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') process.exit(1);
+    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') {
+      process.exit(1);
+      return;
+    }
   } else {
     if (result.status === 'succeeded') {
       console.log('[OK] Pain signal recorded via PainToPrincipleService');
@@ -210,6 +214,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     } else {
       console.error('[FAIL] Pain signal failed:', result.message);
       process.exit(1);
+      return;
     }
   }
 }

@@ -767,10 +767,10 @@ describe('Regression: Flag Registry Consistency', () => {
     expect(missingFlags).toEqual([]);
   });
 
-  it('diagnostician_async_cli is in defaults', () => {
+  it('PRI-375: diagnostician_async_cli is in defaults as disabled', () => {
     const defaults = getDefaultPdConfig();
     expect(Object.hasOwn(defaults.features, 'diagnostician_async_cli')).toBe(true);
-    expect(defaults.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: true });
+    expect(defaults.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: false });
   });
 
   it('diagnostician_split_pipeline is in defaults', () => {
