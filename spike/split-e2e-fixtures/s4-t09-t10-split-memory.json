@@ -1,0 +1,20 @@
+{
+  "id": "S4",
+  "painId": "synthetic_t09_t10_split_memory",
+  "source": "code_review",
+  "description": "PR adds monolith 500-line function that should be split; no consideration for prior lessons",
+  "coveredAxioms": ["T-09", "T-10"],
+  "isSynthetic": true,
+  "contextPayload": {
+    "sourcePainId": "synthetic_t09_t10_split_memory",
+    "reasonSummary": "PR#997 adds a 500-line runDiagnosticPipeline() function that handles context assembly, LLM invocation, output validation, candidate commit, and admission in a single function. This violates the split-responsibility principle (T-09) and ignores the prior lesson from ERR-045 where a similar monolith caused cascading failures (T-10).",
+    "severity": "high",
+    "evidence": [
+      {"sourceRef": "pipeline.ts:L1-500", "note": "Single function handles 5 distinct responsibilities"},
+      {"sourceRef": "ERROR_EXPERIENCE_HANDBOOK.md:ERR-045", "note": "Prior monolith caused cascading failures — lesson not applied"},
+      {"sourceRef": "pipeline.ts:L200-250", "note": "Validation and commit interleaved — cannot test independently"}
+    ],
+    "provenance": {"trigger": "code_review", "prNumber": 997}
+  },
+  "monolithOutput": null
+}

@@ -1,0 +1,19 @@
+{
+  "id": "S3",
+  "painId": "synthetic_t07_minimal_privilege",
+  "source": "tool_failure",
+  "description": "CLI command runs with full DB write access when only read is needed",
+  "coveredAxioms": ["T-07"],
+  "isSynthetic": true,
+  "contextPayload": {
+    "sourcePainId": "synthetic_t07_minimal_privilege",
+    "reasonSummary": "The 'pd pain list' CLI command opens the state.db with read-write connection, but only needs to read. If the command crashes mid-execution, it could corrupt the database. The read-only connection mode exists but is not used.",
+    "severity": "medium",
+    "evidence": [
+      {"sourceRef": "pain-list.ts:L15", "note": "new SqliteConnection(dbPath, { readonly: false }) — should be true"},
+      {"sourceRef": "sqlite-connection.ts:L42", "note": "readonly option exists and is supported"}
+    ],
+    "provenance": {"trigger": "tool_failure"}
+  },
+  "monolithOutput": null
+}

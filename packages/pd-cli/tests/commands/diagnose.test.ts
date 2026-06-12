@@ -78,6 +78,7 @@ vi.mock('@principles/core/runtime-v2', () => {
       agentId: 'main',
     }),
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
+    isFeatureEnabled: vi.fn().mockReturnValue(false),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
     run: vi.fn().mockResolvedValue({
       status: 'succeeded',
@@ -104,6 +105,11 @@ vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
 
 vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+}));
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: vi.fn().mockReturnValue({ ok: true, effective: { config: {}, source: 'defaults', warnings: [] } }),
+  computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
 }));
 
 import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';

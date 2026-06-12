@@ -21,6 +21,8 @@ import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
+import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-output.js';
 import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
 import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
 import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
@@ -291,6 +293,8 @@ interface RunState {
 
 const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['diagnostician-output-v1', DiagnosticianOutputV1Schema],
+  ['diag-rootcause-output-v1', DiagRootCauseOutputV1Schema],
+  ['diag-distiller-output-v1', DiagDistillerOutputV1Schema],
   ['dreamer-output-v1', DreamerOutputV1Schema],
   ['philosopher-output-v1', PhilosopherOutputV1Schema],
   ['scribe-output-v1', ScribeOutputV1Schema],

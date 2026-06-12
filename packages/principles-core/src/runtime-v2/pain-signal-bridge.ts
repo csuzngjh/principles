@@ -1,16 +1,24 @@
 import type { RuntimeStateManager, CandidateRecord } from './store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import type { CandidateIntakeService } from './candidate-intake-service.js';
 import type { LedgerAdapter } from './candidate-intake.js';
-import type { RunnerResultStatus } from './runner/runner-result.js';
+import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
+import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import type { IntakeToInternalizationBridgeInput } from './internalization/intake-to-internalization-bridge.js';
 
 export type { PainProvenance };
+
+/**
+ * Minimal interface for a diagnostician runner.
+ * Both DiagnosticianRunner and SplitDiagnosticianRunner satisfy this.
+ */
+export interface DiagnosticianRunnerLike {
+  run(taskId: string): Promise<RunnerResult>;
+}
 
 /** PRI-359: Increased from 4 to 8 to accommodate failed tool_calls evidence */
 export const MAX_EVIDENCE_ENTRIES = 8;
@@ -53,7 +61,7 @@ export interface PainSignalBridgeResult {
 
 export interface PainSignalBridgeOptions {
   stateManager: RuntimeStateManager;
-  runner: DiagnosticianRunner;
+  runner: DiagnosticianRunnerLike;
   intakeService: CandidateIntakeService;
   ledgerAdapter: LedgerAdapter;
   owner?: string;
@@ -115,7 +123,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
 
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
-  private readonly runner: DiagnosticianRunner;
+  private readonly runner: DiagnosticianRunnerLike;
   private readonly intakeService: CandidateIntakeService;
   private readonly ledgerAdapter: LedgerAdapter;
   private readonly owner: string;
@@ -248,12 +256,33 @@ export class PainSignalBridge {
       };
     }
 
+    return this.onDiagnosisComplete({
+      taskId,
+      diagnosticianOutput: result.output,
+      painId,
+      provenance,
+      inputEvidenceCount: data.evidence?.length ?? 0,
+    });
+  }
+
+  /**
+   * PRI-372 (T-G): Post-diagnosis processing extracted from onPainDetected().
+   * Handles admission → intake → seedDreamer after a successful diagnosis.
+   * Also called by DiagRouterRunner's onDiagnosisComplete callback.
+   */
+  async onDiagnosisComplete(opts: {
+    taskId: string;
+    diagnosticianOutput: DiagnosticianOutputV1 | undefined;
+    painId: string;
+    provenance: PainProvenance;
+    inputEvidenceCount?: number;
+  }): Promise<PainSignalBridgeResult> {
+    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0 } = opts;
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
 
-    const diagnosticianOutput = result.output;
     const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount: data.evidence?.length ?? 0 })
+      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount })
       : candidates.map((c) => ({
           candidateId: c.candidateId,
           recommendationKind: c.recommendationKind,
@@ -343,7 +372,6 @@ export class PainSignalBridge {
         status: 'failed',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         candidateIds,
         ledgerEntryIds,
@@ -360,7 +388,6 @@ export class PainSignalBridge {
         status: 'failed',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -375,7 +402,6 @@ export class PainSignalBridge {
         status: 'degraded',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -390,7 +416,6 @@ export class PainSignalBridge {
         status: 'degraded',
         painId,
         taskId,
-        runnerStatus: result.status,
         runId: latestRun?.runId,
         artifactId: firstCandidate?.artifactId,
         candidateIds,
@@ -404,7 +429,6 @@ export class PainSignalBridge {
       status: seedFailureNote ? 'degraded' : 'succeeded',
       painId,
       taskId,
-      runnerStatus: result.status,
       runId: latestRun?.runId,
       artifactId: firstCandidate?.artifactId,
       candidateIds,

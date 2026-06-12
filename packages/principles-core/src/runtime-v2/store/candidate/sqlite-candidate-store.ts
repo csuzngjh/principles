@@ -45,9 +45,9 @@ export class SqliteCandidateStore implements CandidateStore {
       JOIN commits c ON c.artifact_id = pc.artifact_id
       JOIN runs r ON r.run_id = c.run_id
       JOIN tasks t ON t.task_id = r.task_id
-      WHERE t.task_id = ?
+      WHERE t.task_id = ? OR t.input_ref = ?
       ORDER BY pc.created_at DESC
-    `).all(taskId) as CandidateRow[];
+    `).all(taskId, taskId) as CandidateRow[];
     return rows.map(mapRow);
   }
 
