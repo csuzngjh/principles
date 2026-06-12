@@ -58,8 +58,12 @@ export interface PainSignalRuntimeFactoryOptions {
 /** Funnel name for the Runtime v2 diagnosis path. */
 const DIAGNOSTIC_FUNNEL_ID = 'pd-runtime-v2-diagnosis';
 
-/** Defaults when no funnel policy is defined. */
+/** Default per-stage timeout (5 min). Same for monolith and split-per-stage. */
 const DEFAULT_TIMEOUT_MS = 300_000;
+
+/** Total timeout for the 3-stage split pipeline (3 × 5 min = 15 min).
+ *  Shared with pd-cli diagnose command to avoid divergence. */
+export const SPLIT_PIPELINE_TOTAL_TIMEOUT_MS = 900_000;
 
 /** Resolved runtime configuration from funnel policy. */
 export interface RuntimeConfig {
@@ -472,7 +476,7 @@ export async function createPainSignalBridge(
           await bridgeHolder.bridge.onDiagnosisComplete({
             taskId,
             diagnosticianOutput: output,
-            painId: taskId.replace(/^diagnosis_/, '').replace(/^diag_router-/, ''),
+            painId: taskId.replace(/^diag_router-/, '').replace(/^diagnosis_/, ''),
             provenance: 'automatic_hook',
           });
         }

@@ -150,7 +150,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Receives untrusted data — must NOT assume TOutput shape.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown): void {
+  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown, _context: TContext): void {
     // default no-op
   }
 
@@ -232,7 +232,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 7b. Post-fetch transform on untrusted data (e.g., re-inject lineage fields).
       // Operates on `unknown` — must NOT assume TOutput shape (ERR-001).
-      this.postFetchTransform(taskId, untrustedOutput);
+      this.postFetchTransform(taskId, untrustedOutput, context);
 
       // 8. Validate — the trust boundary. Only validated output becomes TOutput.
       this.phase = RunnerPhase.Validating;

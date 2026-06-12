@@ -95,13 +95,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
   private readonly onDiagnosisComplete: OnDiagnosisComplete;
   private readonly defaultValidator: DefaultDiagnosticianValidator;
 
-  /**
-   * Current context set by buildContext() and consumed by postFetchTransform().
-   * Stored as instance property so postFetchTransform can access upstream
-   * artifact data for invariant field injection (P0).
-   */
-  private currentContext: DiagRouterContext | null = null;
-
   constructor(deps: DiagRouterRunnerDeps, options: PeerRunnerOptions) {
     super(deps, options, {
       runnerName: 'diag_router',
@@ -213,9 +206,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       distillerArtifactId,
       distillerOutput,
     };
-
-    // Store for postFetchTransform access (P0: invariant field injection)
-    this.currentContext = context;
 
     return context;
   }
@@ -394,16 +384,16 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
    *
    * Also re-injects taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
    */
-  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, context: DiagRouterContext): void {
     // Legacy: re-inject taskId if stripped by adapter
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
 
     // P0: Inject invariant fields from upstream artifacts
-    if (this.currentContext && typeof untrustedOutput === 'object' && untrustedOutput !== null) {
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
       const output = untrustedOutput as Record<string, unknown>;
 
       // rootCause ← Stage A (EP-07: must come from rootCauseOutput, not LLM)
-      const stageARootCause = this.currentContext.rootCauseOutput.rootCause;
+      const stageARootCause = context.rootCauseOutput.rootCause;
       if (stageARootCause !== undefined) {
         if (output.rootCause !== stageARootCause && output.rootCause !== undefined) {
           // P2: LLM generated a different rootCause — override and emit telemetry
@@ -416,7 +406,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       }
 
       // evidence ← Stage A
-      const stageAEvidence = this.currentContext.rootCauseOutput.evidence;
+      const stageAEvidence = context.rootCauseOutput.evidence;
       if (stageAEvidence !== undefined) {
         if (output.evidence !== stageAEvidence && output.evidence !== undefined) {
           this.emitEvent('invariant_override', taskId, {
@@ -428,7 +418,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       }
 
       // confidence ← Stage B (EP-07: must come from distillerOutput, not LLM)
-      const stageBConfidence = this.currentContext.distillerOutput.confidence;
+      const stageBConfidence = context.distillerOutput.confidence;
       if (stageBConfidence !== undefined) {
         if (output.confidence !== stageBConfidence && output.confidence !== undefined) {
           this.emitEvent('invariant_override', taskId, {

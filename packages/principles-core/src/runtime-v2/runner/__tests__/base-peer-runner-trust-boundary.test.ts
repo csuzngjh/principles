@@ -120,7 +120,7 @@ class TestPeerRunner extends BasePeerRunner<TestContext, TestOutput> {
     };
   }
 
-  protected override postFetchTransform(_taskId: string, untrustedOutput: unknown): void {
+  protected override postFetchTransform(_taskId: string, untrustedOutput: unknown, _context: TestContext): void {
     this.postFetchCallCount++;
     // Verify the output is NOT typed as TestOutput
     this.postFetchReceivedUnknown = typeof untrustedOutput !== 'object' || untrustedOutput === null
