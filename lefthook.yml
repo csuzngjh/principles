@@ -8,6 +8,8 @@ pre-commit:
       glob: "*.ts"
       run: npx eslint --fix {staged_files}
       stage_fixed: true
+    repo-hygiene:
+      run: node scripts/check-repo-hygiene.js staged
 
 pre-push:
   parallel: false
