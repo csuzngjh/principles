@@ -26,6 +26,9 @@
 import type { SourceKind } from '@principles/core/runtime-v2';
 import type { RawObservation } from './raw-observation-types.js';
 
+// Re-export RawObservation for plugin consumers
+export type { RawObservation } from './raw-observation-types.js';
+
 /**
  * Resolve SourceKind from a unified RawObservation.
  *
@@ -135,97 +138,78 @@ export function resolveSourceKind(observation: RawObservation): SourceKind {
   return 'unknown';
 }
 
+// ── Builder Functions ──────────────────────────────────────────────────────
+//
+// PRI-360 S1: These builders construct RawObservation from specific contexts,
+// centralizing source classification rules in the adapter layer.
+// Hooks should NOT hold source classification logic — use these builders.
+
 /**
- * Resolve SourceKind from tool failure context (legacy wrapper).
+ * Classify error message as dispatch_error vs tool_failure.
  *
- * This is a thin wrapper around resolveSourceKind for compatibility.
- * It constructs a RawObservation from the old function signature.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
+ * This centralizes the regex-based classification that was previously
+ * scattered in classifyToolFailureSource and after-tool-call-helpers.
+ * Now hooks call this builder + resolveSourceKind instead of holding rules.
  */
-export function resolveSourceKindFromToolFailure(
-  toolName: string | undefined,
-  failureSource: 'tool_failure' | 'dispatch_error',
-  provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook',
-): SourceKind {
-  const observation: RawObservation = {
+function classifyErrorForDispatch(error: unknown): 'dispatch_error' | 'tool_failure' {
+  if (!error) return 'tool_failure';
+  const msg = String(error);
+  if (/\btool\s+(?:\S+\s+)?not\s+found\b/i.test(msg) || /\bunknown\s+tool\b/i.test(msg)) {
+    return 'dispatch_error';
+  }
+  return 'tool_failure';
+}
+
+/**
+ * Build a RawObservation for a tool failure context.
+ *
+ * This replaces classifyToolFailureSource and the inline classification
+ * in after-tool-call-helpers. All tool error → dispatch/tool_failure
+ * classification is centralized here.
+ */
+export function buildToolFailureObservation(options: {
+  toolName: string | undefined;
+  error: unknown;
+  exitCode?: number;
+  provenance?: RawObservation['provenance'];
+}): RawObservation {
+  const { toolName, error, provenance } = options;
+  const nonZeroExit = typeof options.exitCode === 'number' && options.exitCode !== 0;
+
+  // Classify dispatch vs tool_failure centrally
+  let failureSource: 'dispatch_error' | 'tool_failure' | undefined;
+
+  if (!toolName || toolName.trim() === '') {
+    // Empty/whitespace tool name → dispatch error
+    failureSource = 'dispatch_error';
+  } else {
+    failureSource = classifyErrorForDispatch(error);
+  }
+
+  // If neither error nor non-zero exit, this is not a failure context
+  if (!error && !nonZeroExit) {
+    failureSource = undefined;
+  }
+
+  return {
     observedAt: new Date().toISOString(),
     toolName,
     failureSource,
+    nonZeroExit,
     provenance,
   };
-  return resolveSourceKind(observation);
 }
 
 /**
- * Resolve SourceKind from LLM detection context (legacy wrapper).
- *
- * This is a thin wrapper around resolveSourceKind for compatibility.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
+ * Build a RawObservation for an LLM detection context.
  */
-export function resolveSourceKindFromLlmDetection(
-  detectionSource: string,
-  isGfiTriggered: boolean,
-): SourceKind {
-  const observation: RawObservation = {
+export function buildLlmDetectionObservation(options: {
+  detectionSource: string;
+  isGfiTriggered: boolean;
+}): RawObservation {
+  return {
     observedAt: new Date().toISOString(),
-    detectionSource,
-    isGfiTriggered,
+    detectionSource: options.detectionSource,
+    isGfiTriggered: options.isGfiTriggered,
   };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from gate block context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromGateBlock(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isGateBlock: true,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from manual command context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromCommand(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isManualEntry: true,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from provider context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromProvider(
-  isRateLimit: boolean,
-): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isRateLimit,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from subagent context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromSubagent(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isSubagentError: true,
-  };
-  return resolveSourceKind(observation);
 }

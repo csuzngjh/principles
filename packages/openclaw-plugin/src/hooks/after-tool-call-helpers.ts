@@ -25,7 +25,8 @@ import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolutio
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isCooldownActive as isTriggerCooldownActive, markEpisodeAsDiagnosed, clearCooldownState } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
-import { resolveSourceKindFromToolFailure, evaluateEvidenceTriage } from './triage-adapter.js';
+import { resolveSourceKind, buildToolFailureObservation, type RawObservation } from './raw-observation-adapter.js';
+import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from './after-tool-call-types.js';
@@ -55,10 +56,19 @@ export function classifyToolCallOutcome(event: PluginHookAfterToolCallEvent): To
     : 0;
   const isFailure = !!event.error || exitCode !== 0;
 
+  // PRI-360 S1: Use centralized builder for tool failure classification
+  // All dispatch/tool_failure rules live in raw-observation-adapter.ts
+  const obs = buildToolFailureObservation({
+    toolName: event.toolName,
+    error: event.error,
+    exitCode,
+  });
+  const failureSource = isFailure ? obs.failureSource : undefined;
+
   return {
     isFailure,
     exitCode,
-    failureSource: isFailure ? classifyToolFailureSource(event.toolName, event.error) : undefined,
+    failureSource,
   };
 }
 
@@ -372,8 +382,23 @@ export function evaluatePainAdmissionForToolCall(
     TRIGGER_COOLDOWN_MAP,
   );
 
+  // PRI-360 S1: Build RawObservation for unified source mapping
+  const rawObs: RawObservation = {
+    observedAt: new Date().toISOString(),
+    workspaceId: workspaceDir,
+    sessionId,
+    toolName: event.toolName,
+    failureSource: outcome.failureSource,
+    // Infer toolNotFound from failureSource for resolveSourceKind compatibility
+    toolNotFound: outcome.failureSource === 'dispatch_error',
+    // Extract exit code from outcome for triage (nonZeroExit)
+    nonZeroExit: outcome.exitCode !== 0,
+  };
+
+  // PRI-360 S1: Use unified resolveSourceKind instead of resolveSourceKindFromToolFailure
+  const sourceKind = resolveSourceKind(rawObs);
+
   // PEAT-B1: Evidence triage (with consecutiveErrors and isRisky for upgrade logic)
-  const sourceKind = resolveSourceKindFromToolFailure(event.toolName, failureSource);
   const triage = evaluateEvidenceTriage(sourceKind, observation.painScore, {
     consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors,
     isRisky: observation.isRisk,
@@ -554,20 +579,8 @@ export function resetTriggerCooldownForTest(): void {
 
 // ── Source Classification ────────────────────────────────────────────────────
 
-/**
- * Classify tool failure source.
- *
- * Pure function — no I/O, no side effects.
- * Determines whether a tool failure is a dispatch error (tool not found)
- * or a regular tool execution failure.
- */
-export function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
-  if (!toolName || toolName.trim() === '') return 'dispatch_error';
-  const msg = String(error ?? '');
-  if (/\btool\s+(?:\S+\s+)?not\s+found\b/i.test(msg)) return 'dispatch_error';
-  if (/\bunknown\s+tool\b/i.test(msg)) return 'dispatch_error';
-  return 'tool_failure';
-}
+// classifyToolFailureSource logic is now in resolveSourceKind (PRI-360 S1)
+// This function is removed to avoid duplication.
 
 /**
  * Extract error type classification from error value.
