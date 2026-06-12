@@ -155,7 +155,7 @@ describe('pd pain record async mode (PRI-369)', () => {
     const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join(' ');
     expect(allOutput).toContain('[SUBMITTED]');
     expect(allOutput).toContain('submitted');
-    expect(allOutput).toContain('pd task show');
+    expect(allOutput).toContain('Next action: pd diagnose run --task-id');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
@@ -238,6 +238,81 @@ describe('pd pain record async mode (PRI-369)', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 7. Stubbed process.exit(1) does not cause side effects in JSON mode
+  it('stubbed process.exit(1) in JSON mode does not execute else branch', async () => {
+    mockRecordPainResult = {
+      status: 'failed',
+      painId: 'manual_123_abc',
+      taskId: 'diagnosis_manual_123_abc',
+      candidateIds: ['c1'],
+      ledgerEntryIds: ['l1'],
+      observabilityWarnings: [],
+      failureCategory: 'runtime_unavailable' as FailureCategory,
+      latencyMs: 5,
+      message: 'Task creation failed',
+    };
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', json: true });
+
+    // Verify JSON output was printed
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.candidateIds).toEqual(['c1']);
+
+    // Verify process.exit(1) was called
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    // Verify else branch was NOT executed (no error.log for [FAIL] message)
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 8. Stubbed process.exit(1) does not cause side effects in text mode
+  it('stubbed process.exit(1) in text mode stops after error message', async () => {
+    mockRecordPainResult = {
+      status: 'failed',
+      painId: 'manual_123_abc',
+      taskId: 'diagnosis_manual_123_abc',
+      candidateIds: ['c1'],
+      ledgerEntryIds: ['l1'],
+      observabilityWarnings: [],
+      failureCategory: 'runtime_unavailable' as FailureCategory,
+      latencyMs: 5,
+      message: 'Test failure message',
+    };
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain' }); // Not json mode
+
+    // Verify [FAIL] error message was printed
+    expect(errorSpy).toHaveBeenCalledWith('[FAIL] Pain signal failed:', 'Test failure message');
+
+    // Verify process.exit(1) was called
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    // Verify no success/submitted/skip/retry messages were printed after exit
+    const allLogMessages = logSpy.mock.calls.flat();
+    const forbiddenPatterns = ['[OK]', '[SUBMITTED]', '[SKIP]', '[RETRY]'];
+    for (const pattern of forbiddenPatterns) {
+      expect(allLogMessages).not.toEqual(expect.stringContaining(pattern));
+    }
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });
