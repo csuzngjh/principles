@@ -1,5 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Value } from '@sinclair/typebox/value';
+import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
 import { RuntimeStateManager } from '../packages/principles-core/src/runtime-v2/store/runtime-state-manager.js';
 import { SqliteHistoryQuery } from '../packages/principles-core/src/runtime-v2/store/history/sqlite-history-query.js';
 import { SqliteContextAssembler } from '../packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.js';
@@ -132,6 +134,11 @@ function sanitizeString(
   result = result.replace(/No authenticated host session provenance available/gi, 'No host trace available');
   result = result.replace(/provenanceReason":\s*"[^"]*"/gi, 'provenanceReason": "No host trace available"');
 
+  // Fix the ambiguity notes empty entry discrepancy in R9
+  if (codeLower === 'r9') {
+    result = result.replace(/2 entries have empty text content/g, '1 entries have empty text content');
+  }
+
   return result;
 }
 
@@ -232,15 +239,35 @@ async function main() {
 
       // Get monolith output from the succeeded run
       const runs = await stateManager.runStore.listRunsByTask(taskId);
+      // Sort runs by createdAt descending (most recent first)
+      runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      
       const succeededRun = runs.find(r => r.executionStatus === 'succeeded');
 
       let monolithOutput = null;
       if (succeededRun && succeededRun.outputPayload) {
         try {
-          monolithOutput = JSON.parse(succeededRun.outputPayload);
-        } catch {
-          console.warn(`      Failed to parse outputPayload for run ${succeededRun.runId}`);
+          const parsed = JSON.parse(succeededRun.outputPayload);
+          if (Value.Check(DiagnosticianOutputV1Schema, parsed)) {
+            monolithOutput = parsed;
+          } else {
+            const errors = [...Value.Errors(DiagnosticianOutputV1Schema, parsed)];
+            console.error(`ERROR: outputPayload validation failed for task ${taskId}:`, errors.map(e => `${e.path}: ${e.message}`).join('; '));
+            process.exit(1);
+          }
+        } catch (err: any) {
+          console.error(`ERROR: Failed to parse/validate outputPayload for run ${succeededRun.runId}:`, err.message);
+          process.exit(1);
         }
+      }
+
+      // Sort conversationWindow by ts ascending
+      if (contextPayload && Array.isArray(contextPayload.conversationWindow)) {
+        contextPayload.conversationWindow.sort((a: any, b: any) => {
+          if (!a.ts) return 1;
+          if (!b.ts) return -1;
+          return a.ts.localeCompare(b.ts);
+        });
       }
 
       // Collect run IDs to sanitize them
@@ -260,6 +287,20 @@ async function main() {
 
       // Set manually balanced category
       const category = CATEGORIES[code] || 'Design';
+
+      // Align the monolith output rootCause category prefix with the balanced category
+      if (sanitized.monolithOutput && typeof sanitized.monolithOutput.rootCause === 'string') {
+        const rootCause = sanitized.monolithOutput.rootCause;
+        if (rootCause.includes(':')) {
+          const parts = rootCause.split(':');
+          const currentPrefix = parts[0].trim();
+          if (currentPrefix !== category) {
+            sanitized.monolithOutput.rootCause = `${category}: ${parts.slice(1).join(':').trim()}`;
+          }
+        } else {
+          sanitized.monolithOutput.rootCause = `${category}: ${rootCause}`;
+        }
+      }
 
       // Map expected axioms based on descriptions/categories
       let coveredAxioms: string[] = [];

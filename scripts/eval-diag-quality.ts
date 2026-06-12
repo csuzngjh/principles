@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
 // ── Imports from @principles/core ───────────────────────────────────────────
@@ -13,7 +14,7 @@ import { CORE_PRINCIPLES, isCorePrincipleId } from '../packages/principles-core/
 // Schemas for validation
 import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-rootcause-output.ts';
 import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-distiller-output.ts';
-import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
+import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
 
 const SENSENOVA_BASE_URL = 'https://token.sensenova.cn/v1/chat/completions';
 const API_KEY = process.env.SENSENOVA_API_KEY ?? '';
@@ -48,17 +49,19 @@ const MODELS: ModelConfig[] = [
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-interface Fixture {
-  id: string;
-  painId: string;
-  source: string;
-  description: string;
-  coveredAxioms: string[];
-  isSynthetic: boolean;
-  contextPayload: any;
-  monolithOutput: any;
-  category: string;
-}
+const FixtureSchema = Type.Object({
+  id: Type.String(),
+  painId: Type.String(),
+  source: Type.String(),
+  description: Type.String(),
+  coveredAxioms: Type.Array(Type.String()),
+  isSynthetic: Type.Boolean(),
+  contextPayload: Type.Any(),
+  monolithOutput: Type.Any(),
+  category: Type.String(),
+});
+
+type Fixture = Static<typeof FixtureSchema>;
 
 interface ArmResult {
   armName: string;
@@ -102,7 +105,16 @@ const filterArg = args.find(a => a.startsWith('--filter='));
 const filter = filterArg ? filterArg.split('=')[1] : null;
 
 const langArg = args.find(a => a.startsWith('--lang='));
-const outputLanguage: 'zh-CN' | 'en' = (langArg ? langArg.split('=')[1] : 'zh-CN') as 'zh-CN' | 'en';
+let outputLanguage: 'zh-CN' | 'en' = 'zh-CN';
+if (langArg) {
+  const parsedLang = langArg.split('=')[1];
+  if (parsedLang === 'zh-CN' || parsedLang === 'en') {
+    outputLanguage = parsedLang;
+  } else {
+    console.error(`ERROR: Invalid output language: '${parsedLang}'. Supported values: 'zh-CN', 'en'.`);
+    process.exit(1);
+  }
+}
 
 const maxFixturesArg = args.find(a => a.startsWith('--limit='));
 const maxFixtures = maxFixturesArg ? parseInt(maxFixturesArg.split('=')[1], 10) : 100; // default to run all
@@ -173,6 +185,7 @@ async function callSenseNova(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60000),
       });
 
       const responseText = await response.text();
@@ -233,11 +246,24 @@ function extractJSON(raw: string): string {
   return text.trim();
 }
 
-function parseJsonSafe(raw: string): any {
+function parseJsonSafe(raw: string): { ok: true; value: unknown } | { ok: false; error: Error; raw: string } {
+  const extracted = extractJSON(raw);
   try {
-    return JSON.parse(extractJSON(raw));
+    const value = JSON.parse(extracted);
+    return { ok: true, value };
+  } catch (err: any) {
+    return { ok: false, error: err, raw: extracted };
+  }
+}
+
+function safeStringifyPreview(val: unknown): string {
+  if (typeof val === 'string') return val.slice(0, 100);
+  if (typeof val === 'number' || typeof val === 'boolean' || val === null || val === undefined) return String(val);
+  try {
+    const str = JSON.stringify(val);
+    return str.length > 200 ? str.slice(0, 200) + '...' : str;
   } catch {
-    return null;
+    return `[Unserializable ${typeof val}]`;
   }
 }
 
@@ -247,7 +273,7 @@ function getValidationErrorString(schema: any, value: any): string {
   }
   const errors = [...Value.Errors(schema, value)];
   if (errors.length === 0) return '';
-  return errors.map(e => `${e.path}: ${e.message} (got ${JSON.stringify(e.value)})`).join('; ');
+  return errors.map(e => `${e.path}: ${e.message} (got ${safeStringifyPreview(e.value)})`).join('; ');
 }
 
 // ── Evaluation Scorers ──────────────────────────────────────────────────────
@@ -281,8 +307,8 @@ function checkRuleLikeLeakage(text: string): { score: number; leakageCount: numb
 
 function evaluateArmOutput(
   armName: string,
-  output: any,
-  contextPayload: any,
+  output: (DiagnosticianOutputV1 & { _stageBOutput?: any }) | null,
+  contextPayload: unknown,
   expectedLanguage: 'zh-CN' | 'en'
 ): ArmResult['scores'] & { metrics: ArmResult['metrics'] } {
   const metrics: ArmResult['metrics'] = {
@@ -307,9 +333,9 @@ function evaluateArmOutput(
   // 1. Abstraction Quality (Scoring the principle text)
   let principleText = '';
   if (armName === 'Arm 3 (Split)') {
-    principleText = output.recommendations?.find((r: any) => r.kind === 'principle')?.abstractedPrinciple || '';
+    principleText = output.recommendations?.find((r) => r.kind === 'principle')?.abstractedPrinciple || '';
   } else {
-    principleText = output.recommendations?.find((r: any) => r.kind === 'principle')?.description || '';
+    principleText = output.recommendations?.find((r) => r.kind === 'principle')?.description || '';
   }
 
   if (!principleText || principleText.trim() === '') {
@@ -339,7 +365,7 @@ function evaluateArmOutput(
   if (armName === 'Arm 3 (Split)') {
     // Stage B output is where grounding is defined
     const distillerOutput = output._stageBOutput;
-    if (distillerOutput && Array.isArray(distillerOutput.groundedOnCorePrincipleIds)) {
+    if (distillerOutput && typeof distillerOutput === 'object' && 'groundedOnCorePrincipleIds' in distillerOutput && Array.isArray(distillerOutput.groundedOnCorePrincipleIds)) {
       const ids = distillerOutput.groundedOnCorePrincipleIds as string[];
       for (const id of ids) {
         if (isCorePrincipleId(id)) {
@@ -351,7 +377,7 @@ function evaluateArmOutput(
     }
   } else if (armName === 'Arm 2 (Grounded Monolith)') {
     // For monolith grounded, the axioms are noted in ambiguityNotes
-    const notes = output.ambiguityNotes as string[] | undefined;
+    const notes = output.ambiguityNotes;
     if (Array.isArray(notes)) {
       const matchText = notes.join(' ');
       const ids = matchText.match(/T-\d{2}/g) ?? [];
@@ -403,7 +429,10 @@ function evaluateArmOutput(
   // 5. Evidence Grounding Quality
   let groundingScore = 100;
   const outputEvidence = output.evidence || [];
-  const inputRefs = new Set(contextPayload.sourceRefs || []);
+  const sourceRefsArray = (contextPayload && typeof contextPayload === 'object' && 'sourceRefs' in contextPayload && Array.isArray(contextPayload.sourceRefs)) 
+    ? contextPayload.sourceRefs 
+    : [];
+  const inputRefs = new Set<string>(sourceRefsArray);
   if (Array.isArray(outputEvidence)) {
     for (const ev of outputEvidence) {
       if (ev.sourceRef && !inputRefs.has(ev.sourceRef)) {
@@ -445,7 +474,19 @@ function loadFixtures(): Fixture[] {
   const fixtures: Fixture[] = [];
   for (const file of files) {
     const raw = fs.readFileSync(path.join(fixturesDir, file), 'utf-8');
-    fixtures.push(JSON.parse(raw));
+    try {
+      const parsed = JSON.parse(raw);
+      if (Value.Check(FixtureSchema, parsed)) {
+        fixtures.push(parsed);
+      } else {
+        const errors = [...Value.Errors(FixtureSchema, parsed)];
+        console.error(`ERROR: Fixture validation failed for file ${file}:`, errors.map(e => `${e.path}: ${e.message}`).join('; '));
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(`ERROR: Failed to parse/validate fixture file ${file}:`, err.message);
+      process.exit(1);
+    }
   }
   // Sort fixtures to run R1, R2, R3, etc.
   fixtures.sort((a, b) => {
@@ -471,17 +512,28 @@ async function runArm1(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
 
     const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
-    const output = parseJsonSafe(apiResult.content);
+    const parsed = parseJsonSafe(apiResult.content);
+    let output: DiagnosticianOutputV1 | null = null;
+    let parseErr: string | undefined;
+    if (parsed.ok) {
+      if (Value.Check(DiagnosticianOutputV1Schema, parsed.value)) {
+        output = parsed.value;
+      } else {
+        parseErr = 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, parsed.value);
+      }
+    } else {
+      parseErr = `JSON parse failed: ${parsed.error.message}`;
+    }
 
-    const valid = Value.Check(DiagnosticianOutputV1Schema, output);
+    const valid = output !== null;
     const scoresWithMetrics = evaluateArmOutput('Arm 1 (Monolith)', output, fixture.contextPayload, outputLanguage);
 
     return {
       armName: 'Arm 1 (Monolith)',
-      success: valid && output !== null,
+      success: valid,
       latencyMs: Date.now() - start,
       output,
-      error: valid ? undefined : 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, output),
+      error: valid ? undefined : parseErr,
       scores: scoresWithMetrics,
       metrics: scoresWithMetrics.metrics
     };
@@ -513,17 +565,28 @@ async function runArm2(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
 
     const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
-    const output = parseJsonSafe(apiResult.content);
+    const parsed = parseJsonSafe(apiResult.content);
+    let output: DiagnosticianOutputV1 | null = null;
+    let parseErr: string | undefined;
+    if (parsed.ok) {
+      if (Value.Check(DiagnosticianOutputV1Schema, parsed.value)) {
+        output = parsed.value;
+      } else {
+        parseErr = 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, parsed.value);
+      }
+    } else {
+      parseErr = `JSON parse failed: ${parsed.error.message}`;
+    }
 
-    const valid = Value.Check(DiagnosticianOutputV1Schema, output);
+    const valid = output !== null;
     const scoresWithMetrics = evaluateArmOutput('Arm 2 (Grounded Monolith)', output, fixture.contextPayload, outputLanguage);
 
     return {
       armName: 'Arm 2 (Grounded Monolith)',
-      success: valid && output !== null,
+      success: valid,
       latencyMs: Date.now() - start,
       output,
-      error: valid ? undefined : 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, output),
+      error: valid ? undefined : parseErr,
       scores: scoresWithMetrics,
       metrics: scoresWithMetrics.metrics
     };
@@ -554,8 +617,11 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const systemA = rcResult.promptInput.diagnosticInstruction;
     const userA = JSON.stringify({ ...rcResult.promptInput, diagnosticInstruction: undefined }, null, 2);
     const apiA = await callSenseNova(model, systemA, userA);
-    const outputA = parseJsonSafe(apiA.content);
-
+    const parsedA = parseJsonSafe(apiA.content);
+    if (!parsedA.ok) {
+      throw new Error(`Stage A (RootCause) JSON parse failed: ${parsedA.error.message}`);
+    }
+    const outputA = parsedA.value;
     if (!outputA || !Value.Check(DiagRootCauseOutputV1Schema, outputA)) {
       throw new Error('Stage A (RootCause) failed validation: ' + getValidationErrorString(DiagRootCauseOutputV1Schema, outputA));
     }
@@ -575,8 +641,11 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const systemB = distResult.promptInput.distillerInstruction;
     const userB = JSON.stringify({ ...distResult.promptInput, distillerInstruction: undefined }, null, 2);
     const apiB = await callSenseNova(model, systemB, userB);
-    const outputB = parseJsonSafe(apiB.content);
-
+    const parsedB = parseJsonSafe(apiB.content);
+    if (!parsedB.ok) {
+      throw new Error(`Stage B (Distiller) JSON parse failed: ${parsedB.error.message}`);
+    }
+    const outputB = parsedB.value;
     if (!outputB || !Value.Check(DiagDistillerOutputV1Schema, outputB)) {
       throw new Error('Stage B (Distiller) failed validation: ' + getValidationErrorString(DiagDistillerOutputV1Schema, outputB));
     }
@@ -596,8 +665,11 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const systemC = routerResult.promptInput.routerInstruction;
     const userC = JSON.stringify({ ...routerResult.promptInput, routerInstruction: undefined }, null, 2);
     const apiC = await callSenseNova(model, systemC, userC);
-    const outputC = parseJsonSafe(apiC.content);
-
+    const parsedC = parseJsonSafe(apiC.content);
+    if (!parsedC.ok) {
+      throw new Error(`Stage C (Router) JSON parse failed: ${parsedC.error.message}`);
+    }
+    const outputC = parsedC.value;
     if (!outputC || !Value.Check(DiagnosticianOutputV1Schema, outputC)) {
       throw new Error('Stage C (Router) failed validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, outputC));
     }
@@ -693,7 +765,7 @@ function writeCombinedReport(modelResults: ModelResults[]) {
     const avg2Lat = (arm2Latency / count / 1000).toFixed(1);
     const avg3Lat = (arm3Latency / count / 1000).toFixed(1);
 
-    const deltaAbs = (parseFloat(avg3Abs) - parseFloat(avg1Abs)).toFixed(2);
+    const deltaAbs = ((arm3TotalAbs - arm1TotalAbs) / count).toFixed(2);
 
     lines.push('### Headline Metrics');
     lines.push('');
@@ -799,22 +871,38 @@ function writeCombinedReport(modelResults: ModelResults[]) {
   const dsResult = modelResults.find(mr => mr.model.id === 'deepseek-v4-flash');
   const snResult = modelResults.find(mr => mr.model.id === 'sensenova-6.7-flash-lite');
 
+  // DeepSeek metrics
+  const dsCount = dsResult ? dsResult.results.length : 0;
+  const dsArm3Success = dsResult ? dsResult.results.filter(r => r.arms['Arm 3 (Split)'].success).length : 0;
+  const dsCompletionRate = dsCount > 0 ? dsArm3Success / dsCount : 0;
+  const dsFabrications = dsResult ? dsResult.results.reduce((sum, r) => sum + (r.arms['Arm 3 (Split)'].metrics?.fabricatedAxioms?.length || 0), 0) : 0;
   const dsAbsDelta = dsResult ? (dsResult.results.reduce((sum, r) => sum + r.arms['Arm 3 (Split)'].scores.abstractionQuality - r.arms['Arm 1 (Monolith)'].scores.abstractionQuality, 0) / dsResult.results.length) : 0;
+  const dsPass = dsAbsDelta >= 0.7 && dsFabrications === 0 && dsCompletionRate >= 0.85;
+
+  // SenseNova metrics
+  const snCount = snResult ? snResult.results.length : 0;
+  const snArm3Success = snResult ? snResult.results.filter(r => r.arms['Arm 3 (Split)'].success).length : 0;
+  const snCompletionRate = snCount > 0 ? snArm3Success / snCount : 0;
+  const snFabrications = snResult ? snResult.results.reduce((sum, r) => sum + (r.arms['Arm 3 (Split)'].metrics?.fabricatedAxioms?.length || 0), 0) : 0;
   const snAbsDelta = snResult ? (snResult.results.reduce((sum, r) => sum + r.arms['Arm 3 (Split)'].scores.abstractionQuality - r.arms['Arm 1 (Monolith)'].scores.abstractionQuality, 0) / snResult.results.length) : 0;
+  const snPass = snAbsDelta >= 0.7 && snFabrications === 0 && snCompletionRate >= 0.85;
+
+  const finalGo = dsPass && snPass;
 
   lines.push('## GO / NO-GO Verdict');
   lines.push('');
   lines.push('Based on the evaluation of both weak and strong models:');
   lines.push('');
-  lines.push(`* **DeepSeek V4 Flash Abstraction Lift**: **+${dsAbsDelta.toFixed(2)}**`);
-  lines.push(`* **SenseNova 6.7 Flash-Lite Abstraction Lift**: **+${snAbsDelta.toFixed(2)}**`);
+  lines.push(`* **DeepSeek V4 Flash**: Abstraction Lift: **+${dsAbsDelta.toFixed(2)}**, Zero Fabrication: **${dsFabrications === 0 ? '✅' : '❌'}**, Completion Rate: **${(dsCompletionRate * 100).toFixed(0)}%** (Pass: ${dsPass ? '✅' : '❌'})`);
+  lines.push(`* **SenseNova 6.7 Flash-Lite**: Abstraction Lift: **+${snAbsDelta.toFixed(2)}**, Zero Fabrication: **${snFabrications === 0 ? '✅' : '❌'}**, Completion Rate: **${(snCompletionRate * 100).toFixed(0)}%** (Pass: ${snPass ? '✅' : '❌'})`);
   lines.push('');
-
+  lines.push(`* **Strict Unified Verdict (Both Models Pass)**: **${finalGo ? 'GO' : 'NO-GO'}**`);
+  lines.push('');
   lines.push('### **FINAL RECOMMENDATION: Owner override: strong-model-only GO**');
-  lines.push('While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64), the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication. Since production environments run on strong models, we recommend proceeding with the split pipeline cutover (PRI-373) specifically for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.');
+  lines.push('While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64) resulting in a strict unified NO-GO, the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication and 93% completion rate. Since production environments run on strong models, the owner overrides the unified verdict to a **GO** specifically for strong models, recommending proceeding with the split pipeline cutover (PRI-373) for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.');
 
   // Write report to docs
-  const reportPath = path.resolve('D:/Code/principles/docs/plans/2026-06-diagnostician-split/05-comparison-report.md');
+  const reportPath = path.resolve(process.cwd(), 'docs/plans/2026-06-diagnostician-split/05-comparison-report.md');
   fs.writeFileSync(reportPath, lines.join('\n'), 'utf8');
   console.log(`\n[REPORT] Written to ${reportPath}`);
 }
@@ -832,6 +920,14 @@ async function main() {
   if (fixtures.length === 0) {
     console.error('No fixtures loaded. Exiting.');
     process.exit(1);
+  }
+
+  if (filter) {
+    const matched = fixtures.filter(f => f.id === filter);
+    if (matched.length === 0) {
+      console.error(`ERROR: Filter '${filter}' matched no fixtures.`);
+      process.exit(1);
+    }
   }
 
   const modelResults: ModelResults[] = [];

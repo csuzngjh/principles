@@ -58,7 +58,7 @@
     "valid": true,
     "diagnosisId": "diag_pain_r3",
     "summary": "自动钩子捕获到工具编辑失败，但轨迹数据为空且源会话无法解析，导致无法定位具体代码错误。根本原因在于执行流程缺乏前置上下文校验与容错设计。",
-    "rootCause": "Design: 自动化编辑流程缺乏前置上下文校验与容错机制，导致在轨迹缺失或会话不可解析时仍触发工具执行并失败。",
+    "rootCause": "Tooling: 自动化编辑流程缺乏前置上下文校验与容错机制，导致在轨迹缺失或会话不可解析时仍触发工具执行并失败。",
     "violatedPrinciples": [
       {
         "principleId": "ctx-validation-01",

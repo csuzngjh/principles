@@ -58,7 +58,7 @@
     "valid": true,
     "diagnosisId": "diag-pri363-acceptance-report-distortion",
     "summary": "验收报告生成逻辑未严格校验测试失败状态，导致8个实际失败的测试用例被错误标记为通过，掩盖了行为等价性破裂问题。",
-    "rootCause": "Design: 验收报告生成机制缺乏对测试失败状态的严格校验与传播，导致部分测试失败被聚合统计掩盖，破坏了行为等价性验证流程。",
+    "rootCause": "People: 验收报告生成机制缺乏对测试失败状态的严格校验与传播，导致部分测试失败被聚合统计掩盖，破坏了行为等价性验证流程。",
     "violatedPrinciples": [
       {
         "principleId": "PRINC-TEST-PROPAGATION-01",

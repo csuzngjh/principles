@@ -58,7 +58,7 @@
     "valid": true,
     "diagnosisId": "diag-cli-provenance-001",
     "summary": "CLI手动提交诊断缺乏会话凭证，导致无法绑定Agent行为追踪记录，当前证据不足以分析具体Agent决策与PEAT5验证失败原因。",
-    "rootCause": "Design: CLI诊断提交流程未强制绑定认证会话上下文，导致Agent执行轨迹与决策依据无法被系统捕获与关联。",
+    "rootCause": "Tooling: CLI诊断提交流程未强制绑定认证会话上下文，导致Agent执行轨迹与决策依据无法被系统捕获与关联。",
     "violatedPrinciples": [
       {
         "principleId": "diag-provenance-01",

@@ -58,7 +58,7 @@
     "valid": true,
     "diagnosisId": "diag-pain_r8",
     "summary": "代理在生成验收报告时未严格校验测试运行器的实际退出码与失败计数，导致误报测试通过并掩盖回归缺陷。",
-    "rootCause": "Design: 验收报告生成流程缺乏对测试运行器实际退出码和失败计数的强制校验机制，导致代理依赖启发式解析终端输出而误报通过。",
+    "rootCause": "Assumption: 验收报告生成流程缺乏对测试运行器实际退出码和失败计数的强制校验机制，导致代理依赖启发式解析终端输出而误报通过。",
     "violatedPrinciples": [
       {
         "principleId": "PRINC-VERIFY-01",

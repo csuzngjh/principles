@@ -264,8 +264,10 @@ The `abstractionQuality` metric is a heuristic score based on a keyword-like exc
 
 Based on the evaluation of both weak and strong models:
 
-* **DeepSeek V4 Flash Abstraction Lift**: **+2.35**
-* **SenseNova 6.7 Flash-Lite Abstraction Lift**: **+0.64**
+* **DeepSeek V4 Flash**: Abstraction Lift: **+2.35**, Zero Fabrication: **✅**, Completion Rate: **93%** (Pass: ✅)
+* **SenseNova 6.7 Flash-Lite**: Abstraction Lift: **+0.64**, Zero Fabrication: **✅**, Completion Rate: **100%** (Pass: ❌)
+
+* **Strict Unified Verdict (Both Models Pass)**: **NO-GO**
 
 ### **FINAL RECOMMENDATION: Owner override: strong-model-only GO**
-While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64), the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication. Since production environments run on strong models, we recommend proceeding with the split pipeline cutover (PRI-373) specifically for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.
+While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64) resulting in a strict unified NO-GO, the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication and 93% completion rate. Since production environments run on strong models, the owner overrides the unified verdict to a **GO** specifically for strong models, recommending proceeding with the split pipeline cutover (PRI-373) for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.

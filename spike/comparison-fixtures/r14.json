@@ -58,7 +58,7 @@
     "valid": true,
     "diagnosisId": "diag-manual-cli-no-context-001",
     "summary": "CLI手动提交的诊断请求缺乏已认证的宿主会话上下文，导致无法绑定对话轨迹与行为证据，当前信息不足以进行有效的根因分析。",
-    "rootCause": "Design: 系统架构未对CLI手动提交渠道实施强制的会话凭证校验与上下文绑定机制，导致无轨迹数据流入诊断管道。",
+    "rootCause": "Tooling: 系统架构未对CLI手动提交渠道实施强制的会话凭证校验与上下文绑定机制，导致无轨迹数据流入诊断管道。",
     "violatedPrinciples": [
       {
         "principleId": "ctx-binding-01",
