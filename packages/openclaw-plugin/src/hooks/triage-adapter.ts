@@ -32,50 +32,13 @@ import {
  *
  * This is the unified entry point for source-kind classification.
  * It replaces the scattered resolveSourceKindFrom* functions.
+ *
+ * PRI-360 S1: All source-kind resolution now goes through this single entry point.
  */
 export { resolveSourceKind } from './raw-observation-adapter.js';
 
-/**
- * Map after_tool_call hook context to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromToolFailure } from './raw-observation-adapter.js';
-
-/**
- * Map empathy/semantic detection context to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromLlmDetection } from './raw-observation-adapter.js';
-
-/**
- * Map gate-block context to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromGateBlock } from './raw-observation-adapter.js';
-
-/**
- * Map /pd-pain command to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromCommand } from './raw-observation-adapter.js';
-
-/**
- * Map provider/rate-limit failure to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromProvider } from './raw-observation-adapter.js';
-
-/**
- * Map subagent error to SourceKind.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export { resolveSourceKindFromSubagent } from './raw-observation-adapter.js';
+// PRI-360 S1: Legacy resolveSourceKindFrom* functions removed.
+// All callers should use resolveSourceKind with RawObservation.
 
 // ── Triage Evaluation ───────────────────────────────────────────────────────
 

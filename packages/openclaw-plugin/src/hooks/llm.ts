@@ -12,7 +12,8 @@ import { atomicWriteFileSync } from '../utils/io.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
-import { resolveSourceKindFromLlmDetection, evaluateEvidenceTriage } from './triage-adapter.js';
+import { resolveSourceKind, type RawObservation } from './raw-observation-adapter.js';
+import { evaluateEvidenceTriage } from './triage-adapter.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -255,7 +256,15 @@ export function handleLlmOutput(
         let triageAdmitted = true;
         const llmTriageFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmission');
         if (llmTriageFlag.enabled) {
-            const sourceKind = resolveSourceKindFromLlmDetection(source, isGfiTriggered);
+            // PRI-360 S1: Build RawObservation for unified source mapping
+            const rawObs: RawObservation = {
+                observedAt: new Date().toISOString(),
+                workspaceId: ctx.workspaceDir,
+                sessionId: ctx.sessionId,
+                detectionSource: source,
+                isGfiTriggered,
+            };
+            const sourceKind = resolveSourceKind(rawObs);
             const triage = evaluateEvidenceTriage(sourceKind, painScore);
             if (triage.decision !== 'admit') {
                 triageAdmitted = false;

@@ -12,12 +12,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  resolveSourceKindFromToolFailure,
-  resolveSourceKindFromLlmDetection,
-  resolveSourceKindFromGateBlock,
-  resolveSourceKindFromCommand,
-  resolveSourceKindFromProvider,
-  resolveSourceKindFromSubagent,
+  resolveSourceKind,
+  type RawObservation,
   evaluateEvidenceTriage,
   isHighConfidenceUnsafeAction,
 } from '../../src/hooks/triage-adapter.js';

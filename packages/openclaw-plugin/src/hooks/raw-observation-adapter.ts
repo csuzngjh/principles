@@ -26,6 +26,9 @@
 import type { SourceKind } from '@principles/core/runtime-v2';
 import type { RawObservation } from './raw-observation-types.js';
 
+// Re-export RawObservation for plugin consumers
+export type { RawObservation } from './raw-observation-types.js';
+
 /**
  * Resolve SourceKind from a unified RawObservation.
  *
@@ -135,97 +138,5 @@ export function resolveSourceKind(observation: RawObservation): SourceKind {
   return 'unknown';
 }
 
-/**
- * Resolve SourceKind from tool failure context (legacy wrapper).
- *
- * This is a thin wrapper around resolveSourceKind for compatibility.
- * It constructs a RawObservation from the old function signature.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromToolFailure(
-  toolName: string | undefined,
-  failureSource: 'tool_failure' | 'dispatch_error',
-  provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook',
-): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    toolName,
-    failureSource,
-    provenance,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from LLM detection context (legacy wrapper).
- *
- * This is a thin wrapper around resolveSourceKind for compatibility.
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromLlmDetection(
-  detectionSource: string,
-  isGfiTriggered: boolean,
-): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    detectionSource,
-    isGfiTriggered,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from gate block context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromGateBlock(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isGateBlock: true,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from manual command context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromCommand(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isManualEntry: true,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from provider context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromProvider(
-  isRateLimit: boolean,
-): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isRateLimit,
-  };
-  return resolveSourceKind(observation);
-}
-
-/**
- * Resolve SourceKind from subagent context (legacy wrapper).
- *
- * @deprecated Use resolveSourceKind directly with RawObservation.
- */
-export function resolveSourceKindFromSubagent(): SourceKind {
-  const observation: RawObservation = {
-    observedAt: new Date().toISOString(),
-    isSubagentError: true,
-  };
-  return resolveSourceKind(observation);
-}
+// PRI-360 S1: Legacy resolveSourceKindFrom* functions removed.
+// All callers should use resolveSourceKind with RawObservation.
