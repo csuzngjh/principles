@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
+import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
 describe('E2E: pd candidate intake flow', () => {
   let tempWorkspace: string;
   let db: Database.Database;
-  const pdCliPath = join(process.cwd(), 'dist/index.js');
+  const pdCliPath = getBuiltPdCliPath();
 
   beforeEach(() => {
     tempWorkspace = mkdtempSync(join(tmpdir(), 'pd-e2e-'));

@@ -20,10 +20,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = 'true';
+  process.env.PD_EMPATHY_API_KEY_ENV = 'PD_TEST_DISABLED_EMPATHY_API_KEY';
 });
 
 afterEach(() => {
   process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = '';
+  delete process.env.PD_EMPATHY_API_KEY_ENV;
 });
 
 const mockGetPendingDiagnosticianTasks = vi.fn<(stateDir: string) => unknown[]>();
@@ -121,16 +123,6 @@ vi.mock('../../src/core/focus-history.js', () => ({
   workingMemoryToInjection: vi.fn().mockReturnValue(''),
   autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
   safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
-}));
-
-vi.mock('../../src/service/subagent-workflow/index.js', () => ({
-  EmpathyObserverWorkflowManager: vi.fn(),
-  empathyObserverWorkflowSpec: {},
-  isExpectedSubagentError: vi.fn().mockReturnValue(false),
-}));
-
-vi.mock('../../src/utils/subagent-probe.js', () => ({
-  isSubagentRuntimeAvailable: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock('../../src/core/local-worker-routing.js', () => ({
@@ -304,7 +296,7 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn(), recordPainEvent: vi.fn() },
       config: { get: vi.fn().mockImplementation((k: string) => {
-        if (k === 'thresholds.pain_trigger') return 40;
+        if (k === 'thresholds.pain_trigger') return 100;
         if (k === 'severity_thresholds.high') return 70;
         if (k === 'language') return 'en';
         return undefined;

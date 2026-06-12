@@ -21,6 +21,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import * as childProcessModule from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 import {
   isLoopbackHost,
   normalizeLoopbackHost,
@@ -757,7 +758,7 @@ describe('CLI command wiring (pd console open)', () => {
 
 function runPd(args: string[], cwd: string): string {
   try {
-    return execFileSync('node', ['packages/pd-cli/dist/index.js', ...args], {
+    return execFileSync('node', [getBuiltPdCliPath(), ...args], {
       encoding: 'utf8',
       cwd,
     });

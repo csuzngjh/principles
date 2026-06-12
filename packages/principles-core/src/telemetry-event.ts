@@ -89,6 +89,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diagnostician_task_failed'),
   Type.Literal('diagnostician_cancel_run_failed'),
   Type.Literal('diagnostician_mark_succeeded_failed'),
+  Type.Literal('diag_router_invariant_override'),
   // PRI-371: Core grounding telemetry
   Type.Literal('diagnostician_core_grounding_result'),
   // M5: Artifact commit events

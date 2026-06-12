@@ -118,16 +118,6 @@ vi.mock('../../src/core/focus-history.js', () => ({
   safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
 }));
 
-vi.mock('../../src/service/subagent-workflow/index.js', () => ({
-  EmpathyObserverWorkflowManager: vi.fn(),
-  empathyObserverWorkflowSpec: {},
-  isExpectedSubagentError: vi.fn().mockReturnValue(false),
-}));
-
-vi.mock('../../src/utils/subagent-probe.js', () => ({
-  isSubagentRuntimeAvailable: vi.fn().mockReturnValue(false),
-}));
-
 vi.mock('../../src/core/local-worker-routing.js', () => ({
   classifyTask: vi.fn().mockReturnValue({
     decision: 'stay_main',

@@ -1,0 +1,135 @@
+════════════════════════════════════════════════════════════════════════════════
+  DIAGNOSTIC PIPELINE QUALITY EVALUATION REPORT
+  Generated: 2026-06-12T02:19:27.882Z
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────
+  Model: DeepSeek V4 Flash
+────────────────────────────────────────────────────────────
+
+  Scenario: Type Safety Bypass (as-cast)
+
+  Stage A (RootCause):
+    Schema Valid: ✅ PASS
+    Quality Score: 100/100
+    Latency: 10.9s
+    Tokens: 1959
+    Reasoning (preview): We are given a pain signal with evidence that the agent used `JSON.parse(data) as UserConfig` without runtime validation, leading to accessing an undefined property. We need to perform 5-Whys analysis...
+
+  Stage B (Distiller):
+    Schema Valid: ✅ PASS
+    Quality Score: 90/100
+      - principle tone: neutral
+    Latency: 13.0s
+    Tokens: 1986
+    Reasoning (preview): We are given a root cause diagnosis for an agent that used TypeScript type assertion on JSON.parse output without runtime validation, causing a crash when the API returned an unexpected format. The ro...
+
+  Stage C (Router):
+    Schema Valid: ✅ PASS
+    Quality Score: 90/100
+      - includes principle recommendation (good default)
+    Latency: 14.9s
+    Tokens: 2477
+    Reasoning (preview): We are given the root cause output and distiller output. The root cause is about lack of runtime validation for external data. The distiller's abstracted principle is "For external data, runtime valid...
+
+  Pipeline Summary for Type Safety Bypass (as-cast):
+    All Stages Valid: ✅
+    Avg Quality Score: 93.3/100
+    Total Latency: 38.8s
+
+
+  Scenario: Silent Fallback (ERR-002 pattern)
+
+  Stage A (RootCause):
+    Schema Valid: ✅ PASS
+    Quality Score: 100/100
+    Latency: 9.2s
+    Tokens: 2015
+    Reasoning (preview): We need to produce a root cause analysis for the given pain signal. Let's extract the relevant information.
+
+The pain signal is about a database query timeout that was caught, but instead of reporting...
+
+  Stage B (Distiller):
+    Schema Valid: ✅ PASS
+    Quality Score: 100/100
+      - principle is abstract (good)
+    Latency: 15.7s
+    Tokens: 2138
+    Reasoning (preview): We are given a root cause artifact. The root cause is a Design issue: the agent's error handling architecture does not propagate infrastructure errors to the user, instead defaulting to silent empty r...
+
+  Stage C (Router):
+    Schema Valid: ✅ PASS
+    Quality Score: 90/100
+      - includes principle recommendation (good default)
+    Latency: 13.1s
+    Tokens: 2662
+    Reasoning (preview): We are given the root cause output and distiller output. The root cause is about an agent silently returning empty array on database timeout, hiding infrastructure issues. The distiller abstracted pri...
+
+  Pipeline Summary for Silent Fallback (ERR-002 pattern):
+    All Stages Valid: ✅
+    Avg Quality Score: 96.7/100
+    Total Latency: 38.0s
+
+────────────────────────────────────────────────────────────
+  Model: SenseNova 6.7 Flash-Lite
+────────────────────────────────────────────────────────────
+
+  Scenario: Type Safety Bypass (as-cast)
+
+  Stage A (RootCause):
+    Schema Valid: ❌ FAIL
+    Error: fetch failed
+    Quality Score: 0/100
+    Latency: 10.7s
+
+  Pipeline Summary for Type Safety Bypass (as-cast):
+    All Stages Valid: ❌
+    Avg Quality Score: 0.0/100
+    Total Latency: 10.7s
+
+
+  Scenario: Silent Fallback (ERR-002 pattern)
+
+  Stage A (RootCause):
+    Schema Valid: ✅ PASS
+    Quality Score: 100/100
+    Latency: 14.4s
+    Tokens: 2111
+
+  Stage B (Distiller):
+    Schema Valid: ✅ PASS
+    Quality Score: 100/100
+      - principle is abstract (good)
+    Latency: 8.8s
+    Tokens: 1977
+
+  Stage C (Router):
+    Schema Valid: ✅ PASS
+    Quality Score: 90/100
+      - includes principle recommendation (good default)
+    Latency: 18.8s
+    Tokens: 2601
+
+  Pipeline Summary for Silent Fallback (ERR-002 pattern):
+    All Stages Valid: ✅
+    Avg Quality Score: 96.7/100
+    Total Latency: 42.1s
+
+════════════════════════════════════════════════════════════════════════════════
+  CROSS-MODEL COMPARISON
+════════════════════════════════════════════════════════════════════════════════
+
+| Model                       | Pipeline Valid | Avg Score | Avg Latency |
+--------------------------------------------------------------------------
+| DeepSeek V4 Flash           | ✅ ALL PASS     | 95.0      | 38.4s      |
+| SenseNova 6.7 Flash-Lite    | ❌ SOME FAIL    | 48.3      | 26.4s      |
+
+────────────────────────────────────────────────────────────────────────────────
+  SCORING RUBRIC
+  Stage A (RootCause): causal chain completeness (30) + evidence refs (20) +
+    root cause classification (15) + summary quality (15) + evidence count (20)
+  Stage B (Distiller): principle length (25) + abstractness (30) + rationale (20) +
+    scope (15) + confidence (10)
+  Stage C (Router): recommendation kind (30) + violated principles (35) +
+    summary (15) + description quality (10) + rule matching (10)
+────────────────────────────────────────────────────────────────────────────────

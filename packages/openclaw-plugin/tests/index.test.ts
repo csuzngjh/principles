@@ -89,7 +89,7 @@ describe('Command Registration', () => {
     expect(pdPain).toBeDefined();
 
     const ctx: PluginCommandContext = {
-      sessionId: 'session-123',
+      sessionId: '',
       sessionKey: 'sk-123',
       workspaceDir: '/mock/workspace',
       args: 'test pain reason',

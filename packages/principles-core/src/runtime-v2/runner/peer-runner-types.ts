@@ -15,7 +15,7 @@ import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import type { PeerRunnerKind } from '../internalization/peer-runner-contracts.js';
+import type { RunnerKind } from '../internalization/peer-runner-contracts.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
 
@@ -73,8 +73,8 @@ export interface PeerRunnerDeps {
 export interface PeerRunnerConfig {
   /** Runner name for telemetry event prefix (e.g. 'dreamer', 'scribe'). */
   readonly runnerName: string;
-  /** Expected taskKind for lease validation (e.g. 'dreamer'). */
-  readonly expectedTaskKind: PeerRunnerKind;
+  /** Expected taskKind for lease validation (e.g. 'dreamer', 'diag_rootcause'). */
+  readonly expectedTaskKind: RunnerKind;
   /** Default agentId if not provided in options. */
   readonly defaultAgentId: string;
   /** ResultRef prefix (e.g. 'dreamer' → 'dreamer://runId'). */

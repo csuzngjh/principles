@@ -137,10 +137,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   /**
    * Check lineage strip contract. Called AFTER validation passes.
-   * Receives validated output — safe to treat as TOutput.
+   * Receives validated output and context — safe to treat as TOutput / TContext.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected checkLineageIntegrity(_taskId: string, _output: TOutput): void {
+  protected checkLineageIntegrity(_taskId: string, _output: TOutput, _context: TContext): void {
     // default no-op
   }
 
@@ -150,7 +150,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Receives untrusted data — must NOT assume TOutput shape.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown): void {
+  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown, _context: TContext): void {
     // default no-op
   }
 
@@ -232,7 +232,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 7b. Post-fetch transform on untrusted data (e.g., re-inject lineage fields).
       // Operates on `unknown` — must NOT assume TOutput shape (ERR-001).
-      this.postFetchTransform(taskId, untrustedOutput);
+      this.postFetchTransform(taskId, untrustedOutput, context);
 
       // 8. Validate — the trust boundary. Only validated output becomes TOutput.
       this.phase = RunnerPhase.Validating;
@@ -251,8 +251,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       this.emitEvent('output_validated', taskId, {});
 
-      // 8b. Check lineage integrity (receives validated output)
-      this.checkLineageIntegrity(taskId, output);
+      // 8b. Check lineage integrity (receives validated output and context)
+      this.checkLineageIntegrity(taskId, output, context);
 
       // 8c. Emit success telemetry (receives validated output)
       this.emitSuccessTelemetry(taskId, output, context);

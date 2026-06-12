@@ -5,10 +5,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
 function runPdHelp(args: string[]): string {
   try {
-    return execFileSync('node', ['packages/pd-cli/dist/index.js', ...args], {
+    return execFileSync('node', [getBuiltPdCliPath(), ...args], {
       encoding: 'utf8',
       cwd: process.cwd(),
     });
