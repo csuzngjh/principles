@@ -52,8 +52,10 @@ export const DENYLIST = [
 // Allowlist for legitimate fixtures that match denylist patterns
 // REQUIRE: Comment explaining why this is allowed
 export const ALLOWLIST = new Set([
-  // Add entries here if absolutely necessary, with clear justification
-  // Example: 'packages/test/fixtures/.tmp/allowed.fixture'
+  // Template seed file: empty WORKBOARD scaffolded by `pd init` into user workspace .state/.
+  // Referenced by paths.ts (WORKBOARD path constant), path-resolver.ts, and init-refactor.test.ts.
+  // Not a runtime artifact — this is the *template* that gets copied, not a live DB.
+  'packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json',
 ]);
 
 function gitLines(args) {
@@ -146,6 +148,6 @@ function main() {
   console.log('[REPO HYGIENE] Passed - no forbidden files detected.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && process.argv[1].endsWith('check-repo-hygiene.js')) {
   main();
 }

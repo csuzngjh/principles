@@ -52,6 +52,10 @@ describe('check-repo-hygiene', () => {
       expect(checkFile('docs/api.md')).toBeNull();
       expect(checkFile('CHANGELOG.md')).toBeNull();
     });
+
+    it('allows allowlisted template files (e.g. WORKBOARD.json)', () => {
+      expect(checkFile('packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json')).toBeNull();
+    });
   });
 
   describe('DENYLIST structure', () => {
@@ -77,8 +81,9 @@ describe('check-repo-hygiene', () => {
       expect(ALLOWLIST).toBeInstanceOf(Set);
     });
 
-    it('has empty default (no legitimate fixtures yet)', () => {
-      expect(ALLOWLIST.size).toBe(0);
+    it('contains known legitimate template fixtures', () => {
+      expect(ALLOWLIST.size).toBeGreaterThanOrEqual(1);
+      expect(ALLOWLIST.has('packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json')).toBe(true);
     });
   });
 });
