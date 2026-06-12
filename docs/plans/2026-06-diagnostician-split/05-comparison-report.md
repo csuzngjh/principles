@@ -58,7 +58,7 @@
 * **Arm 1 Monolith**: "Always reconcile all external feedback before declaring task completion."
 * **Arm 3 Split**: "在任务完成前强制验证所有反馈项是否已处理，防止过早结束流程"
 
-#### R3 — Tool edit failed on D:\Code\principles\packages\pd-cli\tests\commands\pain-evidence.test.ts; diagnos...
+#### R3 — Tool edit failed on /project/packages/pd-cli/tests/commands/pain-evidence.test.ts; diagnos...
 * **RootCause category**: `Tooling`
 * **Arm 1 Monolith**: "在调用编辑工具前，必须验证目标文件状态与上下文完整性。"
 * **Arm 3 Split**: "在执行高风险操作前验证必要上下文并设计容错机制，防止因条件缺失导致失败"
@@ -176,7 +176,7 @@ No failure cases. All 3 stages of Arm 3 successfully validated against their sch
 * **Arm 1 Monolith**: "(None)"
 * **Arm 3 Split**: "在宣告任务完成前，系统地调和所有反馈和未解决项。"
 
-#### R3 — Tool edit failed on D:\Code\principles\packages\pd-cli\tests\commands\pain-evidence.test.ts; diagnos...
+#### R3 — Tool edit failed on /project/packages/pd-cli/tests/commands/pain-evidence.test.ts; diagnos...
 * **RootCause category**: `Tooling`
 * **Arm 1 Monolith**: "(None)"
 * **Arm 3 Split**: "优先在自动化流程的关键操作前设置前置条件验证，以确保上下文完整性"

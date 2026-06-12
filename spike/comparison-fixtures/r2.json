@@ -24,7 +24,7 @@
       "painId": "pain_r2",
       "sessionIdHint": "session_r2",
       "provenance": "openclaw_context_bound",
-      "provenanceReason": "No host trace available",
+      "provenanceReason": "Pain reported from an OpenClaw host session with authenticated sessionId",
       "evidence": [],
       "traceAvailability": "unavailable_with_reason",
       "traceUnavailableDetail": {

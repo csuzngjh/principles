@@ -24,7 +24,7 @@
       "painId": "pain_r8",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No host trace available",
+      "provenanceReason": "No host trace available for CLI-submitted pain; fullTrace unavailable",
       "evidence": [
         {
           "sourceRef": "owner_reported:cli",
