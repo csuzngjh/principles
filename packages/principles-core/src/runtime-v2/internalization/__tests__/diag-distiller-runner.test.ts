@@ -28,6 +28,7 @@ import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { RunnerPhase } from '../../runner/runner-phase.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -73,35 +74,21 @@ function makeDistillerTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeRootCauseOutput(): DiagRootCauseOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
     diagnosisId: 'diag-001',
     taskId: ROOTCAUSE_TASK_ID,
-    summary: 'Root cause analysis summary',
-    causalChain: [
-      { why: 1, statement: 'First why', evidenceRefs: ['ref-1'] },
-      { why: 2, statement: 'Second why', evidenceRefs: ['ref-2'] },
-    ],
-    rootCause: 'Design: Missing error handling in async path',
-    rootCauseCategory: 'Design',
-    evidence: [
-      { sourceRef: 'ref-1', note: 'Evidence note 1' },
-    ],
-    confidence: 0.85,
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeDistillerOutput(overrides: Partial<DiagDistillerOutputV1> = {}): DiagDistillerOutputV1 {
   return {
-    valid: true,
+    ...MOCK_DISTILLER_OUTPUTS.R6,
     taskId: DISTILLER_TASK_ID,
     sourceRootCauseArtifactId: ROOTCAUSE_ARTIFACT_ID,
-    abstractedPrinciple: 'Always handle async errors before proceeding',
-    rationale: 'The root cause shows a pattern of missing async error handling',
-    groundedOnCorePrincipleIds: ['T-01'],
-    scope: 'general',
-    confidence: 0.9,
     ...overrides,
   };
 }
@@ -217,7 +204,7 @@ describe('DiagDistillerRunner V-slice', () => {
     expect(contentJson).toBeDefined();
     if (contentJson) {
       const parsed = JSON.parse(contentJson) as Record<string, unknown>;
-      expect(parsed.groundedOnCorePrincipleIds).toEqual(['T-01']);
+      expect(parsed.groundedOnCorePrincipleIds).toEqual(['T-01', 'T-07']);
     }
 
     // Verify markTaskSucceeded called with diag-distiller:// resultRef
@@ -495,5 +482,43 @@ describe('DiagDistillerRunner V-slice', () => {
     // Should fail because predecessor artifact content fails schema validation
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('input_invalid');
+  });
+
+  it('sourceRootCauseArtifactId mismatch triggers lineage integrity violation (EP-07)', async () => {
+    const deps = createMockDeps();
+    // Output with wrong sourceRootCauseArtifactId — should trigger checkLineageIntegrity
+    const mismatchedOutput = makeDistillerOutput({
+      sourceRootCauseArtifactId: 'pi-art-FABRICATED-WRONG-ID',
+    });
+    (deps._runtimeAdapter.fetchOutput as ReturnType<typeof vi.fn>).mockResolvedValue({ payload: mismatchedOutput });
+
+    const runner = new DiagDistillerRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(DISTILLER_TASK_ID);
+
+    // checkLineageIntegrity throws PDRuntimeError('output_invalid'), caught by base class.
+    // output_invalid is not in permanentErrorCategories, so the runner retries and
+    // eventually exhausts attempts → max_attempts_exceeded.
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
+
+    // Verify lineage_integrity_violation telemetry was emitted
+    const {emitTelemetry} = (deps as unknown as { eventEmitter: { emitTelemetry: ReturnType<typeof vi.fn> } }).eventEmitter;
+    const violationEvent = emitTelemetry.mock.calls.find(
+      (call: unknown[]) => {
+        const event = call[0] as Record<string, unknown> | undefined;
+        return event?.eventType === 'diag_distiller_lineage_integrity_violation';
+      },
+    );
+    expect(violationEvent).toBeDefined();
+    // Verify the event payload contains both artifact IDs
+    const payload = (violationEvent[0] as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.expectedArtifactId).toBe(ROOTCAUSE_ARTIFACT_ID);
+    expect(payload.actualArtifactId).toBe('pi-art-FABRICATED-WRONG-ID');
   });
 });

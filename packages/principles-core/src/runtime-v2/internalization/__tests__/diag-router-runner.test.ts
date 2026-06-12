@@ -31,6 +31,7 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { RunnerPhase } from '../../runner/runner-phase.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -93,53 +94,29 @@ function makeRouterTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeRootCauseOutput(): DiagRootCauseOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
     diagnosisId: 'diag-001',
     taskId: ROOTCAUSE_TASK_ID,
-    summary: 'Root cause analysis summary',
-    causalChain: [
-      { why: 1, statement: 'First why', evidenceRefs: ['ref-1'] },
-    ],
-    rootCause: 'Design: Missing error handling',
-    rootCauseCategory: 'Design',
-    evidence: [{ sourceRef: 'ref-1', note: 'Evidence note' }],
-    confidence: 0.85,
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeDistillerOutput(): DiagDistillerOutputV1 {
   return {
-    valid: true,
+    ...MOCK_DISTILLER_OUTPUTS.R6,
     taskId: DISTILLER_TASK_ID,
     sourceRootCauseArtifactId: ROOTCAUSE_ARTIFACT_ID,
-    abstractedPrinciple: 'Always handle async errors',
-    rationale: 'Root cause shows missing async error handling',
-    groundedOnCorePrincipleIds: ['T-01'],
-    scope: 'general',
-    confidence: 0.9,
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeRouterOutput(): DiagnosticianOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-001',
-    summary: 'Missing runtime validation on untrusted input',
-    rootCause: 'Design: Missing runtime validation on untrusted input',
-    violatedPrinciples: [],
-    evidence: [
-      { sourceRef: 'ref-1', note: 'Input passed directly to business logic' },
-    ],
-    recommendations: [
-      {
-        kind: 'principle',
-        description: 'Add runtime type guards before processing untrusted input',
-        abstractedPrinciple: 'Always validate untrusted input before processing',
-      },
-    ],
-    confidence: 0.88,
   };
 }
 

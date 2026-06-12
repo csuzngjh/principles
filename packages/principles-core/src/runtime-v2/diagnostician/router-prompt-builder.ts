@@ -163,7 +163,10 @@ Based on the distiller's abstracted principle and the root cause from Stage A, d
 OUTPUT REQUIREMENTS:
 Your output MUST match DiagnosticianOutputV1Schema. Key fields:
 
-- violatedPrinciples: derived from Stage A's rootCause + Stage B's grounding (rationale must explain the violation)
+- violatedPrinciples: array of violated principles, derived from Stage A's rootCause + Stage B's grounding
+  - title: short descriptive name for the violated principle (REQUIRED, 3-8 words)
+  - principleId: if the principle corresponds to a core axiom (e.g. T-01 through T-10), include the axiom ID; otherwise omit
+  - rationale: explanation of why this principle was violated (REQUIRED)
 - recommendations: one or more entries with the appropriate kind from the routing rules above
 - rootCause: MUST match Stage A's rootCause exactly — do not rephrase or re-derive
 - evidence: MUST match Stage A's evidence entries

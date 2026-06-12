@@ -27,6 +27,7 @@ import { DiagDistillerRunner } from '../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../diag-distiller-runner.js';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
+import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import type { DiagnosticianCommitter, CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
@@ -37,6 +38,7 @@ import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../../config/pd-config-feature-flags.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import { PDRuntimeError } from '../../error-categories.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -48,57 +50,30 @@ const DISTILLER_ARTIFACT_ID = 'pi-art-distiller-e2e';
 const OWNER = 'test-e2e-owner';
 const RUNTIME_KIND = 'test-double';
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeRootCauseOutput(): DiagRootCauseOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
     diagnosisId: 'diag-e2e-001',
     taskId: ROOTCAUSE_TASK_ID,
-    summary: 'Root cause: Missing validation on untrusted input',
-    causalChain: [
-      { why: 1, statement: 'Input was not validated', evidenceRefs: ['ref-1'] },
-      { why: 2, statement: 'No runtime type guard was applied', evidenceRefs: ['ref-2'] },
-    ],
-    rootCause: 'Design: Missing runtime validation on untrusted input',
-    rootCauseCategory: 'Design',
-    evidence: [
-      { sourceRef: 'ref-1', note: 'Input passed directly to business logic' },
-      { sourceRef: 'ref-2', note: 'No typeof check before property access' },
-    ],
-    confidence: 0.9,
   };
 }
 
-function makeDistillerOutput(): DiagDistillerOutputV1 {
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
+function makeDistillerOutput(overrides: Partial<DiagDistillerOutputV1> = {}): DiagDistillerOutputV1 {
   return {
-    valid: true,
+    ...MOCK_DISTILLER_OUTPUTS.R6,
     taskId: DISTILLER_TASK_ID,
     sourceRootCauseArtifactId: ROOTCAUSE_ARTIFACT_ID,
-    abstractedPrinciple: 'Always validate untrusted input before processing',
-    rationale: 'The root cause shows a pattern of missing runtime validation',
-    groundedOnCorePrincipleIds: ['T-01'],
-    scope: 'general',
-    confidence: 0.88,
+    ...overrides,
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
 function makeRouterOutput(): DiagnosticianOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-e2e-001',
-    summary: 'Missing runtime validation on untrusted input',
-    rootCause: 'Design: Missing runtime validation on untrusted input',
-    violatedPrinciples: [],
-    evidence: [
-      { sourceRef: 'ref-1', note: 'Input passed directly to business logic' },
-    ],
-    recommendations: [
-      {
-        kind: 'principle',
-        description: 'Add runtime type guards before processing untrusted input',
-        abstractedPrinciple: 'Always validate untrusted input before processing',
-      },
-    ],
-    confidence: 0.88,
   };
 }
 
@@ -139,6 +114,15 @@ function makeMockStateManager(taskOverrides: Record<string, TaskRecord>) {
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    createTask: vi.fn().mockImplementation((record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>) => {
+      const task: TaskRecord = {
+        ...record,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      taskOverrides[record.taskId] = task;
+      return Promise.resolve(task);
+    }),
   };
 }
 
@@ -324,7 +308,9 @@ describe('Diag chain e2e', () => {
     const distillerRunId = 'run-dist-e2e';
     runtimeAdapter.startRun.mockResolvedValue(makeRunHandle(distillerRunId));
     runtimeAdapter.pollRun.mockResolvedValue(makeSucceededStatus(distillerRunId));
-    runtimeAdapter.fetchOutput.mockResolvedValue({ payload: makeDistillerOutput() });
+    // Use the actual artifact ID from Stage A for lineage integrity check (EP-07)
+    const stageAArtifactId = resultA.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
+    runtimeAdapter.fetchOutput.mockResolvedValue({ payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) });
 
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
@@ -550,5 +536,218 @@ describe('Diag chain e2e', () => {
 
     // Verify Stage B lineage includes Stage A artifact
     expect(artifactsB[0]?.lineageArtifactIds).toContain(ROOTCAUSE_ARTIFACT_ID);
+  });
+
+  // ── SplitDiagnosticianRunner orchestration test ────────────────────────────
+
+  it('SplitDiagnosticianRunner orchestrates A→B→C and returns RunnerResult', async () => {
+    const artifactStore = new MemoryPIArtifactStore();
+    const PARENT_TASK_ID = 'diagnosis_split-e2e';
+    const STAGE_A_TASK_ID = `diag_rootcause-${PARENT_TASK_ID}`;
+    const STAGE_B_TASK_ID = `diag_distiller-${PARENT_TASK_ID}`;
+    const STAGE_C_TASK_ID = `diag_router-${PARENT_TASK_ID}`;
+
+    const taskMap: Record<string, TaskRecord> = {};
+    const stateManager = makeMockStateManager(taskMap);
+
+    const runtimeAdapter = makeMockRuntimeAdapter();
+    const eventEmitter = makeMockEventEmitter();
+    const contextAssembler = { assemble: vi.fn().mockResolvedValue(makeContextPayload()) };
+
+    // Stage A runner setup
+    const rootCauseRunId = 'run-split-rc';
+    runtimeAdapter.startRun.mockResolvedValue(makeRunHandle(rootCauseRunId));
+    runtimeAdapter.pollRun.mockResolvedValue(makeSucceededStatus(rootCauseRunId));
+    // The store's run ID is 'run-${taskId}' per makeMockStateManager
+    const storeRunIdA = `run-${STAGE_A_TASK_ID}`;
+    const expectedStageAArtifactId = `pi-art-${STAGE_A_TASK_ID}-${storeRunIdA}`;
+    // fetchOutput returns different outputs per stage — use mockImplementation
+    // Stage A is first, Stage B second, Stage C third
+    let fetchCallCount = 0;
+    runtimeAdapter.fetchOutput.mockImplementation(async () => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return { payload: makeRootCauseOutput() };
+      }
+      if (fetchCallCount === 2) {
+        // Stage B: use the artifact ID that Stage A wrote (based on store run ID)
+        return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: expectedStageAArtifactId }) };
+      }
+      return { payload: makeRouterOutput() };
+    });
+
+    const rootCauseDeps: DiagRootCauseRunnerDeps = {
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      artifactStore,
+      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      contextAssembler: contextAssembler as unknown as ContextAssembler,
+    };
+
+    const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    // Stage B runner
+    const distillerDeps: DiagDistillerRunnerDeps = {
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      artifactStore,
+      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+    };
+
+    const distillerRunner = new DiagDistillerRunner(distillerDeps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    // Stage C runner
+    const commitResult: CommitResult = {
+      commitId: 'commit-split-e2e',
+      artifactId: 'art-split-e2e',
+      candidateCount: 1,
+    };
+    const committer = { commit: vi.fn().mockResolvedValue(commitResult) };
+    const onDiagnosisComplete = vi.fn().mockResolvedValue(undefined);
+
+    const routerDeps: DiagRouterRunnerDeps = {
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      artifactStore,
+      committer: committer as unknown as DiagnosticianCommitter,
+      onDiagnosisComplete,
+    };
+
+    const routerRunner = new DiagRouterRunner(routerDeps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    // Create the split runner
+    const splitRunner = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      committer: committer as unknown as DiagnosticianCommitter,
+      onDiagnosisComplete,
+    });
+
+    // Run the split pipeline
+    const result = await splitRunner.run(PARENT_TASK_ID);
+
+    // Verify the result
+    expect(result.status).toBe('succeeded');
+    expect(result.taskId).toBe(PARENT_TASK_ID);
+    expect(result.output).toBeDefined();
+    expect(result.output?.valid).toBe(true);
+
+    // Verify all 3 sub-tasks were created
+    expect(taskMap[STAGE_A_TASK_ID]).toBeDefined();
+    expect(taskMap[STAGE_A_TASK_ID]?.taskKind).toBe('diag_rootcause');
+    expect(taskMap[STAGE_B_TASK_ID]).toBeDefined();
+    expect(taskMap[STAGE_B_TASK_ID]?.taskKind).toBe('diag_distiller');
+    expect(taskMap[STAGE_C_TASK_ID]).toBeDefined();
+    expect(taskMap[STAGE_C_TASK_ID]?.taskKind).toBe('diag_router');
+
+    // Verify Stage B depends on Stage A
+    const stageBDiag = taskMap[STAGE_B_TASK_ID]?.diagnosticJson;
+    expect(stageBDiag).toContain(STAGE_A_TASK_ID);
+
+    // Verify Stage C depends on both A and B
+    const stageCDiag = taskMap[STAGE_C_TASK_ID]?.diagnosticJson;
+    expect(stageCDiag).toContain(STAGE_A_TASK_ID);
+    expect(stageCDiag).toContain(STAGE_B_TASK_ID);
+
+    // Verify committer was called (by Stage C)
+    expect(committer.commit).toHaveBeenCalled();
+
+    // Verify onDiagnosisComplete callback was called (by Stage C)
+    expect(onDiagnosisComplete).toHaveBeenCalled();
+
+    // Verify artifacts were written for all 3 stages
+    const artifactsA = await artifactStore.listBySourceTaskId(STAGE_A_TASK_ID);
+    const artifactsB = await artifactStore.listBySourceTaskId(STAGE_B_TASK_ID);
+    expect(artifactsA).toHaveLength(1);
+    expect(artifactsB).toHaveLength(1);
+  });
+
+  it('SplitDiagnosticianRunner stops and returns failure when Stage A fails', async () => {
+    const artifactStore = new MemoryPIArtifactStore();
+    const PARENT_TASK_ID = 'diagnosis_split-fail-a';
+
+    const taskMap: Record<string, TaskRecord> = {};
+    const stateManager = makeMockStateManager(taskMap);
+
+    const runtimeAdapter = makeMockRuntimeAdapter();
+    const eventEmitter = makeMockEventEmitter();
+    const contextAssembler = { assemble: vi.fn().mockResolvedValue(makeContextPayload()) };
+
+    // Stage A fails
+    runtimeAdapter.startRun.mockResolvedValue(makeRunHandle('run-fail-rc'));
+    runtimeAdapter.pollRun.mockResolvedValue({ status: 'failed', runId: 'run-fail-rc' });
+
+    const rootCauseDeps: DiagRootCauseRunnerDeps = {
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      artifactStore,
+      validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      contextAssembler: contextAssembler as unknown as ContextAssembler,
+    };
+
+    const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
+      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+    );
+
+    const committer = { commit: vi.fn() };
+    const onDiagnosisComplete = vi.fn();
+
+    const routerRunner = new DiagRouterRunner(
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer as unknown as DiagnosticianCommitter, onDiagnosisComplete },
+      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+    );
+
+    const splitRunner = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager: stateManager as unknown as RuntimeStateManager,
+      committer: committer as unknown as DiagnosticianCommitter,
+      onDiagnosisComplete,
+    });
+
+    const result = await splitRunner.run(PARENT_TASK_ID);
+
+    // Should fail — Stage A failed
+    expect(result.status).toBe('failed');
+    expect(result.taskId).toBe(PARENT_TASK_ID);
+    // The failure reason comes from the runner (max_attempts_exceeded)
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
+
+    // Stage B and C tasks should NOT have been created
+    expect(taskMap[`diag_distiller-${PARENT_TASK_ID}`]).toBeUndefined();
+    expect(taskMap[`diag_router-${PARENT_TASK_ID}`]).toBeUndefined();
+
+    // Committer should NOT have been called
+    expect(committer.commit).not.toHaveBeenCalled();
   });
 });

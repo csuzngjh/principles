@@ -225,7 +225,9 @@ export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): bo
       addPrincipleToLedger(stateDir, ledgerPrinciple);
     }
 
-    logger.info(`[PD] Initialized ${CORE_THINKING_MODELS.length} core thinking models: T-01 through T-10`);
+    const firstId = CORE_THINKING_MODELS[0]?.id ?? 'T-01';
+    const lastId = CORE_THINKING_MODELS[CORE_THINKING_MODELS.length - 1]?.id ?? 'T-10';
+    logger.info(`[PD] Initialized ${CORE_THINKING_MODELS.length} core thinking models: ${firstId} through ${lastId}`);
     return true;
   } catch (err) {
     logger.error(`[PD] Failed to initialize core principles: ${String(err)}`);

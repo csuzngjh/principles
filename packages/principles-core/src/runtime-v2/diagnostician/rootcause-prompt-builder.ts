@@ -110,7 +110,9 @@ Pay special attention to diagnosisTarget.evidence — these are the primary beha
 evidence (owner messages and agent actions) that the root cause analysis must address.
 
 PHASE 2 — Causal Chain (5 Whys):
-Build a Why-1 through Why-5 causal chain. Each Why MUST have evidence from Phase 1.
+Build a Why-1 through Why-5 causal chain. Each Why MUST have at least one evidenceRefs entry referencing a sourceRef from Phase 1.
+- If no evidence is available for a Why level, reference the closest available evidence and note the gap in ambiguityNotes.
+- evidenceRefs MUST NOT be an empty array — every causal chain entry must cite at least one evidence source.
 - Why 1: Surface phenomenon (visible error)
 - Why 2: Direct cause (nearest trigger)
 - Why 3: Process gap (missing check/gate)
@@ -138,6 +140,9 @@ CONSTRAINTS:
 - rootCauseCategory MUST match the category prefix in rootCause
 - If diagnosisTarget.evidence is an empty array (length === 0), you MUST NOT fabricate evidence entries.
   Output confidence < 0.3 and set ambiguityNotes to include "Insufficient evidence".
+- evidence: list all evidence items that support your analysis. If sourceRefs or diagnosisTarget.evidence
+  were provided in the input, you MUST reference them here. Only leave empty if the input genuinely
+  contains no evidence at all.
 ${constraints}${languageDirective}`;
 }
 

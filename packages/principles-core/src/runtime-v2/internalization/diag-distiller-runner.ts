@@ -80,6 +80,8 @@ export interface DiagDistillerRunnerOptions extends PeerRunnerOptions {
 export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, DiagDistillerOutputV1> {
   private readonly validator: DiagDistillerValidator;
   private readonly effectiveConfig?: EffectivePdConfig;
+  /** Current run context — set in buildContext(), read in checkLineageIntegrity(), reset in run(). */
+  private currentContext: DiagDistillerContext | null = null;
 
   constructor(deps: DiagDistillerRunnerDeps, options: DiagDistillerRunnerOptions) {
     super(deps, options, {
@@ -93,6 +95,12 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
+
+  /** Reset per-run state before delegating to base class run(). */
+  override async run(taskId: string): Promise<PeerRunnerResult<DiagDistillerOutputV1>> {
+    this.currentContext = null;
+    return super.run(taskId);
+  }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
@@ -161,7 +169,9 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     }
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
 
-    return { contextHash, contextRefs, rootCauseArtifactId, rootCauseOutput, coreGrounding };
+    const context: DiagDistillerContext = { contextHash, contextRefs, rootCauseArtifactId, rootCauseOutput, coreGrounding };
+    this.currentContext = context;
+    return context;
   }
 
   async invokeRuntime(taskId: string, context: DiagDistillerContext): Promise<RunHandle> {
@@ -319,15 +329,17 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
    *
    * After validation passes, verify that the output's sourceRootCauseArtifactId
    * matches the context's rootCauseArtifactId. If they mismatch, the LLM
-   * fabricated or altered the lineage field — emit telemetry.
+   * fabricated or altered the lineage field — emit telemetry and throw.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected override checkLineageIntegrity(taskId: string, output: DiagDistillerOutputV1): void {
-    // Note: context is not available in this hook; the check is performed
-    // implicitly by the validator's taskId + sourceRootCauseArtifactId checks.
-    // This hook is reserved for future cross-stage lineage verification.
-    void taskId;
-    void output;
+    if (this.currentContext?.rootCauseArtifactId && output.sourceRootCauseArtifactId !== this.currentContext.rootCauseArtifactId) {
+      this.emitEvent('lineage_integrity_violation', taskId, {
+        expectedArtifactId: this.currentContext.rootCauseArtifactId,
+        actualArtifactId: output.sourceRootCauseArtifactId,
+        field: 'sourceRootCauseArtifactId',
+      });
+      throw new PDRuntimeError('output_invalid', `sourceRootCauseArtifactId mismatch: expected ${this.currentContext.rootCauseArtifactId}, got ${output.sourceRootCauseArtifactId}`);
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: DiagDistillerOutputV1, _context: DiagDistillerContext): void {

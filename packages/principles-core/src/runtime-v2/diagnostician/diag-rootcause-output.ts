@@ -42,7 +42,7 @@ export type RootCauseCategory = Static<typeof RootCauseCategorySchema>;
 export const CausalChainEntrySchema = Type.Object({
   why: Type.Number({ minimum: 1, maximum: 5 }),
   statement: Type.String({ minLength: 1 }),
-  evidenceRefs: Type.Array(Type.String()),
+  evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
 });
 
 /** A single entry in the 5-Whys causal chain. */
@@ -169,6 +169,8 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
         }
         if (!Array.isArray(entry.evidenceRefs)) {
           errors.push(`causalChain[${i}].evidenceRefs must be an array`);
+        } else if (entry.evidenceRefs.length === 0) {
+          errors.push(`causalChain[${i}].evidenceRefs must have at least 1 item`);
         }
       }
     }

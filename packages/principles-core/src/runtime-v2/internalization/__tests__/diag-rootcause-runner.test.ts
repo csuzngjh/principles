@@ -28,6 +28,7 @@ import type { ContextAssembler } from '../../store/context/context-assembler.js'
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { RunnerPhase } from '../../runner/runner-phase.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -56,22 +57,12 @@ function makeRootCauseTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
+/** Happy-path output using cached real LLM data (R6 fixture) with test-local taskId. */
 function makeRootCauseOutput(): DiagRootCauseOutputV1 {
   return {
-    valid: true,
+    ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
     diagnosisId: 'diag-001',
     taskId: ROOTCAUSE_TASK_ID,
-    summary: 'Root cause analysis summary',
-    causalChain: [
-      { why: 1, statement: 'First why', evidenceRefs: ['ref-1'] },
-      { why: 2, statement: 'Second why', evidenceRefs: ['ref-2'] },
-    ],
-    rootCause: 'Design: Missing error handling in async path',
-    rootCauseCategory: 'Design',
-    evidence: [
-      { sourceRef: 'ref-1', note: 'Evidence note 1' },
-    ],
-    confidence: 0.85,
   };
 }
 
