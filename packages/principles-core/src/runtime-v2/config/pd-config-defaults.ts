@@ -32,7 +32,9 @@ export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {
   evolution_worker:   { category: 'quiet', enabled: false },
   empathy_observer:   { category: 'quiet', enabled: false },
   painEvidenceAdmission:{ category: 'quiet', enabled: false },
+  diagnostician_async_cli: { category: 'quiet', enabled: false },
   diagnostician_core_grounding: { category: 'quiet', enabled: false },
+  diagnostician_split_pipeline: { category: 'quiet', enabled: false },
 
   // MVP-Gone (ADR-0014 §2.6)
   nocturnal:          { category: 'gone',  enabled: false },
