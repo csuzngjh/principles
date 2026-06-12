@@ -1,6 +1,6 @@
 {
   "id": "R5",
-  "painId": "manual_1780931134915_tiuyvu0g",
+  "painId": "pain_r5",
   "source": "code_review",
   "description": "PR #852 CLI routing: pain retry 丢选项，canary 错调 handler，evidence 读错 log 路径。这是一个真实操作者信任失败。",
   "coveredAxioms": [
@@ -8,22 +8,22 @@
   ],
   "isSynthetic": false,
   "contextPayload": {
-    "contextId": "1ef3b12c-30fe-434e-b159-c46a153650fc",
-    "contextHash": "361fd0d0c0769b148ec2230b24ca4769e7f9457361f4004e45b15e8a5e62d849",
-    "taskId": "diagnosis_manual_1780931134915_tiuyvu0g",
-    "workspaceDir": "<unknown>",
+    "contextId": "ctx_r5",
+    "contextHash": "hash_r5",
+    "taskId": "task_r5",
+    "workspaceDir": "/workspace",
     "sourceRefs": [
-      "diagnosis_manual_1780931134915_tiuyvu0g",
-      "run_diagnosis_manual_1780931134915_tiuyvu0g_1"
+      "task_r5",
+      "run_task_r5_1"
     ],
     "diagnosisTarget": {
       "reasonSummary": "PR #852 CLI routing: pain retry 丢选项，canary 错调 handler，evidence 读错 log 路径。这是一个真实操作者信任失败。",
       "source": "code_review",
       "severity": "severe",
-      "painId": "manual_1780931134915_tiuyvu0g",
+      "painId": "pain_r5",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "provenanceReason": "No host trace available",
       "evidence": [],
       "traceAvailability": "unavailable_with_reason",
       "traceUnavailableDetail": {
@@ -39,12 +39,12 @@
       {
         "ts": "2026-06-08T15:07:06.844Z",
         "role": "assistant",
-        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-cli-routing-852\",\n  \"summary\": \"PR #852 CLI路由模块存在选项丢失、Handler错调及日志路径解析错误，导致操作者信任失败。根本原因为路由架构缺乏参数传递与处理器绑定的强校验机制。\",\n  \"rootCause\": \"Design: CLI路由架构缺乏严格的选项传递校验与Handler绑定机制，导致重试、金丝雀调用及日志路径解析出现静默失败。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"CLI-ROUTE-CONTRACT-01\",\n      \"title\": \"CLI路由强契约原则\",\n      \"rationale\": \"CLI命令分发未对输入选项进行完整性校验，且Handler映射与日志路径解析缺乏静态约束，导致运行时静默失败并破坏操作者信任。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"diagnosis_manual_1780931134915_tiuyvu0g\",\n      \"note\": \"Owner报告PR #852 CLI路由存在pain retry丢选项、canary错调handler、evidence读错log路径，确认为真实操作者信任失败。\"\n    },\n    {\n      \"sourceRef\": \"run_diagnosis_manual_1780931134915_tiuyvu0g_1\",\n      \"note\": \"代码审查源引用指向CLI路由逻辑缺陷，缺乏执行轨迹但owner描述明确指向路由分发与路径解析错误。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"拦截CLI路由分发前的参数校验缺失问题\",\n      \"triggerPattern\": \"cli_route_dispatch|pain_retry|canary_handler\",\n      \"action\": \"强制校验选项完整性与Handler映射表，不匹配则阻断执行并抛出明确错误\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立CLI路由强契约设计规范\",\n      \"abstractedPrinciple\": \"CLI路由设计必须遵循显式契约原则，所有参数传递与处理器绑定需具备强类型校验与失败快速反馈机制。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"修复PR #852中的路由逻辑：补全pain retry选项透传、修正canary handler映射表、统一evidence日志路径解析函数。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在代码审查阶段，要求Agent对CLI路由模块执行静态契约检查，重点关注参数丢失与路径硬编码问题。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"2 entries have empty text content\",\n    \"owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable\"\n  ]\n}"
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-cli-routing-852\",\n  \"summary\": \"PR #852 CLI路由模块存在选项丢失、Handler错调及日志路径解析错误，导致操作者信任失败。根本原因为路由架构缺乏参数传递与处理器绑定的强校验机制。\",\n  \"rootCause\": \"Design: CLI路由架构缺乏严格的选项传递校验与Handler绑定机制，导致重试、金丝雀调用及日志路径解析出现静默失败。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"CLI-ROUTE-CONTRACT-01\",\n      \"title\": \"CLI路由强契约原则\",\n      \"rationale\": \"CLI命令分发未对输入选项进行完整性校验，且Handler映射与日志路径解析缺乏静态约束，导致运行时静默失败并破坏操作者信任。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"task_r5\",\n      \"note\": \"Owner报告PR #852 CLI路由存在pain retry丢选项、canary错调handler、evidence读错log路径，确认为真实操作者信任失败。\"\n    },\n    {\n      \"sourceRef\": \"run_task_r5_1\",\n      \"note\": \"代码审查源引用指向CLI路由逻辑缺陷，缺乏执行轨迹但owner描述明确指向路由分发与路径解析错误。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"拦截CLI路由分发前的参数校验缺失问题\",\n      \"triggerPattern\": \"cli_route_dispatch|pain_retry|canary_handler\",\n      \"action\": \"强制校验选项完整性与Handler映射表，不匹配则阻断执行并抛出明确错误\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立CLI路由强契约设计规范\",\n      \"abstractedPrinciple\": \"CLI路由设计必须遵循显式契约原则，所有参数传递与处理器绑定需具备强类型校验与失败快速反馈机制。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"修复PR #852中的路由逻辑：补全pain retry选项透传、修正canary handler映射表、统一evidence日志路径解析函数。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在代码审查阶段，要求Agent对CLI路由模块执行静态契约检查，重点关注参数丢失与路径硬编码问题。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"2 entries have empty text content\",\n    \"owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable\"\n  ]\n}"
       }
     ],
     "ambiguityNotes": [
       "1 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ],
     "fullTrace": null
   },
@@ -62,11 +62,11 @@
     ],
     "evidence": [
       {
-        "sourceRef": "diagnosis_manual_1780931134915_tiuyvu0g",
+        "sourceRef": "task_r5",
         "note": "Owner报告PR #852 CLI路由存在pain retry丢选项、canary错调handler、evidence读错log路径，确认为真实操作者信任失败。"
       },
       {
-        "sourceRef": "run_diagnosis_manual_1780931134915_tiuyvu0g_1",
+        "sourceRef": "run_task_r5_1",
         "note": "代码审查源引用指向CLI路由逻辑缺陷，缺乏执行轨迹但owner描述明确指向路由分发与路径解析错误。"
       }
     ],
@@ -94,7 +94,7 @@
     "confidence": 0.85,
     "ambiguityNotes": [
       "2 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ]
   },
   "category": "Design"

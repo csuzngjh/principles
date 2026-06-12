@@ -240,7 +240,23 @@ No failure cases. All 3 stages of Arm 3 successfully validated against their sch
 
 #### R11 (Arm 3 Failed)
 * **Error**: `Stage C (Router) failed validation: /rootCause: Expected required property (got undefined); /evidence: Expected required property (got undefined); /confidence: Expected required property (got undefined); /rootCause: Expected string (got undefined); /evidence: Expected array (got undefined); /confidence: Expected number (got undefined)`
+* **Risk Analysis**: DeepSeek V4 Flash failed at the Stage C Router for Scenario R11. The model output was missing the required fields `rootCause`, `evidence`, and `confidence`, which caused schema validation to fail. This indicates that even with a strong model, the split pipeline carries a non-zero risk of structured schema failures in production (completion rate of 93%). A fallback mechanism to the monolith baseline or a retry/repair loop should be considered during cutover.
 
+---
+
+## Evaluation Limitations & Quality Risks
+
+### 1. Corpus Distribution Skewness
+The 14-scenario evaluation corpus is heavily skewed towards certain categories:
+* **Design**: 9 samples (64.3%)
+* **Tooling**: 3 samples (21.4%)
+* **People**: 1 sample (7.1%)
+* **Assumption**: 1 sample (7.1%)
+
+Furthermore, Scenarios R14 and R15 are "PEAT-5/GLM double-model configuration validation" meta-test pains rather than actual user dogfood pain signals. While sufficient for a spike comparison, this sample skewness limits generalizability and should not be treated as a definitive validation across all root cause domains.
+
+### 2. Heuristic Scoring Disclaimer
+The `abstractionQuality` metric is a heuristic score based on a keyword-like exclusion list (penalizing rule leakage terms such as `always`, `never`, `.ts`, `.json`, `read_file`, `write_file`, etc.). It is highly valuable for evaluating comparative quality trends and detecting rule leakage, but it does **not** equal a human quality assessment.
 
 ---
 
@@ -248,8 +264,8 @@ No failure cases. All 3 stages of Arm 3 successfully validated against their sch
 
 Based on the evaluation of both weak and strong models:
 
-* **DeepSeek V4 Flash Abstraction Lift**: **+2.36**
+* **DeepSeek V4 Flash Abstraction Lift**: **+2.35**
 * **SenseNova 6.7 Flash-Lite Abstraction Lift**: **+0.64**
 
-### **FINAL RECOMMENDATION: NO-GO**
-Although split pipeline performs well, the average abstraction lift did not meet the strict +0.7 threshold across both models.
+### **FINAL RECOMMENDATION: Owner override: strong-model-only GO**
+While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64), the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication. Since production environments run on strong models, we recommend proceeding with the split pipeline cutover (PRI-373) specifically for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.

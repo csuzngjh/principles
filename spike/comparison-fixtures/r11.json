@@ -1,6 +1,6 @@
 {
   "id": "R11",
-  "painId": "manual_1781079251251_llyt4bto",
+  "painId": "pain_r11",
   "source": "manual",
   "description": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
   "coveredAxioms": [
@@ -9,23 +9,23 @@
   ],
   "isSynthetic": false,
   "contextPayload": {
-    "contextId": "052ff8cd-58eb-4c59-a304-1cd9229d181d",
-    "contextHash": "576c753f0c943580eb4aef90338d66ba4b7f18f13cfbcf7bb8ff092dda468c47",
-    "taskId": "diagnosis_manual_1781079251251_llyt4bto",
-    "workspaceDir": "D:\\.openclaw\\workspace",
+    "contextId": "ctx_r11",
+    "contextHash": "hash_r11",
+    "taskId": "task_r11",
+    "workspaceDir": "/workspace",
     "sourceRefs": [
-      "diagnosis_manual_1781079251251_llyt4bto",
-      "run_diagnosis_manual_1781079251251_llyt4bto_1",
+      "task_r11",
+      "run_task_r11_1",
       "owner_reported:cli"
     ],
     "diagnosisTarget": {
       "reasonSummary": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
       "source": "manual",
       "severity": "severe",
-      "painId": "manual_1781079251251_llyt4bto",
+      "painId": "pain_r11",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "provenanceReason": "No host trace available",
       "evidence": [
         {
           "sourceRef": "owner_reported:cli",
@@ -46,12 +46,12 @@
       {
         "ts": "2026-06-10T08:15:10.668Z",
         "role": "assistant",
-        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-pri363-regression-001\",\n  \"summary\": \"PRI-363重构导致stage枚举变更未同步更新测试断言与集成触发逻辑，引发行为回归。\",\n  \"rootCause\": \"Design: 重构过程中缺乏行为等价性验证与契约测试机制，导致枚举值变更未同步更新测试断言与集成触发逻辑。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"contract-stability-01\",\n      \"title\": \"状态机重构契约稳定性原则\",\n      \"rationale\": \"核心状态枚举（stage）的变更未同步更新下游测试断言与集成触发条件，破坏了行为等价承诺。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"No session context available\"\n    },\n    {\n      \"sourceRef\": \"diagnosis_manual_1781079251251_llyt4bto\",\n      \"note\": \"PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立重构行为等价性验证原则，确保状态机变更不破坏现有测试契约。\",\n      \"abstractedPrinciple\": \"重构必须保持对外行为契约不变，任何状态枚举变更需同步更新测试断言与集成触发逻辑。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"当检测到 stage 枚举值或核心诊断触发函数发生变更时，自动拦截并执行回归检查。\",\n      \"triggerPattern\": \"(stage|emitSync).*=(trigger_rejected|gate_admitted)\",\n      \"action\": \"强制运行 pain.test.ts 与 auto-entry-gate TC2，验证行为等价性承诺。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"更新 pain.test.ts 中的断言以适配 trigger_rejected 枚举值；在 auto-entry-gate TC2 的 repeated failures 路径中恢复 emitSync 调用逻辑。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在执行代码重构后，必须主动验证所有相关单元测试与集成测试的行为等价性，确保状态流转与副作用触发符合原有契约。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"CLI提交缺乏主机会话溯源，完整对话轨迹不可用\",\n    \"依赖owner_reported摘要进行根因推断\"\n  ]\n}"
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-pri363-regression-001\",\n  \"summary\": \"PRI-363重构导致stage枚举变更未同步更新测试断言与集成触发逻辑，引发行为回归。\",\n  \"rootCause\": \"Design: 重构过程中缺乏行为等价性验证与契约测试机制，导致枚举值变更未同步更新测试断言与集成触发逻辑。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"contract-stability-01\",\n      \"title\": \"状态机重构契约稳定性原则\",\n      \"rationale\": \"核心状态枚举（stage）的变更未同步更新下游测试断言与集成触发条件，破坏了行为等价承诺。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"No session context available\"\n    },\n    {\n      \"sourceRef\": \"task_r11\",\n      \"note\": \"PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立重构行为等价性验证原则，确保状态机变更不破坏现有测试契约。\",\n      \"abstractedPrinciple\": \"重构必须保持对外行为契约不变，任何状态枚举变更需同步更新测试断言与集成触发逻辑。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"当检测到 stage 枚举值或核心诊断触发函数发生变更时，自动拦截并执行回归检查。\",\n      \"triggerPattern\": \"(stage|emitSync).*=(trigger_rejected|gate_admitted)\",\n      \"action\": \"强制运行 pain.test.ts 与 auto-entry-gate TC2，验证行为等价性承诺。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"更新 pain.test.ts 中的断言以适配 trigger_rejected 枚举值；在 auto-entry-gate TC2 的 repeated failures 路径中恢复 emitSync 调用逻辑。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在执行代码重构后，必须主动验证所有相关单元测试与集成测试的行为等价性，确保状态流转与副作用触发符合原有契约。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"CLI提交缺乏主机会话溯源，完整对话轨迹不可用\",\n    \"依赖owner_reported摘要进行根因推断\"\n  ]\n}"
       }
     ],
     "ambiguityNotes": [
       "1 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ],
     "fullTrace": null
   },
@@ -73,7 +73,7 @@
         "note": "No session context available"
       },
       {
-        "sourceRef": "diagnosis_manual_1781079251251_llyt4bto",
+        "sourceRef": "task_r11",
         "note": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂"
       }
     ],

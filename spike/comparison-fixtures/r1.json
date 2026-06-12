@@ -1,6 +1,6 @@
 {
   "id": "R1",
-  "painId": "manual_1780787633659_8im5rx7t",
+  "painId": "pain_r1",
   "source": "code_review",
   "description": "PEAT-B1 PR #838: test绿灯遗漏生产路径副作用和不可达high-confidence upgrade，owner无法信任PR质量。证据：llm.ts triage后仍调用evaluatePainDiagnosticGate、gate-block-helper.ts hardcoded isUnsafeHighConfidence=false、PD未自动产生pain/candidate。",
   "coveredAxioms": [
@@ -8,23 +8,23 @@
   ],
   "isSynthetic": false,
   "contextPayload": {
-    "contextId": "e64ca21a-76b6-4459-81f4-d3201cd43ff3",
-    "contextHash": "b98c9659b5a43edf7d7da27fe953589aa623bba4dd3d410a2af9603986483669",
-    "taskId": "diagnosis_manual_1780787633659_8im5rx7t",
-    "workspaceDir": "<unknown>",
+    "contextId": "ctx_r1",
+    "contextHash": "hash_r1",
+    "taskId": "task_r1",
+    "workspaceDir": "/workspace",
     "sourceRefs": [
-      "diagnosis_manual_1780787633659_8im5rx7t",
-      "run_diagnosis_manual_1780787633659_8im5rx7t_1",
-      "run_diagnosis_manual_1780787633659_8im5rx7t_2"
+      "task_r1",
+      "run_task_r1_1",
+      "run_task_r1_2"
     ],
     "diagnosisTarget": {
       "reasonSummary": "PEAT-B1 PR #838: test绿灯遗漏生产路径副作用和不可达high-confidence upgrade，owner无法信任PR质量。证据：llm.ts triage后仍调用evaluatePainDiagnosticGate、gate-block-helper.ts hardcoded isUnsafeHighConfidence=false、PD未自动产生pain/candidate。",
       "source": "code_review",
       "severity": "severe",
-      "painId": "manual_1780787633659_8im5rx7t",
+      "painId": "pain_r1",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "provenanceReason": "No host trace available",
       "evidence": [],
       "traceAvailability": "unavailable_with_reason",
       "traceUnavailableDetail": {
@@ -40,7 +40,7 @@
       {
         "ts": "2026-06-07T03:20:08.154Z",
         "role": "assistant",
-        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-1780787633659-8im5rx7t\",\n  \"summary\": \"PR #838 tests passed despite missing production path side effects and unreachable high-confidence upgrade logic due to hardcoded unsafe flags and incorrect triage fallbacks.\",\n  \"rootCause\": \"Design: The diagnostic gate architecture relies on hardcoded safety flags (isUnsafeHighConfidence=false) and lacks dynamic evaluation, causing the test suite to bypass critical production path validations.\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-DYN-GATE-01\",\n      \"title\": \"Dynamic Safety Evaluation\",\n      \"rationale\": \"Safety gates must be evaluated dynamically based on runtime context rather than hardcoded to false, ensuring production-side effects are never silently bypassed.\"\n    },\n    {\n      \"principleId\": \"PRINC-TRIAGE-ALIGN-02\",\n      \"title\": \"Triage-Production Alignment\",\n      \"rationale\": \"Agent triage logic must not fall back to legacy diagnostic gates when a safe path is identified, preventing test suites from diverging from actual production behavior.\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"diagnosis_manual_1780787633659_8im5rx7t\",\n      \"note\": \"Owner report indicates llm.ts triage incorrectly calls evaluatePainDiagnosticGate post-triage, and gate-block-helper.ts hardcodes isUnsafeHighConfidence=false.\"\n    },\n    {\n      \"sourceRef\": \"diagnosis_manual_1780787633659_8im5rx7t\",\n      \"note\": \"Pain Diagnostic (PD) failed to auto-generate pain/candidate, indicating missing trigger logic for production path side effects.\"\n    },\n    {\n      \"sourceRef\": \"run_diagnosis_manual_1780787633659_8im5rx7t_1\",\n      \"note\": \"CLI-submitted pain lacks host trace, but owner reason explicitly cites hardcoded flags and triage fallback as direct causes of test green-light failure.\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"Block PRs containing hardcoded unsafe confidence flags or incorrect post-triage gate calls.\",\n      \"triggerPattern\": \"(isUnsafeHighConfidence\\\\s*=\\\\s*false|evaluatePainDiagnosticGate)\",\n      \"action\": \"Fail CI check and require dynamic evaluation logic before merge.\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"Enforce dynamic safety gate evaluation and production-path mirroring in all diagnostic workflows.\",\n      \"abstractedPrinciple\": \"Safety gates must dynamically evaluate runtime context; test suites must explicitly validate production path side effects to prevent silent bypasses.\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"Refactor gate-block-helper.ts to compute isUnsafeHighConfidence based on actual diagnostic state, and update llm.ts triage to short-circuit evaluatePainDiagnosticGate when safe.\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"Instruct the agent to verify that all diagnostic gates use dynamic evaluation and that test coverage explicitly includes production path side effects before marking PR as green.\"\n    }\n  ],\n  \"confidence\": 0.82,\n  \"ambiguityNotes\": [\n    \"CLI-submitted pain lacks authenticated host session provenance; conversation trace unavailable.\",\n    \"Evidence relies solely on owner-reported code review findings without runtime execution logs.\"\n  ]\n}"
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-pain_r1\",\n  \"summary\": \"PR #838 tests passed despite missing production path side effects and unreachable high-confidence upgrade logic due to hardcoded unsafe flags and incorrect triage fallbacks.\",\n  \"rootCause\": \"Design: The diagnostic gate architecture relies on hardcoded safety flags (isUnsafeHighConfidence=false) and lacks dynamic evaluation, causing the test suite to bypass critical production path validations.\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-DYN-GATE-01\",\n      \"title\": \"Dynamic Safety Evaluation\",\n      \"rationale\": \"Safety gates must be evaluated dynamically based on runtime context rather than hardcoded to false, ensuring production-side effects are never silently bypassed.\"\n    },\n    {\n      \"principleId\": \"PRINC-TRIAGE-ALIGN-02\",\n      \"title\": \"Triage-Production Alignment\",\n      \"rationale\": \"Agent triage logic must not fall back to legacy diagnostic gates when a safe path is identified, preventing test suites from diverging from actual production behavior.\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"task_r1\",\n      \"note\": \"Owner report indicates llm.ts triage incorrectly calls evaluatePainDiagnosticGate post-triage, and gate-block-helper.ts hardcodes isUnsafeHighConfidence=false.\"\n    },\n    {\n      \"sourceRef\": \"task_r1\",\n      \"note\": \"Pain Diagnostic (PD) failed to auto-generate pain/candidate, indicating missing trigger logic for production path side effects.\"\n    },\n    {\n      \"sourceRef\": \"run_task_r1_1\",\n      \"note\": \"CLI-submitted pain lacks host trace, but owner reason explicitly cites hardcoded flags and triage fallback as direct causes of test green-light failure.\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"Block PRs containing hardcoded unsafe confidence flags or incorrect post-triage gate calls.\",\n      \"triggerPattern\": \"(isUnsafeHighConfidence//s*=//s*false|evaluatePainDiagnosticGate)\",\n      \"action\": \"Fail CI check and require dynamic evaluation logic before merge.\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"Enforce dynamic safety gate evaluation and production-path mirroring in all diagnostic workflows.\",\n      \"abstractedPrinciple\": \"Safety gates must dynamically evaluate runtime context; test suites must explicitly validate production path side effects to prevent silent bypasses.\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"Refactor gate-block-helper.ts to compute isUnsafeHighConfidence based on actual diagnostic state, and update llm.ts triage to short-circuit evaluatePainDiagnosticGate when safe.\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"Instruct the agent to verify that all diagnostic gates use dynamic evaluation and that test coverage explicitly includes production path side effects before marking PR as green.\"\n    }\n  ],\n  \"confidence\": 0.82,\n  \"ambiguityNotes\": [\n    \"CLI-submitted pain lacks authenticated host session provenance; conversation trace unavailable.\",\n    \"Evidence relies solely on owner-reported code review findings without runtime execution logs.\"\n  ]\n}"
       },
       {
         "ts": "2026-06-06T23:13:53.671Z",
@@ -53,13 +53,13 @@
     ],
     "ambiguityNotes": [
       "3 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ],
     "fullTrace": null
   },
   "monolithOutput": {
     "valid": true,
-    "diagnosisId": "diag-manual-1780787633659-8im5rx7t",
+    "diagnosisId": "diag-pain_r1",
     "summary": "PR #838 tests passed despite missing production path side effects and unreachable high-confidence upgrade logic due to hardcoded unsafe flags and incorrect triage fallbacks.",
     "rootCause": "Design: The diagnostic gate architecture relies on hardcoded safety flags (isUnsafeHighConfidence=false) and lacks dynamic evaluation, causing the test suite to bypass critical production path validations.",
     "violatedPrinciples": [
@@ -76,15 +76,15 @@
     ],
     "evidence": [
       {
-        "sourceRef": "diagnosis_manual_1780787633659_8im5rx7t",
+        "sourceRef": "task_r1",
         "note": "Owner report indicates llm.ts triage incorrectly calls evaluatePainDiagnosticGate post-triage, and gate-block-helper.ts hardcodes isUnsafeHighConfidence=false."
       },
       {
-        "sourceRef": "diagnosis_manual_1780787633659_8im5rx7t",
+        "sourceRef": "task_r1",
         "note": "Pain Diagnostic (PD) failed to auto-generate pain/candidate, indicating missing trigger logic for production path side effects."
       },
       {
-        "sourceRef": "run_diagnosis_manual_1780787633659_8im5rx7t_1",
+        "sourceRef": "run_task_r1_1",
         "note": "CLI-submitted pain lacks host trace, but owner reason explicitly cites hardcoded flags and triage fallback as direct causes of test green-light failure."
       }
     ],
@@ -92,7 +92,7 @@
       {
         "kind": "rule",
         "description": "Block PRs containing hardcoded unsafe confidence flags or incorrect post-triage gate calls.",
-        "triggerPattern": "(isUnsafeHighConfidence\\s*=\\s*false|evaluatePainDiagnosticGate)",
+        "triggerPattern": "(isUnsafeHighConfidence/s*=/s*false|evaluatePainDiagnosticGate)",
         "action": "Fail CI check and require dynamic evaluation logic before merge."
       },
       {

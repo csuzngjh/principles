@@ -1,6 +1,6 @@
 {
   "id": "R9",
-  "painId": "manual_1781085229910_wu2k60wq",
+  "painId": "pain_r9",
   "source": "manual",
   "description": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
   "coveredAxioms": [
@@ -9,23 +9,23 @@
   ],
   "isSynthetic": false,
   "contextPayload": {
-    "contextId": "c2c40667-7db1-4af7-bf2b-b4b679d1d3e2",
-    "contextHash": "177a355f95b1aa7923e6a60927e798738b3a309ddbdb69e5c0eecf817dc3e722",
-    "taskId": "diagnosis_manual_1781085229910_wu2k60wq",
-    "workspaceDir": "D:\\.openclaw\\workspace",
+    "contextId": "ctx_r9",
+    "contextHash": "hash_r9",
+    "taskId": "task_r9",
+    "workspaceDir": "/workspace",
     "sourceRefs": [
-      "diagnosis_manual_1781085229910_wu2k60wq",
-      "run_diagnosis_manual_1781085229910_wu2k60wq_1",
+      "task_r9",
+      "run_task_r9_1",
       "owner_reported:cli"
     ],
     "diagnosisTarget": {
       "reasonSummary": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
       "source": "manual",
       "severity": "severe",
-      "painId": "manual_1781085229910_wu2k60wq",
+      "painId": "pain_r9",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "provenanceReason": "No host trace available",
       "evidence": [
         {
           "sourceRef": "owner_reported:cli",
@@ -46,18 +46,18 @@
       {
         "ts": "2026-06-10T09:56:01.479Z",
         "role": "assistant",
-        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-1781085229910-wu2k60wq\",\n  \"summary\": \"PRI-363 重构后 stage 枚举值变更未同步更新下游测试与诊断触发逻辑，导致 pain.test.ts 断言失败及 auto-entry-gate TC2 中 emitSync 调用断裂。\",\n  \"rootCause\": \"Design: 状态机重构缺乏行为等价性验证机制与契约保护，导致枚举值变更后下游消费逻辑未同步适配。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-BEHAVIORAL-EQUIVALENCE-01\",\n      \"title\": \"重构行为等价性原则\",\n      \"rationale\": \"底层状态枚举变更破坏了既定的行为等价承诺，且缺乏自动化回归测试拦截，导致集成测试场景出现静默失败。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"CLI 提交报告指出 stage 枚举从 gate_admitted/triage_evidence_only 改为 trigger_rejected，直接导致测试断言失败与诊断触发失效。\"\n    },\n    {\n      \"sourceRef\": \"diagnosis_manual_1781085229910_wu2k60wq\",\n      \"note\": \"上下文摘要明确记录 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"principle\",\n      \"description\": \"重构状态机或枚举值时，必须保持行为等价性承诺。任何底层状态变更都需通过契约测试验证下游消费逻辑的兼容性。\",\n      \"abstractedPrinciple\": \"状态重构须遵循行为等价原则，强制契约验证防回归。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"拦截涉及 stage 枚举或状态机核心逻辑的变更，强制运行行为回归测试。\",\n      \"triggerPattern\": \"stage.*enum|trigger_rejected|gate_admitted\",\n      \"action\": \"阻断合并请求并执行 pain.test.ts 与 auto-entry-gate 集成测试套件，验证 emitSync 调用链路完整性。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"更新 pain.test.ts 断言以适配新的 trigger_rejected 阶段；修复 auto-entry-gate TC2 的诊断触发映射逻辑，确保重复失败时正确路由并调用 emitSync。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"执行重构任务时，优先识别受影响的下游测试与集成场景，主动补充行为等价性验证用例，避免静默回归。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"CLI-submitted pain has no authenticated host session provenance; fullTrace unavailable\",\n    \"2 entries have empty text content\"\n  ]\n}"
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-pain_r9\",\n  \"summary\": \"PRI-363 重构后 stage 枚举值变更未同步更新下游测试与诊断触发逻辑，导致 pain.test.ts 断言失败及 auto-entry-gate TC2 中 emitSync 调用断裂。\",\n  \"rootCause\": \"Design: 状态机重构缺乏行为等价性验证机制与契约保护，导致枚举值变更后下游消费逻辑未同步适配。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-BEHAVIORAL-EQUIVALENCE-01\",\n      \"title\": \"重构行为等价性原则\",\n      \"rationale\": \"底层状态枚举变更破坏了既定的行为等价承诺，且缺乏自动化回归测试拦截，导致集成测试场景出现静默失败。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"CLI 提交报告指出 stage 枚举从 gate_admitted/triage_evidence_only 改为 trigger_rejected，直接导致测试断言失败与诊断触发失效。\"\n    },\n    {\n      \"sourceRef\": \"task_r9\",\n      \"note\": \"上下文摘要明确记录 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"principle\",\n      \"description\": \"重构状态机或枚举值时，必须保持行为等价性承诺。任何底层状态变更都需通过契约测试验证下游消费逻辑的兼容性。\",\n      \"abstractedPrinciple\": \"状态重构须遵循行为等价原则，强制契约验证防回归。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"拦截涉及 stage 枚举或状态机核心逻辑的变更，强制运行行为回归测试。\",\n      \"triggerPattern\": \"stage.*enum|trigger_rejected|gate_admitted\",\n      \"action\": \"阻断合并请求并执行 pain.test.ts 与 auto-entry-gate 集成测试套件，验证 emitSync 调用链路完整性。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"更新 pain.test.ts 断言以适配新的 trigger_rejected 阶段；修复 auto-entry-gate TC2 的诊断触发映射逻辑，确保重复失败时正确路由并调用 emitSync。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"执行重构任务时，优先识别受影响的下游测试与集成场景，主动补充行为等价性验证用例，避免静默回归。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"CLI-submitted pain has no authenticated host session provenance; fullTrace unavailable\",\n    \"2 entries have empty text content\"\n  ]\n}"
       }
     ],
     "ambiguityNotes": [
       "1 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ],
     "fullTrace": null
   },
   "monolithOutput": {
     "valid": true,
-    "diagnosisId": "diag-manual-1781085229910-wu2k60wq",
+    "diagnosisId": "diag-pain_r9",
     "summary": "PRI-363 重构后 stage 枚举值变更未同步更新下游测试与诊断触发逻辑，导致 pain.test.ts 断言失败及 auto-entry-gate TC2 中 emitSync 调用断裂。",
     "rootCause": "Design: 状态机重构缺乏行为等价性验证机制与契约保护，导致枚举值变更后下游消费逻辑未同步适配。",
     "violatedPrinciples": [
@@ -73,7 +73,7 @@
         "note": "CLI 提交报告指出 stage 枚举从 gate_admitted/triage_evidence_only 改为 trigger_rejected，直接导致测试断言失败与诊断触发失效。"
       },
       {
-        "sourceRef": "diagnosis_manual_1781085229910_wu2k60wq",
+        "sourceRef": "task_r9",
         "note": "上下文摘要明确记录 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用。"
       }
     ],

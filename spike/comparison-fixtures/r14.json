@@ -1,6 +1,6 @@
 {
   "id": "R14",
-  "painId": "manual_1781061594600_fodpyr1g",
+  "painId": "pain_r14",
   "source": "manual",
   "description": "PEAT-5强模型GLM-5.1测试-双模型对比验证",
   "coveredAxioms": [
@@ -8,23 +8,23 @@
   ],
   "isSynthetic": false,
   "contextPayload": {
-    "contextId": "0eeded71-4d41-4384-bb8c-8510d0a0c1d5",
-    "contextHash": "2794be73969a0957d4bfbc8624d799e25832b39f07a286f5271668e8d1ab5ed3",
-    "taskId": "diagnosis_manual_1781061594600_fodpyr1g",
-    "workspaceDir": "D:\\.openclaw\\workspace",
+    "contextId": "ctx_r14",
+    "contextHash": "hash_r14",
+    "taskId": "task_r14",
+    "workspaceDir": "/workspace",
     "sourceRefs": [
-      "diagnosis_manual_1781061594600_fodpyr1g",
-      "run_diagnosis_manual_1781061594600_fodpyr1g_1",
+      "task_r14",
+      "run_task_r14_1",
       "owner_reported:cli"
     ],
     "diagnosisTarget": {
       "reasonSummary": "PEAT-5强模型GLM-5.1测试-双模型对比验证",
       "source": "manual",
       "severity": "moderate",
-      "painId": "manual_1781061594600_fodpyr1g",
+      "painId": "pain_r14",
       "sessionIdHint": "cli",
       "provenance": "owner_reported_no_host_trace",
-      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "provenanceReason": "No host trace available",
       "evidence": [
         {
           "sourceRef": "owner_reported:cli",
@@ -45,12 +45,12 @@
       {
         "ts": "2026-06-10T03:27:57.568Z",
         "role": "assistant",
-        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-cli-no-context-001\",\n  \"summary\": \"CLI手动提交的诊断请求缺乏已认证的宿主会话上下文，导致无法绑定对话轨迹与行为证据，当前信息不足以进行有效的根因分析。\",\n  \"rootCause\": \"Design: 系统架构未对CLI手动提交渠道实施强制的会话凭证校验与上下文绑定机制，导致无轨迹数据流入诊断管道。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"ctx-binding-01\",\n      \"title\": \"诊断请求上下文完整性原则\",\n      \"rationale\": \"所有进入诊断管道的请求必须携带可追溯的会话标识与行为轨迹，否则无法区分系统噪声与真实代理行为缺陷。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"No session context available\"\n    },\n    {\n      \"sourceRef\": \"ambiguityNotes\",\n      \"note\": \"2 entries have empty text content; owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"defer\",\n      \"description\": \"当前证据仅包含元数据提示，缺乏代理实际行为或用户交互上下文。建议在OpenClaw会话内重新触发诊断以收集完整轨迹后再行分析。\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立诊断入口的上下文完整性校验规范，确保所有手动或CLI提交的请求必须绑定有效会话ID与基础行为快照。\",\n      \"abstractedPrinciple\": \"诊断入口强制上下文绑定：无会话凭证与行为轨迹的请求应被拦截或降级处理，保障分析数据的有效性。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"在CLI诊断提交接口增加前置校验规则，检测是否携带有效sessionId或hostTrace标识。\",\n      \"triggerPattern\": \"source=manual && provenance=owner_reported_no_host_trace\",\n      \"action\": \"拦截请求并返回明确提示：要求用户在OpenClaw会话内重新提交以绑定上下文轨迹\"\n    }\n  ],\n  \"confidence\": 0.25,\n  \"ambiguityNotes\": [\n    \"CLI手动提交缺乏宿主会话凭证，fullTrace不可用\",\n    \"conversationWindow文本内容为空，无法提取代理行为特征\"\n  ]\n}"
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-cli-no-context-001\",\n  \"summary\": \"CLI手动提交的诊断请求缺乏已认证的宿主会话上下文，导致无法绑定对话轨迹与行为证据，当前信息不足以进行有效的根因分析。\",\n  \"rootCause\": \"Design: 系统架构未对CLI手动提交渠道实施强制的会话凭证校验与上下文绑定机制，导致无轨迹数据流入诊断管道。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"ctx-binding-01\",\n      \"title\": \"诊断请求上下文完整性原则\",\n      \"rationale\": \"所有进入诊断管道的请求必须携带可追溯的会话标识与行为轨迹，否则无法区分系统噪声与真实代理行为缺陷。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"No session context available\"\n    },\n    {\n      \"sourceRef\": \"ambiguityNotes\",\n      \"note\": \"2 entries have empty text content; owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"defer\",\n      \"description\": \"当前证据仅包含元数据提示，缺乏代理实际行为或用户交互上下文。建议在OpenClaw会话内重新触发诊断以收集完整轨迹后再行分析。\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立诊断入口的上下文完整性校验规范，确保所有手动或CLI提交的请求必须绑定有效会话ID与基础行为快照。\",\n      \"abstractedPrinciple\": \"诊断入口强制上下文绑定：无会话凭证与行为轨迹的请求应被拦截或降级处理，保障分析数据的有效性。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"在CLI诊断提交接口增加前置校验规则，检测是否携带有效sessionId或hostTrace标识。\",\n      \"triggerPattern\": \"source=manual && provenance=owner_reported_no_host_trace\",\n      \"action\": \"拦截请求并返回明确提示：要求用户在OpenClaw会话内重新提交以绑定上下文轨迹\"\n    }\n  ],\n  \"confidence\": 0.25,\n  \"ambiguityNotes\": [\n    \"CLI手动提交缺乏宿主会话凭证，fullTrace不可用\",\n    \"conversationWindow文本内容为空，无法提取代理行为特征\"\n  ]\n}"
       }
     ],
     "ambiguityNotes": [
       "1 entries have empty text content",
-      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
     ],
     "fullTrace": null
   },
@@ -73,7 +73,7 @@
       },
       {
         "sourceRef": "ambiguityNotes",
-        "note": "2 entries have empty text content; owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+        "note": "2 entries have empty text content; owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
       }
     ],
     "recommendations": [

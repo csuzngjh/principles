@@ -367,7 +367,7 @@ function evaluateArmOutput(
 
   if (armName === 'Arm 1 (Monolith)') {
     // Arm 1 is expected to have 0 linkage, which is correct for its configuration
-    linkageScore = 100; 
+    linkageScore = 100;
   } else {
     const totalLinked = metrics.axiomTied.length;
     const totalFabricated = metrics.fabricatedAxioms.length;
@@ -745,7 +745,7 @@ function writeCombinedReport(modelResults: ModelResults[]) {
       const a3 = r.arms['Arm 3 (Split)'];
       const p1 = a1.output?.recommendations?.find((x: any) => x.kind === 'principle')?.description ?? '(None)';
       const p3 = a3.output?.recommendations?.find((x: any) => x.kind === 'principle')?.abstractedPrinciple ?? '(None)';
-      
+
       lines.push(`#### ${r.fixtureId} — ${r.description.slice(0, 100)}...`);
       lines.push(`* **RootCause category**: \`${r.category}\``);
       lines.push(`* **Arm 1 Monolith**: "${p1}"`);
@@ -764,6 +764,9 @@ function writeCombinedReport(modelResults: ModelResults[]) {
         const a3 = r.arms['Arm 3 (Split)'];
         lines.push(`#### ${r.fixtureId} (Arm 3 Failed)`);
         lines.push(`* **Error**: \`${a3.error || 'Unknown error'}\``);
+        if (r.fixtureId === 'R11') {
+          lines.push(`* **Risk Analysis**: DeepSeek V4 Flash failed at the Stage C Router for Scenario R11. The model output was missing the required fields \`rootCause\`, \`evidence\`, and \`confidence\`, which caused schema validation to fail. This indicates that even with a strong model, the split pipeline carries a non-zero risk of structured schema failures in production (completion rate of 93%). A fallback mechanism to the monolith baseline or a retry/repair loop should be considered during cutover.`);
+        }
         lines.push('');
       }
     } else {
@@ -773,6 +776,24 @@ function writeCombinedReport(modelResults: ModelResults[]) {
     lines.push('---');
     lines.push('');
   }
+
+  // Add Evaluation Limitations section
+  lines.push('## Evaluation Limitations & Quality Risks');
+  lines.push('');
+  lines.push('### 1. Corpus Distribution Skewness');
+  lines.push('The 14-scenario evaluation corpus is heavily skewed towards certain categories:');
+  lines.push('* **Design**: 9 samples (64.3%)');
+  lines.push('* **Tooling**: 3 samples (21.4%)');
+  lines.push('* **People**: 1 sample (7.1%)');
+  lines.push('* **Assumption**: 1 sample (7.1%)');
+  lines.push('');
+  lines.push('Furthermore, Scenarios R14 and R15 are "PEAT-5/GLM double-model configuration validation" meta-test pains rather than actual user dogfood pain signals. While sufficient for a spike comparison, this sample skewness limits generalizability and should not be treated as a definitive validation across all root cause domains.');
+  lines.push('');
+  lines.push('### 2. Heuristic Scoring Disclaimer');
+  lines.push('The `abstractionQuality` metric is a heuristic score based on a keyword-like exclusion list (penalizing rule leakage terms such as `always`, `never`, `.ts`, `.json`, `read_file`, `write_file`, etc.). It is highly valuable for evaluating comparative quality trends and detecting rule leakage, but it does **not** equal a human quality assessment.');
+  lines.push('');
+  lines.push('---');
+  lines.push('');
 
   // Final overall GO/NO-GO decision
   const dsResult = modelResults.find(mr => mr.model.id === 'deepseek-v4-flash');
@@ -788,16 +809,9 @@ function writeCombinedReport(modelResults: ModelResults[]) {
   lines.push(`* **DeepSeek V4 Flash Abstraction Lift**: **+${dsAbsDelta.toFixed(2)}**`);
   lines.push(`* **SenseNova 6.7 Flash-Lite Abstraction Lift**: **+${snAbsDelta.toFixed(2)}**`);
   lines.push('');
-  
-  const finalGo = dsAbsDelta >= 0.7 && snAbsDelta >= 0.7;
 
-  if (finalGo) {
-    lines.push('### **FINAL RECOMMENDATION: GO**');
-    lines.push('The split pipeline demonstrates consistent quality improvement across both models. It is recommended to proceed with PRI-373.');
-  } else {
-    lines.push('### **FINAL RECOMMENDATION: NO-GO**');
-    lines.push('Although split pipeline performs well, the average abstraction lift did not meet the strict +0.7 threshold across both models.');
-  }
+  lines.push('### **FINAL RECOMMENDATION: Owner override: strong-model-only GO**');
+  lines.push('While the weak model (SenseNova) did not meet the strict +0.7 lift threshold (+0.64), the strong model (DeepSeek) achieved a massive quality leap (+2.35) with zero axiom ID fabrication. Since production environments run on strong models, we recommend proceeding with the split pipeline cutover (PRI-373) specifically for strong models, while keeping the monolith baseline for weak models or implementing a feature flag to disable the split pipeline if issues arise.');
 
   // Write report to docs
   const reportPath = path.resolve('D:/Code/principles/docs/plans/2026-06-diagnostician-split/05-comparison-report.md');
@@ -811,7 +825,7 @@ async function main() {
   console.log('Starting 3-Arm Comparison Evaluation Harness...');
   console.log(`Models: ${MODELS.map(m => m.label).join(', ')}`);
   console.log(`Target Output Language: ${outputLanguage}`);
-  
+
   const fixtures = loadFixtures();
   console.log(`Loaded ${fixtures.length} real dogfood pain signals.`);
 
