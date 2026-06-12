@@ -155,7 +155,7 @@ describe('pd pain record async mode (PRI-369)', () => {
     const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join(' ');
     expect(allOutput).toContain('[SUBMITTED]');
     expect(allOutput).toContain('submitted');
-    expect(allOutput).toContain('pd task show');
+    expect(allOutput).toContain('Next action: pd diagnose run --task-id');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
