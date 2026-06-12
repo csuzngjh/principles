@@ -432,7 +432,6 @@ export async function createPainSignalBridge(
 
   // PRI-370 (INF-6) / PRI-372 (T-G): Gate on diagnostician_split_pipeline flag
   let useSplitPipeline = false;
-  let bridgeHolder: { bridge: PainSignalBridge | null } | null = null;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
     const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
@@ -458,9 +457,8 @@ export async function createPainSignalBridge(
     const { DefaultDiagRootCauseValidator } = await import('./diagnostician/diag-rootcause-output.js');
     const { DefaultDiagDistillerValidator } = await import('./diagnostician/diag-distiller-output.js');
 
-    // Create onDiagnosisComplete callback — will be wired after bridge construction
-    // The callback needs the bridge reference, so we use an indirection via a mutable holder
-    bridgeHolder = { bridge: null };
+    // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
+    // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
 
     const rootCauseRunner = new DiagRootCauseRunner(
       { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
@@ -471,16 +469,7 @@ export async function createPainSignalBridge(
       { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
     );
     const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer, onDiagnosisComplete: async (taskId, output) => {
-        if (bridgeHolder?.bridge) {
-          await bridgeHolder.bridge.onDiagnosisComplete({
-            taskId,
-            diagnosticianOutput: output,
-            painId: taskId.replace(/^diag_router-/, '').replace(/^diagnosis_/, ''),
-            provenance: 'automatic_hook',
-          });
-        }
-      } },
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
       { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
     );
 
@@ -527,11 +516,6 @@ export async function createPainSignalBridge(
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
   });
-
-  // Wire bridge reference for split pipeline's onDiagnosisComplete callback
-  if (bridgeHolder) {
-    bridgeHolder.bridge = bridge;
-  }
 
   bridgeCache.set(cacheKey, bridge);
   return bridge;

@@ -3,14 +3,12 @@
  *
  * Tests:
  *   1. lease → succeed → commits candidates via DiagnosticianCommitter
- *   2. succeedTask triggers onDiagnosisComplete callback
- *   3. dependency not succeeded → blocked
- *   4. requires both rootcause and distiller predecessor dependencies
- *   5. commit failure → task fails, no markTaskSucceeded
- *   6. onDiagnosisComplete callback failure does not prevent task success
- *   7. invalid output fails TypeBox schema validation
- *   8. wrong taskKind fails closed
- *   9. currentPhase transitions
+ *   2. dependency not succeeded → blocked
+ *   3. requires both rootcause and distiller predecessor dependencies
+ *   4. commit failure → task fails, no markTaskSucceeded
+ *   5. invalid output fails TypeBox schema validation
+ *   6. wrong taskKind fails closed
+ *   7. currentPhase transitions
  *
  * ERR entries considered:
  *   - ERR-001: Treat parsed JSON / LLM output as unknown
@@ -19,7 +17,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { DiagRouterRunner } from '../diag-router-runner.js';
-import type { DiagRouterRunnerDeps, OnDiagnosisComplete } from '../diag-router-runner.js';
+import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
@@ -150,7 +148,6 @@ function createMockDeps(overrides: Partial<DiagRouterRunnerDeps> = {}): DiagRout
   _stateManager: Record<string, ReturnType<typeof vi.fn>>;
   _runtimeAdapter: Record<string, ReturnType<typeof vi.fn>>;
   _committer: Record<string, ReturnType<typeof vi.fn>>;
-  _onDiagnosisComplete: ReturnType<typeof vi.fn>;
 } {
   const taskRecord = makeRouterTask();
   const output = makeRouterOutput();
@@ -195,8 +192,6 @@ function createMockDeps(overrides: Partial<DiagRouterRunnerDeps> = {}): DiagRout
     commit: vi.fn().mockResolvedValue(commitResult),
   };
 
-  const _onDiagnosisComplete = vi.fn().mockResolvedValue(undefined);
-
   const mockEventEmitter = {
     emitTelemetry: vi.fn(),
     on: vi.fn(),
@@ -213,11 +208,9 @@ function createMockDeps(overrides: Partial<DiagRouterRunnerDeps> = {}): DiagRout
     eventEmitter: mockEventEmitter as unknown as StoreEventEmitter,
     artifactStore,
     committer: _committer as unknown as DiagnosticianCommitter,
-    onDiagnosisComplete: _onDiagnosisComplete as OnDiagnosisComplete,
     _stateManager,
     _runtimeAdapter,
     _committer,
-    _onDiagnosisComplete,
     ...overrides,
   };
 }
@@ -251,29 +244,6 @@ describe('DiagRouterRunner V-slice', () => {
     expect(deps._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       ROUTER_TASK_ID,
       expect.stringContaining('commit://'),
-    );
-  });
-
-  it('succeedTask triggers onDiagnosisComplete callback', async () => {
-    const deps = createMockDeps();
-    const runner = new DiagRouterRunner(deps, {
-      owner: OWNER,
-      runtimeKind: RUNTIME_KIND,
-      pollIntervalMs: 10,
-      timeoutMs: 1000,
-    });
-
-    const result = await runner.run(ROUTER_TASK_ID);
-
-    expect(result.status).toBe('succeeded');
-
-    // Verify onDiagnosisComplete callback was called with (taskId, output)
-    expect(deps._onDiagnosisComplete).toHaveBeenCalledWith(
-      ROUTER_TASK_ID,
-      expect.objectContaining({
-        valid: true,
-        diagnosisId: 'diag-001',
-      }),
     );
   });
 
@@ -362,25 +332,6 @@ describe('DiagRouterRunner V-slice', () => {
 
     expect(result.status).toBe('failed');
     expect(deps._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
-  });
-
-  it('onDiagnosisComplete callback failure does not prevent task success', async () => {
-    const deps = createMockDeps();
-    // Make the callback throw
-    deps._onDiagnosisComplete.mockRejectedValue(new Error('Callback failed'));
-
-    const runner = new DiagRouterRunner(deps, {
-      owner: OWNER,
-      runtimeKind: RUNTIME_KIND,
-      pollIntervalMs: 10,
-      timeoutMs: 1000,
-    });
-
-    const result = await runner.run(ROUTER_TASK_ID);
-
-    // Task should still succeed even if callback fails
-    expect(result.status).toBe('succeeded');
-    expect(deps._stateManager.markTaskSucceeded).toHaveBeenCalled();
   });
 
   it('invalid output fails TypeBox schema validation', async () => {

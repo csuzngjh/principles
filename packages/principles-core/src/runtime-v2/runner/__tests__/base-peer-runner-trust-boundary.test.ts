@@ -128,7 +128,7 @@ class TestPeerRunner extends BasePeerRunner<TestContext, TestOutput> {
       : !('data' in (untrustedOutput as Record<string, unknown>));
   }
 
-  protected override checkLineageIntegrity(_taskId: string, output: TestOutput): void {
+  protected override checkLineageIntegrity(_taskId: string, output: TestOutput, _context: TestContext): void {
     this.checkLineageCallCount++;
     // At this point, output SHOULD be typed (validation passed)
     this.checkLineageReceivedUnknown = typeof output !== 'object' || output === null;

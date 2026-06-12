@@ -153,6 +153,18 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
       errors.push(`rootCauseCategory must be one of People|Design|Assumption|Tooling, got ${String(record.rootCauseCategory)}`);
     }
 
+    // ── Step 4b: rootCause prefix must match rootCauseCategory ──────────────
+    if (
+      typeof record.rootCause === 'string'
+      && typeof record.rootCauseCategory === 'string'
+      && VALID_ROOT_CAUSE_CATEGORIES.has(record.rootCauseCategory)
+    ) {
+      const expectedPrefix = `${record.rootCauseCategory}: `;
+      if (!record.rootCause.startsWith(expectedPrefix)) {
+        errors.push(`rootCause must start with "${expectedPrefix}" (matching rootCauseCategory "${record.rootCauseCategory}"), got: "${record.rootCause.slice(0, 40)}${record.rootCause.length > 40 ? '...' : ''}"`);
+      }
+    }
+
     // ── Step 5: causalChain entry-level checks ──────────────────────────────
     if (Array.isArray(record.causalChain)) {
       for (let i = 0; i < record.causalChain.length; i++) {

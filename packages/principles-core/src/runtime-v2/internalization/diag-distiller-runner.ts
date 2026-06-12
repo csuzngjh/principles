@@ -80,8 +80,6 @@ export interface DiagDistillerRunnerOptions extends PeerRunnerOptions {
 export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, DiagDistillerOutputV1> {
   private readonly validator: DiagDistillerValidator;
   private readonly effectiveConfig?: EffectivePdConfig;
-  /** Current run context — set in buildContext(), read in checkLineageIntegrity(), reset in run(). */
-  private currentContext: DiagDistillerContext | null = null;
 
   constructor(deps: DiagDistillerRunnerDeps, options: DiagDistillerRunnerOptions) {
     super(deps, options, {
@@ -95,12 +93,6 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
-
-  /** Reset per-run state before delegating to base class run(). */
-  override async run(taskId: string): Promise<PeerRunnerResult<DiagDistillerOutputV1>> {
-    this.currentContext = null;
-    return super.run(taskId);
-  }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
@@ -170,7 +162,6 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
 
     const context: DiagDistillerContext = { contextHash, contextRefs, rootCauseArtifactId, rootCauseOutput, coreGrounding };
-    this.currentContext = context;
     return context;
   }
 
@@ -331,14 +322,14 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
    * matches the context's rootCauseArtifactId. If they mismatch, the LLM
    * fabricated or altered the lineage field — emit telemetry and throw.
    */
-  protected override checkLineageIntegrity(taskId: string, output: DiagDistillerOutputV1): void {
-    if (this.currentContext?.rootCauseArtifactId && output.sourceRootCauseArtifactId !== this.currentContext.rootCauseArtifactId) {
+  protected override checkLineageIntegrity(taskId: string, output: DiagDistillerOutputV1, context: DiagDistillerContext): void {
+    if (context.rootCauseArtifactId && output.sourceRootCauseArtifactId !== context.rootCauseArtifactId) {
       this.emitEvent('lineage_integrity_violation', taskId, {
-        expectedArtifactId: this.currentContext.rootCauseArtifactId,
+        expectedArtifactId: context.rootCauseArtifactId,
         actualArtifactId: output.sourceRootCauseArtifactId,
         field: 'sourceRootCauseArtifactId',
       });
-      throw new PDRuntimeError('output_invalid', `sourceRootCauseArtifactId mismatch: expected ${this.currentContext.rootCauseArtifactId}, got ${output.sourceRootCauseArtifactId}`);
+      throw new PDRuntimeError('output_invalid', `sourceRootCauseArtifactId mismatch: expected ${context.rootCauseArtifactId}, got ${output.sourceRootCauseArtifactId}`);
     }
   }
 

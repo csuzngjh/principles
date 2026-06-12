@@ -137,10 +137,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   /**
    * Check lineage strip contract. Called AFTER validation passes.
-   * Receives validated output — safe to treat as TOutput.
+   * Receives validated output and context — safe to treat as TOutput / TContext.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected checkLineageIntegrity(_taskId: string, _output: TOutput): void {
+  protected checkLineageIntegrity(_taskId: string, _output: TOutput, _context: TContext): void {
     // default no-op
   }
 
@@ -251,8 +251,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       this.emitEvent('output_validated', taskId, {});
 
-      // 8b. Check lineage integrity (receives validated output)
-      this.checkLineageIntegrity(taskId, output);
+      // 8b. Check lineage integrity (receives validated output and context)
+      this.checkLineageIntegrity(taskId, output, context);
 
       // 8c. Emit success telemetry (receives validated output)
       this.emitSuccessTelemetry(taskId, output, context);

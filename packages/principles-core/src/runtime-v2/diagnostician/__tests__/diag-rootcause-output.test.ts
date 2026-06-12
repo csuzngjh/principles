@@ -46,4 +46,19 @@ describe('DiagRootCauseOutputV1Schema', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
+
+  it('rejects rootCause without category prefix', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, rootCause: 'Poor error handling', rootCauseCategory: 'Design' };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('must start with "Design: "'))).toBe(true);
+  });
+
+  it('accepts rootCause with matching category prefix', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, rootCause: 'People: Insufficient review process', rootCauseCategory: 'People' };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(true);
+  });
 });

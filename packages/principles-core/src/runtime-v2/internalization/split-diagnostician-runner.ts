@@ -8,8 +8,8 @@
  * Internally creates sub-tasks for each stage and runs them sequentially:
  *   Stage A (diag_rootcause) → Stage B (diag_distiller) → Stage C (diag_router)
  *
- * After Stage C succeeds, the onDiagnosisComplete callback is invoked by
- * the DiagRouterRunner (not by this wrapper).
+ * After Stage C succeeds, onDiagnosisComplete is invoked by the bridge
+ * (PainSignalBridge.onPainDetected), not by this wrapper or the router.
  *
  * Key constraints:
  *   - Each stage gets its own task with the correct taskKind
@@ -100,6 +100,9 @@ export class SplitDiagnosticianRunner {
 
     const resultA = await this.rootCauseRunner.run(stageATaskId);
     if (resultA.status !== 'succeeded') {
+      try {
+        await this.stateManager.markTaskFailed(parentTaskId, resultA.errorCategory ?? 'execution_failed');
+      } catch { /* best-effort — return failure regardless */ }
       return {
         status: resultA.status,
         taskId: parentTaskId,
@@ -131,6 +134,9 @@ export class SplitDiagnosticianRunner {
 
     const resultB = await this.distillerRunner.run(stageBTaskId);
     if (resultB.status !== 'succeeded') {
+      try {
+        await this.stateManager.markTaskFailed(parentTaskId, resultB.errorCategory ?? 'execution_failed');
+      } catch { /* best-effort — return failure regardless */ }
       return {
         status: resultB.status,
         taskId: parentTaskId,
@@ -162,6 +168,9 @@ export class SplitDiagnosticianRunner {
 
     const resultC = await this.routerRunner.run(stageCTaskId);
     if (resultC.status !== 'succeeded') {
+      try {
+        await this.stateManager.markTaskFailed(parentTaskId, resultC.errorCategory ?? 'execution_failed');
+      } catch { /* best-effort — return failure regardless */ }
       return {
         status: resultC.status,
         taskId: parentTaskId,
@@ -172,8 +181,13 @@ export class SplitDiagnosticianRunner {
     }
 
     // ── Pipeline complete ──────────────────────────────────────────────────
-    // The router runner's onDiagnosisComplete callback was already called
-    // inside its succeedTask(). Return a RunnerResult with the router output.
+    // onDiagnosisComplete is invoked by the bridge (PainSignalBridge.onPainDetected)
+    // after this run() returns succeeded — not by the router or this wrapper (P0-1 fix).
+    // P0-2 fix: mark parent task as succeeded so it reaches terminal state.
+    const parentResultRef = resultC.resultRef ?? `split-pipeline://${parentTaskId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(parentTaskId, parentResultRef);
+    } catch { /* best-effort — return success regardless */ }
     return {
       status: 'succeeded',
       taskId: parentTaskId,

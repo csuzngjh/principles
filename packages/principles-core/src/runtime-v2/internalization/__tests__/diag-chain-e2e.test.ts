@@ -34,7 +34,6 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-proto
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
 import type { LedgerAdapter } from '../../candidate-intake.js';
-import type { PainSignalBridge } from '../../pain-signal-bridge.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -351,7 +350,6 @@ describe('Diag chain e2e', () => {
     };
 
     const committer = { commit: vi.fn().mockResolvedValue(commitResult) };
-    const onDiagnosisComplete = vi.fn().mockResolvedValue(undefined);
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
@@ -359,7 +357,6 @@ describe('Diag chain e2e', () => {
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       committer: committer as unknown as DiagnosticianCommitter,
-      onDiagnosisComplete,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -377,12 +374,6 @@ describe('Diag chain e2e', () => {
       expect.objectContaining({
         taskId: ROUTER_TASK_ID,
       }),
-    );
-
-    // Verify onDiagnosisComplete callback was called
-    expect(onDiagnosisComplete).toHaveBeenCalledWith(
-      ROUTER_TASK_ID,
-      expect.objectContaining({ valid: true }),
     );
   });
 
@@ -618,7 +609,6 @@ describe('Diag chain e2e', () => {
       candidateCount: 1,
     };
     const committer = { commit: vi.fn().mockResolvedValue(commitResult) };
-    const onDiagnosisComplete = vi.fn().mockResolvedValue(undefined);
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
@@ -626,7 +616,6 @@ describe('Diag chain e2e', () => {
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       committer: committer as unknown as DiagnosticianCommitter,
-      onDiagnosisComplete,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -674,9 +663,6 @@ describe('Diag chain e2e', () => {
     // Verify committer was called (by Stage C)
     expect(committer.commit).toHaveBeenCalled();
 
-    // Verify onDiagnosisComplete callback was called (by Stage C)
-    expect(onDiagnosisComplete).toHaveBeenCalled();
-
     // Verify artifacts were written for all 3 stages
     const artifactsA = await artifactStore.listBySourceTaskId(STAGE_A_TASK_ID);
     const artifactsB = await artifactStore.listBySourceTaskId(STAGE_B_TASK_ID);
@@ -721,10 +707,9 @@ describe('Diag chain e2e', () => {
     );
 
     const committer = { commit: vi.fn() };
-    const onDiagnosisComplete = vi.fn();
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer as unknown as DiagnosticianCommitter, onDiagnosisComplete },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer as unknown as DiagnosticianCommitter },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -806,7 +791,6 @@ describe('Diag chain e2e', () => {
       return { payload: makeRouterOutput() };
     });
 
-    const bridgeHolder: { bridge: PainSignalBridge | null } = { bridge: null };
     const rootCauseRunner = new DiagRootCauseRunnerImpl(
       {
         stateManager,
@@ -835,16 +819,6 @@ describe('Diag chain e2e', () => {
         eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
-        onDiagnosisComplete: async (taskId, output) => {
-          if (bridgeHolder.bridge) {
-            await bridgeHolder.bridge.onDiagnosisComplete({
-              taskId,
-              diagnosticianOutput: output,
-              painId: taskId.replace(/^diag_router-/, '').replace(/^diagnosis_/, ''),
-              provenance: 'automatic_hook',
-            });
-          }
-        },
       },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
@@ -874,7 +848,6 @@ describe('Diag chain e2e', () => {
       autoIntakeEnabled: true,
       workspaceDir: tmpDir,
     });
-    bridgeHolder.bridge = bridge;
 
     const painSignal = {
       painId: 'pain-e2e-boundary',

@@ -19,7 +19,8 @@
  *   - No plugin-layer imports (core is infrastructure-agnostic)
  *   - Uses RuntimeStateManager for all state operations
  *   - Commits via DiagnosticianCommitter (reuses existing committer)
- *   - Calls onDiagnosisComplete callback after commit (INF-9)
+ * Does NOT call onDiagnosisComplete — that is the bridge's responsibility
+ * (PainSignalBridge.onPainDetected) to avoid double invocation (P0-1 fix).
  *   - Router MUST NOT re-derive root causes or invent new principles
  *
  * @see PRI-372
@@ -61,21 +62,17 @@ interface DiagRouterContext {
   readonly distillerOutput: DiagDistillerOutputV1;
 }
 
-// ── Callback type ────────────────────────────────────────────────────────────
-
-/**
- * Bridge callback invoked after successful diagnosis commit (INF-9).
- *
- * Extracted from the monolithic DiagnosticianRunner to decouple the
- * router stage from host-layer side effects.
- */
-export type OnDiagnosisComplete = (taskId: string, output: DiagnosticianOutputV1) => Promise<void>;
+// ── Callback type (removed — P0-1 fix) ─────────────────────────────────────
+// OnDiagnosisComplete was previously defined here and wired via the factory's
+// bridgeHolder indirection. The bridge (PainSignalBridge.onPainDetected) is
+// now the sole invocation point for onDiagnosisComplete, eliminating the
+// double-call bug where both Router.succeedTask() and Bridge.onPainDetected()
+// each called it once.
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
 
 export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
   readonly committer: DiagnosticianCommitter;
-  readonly onDiagnosisComplete: OnDiagnosisComplete;
 }
 
 // ── DiagRouterRunner ─────────────────────────────────────────────────────────
@@ -92,7 +89,6 @@ export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
  */
 export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, DiagnosticianOutputV1> {
   private readonly committer: DiagnosticianCommitter;
-  private readonly onDiagnosisComplete: OnDiagnosisComplete;
   private readonly defaultValidator: DefaultDiagnosticianValidator;
 
   constructor(deps: DiagRouterRunnerDeps, options: PeerRunnerOptions) {
@@ -103,7 +99,6 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       resultRefPrefix: 'diag-router',
     });
     this.committer = deps.committer;
-    this.onDiagnosisComplete = deps.onDiagnosisComplete;
     this.defaultValidator = new DefaultDiagnosticianValidator();
   }
 
@@ -331,19 +326,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw stateErr;
     }
 
-    // 4. Call onDiagnosisComplete — the extracted bridge method (INF-9)
-    try {
-      await this.onDiagnosisComplete(taskId, output);
-    } catch (callbackErr) {
-      // Bridge callback failure must not prevent the task from being marked succeeded.
-      // Emit telemetry for observability but do not throw.
-      this.emitEvent('diagnosis_complete_callback_failed', taskId, {
-        taskId,
-        errorMessage: callbackErr instanceof Error ? callbackErr.message : String(callbackErr),
-      });
-    }
-
-    // 5. Emit diag_router_task_succeeded telemetry
+    // 4. Emit diag_router_task_succeeded telemetry
     const recommendationKinds = output.recommendations.map((r) => r.kind);
     const kindHistogram: Record<string, number> = {};
     for (const kind of recommendationKinds) {
