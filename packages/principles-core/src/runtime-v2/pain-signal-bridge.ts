@@ -1,8 +1,7 @@
 import type { RuntimeStateManager, CandidateRecord } from './store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import type { CandidateIntakeService } from './candidate-intake-service.js';
 import type { LedgerAdapter } from './candidate-intake.js';
-import type { RunnerResultStatus } from './runner/runner-result.js';
+import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
@@ -12,6 +11,14 @@ import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND
 import type { IntakeToInternalizationBridgeInput } from './internalization/intake-to-internalization-bridge.js';
 
 export type { PainProvenance };
+
+/**
+ * Minimal interface for a diagnostician runner.
+ * Both DiagnosticianRunner and SplitDiagnosticianRunner satisfy this.
+ */
+export interface DiagnosticianRunnerLike {
+  run(taskId: string): Promise<RunnerResult>;
+}
 
 /** PRI-359: Increased from 4 to 8 to accommodate failed tool_calls evidence */
 export const MAX_EVIDENCE_ENTRIES = 8;
@@ -54,7 +61,7 @@ export interface PainSignalBridgeResult {
 
 export interface PainSignalBridgeOptions {
   stateManager: RuntimeStateManager;
-  runner: DiagnosticianRunner;
+  runner: DiagnosticianRunnerLike;
   intakeService: CandidateIntakeService;
   ledgerAdapter: LedgerAdapter;
   owner?: string;
@@ -116,7 +123,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
 
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
-  private readonly runner: DiagnosticianRunner;
+  private readonly runner: DiagnosticianRunnerLike;
   private readonly intakeService: CandidateIntakeService;
   private readonly ledgerAdapter: LedgerAdapter;
   private readonly owner: string;

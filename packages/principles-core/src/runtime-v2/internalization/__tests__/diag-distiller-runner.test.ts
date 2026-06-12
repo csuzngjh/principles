@@ -517,7 +517,9 @@ describe('DiagDistillerRunner V-slice', () => {
     );
     expect(violationEvent).toBeDefined();
     // Verify the event payload contains both artifact IDs
-    const payload = (violationEvent[0] as Record<string, unknown>).payload as Record<string, unknown>;
+    // Type narrowing: after toBeDefined, violationEvent is guaranteed to exist
+    const foundEvent = violationEvent as unknown[];
+    const payload = (foundEvent[0] as Record<string, unknown>).payload as Record<string, unknown>;
     expect(payload.expectedArtifactId).toBe(ROOTCAUSE_ARTIFACT_ID);
     expect(payload.actualArtifactId).toBe('pi-art-FABRICATED-WRONG-ID');
   });

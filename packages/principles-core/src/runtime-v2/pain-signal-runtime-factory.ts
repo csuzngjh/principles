@@ -14,6 +14,7 @@
 import { PainSignalBridge } from './pain-signal-bridge.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
+import { SplitDiagnosticianRunner } from './internalization/split-diagnostician-runner.js';
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
@@ -426,6 +427,8 @@ export async function createPainSignalBridge(
   }
 
   // PRI-370 (INF-6) / PRI-372 (T-G): Gate on diagnostician_split_pipeline flag
+  let useSplitPipeline = false;
+  let bridgeHolder: { bridge: PainSignalBridge | null } | null = null;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
     const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
@@ -438,52 +441,75 @@ export async function createPainSignalBridge(
       );
     }
 
-    if (splitPipeline) {
-      // Instantiate 3 split runners for orchestrator pickup
-      // The bridge still uses the monolith for now — split execution path
-      // will be wired when the orchestrator can handle diag stage task kinds
-      const { DiagRootCauseRunner } = await import('./internalization/diag-rootcause-runner.js');
-      const { DiagDistillerRunner } = await import('./internalization/diag-distiller-runner.js');
-      const { DiagRouterRunner } = await import('./internalization/diag-router-runner.js');
-      const { DefaultDiagRootCauseValidator } = await import('./diagnostician/diag-rootcause-output.js');
-      const { DefaultDiagDistillerValidator } = await import('./diagnostician/diag-distiller-output.js');
-
-      // Runners are instantiated but not yet wired into the bridge
-      // (void silences unused variable lint until orchestrator integration)
-      void new DiagRootCauseRunner(
-        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
-        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-      );
-      void new DiagDistillerRunner(
-        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-      );
-      void new DiagRouterRunner(
-        { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer, onDiagnosisComplete: async (_taskId, _output) => { /* placeholder — bridge reference set after construction */ } },
-        { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
-      );
-    }
+    useSplitPipeline = splitPipeline && asyncCli;
   }
 
-  const runner = new DiagnosticianRunner(
-    {
+  let runner: DiagnosticianRunner | SplitDiagnosticianRunner;
+
+  if (useSplitPipeline) {
+    // PRI-372: Wire split runners into the bridge via SplitDiagnosticianRunner
+    const { DiagRootCauseRunner } = await import('./internalization/diag-rootcause-runner.js');
+    const { DiagDistillerRunner } = await import('./internalization/diag-distiller-runner.js');
+    const { DiagRouterRunner } = await import('./internalization/diag-router-runner.js');
+    const { DefaultDiagRootCauseValidator } = await import('./diagnostician/diag-rootcause-output.js');
+    const { DefaultDiagDistillerValidator } = await import('./diagnostician/diag-distiller-output.js');
+
+    // Create onDiagnosisComplete callback — will be wired after bridge construction
+    // The callback needs the bridge reference, so we use an indirection via a mutable holder
+    bridgeHolder = { bridge: null };
+
+    const rootCauseRunner = new DiagRootCauseRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    );
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    );
+    const routerRunner = new DiagRouterRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer, onDiagnosisComplete: async (taskId, output) => {
+        if (bridgeHolder?.bridge) {
+          await bridgeHolder.bridge.onDiagnosisComplete({
+            taskId,
+            diagnosticianOutput: output,
+            painId: taskId.replace(/^diagnosis_/, '').replace(/^diag_router-/, ''),
+            provenance: 'automatic_hook',
+          });
+        }
+      } },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
+    );
+
+    runner = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
       stateManager,
-      contextAssembler,
-      runtimeAdapter,
-      eventEmitter: storeEmitter,
-      validator,
       committer,
-    },
-    {
-      owner: opts.owner ?? 'pain-signal-bridge',
-      runtimeKind: runtimeConfig.runtimeKind,
-      pollIntervalMs: 5000,
-      timeoutMs: runtimeConfig.timeoutMs,
-      agentId: runtimeConfig.agentId,
-      outputLanguage,
-      effectiveConfig: opts.effectiveConfig,
-    },
-  );
+      onDiagnosisComplete: async () => { /* handled by routerRunner's callback */ },
+      perStageTimeoutMs: runtimeConfig.timeoutMs ?? 300_000,
+    });
+  } else {
+    runner = new DiagnosticianRunner(
+      {
+        stateManager,
+        contextAssembler,
+        runtimeAdapter,
+        eventEmitter: storeEmitter,
+        validator,
+        committer,
+      },
+      {
+        owner: opts.owner ?? 'pain-signal-bridge',
+        runtimeKind: runtimeConfig.runtimeKind,
+        pollIntervalMs: 5000,
+        timeoutMs: runtimeConfig.timeoutMs,
+        agentId: runtimeConfig.agentId,
+        outputLanguage,
+        effectiveConfig: opts.effectiveConfig,
+      },
+    );
+  }
 
   const intakeService = new CandidateIntakeService({
     stateManager,
@@ -498,6 +524,11 @@ export async function createPainSignalBridge(
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
   });
+
+  // Wire bridge reference for split pipeline's onDiagnosisComplete callback
+  if (bridgeHolder) {
+    bridgeHolder.bridge = bridge;
+  }
 
   bridgeCache.set(cacheKey, bridge);
   return bridge;

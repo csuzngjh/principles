@@ -264,6 +264,8 @@ export type {
   PainSignalBridgeResult,
   /** @deprecated Internal — use PainToPrincipleOutput.status */
   PainSignalBridgeStatus,
+  /** Minimal interface for a diagnostician runner (monolith or split pipeline). */
+  DiagnosticianRunnerLike,
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */

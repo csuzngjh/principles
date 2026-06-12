@@ -7,7 +7,7 @@ const mockRootCauseOutput: DiagRootCauseOutputV1 = {
   diagnosisId: 'diag-001',
   taskId: 'task-001',
   summary: 'Test summary',
-  causalChain: [{ why: 1, statement: 'First why', evidenceRefs: [] }],
+  causalChain: [{ why: 1, statement: 'First why', evidenceRefs: ['ref1'] }],
   rootCause: 'Design: Poor error handling',
   rootCauseCategory: 'Design',
   evidence: [{ sourceRef: 'src1', note: 'note1' }],

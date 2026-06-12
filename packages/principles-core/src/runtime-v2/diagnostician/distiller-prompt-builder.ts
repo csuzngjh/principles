@@ -167,6 +167,8 @@ a rule is a boundary condition.
 Examples:
 - GOOD (abstract principle): "Prefer understanding the existing structure before modifying it"
 - BAD (rule-like): "Always run grep before editing files" or "Never use as casts"
+- GOOD (intent over technique): "Explicitly stated user constraints take precedence over inferred optimal paths"
+- BAD (technique-specific): "Do not create project files in /tmp directory"
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after

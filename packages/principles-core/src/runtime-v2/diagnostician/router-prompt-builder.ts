@@ -160,18 +160,22 @@ Based on the distiller's abstracted principle and the root cause from Stage A, d
 - If a prompt directive can enforce the behavior → kind: "prompt"
 - If insufficient confidence or the finding is too specific/single-instance → kind: "defer"
 
+Default: "principle" is the preferred kind. Only use "defer" for noise signals or genuinely insufficient evidence.
+
 OUTPUT REQUIREMENTS:
-Your output MUST match DiagnosticianOutputV1Schema. Key fields:
+Your output MUST match DiagnosticianOutputV1Schema. You only need to generate these fields:
 
 - violatedPrinciples: array of violated principles, derived from Stage A's rootCause + Stage B's grounding
   - title: short descriptive name for the violated principle (REQUIRED, 3-8 words)
   - principleId: if the principle corresponds to a core axiom (e.g. T-01 through T-10), include the axiom ID; otherwise omit
   - rationale: explanation of why this principle was violated (REQUIRED)
 - recommendations: one or more entries with the appropriate kind from the routing rules above
-- rootCause: MUST match Stage A's rootCause exactly — do not rephrase or re-derive
-- evidence: MUST match Stage A's evidence entries
-- confidence: MUST match Stage B's confidence value
 - summary: a concise summary combining Stage A's root cause and Stage B's abstracted principle
+
+The following fields are auto-filled by the system from upstream artifacts — do NOT generate them:
+- rootCause (copied from Stage A)
+- evidence (copied from Stage A)
+- confidence (copied from Stage B)
 
 CONSTRAINT:
 You MUST NOT re-derive the root cause or invent new principles. Route what the distiller produced.

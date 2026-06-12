@@ -10,7 +10,7 @@ describe('DiagRootCauseOutputV1Schema', () => {
     summary: 'Test summary',
     causalChain: [
       { why: 1, statement: 'First why', evidenceRefs: ['ref1'] },
-      { why: 2, statement: 'Second why', evidenceRefs: [] },
+      { why: 2, statement: 'Second why', evidenceRefs: ['ref1'] },
     ],
     rootCause: 'Design: Poor error handling',
     rootCauseCategory: 'Design',
