@@ -103,7 +103,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
   { id: 'painEvidenceAdmission', category: 'quiet', enabled: false, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1)' },
-  { id: 'diagnostician_async_cli', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background' },
+  { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
 
@@ -179,12 +179,6 @@ export function computeEffectiveFlags(
     if (!Object.hasOwn(flags, key)) {
       warnings.push(`flag '${key}': unknown flag ignored`);
     }
-  }
-
-  // Invalid flag combination: split requires async_cli
-  if (flags.diagnostician_split_pipeline?.enabled && !flags.diagnostician_async_cli?.enabled) {
-    warnings.push('flag \'diagnostician_split_pipeline\': invalid combo — split pipeline requires diagnostician_async_cli to be enabled');
-    flags.diagnostician_split_pipeline = { ...flags.diagnostician_split_pipeline, enabled: false };
   }
 
   return {
