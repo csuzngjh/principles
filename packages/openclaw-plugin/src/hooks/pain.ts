@@ -128,9 +128,10 @@ function createPainId(sessionId: string): string {
   return `pain_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
 }
 
-// ── Source Classification (re-exported from helpers) ────────────────────────
+// ── Source Classification ────────────────────────────────────────────────────
 
-export { classifyToolFailureSource } from './after-tool-call-helpers.js';
+// PRI-360 S1: classifyToolFailureSource is removed; source mapping is now unified
+// through resolveSourceKind in raw-observation-adapter.ts
 
 // ── Main Hook ───────────────────────────────────────────────────────────────
 
