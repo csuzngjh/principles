@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from '../diagnostician-runner.js';
+import type { DiagnosticianRunnerLike } from '../../pain-signal-bridge.js';
 import type { RunnerResult } from '../runner-result.js';
 import type { TaskRecord } from '../../task-status.js';
 import { run, status } from '../../cli/diagnose.js';
@@ -43,7 +43,7 @@ describe('cli/diagnose', () => {
     };
 
     const runMock = vi.fn<(taskId: string) => Promise<RunnerResult>>().mockResolvedValue(mockRunnerResult);
-    const mockRunner = { run: runMock } as unknown as DiagnosticianRunner;
+    const mockRunner = { run: runMock } as unknown as DiagnosticianRunnerLike;
 
     const mockStateManager = {} as unknown as RuntimeStateManager;
 
@@ -68,7 +68,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(taskRecord);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const _mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunnerLike;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 
@@ -92,7 +92,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(null);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const _mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunnerLike;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 

@@ -22,18 +22,15 @@ import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../diag-rootcause-runner.js';
-import type { ContextAssembler } from '../../store/context/context-assembler.js';
 import { DiagDistillerRunner } from '../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../diag-distiller-runner.js';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
-import type { DiagnosticianCommitter, CommitResult } from '../../store/commit/diagnostician-committer.js';
+import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
-import type { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
-import type { LedgerAdapter } from '../../candidate-intake.js';
+import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -283,11 +280,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -316,7 +313,7 @@ describe('Diag chain e2e', () => {
 
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -353,10 +350,10 @@ describe('Diag chain e2e', () => {
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -379,18 +376,18 @@ describe('Diag chain e2e', () => {
 
   // ── Flag matrix guard tests ────────────────────────────────────────────────
 
-  it('flag off: monolith runs unchanged (DiagnosticianRunner, not split runners)', () => {
-    // When split_pipeline flag is off (default), the factory creates the
-    // monolith DiagnosticianRunner, not the split runners.
+  it('flag off: splitPipeline flag can be disabled via config', () => {
     const effectiveConfig: EffectivePdConfig = {
       config: {
         version: 1,
-        features: {},
+        features: {
+          diagnostician_split_pipeline: { category: 'quiet', enabled: false },
+        },
         runtimeProfiles: {},
         internalAgents: makeDefaultInternalAgents(),
         ui: { diagnostics: { mode: 'simple' } },
       },
-      source: 'defaults',
+      source: 'user_config',
       warnings: [],
     };
 
@@ -406,7 +403,7 @@ describe('Diag chain e2e', () => {
         version: 1,
         features: {
           diagnostician_split_pipeline: { category: 'quiet', enabled: true },
-          // diagnostician_async_cli NOT enabled (default off)
+          diagnostician_async_cli: { category: 'quiet', enabled: false },
         },
         runtimeProfiles: {},
         internalAgents: makeDefaultInternalAgents(),
@@ -572,11 +569,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -589,7 +586,7 @@ describe('Diag chain e2e', () => {
     // Stage B runner
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
@@ -612,10 +609,10 @@ describe('Diag chain e2e', () => {
 
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -631,7 +628,7 @@ describe('Diag chain e2e', () => {
       distillerRunner,
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     });
 
     // Run the split pipeline
@@ -687,11 +684,11 @@ describe('Diag chain e2e', () => {
 
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
-      runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter,
+      runtimeAdapter: runtimeAdapter,
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      contextAssembler: contextAssembler as unknown as ContextAssembler,
+      contextAssembler: contextAssembler,
     };
 
     const rootCauseRunner = new DiagRootCauseRunner(rootCauseDeps, {
@@ -702,14 +699,14 @@ describe('Diag chain e2e', () => {
     });
 
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) } },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
     const committer = { commit: vi.fn() };
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter as unknown as PDRuntimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer as unknown as DiagnosticianCommitter },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -718,7 +715,7 @@ describe('Diag chain e2e', () => {
       distillerRunner,
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
-      committer: committer as unknown as DiagnosticianCommitter,
+      committer: committer,
     });
 
     const result = await splitRunner.run(PARENT_TASK_ID);
@@ -754,130 +751,131 @@ describe('Diag chain e2e', () => {
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-split-e2e-boundary-'));
     const stateManager = new RuntimeStateManager({ workspaceDir: tmpDir });
-    await stateManager.initialize();
+    try {
+      await stateManager.initialize();
 
-    const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
-    const trajectoryTurnReader = {
-      listUserTurnsForSession: vi.fn().mockReturnValue([]),
-      listAssistantTurns: vi.fn().mockReturnValue([]),
-    };
-    const contextAssembler = new SqliteContextAssembler(
-      stateManager.taskStore,
-      new SqliteHistoryQuery(stateManager.connection),
-      stateManager.runStore,
-      { trajectoryTurnReader },
-    );
+      const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
+      const trajectoryTurnReader = {
+        listUserTurnsForSession: vi.fn().mockReturnValue([]),
+        listAssistantTurns: vi.fn().mockReturnValue([]),
+      };
+      const contextAssembler = new SqliteContextAssembler(
+        stateManager.taskStore,
+        new SqliteHistoryQuery(stateManager.connection),
+        stateManager.runStore,
+        { trajectoryTurnReader },
+      );
 
-    const runtimeAdapter = makeMockRuntimeAdapter();
-    let runCount = 0;
-    runtimeAdapter.startRun.mockImplementation(async () => {
-      runCount++;
-      return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
-    });
-    runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
-      return { status: 'succeeded', runId: handle.runId };
-    });
-    let fetchCallCount = 0;
-    runtimeAdapter.fetchOutput.mockImplementation(async () => {
-      fetchCallCount++;
-      if (fetchCallCount === 1) {
-        return { payload: makeRootCauseOutput() };
-      }
-      if (fetchCallCount === 2) {
-        const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
-        const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
-        return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
-      }
-      return { payload: makeRouterOutput() };
-    });
+      const runtimeAdapter = makeMockRuntimeAdapter();
+      let runCount = 0;
+      runtimeAdapter.startRun.mockImplementation(async () => {
+        runCount++;
+        return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+      });
+      runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
+        return { status: 'succeeded', runId: handle.runId };
+      });
+      let fetchCallCount = 0;
+      runtimeAdapter.fetchOutput.mockImplementation(async () => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return { payload: makeRootCauseOutput() };
+        }
+        if (fetchCallCount === 2) {
+          const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
+          const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
+          return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
+        }
+        return { payload: makeRouterOutput() };
+      });
 
-    const rootCauseRunner = new DiagRootCauseRunnerImpl(
-      {
+      const rootCauseRunner = new DiagRootCauseRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+          contextAssembler,
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+      const distillerRunner = new DiagDistillerRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+      const routerRunner = new DiagRouterRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          committer,
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+
+      const splitRunner = new SplitDiagnosticianRunnerImpl({
+        rootCauseRunner,
+        distillerRunner,
+        routerRunner,
         stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
-        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-        contextAssembler,
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
-    const distillerRunner = new DiagDistillerRunnerImpl(
-      {
-        stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
-        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
-    const routerRunner = new DiagRouterRunnerImpl(
-      {
-        stateManager,
-        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
         committer,
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
+      });
 
-    const splitRunner = new SplitDiagnosticianRunnerImpl({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-    });
+      const ledgerAdapter = {
+        writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
+        existsForCandidate: vi.fn().mockReturnValue(null),
+      };
+      const intakeService = new CandidateIntakeService({
+        stateManager,
+        ledgerAdapter: ledgerAdapter,
+      });
 
-    const ledgerAdapter = {
-      writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
-      existsForCandidate: vi.fn().mockReturnValue(null),
-    };
-    const intakeService = new CandidateIntakeService({
-      stateManager,
-      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
-    });
+      const bridge = new PainSignalBridge({
+        stateManager,
+        runner: splitRunner,
+        intakeService,
+        ledgerAdapter: ledgerAdapter,
+        autoIntakeEnabled: true,
+        workspaceDir: tmpDir,
+      });
 
-    const bridge = new PainSignalBridge({
-      stateManager,
-      runner: splitRunner,
-      intakeService,
-      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
-      autoIntakeEnabled: true,
-      workspaceDir: tmpDir,
-    });
+      const painSignal = {
+        painId: 'pain-e2e-boundary',
+        painType: 'tool_failure' as const,
+        source: 'test-source',
+        reason: 'test reason',
+        evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
+      };
 
-    const painSignal = {
-      painId: 'pain-e2e-boundary',
-      painType: 'tool_failure' as const,
-      source: 'test-source',
-      reason: 'test reason',
-      evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
-    };
+      const bridgeResult = await bridge.onPainDetected(painSignal);
 
-    const bridgeResult = await bridge.onPainDetected(painSignal);
+      // Verify successful e2e execution status
+      expect(bridgeResult.status).toBe('succeeded');
+      expect(bridgeResult.painId).toBe(painSignal.painId);
+      expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
 
-    // Verify successful e2e execution status
-    expect(bridgeResult.status).toBe('succeeded');
-    expect(bridgeResult.painId).toBe(painSignal.painId);
-    expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
+      // Verify all 3 sub-tasks were written to the state.db
+      const parentTaskId = `diagnosis_${painSignal.painId}`;
+      const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
+      const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
+      const taskC = await stateManager.getTask(`diag_router-${parentTaskId}`);
+      expect(taskA?.status).toBe('succeeded');
+      expect(taskB?.status).toBe('succeeded');
+      expect(taskC?.status).toBe('succeeded');
 
-    // Verify all 3 sub-tasks were written to the state.db
-    const parentTaskId = `diagnosis_${painSignal.painId}`;
-    const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
-    const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
-    const taskC = await stateManager.getTask(`diag_router-${parentTaskId}`);
-    expect(taskA?.status).toBe('succeeded');
-    expect(taskB?.status).toBe('succeeded');
-    expect(taskC?.status).toBe('succeeded');
-
-    // Verify candidate was committed and then registered to the ledger!
-    expect(ledgerAdapter.writeProbationEntry).toHaveBeenCalled();
-
-    // Clean up
-    stateManager.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      // Verify candidate was committed and then registered to the ledger!
+      expect(ledgerAdapter.writeProbationEntry).toHaveBeenCalled();
+    } finally {
+      stateManager.close();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

@@ -8,7 +8,7 @@
  * No Run history.
  */
 import type { RuntimeStateManager, CandidateRecord } from '../store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from '../runner/diagnostician-runner.js';
+import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { TaskRecord } from '../task-status.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
@@ -69,7 +69,7 @@ export interface DiagnoseRunOptions {
   /** Initialized RuntimeStateManager instance. */
   stateManager: RuntimeStateManager;
   /** DiagnosticianRunner instance (already configured with deps). */
-  runner: DiagnosticianRunner;
+  runner: DiagnosticianRunnerLike;
 }
 
 /** Options for the status() CLI function. */

@@ -51,7 +51,7 @@ import { SqliteContextAssembler } from '../store/context/sqlite-context-assemble
 import { PainSignalBridge } from '../pain-signal-bridge.js';
 import { DiagnosticianContextPayloadSchema } from '../context-payload.js';
 import type { TrajectoryTurnReader, TrajectoryUserTurn, TrajectoryAssistantTurn } from '../store/context/trajectory-turn-reader.js';
-import type { DiagnosticianRunner } from '../runner/diagnostician-runner.js';
+import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 
@@ -80,7 +80,7 @@ function createMockTrajectoryTurnReader(
 }
 
 /** Create a mock DiagnosticianRunner that returns a basic "succeeded" result. */
-function createMockRunner(): DiagnosticianRunner {
+function createMockRunner(): DiagnosticianRunnerLike {
   return {
     run: vi.fn().mockResolvedValue({
       status: 'succeeded',
@@ -97,7 +97,7 @@ function createMockRunner(): DiagnosticianRunner {
         confidence: 0.9,
       },
     }),
-  } as unknown as DiagnosticianRunner;
+  };
 }
 
 /** Create a mock CandidateIntakeService. */
@@ -132,7 +132,7 @@ interface GoldenFixture {
   assembler: SqliteContextAssembler;
   bridge: PainSignalBridge;
   trajectoryTurnReader: TrajectoryTurnReader;
-  runner: DiagnosticianRunner;
+  runner: DiagnosticianRunnerLike;
 }
 
 async function createGoldenFixture(

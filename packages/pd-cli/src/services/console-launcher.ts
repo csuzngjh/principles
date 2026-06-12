@@ -56,7 +56,7 @@ const PORT_FALLBACK_LIMIT = 20; // try 3100..3119 before giving up
 
 /** Returns true if the host resolves to a loopback address. */
 export function isLoopbackHost(host: string): boolean {
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === '0:0:0:0:0:0:0:1' || host === '[0:0:0:0:0:0:0:1]') return true;
   // Reject any IPv4 host that doesn't start with 127.
   if (/^127\./.test(host)) return true;
   return false;

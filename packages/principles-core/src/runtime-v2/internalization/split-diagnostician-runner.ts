@@ -27,6 +27,10 @@ import type { DiagDistillerRunner } from './diag-distiller-runner.js';
 import type { DiagRouterRunner } from './diag-router-runner.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerResult } from '../runner/runner-result.js';
+import type { PeerRunnerResult } from '../runner/peer-runner-types.js';
+import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
+import type { DiagDistillerOutputV1 } from '../diagnostician/diag-distiller-output.js';
+import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
@@ -81,24 +85,44 @@ export class SplitDiagnosticianRunner {
     // ── Stage A: Root Cause ────────────────────────────────────────────────
     const stageATaskId = `diag_rootcause-${parentTaskId}`;
 
-    // Create Stage A task (no dependencies — entry point of the pipeline)
-    await this.stateManager.createTask({
-      taskId: stageATaskId,
-      taskKind: 'diag_rootcause',
-      inputRef: parentTaskId,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [],
-        channel: 'prompt',
-        timeoutMs: this.perStageTimeoutMs,
-        inputArtifactRefs: [],
-        outputArtifactRefs: [],
-      }),
-    });
+    let stageATask = await this.stateManager.getTask(stageATaskId);
+    if (!stageATask) {
+      await this.stateManager.createTask({
+        taskId: stageATaskId,
+        taskKind: 'diag_rootcause',
+        inputRef: parentTaskId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [],
+          channel: 'prompt',
+          timeoutMs: this.perStageTimeoutMs,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }),
+      });
+      stageATask = await this.stateManager.getTask(stageATaskId);
+    } else if (stageATask.status === 'failed' || stageATask.status === 'retry_wait') {
+      await this.stateManager.updateTask(stageATaskId, {
+        status: 'pending',
+        attemptCount: 0,
+        lastError: null,
+      });
+      stageATask = await this.stateManager.getTask(stageATaskId);
+    }
 
-    const resultA = await this.rootCauseRunner.run(stageATaskId);
+    let resultA: PeerRunnerResult<DiagRootCauseOutputV1>;
+    if (stageATask && stageATask.status === 'succeeded') {
+      resultA = {
+        status: 'succeeded',
+        taskId: stageATaskId,
+        attemptCount: stageATask.attemptCount,
+      };
+    } else {
+      resultA = await this.rootCauseRunner.run(stageATaskId);
+    }
+
     if (resultA.status !== 'succeeded') {
       try {
         await this.stateManager.markTaskFailed(parentTaskId, resultA.errorCategory ?? 'execution_failed');
@@ -115,24 +139,44 @@ export class SplitDiagnosticianRunner {
     // ── Stage B: Distiller ─────────────────────────────────────────────────
     const stageBTaskId = `diag_distiller-${parentTaskId}`;
 
-    // Create Stage B task (depends on Stage A)
-    await this.stateManager.createTask({
-      taskId: stageBTaskId,
-      taskKind: 'diag_distiller',
-      inputRef: parentTaskId,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [stageATaskId],
-        channel: 'prompt',
-        timeoutMs: this.perStageTimeoutMs,
-        inputArtifactRefs: [],
-        outputArtifactRefs: [],
-      }),
-    });
+    let stageBTask = await this.stateManager.getTask(stageBTaskId);
+    if (!stageBTask) {
+      await this.stateManager.createTask({
+        taskId: stageBTaskId,
+        taskKind: 'diag_distiller',
+        inputRef: parentTaskId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [stageATaskId],
+          channel: 'prompt',
+          timeoutMs: this.perStageTimeoutMs,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }),
+      });
+      stageBTask = await this.stateManager.getTask(stageBTaskId);
+    } else if (stageBTask.status === 'failed' || stageBTask.status === 'retry_wait') {
+      await this.stateManager.updateTask(stageBTaskId, {
+        status: 'pending',
+        attemptCount: 0,
+        lastError: null,
+      });
+      stageBTask = await this.stateManager.getTask(stageBTaskId);
+    }
 
-    const resultB = await this.distillerRunner.run(stageBTaskId);
+    let resultB: PeerRunnerResult<DiagDistillerOutputV1>;
+    if (stageBTask && stageBTask.status === 'succeeded') {
+      resultB = {
+        status: 'succeeded',
+        taskId: stageBTaskId,
+        attemptCount: stageBTask.attemptCount,
+      };
+    } else {
+      resultB = await this.distillerRunner.run(stageBTaskId);
+    }
+
     if (resultB.status !== 'succeeded') {
       try {
         await this.stateManager.markTaskFailed(parentTaskId, resultB.errorCategory ?? 'execution_failed');
@@ -149,24 +193,50 @@ export class SplitDiagnosticianRunner {
     // ── Stage C: Router ────────────────────────────────────────────────────
     const stageCTaskId = `diag_router-${parentTaskId}`;
 
-    // Create Stage C task (depends on both A and B)
-    await this.stateManager.createTask({
-      taskId: stageCTaskId,
-      taskKind: 'diag_router',
-      inputRef: parentTaskId,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [stageATaskId, stageBTaskId],
-        channel: 'prompt',
-        timeoutMs: this.perStageTimeoutMs,
-        inputArtifactRefs: [],
-        outputArtifactRefs: [],
-      }),
-    });
+    let stageCTask = await this.stateManager.getTask(stageCTaskId);
+    if (!stageCTask) {
+      await this.stateManager.createTask({
+        taskId: stageCTaskId,
+        taskKind: 'diag_router',
+        inputRef: parentTaskId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [stageATaskId, stageBTaskId],
+          channel: 'prompt',
+          timeoutMs: this.perStageTimeoutMs,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }),
+      });
+      stageCTask = await this.stateManager.getTask(stageCTaskId);
+    } else if (stageCTask.status === 'failed' || stageCTask.status === 'retry_wait') {
+      await this.stateManager.updateTask(stageCTaskId, {
+        status: 'pending',
+        attemptCount: 0,
+        lastError: null,
+      });
+      stageCTask = await this.stateManager.getTask(stageCTaskId);
+    }
 
-    const resultC = await this.routerRunner.run(stageCTaskId);
+    let resultC: PeerRunnerResult<DiagnosticianOutputV1>;
+    if (stageCTask && stageCTask.status === 'succeeded') {
+      const runs = await this.stateManager.getRunsByTask(stageCTaskId);
+      const succeededRun = runs.find((r) => r.executionStatus === 'succeeded');
+      const outputPayload = succeededRun?.outputPayload;
+      const output = outputPayload ? JSON.parse(outputPayload) : undefined;
+      resultC = {
+        status: 'succeeded',
+        taskId: stageCTaskId,
+        attemptCount: stageCTask.attemptCount,
+        contextHash: '',
+        output,
+      };
+    } else {
+      resultC = await this.routerRunner.run(stageCTaskId);
+    }
+
     if (resultC.status !== 'succeeded') {
       try {
         await this.stateManager.markTaskFailed(parentTaskId, resultC.errorCategory ?? 'execution_failed');
@@ -193,7 +263,7 @@ export class SplitDiagnosticianRunner {
       taskId: parentTaskId,
       contextHash: resultC.contextHash,
       output: resultC.output,
-      attemptCount: resultA.attemptCount + resultB.attemptCount + resultC.attemptCount,
+      attemptCount: (stageATask?.attemptCount ?? resultA.attemptCount) + (stageBTask?.attemptCount ?? resultB.attemptCount) + (stageCTask?.attemptCount ?? resultC.attemptCount),
     };
   }
 }

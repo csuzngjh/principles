@@ -14,7 +14,7 @@ disable-model-invocation: false
 - 工具失败先累计 GFI/摩擦。
 - 只有高价值 episode 才进入 Runtime V2：高 GFI、重复同类失败、严重语义痛苦、LLM paralysis，或明确手动 pain。
 - 通过门控的 `pain_detected` 进入 `PainSignalBridge`。
-- Bridge 调用 `DiagnosticianRunner`，提交 candidate，并 intake 到 ledger。
+- Bridge 调用 `SplitDiagnosticianRunner`，提交 candidate，并 intake 到 ledger。
 
 手动入口：
 ```bash

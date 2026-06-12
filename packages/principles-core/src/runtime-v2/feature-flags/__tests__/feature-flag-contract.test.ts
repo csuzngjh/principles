@@ -211,6 +211,9 @@ describe('computeEffectiveFlags', () => {
       // feedback_channel is a quiet flag that defaults on (MVP seed channel)
       if (flag.id === 'feedback_channel') continue;
       if (flag.id === 'correction_observer') continue;
+      if (flag.id === 'diagnostician_async_cli') continue;
+      if (flag.id === 'diagnostician_core_grounding') continue;
+      if (flag.id === 'diagnostician_split_pipeline') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -240,7 +243,7 @@ describe('computeEffectiveFlags', () => {
   it('disables diagnostician_split_pipeline when diagnostician_async_cli is not enabled', () => {
     const userFlags = {
       diagnostician_split_pipeline: { enabled: true },
-      // diagnostician_async_cli NOT enabled
+      diagnostician_async_cli: { enabled: false },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const splitFlag = result.flags.diagnostician_split_pipeline;
@@ -363,30 +366,30 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.description).toContain('PEAT-B1');
   });
 
-  it('PRI-369: diagnostician_async_cli is registered as quiet, default-off', () => {
+  it('PRI-369: diagnostician_async_cli is registered as quiet, default-on', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_async_cli');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('diagnostician_async_cli flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-06-11');
     expect(flag.description).toContain('Async pain-record CLI');
   });
 
-  it('PRI-369: diagnostician_core_grounding is registered as quiet, default-off', () => {
+  it('PRI-369: diagnostician_core_grounding is registered as quiet, default-on', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_core_grounding');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('diagnostician_core_grounding flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    expect(flag.enabled).toBe(true);
   });
 
-  it('PRI-369: diagnostician_split_pipeline is registered as quiet, default-off', () => {
+  it('PRI-369: diagnostician_split_pipeline is registered as quiet, default-on', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_split_pipeline');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('diagnostician_split_pipeline flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    expect(flag.enabled).toBe(true);
   });
 });
 
