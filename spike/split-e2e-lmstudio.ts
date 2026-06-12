@@ -285,7 +285,7 @@ async function runFixture(fixture: Fixture, signal?: AbortSignal): Promise<Fixtu
   const stageBStart = Date.now();
   let stageB: StageResult;
 
-  if (!stageA.output) {
+  if (!stageA.output || !stageA.schemaValid) {
     stageB = {
       stage: 'B-Distiller',
       passed: false,
@@ -293,7 +293,7 @@ async function runFixture(fixture: Fixture, signal?: AbortSignal): Promise<Fixtu
       jsonRepairNeeded: false,
       timeMs: 0,
       output: null,
-      errors: ['Skipped: Stage A produced no output'],
+      errors: ['Skipped: Stage A failed (no output or schema invalid)'],
     };
     console.log(`  [Stage B] SKIPPED (Stage A failed)`);
   } else {
@@ -342,7 +342,7 @@ async function runFixture(fixture: Fixture, signal?: AbortSignal): Promise<Fixtu
   const stageCStart = Date.now();
   let stageC: StageResult;
 
-  if (!stageA.output || !stageB.output) {
+  if (!stageA.output || !stageA.schemaValid || !stageB.output || !stageB.schemaValid) {
     stageC = {
       stage: 'C-Router',
       passed: false,
@@ -350,7 +350,7 @@ async function runFixture(fixture: Fixture, signal?: AbortSignal): Promise<Fixtu
       jsonRepairNeeded: false,
       timeMs: 0,
       output: null,
-      errors: [`Skipped: ${!stageA.output ? 'Stage A' : 'Stage B'} produced no output`],
+      errors: [`Skipped: ${!stageA.output || !stageA.schemaValid ? 'Stage A' : 'Stage B'} failed`],
     };
     console.log(`  [Stage C] SKIPPED (upstream stage failed)`);
   } else {

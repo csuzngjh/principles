@@ -31,7 +31,7 @@ import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js'
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
-import { isFeatureEnabled } from '@principles/core/runtime-v2';
+import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
 import * as path from 'path';
 
 interface DiagnoseStatusOptions {
@@ -293,7 +293,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const configLoadResult = loadPdConfig(workspaceDir);
     const featureFlags = computeFlagsFromLoadResult(configLoadResult);
     const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const pipelineTimeoutMs = isSplitPipeline ? 900_000 : 300_000; // 15 min for split, 5 min for monolith
+    const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
 
     const runner = new DiagnosticianRunner(
       {
