@@ -163,12 +163,23 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
       if (result.message) console.error(`  Details: ${result.message}`);
       process.exit(1);
+      return;
     }
   }
 
   if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
-    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') process.exit(1);
+    const out = { ...result };
+    // Ensure nextAction is present for actionable states
+    if (out.status === 'submitted') {
+      if (!out.nextAction) {
+        out.nextAction = `pd diagnose run --task-id ${out.taskId} --workspace "${workspaceDir}"`;
+      }
+    }
+    console.log(JSON.stringify(out, null, 2));
+    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') {
+      process.exit(1);
+      return;
+    }
   } else {
     if (result.status === 'succeeded') {
       console.log('[OK] Pain signal recorded via PainToPrincipleService');
@@ -190,7 +201,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   Pain ID: ${result.painId}`);
       console.log(`   Task ID: ${result.taskId}`);
       console.log(`   Status: submitted`);
-      console.log(`   Next action: pd task show ${result.taskId} --workspace "${workspaceDir}"`);
+      console.log(`   Next action: pd diagnose run --task-id ${result.taskId} --workspace "${workspaceDir}"`);
       if (result.latencyMs !== undefined) console.log(`   Submit latency: ${result.latencyMs}ms`);
     } else if (result.status === 'skipped') {
       console.log(`[SKIP] Task already in progress: ${result.message ?? 'unknown'}`);
@@ -203,6 +214,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     } else {
       console.error('[FAIL] Pain signal failed:', result.message);
       process.exit(1);
+      return;
     }
   }
 }

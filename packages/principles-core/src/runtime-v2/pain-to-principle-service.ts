@@ -76,6 +76,7 @@ export interface PainToPrincipleOutput {
   observabilityWarnings: string[];
   failureCategory?: FailureCategory;
   latencyMs: number;
+  nextAction?: string;
 }
 
 // ── Error classification ───────────────────────────────────────────────────
