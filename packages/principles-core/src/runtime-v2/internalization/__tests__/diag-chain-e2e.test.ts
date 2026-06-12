@@ -751,130 +751,131 @@ describe('Diag chain e2e', () => {
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-split-e2e-boundary-'));
     const stateManager = new RuntimeStateManager({ workspaceDir: tmpDir });
-    await stateManager.initialize();
+    try {
+      await stateManager.initialize();
 
-    const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
-    const trajectoryTurnReader = {
-      listUserTurnsForSession: vi.fn().mockReturnValue([]),
-      listAssistantTurns: vi.fn().mockReturnValue([]),
-    };
-    const contextAssembler = new SqliteContextAssembler(
-      stateManager.taskStore,
-      new SqliteHistoryQuery(stateManager.connection),
-      stateManager.runStore,
-      { trajectoryTurnReader },
-    );
+      const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
+      const trajectoryTurnReader = {
+        listUserTurnsForSession: vi.fn().mockReturnValue([]),
+        listAssistantTurns: vi.fn().mockReturnValue([]),
+      };
+      const contextAssembler = new SqliteContextAssembler(
+        stateManager.taskStore,
+        new SqliteHistoryQuery(stateManager.connection),
+        stateManager.runStore,
+        { trajectoryTurnReader },
+      );
 
-    const runtimeAdapter = makeMockRuntimeAdapter();
-    let runCount = 0;
-    runtimeAdapter.startRun.mockImplementation(async () => {
-      runCount++;
-      return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
-    });
-    runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
-      return { status: 'succeeded', runId: handle.runId };
-    });
-    let fetchCallCount = 0;
-    runtimeAdapter.fetchOutput.mockImplementation(async () => {
-      fetchCallCount++;
-      if (fetchCallCount === 1) {
-        return { payload: makeRootCauseOutput() };
-      }
-      if (fetchCallCount === 2) {
-        const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
-        const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
-        return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
-      }
-      return { payload: makeRouterOutput() };
-    });
+      const runtimeAdapter = makeMockRuntimeAdapter();
+      let runCount = 0;
+      runtimeAdapter.startRun.mockImplementation(async () => {
+        runCount++;
+        return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+      });
+      runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
+        return { status: 'succeeded', runId: handle.runId };
+      });
+      let fetchCallCount = 0;
+      runtimeAdapter.fetchOutput.mockImplementation(async () => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return { payload: makeRootCauseOutput() };
+        }
+        if (fetchCallCount === 2) {
+          const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
+          const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
+          return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
+        }
+        return { payload: makeRouterOutput() };
+      });
 
-    const rootCauseRunner = new DiagRootCauseRunnerImpl(
-      {
+      const rootCauseRunner = new DiagRootCauseRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+          contextAssembler,
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+      const distillerRunner = new DiagDistillerRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+      const routerRunner = new DiagRouterRunnerImpl(
+        {
+          stateManager,
+          runtimeAdapter: runtimeAdapter,
+          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          artifactStore: stateManager.piArtifactStore,
+          committer,
+        },
+        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+      );
+
+      const splitRunner = new SplitDiagnosticianRunnerImpl({
+        rootCauseRunner,
+        distillerRunner,
+        routerRunner,
         stateManager,
-        runtimeAdapter: runtimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
-        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-        contextAssembler,
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
-    const distillerRunner = new DiagDistillerRunnerImpl(
-      {
-        stateManager,
-        runtimeAdapter: runtimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
-        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
-    const routerRunner = new DiagRouterRunnerImpl(
-      {
-        stateManager,
-        runtimeAdapter: runtimeAdapter,
-        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
-        artifactStore: stateManager.piArtifactStore,
         committer,
-      },
-      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
-    );
+      });
 
-    const splitRunner = new SplitDiagnosticianRunnerImpl({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-    });
+      const ledgerAdapter = {
+        writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
+        existsForCandidate: vi.fn().mockReturnValue(null),
+      };
+      const intakeService = new CandidateIntakeService({
+        stateManager,
+        ledgerAdapter: ledgerAdapter,
+      });
 
-    const ledgerAdapter = {
-      writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
-      existsForCandidate: vi.fn().mockReturnValue(null),
-    };
-    const intakeService = new CandidateIntakeService({
-      stateManager,
-      ledgerAdapter: ledgerAdapter,
-    });
+      const bridge = new PainSignalBridge({
+        stateManager,
+        runner: splitRunner,
+        intakeService,
+        ledgerAdapter: ledgerAdapter,
+        autoIntakeEnabled: true,
+        workspaceDir: tmpDir,
+      });
 
-    const bridge = new PainSignalBridge({
-      stateManager,
-      runner: splitRunner,
-      intakeService,
-      ledgerAdapter: ledgerAdapter,
-      autoIntakeEnabled: true,
-      workspaceDir: tmpDir,
-    });
+      const painSignal = {
+        painId: 'pain-e2e-boundary',
+        painType: 'tool_failure' as const,
+        source: 'test-source',
+        reason: 'test reason',
+        evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
+      };
 
-    const painSignal = {
-      painId: 'pain-e2e-boundary',
-      painType: 'tool_failure' as const,
-      source: 'test-source',
-      reason: 'test reason',
-      evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
-    };
+      const bridgeResult = await bridge.onPainDetected(painSignal);
 
-    const bridgeResult = await bridge.onPainDetected(painSignal);
+      // Verify successful e2e execution status
+      expect(bridgeResult.status).toBe('succeeded');
+      expect(bridgeResult.painId).toBe(painSignal.painId);
+      expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
 
-    // Verify successful e2e execution status
-    expect(bridgeResult.status).toBe('succeeded');
-    expect(bridgeResult.painId).toBe(painSignal.painId);
-    expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
+      // Verify all 3 sub-tasks were written to the state.db
+      const parentTaskId = `diagnosis_${painSignal.painId}`;
+      const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
+      const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
+      const taskC = await stateManager.getTask(`diag_router-${parentTaskId}`);
+      expect(taskA?.status).toBe('succeeded');
+      expect(taskB?.status).toBe('succeeded');
+      expect(taskC?.status).toBe('succeeded');
 
-    // Verify all 3 sub-tasks were written to the state.db
-    const parentTaskId = `diagnosis_${painSignal.painId}`;
-    const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
-    const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
-    const taskC = await stateManager.getTask(`diag_router-${parentTaskId}`);
-    expect(taskA?.status).toBe('succeeded');
-    expect(taskB?.status).toBe('succeeded');
-    expect(taskC?.status).toBe('succeeded');
-
-    // Verify candidate was committed and then registered to the ledger!
-    expect(ledgerAdapter.writeProbationEntry).toHaveBeenCalled();
-
-    // Clean up
-    stateManager.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      // Verify candidate was committed and then registered to the ledger!
+      expect(ledgerAdapter.writeProbationEntry).toHaveBeenCalled();
+    } finally {
+      stateManager.close();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

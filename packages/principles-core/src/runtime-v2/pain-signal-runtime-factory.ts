@@ -394,7 +394,27 @@ export async function createPainSignalBridge(
     );
   }
   validateRuntimeConfig(runtimeConfig);
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}`;
+
+  // PRI-373: Resolve split pipeline flag BEFORE cache key to include it in the key.
+  // This prevents cache collision when same workspaceDir+runtimeKind+openclawMode
+  // is called with different effectiveConfig (e.g., split on vs off).
+  let useSplitPipeline = true;
+  if (opts.effectiveConfig) {
+    const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
+    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
+    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+
+    if (splitPipeline && !asyncCli) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
+      );
+    }
+
+    useSplitPipeline = splitPipeline;
+  }
+
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${useSplitPipeline ? 'split' : 'disabled'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -450,23 +470,6 @@ export async function createPainSignalBridge(
     });
   }
 
-  // PRI-373: Split pipeline is the only implementation. Gated on diagnostician_split_pipeline.
-  let useSplitPipeline = true;
-  if (opts.effectiveConfig) {
-    const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
-    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
-
-    if (splitPipeline && !asyncCli) {
-      throw new PDRuntimeError(
-        'input_invalid',
-        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-      );
-    }
-
-    useSplitPipeline = splitPipeline;
-  }
-
   let runner: DiagnosticianRunnerLike;
 
   if (useSplitPipeline) {
@@ -518,10 +521,13 @@ export async function createPainSignalBridge(
 
 /**
  * Invalidate the cached bridge for a workspace (for testing).
+ * Covers both split and disabled pipeline variants.
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:local`);
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:gateway`);
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:`);
+  for (const mode of ['local', 'gateway', '']) {
+    for (const pipeline of ['split', 'disabled']) {
+      bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pipeline}`);
+    }
+  }
 }

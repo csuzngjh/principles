@@ -3236,6 +3236,7 @@ const FORBIDDEN_RUNTIME_ORCHESTRATION_CLASSES = new Set([
   'SqliteDiagnosticianCommitter',
   'PainSignalBridge',
   'SplitDiagnosticianRunner',
+  'DisabledDiagnosticianRunner',
   'DiagRootCauseRunner',
   'DiagDistillerRunner',
   'DiagRouterRunner',

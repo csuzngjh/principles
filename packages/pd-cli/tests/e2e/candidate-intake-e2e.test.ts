@@ -149,20 +149,31 @@ describe('E2E: pd candidate intake flow', () => {
     }
   }
 
-  function readLedgerFile(workspace: string): any[] {
+  function readLedgerFile(workspace: string): Array<{ id: string; sourceRef: string; status: string; evaluability: string }> {
     const ledgerPath = join(workspace, '.state', 'principle_training_state.json');
     if (!existsSync(ledgerPath)) return [];
     const content = readFileSync(ledgerPath, 'utf-8');
-    const data = JSON.parse(content);
-    const tree = data._tree || data.tree || {};
-    const principles = tree.principles || {};
-    return Object.values(principles).map((p: any) => {
-      const candidateId = p.derivedFromPainIds?.[0] || '';
+    const data: unknown = JSON.parse(content);
+    if (typeof data !== 'object' || data === null) return [];
+    const tree = (data as Record<string, unknown>)._tree ?? (data as Record<string, unknown>).tree ?? {};
+    if (typeof tree !== 'object' || tree === null) return [];
+    const principles = (tree as Record<string, unknown>).principles ?? {};
+    if (typeof principles !== 'object' || principles === null) return [];
+    return Object.values(principles).map((p: unknown) => {
+      if (typeof p !== 'object' || p === null) {
+        return { id: '', sourceRef: 'candidate://', status: '', evaluability: '' };
+      }
+      const pObj = p as Record<string, unknown>;
+      const painIds = pObj.derivedFromPainIds;
+      const candidateId = Array.isArray(painIds) && typeof painIds[0] === 'string' ? painIds[0] : '';
+      const id = typeof pObj.id === 'string' ? pObj.id : '';
+      const rawStatus = typeof pObj.status === 'string' ? pObj.status : '';
+      const evaluability = typeof pObj.evaluability === 'string' ? pObj.evaluability : '';
       return {
-        id: p.id,
+        id,
         sourceRef: `candidate://${candidateId}`,
-        status: p.status === 'candidate' ? 'probation' : p.status,
-        evaluability: p.evaluability,
+        status: rawStatus === 'candidate' ? 'probation' : rawStatus,
+        evaluability,
       };
     });
   }

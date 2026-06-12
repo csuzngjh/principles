@@ -28,10 +28,6 @@ interface MockStateManager {
   getRetryPolicy: ReturnType<typeof vi.fn>;
 }
 
-interface MockRunner {
-  run: ReturnType<typeof vi.fn>;
-}
-
 function createMocks() {
   const stateManager: MockStateManager = {
     getTask: vi.fn(),
@@ -42,8 +38,9 @@ function createMocks() {
     getRetryPolicy: vi.fn(),
   };
 
-  const runner: MockRunner = {
-    run: vi.fn(),
+  const runMock = vi.fn<(taskId: string) => Promise<RunnerResult>>();
+  const runner: DiagnosticianRunnerLike = {
+    run: runMock,
   };
 
   const intakeService = {};
@@ -55,11 +52,11 @@ function createMocks() {
 
   return {
     stateManager: stateManager as unknown as RuntimeStateManager,
-    runner: runner as unknown as DiagnosticianRunnerLike,
+    runner,
     intakeService: intakeService as unknown as CandidateIntakeService,
     ledgerAdapter,
     _stateManager: stateManager,
-    _runner: runner,
+    _runMock: runMock,
   };
 }
 
@@ -85,7 +82,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       calculateBackoff: () => 30000,
       shouldRetry: () => true,
     });
-    mocks._runner.run.mockResolvedValue(makeRetriedResult());
+    mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
       stateManager: mocks.stateManager,
@@ -120,7 +117,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       calculateBackoff: () => 30000,
       shouldRetry: () => true,
     });
-    mocks._runner.run.mockResolvedValue(makeRetriedResult());
+    mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
       stateManager: mocks.stateManager,
@@ -161,7 +158,7 @@ describe('PainSignalBridge retried with empty candidates', () => {
       calculateBackoff: () => 30000,
       shouldRetry: () => true,
     });
-    mocks._runner.run.mockResolvedValue(makeRetriedResult());
+    mocks._runMock.mockResolvedValue(makeRetriedResult());
 
     const bridge = new PainSignalBridge({
       stateManager: mocks.stateManager,
