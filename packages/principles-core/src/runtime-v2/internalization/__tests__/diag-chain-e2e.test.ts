@@ -32,6 +32,9 @@ import type { DiagnosticianCommitter, CommitResult } from '../../store/commit/di
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
+import type { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
+import type { LedgerAdapter } from '../../candidate-intake.js';
+import type { PainSignalBridge } from '../../pain-signal-bridge.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -640,7 +643,6 @@ describe('Diag chain e2e', () => {
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
       committer: committer as unknown as DiagnosticianCommitter,
-      onDiagnosisComplete,
     });
 
     // Run the split pipeline
@@ -732,7 +734,6 @@ describe('Diag chain e2e', () => {
       routerRunner,
       stateManager: stateManager as unknown as RuntimeStateManager,
       committer: committer as unknown as DiagnosticianCommitter,
-      onDiagnosisComplete,
     });
 
     const result = await splitRunner.run(PARENT_TASK_ID);
@@ -749,5 +750,161 @@ describe('Diag chain e2e', () => {
 
     // Committer should NOT have been called
     expect(committer.commit).not.toHaveBeenCalled();
+  });
+
+  it('split pipeline end-to-end boundary integration (real SQLite + Bridge + Committer + Intake + Ledger)', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const { RuntimeStateManager } = await import('../../store/runtime-state-manager.js');
+    const { SqliteDiagnosticianCommitter } = await import('../../store/commit/diagnostician-committer.js');
+    const { SqliteContextAssembler } = await import('../../store/context/sqlite-context-assembler.js');
+    const { SqliteHistoryQuery } = await import('../../store/history/sqlite-history-query.js');
+    const { PainSignalBridge } = await import('../../pain-signal-bridge.js');
+    const { CandidateIntakeService } = await import('../../candidate-intake-service.js');
+    const { DiagRootCauseRunner: DiagRootCauseRunnerImpl } = await import('../diag-rootcause-runner.js');
+    const { DiagDistillerRunner: DiagDistillerRunnerImpl } = await import('../diag-distiller-runner.js');
+    const { DiagRouterRunner: DiagRouterRunnerImpl } = await import('../diag-router-runner.js');
+    const { SplitDiagnosticianRunner: SplitDiagnosticianRunnerImpl } = await import('../split-diagnostician-runner.js');
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-split-e2e-boundary-'));
+    const stateManager = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await stateManager.initialize();
+
+    const committer = new SqliteDiagnosticianCommitter(stateManager.connection);
+    const trajectoryTurnReader = {
+      listUserTurnsForSession: vi.fn().mockReturnValue([]),
+      listAssistantTurns: vi.fn().mockReturnValue([]),
+    };
+    const contextAssembler = new SqliteContextAssembler(
+      stateManager.taskStore,
+      new SqliteHistoryQuery(stateManager.connection),
+      stateManager.runStore,
+      { trajectoryTurnReader },
+    );
+
+    const runtimeAdapter = makeMockRuntimeAdapter();
+    let runCount = 0;
+    runtimeAdapter.startRun.mockImplementation(async () => {
+      runCount++;
+      return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+    });
+    runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
+      return { status: 'succeeded', runId: handle.runId };
+    });
+    let fetchCallCount = 0;
+    runtimeAdapter.fetchOutput.mockImplementation(async () => {
+      fetchCallCount++;
+      if (fetchCallCount === 1) {
+        return { payload: makeRootCauseOutput() };
+      }
+      if (fetchCallCount === 2) {
+        const artifactsA = await stateManager.piArtifactStore.listBySourceTaskId(`diag_rootcause-diagnosis_pain-e2e-boundary`);
+        const stageAArtifactId = artifactsA[0]?.artifactId ?? ROOTCAUSE_ARTIFACT_ID;
+        return { payload: makeDistillerOutput({ sourceRootCauseArtifactId: stageAArtifactId }) };
+      }
+      return { payload: makeRouterOutput() };
+    });
+
+    const bridgeHolder: { bridge: PainSignalBridge | null } = { bridge: null };
+    const rootCauseRunner = new DiagRootCauseRunnerImpl(
+      {
+        stateManager,
+        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+        artifactStore: stateManager.piArtifactStore,
+        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+        contextAssembler,
+      },
+      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+    );
+    const distillerRunner = new DiagDistillerRunnerImpl(
+      {
+        stateManager,
+        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+        artifactStore: stateManager.piArtifactStore,
+        validator: { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) },
+      },
+      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+    );
+    const routerRunner = new DiagRouterRunnerImpl(
+      {
+        stateManager,
+        runtimeAdapter: runtimeAdapter as unknown as PiAiRuntimeAdapter,
+        eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+        artifactStore: stateManager.piArtifactStore,
+        committer,
+        onDiagnosisComplete: async (taskId, output) => {
+          if (bridgeHolder.bridge) {
+            await bridgeHolder.bridge.onDiagnosisComplete({
+              taskId,
+              diagnosticianOutput: output,
+              painId: taskId.replace(/^diag_router-/, '').replace(/^diagnosis_/, ''),
+              provenance: 'automatic_hook',
+            });
+          }
+        },
+      },
+      { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
+    );
+
+    const splitRunner = new SplitDiagnosticianRunnerImpl({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+    });
+
+    const ledgerAdapter = {
+      writeProbationEntry: vi.fn().mockImplementation((entry) => entry),
+      existsForCandidate: vi.fn().mockReturnValue(null),
+    };
+    const intakeService = new CandidateIntakeService({
+      stateManager,
+      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: splitRunner,
+      intakeService,
+      ledgerAdapter: ledgerAdapter as unknown as LedgerAdapter,
+      autoIntakeEnabled: true,
+      workspaceDir: tmpDir,
+    });
+    bridgeHolder.bridge = bridge;
+
+    const painSignal = {
+      painId: 'pain-e2e-boundary',
+      painType: 'tool_failure' as const,
+      source: 'test-source',
+      reason: 'test reason',
+      evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
+    };
+
+    const bridgeResult = await bridge.onPainDetected(painSignal);
+
+    // Verify successful e2e execution status
+    expect(bridgeResult.status).toBe('succeeded');
+    expect(bridgeResult.painId).toBe(painSignal.painId);
+    expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
+
+    // Verify all 3 sub-tasks were written to the state.db
+    const parentTaskId = `diagnosis_${painSignal.painId}`;
+    const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
+    const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
+    const taskC = await stateManager.getTask(`diag_router-${parentTaskId}`);
+    expect(taskA?.status).toBe('succeeded');
+    expect(taskB?.status).toBe('succeeded');
+    expect(taskC?.status).toBe('succeeded');
+
+    // Verify candidate was committed and then registered to the ledger!
+    expect(ledgerAdapter.writeProbationEntry).toHaveBeenCalled();
+
+    // Clean up
+    stateManager.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

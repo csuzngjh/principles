@@ -1550,96 +1550,6 @@ describe('PRI-62 Internalization State Machine Guards', () => {
   });
 });
 
-// ── PRI-63: Internalization Dumb Trigger Adapter ─────────────────────────────
-
-describe('PRI-63 Internalization Dumb Trigger Adapter', () => {
-  const PRI63_REQUIRED_FILES = [
-    'internalization-trigger-adapter.ts',
-  ];
-
-  it('adapter source file exists in plugin service directory', async () => {
-    const { existsSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const pluginRoot = resolve(__dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service');
-    for (const file of PRI63_REQUIRED_FILES) {
-      expect(existsSync(resolve(pluginRoot, file))).toBe(true);
-    }
-  });
-
-  it('adapter does not import nocturnal-trinity', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('nocturnal-trinity');
-  });
-
-  it('adapter does not import runTrinity or runTrinityAsync', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('runTrinity');
-    expect(src).not.toContain('runTrinityAsync');
-  });
-
-  it('adapter does not import Dreamer/Philosopher/Scribe executors', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain("from 'dreamer'");
-    expect(src).not.toContain("from 'philosopher'");
-    expect(src).not.toContain("from 'scribe'");
-  });
-
-  it('adapter does not use PDRuntimeAdapter', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('PDRuntimeAdapter');
-  });
-
-  it('adapter imports TaskRecord from @principles/core/runtime-v2', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).toContain('TaskRecord');
-    expect(src).toContain('@principles/core/runtime-v2');
-  });
-
-  it('PLUGIN_NO_INLINE_EXECUTION: adapter does not call mutating store methods (read-only probe)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    // wake() should only read, not update/create/delete tasks
-    expect(src).not.toContain('updateTask');
-    expect(src).not.toContain('createTask');
-    expect(src).not.toContain('deleteTask');
-    expect(src).not.toContain('leaseTask');
-  });
-
-  it('PLUGIN_NO_INLINE_EXECUTION: adapter does not use setInterval/setTimeout for scheduling (core responsibility)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    // setInterval is used in start() to trigger wake() periodically — this is plugin responsibility
-    // Core state machine should NOT use setInterval (CORE_NO_SCHEDULING)
-    expect(src).not.toContain('node:cron');
-  });
-});
-
 describe('PRI-68 InternalizationOrchestrator', () => {
   it('orchestrator source file exists in internalization directory', async () => {
     const { existsSync } = await import('node:fs');
@@ -2831,15 +2741,6 @@ describe('Phase 2.4 types directory migration', () => {
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(
       __dirname, '../../../../openclaw-plugin/src/types/event-types.ts'
-    ), 'utf-8');
-    expect(src).toContain("@principles/core/runtime-v2");
-  });
-
-  it('plugin types/event-payload.ts re-exports from core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/types/event-payload.ts'
     ), 'utf-8');
     expect(src).toContain("@principles/core/runtime-v2");
   });

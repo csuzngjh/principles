@@ -490,8 +490,7 @@ export async function createPainSignalBridge(
       routerRunner,
       stateManager,
       committer,
-      onDiagnosisComplete: async () => { /* handled by routerRunner's callback */ },
-      perStageTimeoutMs: runtimeConfig.timeoutMs ?? 300_000,
+      perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
   } else {
     runner = new DiagnosticianRunner(

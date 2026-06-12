@@ -28,7 +28,6 @@ import type { DiagRouterRunner } from './diag-router-runner.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
-import type { OnDiagnosisComplete } from './diag-router-runner.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
@@ -39,7 +38,6 @@ export interface SplitDiagnosticianRunnerDeps {
   readonly routerRunner: DiagRouterRunner;
   readonly stateManager: RuntimeStateManager;
   readonly committer: DiagnosticianCommitter;
-  readonly onDiagnosisComplete: OnDiagnosisComplete;
   /** Per-stage timeout in ms. Default: 300_000 (5 min). Split pipeline total = 3 × this value. */
   readonly perStageTimeoutMs?: number;
 }

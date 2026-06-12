@@ -103,8 +103,10 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
     }
 
+    const parentTaskId = task.inputRef || taskId;
+
     // Assemble pain signal context via ContextAssembler
-    const painPayload = await this.contextAssembler.assemble(taskId);
+    const painPayload = await this.contextAssembler.assemble(parentTaskId);
 
     // Compute contextHash from sourceRefs
     const piTask = hydratePITaskRecord(task);
