@@ -16,32 +16,17 @@ import {
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
 } from './pd-config-types.js';
+import { DEFAULT_FEATURE_FLAGS as CONTRACT_DEFAULTS } from '../feature-flags/feature-flag-contract.js';
 
 // ── Default Feature Flags ───────────────────────────────────────────────────
 
-export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {
-  // MVP-Core (ADR-0014 §2.4)
-  prompt:             { category: 'core',  enabled: true },
-  code_tool_hook:     { category: 'core',  enabled: true },
-  defer_archive:      { category: 'core',  enabled: true },
-  correction_observer:{ category: 'quiet', enabled: false },
-
-  // MVP-Quiet (ADR-0014 §2.5)
-  feedback_channel:   { category: 'quiet', enabled: true },
-  gfi:                { category: 'quiet', enabled: false },
-  evolution_worker:   { category: 'quiet', enabled: false },
-  empathy_observer:   { category: 'quiet', enabled: false },
-  painEvidenceAdmission:{ category: 'quiet', enabled: false },
-  diagnostician_async_cli: { category: 'quiet', enabled: false },
-  diagnostician_core_grounding: { category: 'quiet', enabled: true },
-  diagnostician_split_pipeline: { category: 'quiet', enabled: true },
-
-  // MVP-Gone (ADR-0014 §2.6)
-  nocturnal:          { category: 'gone',  enabled: false },
-  idle_trigger:       { category: 'gone',  enabled: false },
-  model_training:     { category: 'gone',  enabled: false },
-  trainer:            { category: 'gone',  enabled: false },
-};
+export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {};
+for (const flag of CONTRACT_DEFAULTS) {
+  DEFAULT_FEATURE_FLAGS[flag.id] = {
+    category: flag.category,
+    enabled: flag.enabled,
+  };
+}
 
 // ── Default Runtime Profile ─────────────────────────────────────────────────
 

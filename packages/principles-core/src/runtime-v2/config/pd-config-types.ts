@@ -17,7 +17,7 @@ export type PdConfigVersion = 1;
 
 // ── Feature Flag Category ───────────────────────────────────────────────────
 
-export const VALID_FEATURE_CATEGORIES = ['core', 'quiet', 'gone'] as const;
+export const VALID_FEATURE_CATEGORIES = ['core', 'quiet', 'gone', 'legacy_retire'] as const;
 export type FeatureCategory = (typeof VALID_FEATURE_CATEGORIES)[number];
 
 // ── Feature Flag Entry ──────────────────────────────────────────────────────
@@ -169,6 +169,7 @@ export interface EffectivePdConfig {
   config: PdConfig;
   source: 'defaults' | 'user_config';
   warnings: string[];
+  featuresChangedFromDefault?: string[];
 }
 
 // ── Redacted Summary ────────────────────────────────────────────────────────
