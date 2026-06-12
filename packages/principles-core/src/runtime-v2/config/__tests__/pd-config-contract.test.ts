@@ -25,6 +25,7 @@ import {
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
 } from '../index.js';
+import { DEFAULT_FEATURE_FLAGS as FLAGS_ARRAY } from '../../feature-flags/index.js';
 import type {
   PdConfig,
   RuntimeProfile,
@@ -739,5 +740,48 @@ describe('Edge cases', () => {
     const summary = redactPdConfig(effective);
     const minimal = summary.runtimeProfiles.find(p => p.id === 'oc.minimal');
     expect(nn(minimal).readiness).toBe('needs_setup');
+  });
+});
+
+// ── Regression: Flag Registry Consistency ────────────────────────────────────
+
+describe('Regression: Flag Registry Consistency', () => {
+  /**
+   * All flags registered in feature-flag-contract.ts (FLAGS_ARRAY) MUST be
+   * present in pd-config-defaults.ts (getDefaultPdConfig().features).
+   *
+   * This prevents a bug where isFeatureEnabled() returns false for registered
+   * flags because they were missing from the defaults record used by
+   * computeFeatureFlagsFromConfig().
+   */
+  it('all registered flags are in pd-config-defaults', () => {
+    const defaults = getDefaultPdConfig();
+    const missingFlags: string[] = [];
+
+    for (const flagDef of FLAGS_ARRAY) {
+      if (!Object.hasOwn(defaults.features, flagDef.id)) {
+        missingFlags.push(flagDef.id);
+      }
+    }
+
+    expect(missingFlags).toEqual([]);
+  });
+
+  it('diagnostician_async_cli is in defaults', () => {
+    const defaults = getDefaultPdConfig();
+    expect(Object.hasOwn(defaults.features, 'diagnostician_async_cli')).toBe(true);
+    expect(defaults.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('diagnostician_split_pipeline is in defaults', () => {
+    const defaults = getDefaultPdConfig();
+    expect(Object.hasOwn(defaults.features, 'diagnostician_split_pipeline')).toBe(true);
+    expect(defaults.features.diagnostician_split_pipeline).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('diagnostician_core_grounding is in defaults', () => {
+    const defaults = getDefaultPdConfig();
+    expect(Object.hasOwn(defaults.features, 'diagnostician_core_grounding')).toBe(true);
+    expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: false });
   });
 });
