@@ -226,7 +226,7 @@ PD 鼓励**渐进式内化**：原则先以 prompt 起步，经过验证后逐�
 |------|-----|
 | **Pain Signal** | 代理执行任务时遇到的具体挫败（错误、超时、用户负面反馈）。是演化的原始输入流量。 |
 | **GAP Signal** | Goal-Aligned Pain Signal。目标驱动的痛苦信号，来自 Mission 失败/停滞、OKR 偏离、决策卫生缺失等**长程目标层**事件。是 Pain Pipeline 的**主信号源**（Layer 1）。 |
-| **Diagnosis** | 寻找 Pain 根因的分析过程，由 `DiagnosticianRunner` 完成。|
+| **Diagnosis** | 寻找 Pain 根因的分析过程，由 3 阶段拆分管道（`SplitDiagnosticianRunner`）完成。|
 | **Recommendation** | Diagnostician 输出的建议项。合法 `kind`：`principle / rule / implementation / prompt / defer`。|
 | **Taxonomy** | 将 Recommendation 正确分类的动作。分类精度决定软硬转换效率。|
 | **Internalization** | 将 Principle 通过 5 通道转化为更稳定行为约束的过程。|

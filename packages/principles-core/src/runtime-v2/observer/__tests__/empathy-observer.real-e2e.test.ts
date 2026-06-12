@@ -3,12 +3,15 @@ import { EmpathyObserver } from '../empathy-observer.js';
 import { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
 import { TestDoubleRuntimeAdapter } from '../../adapter/test-double-runtime-adapter.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
+import { getLlmE2eConfig } from '../../__tests__/fixtures/llm-e2e-config.js';
+
+const llmConfig = getLlmE2eConfig();
+
+// Local LM Studio probe — only attempted when LLM_E2E_ENABLED=true
+const LM_STUDIO_BASE_URL = process.env.PD_EMPATHY_BASE_URL || 'http://localhost:12341/v1';
 
 describe('EmpathyObserver Real E2E & Mock Fallback', () => {
   it('runs E2E against local LM Studio if available, otherwise falls back to stable mock validation', async () => {
-    const provider = process.env.PD_EMPATHY_PROVIDER || 'lm-studio';
-    const model = process.env.PD_EMPATHY_MODEL || 'qwen3.6-27b-mtp';
-    const baseUrl = process.env.PD_EMPATHY_BASE_URL || 'http://localhost:12341/v1';
     const apiKeyEnv = 'LM_STUDIO_API_KEY';
 
     // Temporary set key if absent
@@ -30,25 +33,30 @@ describe('EmpathyObserver Real E2E & Mock Fallback', () => {
     });
     let isRealLlm = false;
 
-    // Detect if LM Studio is running by trying a quick fetch
-    try {
-      const response = await fetch(`${baseUrl}/models`, { method: 'GET', signal: AbortSignal.timeout(2000) });
-      if (response.ok) {
-        // LM Studio is running! Use the real LLM adapter.
-        adapter = new PiAiRuntimeAdapter({
-          provider,
-          model,
-          apiKeyEnv,
-          baseUrl,
-          timeoutMs: 60000,
-        });
-        isRealLlm = true;
-        console.log(`[E2E Test] LM Studio detected at ${baseUrl}. Running E2E test with real model: ${model}`);
-      } else {
-        console.log(`[E2E Test] LM Studio not running at ${baseUrl}. Falling back to stable mock validation.`);
+    // Only probe LM Studio when LLM_E2E_ENABLED=true (same gate as other real-LLM tests)
+    if (llmConfig) {
+      try {
+        const response = await fetch(`${LM_STUDIO_BASE_URL}/models`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+        if (response.ok) {
+          const provider = process.env.PD_EMPATHY_PROVIDER || 'lm-studio';
+          const model = process.env.PD_EMPATHY_MODEL || 'qwen3.6-27b-mtp';
+          adapter = new PiAiRuntimeAdapter({
+            provider,
+            model,
+            apiKeyEnv,
+            baseUrl: LM_STUDIO_BASE_URL,
+            timeoutMs: 60000,
+          });
+          isRealLlm = true;
+          console.log(`[E2E Test] LM Studio detected at ${LM_STUDIO_BASE_URL}. Running E2E test with real model: ${model}`);
+        } else {
+          console.log(`[E2E Test] LM Studio not running at ${LM_STUDIO_BASE_URL}. Falling back to stable mock validation.`);
+        }
+      } catch {
+        console.log(`[E2E Test] LM Studio not running at ${LM_STUDIO_BASE_URL}. Falling back to stable mock validation.`);
       }
-    } catch {
-      console.log(`[E2E Test] LM Studio not running at ${baseUrl}. Falling back to stable mock validation.`);
+    } else {
+      console.log('[E2E Test] LLM_E2E_ENABLED is not true. Skipping LM Studio probe, using stable mock.');
     }
 
     const observer = new EmpathyObserver({ runtimeAdapter: adapter });

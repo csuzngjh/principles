@@ -14,7 +14,7 @@ Automatic:
 - Tool failures first accumulate GFI/friction.
 - Only high-value episodes enter Runtime V2: high GFI, repeated same failure, severe semantic pain, LLM paralysis, or explicit manual pain.
 - Approved `pain_detected` events enter `PainSignalBridge`.
-- The bridge runs `DiagnosticianRunner`, commits candidates, and intakes them into the ledger.
+- The bridge runs `SplitDiagnosticianRunner`, commits candidates, and intakes them into the ledger.
 
 Manual:
 ```bash

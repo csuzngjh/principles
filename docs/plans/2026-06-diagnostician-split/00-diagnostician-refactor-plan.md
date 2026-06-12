@@ -381,4 +381,6 @@ How recurrence is prevented is restated per-PR in the implementation brief.
 
 ## 14. Summary
 
-This design fixes all four diagnostician defects without violating MVP-First: Q1 via a persisted-task async submit, Q2 by rebuilding the diagnostician on the shared `BasePeerRunner`, and Q3+Q6 by splitting distillation from routing and grounding distillation on a structured T-01..T-10 registry. Every change is flag-gated and default-off, the downstream contract is frozen, owner-facing output language remains controlled by `principles.outputLanguage`, and the old path remains the fallback until a 3-arm comparison proves the new path is better — making the entire refactor a zero-migration, reversible toggle.
+This design fixes all four diagnostician defects without violating MVP-First: Q1 via a persisted-task async submit, Q2 by rebuilding the diagnostician on the shared `BasePeerRunner`, and Q3+Q6 by splitting distillation from routing and grounding distillation on a structured T-01..T-10 registry. 
+
+**Update (2026-06-12)**: The comparison report proved the split pipeline's superior quality. Per owner decision, the old monolith path has been completely deleted and the split pipeline is now the sole implementation (no fallback pathways or long-term compatibility switches remain) to keep the architecture clean and maintainable.

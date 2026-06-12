@@ -17,7 +17,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { DiagnosticianRunner } from '../runner/diagnostician-runner.js';
+import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 
@@ -56,7 +56,7 @@ function createMocks() {
         confidence: 0.85,
       },
     }),
-  } as unknown as DiagnosticianRunner;
+  } as unknown as DiagnosticianRunnerLike;
 
   const intakeService = {
     intake: vi.fn().mockResolvedValue({ id: 'ledger-wsdir-1' }),

@@ -189,7 +189,7 @@ describe('INF-7: Feature flags registered', () => {
     expect(flag).toBeDefined();
     if (flag) {
       expect(flag.category).toBe('quiet');
-      expect(flag.enabled).toBe(false);
+      expect(flag.enabled).toBe(true);
     }
   });
 
@@ -198,7 +198,7 @@ describe('INF-7: Feature flags registered', () => {
     expect(flag).toBeDefined();
     if (flag) {
       expect(flag.category).toBe('quiet');
-      expect(flag.enabled).toBe(false);
+      expect(flag.enabled).toBe(true);
     }
   });
 
@@ -207,7 +207,7 @@ describe('INF-7: Feature flags registered', () => {
     expect(flag).toBeDefined();
     if (flag) {
       expect(flag.category).toBe('quiet');
-      expect(flag.enabled).toBe(false);
+      expect(flag.enabled).toBe(true);
     }
   });
 });

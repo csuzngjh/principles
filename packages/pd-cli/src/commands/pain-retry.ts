@@ -18,8 +18,14 @@ import {
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,
   StoreEventEmitter,
-  DiagnosticianRunner,
-  DefaultDiagnosticianValidator,
+  SplitDiagnosticianRunner,
+  DiagRootCauseRunner,
+  DiagDistillerRunner,
+  DiagRouterRunner,
+  DefaultDiagRootCauseValidator,
+  DefaultDiagDistillerValidator,
+  DisabledDiagnosticianRunner,
+  type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
@@ -28,8 +34,11 @@ import {
   isRuntimeConfigError,
   CandidateIntakeService,
   run as diagnoseRun,
+  isFeatureEnabled,
+  SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -368,24 +377,38 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
     const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
 
-    const runner = new DiagnosticianRunner(
-      {
+    // Check if split pipeline is enabled — 3 serial LLM calls need more time
+    const configLoadResult = loadPdConfig(workspaceDir);
+    const featureFlags = computeFlagsFromLoadResult(configLoadResult);
+    const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
+    const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
+
+    let runner: DiagnosticianRunnerLike;
+    if (isSplitPipeline) {
+      const rootCauseRunner = new DiagRootCauseRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+      );
+      const distillerRunner = new DiagDistillerRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+      );
+      const routerRunner = new DiagRouterRunner(
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+      );
+
+      runner = new SplitDiagnosticianRunner({
+        rootCauseRunner,
+        distillerRunner,
+        routerRunner,
         stateManager,
-        contextAssembler,
-        runtimeAdapter,
-        eventEmitter,
-        validator: new DefaultDiagnosticianValidator(),
         committer,
-      },
-      {
-        owner: 'pd-cli-pain-retry',
-        runtimeKind,
-        pollIntervalMs: 100,
-        timeoutMs: 300_000,
-        agentId: opts.agent,
-        outputLanguage,
-      },
-    );
+        perStageTimeoutMs: pipelineTimeoutMs / 3,
+      });
+    } else {
+      runner = new DisabledDiagnosticianRunner();
+    }
 
     if (!opts.json) {
       console.log(`\nRetrying diagnosis for pain: ${opts.painId}`);

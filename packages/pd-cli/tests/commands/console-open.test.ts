@@ -758,9 +758,18 @@ describe('CLI command wiring (pd console open)', () => {
 
 function runPd(args: string[], cwd: string): string {
   try {
+    const env: Record<string, string> = { ...process.env };
+    if (!args.includes('--workspace') && !args.includes('--help') && !args.includes('-h')) {
+      env.USERPROFILE = '/nonexistent';
+      env.HOME = '/nonexistent';
+      env.HOMEPATH = '/nonexistent';
+      env.HOMEDRIVE = '/nonexistent';
+      delete env.PD_WORKSPACE_DIR;
+    }
     return execFileSync('node', [getBuiltPdCliPath(), ...args], {
       encoding: 'utf8',
       cwd,
+      env,
     });
   } catch (err: unknown) {
     if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {

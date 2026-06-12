@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CandidateIntakeService } from '../../src/runtime-v2/candidate-intake-service.js';
-import { CandidateIntakeError, INTAKE_ERROR_CODES } from '@principles/core/runtime-v2';
-import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
+import { CandidateIntakeError, INTAKE_ERROR_CODES } from '../../src/runtime-v2/candidate-intake.js';
+import type { LedgerPrincipleEntry, LedgerAdapter } from '../../src/runtime-v2/candidate-intake.js';
 import type { RuntimeStateManager } from '../../src/runtime-v2/store/runtime-state-manager.js';
-import type { LedgerAdapter } from '@principles/core/runtime-v2';
 
 // ── Test Factories ──────────────────────────────────────────
 
