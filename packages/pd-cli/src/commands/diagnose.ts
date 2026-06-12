@@ -40,11 +40,26 @@ import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-
 import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
 import * as path from 'path';
 
+function validateStalledThreshold(val: unknown): number | undefined {
+  if (val === undefined) {
+    return undefined;
+  }
+  const str = String(val).trim();
+  if (!/^[1-9]\d*$/.test(str)) {
+    throw new Error('stalled-threshold must be a positive integer.');
+  }
+  const num = parseInt(str, 10);
+  if (isNaN(num)) {
+    throw new Error('stalled-threshold must be a positive integer.');
+  }
+  return num;
+}
+
 interface DiagnoseStatusOptions {
   taskId: string;
   workspace?: string;
   json?: boolean;
-  stalledThreshold?: number;
+  stalledThreshold?: unknown;
 }
 
 interface DiagnoseRunOptions {
@@ -70,6 +85,25 @@ interface DiagnoseRunOptions {
  * Inspects the current status of a diagnostician task.
  */
 export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise<void> {
+  let stalledThresholdSeconds: number | undefined;
+  try {
+    stalledThresholdSeconds = validateStalledThreshold(opts.stalledThreshold);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (opts.json) {
+      console.log(JSON.stringify({
+        ok: false,
+        reason: 'invalid_stalled_threshold',
+        nextAction: 'Provide a valid positive integer for --stalled-threshold (e.g., --stalled-threshold 300).',
+      }));
+    } else {
+      console.error(`error: ${msg}`);
+      console.error('nextAction: Provide a valid positive integer for --stalled-threshold (e.g., --stalled-threshold 300).');
+    }
+    process.exit(1);
+    return;
+  }
+
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
@@ -78,7 +112,7 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     const result = await diagnoseStatus({
       taskId: opts.taskId,
       stateManager,
-      stalledThresholdSeconds: opts.stalledThreshold,
+      stalledThresholdSeconds,
     });
 
     if (!result) {
