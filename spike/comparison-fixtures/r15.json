@@ -1,0 +1,104 @@
+{
+  "id": "R15",
+  "painId": "pain_r15",
+  "source": "manual",
+  "description": "测试GLM-5.1双模型配置-PEAT5验证",
+  "coveredAxioms": [
+    "T-03"
+  ],
+  "isSynthetic": false,
+  "contextPayload": {
+    "contextId": "ctx_r15",
+    "contextHash": "hash_r15",
+    "taskId": "task_r15",
+    "workspaceDir": "/workspace",
+    "sourceRefs": [
+      "task_r15",
+      "run_task_r15_1",
+      "owner_reported:cli"
+    ],
+    "diagnosisTarget": {
+      "reasonSummary": "测试GLM-5.1双模型配置-PEAT5验证",
+      "source": "manual",
+      "severity": "severe",
+      "painId": "pain_r15",
+      "sessionIdHint": "cli",
+      "provenance": "owner_reported_no_host_trace",
+      "provenanceReason": "No host trace available for CLI-submitted pain; fullTrace unavailable",
+      "evidence": [
+        {
+          "sourceRef": "owner_reported:cli",
+          "note": "No session context available"
+        }
+      ],
+      "traceAvailability": "unavailable_with_reason",
+      "traceUnavailableDetail": {
+        "reason": "CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session",
+        "nextAction": "Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis"
+      }
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-10T03:16:58.054Z",
+        "role": "system"
+      },
+      {
+        "ts": "2026-06-10T03:18:45.948Z",
+        "role": "assistant",
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-cli-provenance-001\",\n  \"summary\": \"CLI手动提交诊断缺乏会话凭证，导致无法绑定Agent行为追踪记录，当前证据不足以分析具体Agent决策与PEAT5验证失败原因。\",\n  \"rootCause\": \"Design: CLI诊断提交流程未强制绑定认证会话上下文，导致Agent执行轨迹与决策依据无法被系统捕获与关联。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"diag-provenance-01\",\n      \"title\": \"诊断溯源完整性原则\",\n      \"rationale\": \"所有诊断报告必须绑定可验证的会话上下文或明确的Agent行为证据，否则无法进行有效的根因分析。当前CLI提交未满足此要求，导致追踪记录断裂。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"No session context available\"\n    },\n    {\n      \"sourceRef\": \"task_r15\",\n      \"note\": \"CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"拦截无会话凭证的CLI诊断提交，强制要求用户注入上下文或切换至OpenClaw会话内执行。\",\n      \"triggerPattern\": \"source=manual AND provenance=owner_reported_no_host_trace\",\n      \"action\": \"block_submission_and_prompt_session_binding\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立诊断数据的最小上下文契约，确保所有上报的痛点均携带可追溯的会话标识或明确的Agent交互日志。\",\n      \"abstractedPrinciple\": \"诊断溯源必须绑定可验证的会话上下文或Agent行为证据，禁止无凭证的孤立上报。\"\n    },\n    {\n      \"kind\": \"defer\",\n      \"description\": \"当前证据仅包含CLI元数据与空对话窗口，缺乏Owner消息或Agent动作上下文，无法进行有效的根因分析。建议在OpenClaw会话内重新触发诊断以收集完整追踪记录。\"\n    }\n  ],\n  \"confidence\": 0.25,\n  \"ambiguityNotes\": [\n    \"CLI提交缺乏认证主机会话凭证\",\n    \"对话窗口文本内容为空，无法提取Agent行为轨迹\",\n    \"证据不足以支撑具体的Agent决策分析\"\n  ]\n}"
+      }
+    ],
+    "ambiguityNotes": [
+      "1 entries have empty text content",
+      "owner_reported_no_host_trace: No host trace available for CLI-submitted pain; fullTrace unavailable"
+    ],
+    "fullTrace": null
+  },
+  "monolithOutput": {
+    "valid": true,
+    "diagnosisId": "diag-cli-provenance-001",
+    "summary": "CLI手动提交诊断缺乏会话凭证，导致无法绑定Agent行为追踪记录，当前证据不足以分析具体Agent决策与PEAT5验证失败原因。",
+    "rootCause": "Tooling: CLI诊断提交流程未强制绑定认证会话上下文，导致Agent执行轨迹与决策依据无法被系统捕获与关联。",
+    "violatedPrinciples": [
+      {
+        "principleId": "diag-provenance-01",
+        "title": "诊断溯源完整性原则",
+        "rationale": "所有诊断报告必须绑定可验证的会话上下文或明确的Agent行为证据，否则无法进行有效的根因分析。当前CLI提交未满足此要求，导致追踪记录断裂。"
+      }
+    ],
+    "evidence": [
+      {
+        "sourceRef": "owner_reported:cli",
+        "note": "No session context available"
+      },
+      {
+        "sourceRef": "task_r15",
+        "note": "CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session"
+      }
+    ],
+    "recommendations": [
+      {
+        "kind": "rule",
+        "description": "拦截无会话凭证的CLI诊断提交，强制要求用户注入上下文或切换至OpenClaw会话内执行。",
+        "triggerPattern": "source=manual AND provenance=owner_reported_no_host_trace",
+        "action": "block_submission_and_prompt_session_binding"
+      },
+      {
+        "kind": "principle",
+        "description": "建立诊断数据的最小上下文契约，确保所有上报的痛点均携带可追溯的会话标识或明确的Agent交互日志。",
+        "abstractedPrinciple": "诊断溯源必须绑定可验证的会话上下文或Agent行为证据，禁止无凭证的孤立上报。"
+      },
+      {
+        "kind": "defer",
+        "description": "当前证据仅包含CLI元数据与空对话窗口，缺乏Owner消息或Agent动作上下文，无法进行有效的根因分析。建议在OpenClaw会话内重新触发诊断以收集完整追踪记录。"
+      }
+    ],
+    "confidence": 0.25,
+    "ambiguityNotes": [
+      "CLI提交缺乏认证主机会话凭证",
+      "对话窗口文本内容为空，无法提取Agent行为轨迹",
+      "证据不足以支撑具体的Agent决策分析"
+    ]
+  },
+  "category": "Tooling"
+}
