@@ -89,11 +89,17 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
-    DiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DefaultDiagnosticianValidator: vi.fn().mockImplementation(function () { return {}; }),
+    SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagDistillerRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRouterRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DefaultDiagRootCauseValidator: vi.fn().mockImplementation(function () { return {}; }),
+    DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
+    DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
+    SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
     PDRuntimeError: class PDRuntimeError extends Error {
       constructor(public category: string, message: string) {
         super(message);
@@ -103,7 +109,12 @@ vi.mock('@principles/core/runtime-v2', () => {
     CandidateIntakeService: MockCandidateIntakeService,
     resolveRuntimeConfig: mockResolveRuntimeConfig,
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
+    isFeatureEnabled: vi.fn().mockReturnValue(true),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+    validatePdConfig: vi.fn().mockReturnValue({ valid: true, errors: [] }),
+    computeEffectivePdConfig: vi.fn().mockReturnValue({ config: {}, source: 'defaults', warnings: [] }),
+    computeFeatureFlagsFromConfig: vi.fn().mockReturnValue({}),
+    redactPdConfig: vi.fn().mockImplementation((c) => c),
     run: mockRun,
     status: vi.fn(),
   };

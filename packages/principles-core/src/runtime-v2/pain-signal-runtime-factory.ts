@@ -11,10 +11,15 @@
  *   await bridge.onPainDetected(data);
  */
 
-import { PainSignalBridge } from './pain-signal-bridge.js';
+import { PainSignalBridge, type DiagnosticianRunnerLike } from './pain-signal-bridge.js';
+import type { RunnerResult } from './runner/runner-result.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
-import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import { SplitDiagnosticianRunner } from './internalization/split-diagnostician-runner.js';
+import { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
+import { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
+import { DiagRouterRunner } from './internalization/diag-router-runner.js';
+import { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
+import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
@@ -30,7 +35,6 @@ import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapte
 import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
 import { getProviders } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
-import { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 import { storeEmitter } from './store/event-emitter.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
@@ -347,6 +351,23 @@ export function resolveRuntimeConfigFromPdConfig(
 const bridgeCache = new Map<string, PainSignalBridge>();
 
 /**
+ * DisabledDiagnosticianRunner — used when the split pipeline feature flag is disabled (PRI-373).
+ * Fails loud with capability_missing, preventing silent monlith fallback.
+ */
+export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async run(taskId: string): Promise<RunnerResult> {
+    return {
+      status: 'failed',
+      taskId,
+      errorCategory: 'capability_missing',
+      failureReason: 'Diagnostician pipeline is disabled by feature flag (diagnostician_split_pipeline=false)',
+      attemptCount: 1,
+    };
+  }
+}
+
+/**
  * Create (or return cached) PainSignalBridge for a workspace.
  *
  * Initialization is performed on first call for a workspace (async).
@@ -373,7 +394,27 @@ export async function createPainSignalBridge(
     );
   }
   validateRuntimeConfig(runtimeConfig);
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}`;
+
+  // PRI-373: Resolve split pipeline flag BEFORE cache key to include it in the key.
+  // This prevents cache collision when same workspaceDir+runtimeKind+openclawMode
+  // is called with different effectiveConfig (e.g., split on vs off).
+  let useSplitPipeline = true;
+  if (opts.effectiveConfig) {
+    const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
+    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
+    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+
+    if (splitPipeline && !asyncCli) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
+      );
+    }
+
+    useSplitPipeline = splitPipeline;
+  }
+
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${useSplitPipeline ? 'split' : 'disabled'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -383,7 +424,6 @@ export async function createPainSignalBridge(
   const connection = new SqliteConnection(opts.workspaceDir);
   const historyQuery = new SqliteHistoryQuery(connection);
   const committer = new SqliteDiagnosticianCommitter(connection);
-  const validator = new DefaultDiagnosticianValidator();
   const trajectoryLocator = new SqliteTrajectoryLocator(connection);
   const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
 
@@ -430,33 +470,9 @@ export async function createPainSignalBridge(
     });
   }
 
-  // PRI-370 (INF-6) / PRI-372 (T-G): Gate on diagnostician_split_pipeline flag
-  let useSplitPipeline = false;
-  if (opts.effectiveConfig) {
-    const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
-    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
-
-    if (splitPipeline && !asyncCli) {
-      throw new PDRuntimeError(
-        'input_invalid',
-        'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-      );
-    }
-
-    useSplitPipeline = splitPipeline && asyncCli;
-  }
-
-  let runner: DiagnosticianRunner | SplitDiagnosticianRunner;
+  let runner: DiagnosticianRunnerLike;
 
   if (useSplitPipeline) {
-    // PRI-372: Wire split runners into the bridge via SplitDiagnosticianRunner
-    const { DiagRootCauseRunner } = await import('./internalization/diag-rootcause-runner.js');
-    const { DiagDistillerRunner } = await import('./internalization/diag-distiller-runner.js');
-    const { DiagRouterRunner } = await import('./internalization/diag-router-runner.js');
-    const { DefaultDiagRootCauseValidator } = await import('./diagnostician/diag-rootcause-output.js');
-    const { DefaultDiagDistillerValidator } = await import('./diagnostician/diag-distiller-output.js');
-
     // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
     // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
 
@@ -482,25 +498,7 @@ export async function createPainSignalBridge(
       perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
   } else {
-    runner = new DiagnosticianRunner(
-      {
-        stateManager,
-        contextAssembler,
-        runtimeAdapter,
-        eventEmitter: storeEmitter,
-        validator,
-        committer,
-      },
-      {
-        owner: opts.owner ?? 'pain-signal-bridge',
-        runtimeKind: runtimeConfig.runtimeKind,
-        pollIntervalMs: 5000,
-        timeoutMs: runtimeConfig.timeoutMs,
-        agentId: runtimeConfig.agentId,
-        outputLanguage,
-        effectiveConfig: opts.effectiveConfig,
-      },
-    );
+    runner = new DisabledDiagnosticianRunner();
   }
 
   const intakeService = new CandidateIntakeService({
@@ -523,10 +521,13 @@ export async function createPainSignalBridge(
 
 /**
  * Invalidate the cached bridge for a workspace (for testing).
+ * Covers both split and disabled pipeline variants.
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:local`);
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:gateway`);
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:`);
+  for (const mode of ['local', 'gateway', '']) {
+    for (const pipeline of ['split', 'disabled']) {
+      bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pipeline}`);
+    }
+  }
 }

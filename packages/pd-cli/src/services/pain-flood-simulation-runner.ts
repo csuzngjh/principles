@@ -4,8 +4,14 @@ import { RuntimeStateManager } from '@principles/core/runtime-v2';
 import { SqliteContextAssembler } from '@principles/core/runtime-v2';
 import { SqliteHistoryQuery } from '@principles/core/runtime-v2';
 import { StoreEventEmitter } from '@principles/core/runtime-v2';
-import { DiagnosticianRunner } from '@principles/core/runtime-v2';
-import { PassThroughValidator } from '@principles/core/runtime-v2';
+import {
+  SplitDiagnosticianRunner,
+  DiagRootCauseRunner,
+  DiagDistillerRunner,
+  DiagRouterRunner,
+  DefaultDiagRootCauseValidator,
+  DefaultDiagDistillerValidator,
+} from '@principles/core/runtime-v2';
 import { SqliteDiagnosticianCommitter } from '@principles/core/runtime-v2';
 import { TestDoubleRuntimeAdapter } from '@principles/core/runtime-v2';
 import { PainSignalBridge } from '@principles/core/runtime-v2';
@@ -170,23 +176,107 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
     const eventEmitter = new StoreEventEmitter();
     const committer = new SqliteDiagnosticianCommitter(sqliteConn);
-    const validator = new PassThroughValidator();
+    const runIdToTaskId = new Map<string, string>();
+    let runCounter = 0;
 
-    // Single test-double adapter handles all pains with deterministic output
+    // Single test-double adapter handles all pains with stage-aware output
     const runtimeAdapter = new TestDoubleRuntimeAdapter({
-      onFetchOutput: (runId: string) => ({
-        runId,
-        payload: makeDeterministicDiagnosticianOutput(runId),
-      }),
+      onStartRun: (input) => {
+        runCounter += 1;
+        const runId = `td-${runCounter}`;
+        const taskId = input.taskRef?.taskId ?? '';
+        runIdToTaskId.set(runId, taskId);
+        return {
+          runId,
+          runtimeKind: 'test-double',
+          startedAt: new Date().toISOString(),
+        };
+      },
+      onFetchOutput: async (runId: string) => {
+        const taskId = runIdToTaskId.get(runId) ?? '';
+        if (taskId.includes('diag_rootcause')) {
+          return {
+            runId,
+            payload: {
+              valid: true,
+              diagnosisId: `diag-${runId}`,
+              taskId,
+              summary: 'Mock rootcause summary for pain-flood-simulation',
+              causalChain: [{ why: 1, statement: 'why', evidenceRefs: ['ref-1'] }],
+              rootCause: 'Design: Mock rootcause',
+              rootCauseCategory: 'Design',
+              evidence: [{ sourceRef: 'ref-1', note: 'note' }],
+              confidence: 0.9,
+            },
+          };
+        } else if (taskId.includes('diag_distiller')) {
+          const parentTaskId = taskId.replace('diag_distiller-', '');
+          const stageATaskId = `diag_rootcause-${parentTaskId}`;
+          const artifacts = stateManager
+            ? await stateManager.piArtifactStore.listBySourceTaskId(stageATaskId)
+            : [];
+          const sourceRootCauseArtifactId = artifacts[0]?.artifactId ?? 'art-rc';
+          return {
+            runId,
+            payload: {
+              valid: true,
+              taskId,
+              sourceRootCauseArtifactId,
+              abstractedPrinciple: 'Mock abstracted principle',
+              rationale: 'Mock rationale',
+              groundedOnCorePrincipleIds: ['T-01'],
+              scope: 'domain',
+              confidence: 0.9,
+            },
+          };
+        } else {
+          return {
+            runId,
+            payload: makeDeterministicDiagnosticianOutput(runId),
+          };
+        }
+      },
     });
 
-    const runner = new DiagnosticianRunner(
+    const rootCauseRunner = new DiagRootCauseRunner(
       {
         stateManager,
-        contextAssembler,
         runtimeAdapter,
         eventEmitter,
-        validator,
+        artifactStore: stateManager.piArtifactStore,
+        validator: new DefaultDiagRootCauseValidator(),
+        contextAssembler,
+      },
+      {
+        owner: 'pain-flood-simulation',
+        runtimeKind: 'test-double',
+        pollIntervalMs: 50,
+        timeoutMs: 10000,
+      },
+    );
+
+    const distillerRunner = new DiagDistillerRunner(
+      {
+        stateManager,
+        runtimeAdapter,
+        eventEmitter,
+        artifactStore: stateManager.piArtifactStore,
+        validator: new DefaultDiagDistillerValidator(),
+      },
+      {
+        owner: 'pain-flood-simulation',
+        runtimeKind: 'test-double',
+        pollIntervalMs: 50,
+        timeoutMs: 10000,
+      },
+    );
+
+    const routerRunner = new DiagRouterRunner(
+      {
+        stateManager,
+        runtimeAdapter,
+        eventEmitter,
+        artifactStore: stateManager.piArtifactStore,
         committer,
       },
       {
@@ -196,6 +286,15 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
         timeoutMs: 10000,
       },
     );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+      perStageTimeoutMs: 10000,
+    });
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
     const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });

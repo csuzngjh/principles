@@ -4,41 +4,19 @@
  * Phase: m6-03
  * Requirements: DPB-01, DPB-02, DPB-03, DPB-04, DPB-05
  *
- * ## Contract
- *
- * buildPrompt() takes DiagnosticianContextPayload and returns a JSON string
- * to be passed as `openclaw agent --message <json>`.
- *
  * ## Output Structure (DPB-06)
  *
  * PromptInput has explicit top-level fields (taskId, contextHash, diagnosisTarget,
  * conversationWindow, sourceRefs) plus nested `context: DiagnosticianContextPayload`.
  *
- * ## Diagnostic Instruction (5 Whys / Root Cause Protocol)
- *
- * Per SKILL.md (pd-diagnostician): The LLM MUST follow the 5-phase protocol
- * (Phase 0 context → Phase 1 evidence → Phase 2 causal chain → Phase 3 classification
- * → Phase 4 principle extraction). The diagnosticInstruction field makes this explicit
- * so the LLM follows the protocol even if OpenClaw does not load SKILL.md automatically.
- *
- * ## Constraints (LOCKED)
- *
- * - DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
- * - DPB-07: NO extraSystemPrompt field — system prompt is agent profile's responsibility
- * - DPB-05: LLM only analyzes — PD database commits are handled by caller code
+ * (Note: monolithic DiagnosticianPromptBuilder and buildDiagnosticProtocolInstruction have been deleted per PRI-373).
  */
 import type {
   DiagnosticianContextPayload,
   HistoryQueryEntry,
   DiagnosisTarget,
 } from './context-payload.js';
-import type { TSchema } from '@sinclair/typebox';
-import type { SchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
-import { DefaultSchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
-import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
 import type { OutputLanguage } from './language-directive.js';
-import { buildLanguageDirective } from './language-directive.js';
-import { CORE_PRINCIPLES } from './core-principles/core-principle-registry.js';
 
 /** Options for DiagnosticianPromptBuilder.buildPrompt() beyond the required payload. */
 export interface BuildPromptOptions {
@@ -117,116 +95,6 @@ export interface PromptBuildResult {
 }
 
 /**
- * Options for buildDiagnosticProtocolInstruction.
- * Uses an options object to stay within max-params limit.
- */
-export interface DiagnosticProtocolInstructionOptions {
-  /** Schema prompt adapter (default: DefaultSchemaPromptAdapter) */
-  adapter?: SchemaPromptAdapter;
-  /** TypeBox schema for output validation (default: DiagnosticianOutputV1Schema) */
-  schema?: TSchema;
-  /** Output language directive (default: none) */
-  outputLanguage?: OutputLanguage;
-  /** T-E (PRI-371): Inject core axiom grounding as PHASE 3.5 (default: false) */
-  coreGrounding?: boolean;
-}
-
-/**
- * 5-phase diagnostic protocol instruction for the LLM.
- *
- * Per DPB-02 (LOCKED): Output is ONLY JSON — no markdown, no file ops, no tool calls.
- * Per DPB-04: LLM can only analyze the context provided in the prompt; it must NOT
- *   read files, call tools, or write to databases. All evidence must be drawn from
- *   the context payload (sourceRefs, conversationWindow).
- *
- * The 5-phase protocol is embedded directly in the prompt so the LLM follows it
- * regardless of whether OpenClaw loads SKILL.md as the agent system prompt.
- */
-export function buildDiagnosticProtocolInstruction(
-  opts: DiagnosticProtocolInstructionOptions = {},
-): string {
-  const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
-  const schema = opts.schema ?? DiagnosticianOutputV1Schema;
-  const { outputLanguage, coreGrounding } = opts;
-
-  const example = adapter.generateExample(schema);
-  const constraints = adapter.generateConstraints(schema);
-  const languageDirective = buildLanguageDirective(outputLanguage);
-
-  // T-E (PRI-371): When coreGrounding is true, insert PHASE 3.5 between
-  // PHASE 3 and PHASE 4. When false or undefined, output is byte-identical
-  // to the original (EP-03: no silent fallback).
-  const phase35Block = coreGrounding
-    ? `
-PHASE 3.5 — Core Axiom Grounding:
-The following core axioms are the system's foundational behavioral principles.
-If the root cause relates to any of these axioms, note the axiom ID (e.g. T-01)
-in the ambiguityNotes field of your output.
-
-Core Axioms:
-${CORE_PRINCIPLES.map(p => `${p.id}: ${p.statement}`).join('\n')}
-
-`
-    : '\n';
-
-  return `You are a root cause analysis expert. Follow this protocol:
-
-PHASE 1 — Evidence Review:
-Review the provided sourceRefs, diagnosisTarget.evidence entries, and conversationWindow
-entries from the context payload. Do NOT read any files or call any tools.
-Record all evidence by referencing the sourceRef identifiers and conversation
-entries already present in the context. Each evidence item must cite its source.
-Pay special attention to diagnosisTarget.evidence — these are the primary behavioral
-evidence (owner messages and agent actions) that the root cause analysis must address.
-
-PHASE 2 — Causal Chain (5 Whys):
-Build a Why-1 through Why-5 causal chain. Each Why MUST have evidence from Phase 1.
-- Why 1: Surface phenomenon (visible error)
-- Why 2: Direct cause (nearest trigger)
-- Why 3: Process gap (missing check/gate)
-- Why 4: Design flaw (why gap exists)
-- Why 5: Root cause (systemic defect)
-Stop early if you find a directly fixable problem.
-
-PHASE 3 — Root Cause Classification:
-Classify into ONE: People | Design | Assumption | Tooling
-- People: capability blind spots, habit issues
-- Design: architecture defects, missing gates, process gaps
-- Assumption: wrong assumptions about env/versions/deps
-- Tooling: tool misconfiguration, API changes
-${phase35Block}PHASE 4 — Recommendation Taxonomy & Distillation:
-Analyze the root cause and propose actionable recommendations. Classify each recommendation into one of FIVE categories based on the taxonomy below.
-
-TAXONOMY DEFINITIONS:
-1. "rule": Deterministic constraints. Use for specific tool blocks or path protections. A "rule" MUST have a precise 'triggerPattern' and 'action' for physical interception.
-2. "principle": Abstract, reusable wisdom. Use for high-level architectural guidelines. MUST have 'abstractedPrinciple'.
-3. "implementation": Code-level candidate. Use for extremely specific code patches.
-4. "prompt": Context/Skill injection. Use to influence the agent's workflow habits.
-5. "defer": Insufficient evidence. Use for network timeouts or noise.
-
-EVIDENCE SCOPE GUARD:
-- The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
-- If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
-  owner message or agent action context, return confidence < 0.3 and kind="defer".
-- If diagnosisTarget.evidence is an empty array (length === 0), you MUST NOT fabricate evidence entries.
-  You MUST output confidence < 0.3 and kind = "defer".
-  Set description to: "Insufficient evidence: diagnosisTarget.evidence is empty.
-  Re-trigger diagnosis after evidence is collected."
-
-CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
-
-COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-${example}
-
-IMPORTANT: The example above is ILLUSTRATIVE ONLY. Your recommendations MUST be based on the actual root cause analysis and evidence in this context — do not copy the example text verbatim.
-
-CONSTRAINTS:
-- Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
-- Do NOT read files, call tools, or write to any database
-${constraints}${languageDirective}`;
-}
-
-/**
  * Summarizes a conversation window for inclusion in the prompt.
  * DPB-04: Prompt includes conversationWindow summary.
  *
@@ -237,121 +105,4 @@ export function summarizeConversationWindow(
   entries: HistoryQueryEntry[]
 ): HistoryQueryEntry[] {
   return entries;
-}
-
-export class DiagnosticianPromptBuilder {
-  private readonly adapter: SchemaPromptAdapter;
-  private readonly schema: TSchema;
-
-  constructor(
-    adapter: SchemaPromptAdapter = new DefaultSchemaPromptAdapter(),
-    schema: TSchema = DiagnosticianOutputV1Schema,
-  ) {
-    this.adapter = adapter;
-    this.schema = schema;
-  }
-
-  /**
-   * Transform DiagnosticianContextPayload into a PromptInput object,
-   * then serialize to JSON for the --message argument.
-   *
-   * @param payload — DiagnosticianContextPayload from context assembly (DPB-01)
-   * @param opts — Build options (limits, outputLanguage, coreGrounding)
-   * @returns PromptBuildResult with JSON string + PromptInput object (DPB-02, DPB-03, DPB-04, DPB-06)
-   *
-   * Per DPB-05: This method only builds the prompt; it does NOT commit to PD database.
-   * The caller (DiagnosticianRunner or CLI layer) handles database commits.
-   *
-   * Per DPB-07: NO extraSystemPrompt is added — agent profile is the source of truth.
-   */
-  buildPrompt(
-    payload: DiagnosticianContextPayload,
-    opts: BuildPromptOptions = {},
-  ): PromptBuildResult {
-    const limits = opts.limits ?? DEFAULT_PROMPT_BUILDER_LIMITS;
-    const { outputLanguage, coreGrounding } = opts;
-
-    const truncationWarnings: string[] = [];
-
-    // DPB-04: Apply truncation to conversationWindow to prevent token overflow
-    const rawWindow = summarizeConversationWindow(payload.conversationWindow);
-    const windowEntries = rawWindow.slice(0, limits.maxConversationEntries);
-    if (rawWindow.length > limits.maxConversationEntries) {
-      truncationWarnings.push(
-        `conversationWindow truncated from ${rawWindow.length} to ${limits.maxConversationEntries} entries`,
-      );
-    }
-
-    // Truncate individual entry text
-    const conversationWindow = windowEntries.map((entry) => {
-      if (entry.text && entry.text.length > limits.maxEntryTextChars) {
-        return {
-          ...entry,
-          text: entry.text.slice(0, limits.maxEntryTextChars) + '...[truncated]',
-        };
-      }
-      return entry;
-    });
-
-    // Build compact context — replace conversationWindow with truncated version
-    // to avoid duplicating full content at top-level AND in context
-    const compactContext: DiagnosticianContextPayload = {
-      ...payload,
-      conversationWindow,
-    };
-
-    const diagnosticInstruction = buildDiagnosticProtocolInstruction({
-      adapter: this.adapter,
-      schema: this.schema,
-      outputLanguage,
-      coreGrounding,
-    });
-
-    // DPB-04: Explicit top-level fields at the prompt level
-    const promptInput: PromptInput = {
-      taskId: payload.taskId,
-      contextHash: payload.contextHash,
-      diagnosisTarget: payload.diagnosisTarget,
-      conversationWindow,
-      sourceRefs: payload.sourceRefs,
-      context: compactContext,
-      diagnosticInstruction,
-      ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
-    };
-
-    // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
-    // DPB-03: JSON must conform to what DiagnosticianOutputV1 expects (caller validates)
-    let message = JSON.stringify(promptInput);
-
-    // If message exceeds maxMessageChars, truncate the diagnostic instruction
-    // PRI-342: Extract and preserve EVIDENCE SCOPE GUARD before truncating
-    if (message.length > limits.maxMessageChars) {
-      const surplus = message.length - limits.maxMessageChars;
-      const instruction = diagnosticInstruction;
-
-      // Extract EVIDENCE SCOPE GUARD to preserve it through truncation
-      const guardMatch = /EVIDENCE SCOPE GUARD:\s*[\s\S]*?(?=\nCRITICAL:|\nCOMPLETE EXAMPLE)/.exec(instruction);
-      const guardBlock = guardMatch ? guardMatch[0] : '';
-
-      // Keep at least the first 200 chars of the instruction + a note
-      const keepLength = Math.max(200, instruction.length - surplus - 100);
-      let truncatedInstruction = instruction.slice(0, keepLength) +
-        '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
-
-      // If the guard block was cut off by truncation, re-append it
-      if (guardBlock && !truncatedInstruction.includes('EVIDENCE SCOPE GUARD')) {
-        truncatedInstruction = truncatedInstruction +
-          `\n\n${guardBlock}`;
-      }
-
-      promptInput.diagnosticInstruction = truncatedInstruction;
-      promptInput.truncationWarnings = [
-        ...truncationWarnings,
-        `diagnosticInstruction truncated due to size (${message.length} > ${limits.maxMessageChars})`,
-      ];
-      message = JSON.stringify(promptInput);
-    }
-
-    return { message, promptInput };
-  }
 }
