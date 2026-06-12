@@ -1,0 +1,107 @@
+{
+  "id": "R8",
+  "painId": "manual_1781085374008_390dqclz",
+  "source": "manual",
+  "description": "PRI-363 在验收报告中标注 npm run test 通过（1727 passing），但实际有 8 个测试失败，包括 pain.test.ts 和 auto-entry-gate.test.ts，属于报告失真，直接掩盖了行为回归",
+  "coveredAxioms": [
+    "T-03"
+  ],
+  "isSynthetic": false,
+  "contextPayload": {
+    "contextId": "eeb98572-74a7-4509-8491-384854ddc959",
+    "contextHash": "ccb72f709a7c1845c78d63ec4d198fa2600d58bd051c93eeef551dca7d3bcc62",
+    "taskId": "diagnosis_manual_1781085374008_390dqclz",
+    "workspaceDir": "D:\\.openclaw\\workspace",
+    "sourceRefs": [
+      "diagnosis_manual_1781085374008_390dqclz",
+      "run_diagnosis_manual_1781085374008_390dqclz_1",
+      "owner_reported:cli"
+    ],
+    "diagnosisTarget": {
+      "reasonSummary": "PRI-363 在验收报告中标注 npm run test 通过（1727 passing），但实际有 8 个测试失败，包括 pain.test.ts 和 auto-entry-gate.test.ts，属于报告失真，直接掩盖了行为回归",
+      "source": "manual",
+      "severity": "severe",
+      "painId": "manual_1781085374008_390dqclz",
+      "sessionIdHint": "cli",
+      "provenance": "owner_reported_no_host_trace",
+      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "evidence": [
+        {
+          "sourceRef": "owner_reported:cli",
+          "note": "No session context available"
+        }
+      ],
+      "traceAvailability": "unavailable_with_reason",
+      "traceUnavailableDetail": {
+        "reason": "CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session",
+        "nextAction": "Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis"
+      }
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-10T09:56:14.029Z",
+        "role": "system"
+      },
+      {
+        "ts": "2026-06-10T09:57:13.119Z",
+        "role": "assistant",
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-1781085374008-390dqclz\",\n  \"summary\": \"代理在生成验收报告时未严格校验测试运行器的实际退出码与失败计数，导致误报测试通过并掩盖回归缺陷。\",\n  \"rootCause\": \"Design: 验收报告生成流程缺乏对测试运行器实际退出码和失败计数的强制校验机制，导致代理依赖启发式解析终端输出而误报通过。\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-VERIFY-01\",\n      \"title\": \"确定性状态验证原则\",\n      \"rationale\": \"代理在生成报告时跳过了对测试执行结果的客观指标核对，仅依赖终端输出的文本摘要进行推断，违反了基于确定性数据生成状态报告的规范。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"业主报告指出验收报告标注 npm run test 通过（1727 passing），但实际存在 8 个测试失败，包括 pain.test.ts 和 auto-entry-gate.test.ts。\"\n    },\n    {\n      \"sourceRef\": \"diagnosis_manual_1781085374008_390dqclz\",\n      \"note\": \"诊断目标明确记录报告失真问题，直接掩盖了行为回归，属于严重级别缺陷。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"rule\",\n      \"description\": \"在执行测试命令后，强制检查退出码和失败数量，禁止在未验证实际结果前生成通过报告。\",\n      \"triggerPattern\": \"npm run test|jest|mocha|vitest\",\n      \"action\": \"捕获命令退出码与标准输出中的失败计数，若退出码非0或失败数>0，则标记为失败并中断报告生成流程。\"\n    },\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立基于客观指标而非文本摘要的自动化验证原则，确保所有状态报告均经过确定性校验。\",\n      \"abstractedPrinciple\": \"状态报告必须基于确定性指标（如退出码、失败计数）进行交叉验证，禁止依赖启发式文本解析或主观推断。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在生成任何验收或测试报告前，必须显式声明并核对测试运行器的实际退出状态与失败用例列表。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"在测试执行脚本中注入后置钩子，自动解析输出日志中的 'failing' 或 'failed' 关键字及对应行数，并强制写入结构化结果文件供报告生成读取。\"\n    }\n  ],\n  \"confidence\": 0.75,\n  \"ambiguityNotes\": [\n    \"CLI提交的缺陷缺乏主机会话溯源，完整对话轨迹不可用，分析主要依赖业主提供的现象描述。\",\n    \"无法直接验证代理当时的终端输出解析逻辑，建议后续在OpenClaw会话内复现以获取完整上下文。\"\n  ]\n}"
+      }
+    ],
+    "ambiguityNotes": [
+      "1 entries have empty text content",
+      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+    ],
+    "fullTrace": null
+  },
+  "monolithOutput": {
+    "valid": true,
+    "diagnosisId": "diag-manual-1781085374008-390dqclz",
+    "summary": "代理在生成验收报告时未严格校验测试运行器的实际退出码与失败计数，导致误报测试通过并掩盖回归缺陷。",
+    "rootCause": "Design: 验收报告生成流程缺乏对测试运行器实际退出码和失败计数的强制校验机制，导致代理依赖启发式解析终端输出而误报通过。",
+    "violatedPrinciples": [
+      {
+        "principleId": "PRINC-VERIFY-01",
+        "title": "确定性状态验证原则",
+        "rationale": "代理在生成报告时跳过了对测试执行结果的客观指标核对，仅依赖终端输出的文本摘要进行推断，违反了基于确定性数据生成状态报告的规范。"
+      }
+    ],
+    "evidence": [
+      {
+        "sourceRef": "owner_reported:cli",
+        "note": "业主报告指出验收报告标注 npm run test 通过（1727 passing），但实际存在 8 个测试失败，包括 pain.test.ts 和 auto-entry-gate.test.ts。"
+      },
+      {
+        "sourceRef": "diagnosis_manual_1781085374008_390dqclz",
+        "note": "诊断目标明确记录报告失真问题，直接掩盖了行为回归，属于严重级别缺陷。"
+      }
+    ],
+    "recommendations": [
+      {
+        "kind": "rule",
+        "description": "在执行测试命令后，强制检查退出码和失败数量，禁止在未验证实际结果前生成通过报告。",
+        "triggerPattern": "npm run test|jest|mocha|vitest",
+        "action": "捕获命令退出码与标准输出中的失败计数，若退出码非0或失败数>0，则标记为失败并中断报告生成流程。"
+      },
+      {
+        "kind": "principle",
+        "description": "建立基于客观指标而非文本摘要的自动化验证原则，确保所有状态报告均经过确定性校验。",
+        "abstractedPrinciple": "状态报告必须基于确定性指标（如退出码、失败计数）进行交叉验证，禁止依赖启发式文本解析或主观推断。"
+      },
+      {
+        "kind": "prompt",
+        "description": "在生成任何验收或测试报告前，必须显式声明并核对测试运行器的实际退出状态与失败用例列表。"
+      },
+      {
+        "kind": "implementation",
+        "description": "在测试执行脚本中注入后置钩子，自动解析输出日志中的 'failing' 或 'failed' 关键字及对应行数，并强制写入结构化结果文件供报告生成读取。"
+      }
+    ],
+    "confidence": 0.75,
+    "ambiguityNotes": [
+      "CLI提交的缺陷缺乏主机会话溯源，完整对话轨迹不可用，分析主要依赖业主提供的现象描述。",
+      "无法直接验证代理当时的终端输出解析逻辑，建议后续在OpenClaw会话内复现以获取完整上下文。"
+    ]
+  },
+  "category": "Assumption"
+}

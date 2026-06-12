@@ -1,14 +1,19 @@
-/**
- * Diagnostic Pipeline Quality Evaluation Script
- *
- * Tests the split diagnostic pipeline's prompts against multiple SenseNova models
- * to compare output quality with local LM Studio results.
- *
- * Usage:
- *   SENSENOVA_API_KEY=sk-xxx npx tsx scripts/eval-diag-quality.ts
- *
- * DO NOT commit API keys to the repo.
- */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Value } from '@sinclair/typebox/value';
+
+// ── Imports from @principles/core ───────────────────────────────────────────
+import { DiagnosticianPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.ts';
+import { RootCausePromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/rootcause-prompt-builder.ts';
+import { DistillerPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/distiller-prompt-builder.ts';
+import { RouterPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/router-prompt-builder.ts';
+import { CORE_PRINCIPLES, isCorePrincipleId } from '../packages/principles-core/src/runtime-v2/core-principles/core-principle-registry.ts';
+
+// Schemas for validation
+import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-rootcause-output.ts';
+import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-distiller-output.ts';
+import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
 
 const SENSENOVA_BASE_URL = 'https://token.sensenova.cn/v1/chat/completions';
 const API_KEY = process.env.SENSENOVA_API_KEY ?? '';
@@ -41,250 +46,74 @@ const MODELS: ModelConfig[] = [
   },
 ];
 
-// ── Test scenarios (realistic pain signals) ──────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
-interface TestScenario {
-  name: string;
+interface Fixture {
+  id: string;
+  painId: string;
+  source: string;
   description: string;
-  contextPayload: {
-    contextId: string;
-    contextHash: string;
-    taskId: string;
-    workspaceDir: string;
-    sourceRefs: string[];
-    diagnosisTarget: {
-      painId: string;
-      painScore: number;
-      painCategory: string;
-      toolCallId: string;
-      toolName: string;
-      errorMessage: string;
-      evidence: string;
-      conversationTurn: string;
-    };
-    conversationWindow: Array<{ role: string; text: string }>;
+  coveredAxioms: string[];
+  isSynthetic: boolean;
+  contextPayload: any;
+  monolithOutput: any;
+  category: string;
+}
+
+interface ArmResult {
+  armName: string;
+  success: boolean;
+  latencyMs: number;
+  output: any;
+  error?: string;
+  scores: {
+    abstractionQuality: number; // 1-5
+    linkageQuality: number; // 0-100
+    candidateValidity: number; // 0-100
+    langConsistency: number; // 0-100
+    groundingQuality: number; // 0-100
+    totalScore: number; // overall computed quality
+  };
+  metrics: {
+    leakageCount: number;
+    axiomTied: string[];
+    fabricatedAxioms: string[];
+    languageUsed: string;
   };
 }
 
-const SCENARIOS: TestScenario[] = [
-  {
-    name: 'Type Safety Bypass (as-cast)',
-    description: 'Agent used `as` cast to bypass runtime validation on parsed JSON',
-    contextPayload: {
-      contextId: 'ctx-eval-001',
-      contextHash: 'hash-eval-001',
-      taskId: 'diag_rootcause-eval-001',
-      workspaceDir: '/workspace/project',
-      sourceRefs: ['tool_call:parseJson:tc-001', 'error:TypeError:tc-002'],
-      diagnosisTarget: {
-        painId: 'pain-eval-001',
-        painScore: 0.85,
-        painCategory: 'type_safety',
-        toolCallId: 'tc-001',
-        toolName: 'readFile',
-        errorMessage: 'Agent parsed JSON response and used `as UserConfig` without runtime validation, then accessed nested property that was undefined at runtime',
-        evidence: 'The agent received a JSON response from an API, used `JSON.parse(data) as UserConfig` without checking if the parsed object actually matches the expected shape. When the API returned an unexpected structure, the code proceeded to access `config.database.host` which caused a runtime crash because `database` was undefined.',
-        conversationTurn: 'User asked to fix a config loading bug. Agent read the API endpoint, got the JSON, immediately cast it as UserConfig without validation, and deployed.',
-      },
-      conversationWindow: [
-        { role: 'user', text: 'Fix the config loading bug in src/config-loader.ts' },
-        { role: 'assistant', text: 'I will read the config from the API endpoint and parse it.' },
-        { role: 'tool', text: 'HTTP GET /api/config returned: {"version": 2, "db_url": "postgres://..."}' },
-        { role: 'assistant', text: 'const config = JSON.parse(data) as UserConfig;\nconsole.log(config.database.host); // TypeError: Cannot read property "host" of undefined' },
-        { role: 'user', text: 'That crashed. The API returned a different format than expected.' },
-      ],
-    },
-  },
-  {
-    name: 'Silent Fallback (ERR-002 pattern)',
-    description: 'Agent silently returned empty result instead of surfacing an error',
-    contextPayload: {
-      contextId: 'ctx-eval-002',
-      contextHash: 'hash-eval-002',
-      taskId: 'diag_rootcause-eval-002',
-      workspaceDir: '/workspace/project',
-      sourceRefs: ['tool_call:queryDB:tc-003', 'error:QueryTimeout:tc-004'],
-      diagnosisTarget: {
-        painId: 'pain-eval-002',
-        painScore: 0.75,
-        painCategory: 'silent_failure',
-        toolCallId: 'tc-003',
-        toolName: 'queryDatabase',
-        errorMessage: 'Database query timed out, agent returned empty array to caller instead of reporting the timeout error',
-        evidence: 'The agent caught a database timeout error in a try-catch block but instead of logging the error and surfacing it, returned an empty array []. The calling code interpreted this as "no records found" and proceeded with default behavior, hiding a real infrastructure issue.',
-        conversationTurn: 'User asked to generate a report from database data. Agent ran the query, it timed out, agent silently returned empty results, report showed zero data.',
-      },
-      conversationWindow: [
-        { role: 'user', text: 'Generate the monthly sales report' },
-        { role: 'assistant', text: 'Let me query the sales database for last month\'s data.' },
-        { role: 'tool', text: 'Error: Query timeout after 30s. Connection pool exhausted.' },
-        { role: 'assistant', text: 'try { const results = await db.query(sql); return results; } catch { return []; }' },
-        { role: 'user', text: 'The report says 0 sales, that can\'t be right for last month.' },
-      ],
-    },
-  },
-];
-
-// ── Prompt builders (inline, matching production logic) ─────────────────────
-
-function buildRootCauseInstruction(): string {
-  return `You are a root cause analyst. Your job is to perform a structured 5-Whys analysis on a pain signal (an observed behavior deviation).
-
-PHASE 1 — Evidence Review:
-Review all sourceRefs, diagnosisTarget.evidence, and conversationWindow entries. Identify the observable facts.
-
-PHASE 2 — Causal Chain (5 Whys):
-Starting from the observed failure, construct a 5-level causal chain:
-- Why-1: What directly caused the observed failure?
-- Why-2: What enabled the direct cause?
-- Why-3: What allowed that enabling condition?
-- Why-4: What assumption or gap underlay that condition?
-- Why-5: What systemic root cause produced that assumption?
-Each level MUST reference at least one evidenceRef.
-
-PHASE 3 — Root Cause Classification:
-Classify the root cause into one of:
-- People: Human error, skill gap, or knowledge deficit
-- Design: Architectural or design-level flaw in the system/agent
-- Assumption: Incorrect assumption built into the approach
-- Tooling: Infrastructure, tool, or environment limitation
-
-OUTPUT REQUIREMENTS:
-Your output MUST match the following JSON schema exactly:
-{
-  "valid": true,
-  "diagnosisId": "diag-<unique-id>",
-  "taskId": "<provided taskId>",
-  "summary": "<concise diagnosis summary, 1-2 sentences>",
-  "causalChain": [
-    { "why": 1, "statement": "...", "evidenceRefs": ["ref1"] },
-    { "why": 2, "statement": "...", "evidenceRefs": ["ref2"] },
-    { "why": 3, "statement": "...", "evidenceRefs": ["ref3"] },
-    { "why": 4, "statement": "...", "evidenceRefs": ["ref4"] },
-    { "why": 5, "statement": "...", "evidenceRefs": ["ref5"] }
-  ],
-  "rootCause": "<Category>: <description>",
-  "rootCauseCategory": "People|Design|Assumption|Tooling",
-  "evidence": [
-    { "sourceRef": "...", "note": "..." }
-  ],
-  "confidence": 0.85,
-  "ambiguityNotes": ["..."]
+interface ScenarioRunResult {
+  fixtureId: string;
+  description: string;
+  category: string;
+  expectedAxioms: string[];
+  arms: Record<string, ArmResult>;
 }
 
-CONSTRAINTS:
-- Output ONLY valid JSON — no markdown, no explanatory text, no code fences
-- Do NOT read files, call tools, or write to any database
-- rootCause MUST include the category prefix (e.g., "Design: The agent lacks runtime validation...")
-- causalChain MUST have exactly 5 entries with consecutive why numbers (1-5)
-- Each causalChain entry MUST have at least one evidenceRef
-- confidence MUST be between 0 and 1`;
+interface ModelResults {
+  model: ModelConfig;
+  results: ScenarioRunResult[];
 }
 
-function buildDistillerInstruction(): string {
-  return `You are a principle distiller. Your job is to abstract a specific root cause into a general, cross-scenario principle.
+// ── CLI arg parsing ────────────────────────────────────────────────────────
 
-INPUT:
-You will receive the Stage A root cause output as structured data. This contains:
-- summary: a concise description of the diagnosis
-- causalChain: the 5-Whys causal chain
-- rootCause: the classified root cause with category prefix
-- rootCauseCategory: People | Design | Assumption | Tooling
-- evidence: supporting evidence entries
-- confidence: the Stage A confidence score
+const args = process.argv.slice(2);
+const filterArg = args.find(a => a.startsWith('--filter='));
+const filter = filterArg ? filterArg.split('=')[1] : null;
 
-OUTPUT REQUIREMENTS:
-Your output MUST match the following JSON schema exactly:
-{
-  "valid": true,
-  "taskId": "<provided taskId>",
-  "sourceRootCauseArtifactId": "<provided artifact ID>",
-  "abstractedPrinciple": "<≤200 chars, abstract, cross-scenario principle>",
-  "rationale": "<why this principle addresses the root cause>",
-  "groundedOnCorePrincipleIds": [],
-  "scope": "general|domain|scenario",
-  "confidence": 0.85,
-  "ambiguityNotes": []
+const langArg = args.find(a => a.startsWith('--lang='));
+const outputLanguage: 'zh-CN' | 'en' = (langArg ? langArg.split('=')[1] : 'zh-CN') as 'zh-CN' | 'en';
+
+const maxFixturesArg = args.find(a => a.startsWith('--limit='));
+const maxFixtures = maxFixturesArg ? parseInt(maxFixturesArg.split('=')[1], 10) : 100; // default to run all
+
+// ── API rate limiter helper ────────────────────────────────────────────────
+
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-QUALITY GUARD:
-Your principle must be ABSTRACT, not rule-like. Avoid concrete trigger patterns,
-specific tools, or implementation details. A principle is directional wisdom;
-a rule is a boundary condition.
-
-Examples:
-- GOOD (abstract principle): "Prefer understanding the existing structure before modifying it"
-- BAD (rule-like): "Always run grep before editing files" or "Never use as casts"
-- GOOD (intent over technique): "Explicitly stated user constraints take precedence over inferred optimal paths"
-- BAD (technique-specific): "Do not create project files in /tmp directory"
-
-CONSTRAINTS:
-- Output ONLY valid JSON — no markdown, no explanatory text, no code fences
-- Do NOT read files, call tools, or write to any database
-- abstractedPrinciple MUST be ≤200 characters
-- sourceRootCauseArtifactId MUST match the provided artifact ID`;
-}
-
-function buildRouterInstruction(): string {
-  return `You are a principle router. Your job is to take an abstracted principle and root cause, and decide the concrete carrier(s).
-
-INPUT:
-You receive two structured artifacts:
-1. Stage A Root Cause output — contains the causal chain, root cause classification, and evidence.
-2. Stage B Distiller output — contains the abstracted principle, rationale, scope, and confidence.
-
-ROUTING RULES:
-Based on the distiller's abstracted principle and the root cause from Stage A, decide the recommendation kind:
-
-- If the principle is broadly applicable across scenarios → kind: "principle"
-  (MUST include abstractedPrinciple field)
-- If a specific trigger pattern can be identified for deterministic interception → kind: "rule"
-  (MUST include triggerPattern and action fields)
-- If code/tool enforcement is possible and practical → kind: "implementation"
-- If a prompt directive can enforce the behavior → kind: "prompt"
-- If insufficient confidence or the finding is too specific/single-instance → kind: "defer"
-
-Default: "principle" is the preferred kind. Only use "defer" for noise signals or genuinely insufficient evidence.
-
-OUTPUT REQUIREMENTS:
-Your output MUST match DiagnosticianOutputV1Schema. You only need to generate these fields:
-
-- violatedPrinciples: array of violated principles, derived from Stage A's rootCause + Stage B's grounding
-  - title: short descriptive name for the violated principle (REQUIRED, 3-8 words)
-  - principleId: omit (no core axioms in this evaluation)
-  - rationale: explanation of why this principle was violated (REQUIRED)
-- recommendations: one or more entries with the appropriate kind from the routing rules above
-- summary: a concise summary combining Stage A's root cause and Stage B's abstracted principle
-
-The following fields are auto-filled by the system from upstream artifacts — do NOT generate them:
-- rootCause (copied from Stage A)
-- evidence (copied from Stage A)
-- confidence (copied from Stage B)
-
-COMPLETE EXAMPLE OUTPUT:
-{
-  "valid": true,
-  "diagnosisId": "diag-example",
-  "summary": "...",
-  "rootCause": "Design: ...",
-  "violatedPrinciples": [
-    { "title": "Runtime Type Validation", "rationale": "..." }
-  ],
-  "evidence": [{ "sourceRef": "...", "note": "..." }],
-  "recommendations": [
-    { "kind": "principle", "description": "...", "abstractedPrinciple": "..." }
-  ],
-  "confidence": 0.85,
-  "ambiguityNotes": []
-}
-
-CONSTRAINTS:
-- Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
-- Do NOT read files, call tools, or write to any database
-- You MUST NOT re-derive the root cause or invent new principles. Route what the distiller produced.`;
-}
-
-// ── API call helper ─────────────────────────────────────────────────────────
+// ── SenseNova API Helper ───────────────────────────────────────────────────
 
 interface APIResponse {
   choices?: Array<{
@@ -308,8 +137,11 @@ async function callSenseNova(
   model: ModelConfig,
   systemPrompt: string,
   userPrompt: string,
-  retries = 2,
-): Promise<{ content: string; reasoning?: string; usage?: APIResponse['usage']; rawResponse: unknown }> {
+  retries = 3,
+): Promise<{ content: string; reasoning?: string; usage?: APIResponse['usage'] }> {
+  // Respect API rate limits by sleeping briefly before the call
+  await sleep(1000);
+
   const body: Record<string, unknown> = {
     model: model.id,
     messages: [
@@ -318,7 +150,7 @@ async function callSenseNova(
     ],
     stream: false,
     temperature: model.temperature ?? 0.3,
-    max_tokens: 16384,
+    max_tokens: 4096,
   };
 
   if (model.reasoningEffort) {
@@ -330,8 +162,8 @@ async function callSenseNova(
     try {
       if (attempt > 0) {
         const delay = attempt * 5000;
-        console.log(`    [RETRY] Attempt ${attempt + 1}/${retries + 1} after ${delay}ms delay...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        console.log(`      [callSenseNova Retry] Waiting ${delay}ms for attempt ${attempt + 1}...`);
+        await sleep(delay);
       }
 
       const response = await fetch(SENSENOVA_BASE_URL, {
@@ -344,7 +176,6 @@ async function callSenseNova(
       });
 
       const responseText = await response.text();
-      console.log(`    [DEBUG] HTTP ${response.status}, response length: ${responseText.length}`);
 
       if (!response.ok) {
         throw new Error(`API error ${response.status}: ${responseText.slice(0, 500)}`);
@@ -354,7 +185,6 @@ async function callSenseNova(
       try {
         data = JSON.parse(responseText) as APIResponse;
       } catch (parseErr) {
-        console.log(`    [DEBUG] JSON parse failed. First 500 chars: ${responseText.slice(0, 500)}`);
         throw new Error(`Failed to parse API response: ${(parseErr as Error).message}`);
       }
 
@@ -371,31 +201,27 @@ async function callSenseNova(
         const jsonMatch = reasoning.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           finalContent = jsonMatch[0];
-          console.log(`    [DEBUG] Content empty, extracted JSON from reasoning_content (${finalContent.length} chars)`);
         }
       }
 
-      if (!finalContent) {
-        console.log(`    [DEBUG] Empty content for model=${model.id}. Full response:`, JSON.stringify(data, null, 2).slice(0, 2000));
-      } else {
-        console.log(`    [DEBUG] Content length: ${finalContent.length}, reasoning: ${reasoning ? reasoning.length : 'none'} chars`);
-      }
-
-      return { content: finalContent, reasoning, usage: data.usage, rawResponse: data };
+      return { content: finalContent, reasoning, usage: data.usage };
     } catch (err) {
       lastError = err as Error;
-      console.log(`    [RETRY] Attempt ${attempt + 1} failed: ${lastError.message}`);
+      console.log(`      [callSenseNova Retry] Attempt ${attempt + 1} failed: ${lastError.message}`);
+      console.log(lastError.stack);
+      if ((lastError as any).cause) {
+        console.log(`      Cause:`, (lastError as any).cause);
+      }
     }
   }
 
   throw lastError ?? new Error('All retries exhausted');
 }
 
-// ── Output validators ───────────────────────────────────────────────────────
+// ── JSON extraction helper ──────────────────────────────────────────────────
 
 function extractJSON(raw: string): string {
   let text = raw.trim();
-
   if (text.startsWith('```json')) {
     text = text.slice(7);
   } else if (text.startsWith('```')) {
@@ -404,588 +230,641 @@ function extractJSON(raw: string): string {
   if (text.endsWith('```')) {
     text = text.slice(0, -3);
   }
-  text = text.trim();
-
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    text = text.slice(firstBrace, lastBrace + 1);
-  }
-
-  return text;
+  return text.trim();
 }
 
-interface ValidationOutcome {
-  valid: boolean;
-  errors: string[];
-  parsed: unknown;
-}
-
-function validateRootCauseOutput(raw: string): ValidationOutcome {
-  const errors: string[] = [];
-  let parsed: unknown;
-
+function parseJsonSafe(raw: string): any {
   try {
-    parsed = JSON.parse(extractJSON(raw));
-  } catch (e) {
-    return { valid: false, errors: [`JSON parse error: ${(e as Error).message}`], parsed: null };
+    return JSON.parse(extractJSON(raw));
+  } catch {
+    return null;
   }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    errors.push('Output is not an object');
-    return { valid: false, errors, parsed };
-  }
-
-  const obj = parsed as Record<string, unknown>;
-
-  if (obj.valid !== true) errors.push('valid !== true');
-  if (typeof obj.diagnosisId !== 'string' || !obj.diagnosisId) errors.push('diagnosisId missing or empty');
-  if (typeof obj.taskId !== 'string' || !obj.taskId) errors.push('taskId missing or empty');
-  if (typeof obj.summary !== 'string' || !obj.summary) errors.push('summary missing or empty');
-  if (typeof obj.rootCause !== 'string' || !obj.rootCause) errors.push('rootCause missing or empty');
-  else {
-    const hasCategory = /^(People|Design|Assumption|Tooling):/.test(obj.rootCause as string);
-    if (!hasCategory) errors.push('rootCause missing category prefix (People|Design|Assumption|Tooling)');
-  }
-  if (!['People', 'Design', 'Assumption', 'Tooling'].includes(obj.rootCauseCategory as string)) {
-    errors.push(`rootCauseCategory invalid: ${obj.rootCauseCategory}`);
-  }
-  if (!Array.isArray(obj.causalChain)) errors.push('causalChain is not an array');
-  else {
-    if (obj.causalChain.length !== 5) errors.push(`causalChain has ${obj.causalChain.length} entries, expected 5`);
-    (obj.causalChain as unknown[]).forEach((entry, i) => {
-      const e = entry as Record<string, unknown>;
-      if (e.why !== i + 1) errors.push(`causalChain[${i}].why !== ${i + 1}`);
-      if (typeof e.statement !== 'string' || !e.statement) errors.push(`causalChain[${i}].statement missing`);
-      if (!Array.isArray(e.evidenceRefs) || e.evidenceRefs.length === 0) errors.push(`causalChain[${i}].evidenceRefs empty`);
-    });
-  }
-  if (!Array.isArray(obj.evidence)) errors.push('evidence is not an array');
-  if (typeof obj.confidence !== 'number' || obj.confidence < 0 || obj.confidence > 1) {
-    errors.push('confidence missing or out of range [0,1]');
-  }
-
-  return { valid: errors.length === 0, errors, parsed };
 }
 
-function validateDistillerOutput(raw: string, expectedArtifactId: string): ValidationOutcome {
-  const errors: string[] = [];
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(extractJSON(raw));
-  } catch (e) {
-    return { valid: false, errors: [`JSON parse error: ${(e as Error).message}`], parsed: null };
+function getValidationErrorString(schema: any, value: any): string {
+  if (value === null || value === undefined) {
+    return 'Value is null or failed parsing';
   }
-
-  if (typeof parsed !== 'object' || parsed === null) {
-    errors.push('Output is not an object');
-    return { valid: false, errors, parsed };
-  }
-
-  const obj = parsed as Record<string, unknown>;
-
-  if (obj.valid !== true) errors.push('valid !== true');
-  if (typeof obj.taskId !== 'string' || !obj.taskId) errors.push('taskId missing or empty');
-  if (obj.sourceRootCauseArtifactId !== expectedArtifactId) {
-    errors.push(`sourceRootCauseArtifactId mismatch: got "${obj.sourceRootCauseArtifactId}", expected "${expectedArtifactId}"`);
-  }
-  if (typeof obj.abstractedPrinciple !== 'string' || !obj.abstractedPrinciple) {
-    errors.push('abstractedPrinciple missing or empty');
-  } else if ((obj.abstractedPrinciple as string).length > 200) {
-    errors.push(`abstractedPrinciple too long: ${(obj.abstractedPrinciple as string).length} chars (max 200)`);
-  }
-  if (typeof obj.rationale !== 'string' || !obj.rationale) errors.push('rationale missing');
-  if (!['general', 'domain', 'scenario'].includes(obj.scope as string)) {
-    errors.push(`scope invalid: ${obj.scope}`);
-  }
-  if (typeof obj.confidence !== 'number' || obj.confidence < 0 || obj.confidence > 1) {
-    errors.push('confidence missing or out of range');
-  }
-
-  return { valid: errors.length === 0, errors, parsed };
+  const errors = [...Value.Errors(schema, value)];
+  if (errors.length === 0) return '';
+  return errors.map(e => `${e.path}: ${e.message} (got ${JSON.stringify(e.value)})`).join('; ');
 }
 
-function validateRouterOutput(raw: string): ValidationOutcome {
-  const errors: string[] = [];
-  let parsed: unknown;
+// ── Evaluation Scorers ──────────────────────────────────────────────────────
 
-  try {
-    parsed = JSON.parse(extractJSON(raw));
-  } catch (e) {
-    return { valid: false, errors: [`JSON parse error: ${(e as Error).message}`], parsed: null };
+function checkRuleLikeLeakage(text: string): { score: number; leakageCount: number } {
+  const lowercase = text.toLowerCase();
+  const ruleIndicators = [
+    'always', 'never', 'must use', 'do not', 'don\'t', 'every time', 'run grep',
+    '必须', '禁止', '不要', '切勿', '始终', '每次', '每次都',
+    '.ts', '.js', '.json', 'edit_file', 'read_file', 'write_file', 'git push', 'curl', 'process.exit'
+  ];
+  let leakageCount = 0;
+  for (const ind of ruleIndicators) {
+    const regex = new RegExp(ind.replace('.', '\\.'), 'gi');
+    const matches = lowercase.match(regex);
+    if (matches) {
+      leakageCount += matches.length;
+    }
   }
 
-  if (typeof parsed !== 'object' || parsed === null) {
-    errors.push('Output is not an object');
-    return { valid: false, errors, parsed };
+  // Leakage count penalizes the abstraction score
+  // 0 leakage = 5, 1-2 leakage = 4, 3-4 leakage = 3, 5-6 leakage = 2, >=7 leakage = 1
+  let score = 5;
+  if (leakageCount >= 7) score = 1;
+  else if (leakageCount >= 5) score = 2;
+  else if (leakageCount >= 3) score = 3;
+  else if (leakageCount >= 1) score = 4;
+
+  return { score, leakageCount };
+}
+
+function evaluateArmOutput(
+  armName: string,
+  output: any,
+  contextPayload: any,
+  expectedLanguage: 'zh-CN' | 'en'
+): ArmResult['scores'] & { metrics: ArmResult['metrics'] } {
+  const metrics: ArmResult['metrics'] = {
+    leakageCount: 0,
+    axiomTied: [],
+    fabricatedAxioms: [],
+    languageUsed: 'unknown'
+  };
+
+  if (!output) {
+    return {
+      abstractionQuality: 1,
+      linkageQuality: 0,
+      candidateValidity: 0,
+      langConsistency: 0,
+      groundingQuality: 0,
+      totalScore: 0,
+      metrics
+    };
   }
 
-  const obj = parsed as Record<string, unknown>;
-
-  if (obj.valid !== true) errors.push('valid !== true');
-  if (typeof obj.diagnosisId !== 'string' || !obj.diagnosisId) errors.push('diagnosisId missing');
-  if (typeof obj.summary !== 'string' || !obj.summary) errors.push('summary missing');
-
-  if (!Array.isArray(obj.violatedPrinciples) || (obj.violatedPrinciples as unknown[]).length === 0) {
-    errors.push('violatedPrinciples missing or empty');
+  // 1. Abstraction Quality (Scoring the principle text)
+  let principleText = '';
+  if (armName === 'Arm 3 (Split)') {
+    principleText = output.recommendations?.find((r: any) => r.kind === 'principle')?.abstractedPrinciple || '';
   } else {
-    (obj.violatedPrinciples as Array<Record<string, unknown>>).forEach((vp, i) => {
-      if (typeof vp.title !== 'string' || !vp.title) errors.push(`violatedPrinciples[${i}].title missing`);
-      if (typeof vp.rationale !== 'string' || !vp.rationale) errors.push(`violatedPrinciples[${i}].rationale missing`);
-    });
+    principleText = output.recommendations?.find((r: any) => r.kind === 'principle')?.description || '';
   }
 
-  if (!Array.isArray(obj.recommendations) || (obj.recommendations as unknown[]).length === 0) {
-    errors.push('recommendations missing or empty');
-  } else {
-    const validKinds = new Set(['principle', 'rule', 'implementation', 'prompt', 'defer']);
-    (obj.recommendations as Array<Record<string, unknown>>).forEach((rec, i) => {
-      if (!validKinds.has(rec.kind as string)) errors.push(`recommendations[${i}].kind invalid: ${rec.kind}`);
-      if (typeof rec.description !== 'string' || !rec.description) errors.push(`recommendations[${i}].description missing`);
-    });
+  if (!principleText || principleText.trim() === '') {
+    return {
+      abstractionQuality: 1, // default lowest score for missing principle
+      linkageQuality: armName === 'Arm 1 (Monolith)' ? 100 : 0,
+      candidateValidity: 0,
+      langConsistency: 0,
+      groundingQuality: 0,
+      totalScore: 0,
+      metrics
+    };
   }
 
-  return { valid: errors.length === 0, errors, parsed };
-}
+  const { score: absScore, leakageCount } = checkRuleLikeLeakage(principleText);
+  metrics.leakageCount = leakageCount;
 
-// ── Quality scoring ─────────────────────────────────────────────────────────
+  // 2. Language Consistency
+  // Simple heuristic: check for Chinese characters
+  const hasChinese = /[\u4e00-\u9fa5]/.test(principleText);
+  const langMatch = expectedLanguage === 'zh-CN' ? hasChinese : !hasChinese;
+  const langScore = langMatch ? 100 : 0;
+  metrics.languageUsed = hasChinese ? 'zh-CN' : 'en';
 
-interface QualityScore {
-  rootCauseDepth: number;
-  principleAbstractness: number;
-  routingAccuracy: number;
-  overall: number;
-  notes: string[];
-}
-
-function scoreRootCause(parsed: Record<string, unknown>): { score: number; notes: string[] } {
-  const notes: string[] = [];
-  let score = 0;
-  const chain = obj.arr(parsed.causalChain);
-  if (chain.length === 5) {
-    score += 30;
-  } else {
-    notes.push(`causalChain length: ${chain.length}/5`);
-    score += chain.length * 6;
-  }
-  const hasAllRefs = chain.every((entry: Record<string, unknown>) =>
-    Array.isArray(entry.evidenceRefs) && entry.evidenceRefs.length > 0,
-  );
-  if (hasAllRefs) score += 20;
-  else notes.push('Some causalChain entries missing evidenceRefs');
-
-  const rootCause = parsed.rootCause as string;
-  if (rootCause && /^(People|Design|Assumption|Tooling):/.test(rootCause)) score += 15;
-  else notes.push('rootCause missing category prefix');
-
-  const summary = parsed.summary as string;
-  if (summary && summary.length > 20 && summary.length < 300) score += 15;
-  else notes.push('summary too short or too long');
-
-  const evidence = parsed.evidence as Array<unknown>;
-  if (Array.isArray(evidence) && evidence.length >= 2) score += 20;
-  else {
-    notes.push(`evidence count: ${Array.isArray(evidence) ? evidence.length : 0}, expected >= 2`);
-    score += 10;
-  }
-
-  return { score, notes };
-}
-
-function scoreDistiller(parsed: Record<string, unknown>): { score: number; notes: string[] } {
-  const notes: string[] = [];
-  let score = 0;
-
-  const principle = parsed.abstractedPrinciple as string;
-  if (!principle) {
-    notes.push('abstractedPrinciple missing');
-    return { score: 0, notes };
-  }
-
-  if (principle.length <= 200) score += 25;
-  else notes.push(`principle too long: ${principle.length} chars`);
-
-  const abstractIndicators = ['prefer', 'before', 'over', 'ensure', 'rather than', 'when', 'prioritize', 'validate'];
-  const ruleIndicators = ['always', 'never', 'must use', 'do not', 'don\'t', 'every time', 'run grep'];
-  const abstractHits = abstractIndicators.filter(w => principle.toLowerCase().includes(w)).length;
-  const ruleHits = ruleIndicators.filter(w => principle.toLowerCase().includes(w)).length;
-  if (abstractHits > ruleHits) {
-    score += 30;
-    notes.push('principle is abstract (good)');
-  } else if (ruleHits > 0) {
-    score += 10;
-    notes.push('principle is rule-like (needs improvement)');
-  } else {
-    score += 20;
-    notes.push('principle tone: neutral');
-  }
-
-  const rationale = parsed.rationale as string;
-  if (rationale && rationale.length > 30) score += 20;
-  else notes.push('rationale too short');
-
-  if (parsed.scope === 'general') score += 15;
-  else if (parsed.scope === 'domain') score += 10;
-  else notes.push(`scope is "${parsed.scope}" — could be more general`);
-
-  const confidence = parsed.confidence as number;
-  if (typeof confidence === 'number' && confidence >= 0.5 && confidence <= 1) score += 10;
-  else notes.push('confidence out of expected range');
-
-  return { score, notes };
-}
-
-function scoreRouter(parsed: Record<string, unknown>): { score: number; notes: string[] } {
-  const notes: string[] = [];
-  let score = 0;
-
-  const recs = parsed.recommendations as Array<Record<string, unknown>>;
-  if (!Array.isArray(recs) || recs.length === 0) {
-    notes.push('no recommendations');
-    return { score: 0, notes };
-  }
-
-  const hasPrinciple = recs.some(r => r.kind === 'principle');
-  const hasRule = recs.some(r => r.kind === 'rule');
-  if (hasPrinciple) {
-    score += 30;
-    notes.push('includes principle recommendation (good default)');
-  }
-  if (hasRule) {
-    score += 10;
-    notes.push('includes rule recommendation');
-  }
-  if (!hasPrinciple && !hasRule && recs.some(r => r.kind === 'defer')) {
-    score += 5;
-    notes.push('only defer — may indicate insufficient signal');
-  }
-
-  const vps = parsed.violatedPrinciples as Array<Record<string, unknown>>;
-  if (Array.isArray(vps) && vps.length > 0) {
-    score += 25;
-    const hasTitle = vps.every(vp => typeof vp.title === 'string' && (vp.title as string).length >= 3);
-    if (hasTitle) score += 10;
-    else notes.push('some violatedPrinciples missing title');
-  } else {
-    notes.push('violatedPrinciples empty');
-  }
-
-  const summary = parsed.summary as string;
-  if (summary && summary.length > 20) score += 15;
-  else notes.push('summary too short');
-
-  if (recs.every(r => typeof r.description === 'string' && (r.description as string).length > 10)) {
-    score += 10;
-  } else {
-    notes.push('some recommendations missing description');
-  }
-
-  return { score, notes };
-}
-
-// Helper for type safety
-const obj = {
-  arr(val: unknown): Array<Record<string, unknown>> {
-    if (!Array.isArray(val)) return [];
-    return val as Array<Record<string, unknown>>;
-  },
-};
-
-// ── Main evaluation runner ──────────────────────────────────────────────────
-
-interface StageResult {
-  model: string;
-  scenario: string;
-  stage: string;
-  schemaValid: boolean;
-  validationErrors: string[];
-  qualityScore: number;
-  qualityNotes: string[];
-  output: unknown;
-  reasoning?: string;
-  tokensUsed?: number;
-  latencyMs: number;
-  error?: string;
-}
-
-async function runStage(
-  model: ModelConfig,
-  scenario: TestScenario,
-  stage: 'rootcause' | 'distiller' | 'router',
-  rootCauseOutput?: Record<string, unknown>,
-  distillerOutput?: Record<string, unknown>,
-): Promise<StageResult> {
-  const start = Date.now();
-
-  try {
-    let systemPrompt: string;
-    let userPrompt: string;
-    let validator: (raw: string) => ValidationOutcome;
-    let scorer: (parsed: Record<string, unknown>) => { score: number; notes: string[] };
-
-    switch (stage) {
-      case 'rootcause': {
-        systemPrompt = buildRootCauseInstruction();
-        userPrompt = JSON.stringify(scenario.contextPayload, null, 2);
-        validator = validateRootCauseOutput;
-        scorer = scoreRootCause;
-        break;
-      }
-      case 'distiller': {
-        systemPrompt = buildDistillerInstruction();
-        const artifactId = `artifact-rc-${scenario.contextPayload.taskId}`;
-        userPrompt = JSON.stringify({
-          rootCauseArtifactId: artifactId,
-          rootCauseOutput: rootCauseOutput!,
-          distillerInstruction: '(see system prompt)',
-        }, null, 2);
-        validator = (raw) => validateDistillerOutput(raw, artifactId);
-        scorer = scoreDistiller;
-        break;
-      }
-      case 'router': {
-        systemPrompt = buildRouterInstruction();
-        const rcArtifactId = `artifact-rc-${scenario.contextPayload.taskId}`;
-        const distArtifactId = `artifact-dist-${scenario.contextPayload.taskId}`;
-        userPrompt = JSON.stringify({
-          taskId: scenario.contextPayload.taskId,
-          rootCauseArtifactId: rcArtifactId,
-          rootCauseOutput: rootCauseOutput!,
-          distillerArtifactId: distArtifactId,
-          distillerOutput: distillerOutput!,
-          routerInstruction: '(see system prompt)',
-        }, null, 2);
-        validator = validateRouterOutput;
-        scorer = scoreRouter;
-        break;
+  // 3. Core Principle Linkage & Fabrication Checks
+  let linkageScore = 0;
+  if (armName === 'Arm 3 (Split)') {
+    // Stage B output is where grounding is defined
+    const distillerOutput = output._stageBOutput;
+    if (distillerOutput && Array.isArray(distillerOutput.groundedOnCorePrincipleIds)) {
+      const ids = distillerOutput.groundedOnCorePrincipleIds as string[];
+      for (const id of ids) {
+        if (isCorePrincipleId(id)) {
+          metrics.axiomTied.push(id);
+        } else {
+          metrics.fabricatedAxioms.push(id);
+        }
       }
     }
+  } else if (armName === 'Arm 2 (Grounded Monolith)') {
+    // For monolith grounded, the axioms are noted in ambiguityNotes
+    const notes = output.ambiguityNotes as string[] | undefined;
+    if (Array.isArray(notes)) {
+      const matchText = notes.join(' ');
+      const ids = matchText.match(/T-\d{2}/g) ?? [];
+      for (const id of ids) {
+        if (isCorePrincipleId(id)) {
+          metrics.axiomTied.push(id);
+        } else {
+          metrics.fabricatedAxioms.push(id);
+        }
+      }
+    }
+  }
 
-    const result = await callSenseNova(model, systemPrompt, userPrompt);
-    const latencyMs = Date.now() - start;
+  if (armName === 'Arm 1 (Monolith)') {
+    // Arm 1 is expected to have 0 linkage, which is correct for its configuration
+    linkageScore = 100; 
+  } else {
+    const totalLinked = metrics.axiomTied.length;
+    const totalFabricated = metrics.fabricatedAxioms.length;
+    if (totalLinked > 0 && totalFabricated === 0) {
+      linkageScore = 100;
+    } else if (totalFabricated > 0) {
+      linkageScore = 0; // major penalty for fabricating axioms
+    } else {
+      linkageScore = 50; // no linkage identified, but no fabrication
+    }
+  }
 
-    const validation = validator(result.content);
-    const quality = validation.valid
-      ? scorer(validation.parsed as Record<string, unknown>)
-      : { score: 0, notes: ['skipped — schema invalid'] };
+  // 4. Downstream Candidate Validity
+  let candidateScore = 100;
+  const recs = output.recommendations || [];
+  if (!Array.isArray(recs) || recs.length === 0) {
+    candidateScore = 0;
+  } else {
+    for (const r of recs) {
+      if (!['principle', 'rule', 'implementation', 'prompt', 'defer'].includes(r.kind)) {
+        candidateScore -= 25;
+      }
+      if (r.kind === 'rule' && (!r.triggerPattern || !r.action)) {
+        candidateScore -= 15;
+      }
+      if (r.kind === 'principle' && armName === 'Arm 3 (Split)' && !r.abstractedPrinciple) {
+        candidateScore -= 15;
+      }
+    }
+    candidateScore = Math.max(0, candidateScore);
+  }
+
+  // 5. Evidence Grounding Quality
+  let groundingScore = 100;
+  const outputEvidence = output.evidence || [];
+  const inputRefs = new Set(contextPayload.sourceRefs || []);
+  if (Array.isArray(outputEvidence)) {
+    for (const ev of outputEvidence) {
+      if (ev.sourceRef && !inputRefs.has(ev.sourceRef)) {
+        groundingScore -= 20; // penalize for referencing non-existent evidence
+      }
+    }
+    groundingScore = Math.max(0, groundingScore);
+  }
+
+  // Compute overall total score
+  const totalScore = Math.round(
+    (absScore / 5) * 35 +
+    (linkageScore / 100) * 15 +
+    (candidateScore / 100) * 20 +
+    (langScore / 100) * 15 +
+    (groundingScore / 100) * 15
+  );
+
+  return {
+    abstractionQuality: absScore,
+    linkageQuality: linkageScore,
+    candidateValidity: candidateScore,
+    langConsistency: langScore,
+    groundingQuality: groundingScore,
+    totalScore,
+    metrics
+  };
+}
+
+// ── Load Corpus ─────────────────────────────────────────────────────────────
+
+function loadFixtures(): Fixture[] {
+  const fixturesDir = path.resolve(process.cwd(), 'spike', 'comparison-fixtures');
+  if (!fs.existsSync(fixturesDir)) {
+    console.error(`Directory not found: ${fixturesDir}`);
+    return [];
+  }
+  const files = fs.readdirSync(fixturesDir).filter(f => f.endsWith('.json'));
+  const fixtures: Fixture[] = [];
+  for (const file of files) {
+    const raw = fs.readFileSync(path.join(fixturesDir, file), 'utf-8');
+    fixtures.push(JSON.parse(raw));
+  }
+  // Sort fixtures to run R1, R2, R3, etc.
+  fixtures.sort((a, b) => {
+    const aNum = parseInt(a.id.slice(1), 10);
+    const bNum = parseInt(b.id.slice(1), 10);
+    return aNum - bNum;
+  });
+  return fixtures.slice(0, maxFixtures);
+}
+
+// ── Run Arm 1: Monolith ─────────────────────────────────────────────────────
+
+async function runArm1(model: ModelConfig, fixture: Fixture): Promise<ArmResult> {
+  const start = Date.now();
+  try {
+    const builder = new DiagnosticianPromptBuilder();
+    const result = builder.buildPrompt(fixture.contextPayload, {
+      coreGrounding: false,
+      outputLanguage
+    });
+
+    const systemPrompt = result.promptInput.diagnosticInstruction;
+    const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
+
+    const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
+    const output = parseJsonSafe(apiResult.content);
+
+    const valid = Value.Check(DiagnosticianOutputV1Schema, output);
+    const scoresWithMetrics = evaluateArmOutput('Arm 1 (Monolith)', output, fixture.contextPayload, outputLanguage);
 
     return {
-      model: model.label,
-      scenario: scenario.name,
-      stage,
-      schemaValid: validation.valid,
-      validationErrors: validation.errors,
-      qualityScore: quality.score,
-      qualityNotes: quality.notes,
-      output: validation.parsed,
-      reasoning: result.reasoning,
-      tokensUsed: result.usage?.total_tokens,
-      latencyMs,
-    };
-  } catch (err) {
-    return {
-      model: model.label,
-      scenario: scenario.name,
-      stage,
-      schemaValid: false,
-      validationErrors: [],
-      qualityScore: 0,
-      qualityNotes: [],
-      output: null,
+      armName: 'Arm 1 (Monolith)',
+      success: valid && output !== null,
       latencyMs: Date.now() - start,
-      error: (err as Error).message,
+      output,
+      error: valid ? undefined : 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, output),
+      scores: scoresWithMetrics,
+      metrics: scoresWithMetrics.metrics
+    };
+  } catch (err: any) {
+    return {
+      armName: 'Arm 1 (Monolith)',
+      success: false,
+      latencyMs: Date.now() - start,
+      output: null,
+      error: err.message,
+      scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
+      metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' }
     };
   }
 }
 
-// ── Report generation ───────────────────────────────────────────────────────
+// ── Run Arm 2: Grounded Monolith ────────────────────────────────────────────
 
-function generateReport(results: StageResult[]): string {
+async function runArm2(model: ModelConfig, fixture: Fixture): Promise<ArmResult> {
+  const start = Date.now();
+  try {
+    const builder = new DiagnosticianPromptBuilder();
+    const result = builder.buildPrompt(fixture.contextPayload, {
+      coreGrounding: true,
+      outputLanguage
+    });
+
+    const systemPrompt = result.promptInput.diagnosticInstruction;
+    const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
+
+    const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
+    const output = parseJsonSafe(apiResult.content);
+
+    const valid = Value.Check(DiagnosticianOutputV1Schema, output);
+    const scoresWithMetrics = evaluateArmOutput('Arm 2 (Grounded Monolith)', output, fixture.contextPayload, outputLanguage);
+
+    return {
+      armName: 'Arm 2 (Grounded Monolith)',
+      success: valid && output !== null,
+      latencyMs: Date.now() - start,
+      output,
+      error: valid ? undefined : 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, output),
+      scores: scoresWithMetrics,
+      metrics: scoresWithMetrics.metrics
+    };
+  } catch (err: any) {
+    return {
+      armName: 'Arm 2 (Grounded Monolith)',
+      success: false,
+      latencyMs: Date.now() - start,
+      output: null,
+      error: err.message,
+      scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
+      metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' }
+    };
+  }
+}
+
+// ── Run Arm 3: Split Pipeline ───────────────────────────────────────────────
+
+async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult> {
+  const start = Date.now();
+  try {
+    // 1. Stage A: Root Cause
+    const rootBuilder = new RootCausePromptBuilder();
+    const rcResult = rootBuilder.buildPrompt(fixture.contextPayload, {
+      coreGrounding: true,
+      outputLanguage
+    });
+    const systemA = rcResult.promptInput.diagnosticInstruction;
+    const userA = JSON.stringify({ ...rcResult.promptInput, diagnosticInstruction: undefined }, null, 2);
+    const apiA = await callSenseNova(model, systemA, userA);
+    const outputA = parseJsonSafe(apiA.content);
+
+    if (!outputA || !Value.Check(DiagRootCauseOutputV1Schema, outputA)) {
+      throw new Error('Stage A (RootCause) failed validation: ' + getValidationErrorString(DiagRootCauseOutputV1Schema, outputA));
+    }
+
+    // 2. Stage B: Distiller
+    const distillerBuilder = new DistillerPromptBuilder();
+    const rootCauseArtifactId = `artifact-rc-${fixture.painId}`;
+    const distillerCtx = {
+      rootCauseArtifactId,
+      rootCauseOutput: outputA,
+      coreGrounding: true
+    };
+    const distResult = distillerBuilder.buildPrompt(distillerCtx, {
+      coreGrounding: true,
+      outputLanguage
+    });
+    const systemB = distResult.promptInput.distillerInstruction;
+    const userB = JSON.stringify({ ...distResult.promptInput, distillerInstruction: undefined }, null, 2);
+    const apiB = await callSenseNova(model, systemB, userB);
+    const outputB = parseJsonSafe(apiB.content);
+
+    if (!outputB || !Value.Check(DiagDistillerOutputV1Schema, outputB)) {
+      throw new Error('Stage B (Distiller) failed validation: ' + getValidationErrorString(DiagDistillerOutputV1Schema, outputB));
+    }
+
+    // 3. Stage C: Router
+    const routerBuilder = new RouterPromptBuilder();
+    const distillerArtifactId = `artifact-dist-${fixture.painId}`;
+    const routerCtx = {
+      rootCauseArtifactId,
+      rootCauseOutput: outputA,
+      distillerArtifactId,
+      distillerOutput: outputB
+    };
+    const routerResult = routerBuilder.buildPrompt(routerCtx, {
+      outputLanguage
+    });
+    const systemC = routerResult.promptInput.routerInstruction;
+    const userC = JSON.stringify({ ...routerResult.promptInput, routerInstruction: undefined }, null, 2);
+    const apiC = await callSenseNova(model, systemC, userC);
+    const outputC = parseJsonSafe(apiC.content);
+
+    if (!outputC || !Value.Check(DiagnosticianOutputV1Schema, outputC)) {
+      throw new Error('Stage C (Router) failed validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, outputC));
+    }
+
+    // Attach stage B output for evaluateArmOutput to read grounding
+    const finalOutput = { ...outputC, _stageBOutput: outputB };
+    const scoresWithMetrics = evaluateArmOutput('Arm 3 (Split)', finalOutput, fixture.contextPayload, outputLanguage);
+
+    return {
+      armName: 'Arm 3 (Split)',
+      success: true,
+      latencyMs: Date.now() - start,
+      output: finalOutput,
+      scores: scoresWithMetrics,
+      metrics: scoresWithMetrics.metrics
+    };
+  } catch (err: any) {
+    return {
+      armName: 'Arm 3 (Split)',
+      success: false,
+      latencyMs: Date.now() - start,
+      output: null,
+      error: err.message,
+      scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
+      metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' }
+    };
+  }
+}
+
+// ── Combined Report Generator ───────────────────────────────────────────────
+
+function writeCombinedReport(modelResults: ModelResults[]) {
   const lines: string[] = [];
-
-  lines.push('═'.repeat(80));
-  lines.push('  DIAGNOSTIC PIPELINE QUALITY EVALUATION REPORT');
-  lines.push(`  Generated: ${new Date().toISOString()}`);
-  lines.push('═'.repeat(80));
+  lines.push('# 3-Arm Comparison Evaluation Report');
+  lines.push('');
+  lines.push(`**Date**: ${new Date().toISOString()}`);
+  lines.push(`**Language Controlled**: ${outputLanguage}`);
   lines.push('');
 
-  const models = [...new Set(results.map(r => r.model))];
-  const scenarios = [...new Set(results.map(r => r.scenario))];
+  for (const { model, results } of modelResults) {
+    lines.push(`## Model: ${model.label}`);
+    lines.push('');
 
-  for (const model of models) {
-    lines.push('─'.repeat(60));
-    lines.push(`  Model: ${model}`);
-    lines.push('─'.repeat(60));
+    // Calculate averages
+    let arm1TotalScore = 0;
+    let arm2TotalScore = 0;
+    let arm3TotalScore = 0;
+    let arm1TotalAbs = 0;
+    let arm2TotalAbs = 0;
+    let arm3TotalAbs = 0;
+    let arm1Success = 0;
+    let arm2Success = 0;
+    let arm3Success = 0;
+    let arm1Latency = 0;
+    let arm2Latency = 0;
+    let arm3Latency = 0;
+    let arm3TotalFabrications = 0;
 
-    for (const scenario of scenarios) {
-      const scenarioResults = results.filter(r => r.model === model && r.scenario === scenario);
-      if (scenarioResults.length === 0) continue;
+    for (const r of results) {
+      const a1 = r.arms['Arm 1 (Monolith)'];
+      const a2 = r.arms['Arm 2 (Grounded Monolith)'];
+      const a3 = r.arms['Arm 3 (Split)'];
 
+      arm1TotalScore += a1.scores.totalScore;
+      arm2TotalScore += a2.scores.totalScore;
+      arm3TotalScore += a3.scores.totalScore;
+
+      arm1TotalAbs += a1.scores.abstractionQuality;
+      arm2TotalAbs += a2.scores.abstractionQuality;
+      arm3TotalAbs += a3.scores.abstractionQuality;
+
+      if (a1.success) arm1Success++;
+      if (a2.success) arm2Success++;
+      if (a3.success) arm3Success++;
+
+      arm1Latency += a1.latencyMs;
+      arm2Latency += a2.latencyMs;
+      arm3Latency += a3.latencyMs;
+
+      arm3TotalFabrications += a3.metrics.fabricatedAxioms.length;
+    }
+
+    const count = results.length;
+    const avg1Score = Math.round(arm1TotalScore / count);
+    const avg2Score = Math.round(arm2TotalScore / count);
+    const avg3Score = Math.round(arm3TotalScore / count);
+
+    const avg1Abs = (arm1TotalAbs / count).toFixed(2);
+    const avg2Abs = (arm2TotalAbs / count).toFixed(2);
+    const avg3Abs = (arm3TotalAbs / count).toFixed(2);
+
+    const avg1Lat = (arm1Latency / count / 1000).toFixed(1);
+    const avg2Lat = (arm2Latency / count / 1000).toFixed(1);
+    const avg3Lat = (arm3Latency / count / 1000).toFixed(1);
+
+    const deltaAbs = (parseFloat(avg3Abs) - parseFloat(avg1Abs)).toFixed(2);
+
+    lines.push('### Headline Metrics');
+    lines.push('');
+    lines.push(`* **Arm 1 (Monolith baseline) average abstraction**: **${avg1Abs} / 5**`);
+    lines.push(`* **Arm 3 (Split pipeline) average abstraction**: **${avg3Abs} / 5** (Delta: **+${deltaAbs}**)`);
+    lines.push(`* **Arm 3 completion rate**: **${((arm3Success / count) * 100).toFixed(0)}%** (${arm3Success}/${count} valid)`);
+    lines.push(`* **Arm 3 axiom fabrication count**: **${arm3TotalFabrications}**`);
+    lines.push('');
+
+    // GO/NO-GO logic based on criteria
+    const meetsAbsImprovement = (parseFloat(avg3Abs) - parseFloat(avg1Abs)) >= 0.7;
+    const meetsZeroFabrication = arm3TotalFabrications === 0;
+    const meetsCompletionRate = arm3Success / count >= 0.85;
+
+    const isGo = meetsAbsImprovement && meetsZeroFabrication && meetsCompletionRate;
+
+    if (isGo) {
+      lines.push(`> [!NOTE]\n> **RECOMMENDATION: GO for ${model.label}**\n> The split pipeline meets all criteria: abstraction lift >= +0.7, zero core axiom ID fabrication, and high completion rate. Proceed with the cutover plan (PRI-373).`);
+    } else {
+      lines.push(`> [!WARNING]\n> **RECOMMENDATION: NO-GO for ${model.label}**\n> The split pipeline did not satisfy all validation gates:\n> - Abstraction Lift >= +0.7: ${meetsAbsImprovement ? '✅' : '❌'} (Actual: +${deltaAbs})\n> - Zero Axiom Fabrication: ${meetsZeroFabrication ? '✅' : '❌'} (Actual: ${arm3TotalFabrications})\n> - Completion Rate >= 85%: ${meetsCompletionRate ? '✅' : '❌'} (Actual: ${((arm3Success / count) * 100).toFixed(0)}%)`);
+    }
+    lines.push('');
+
+    lines.push('### 3-Arm Comparison Table');
+    lines.push('');
+    lines.push('| Arm Name | Completion Rate | Average Abstraction | Avg Latency | Avg Total Score |');
+    lines.push('|---|---|---|---|---|');
+    lines.push(`| Arm 1 (Monolith baseline) | ${((arm1Success / count) * 100).toFixed(0)}% | ${avg1Abs} | ${avg1Lat}s | ${avg1Score} |`);
+    lines.push(`| Arm 2 (Grounded Monolith) | ${((arm2Success / count) * 100).toFixed(0)}% | ${avg2Abs} | ${avg2Lat}s | ${avg2Score} |`);
+    lines.push(`| Arm 3 (Split pipeline) | ${((arm3Success / count) * 100).toFixed(0)}% | ${avg3Abs} | ${avg3Lat}s | ${avg3Score} |`);
+    lines.push('');
+
+    lines.push('### Scenario-by-Scenario Detailed Results');
+    lines.push('');
+    lines.push('| Scenario ID | RootCause Category | Arm 1 Abstraction | Arm 2 Abstraction | Arm 3 Abstraction | Arm 3 Axioms Tied |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const r of results) {
+      const a1 = r.arms['Arm 1 (Monolith)'];
+      const a2 = r.arms['Arm 2 (Grounded Monolith)'];
+      const a3 = r.arms['Arm 3 (Split)'];
+      lines.push(`| **${r.fixtureId}** | ${r.category} | ${a1.scores.abstractionQuality} | ${a2.scores.abstractionQuality} | ${a3.scores.abstractionQuality} | ${a3.metrics.axiomTied.join(', ') || 'None'} |`);
+    }
+    lines.push('');
+
+    lines.push('### Output Principles & Quality Comparison');
+    lines.push('');
+    for (const r of results) {
+      const a1 = r.arms['Arm 1 (Monolith)'];
+      const a3 = r.arms['Arm 3 (Split)'];
+      const p1 = a1.output?.recommendations?.find((x: any) => x.kind === 'principle')?.description ?? '(None)';
+      const p3 = a3.output?.recommendations?.find((x: any) => x.kind === 'principle')?.abstractedPrinciple ?? '(None)';
+      
+      lines.push(`#### ${r.fixtureId} — ${r.description.slice(0, 100)}...`);
+      lines.push(`* **RootCause category**: \`${r.category}\``);
+      lines.push(`* **Arm 1 Monolith**: "${p1}"`);
+      lines.push(`* **Arm 3 Split**: "${p3}"`);
+      if (a3.metrics.fabricatedAxioms.length > 0) {
+        lines.push(`* **[WARNING] Fabricated Axioms**: \`${a3.metrics.fabricatedAxioms.join(', ')}\``);
+      }
       lines.push('');
-      lines.push(`  Scenario: ${scenario}`);
-      lines.push('');
+    }
 
-      for (const r of scenarioResults) {
-        const stageLabel = r.stage === 'rootcause' ? 'Stage A (RootCause)'
-          : r.stage === 'distiller' ? 'Stage B (Distiller)'
-          : 'Stage C (Router)';
-
-        lines.push(`  ${stageLabel}:`);
-        lines.push(`    Schema Valid: ${r.schemaValid ? '✅ PASS' : '❌ FAIL'}`);
-
-        if (r.error) {
-          lines.push(`    Error: ${r.error}`);
-        }
-
-        if (r.validationErrors.length > 0) {
-          lines.push(`    Validation Errors:`);
-          for (const err of r.validationErrors) {
-            lines.push(`      - ${err}`);
-          }
-        }
-
-        lines.push(`    Quality Score: ${r.qualityScore}/100`);
-        if (r.qualityNotes.length > 0) {
-          for (const note of r.qualityNotes) {
-            lines.push(`      - ${note}`);
-          }
-        }
-
-        lines.push(`    Latency: ${(r.latencyMs / 1000).toFixed(1)}s`);
-        if (r.tokensUsed) {
-          lines.push(`    Tokens: ${r.tokensUsed}`);
-        }
-
-        if (r.reasoning) {
-          const preview = r.reasoning.length > 200 ? r.reasoning.slice(0, 200) + '...' : r.reasoning;
-          lines.push(`    Reasoning (preview): ${preview}`);
-        }
-
+    lines.push('### Failure and Boundary Case Analysis');
+    lines.push('');
+    const failedScenarios = results.filter(r => !r.arms['Arm 3 (Split)'].success);
+    if (failedScenarios.length > 0) {
+      for (const r of failedScenarios) {
+        const a3 = r.arms['Arm 3 (Split)'];
+        lines.push(`#### ${r.fixtureId} (Arm 3 Failed)`);
+        lines.push(`* **Error**: \`${a3.error || 'Unknown error'}\``);
         lines.push('');
       }
-
-      const pipelineScore = scenarioResults.reduce((sum, r) => sum + r.qualityScore, 0) / scenarioResults.length;
-      const allValid = scenarioResults.every(r => r.schemaValid);
-      const totalLatency = scenarioResults.reduce((sum, r) => sum + r.latencyMs, 0);
-
-      lines.push(`  Pipeline Summary for ${scenario}:`);
-      lines.push(`    All Stages Valid: ${allValid ? '✅' : '❌'}`);
-      lines.push(`    Avg Quality Score: ${pipelineScore.toFixed(1)}/100`);
-      lines.push(`    Total Latency: ${(totalLatency / 1000).toFixed(1)}s`);
-      lines.push('');
+    } else {
+      lines.push('No failure cases. All 3 stages of Arm 3 successfully validated against their schemas across all tested scenarios.');
     }
+    lines.push('');
+    lines.push('---');
+    lines.push('');
   }
 
-  lines.push('═'.repeat(80));
-  lines.push('  CROSS-MODEL COMPARISON');
-  lines.push('═'.repeat(80));
+  // Final overall GO/NO-GO decision
+  const dsResult = modelResults.find(mr => mr.model.id === 'deepseek-v4-flash');
+  const snResult = modelResults.find(mr => mr.model.id === 'sensenova-6.7-flash-lite');
+
+  const dsAbsDelta = dsResult ? (dsResult.results.reduce((sum, r) => sum + r.arms['Arm 3 (Split)'].scores.abstractionQuality - r.arms['Arm 1 (Monolith)'].scores.abstractionQuality, 0) / dsResult.results.length) : 0;
+  const snAbsDelta = snResult ? (snResult.results.reduce((sum, r) => sum + r.arms['Arm 3 (Split)'].scores.abstractionQuality - r.arms['Arm 1 (Monolith)'].scores.abstractionQuality, 0) / snResult.results.length) : 0;
+
+  lines.push('## GO / NO-GO Verdict');
   lines.push('');
+  lines.push('Based on the evaluation of both weak and strong models:');
+  lines.push('');
+  lines.push(`* **DeepSeek V4 Flash Abstraction Lift**: **+${dsAbsDelta.toFixed(2)}**`);
+  lines.push(`* **SenseNova 6.7 Flash-Lite Abstraction Lift**: **+${snAbsDelta.toFixed(2)}**`);
+  lines.push('');
+  
+  const finalGo = dsAbsDelta >= 0.7 && snAbsDelta >= 0.7;
 
-  const header = '| Model'.padEnd(30) + '| Pipeline Valid | Avg Score | Avg Latency |';
-  lines.push(header);
-  lines.push('-'.repeat(header.length));
-
-  for (const model of models) {
-    const modelResults = results.filter(r => r.model === model);
-    const pipelines = scenarios.map(s => {
-      const sr = modelResults.filter(r => r.scenario === s);
-      return {
-        valid: sr.every(r => r.schemaValid),
-        score: sr.reduce((sum, r) => sum + r.qualityScore, 0) / Math.max(sr.length, 1),
-        latency: sr.reduce((sum, r) => sum + r.latencyMs, 0),
-      };
-    });
-
-    const allValid = pipelines.every(p => p.valid);
-    const avgScore = pipelines.reduce((sum, p) => sum + p.score, 0) / Math.max(pipelines.length, 1);
-    const avgLatency = pipelines.reduce((sum, p) => sum + p.latency, 0) / Math.max(pipelines.length, 1);
-
-    const row = `| ${model}`.padEnd(30)
-      + `| ${allValid ? '✅ ALL PASS' : '❌ SOME FAIL'}`.padEnd(17)
-      + `| ${(avgScore).toFixed(1)}`.padEnd(12)
-      + `| ${(avgLatency / 1000).toFixed(1)}s`.padEnd(13)
-      + '|';
-    lines.push(row);
+  if (finalGo) {
+    lines.push('### **FINAL RECOMMENDATION: GO**');
+    lines.push('The split pipeline demonstrates consistent quality improvement across both models. It is recommended to proceed with PRI-373.');
+  } else {
+    lines.push('### **FINAL RECOMMENDATION: NO-GO**');
+    lines.push('Although split pipeline performs well, the average abstraction lift did not meet the strict +0.7 threshold across both models.');
   }
 
-  lines.push('');
-  lines.push('─'.repeat(80));
-  lines.push('  SCORING RUBRIC');
-  lines.push('  Stage A (RootCause): causal chain completeness (30) + evidence refs (20) +');
-  lines.push('    root cause classification (15) + summary quality (15) + evidence count (20)');
-  lines.push('  Stage B (Distiller): principle length (25) + abstractness (30) + rationale (20) +');
-  lines.push('    scope (15) + confidence (10)');
-  lines.push('  Stage C (Router): recommendation kind (30) + violated principles (35) +');
-  lines.push('    summary (15) + description quality (10) + rule matching (10)');
-  lines.push('─'.repeat(80));
-
-  return lines.join('\n');
+  // Write report to docs
+  const reportPath = path.resolve('D:/Code/principles/docs/plans/2026-06-diagnostician-split/05-comparison-report.md');
+  fs.writeFileSync(reportPath, lines.join('\n'), 'utf8');
+  console.log(`\n[REPORT] Written to ${reportPath}`);
 }
 
-// ── Entry point ─────────────────────────────────────────────────────────────
+// ── Main Entry ──────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  console.log('Starting diagnostic pipeline quality evaluation...\n');
+async function main() {
+  console.log('Starting 3-Arm Comparison Evaluation Harness...');
   console.log(`Models: ${MODELS.map(m => m.label).join(', ')}`);
-  console.log(`Scenarios: ${SCENARIOS.map(s => s.name).join(', ')}\n`);
+  console.log(`Target Output Language: ${outputLanguage}`);
+  
+  const fixtures = loadFixtures();
+  console.log(`Loaded ${fixtures.length} real dogfood pain signals.`);
 
-  const allResults: StageResult[] = [];
-
-  for (const model of MODELS) {
-    console.log(`\n${'═'.repeat(40)}`);
-    console.log(`Testing: ${model.label} (id: ${model.id})`);
-    console.log('═'.repeat(40));
-
-    for (const scenario of SCENARIOS) {
-      console.log(`\n  Scenario: ${scenario.name}`);
-
-      // Stage A — Root Cause
-      console.log('    Running Stage A (RootCause)...');
-      const stageA = await runStage(model, scenario, 'rootcause');
-      allResults.push(stageA);
-      console.log(`      Valid: ${stageA.schemaValid ? '✅' : '❌'} | Score: ${stageA.qualityScore}/100 | Latency: ${(stageA.latencyMs / 1000).toFixed(1)}s`);
-
-      if (!stageA.schemaValid || !stageA.output) {
-        console.log('      Stage A failed — skipping B & C');
-        continue;
-      }
-
-      // Stage B — Distiller
-      console.log('    Running Stage B (Distiller)...');
-      const stageB = await runStage(model, scenario, 'distiller', stageA.output as Record<string, unknown>);
-      allResults.push(stageB);
-      console.log(`      Valid: ${stageB.schemaValid ? '✅' : '❌'} | Score: ${stageB.qualityScore}/100 | Latency: ${(stageB.latencyMs / 1000).toFixed(1)}s`);
-
-      if (!stageB.schemaValid || !stageB.output) {
-        console.log('      Stage B failed — skipping C');
-        continue;
-      }
-
-      // Stage C — Router
-      console.log('    Running Stage C (Router)...');
-      const stageC = await runStage(
-        model, scenario, 'router',
-        stageA.output as Record<string, unknown>,
-        stageB.output as Record<string, unknown>,
-      );
-      allResults.push(stageC);
-      console.log(`      Valid: ${stageC.schemaValid ? '✅' : '❌'} | Score: ${stageC.qualityScore}/100 | Latency: ${(stageC.latencyMs / 1000).toFixed(1)}s`);
-    }
+  if (fixtures.length === 0) {
+    console.error('No fixtures loaded. Exiting.');
+    process.exit(1);
   }
 
-  const report = generateReport(allResults);
-  console.log('\n' + report);
+  const modelResults: ModelResults[] = [];
 
-  // Save report to file
-  const fs = await import('fs');
-  const path = await import('path');
-  const reportPath = path.join(process.cwd(), 'scripts', `eval-diag-report-${Date.now()}.txt`);
-  fs.writeFileSync(reportPath, report, 'utf-8');
-  console.log(`\nReport saved to: ${reportPath}`);
+  await Promise.all(MODELS.map(async (model) => {
+    const activeFixtures = filter ? fixtures.filter(f => f.id === filter) : fixtures;
+    const results: ScenarioRunResult[] = [];
+
+    // Run all scenarios and arms strictly sequentially to prevent rate limits
+    for (const fixture of activeFixtures) {
+      console.log(`[${model.label}] Scenario ${fixture.id} (${fixture.category})...`);
+
+      console.log(`[${model.label}]   Running Arm 1 (Monolith)...`);
+      const arm1 = await runArm1(model, fixture);
+      console.log(`[${model.label}]     Arm 1 Abstraction: ${arm1.scores.abstractionQuality} (Success: ${arm1.success}, Latency: ${(arm1.latencyMs/1000).toFixed(1)}s)`);
+
+      console.log(`[${model.label}]   Running Arm 2 (Grounded Monolith)...`);
+      const arm2 = await runArm2(model, fixture);
+      console.log(`[${model.label}]     Arm 2 Abstraction: ${arm2.scores.abstractionQuality} (Success: ${arm2.success}, Latency: ${(arm2.latencyMs/1000).toFixed(1)}s)`);
+
+      console.log(`[${model.label}]   Running Arm 3 (Split)...`);
+      const arm3 = await runArm3(model, fixture);
+      console.log(`[${model.label}]     Arm 3 Abstraction: ${arm3.scores.abstractionQuality} (Success: ${arm3.success}, Latency: ${(arm3.latencyMs/1000).toFixed(1)}s)`);
+
+      results.push({
+        fixtureId: fixture.id,
+        description: fixture.description,
+        category: fixture.category,
+        expectedAxioms: fixture.coveredAxioms,
+        arms: {
+          'Arm 1 (Monolith)': arm1,
+          'Arm 2 (Grounded Monolith)': arm2,
+          'Arm 3 (Split)': arm3,
+        }
+      });
+    }
+
+    modelResults.push({ model, results });
+  }));
+
+  // Write the combined report
+  writeCombinedReport(modelResults);
+
+  console.log('\n=== Evaluation Completed ===');
 }
 
 main().catch(err => {
-  console.error('Fatal error:', err);
+  console.error('Fatal execution error:', err);
   process.exit(1);
 });

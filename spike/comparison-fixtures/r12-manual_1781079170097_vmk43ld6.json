@@ -1,0 +1,107 @@
+{
+  "id": "R12",
+  "painId": "manual_1781079170097_vmk43ld6",
+  "source": "manual",
+  "description": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
+  "coveredAxioms": [
+    "T-03",
+    "T-01"
+  ],
+  "isSynthetic": false,
+  "contextPayload": {
+    "contextId": "d9f8b51a-1f8e-41e5-9de4-926c39af573d",
+    "contextHash": "383283c78880a13ea2268ff368c08c7e3b95faf078cfd821ddce00fd09630310",
+    "taskId": "diagnosis_manual_1781079170097_vmk43ld6",
+    "workspaceDir": "D:\\.openclaw\\workspace",
+    "sourceRefs": [
+      "diagnosis_manual_1781079170097_vmk43ld6",
+      "run_diagnosis_manual_1781079170097_vmk43ld6_1",
+      "owner_reported:cli"
+    ],
+    "diagnosisTarget": {
+      "reasonSummary": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂",
+      "source": "manual",
+      "severity": "severe",
+      "painId": "manual_1781079170097_vmk43ld6",
+      "sessionIdHint": "cli",
+      "provenance": "owner_reported_no_host_trace",
+      "provenanceReason": "No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable",
+      "evidence": [
+        {
+          "sourceRef": "owner_reported:cli",
+          "note": "No session context available"
+        }
+      ],
+      "traceAvailability": "unavailable_with_reason",
+      "traceUnavailableDetail": {
+        "reason": "CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session",
+        "nextAction": "Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis"
+      }
+    },
+    "conversationWindow": [
+      {
+        "ts": "2026-06-10T08:12:50.117Z",
+        "role": "system"
+      },
+      {
+        "ts": "2026-06-10T08:14:03.366Z",
+        "role": "assistant",
+        "text": "{\n  \"valid\": true,\n  \"diagnosisId\": \"diag-manual-1781079170097_vmk43ld6\",\n  \"summary\": \"PRI-363 重构导致 pain.test.ts 行为回归及 auto-entry-gate TC2 诊断触发失效，根因为缺乏状态变更的行为等价性验证机制。\",\n  \"rootCause\": \"Design: 重构过程中缺乏行为等价性验证机制与状态机契约测试，导致枚举值变更破坏了原有副作用触发逻辑（如 emitSync）\",\n  \"violatedPrinciples\": [\n    {\n      \"principleId\": \"PRINC-BEHAVIOR-EQUIVALENCE-01\",\n      \"title\": \"重构行为等价性原则\",\n      \"rationale\": \"状态枚举变更未同步更新依赖该状态的副作用触发逻辑与测试断言，破坏了系统原有的行为承诺。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"sourceRef\": \"owner_reported:cli\",\n      \"note\": \"CLI 提交报告指出 stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致测试断言失败及 emitSync 未调用。\"\n    },\n    {\n      \"sourceRef\": \"diagnosis_manual_1781079170097_vmk43ld6\",\n      \"note\": \"诊断目标摘要明确记录 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，行为等价承诺破裂。\"\n    }\n  ],\n  \"recommendations\": [\n    {\n      \"kind\": \"principle\",\n      \"description\": \"建立重构行为等价性保障原则\",\n      \"abstractedPrinciple\": \"重构必须保持行为等价，状态变更需通过契约测试验证副作用触发逻辑。\"\n    },\n    {\n      \"kind\": \"rule\",\n      \"description\": \"枚举与状态机变更拦截规则\",\n      \"triggerPattern\": \"stage.*enum|状态机重构|枚举值变更\",\n      \"action\": \"强制运行行为等价性测试与副作用断言检查，阻断未通过契约验证的提交。\"\n    },\n    {\n      \"kind\": \"implementation\",\n      \"description\": \"修复 pain.test.ts 断言以适配新枚举值，并在 auto-entry-gate TC2 中恢复 trigger_rejected 状态下的 emitSync 调用路径。\"\n    },\n    {\n      \"kind\": \"prompt\",\n      \"description\": \"在修改核心状态枚举或重构诊断流水线时，主动检查并验证所有依赖该状态的副作用函数（如 emitSync）是否按预期触发。\"\n    }\n  ],\n  \"confidence\": 0.85,\n  \"ambiguityNotes\": [\n    \"CLI 提交缺乏主机会话溯源，完整对话轨迹不可用，分析主要依赖 owner_reported 摘要。\"\n  ]\n}"
+      }
+    ],
+    "ambiguityNotes": [
+      "1 entries have empty text content",
+      "owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable"
+    ],
+    "fullTrace": null
+  },
+  "monolithOutput": {
+    "valid": true,
+    "diagnosisId": "diag-manual-1781079170097_vmk43ld6",
+    "summary": "PRI-363 重构导致 pain.test.ts 行为回归及 auto-entry-gate TC2 诊断触发失效，根因为缺乏状态变更的行为等价性验证机制。",
+    "rootCause": "Design: 重构过程中缺乏行为等价性验证机制与状态机契约测试，导致枚举值变更破坏了原有副作用触发逻辑（如 emitSync）",
+    "violatedPrinciples": [
+      {
+        "principleId": "PRINC-BEHAVIOR-EQUIVALENCE-01",
+        "title": "重构行为等价性原则",
+        "rationale": "状态枚举变更未同步更新依赖该状态的副作用触发逻辑与测试断言，破坏了系统原有的行为承诺。"
+      }
+    ],
+    "evidence": [
+      {
+        "sourceRef": "owner_reported:cli",
+        "note": "CLI 提交报告指出 stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致测试断言失败及 emitSync 未调用。"
+      },
+      {
+        "sourceRef": "diagnosis_manual_1781079170097_vmk43ld6",
+        "note": "诊断目标摘要明确记录 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，行为等价承诺破裂。"
+      }
+    ],
+    "recommendations": [
+      {
+        "kind": "principle",
+        "description": "建立重构行为等价性保障原则",
+        "abstractedPrinciple": "重构必须保持行为等价，状态变更需通过契约测试验证副作用触发逻辑。"
+      },
+      {
+        "kind": "rule",
+        "description": "枚举与状态机变更拦截规则",
+        "triggerPattern": "stage.*enum|状态机重构|枚举值变更",
+        "action": "强制运行行为等价性测试与副作用断言检查，阻断未通过契约验证的提交。"
+      },
+      {
+        "kind": "implementation",
+        "description": "修复 pain.test.ts 断言以适配新枚举值，并在 auto-entry-gate TC2 中恢复 trigger_rejected 状态下的 emitSync 调用路径。"
+      },
+      {
+        "kind": "prompt",
+        "description": "在修改核心状态枚举或重构诊断流水线时，主动检查并验证所有依赖该状态的副作用函数（如 emitSync）是否按预期触发。"
+      }
+    ],
+    "confidence": 0.85,
+    "ambiguityNotes": [
+      "CLI 提交缺乏主机会话溯源，完整对话轨迹不可用，分析主要依赖 owner_reported 摘要。"
+    ]
+  },
+  "category": "Design"
+}
