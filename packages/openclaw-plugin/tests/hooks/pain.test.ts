@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleAfterToolCall, classifyToolFailureSource } from '../../src/hooks/pain.js';
+import { handleAfterToolCall } from '../../src/hooks/pain.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,6 +8,7 @@ import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
 import { resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
+import { buildToolFailureObservation, resolveSourceKind } from '../../src/hooks/raw-observation-adapter.js';
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 
 vi.mock('fs');
@@ -31,74 +32,91 @@ const mockEmitSync = vi.fn();
 const mockRecordProbationFeedback = vi.fn();
 const mockUpdatePrincipleValueMetrics = vi.fn();
 
-describe('classifyToolFailureSource', () => {
+// PRI-360 S1: classifyToolFailureSource tests migrated to resolveSourceKind + buildToolFailureObservation
+// See triage-adapter.test.ts for the unified RawObservation path tests
+
+describe('buildToolFailureObservation + resolveSourceKind (replaces classifyToolFailureSource)', () => {
   it('empty toolName -> dispatch_error', () => {
-    expect(classifyToolFailureSource(undefined, 'tool not found')).toBe('dispatch_error');
-    expect(classifyToolFailureSource('', 'tool not found')).toBe('dispatch_error');
+    const obs = buildToolFailureObservation({ toolName: undefined, error: 'tool not found', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('dispatch_error');
+    const obs2 = buildToolFailureObservation({ toolName: '', error: 'tool not found', exitCode: 1 });
+    expect(resolveSourceKind(obs2)).toBe('dispatch_error');
   });
 
   it('"Tool not found" (case insensitive) -> dispatch_error', () => {
-    expect(classifyToolFailureSource('read', 'error: tool not found')).toBe('dispatch_error');
-    expect(classifyToolFailureSource('read', 'Tool Not Found')).toBe('dispatch_error');
-    // "tool <name> not found" also matches (e.g. "tool read_file not found")
-    expect(classifyToolFailureSource('read', 'Tool read_file not found')).toBe('dispatch_error');
+    const cases = [
+      'error: tool not found',
+      'Tool Not Found',
+      'Tool read_file not found',
+    ];
+    for (const err of cases) {
+      const obs = buildToolFailureObservation({ toolName: 'read', error: err, exitCode: 1 });
+      expect(resolveSourceKind(obs)).toBe('dispatch_error');
+    }
   });
 
   it('"Unknown tool" (case insensitive) -> dispatch_error', () => {
-    expect(classifyToolFailureSource('read', 'error: unknown tool')).toBe('dispatch_error');
-    expect(classifyToolFailureSource('read', 'Unknown Tool')).toBe('dispatch_error');
-    expect(classifyToolFailureSource('read', 'failed: unknown tool read_file')).toBe('dispatch_error');
+    const cases = ['error: unknown tool', 'Unknown Tool', 'failed: unknown tool read_file'];
+    for (const err of cases) {
+      const obs = buildToolFailureObservation({ toolName: 'read', error: err, exitCode: 1 });
+      expect(resolveSourceKind(obs)).toBe('dispatch_error');
+    }
   });
 
   it('Warning-style messages containing "tool not found" -> dispatch_error', () => {
-    // After dropping "error:" prefix, Warning messages with "tool not found" match the dispatch pattern
-    expect(classifyToolFailureSource('read', 'Warning: tool not found was suppressed')).toBe('dispatch_error');
-    expect(classifyToolFailureSource('read', 'Warning: tool not found - already handled')).toBe('dispatch_error');
+    const cases = ['Warning: tool not found was suppressed', 'Warning: tool not found - already handled'];
+    for (const err of cases) {
+      const obs = buildToolFailureObservation({ toolName: 'read', error: err, exitCode: 1 });
+      expect(resolveSourceKind(obs)).toBe('dispatch_error');
+    }
   });
 
   it('real execution errors (ENOENT, EACCES) -> tool_failure', () => {
-    expect(classifyToolFailureSource('read', 'ENOENT: no such file or directory')).toBe('tool_failure');
-    expect(classifyToolFailureSource('write', 'EACCES: permission denied')).toBe('tool_failure');
-    expect(classifyToolFailureSource('edit', 'Error: EIO: I/O error')).toBe('tool_failure');
+    const cases = [
+      { toolName: 'read' as const, error: 'ENOENT: no such file or directory' },
+      { toolName: 'write' as const, error: 'EACCES: permission denied' },
+      { toolName: 'edit' as const, error: 'Error: EIO: I/O error' },
+    ];
+    for (const { toolName, error } of cases) {
+      const obs = buildToolFailureObservation({ toolName, error, exitCode: 1 });
+      expect(resolveSourceKind(obs)).toBe('tool_failure');
+    }
   });
 
-  it('edge cases: null/undefined/empty error', () => {
-    expect(classifyToolFailureSource('read', null)).toBe('tool_failure');
-    expect(classifyToolFailureSource('read', undefined)).toBe('tool_failure');
-    expect(classifyToolFailureSource('read', '')).toBe('tool_failure');
-    expect(classifyToolFailureSource('read', 123)).toBe('tool_failure');
+  it('edge cases: null/undefined/empty error -> tool_failure', () => {
+    // With valid toolName and non-zero exit, no error message → tool_failure
+    const obs = buildToolFailureObservation({ toolName: 'read', error: undefined, exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
   });
 
   it('word-boundary: "report_tool_not_found" does NOT match dispatch pattern', () => {
-    expect(classifyToolFailureSource('read', 'report_tool_not_found')).toBe('tool_failure');
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'report_tool_not_found', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
   });
 
   it('word-boundary: "atoolnotfound" (no spaces) does NOT match dispatch pattern', () => {
-    expect(classifyToolFailureSource('read', 'atoolnotfound')).toBe('tool_failure');
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'atoolnotfound', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
   });
 
   it('word-boundary: "unknown_tool" (underscore, no space) does NOT match dispatch pattern', () => {
-    expect(classifyToolFailureSource('read', 'unknown_tool')).toBe('tool_failure');
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'unknown_tool', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
   });
 
   it('whitespace-only toolName -> dispatch_error', () => {
-    expect(classifyToolFailureSource('   ', 'tool not found')).toBe('dispatch_error');
-  });
-
-  it('numeric error value -> tool_failure', () => {
-    expect(classifyToolFailureSource('read', 42)).toBe('tool_failure');
-  });
-
-  it('object error value -> tool_failure', () => {
-    expect(classifyToolFailureSource('read', { code: 'ENOENT' })).toBe('tool_failure');
+    const obs = buildToolFailureObservation({ toolName: '   ', error: 'tool not found', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('dispatch_error');
   });
 
   it('"tool <name> not found" with multi-word tool name -> dispatch_error', () => {
-    expect(classifyToolFailureSource('read', 'tool my_custom_tool not found')).toBe('dispatch_error');
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'tool my_custom_tool not found', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('dispatch_error');
   });
 
   it('partial match "not found" without "tool" prefix -> tool_failure', () => {
-    expect(classifyToolFailureSource('read', 'file not found')).toBe('tool_failure');
+    const obs = buildToolFailureObservation({ toolName: 'read', error: 'file not found', exitCode: 1 });
+    expect(resolveSourceKind(obs)).toBe('tool_failure');
   });
 });
 
