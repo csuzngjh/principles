@@ -388,7 +388,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Check lineage strip contract after validation passes.
    * Validates sourceTrace.scribeArtifactId consistency (ERR-004, ERR-008).
    */
-  protected override checkLineageIntegrity(taskId: string, output: EvaluatorOutputV1): void {
+  protected override checkLineageIntegrity(taskId: string, output: EvaluatorOutputV1, _context: EvaluatorContext): void {
     // sourceTrace.artificerArtifactId must match sourceArtificerArtifactId
     if (output.sourceTrace.artificerArtifactId !== output.sourceArtificerArtifactId) {
       this.emitEvent('lineage_integrity_violation', taskId, {

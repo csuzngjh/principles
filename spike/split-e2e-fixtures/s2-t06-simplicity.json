@@ -1,0 +1,20 @@
+{
+  "id": "S2",
+  "painId": "synthetic_t06_simplicity",
+  "source": "code_review",
+  "description": "PR implements 3-layer config resolution when 1 layer suffices",
+  "coveredAxioms": ["T-06"],
+  "isSynthetic": true,
+  "contextPayload": {
+    "sourcePainId": "synthetic_t06_simplicity",
+    "reasonSummary": "PR#998 adds a 3-layer config resolution system (global → domain → scenario) when the codebase only uses global config. The domain and scenario layers add 200+ lines of indirection with zero actual use cases.",
+    "severity": "medium",
+    "evidence": [
+      {"sourceRef": "config-resolver.ts:L1-80", "note": "3-layer resolution chain with merge strategy"},
+      {"sourceRef": "config-resolver.ts:L82-200", "note": "Domain and scenario layers — no callers found"},
+      {"sourceRef": "grep_result", "note": "0 references to resolveDomainConfig or resolveScenarioConfig"}
+    ],
+    "provenance": {"trigger": "code_review", "prNumber": 998}
+  },
+  "monolithOutput": null
+}

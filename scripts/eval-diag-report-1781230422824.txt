@@ -1,0 +1,89 @@
+════════════════════════════════════════════════════════════════════════════════
+  DIAGNOSTIC PIPELINE QUALITY EVALUATION REPORT
+  Generated: 2026-06-12T02:13:42.822Z
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────
+  Model: DeepSeek V4 Flash
+────────────────────────────────────────────────────────────
+
+  Scenario: Type Safety Bypass (as-cast)
+
+  Stage A (RootCause):
+    Schema Valid: ❌ FAIL
+    Validation Errors:
+      - JSON parse error: Unexpected end of JSON input
+    Quality Score: 0/100
+      - skipped — schema invalid
+    Latency: 34.1s
+
+  Pipeline Summary for Type Safety Bypass (as-cast):
+    All Stages Valid: ❌
+    Avg Quality Score: 0.0/100
+    Total Latency: 34.1s
+
+
+  Scenario: Silent Fallback (ERR-002 pattern)
+
+  Stage A (RootCause):
+    Schema Valid: ❌ FAIL
+    Validation Errors:
+      - JSON parse error: Unexpected end of JSON input
+    Quality Score: 0/100
+      - skipped — schema invalid
+    Latency: 11.1s
+
+  Pipeline Summary for Silent Fallback (ERR-002 pattern):
+    All Stages Valid: ❌
+    Avg Quality Score: 0.0/100
+    Total Latency: 11.1s
+
+────────────────────────────────────────────────────────────
+  Model: SenseNova U1 Fast
+────────────────────────────────────────────────────────────
+
+  Scenario: Type Safety Bypass (as-cast)
+
+  Stage A (RootCause):
+    Schema Valid: ❌ FAIL
+    Error: API error 404: {}
+    Quality Score: 0/100
+    Latency: 0.3s
+
+  Pipeline Summary for Type Safety Bypass (as-cast):
+    All Stages Valid: ❌
+    Avg Quality Score: 0.0/100
+    Total Latency: 0.3s
+
+
+  Scenario: Silent Fallback (ERR-002 pattern)
+
+  Stage A (RootCause):
+    Schema Valid: ❌ FAIL
+    Error: API error 404: {}
+    Quality Score: 0/100
+    Latency: 0.1s
+
+  Pipeline Summary for Silent Fallback (ERR-002 pattern):
+    All Stages Valid: ❌
+    Avg Quality Score: 0.0/100
+    Total Latency: 0.1s
+
+════════════════════════════════════════════════════════════════════════════════
+  CROSS-MODEL COMPARISON
+════════════════════════════════════════════════════════════════════════════════
+
+| Model                       | Pipeline Valid | Avg Score | Avg Latency |
+--------------------------------------------------------------------------
+| DeepSeek V4 Flash           | ❌ SOME FAIL    | 0.0       | 22.6s      |
+| SenseNova U1 Fast           | ❌ SOME FAIL    | 0.0       | 0.2s       |
+
+────────────────────────────────────────────────────────────────────────────────
+  SCORING RUBRIC
+  Stage A (RootCause): causal chain completeness (30) + evidence refs (20) +
+    root cause classification (15) + summary quality (15) + evidence count (20)
+  Stage B (Distiller): principle length (25) + abstractness (30) + rationale (20) +
+    scope (15) + confidence (10)
+  Stage C (Router): recommendation kind (30) + violated principles (35) +
+    summary (15) + description quality (10) + rule matching (10)
+────────────────────────────────────────────────────────────────────────────────

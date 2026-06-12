@@ -1,8 +1,8 @@
 ﻿/**
  * WorkspaceDir Validation Utilities
  *
- * This module only validates candidate workspace directories and delegates
- * actual resolution policy to workspace-dir-service.ts.
+ * This module only validates candidate workspace directories. Runtime hook
+ * resolution policy lives at the I/O boundary in utils/workspace-resolver.ts.
  */
 
 import * as os from 'os';

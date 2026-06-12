@@ -17,7 +17,6 @@ describe('PRI-228: Runtime V2 discovery guard', () => {
   const guardedFiles = [
     { name: 'workspace-resolver.ts', path: path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts') },
     { name: 'workspace-context.ts', path: path.join(PLUGIN_SRC, 'core', 'workspace-context.ts') },
-    { name: 'workspace-dir-service.ts', path: path.join(PLUGIN_SRC, 'core', 'workspace-dir-service.ts') },
     { name: 'path-resolver.ts', path: path.join(PLUGIN_SRC, 'core', 'path-resolver.ts') },
   ];
 

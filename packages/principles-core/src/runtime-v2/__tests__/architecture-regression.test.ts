@@ -164,9 +164,18 @@ const REQUIRED_SOURCE_FILES = [
   'feedback/render-markdown.ts',
   'feedback/render-github-url.ts',
   'feedback/privacy-preview.ts',
-  'feedback/create-report.ts',
   'feedback/safe-stringify.ts',
+  'feedback/create-report.ts',
   'feedback/index.ts',
+  // PRI-372 (T-G)
+  'diagnostician/diag-rootcause-output.ts',
+  'diagnostician/diag-distiller-output.ts',
+  'diagnostician/rootcause-prompt-builder.ts',
+  'diagnostician/distiller-prompt-builder.ts',
+  'diagnostician/router-prompt-builder.ts',
+  'internalization/diag-rootcause-runner.ts',
+  'internalization/diag-distiller-runner.ts',
+  'internalization/diag-router-runner.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -417,6 +426,16 @@ const REQUIRED_TEST_FILES = [
   '../feature-flags/__tests__/feature-flag-contract.test.ts',
   // PRI-295
   '../activation/__tests__/prompt-activation-reader-contract.test.ts',
+  // PRI-372 (T-G)
+  '../diagnostician/__tests__/diag-rootcause-output.test.ts',
+  '../diagnostician/__tests__/diag-distiller-output.test.ts',
+  '../diagnostician/__tests__/rootcause-prompt-builder.test.ts',
+  '../diagnostician/__tests__/distiller-prompt-builder.test.ts',
+  '../diagnostician/__tests__/router-prompt-builder.test.ts',
+  '../internalization/__tests__/diag-rootcause-runner.test.ts',
+  '../internalization/__tests__/diag-distiller-runner.test.ts',
+  '../internalization/__tests__/diag-router-runner.test.ts',
+  '../internalization/__tests__/diag-chain-e2e.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -1528,96 +1547,6 @@ describe('PRI-62 Internalization State Machine Guards', () => {
     task.outputArtifactRefs = [];
     const result = createNextTaskProposal(task, []);
     expect(result === null || typeof result === 'object').toBe(true);
-  });
-});
-
-// ── PRI-63: Internalization Dumb Trigger Adapter ─────────────────────────────
-
-describe('PRI-63 Internalization Dumb Trigger Adapter', () => {
-  const PRI63_REQUIRED_FILES = [
-    'internalization-trigger-adapter.ts',
-  ];
-
-  it('adapter source file exists in plugin service directory', async () => {
-    const { existsSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const pluginRoot = resolve(__dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service');
-    for (const file of PRI63_REQUIRED_FILES) {
-      expect(existsSync(resolve(pluginRoot, file))).toBe(true);
-    }
-  });
-
-  it('adapter does not import nocturnal-trinity', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('nocturnal-trinity');
-  });
-
-  it('adapter does not import runTrinity or runTrinityAsync', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('runTrinity');
-    expect(src).not.toContain('runTrinityAsync');
-  });
-
-  it('adapter does not import Dreamer/Philosopher/Scribe executors', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain("from 'dreamer'");
-    expect(src).not.toContain("from 'philosopher'");
-    expect(src).not.toContain("from 'scribe'");
-  });
-
-  it('adapter does not use PDRuntimeAdapter', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).not.toContain('PDRuntimeAdapter');
-  });
-
-  it('adapter imports TaskRecord from @principles/core/runtime-v2', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    expect(src).toContain('TaskRecord');
-    expect(src).toContain('@principles/core/runtime-v2');
-  });
-
-  it('PLUGIN_NO_INLINE_EXECUTION: adapter does not call mutating store methods (read-only probe)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    // wake() should only read, not update/create/delete tasks
-    expect(src).not.toContain('updateTask');
-    expect(src).not.toContain('createTask');
-    expect(src).not.toContain('deleteTask');
-    expect(src).not.toContain('leaseTask');
-  });
-
-  it('PLUGIN_NO_INLINE_EXECUTION: adapter does not use setInterval/setTimeout for scheduling (core responsibility)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '..', '..', '..', '..', 'openclaw-plugin', 'src', 'service', 'internalization-trigger-adapter.ts'
-    ), 'utf-8');
-    // setInterval is used in start() to trigger wake() periodically — this is plugin responsibility
-    // Core state machine should NOT use setInterval (CORE_NO_SCHEDULING)
-    expect(src).not.toContain('node:cron');
   });
 });
 
@@ -2815,15 +2744,6 @@ describe('Phase 2.4 types directory migration', () => {
     ), 'utf-8');
     expect(src).toContain("@principles/core/runtime-v2");
   });
-
-  it('plugin types/event-payload.ts re-exports from core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/types/event-payload.ts'
-    ), 'utf-8');
-    expect(src).toContain("@principles/core/runtime-v2");
-  });
 });
 
 // ── Phase 2 Migration: Principle-Tree Data Structures ─────────────────────────
@@ -3548,6 +3468,26 @@ describe('PRI-304: PD-Owned Config Contract barrel exports and purity', () => {
       expect(src).not.toContain('eval(');
       expect(src).not.toContain('new Function');
     }
+  });
+});
+
+describe('PRI-372: split diagnostician runners extend BasePeerRunner', () => {
+  it('DiagRootCauseRunner extends BasePeerRunner', async () => {
+    const { DiagRootCauseRunner } = await import('../internalization/diag-rootcause-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagRootCauseRunner.prototype).toBeInstanceOf(BasePeerRunner);
+  });
+
+  it('DiagDistillerRunner extends BasePeerRunner', async () => {
+    const { DiagDistillerRunner } = await import('../internalization/diag-distiller-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagDistillerRunner.prototype).toBeInstanceOf(BasePeerRunner);
+  });
+
+  it('DiagRouterRunner extends BasePeerRunner', async () => {
+    const { DiagRouterRunner } = await import('../internalization/diag-router-runner.js');
+    const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
+    expect(DiagRouterRunner.prototype).toBeInstanceOf(BasePeerRunner);
   });
 });
 

@@ -1,0 +1,154 @@
+[
+  {
+    "fixtureId": "R6",
+    "fixtureDescription": "PRI-363 refactor behavior regression (stage enum change broke tests)",
+    "coveredAxioms": [
+      "T-01",
+      "T-03"
+    ],
+    "isSynthetic": false,
+    "stages": [
+      {
+        "stage": "A-RootCause",
+        "passed": true,
+        "schemaValid": true,
+        "jsonRepairNeeded": false,
+        "timeMs": 90771,
+        "output": {
+          "valid": true,
+          "diagnosisId": "diag-manual_1781081305247",
+          "taskId": "diag-manual_1781081305247",
+          "summary": "PRI-363 重构过程中 stage 枚举值变更未进行影响面评估与契约验证，导致下游测试断言失败及核心诊断触发逻辑（emitSync）断裂。",
+          "causalChain": [
+            {
+              "why": 1,
+              "statement": "pain.test.ts 测试断言失败，且 auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用。",
+              "evidenceRefs": [
+                "owner_reported:cli"
+              ]
+            },
+            {
+              "why": 2,
+              "statement": "PRI-363 重构将 stage 枚举值从 gate_admitted/triage_evidence_only 更改为 trigger_rejected，直接破坏了依赖旧枚举值的条件判断逻辑。",
+              "evidenceRefs": [
+                "owner_reported:cli"
+              ]
+            },
+            {
+              "why": 3,
+              "statement": "重构流程中缺少对枚举变更影响范围的静态分析或契约测试验证环节，未能拦截破坏性修改。",
+              "evidenceRefs": [
+                "owner_reported:cli"
+              ]
+            },
+            {
+              "why": 4,
+              "statement": "核心控制流（如诊断触发机制）直接耦合于硬编码的枚举字符串，缺乏版本兼容层或适配器模式以隔离变更影响。",
+              "evidenceRefs": [
+                "owner_reported:cli"
+              ]
+            },
+            {
+              "why": 5,
+              "statement": "缺乏系统性的向后兼容性保障机制与重构影响面评估规范，导致行为等价承诺在代码重构时破裂。",
+              "evidenceRefs": [
+                "owner_reported:cli"
+              ]
+            }
+          ],
+          "rootCause": "Design: 缺乏系统性的向后兼容性保障机制与重构影响面评估规范，导致枚举变更直接破坏下游控制流契约。",
+          "rootCauseCategory": "Design",
+          "evidence": [
+            {
+              "sourceRef": "owner_reported:cli",
+              "note": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂"
+            }
+          ],
+          "confidence": 0.85,
+          "ambiguityNotes": [
+            "Fixture: R6 — PRI-363 refactor behavior regression (stage enum change broke tests)",
+            "关联核心公理: T-01 (先理解结构再修改), T-07 (限制爆炸半径)"
+          ]
+        },
+        "errors": []
+      },
+      {
+        "stage": "B-Distiller",
+        "passed": true,
+        "schemaValid": true,
+        "jsonRepairNeeded": false,
+        "timeMs": 61701,
+        "output": {
+          "valid": true,
+          "taskId": "diag-manual_1781081305247",
+          "sourceRootCauseArtifactId": "artifact-rc-manual_1781081305247",
+          "abstractedPrinciple": "重构或修改核心契约前，必须全面评估影响范围并建立向后兼容机制，避免破坏性变更直接波及下游依赖。",
+          "rationale": "该原则要求在进行代码重构或契约变更时，优先进行影响面分析与兼容性设计。通过前置评估与适配层隔离，可有效防止底层枚举或接口修改直接破坏下游控制流，确保系统行为等价承诺不被无意打破。",
+          "groundedOnCorePrincipleIds": [
+            "T-01",
+            "T-07"
+          ],
+          "scope": "general",
+          "confidence": 0.85
+        },
+        "errors": []
+      },
+      {
+        "stage": "C-Router",
+        "passed": true,
+        "schemaValid": true,
+        "jsonRepairNeeded": false,
+        "timeMs": 91656,
+        "output": {
+          "valid": true,
+          "diagnosisId": "diag-manual_1781081305247",
+          "summary": "PRI-363 重构因缺乏影响面评估与向后兼容机制导致枚举变更破坏下游契约；需建立重构前全面评估与兼容性保障规范，避免破坏性变更波及依赖。",
+          "rootCause": "Design: 缺乏系统性的向后兼容性保障机制与重构影响面评估规范，导致枚举变更直接破坏下游控制流契约。",
+          "violatedPrinciples": [
+            {
+              "principleId": "T-01",
+              "title": "先理解结构再修改",
+              "rationale": "重构未充分评估枚举变更对下游控制流的影响，违背了修改前需全面理解系统结构与依赖关系的原则。"
+            },
+            {
+              "principleId": "T-07",
+              "title": "限制爆炸半径",
+              "rationale": "缺乏适配层或兼容性设计导致底层契约变更直接破坏核心诊断逻辑，违背了通过隔离机制限制变更影响范围的原则。"
+            }
+          ],
+          "evidence": [
+            {
+              "sourceRef": "owner_reported:cli",
+              "note": "PRI-363 重构后 pain.test.ts 出现行为回归：stage 枚举值从 gate_admitted/triage_evidence_only 改为 trigger_rejected，导致2条现有测试断言失败；auto-entry-gate 集成测试 TC2 中 repeated failures 不再触发诊断，emitSync 未被调用，行为等价承诺破裂"
+            }
+          ],
+          "recommendations": [
+            {
+              "kind": "principle",
+              "description": "重构或修改核心契约前，必须全面评估影响范围并建立向后兼容机制，避免破坏性变更直接波及下游依赖。",
+              "abstractedPrinciple": "重构或修改核心契约前，必须全面评估影响范围并建立向后兼容机制，避免破坏性变更直接波及下游依赖。"
+            },
+            {
+              "kind": "rule",
+              "description": "当代码涉及枚举值、接口签名或核心控制流条件判断变更时，强制触发影响面扫描与契约验证流程。",
+              "triggerPattern": "enum.*change|interface.*modify|stage.*value.*update|contract.*break",
+              "action": "执行静态依赖分析并运行下游集成测试套件，确认行为等价性后方可合并。"
+            },
+            {
+              "kind": "implementation",
+              "description": "在核心控制流与底层枚举之间引入版本兼容层或适配器模式，隔离重构变更对下游逻辑的直接冲击。"
+            }
+          ],
+          "confidence": 0.85,
+          "ambiguityNotes": [
+            "Fixture: R6 — PRI-363 refactor behavior regression (stage enum change broke tests)",
+            "关联核心公理: T-01 (先理解结构再修改), T-07 (限制爆炸半径)"
+          ]
+        },
+        "errors": []
+      }
+    ],
+    "totalTimeMs": 244128,
+    "monolithComparison": "Monolith: \"PRI-363重构导致pain.test.ts行为回归：stage枚举值变更未同步更新测试断言与集成逻辑，破坏行为等价承诺。...\" | Split: \"PRI-363 重构因缺乏影响面评估与向后兼容机制导致枚举变更破坏下游契约；需建立重构前全面评估与兼容性保障规范，避免破坏性变更波及依赖。...\""
+  }
+]
