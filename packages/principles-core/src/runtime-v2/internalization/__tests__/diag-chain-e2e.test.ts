@@ -35,8 +35,10 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../../config/pd-config-feature-flags.js';
-import type { EffectivePdConfig } from '../../config/pd-config-types.js';
-import { PDRuntimeError } from '../../error-categories.js';
+import { computeEffectivePdConfig } from '../../config/index.js';
+import type { EffectivePdConfig, PdConfig } from '../../config/pd-config-types.js';
+import { createPainSignalBridge } from '../../pain-signal-runtime-factory.js';
+import type { LedgerAdapter } from '../../candidate-intake.js';
 import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
@@ -396,8 +398,8 @@ describe('Diag chain e2e', () => {
     expect(splitPipeline).toBe(false);
   });
 
-  it('split && !async_cli → fail loud at startup', () => {
-    // When split_pipeline=true and async_cli=false, the factory guard should throw.
+  it('split && !async_cli → fail loud at startup when explicitly overridden', async () => {
+    // When split_pipeline=true and async_cli=false, the factory guard should throw if overridden.
     const effectiveConfig: EffectivePdConfig = {
       config: {
         version: 1,
@@ -405,30 +407,99 @@ describe('Diag chain e2e', () => {
           diagnostician_split_pipeline: { category: 'quiet', enabled: true },
           diagnostician_async_cli: { category: 'quiet', enabled: false },
         },
-        runtimeProfiles: {},
+        runtimeProfiles: {
+          'default': { type: 'openclaw', source: 'default' },
+        },
         internalAgents: makeDefaultInternalAgents(),
         ui: { diagnostics: { mode: 'simple' } },
       },
       source: 'user_config',
       warnings: [],
+      featuresChangedFromDefault: ['diagnostician_split_pipeline'],
     };
 
-    const featureFlags = computeFeatureFlagsFromConfig(effectiveConfig);
-    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+    // Verify it actually throws in createPainSignalBridge
+    await expect(
+      createPainSignalBridge({
+        workspaceDir: '/invalid-path-a',
+        stateDir: '/invalid-path-a',
+        effectiveConfig,
+        ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
+      })
+    ).rejects.toThrowError('diagnostician_split_pipeline requires diagnostician_async_cli=on');
+  });
 
-    // Simulate the factory guard logic
-    if (splitPipeline && !asyncCli) {
-      // This is the expected path — the factory would throw
-      expect(() => {
-        throw new PDRuntimeError(
-          'input_invalid',
-          'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-        );
-      }).toThrow(PDRuntimeError);
-    } else {
-      // Should not reach here
-      expect.unreachable('split_pipeline should be true and async_cli should be false');
+  it('split && !async_cli → does NOT throw at startup for default configuration', async () => {
+    const defaults = computeEffectivePdConfig(null);
+    // Should NOT throw the factory guard (so it will proceed to DB init and fail with a filesystem/db error, not PDRuntimeError input_invalid)
+    const result = createPainSignalBridge({
+      workspaceDir: '/invalid-path-b',
+      stateDir: '/invalid-path-b',
+      effectiveConfig: defaults,
+      ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
+    });
+
+    try {
+      await result;
+      expect.unreachable('should have failed with filesystem/db error');
+    } catch (err: unknown) {
+      const error = err as Error & { code?: string };
+      // It should NOT be the PDRuntimeError with code 'input_invalid' from the factory guard
+      expect(error.code).not.toBe('input_invalid');
+      expect(error.message).not.toContain('diagnostician_split_pipeline requires');
+    }
+  });
+
+  it('user config matching defaults does not trigger the factory guard', async () => {
+    // Completely list default flags matching their default values
+    const userConfig = {
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        correction_observer: { category: 'quiet', enabled: true },
+        feedback_channel: { category: 'quiet', enabled: true },
+        gfi: { category: 'quiet', enabled: false },
+        evolution_worker: { category: 'quiet', enabled: false },
+        empathy_observer: { category: 'quiet', enabled: false },
+        painEvidenceAdmission: { category: 'quiet', enabled: false },
+        diagnostician_async_cli: { category: 'quiet', enabled: false },
+        diagnostician_core_grounding: { category: 'quiet', enabled: true },
+        diagnostician_split_pipeline: { category: 'quiet', enabled: true },
+        nocturnal: { category: 'gone', enabled: false },
+        idle_trigger: { category: 'gone', enabled: false },
+        model_training: { category: 'gone', enabled: false },
+        trainer: { category: 'gone', enabled: false },
+      },
+      runtimeProfiles: {
+        'default': { type: 'openclaw', source: 'default' },
+      },
+      internalAgents: makeDefaultInternalAgents(),
+      ui: { diagnostics: { mode: 'simple' } },
+    };
+
+    const effectiveConfig = computeEffectivePdConfig(userConfig as unknown as PdConfig);
+
+    // Verify neither split_pipeline nor async_cli is in featuresChangedFromDefault
+    expect(effectiveConfig.featuresChangedFromDefault).not.toContain('diagnostician_split_pipeline');
+    expect(effectiveConfig.featuresChangedFromDefault).not.toContain('diagnostician_async_cli');
+
+    // Verify it does NOT throw the factory guard
+    const result = createPainSignalBridge({
+      workspaceDir: '/invalid-path-matching-defaults',
+      stateDir: '/invalid-path-matching-defaults',
+      effectiveConfig,
+      ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
+    });
+
+    try {
+      await result;
+      expect.unreachable('should have failed with filesystem/db error');
+    } catch (err: unknown) {
+      const error = err as Error & { code?: string };
+      expect(error.code).not.toBe('input_invalid');
+      expect(error.message).not.toContain('diagnostician_split_pipeline requires');
     }
   });
 
