@@ -754,17 +754,16 @@ describe('Regression: Flag Registry Consistency', () => {
    * flags because they were missing from the defaults record used by
    * computeFeatureFlagsFromConfig().
    */
-  it('all registered flags are in pd-config-defaults', () => {
+  it('all registered flags match the config defaults exactly in category and enabled status', () => {
     const defaults = getDefaultPdConfig();
-    const missingFlags: string[] = [];
-
     for (const flagDef of FLAGS_ARRAY) {
-      if (!Object.hasOwn(defaults.features, flagDef.id)) {
-        missingFlags.push(flagDef.id);
+      const configEntry = defaults.features[flagDef.id];
+      expect(configEntry, `flag ${flagDef.id} must be in config defaults`).toBeDefined();
+      if (configEntry) {
+        expect(configEntry.category, `flag ${flagDef.id} category`).toBe(flagDef.category);
+        expect(configEntry.enabled, `flag ${flagDef.id} enabled`).toBe(flagDef.enabled);
       }
     }
-
-    expect(missingFlags).toEqual([]);
   });
 
   it('PRI-375: diagnostician_async_cli is in defaults as disabled', () => {
