@@ -166,10 +166,12 @@ function ProseSummary({
   pendingCount,
   deviationCount,
   stagnationCount,
+  evidenceCount,
 }: {
   pendingCount: number;
   deviationCount: number;
   stagnationCount: number;
+  evidenceCount: number;
 }) {
   const { t } = useTranslation();
   return (
@@ -182,8 +184,17 @@ function ProseSummary({
       <span className="font-mono font-semibold text-ink">{pendingCount}</span>{" "}
       <span className="text-ink-3">{t("pages.focus.summaryPending")}</span>{" "}
       /{" "}
-      <span className="font-mono font-semibold text-ink">{deviationCount}</span>{" "}
-      <span className="text-ink-3">{t("pages.focus.summaryDeviation")}</span>{" "}
+      {evidenceCount > 0 ? (
+        <>
+          <span className="font-mono font-semibold text-ink">{evidenceCount}</span>{" "}
+          <span className="text-ink-3">{t("pages.focus.summaryEvidence")}</span>{" "}
+        </>
+      ) : (
+        <>
+          <span className="font-mono font-semibold text-ink">{deviationCount}</span>{" "}
+          <span className="text-ink-3">{t("pages.focus.summaryDeviation")}</span>{" "}
+        </>
+      )}
       /{" "}
       <span className="font-mono font-semibold text-ink">{stagnationCount}</span>{" "}
       <span className="text-ink-3">{t("pages.focus.summaryStagnation")}</span>
@@ -501,6 +512,7 @@ export function FocusPage() {
   const nextActionCode = queueData?.nextActionCode ?? "wait_for_pipeline";
   const inProgressSummary = queueData?.inProgressSummary;
   const degradedSignals = queueData?.degradedSignals;
+  const evidenceCount = queueData?.evidenceInProgressCount ?? 0;
   const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
 
   // Map codes to i18n text
@@ -553,6 +565,7 @@ export function FocusPage() {
         pendingCount={pendingCount}
         deviationCount={deviationCount}
         stagnationCount={stagnationCount}
+        evidenceCount={evidenceCount}
       />
 
       {/* State-specific guides — PRI-332: distinguish healthy empty from degraded */}
@@ -604,10 +617,12 @@ export function FocusPage() {
         )}
       </section>
 
-      {/* Section 2: Behavior Deviations */}
+      {/* Section 2: Behavior Deviations / Evidence */}
       <section className="mt-8" aria-labelledby="section-deviation">
         <SectionTitle id="section-deviation">
-          {t("pages.focus.sectionDeviation")}
+          {evidenceCount > 0
+            ? t("pages.focus.sectionEvidenceInProgress")
+            : t("pages.focus.sectionDeviation")}
         </SectionTitle>
 
         {deviationCount > 0 ? (
@@ -630,6 +645,10 @@ export function FocusPage() {
               </div>
             </details>
           </>
+        ) : evidenceCount > 0 ? (
+          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+            {t("pages.focus.evidenceInProgress", { count: evidenceCount })}
+          </div>
         ) : (
           <div className="text-ink-3 text-[13px] leading-relaxed py-3">
             {t("pages.focus.emptyDeviation")}
