@@ -463,6 +463,7 @@ interface DreamerTaskInfo {
 function buildDreamerMap(
   db: Database.Database,
   degradedReasons: string[],
+  degradedNextActions: string[],
 ): Map<string, DreamerTaskInfo> {
   const dreamerMap = new Map<string, DreamerTaskInfo>();
   try {
@@ -491,6 +492,7 @@ function buildDreamerMap(
     }
   } catch {
     degradedReasons.push('Dreamer task query failed — internalization pipeline status is unavailable.');
+    degradedNextActions.push('Check state database dreamer task table integrity.');
   }
   return dreamerMap;
 }
@@ -686,7 +688,7 @@ export class EvidenceChainConsoleModel {
         stateDbAvailable = true;
 
         // PRI-380: Build dreamer task map for internalization pipeline visibility
-        dreamerMap = buildDreamerMap(db, degradedReasons);
+        dreamerMap = buildDreamerMap(db, degradedReasons, degradedNextActions);
       } catch (err) {
         if (isMissingTableError(err)) {
           degradedReasons.push('Tasks table not found in state database');
@@ -709,6 +711,7 @@ export class EvidenceChainConsoleModel {
     }
 
     let candidateMap = new Map<string, CandidateInfo>(); // painId → CandidateInfo
+    const candidateByTaskId = new Map<string, CandidateInfo>(); // taskId → CandidateInfo (PRI-380: cross-ref dual index)
     if (stateDbAvailable) {
       try {
         const conn = this.getReadConnection();
@@ -741,14 +744,17 @@ export class EvidenceChainConsoleModel {
             painId = taskId.slice('diagnosis_'.length);
           }
           if (painId && candidateId) {
-            candidateMap.set(painId, {
+            const info: CandidateInfo = {
               candidateId,
               title: hasRichColumns ? readOwnString(c, 'title') : undefined,
               description: hasRichColumns ? readOwnString(c, 'description') : undefined,
               confidence: hasRichColumns && typeof c.confidence === 'number' && Number.isFinite(c.confidence)
                 ? c.confidence : undefined,
               recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
-            });
+            };
+            candidateMap.set(painId, info);
+            // PRI-380: dual index by taskId for cross-reference lookups
+            if (taskId) candidateByTaskId.set(taskId, info);
           }
         }
       } catch (err) {
@@ -914,6 +920,9 @@ export class EvidenceChainConsoleModel {
             degradedReason: 'Could not link this pain event to a diagnostician task. The chain may be incomplete.',
             nextAction: 'Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.',
           };
+          // ERR-002: Surface at response level too
+          degradedReasons.push(`Pain event ${painId} could not be linked to a diagnostician task.`);
+          degradedNextActions.push('Check Runtime V2 pipeline status for unmatched pain ID formats.');
           records.push(record);
         }
         continue;
@@ -927,8 +936,8 @@ export class EvidenceChainConsoleModel {
       const score = typeof event.score === 'number' ? event.score : 0;
       const sourceKind = mapSourceKind(source);
 
-      // Look up candidate using painId (already normalized to pain_<id>)
-      const linkedCandidate = candidateMap.get(painId);
+      // Look up candidate: prefer painId key, fall back to taskId dual index
+      const linkedCandidate = candidateMap.get(painId) || candidateByTaskId.get(crossRefTask.taskId);
       const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
 
       const state = determineState({

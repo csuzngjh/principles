@@ -974,6 +974,38 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     // No task = no linkage, but the record exists and is not silent
     expect(record!.linkedTaskId).toBeUndefined();
   });
+
+  it('shows loud degradation with degradedReason when tasks exist but none link (ERR-002)', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Unlinked pain event',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task exists but input_ref points to different pain event, and timestamp is far away
+    insertTask(stateDb, {
+      taskId: 'diagnosis_manual_9999_other',
+      status: 'succeeded',
+      inputRef: '999',  // different pain event
+      createdAt: '2026-06-07T20:00:00.000Z',  // 10 hours later — outside 5min window
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    // Must surface degradation loudly (ERR-002)
+    expect(record!.degradedReason).toBeDefined();
+    expect(record!.degradedReason).toContain('Could not link');
+    expect(record!.nextAction).toBeDefined();
+    expect(record!.nextAction).toContain('Runtime V2');
+    // Response-level degradation should also be present
+    expect(result.degradedReason).toBeDefined();
+    expect(result.nextAction).toBeDefined();
+  });
 });
 
 // ── PRI-380: crossReferenceByTimestamp unit tests ─────────────────────────────

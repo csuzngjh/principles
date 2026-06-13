@@ -30,8 +30,8 @@ export type GovernanceState = 'none' | 'in_progress' | 'owner_review_ready' | 'd
  * Machine-readable codes for degraded signals.
  * Frontend maps these via i18n; `reason` is English debug text.
  */
-export type DegradedReasonCode = 'task_retry_wait' | 'task_failed' | 'approval_table_missing';
-export type DegradedNextActionCode = 'check_task_status' | 'fix_and_retry' | 'run_integrity_check';
+export type DegradedReasonCode = 'task_retry_wait' | 'task_failed' | 'approval_table_missing' | 'trajectory_db_unavailable';
+export type DegradedNextActionCode = 'check_task_status' | 'fix_and_retry' | 'run_integrity_check' | 'check_trajectory_db';
 
 export interface DegradedSignal {
   /** Machine-readable code for i18n mapping */
@@ -97,6 +97,10 @@ export interface GovernanceQueueResponse {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export class GovernanceConsoleModel {
@@ -343,6 +347,7 @@ export class GovernanceConsoleModel {
 
     // PRI-380: Query trajectory.db for behavior evidence count
     let evidenceInProgressCount = 0;
+    let trajectoryDegraded = false;
     const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
     if (fs.existsSync(trajectoryDbPath)) {
       try {
@@ -352,28 +357,32 @@ export class GovernanceConsoleModel {
           const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
           if (Array.isArray(rows) && rows.length > 0) {
             const [row] = rows;
-            if (row !== null && typeof row === 'object' && !Array.isArray(row)) {
-              const rec = row as Record<string, unknown>;
-              if (Object.hasOwn(rec, 'c') && typeof rec.c === 'number') {
-                evidenceInProgressCount = rec.c;
-              }
+            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+              evidenceInProgressCount = row.c;
             }
           }
         } catch (err) {
           if (!isMissingTableError(err)) throw err;
+          trajectoryDegraded = true;
         } finally {
           trajDb.close();
         }
       } catch (err) {
-        // trajectory.db not accessible — not a hard failure
-        if (!(err instanceof Error && err.message.includes('no such table'))) {
-          // Only rethrow if not a missing-table error
-          if (!(err instanceof Error)) throw err;
-        }
+        trajectoryDegraded = true;
+        if (!(err instanceof Error)) throw err;
       }
     }
     if (evidenceInProgressCount > 0) {
       response.evidenceInProgressCount = evidenceInProgressCount;
+    }
+    if (trajectoryDegraded) {
+      degradedSignals.push({
+        reasonCode: 'trajectory_db_unavailable',
+        nextActionCode: 'check_trajectory_db',
+        reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+        nextAction: 'Check trajectory.db file integrity in .state directory.',
+        source: 'source_unavailable',
+      });
     }
 
     return response;
