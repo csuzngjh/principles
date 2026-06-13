@@ -54,8 +54,10 @@
       "summaryPending": "pending review",
       "summaryDeviation": "behavior deviations",
       "summaryStagnation": "stagnation signals",
+      "summaryEvidence": "behavior evidence in progress",
       "sectionPending": "Pending Your Review",
       "sectionDeviation": "Behavior Deviations Worth Noting",
+      "sectionEvidenceInProgress": "Behavior Evidence In Progress",
       "sectionSignals": "System Signals",
       "emptyPending": "No principles pending review. When PD captures behavior deviation signals, principle candidates will appear here for your review.",
       "emptyDeviation": "No behavior deviations captured yet. PD will detect deviations when the agent's behavior diverges from owner expectations.",
@@ -126,7 +128,8 @@
         "run_integrity_check": "Run pd runtime internalization integrity to check and repair table structure."
       },
       "zeroStateHealthy": "No items need your judgment right now. PD has checked behavior evidence, principle review queue, and system signals.",
-      "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here."
+      "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
+      "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed."
     },
     "pain": {
       "eyebrow": "Behavior Evidence",
@@ -170,6 +173,8 @@
       "chainPrincipleId": "Linked Principle ID",
       "chainSourceKind": "Source Kind",
       "chainState": "Chain State",
+      "chainInternalizationTask": "Internalization Task ID",
+      "chainDreamerStatus": "Dreamer Status",
       "fieldTrigger": "Trigger",
       "fieldConclusion": "PD's Conclusion",
       "fieldApplicability": "Applicability",

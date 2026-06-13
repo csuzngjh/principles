@@ -52,6 +52,9 @@ export interface Layer3Data {
   linkedPrincipleId: string | null;
   sourceKind: string;
   state: string;
+  /** PRI-380: internalization task linkage */
+  internalizationTaskId: string | null;
+  dreamerTaskStatus: string | null;
 }
 
 export interface CardLayers {
@@ -78,6 +81,9 @@ export interface RecordData {
   linkedTaskStatus?: string;
   linkedCandidateId?: string;
   linkedPrincipleId?: string;
+  /** PRI-380: internalization task linkage */
+  internalizationTaskId?: string;
+  dreamerTaskStatus?: string;
 }
 
 /**
@@ -113,6 +119,8 @@ export function buildCardLayers(record: RecordData): CardLayers {
     linkedPrincipleId: record.linkedPrincipleId ?? null,
     sourceKind: record.sourceKind,
     state: record.state,
+    internalizationTaskId: record.internalizationTaskId ?? null,
+    dreamerTaskStatus: record.dreamerTaskStatus ?? null,
   };
 
   return { layer1, layer2, layer3 };
