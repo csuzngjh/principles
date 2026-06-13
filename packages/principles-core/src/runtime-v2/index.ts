@@ -39,7 +39,7 @@ export type { GoldenTraceCandidateDecision, GoldenTraceCandidateBuilderInput, Go
 // Diagnostician output schemas (Phase 2)
 export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
 // Principle tree types schemas
-export { PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema } from './types/index.js';
+export { PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
 // Runtime summary types schemas
@@ -489,6 +489,9 @@ export type {
   PDTaskDelivery,
   PDTaskMeta,
   PDTaskSpec,
+  EvidenceChainState,
+  EvidenceChainRecord,
+  EvidenceChainResponse,
 } from './types/index.js';
 
 export {
@@ -502,6 +505,14 @@ export {
   PDTaskMetaSchema,
   PDTaskSpecSchema,
   BUILTIN_PD_TASKS,
+  mapSourceKind,
+  inferAdmissionDecision,
+  determineState,
+  determineNextAction,
+  resolveSummary,
+  normalizeDiagnosticianTaskId,
+  crossReferenceByTimestamp,
+  assembleEvidenceChain,
 } from './types/index.js';
 
 
@@ -647,6 +658,10 @@ export type {
 } from './internalization/internalization-orchestrator.js';
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
+
+// Golden fixtures (PRI-385)
+export type { FixtureDataSet } from './internalization/golden-dogfood-fixtures.js';
+export { GOLDEN_FIXTURES } from './internalization/golden-dogfood-fixtures.js';
 
 // ── Dreamer Peer Runner (PRI-67/PRI-85) ───────────────────────────────────────
 

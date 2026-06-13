@@ -32,8 +32,8 @@ export interface ClassifiedPrinciple {
 
 // ── Heuristics ────────────────────────────────────────────────────────────────
 
-/** Regex that matches core Thinking OS axiom IDs (T-NN pattern, e.g. T-01, T-11) */
-const BUILTIN_ID_REGEX = /^T-\d{2}$/;
+/** Regex that matches core Thinking OS axiom IDs (T-NN pattern, e.g. T-01..T-10) */
+const BUILTIN_ID_REGEX = /^T-(0[1-9]|10)$/;
 
 /** ID prefixes that indicate demo / dogfood data */
 const DEMO_ID_PREFIXES = ['DEMO_', 'demo_', 'story-a', 'story_a', 'dogfood_'];

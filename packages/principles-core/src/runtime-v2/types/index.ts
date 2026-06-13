@@ -231,3 +231,30 @@ export {
   BUILTIN_PD_TASKS,
 } from './pd-task-types.js';
 
+// Evidence chain contract
+export type {
+  EvidenceChainState,
+  EvidenceChainRecord,
+  EvidenceChainResponse,
+  ChainStateParams,
+  TaskMapEntry as EvidenceTaskMapEntry,
+  CandidateInfo as EvidenceCandidateInfo,
+  DreamerTaskInfo as EvidenceDreamerTaskInfo,
+  LedgerPrinciple as EvidenceLedgerPrinciple,
+} from './evidence-chain-contract.js';
+
+export {
+  EvidenceChainStateSchema,
+  EvidenceChainRecordSchema,
+  EvidenceChainResponseSchema,
+  mapSourceKind,
+  inferAdmissionDecision,
+  determineState,
+  determineNextAction,
+  resolveSummary,
+  normalizeDiagnosticianTaskId,
+  crossReferenceByTimestamp,
+  assembleEvidenceChain,
+} from './evidence-chain-contract.js';
+
+
