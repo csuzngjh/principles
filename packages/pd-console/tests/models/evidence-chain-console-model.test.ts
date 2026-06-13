@@ -1239,113 +1239,177 @@ describe('PRI-380: crossReferenceByTimestamp', () => {
 });
 
 // ── PRI-388: Dedupe trajectory pain rows with Runtime V2 canonical pain ───
+//
+// Reviewer P1/P2 requirements covered here:
+//   - dedupe MUST rely on strong lineage, not timestamp alone
+//   - two different real pains landing within 1s MUST both survive
+//   - observedAt desc order MUST be preserved after dedupe
+//   - a true orphan trajectory row (no canonical counterpart) MUST survive
 
 describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
-  it('dedupes: trajectory pain_N + Runtime V2 manual_* same event -> only canonical shown', async () => {
-    // Scenario: A CLI manual pain creates both:
-    // 1. A trajectory pain_events row (pain_311) with no linked task
-    // 2. A Runtime V2 canonical task (manual_*) with full chain
-    // The Console should only show the canonical record, not both.
-
+  // Fixture 1 (reviewer-requested): real manual_* canonical + pain_N trajectory
+  // form, where the trajectory row's text matches the canonical candidate title.
+  // Same event -> dedupe to a single canonical card.
+  it('dedupes: trajectory pain_N + Runtime V2 manual_* same event (matched summary) -> only canonical shown', async () => {
     const timestamp = '2026-06-10T14:30:45.000Z';
+    const sharedText = 'Agent modified config without approval';
 
-    // 1. Insert trajectory pain event (no matching task initially)
+    // 1. trajectory pain_events row (pain_1) — no linked task by id
     const trajDb = createTrajectoryDb();
     const trajectoryRowId = insertPainEvent(trajDb, {
       source: 'manual',
-      text: 'Agent modified config without approval',
+      text: sharedText,
       createdAt: timestamp,
     });
     trajDb.close();
 
-    // 2. Insert Runtime V2 canonical task that matches via input_ref
-    // The task will have inputRef pointing to the trajectory row ID
+    // 2. Runtime V2 canonical task with a DIFFERENT id namespace (manual_*),
+    //    so the task is not auto-merged in step 1. Its candidate title matches
+    //    the trajectory text, which is the strong-lineage content hash.
     const stateDb = createStateDb();
     insertTask(stateDb, {
-      taskId: `diagnosis_pain_${trajectoryRowId}`, // This matches trajectory pain via input_ref convention
+      taskId: 'manual_1781355083586_8cfc3yqe',
       status: 'succeeded',
-      createdAt: timestamp, // Same timestamp as trajectory pain
-      inputRef: String(trajectoryRowId), // Explicitly links to trajectory row
-      diagnosticJson: JSON.stringify({ rootCause: 'Missing approval workflow' }),
+      createdAt: timestamp,
+      inputRef: 'manual_1781355083586_8cfc3yqe', // self-referential, not the trajectory row id
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
     });
     insertCandidate(stateDb, {
       candidateId: 'cand-dedupe-001',
-      taskId: `diagnosis_pain_${trajectoryRowId}`,
-      title: 'Modify config requires approval',
+      taskId: 'manual_1781355083586_8cfc3yqe',
+      title: sharedText, // matches trajectory text -> content-hash lineage
       confidence: 0.9,
     });
     stateDb.close();
 
     const result = await model.getEvidenceChain();
 
-    // Should show only ONE record (the merged one)
-    // The trajectory and canonical should merge into a single record
+    // Only ONE card remains: the canonical (manual_*) record.
+    // The trajectory pain_1 row was suppressed because its summary hashes to
+    // the same (sourceKind, normalizedSummary) key as the canonical candidate.
     expect(result.records).toHaveLength(1);
 
     const record = result.records[0];
-    // The record has linked task (canonical state)
-    expect(record.linkedTaskId).toBe(`diagnosis_pain_${trajectoryRowId}`);
+    expect(record.linkedTaskId).toBe('manual_1781355083586_8cfc3yqe');
     expect(record.linkedCandidateId).toBe('cand-dedupe-001');
     expect(record.state).toBe('internalization-missing');
-    expect(record.summary).toContain('approval');
-    // ID should be the canonical pain ID (pain_N)
-    expect(record.id).toBe(`pain_${trajectoryRowId}`);
+    // The trajectory row (pain_<rowId>) must NOT appear as a separate card.
+    expect(result.records.some(r => r.id === `pain_${trajectoryRowId}`)).toBe(false);
   });
 
-  it('dedupes: within 1 second window merges, outside window keeps both', async () => {
-    // Test the 1-second dedupe window boundary
-    const baseTime = '2026-06-10T14:30:00.000Z';
+  // Fixture 2 (reviewer-requested P1): two DIFFERENT real pains within 1s.
+  // They share source and timestamp window but have different content.
+  // They MUST both survive — dedupe must not rely on time alone.
+  it('does NOT dedupe: two different pains within 1 second (same source, different text)', async () => {
+    const t0 = '2026-06-10T14:30:00.000Z';
+    const t1 = '2026-06-10T14:30:00.500Z'; // 500ms apart
 
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'manual',
-      text: 'Event A',
-      createdAt: baseTime,
+      text: 'Agent deleted a file without confirmation',
+      createdAt: t0,
     });
     insertPainEvent(trajDb, {
       source: 'manual',
-      text: 'Event B (close to canonical)',
-      createdAt: '2026-06-10T14:30:00.500Z', // 500ms after - should dedupe
-    });
-    insertPainEvent(trajDb, {
-      source: 'manual',
-      text: 'Event C (far from canonical)',
-      createdAt: '2026-06-10T14:30:03.000Z', // 3s after - should NOT dedupe
+      text: 'Agent ran a shell command without approval',
+      createdAt: t1,
     });
     trajDb.close();
 
+    // Canonical task ONLY for the second pain (different content from first).
     const stateDb = createStateDb();
-    insertTask(stateDb, {
-      taskId: 'diagnosis_pain_1',
-      status: 'succeeded',
-      createdAt: baseTime, // Same as Event A - dedupes
-      inputRef: '1',
-    });
     insertTask(stateDb, {
       taskId: 'diagnosis_pain_2',
       status: 'succeeded',
-      createdAt: '2026-06-10T14:30:00.500Z', // Same as Event B - dedupes
+      createdAt: t1,
       inputRef: '2',
+      diagnosticJson: JSON.stringify({ rootCause: 'Agent ran a shell command without approval' }),
     });
-    insertTask(stateDb, {
-      taskId: 'diagnosis_pain_3',
-      status: 'succeeded',
-      createdAt: '2026-06-10T14:30:03.000Z', // Same as Event C - dedupes (exact match)
-      inputRef: '3',
+    insertCandidate(stateDb, {
+      candidateId: 'cand-shell',
+      taskId: 'diagnosis_pain_2',
+      title: 'Shell commands require approval',
+      confidence: 0.85,
     });
     stateDb.close();
 
     const result = await model.getEvidenceChain();
 
-    // All 3 events match exactly in timestamp, so they merge into 3 records
-    expect(result.records).toHaveLength(3);
+    // Both pains survive: pain_2 has canonical state; pain_1 stays as a
+    // trajectory-only card because its content does not hash-match the canonical.
+    expect(result.records).toHaveLength(2);
 
-    const ids = result.records.map(r => r.id).sort();
-    expect(ids).toEqual(['pain_1', 'pain_2', 'pain_3']);
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_1');
+    expect(ids).toContain('pain_2');
+
+    // pain_1 (the different pain) must NOT be silently suppressed by the
+    // 500ms timestamp proximity to pain_2's canonical task.
+    const pain1 = result.records.find(r => r.id === 'pain_1');
+    expect(pain1).toBeDefined();
+    expect(pain1!.linkedTaskId).toBeUndefined();
   });
 
-  it('dedupes: true orphaned trajectory records are NOT deduped', async () => {
-    // If there's NO canonical record, the trajectory pain should still show
+  // Fixture 3 (reviewer-requested P1-2): dedupe preserves observedAt desc order.
+  it('preserves observedAt descending order after dedupe', async () => {
+    // Three trajectory rows. The middle one shares content with a canonical
+    // record and should be suppressed; the remaining two must stay in
+    // descending observedAt order.
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Oldest event',
+      createdAt: '2026-06-10T14:00:00.000Z',
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Shared event text',
+      createdAt: '2026-06-10T15:00:00.000Z',
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Newest event',
+      createdAt: '2026-06-10T16:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Canonical task whose candidate title matches the middle trajectory row.
+    insertTask(stateDb, {
+      taskId: 'manual_canonical_shared',
+      status: 'succeeded',
+      createdAt: '2026-06-10T15:00:00.000Z',
+      inputRef: 'manual_canonical_shared',
+      diagnosticJson: JSON.stringify({ rootCause: 'Shared event text' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-shared',
+      taskId: 'manual_canonical_shared',
+      title: 'Shared event text',
+      confidence: 0.8,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Three records: pain_3 (Newest, 16:00), manual_canonical_shared (15:00),
+// pain_1 (Oldest, 14:00). pain_2 was suppressed.
+    expect(result.records).toHaveLength(3);
+
+    const observedAts = result.records.map(r => r.observedAt);
+    expect(observedAts).toEqual([
+      '2026-06-10T16:00:00.000Z',
+      '2026-06-10T15:00:00.000Z',
+      '2026-06-10T14:00:00.000Z',
+    ]);
+
+    // The suppressed middle trajectory row must not reappear.
+    expect(result.records.some(r => r.id === 'pain_2')).toBe(false);
+  });
+
+  // Fixture 4: true orphan trajectory row (no canonical counterpart at all).
+  it('does NOT dedupe: orphan trajectory records with no canonical counterpart', async () => {
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'manual',
@@ -1356,8 +1420,50 @@ describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
 
     const result = await model.getEvidenceChain();
 
-    // Should show the trajectory record (state depends on source)
     expect(result.records).toHaveLength(1);
     expect(result.records[0].state).toBe('recorded-only');
+  });
+
+  // Fixture 5: same source + same timestamp, but different content — no dedupe.
+  // This is the strongest form of the P1 regression test.
+  it('does NOT dedupe: identical timestamp + source but different content', async () => {
+    const sameTimestamp = '2026-06-10T14:30:00.000Z';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain alpha',
+      createdAt: sameTimestamp,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain beta',
+      createdAt: sameTimestamp,
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: sameTimestamp,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: 'Pain alpha' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-alpha',
+      taskId: 'diagnosis_pain_1',
+      title: 'Pain alpha',
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // pain_1 dedupes against the canonical (same content hash).
+    // pain_2 MUST survive: identical timestamp + source, but different content.
+    expect(result.records).toHaveLength(2);
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2');
   });
 });
