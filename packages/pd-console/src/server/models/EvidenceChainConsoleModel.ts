@@ -83,6 +83,51 @@ function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
+interface NormalizationResult {
+  success: boolean;
+  normalized?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+/**
+ * Normalize a diagnostician task ID to canonical "diagnosis_*" format.
+ * Supports:
+ * - diagnosis_manual_xxx
+ * - <stage>-diagnosis_manual_xxx (e.g. diag_router-diagnosis_manual_xxx)
+ * Fails loud if malformed.
+ */
+function normalizeDiagnosticianTaskId(taskId: string): NormalizationResult {
+  if (!taskId) {
+    return {
+      success: false,
+      reason: 'Diagnostician task ID is empty or missing.',
+      nextAction: 'Verify that the principle candidates table contains valid task IDs.',
+    };
+  }
+
+  // If it doesn't contain "diagnosis_", treat it as a non-standard canonical ID as-is (e.g. for testing)
+  if (!taskId.includes('diagnosis_')) {
+    return { success: true, normalized: taskId };
+  }
+
+  if (taskId.startsWith('diagnosis_')) {
+    return { success: true, normalized: taskId };
+  }
+
+  const idx = taskId.indexOf('diagnosis_');
+  if (idx > 0 && taskId[idx - 1] === '-') {
+    const normalized = taskId.slice(idx);
+    return { success: true, normalized };
+  }
+
+  return {
+    success: false,
+    reason: `Malformed diagnostician task ID: "${taskId}". Unable to normalize to canonical "diagnosis_*" format.`,
+    nextAction: 'Ensure task IDs follow the format "diagnosis_*" or "<stage>-diagnosis_*".',
+  };
+}
+
 /**
  * Runtime type guard: check if a value is a plain object (Record<string, unknown>).
  * Rejects null, arrays, primitives. Used instead of `as Record<string, unknown>`
@@ -736,26 +781,40 @@ export class EvidenceChainConsoleModel {
 
         for (const c of candidates) {
           const candidateId = isString(c.candidate_id) ? c.candidate_id : '';
-          const taskId = isString(c.task_id) ? c.task_id : '';
+          if (!candidateId) {
+            degradedReasons.push('Candidate record is missing candidate_id.');
+            degradedNextActions.push('Check principle_candidates table integrity.');
+            continue;
+          }
+
+          const rawTaskId = isString(c.task_id) ? c.task_id : '';
+          const normResult = normalizeDiagnosticianTaskId(rawTaskId);
+          if (!normResult.success || !normResult.normalized) {
+            degradedReasons.push(normResult.reason ?? 'Malformed candidate task ID.');
+            degradedNextActions.push(normResult.nextAction ?? 'Check principle_candidates table task IDs.');
+            continue;
+          }
+
+          const taskId = normResult.normalized;
+
           // PRI-380: Reverse-map candidate → painId via taskIdToPainId first,
           // then fall back to legacy taskId prefix stripping
           let painId = taskIdToPainId.get(taskId) ?? '';
           if (!painId && taskId.startsWith('diagnosis_')) {
             painId = taskId.slice('diagnosis_'.length);
           }
-          if (candidateId) {
-            const info: CandidateInfo = {
-              candidateId,
-              title: hasRichColumns ? readOwnString(c, 'title') : undefined,
-              description: hasRichColumns ? readOwnString(c, 'description') : undefined,
-              confidence: hasRichColumns && typeof c.confidence === 'number' && Number.isFinite(c.confidence)
-                ? c.confidence : undefined,
-              recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
-            };
-            // candidateMap requires painId; candidateByTaskId only requires taskId
-            if (painId) candidateMap.set(painId, info);
-            if (taskId) candidateByTaskId.set(taskId, info);
-          }
+
+          const info: CandidateInfo = {
+            candidateId,
+            title: hasRichColumns ? readOwnString(c, 'title') : undefined,
+            description: hasRichColumns ? readOwnString(c, 'description') : undefined,
+            confidence: hasRichColumns && typeof c.confidence === 'number' && Number.isFinite(c.confidence)
+              ? c.confidence : undefined,
+            recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
+          };
+          // candidateMap requires painId; candidateByTaskId only requires taskId
+          if (painId) candidateMap.set(painId, info);
+          if (taskId) candidateByTaskId.set(taskId, info);
         }
       } catch (err) {
         if (isMissingTableError(err)) {

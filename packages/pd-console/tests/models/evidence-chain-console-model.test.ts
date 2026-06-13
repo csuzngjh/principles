@@ -440,6 +440,89 @@ describe('EvidenceChainConsoleModel — candidate generated', () => {
     expect(record!.linkedCandidateId).toBe('cand-001');
     expect(record!.state).toBe('candidate_generated');
   });
+
+  it('normalizes sub-run task IDs (e.g. diag_router-diagnosis_*) to canonical format', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+    });
+    // Candidate generated with diag_router- prefixed task ID
+    insertCandidate(stateDb, {
+      candidateId: 'cand-002',
+      taskId: `diag_router-diagnosis_pain_${rowId}`,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.linkedCandidateId).toBe('cand-002');
+    expect(record!.state).toBe('candidate_generated');
+  });
+
+  it('normalizes multi-segment prefixed task IDs to canonical format', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+    });
+    // Candidate generated with multi-segment prefixed task ID
+    insertCandidate(stateDb, {
+      candidateId: 'cand-003',
+      taskId: `stage1-stage2-diagnosis_pain_${rowId}`,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.linkedCandidateId).toBe('cand-003');
+    expect(record!.state).toBe('candidate_generated');
+  });
+
+  it('fails loud / degrades with reason when task ID is malformed', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'succeeded',
+    });
+    // Malformed task ID with invalid prefix separator
+    const malformedId = `diag_router_diagnosis_pain_${rowId}`;
+    insertCandidate(stateDb, {
+      candidateId: 'cand-004',
+      taskId: malformedId,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.degradedReason).toContain('Malformed');
+    expect(result.degradedReason).toContain(malformedId);
+  });
 });
 
 // ── Sanitizer boundary ────────────────────────────────────────────────────────
