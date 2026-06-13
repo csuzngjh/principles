@@ -497,7 +497,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       taskId,
       task,
       errorCategory,
-      failureReason: `Runtime execution ended with status: ${runStatus.status}`,
+      failureReason: runStatus.reason
+        ? `Runtime execution ended with status: ${runStatus.status}. Reason: ${runStatus.reason}`
+        : `Runtime execution ended with status: ${runStatus.status}`,
     });
   }
 
@@ -535,7 +537,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // Permanent errors — never retry
     if (this.permanentErrorCategories.has(ctx.errorCategory)) {
       try {
-        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
+        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory, ctx.failureReason);
       } catch (stateErr) {
         this.emitEvent('mark_failed_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
@@ -569,7 +571,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       try {
-        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
+        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory, ctx.failureReason);
       } catch (stateErr) {
         this.emitEvent('mark_retry_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
@@ -600,7 +602,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
     // Max attempts exceeded
     try {
-      await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
+      await this.stateManager.markTaskFailed(
+        ctx.taskId,
+        'max_attempts_exceeded',
+        `Max attempts exceeded: ${ctx.failureReason}`,
+      );
     } catch (stateErr) {
       this.emitEvent('mark_failed_error', ctx.taskId, {
         errorCategory: 'storage_unavailable',

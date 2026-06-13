@@ -269,7 +269,11 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
     const runResult = await runner.run(wakeResult.taskId);
 
     expect(runResult.status).toBe('retried');
-    expect(mockStateManager.markTaskRetryWait).toHaveBeenCalled();
+    expect(mockStateManager.markTaskRetryWait).toHaveBeenCalledWith(
+      wakeResult.taskId,
+      'execution_failed',
+      expect.stringContaining('Runtime execution ended with status: failed'),
+    );
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });
 
@@ -314,7 +318,11 @@ describe('PRI-381: Consumer product-path — full cycle integration', () => {
     const runResult = await runner.run(wakeResult.taskId);
 
     expect(runResult.status).toBe('failed');
-    expect(mockStateManager.markTaskFailed).toHaveBeenCalled();
+    expect(mockStateManager.markTaskFailed).toHaveBeenCalledWith(
+      wakeResult.taskId,
+      'max_attempts_exceeded',
+      expect.stringContaining('Max attempts exceeded: Runtime execution ended with status: failed'),
+    );
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });
 });
