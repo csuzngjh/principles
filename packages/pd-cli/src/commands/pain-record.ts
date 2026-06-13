@@ -168,11 +168,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   }
 
   if (opts.json) {
-    const out = { ...result };
+    const out: Record<string, unknown> = { ...result };
     // Ensure nextAction is present for actionable states
     if (out.status === 'submitted') {
       if (!out.nextAction) {
-        out.nextAction = `pd diagnose run --task-id ${out.taskId} --workspace "${workspaceDir}"`;
+        out.nextAction = `pd diagnose run --task-id ${out.taskId} --workspace "${workspaceDir}" --runtime pi-ai --json`;
+      }
+      if (!out.reason) {
+        out.reason = out.message;
       }
     }
     console.log(JSON.stringify(out, null, 2));

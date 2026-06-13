@@ -137,6 +137,10 @@ describe('pd pain record async mode (PRI-369)', () => {
     expect(jsonOutput.ledgerEntryIds).toEqual([]);
     expect(jsonOutput.latencyMs).toBe(120);
     expect(jsonOutput.message).toContain('pd task show');
+    expect(jsonOutput.reason).toContain('pd task show');
+    expect(jsonOutput.nextAction).toContain('pd diagnose run');
+    expect(jsonOutput.nextAction).toContain('--runtime pi-ai');
+    expect(jsonOutput.nextAction).toContain('--json');
     // submitted should NOT cause exit(1)
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
