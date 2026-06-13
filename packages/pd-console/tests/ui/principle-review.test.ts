@@ -673,3 +673,62 @@ describe("PRI-332: Backend contract validators", () => {
     expect(validatorsSrc).toMatch(/readabilityWarningCode.*return null/);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// 17. PRI-387: Principle Detail Action Honesty
+// ════════════════════════════════════════════════════════════════════════════
+describe("PRI-387: Principle Detail Action Honesty", () => {
+  it("detail page checks if any record is in an MVP-supported channel", () => {
+    expect(principleDetailSrc).toMatch(/channel === "prompt" \|\| r\.channel === "defer_archive"/);
+  });
+
+  it("detail page checks for data unavailable reason", () => {
+    expect(principleDetailSrc).toMatch(/reasonDataUnavailable|reasonKey = "principles\.detail\.reasonDataUnavailable"/);
+    expect(getPagesKey("principles.detail.reasonDataUnavailable")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.reasonDataUnavailable")).toBeTruthy();
+  });
+
+  it("detail page checks for already handled reason", () => {
+    expect(principleDetailSrc).toMatch(/reasonAlreadyHandled|reasonKey = "principles\.detail\.reasonAlreadyHandled"/);
+    expect(getPagesKey("principles.detail.reasonAlreadyHandled")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.reasonAlreadyHandled")).toBeTruthy();
+  });
+
+  it("detail page checks for no records reason", () => {
+    expect(principleDetailSrc).toMatch(/reasonNoRecords|reasonKey = "principles\.detail\.reasonNoRecords"/);
+    expect(getPagesKey("principles.detail.reasonNoRecords")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.reasonNoRecords")).toBeTruthy();
+  });
+
+  it("detail page checks for unsupported channel reason", () => {
+    expect(principleDetailSrc).toMatch(/reasonUnsupportedChannel|reasonKey = "principles\.detail\.reasonUnsupportedChannel"/);
+    expect(getPagesKey("principles.detail.reasonUnsupportedChannel")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.reasonUnsupportedChannel")).toBeTruthy();
+  });
+
+  it("Park action is disabled and has unavailable message", () => {
+    expect(principleDetailSrc).toMatch(/onClick=\{handlePark\}\s+disabled/);
+    expect(principleDetailSrc).toMatch(/parkUnavailable/);
+    expect(getPagesKey("principles.detail.parkUnavailable")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.parkUnavailable")).toBeTruthy();
+  });
+
+  it("handlePark does not trigger toast or claim persistence", () => {
+    const parkFunc = principleDetailSrc.substring(
+      principleDetailSrc.indexOf("const handlePark = () =>"),
+      principleDetailSrc.indexOf("const handlePark = () =>") + 150
+    );
+    expect(parkFunc).not.toMatch(/toast\.success/);
+    expect(parkFunc).not.toMatch(/toast\.error/);
+  });
+
+  it("confirmApprove and confirmReject are guarded by isActionable check", () => {
+    expect(principleDetailSrc).toMatch(/confirmApprove = async \(\) => \{\s*if \(!isActionable/);
+    expect(principleDetailSrc).toMatch(/confirmReject = async \(\) => \{\s*if \(!isActionable/);
+  });
+
+  it("only status pending allows approve/reject actionability (fail-closed check)", () => {
+    expect(principleDetailSrc).toMatch(/status !== "pending"/);
+    expect(principleDetailSrc).not.toMatch(/status === "approved" \|\| approvalGroup\.status === "rejected"/);
+  });
+});

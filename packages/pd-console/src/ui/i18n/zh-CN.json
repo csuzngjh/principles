@@ -336,7 +336,14 @@
         "viewActivation": "查看生效情况",
         "approveFailed": "批准失败，请稍后重试。",
         "partialFailure": "决策已执行，但 {{failedCount}}/{{totalCount}} 条记录失败。请检查后重试。",
-        "rejectFailed": "拒绝失败，请稍后重试。"
+        "rejectFailed": "拒绝失败，请稍后重试。",
+        "decisionTitle": "决策操作",
+        "parkUnavailable": "暂存尚未可用",
+        "reasonDataUnavailable": "数据暂不可用",
+        "reasonAlreadyHandled": "已处理",
+        "reasonNoRecords": "暂无待审批记录",
+        "reasonUnsupportedChannel": "不是 MVP 支持通道",
+        "unactionableReasonPrefix": "不可操作原因: "
       }
     },
     "activation": {
