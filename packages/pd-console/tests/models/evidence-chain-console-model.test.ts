@@ -1129,6 +1129,46 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     expect(result.degradedReason).toBeDefined();
     expect(result.nextAction).toBeDefined();
   });
+
+  it('aggregates multiple unmatched pain event warnings at response level and deduplicates nextAction (PRI-382)', async () => {
+    const trajDb = createTrajectoryDb();
+    // Insert 5 unmatched pain events
+    const rowIds: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      rowIds.push(insertPainEvent(trajDb, {
+        source: 'manual',
+        text: `Unlinked pain event ${i}`,
+        createdAt: `2026-06-07T10:0${i}:00.000Z`,
+      }));
+    }
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task exists but won't match any of these (different ID and far in future)
+    insertTask(stateDb, {
+      taskId: 'diagnosis_manual_9999_other',
+      status: 'succeeded',
+      inputRef: '999',
+      createdAt: '2026-06-07T20:00:00.000Z',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // 1. Assert each record still has its own details (Requirement 1)
+    for (const rowId of rowIds) {
+      const record = result.records.find(r => r.id === `pain_${rowId}`);
+      expect(record).toBeDefined();
+      expect(record!.degradedReason).toBe('Could not link this pain event to a diagnostician task. The chain may be incomplete.');
+      expect(record!.nextAction).toBe('Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.');
+    }
+
+    // 2. Assert response-level degradedReason is aggregated (Requirement 2)
+    expect(result.degradedReason).toBe('5 evidence records could not be linked to diagnostician tasks. Showing per-record details below.');
+
+    // 3. Assert response-level nextAction is deduplicated (Requirement 3)
+    expect(result.nextAction).toBe('Check Runtime V2 pipeline status for unmatched pain ID formats.');
+  });
 });
 
 // ── PRI-380: crossReferenceByTimestamp unit tests ─────────────────────────────
