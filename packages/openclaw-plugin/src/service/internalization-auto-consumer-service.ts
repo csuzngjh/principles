@@ -285,7 +285,7 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       }
       workspaceStates.delete(workspaceDir);
     } else {
-      for (const [dir, state] of workspaceStates) {
+      for (const [, state] of workspaceStates) {
         state.stopped = true;
         if (state.timeoutId) clearTimeout(state.timeoutId);
         state.timeoutId = null;
