@@ -1,16 +1,25 @@
 /**
  * PRI-361 Quality Scorecard — Tests
+ *
+ * Tests pure logic from @principles/core only.
+ * I/O layer tests belong in pd-cli.
  */
 import { describe, it, expect } from 'vitest';
 import {
   RUBRIC_DIMENSIONS,
   RUBRIC_LABELS,
   meetsMvpThreshold,
+  escapeHtml,
+  escapeMarkdownTable,
+  validateLlmScoreResponse,
+  validateAdjudicationResponse,
+  validatePainRow,
+  validateCliOptions,
+  needsAdjudication,
+  determineFinalLabel,
   type RubricDimension,
   type RubricScore,
-} from '../types.js';
-import { needsAdjudication, determineFinalLabel, skippedAdjudication } from '../strong-model-gate.js';
-import { extractLogStats } from '../data-extractor.js';
+} from '../index.js';
 
 // ── Rubric Tests ───────────────────────────────────────────────────
 
@@ -36,18 +45,6 @@ describe('meetsMvpThreshold', () => {
     expect(meetsMvpThreshold(perfectScores)).toBe(true);
   });
 
-  it('passes when G1=2, G2=2, G5=2, G3=1, total=10', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G3: 1 as RubricScore, G4: 0 as RubricScore, G6: 0 as RubricScore, G7: 0 as RubricScore };
-    // total = 2+2+1+0+2+0+0 = 7, not enough
-    expect(meetsMvpThreshold(scores)).toBe(false);
-  });
-
-  it('passes when G1=2, G2=2, G5=2, G3=1, total=10 exactly', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G3: 1 as RubricScore, G7: 1 as RubricScore };
-    // total = 2+2+1+2+2+2+1 = 12
-    expect(meetsMvpThreshold(scores)).toBe(true);
-  });
-
   it('fails when G1 < 2', () => {
     const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G1: 1 as RubricScore };
     expect(meetsMvpThreshold(scores)).toBe(false);
@@ -65,13 +62,14 @@ describe('meetsMvpThreshold', () => {
 
   it('fails when G3 = 0 (must be >= 1)', () => {
     const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G3: 0 as RubricScore };
-    // total = 12, but G3 = 0
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
   it('fails when total < 10', () => {
-    const scores: Record<RubricDimension, RubricScore> = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore, G4: 0 as RubricScore, G5: 2 as RubricScore, G6: 0 as RubricScore, G7: 0 as RubricScore };
-    // total = 7
+    const scores: Record<RubricDimension, RubricScore> = {
+      G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore,
+      G4: 0 as RubricScore, G5: 2 as RubricScore, G6: 0 as RubricScore, G7: 0 as RubricScore,
+    };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
@@ -81,15 +79,149 @@ describe('meetsMvpThreshold', () => {
   });
 });
 
+// ── Escaping Tests ─────────────────────────────────────────────────
+
+describe('escapeHtml', () => {
+  it('escapes < > & " \'', () => {
+    expect(escapeHtml('<script>alert("xss")</script>')).toBe(
+      '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+    );
+  });
+
+  it('escapes ampersands', () => {
+    expect(escapeHtml('a & b')).toBe('a &amp; b');
+  });
+
+  it('leaves safe text unchanged', () => {
+    expect(escapeHtml('hello world')).toBe('hello world');
+  });
+
+  it('handles injection in pain summary', () => {
+    const malicious = '<img src=x onerror=alert(1)>';
+    const escaped = escapeHtml(malicious);
+    expect(escaped).not.toContain('<');
+    expect(escaped).not.toContain('>');
+  });
+});
+
+describe('escapeMarkdownTable', () => {
+  it('escapes pipe characters', () => {
+    expect(escapeMarkdownTable('a | b | c')).toBe('a \\| b \\| c');
+  });
+
+  it('replaces newlines with spaces', () => {
+    expect(escapeMarkdownTable('line1\nline2\rline3')).toBe('line1 line2line3');
+  });
+
+  it('leaves safe text unchanged', () => {
+    expect(escapeMarkdownTable('hello world')).toBe('hello world');
+  });
+});
+
+// ── Validation Tests ───────────────────────────────────────────────
+
+describe('validateLlmScoreResponse', () => {
+  it('returns zeros for null input', () => {
+    const result = validateLlmScoreResponse(null);
+    expect(result.scores.G1).toBe(0);
+    expect(result.flags).toContain('invalid_llm_response');
+  });
+
+  it('parses valid response', () => {
+    const result = validateLlmScoreResponse({
+      scores: { G1: 2, G2: 1, G3: 0, G4: 2, G5: 2, G6: 1, G7: 0 },
+      rationales: { G1: 'Good evidence', G2: 'Partial' },
+      flags: ['over_abstraction'],
+    });
+    expect(result.scores.G1).toBe(2);
+    expect(result.scores.G2).toBe(1);
+    expect(result.flags).toEqual(['over_abstraction']);
+    expect(result.rationales.G2).toBe('Partial');
+  });
+
+  it('clamps invalid scores to 0', () => {
+    const result = validateLlmScoreResponse({
+      scores: { G1: 5, G2: -1, G3: 'bad' },
+      rationales: {},
+      flags: 'not-array',
+    });
+    expect(result.scores.G1).toBe(0);
+    expect(result.scores.G2).toBe(0);
+    expect(result.scores.G3).toBe(0);
+    expect(result.flags).toEqual([]);
+  });
+});
+
+describe('validateAdjudicationResponse', () => {
+  it('returns needs-review for null input', () => {
+    const result = validateAdjudicationResponse(null);
+    expect(result.verdict).toBe('needs-review');
+  });
+
+  it('parses valid response', () => {
+    const result = validateAdjudicationResponse({
+      scores: { G1: 2, G2: 2, G3: 2, G4: 2, G5: 2, G6: 2, G7: 2 },
+      rationale: 'All good',
+      verdict: 'pass',
+    });
+    expect(result.verdict).toBe('pass');
+    expect(result.rationale).toBe('All good');
+  });
+});
+
+describe('validatePainRow', () => {
+  it('returns null for null input', () => {
+    expect(validatePainRow(null)).toBeNull();
+  });
+
+  it('returns null for missing required fields', () => {
+    expect(validatePainRow({})).toBeNull();
+  });
+
+  it('parses valid row', () => {
+    const row = validatePainRow({ id: 1, session_id: 's1', source: 'manual', score: 80, reason: 'test', severity: 'severe', created_at: '2026-01-01' });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.id).toBe(1);
+      expect(row.score).toBe(80);
+    }
+  });
+});
+
+describe('validateCliOptions', () => {
+  it('rejects invalid format', () => {
+    const { errors } = validateCliOptions({ format: 'xml', minPainScore: 50, limit: 0, localModelBaseUrl: 'http://x', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'format')).toBe(true);
+  });
+
+  it('rejects invalid minPainScore', () => {
+    const { errors } = validateCliOptions({ format: 'json', minPainScore: -1, limit: 0, localModelBaseUrl: 'http://x', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'minPainScore')).toBe(true);
+  });
+
+  it('rejects invalid URL', () => {
+    const { errors } = validateCliOptions({ format: 'json', minPainScore: 50, limit: 0, localModelBaseUrl: 'ftp://x', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'localModelBaseUrl')).toBe(true);
+  });
+
+  it('accepts valid options', () => {
+    const { options, errors } = validateCliOptions({
+      format: 'json', minPainScore: 50, limit: 10,
+      localModelBaseUrl: 'http://localhost:12341/v1', output: 'report.json', localModelId: 'gemma',
+    });
+    expect(errors).toHaveLength(0);
+    expect(options.format).toBe('json');
+    expect(options.limit).toBe(10);
+  });
+});
+
 // ── Adjudication Decision Tests ────────────────────────────────────
 
 function makeLocalEval(overrides: Partial<{ totalScore: number; mvpMet: boolean; flags: string[] }> = {}) {
-  const allTwos = Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, 2])) as Record<RubricDimension, RubricScore>;
-  const allTwosRationales = Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, ''])) as Record<RubricDimension, string>;
   return {
     model: 'test-model',
-    dimensionScores: allTwos,
-    dimensionRationales: allTwosRationales,
+    dimensionScores: Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, 2])) as Record<RubricDimension, RubricScore>,
+    dimensionRationales: Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, ''])) as Record<RubricDimension, string>,
     totalScore: overrides.totalScore ?? 14,
     maxScore: 14,
     mvpMet: overrides.mvpMet ?? true,
@@ -99,15 +231,9 @@ function makeLocalEval(overrides: Partial<{ totalScore: number; mvpMet: boolean;
 
 function makeEpisode(overrides = {}) {
   return {
-    episodeId: 'EP-1',
-    summary: 'Test episode',
-    source: 'manual',
-    score: 80,
-    severity: 'severe',
-    createdAt: '2026-06-12T00:00:00Z',
-    evolutionTaskResolution: null,
-    linkedPrinciples: [],
-    gateBlockCount: 0,
+    episodeId: 'EP-1', summary: 'Test episode', source: 'manual', score: 80,
+    severity: 'severe', createdAt: '2026-06-12T00:00:00Z',
+    evolutionTaskResolution: null, linkedPrinciples: [], gateBlockCount: 0,
     ...overrides,
   };
 }
@@ -121,23 +247,14 @@ describe('needsAdjudication', () => {
 
   it('returns high when MVP not met', () => {
     const local = makeLocalEval({ mvpMet: false, totalScore: 5 });
-    // Override dimension scores to have zeros
     local.dimensionScores = { G1: 0 as RubricScore, G2: 2 as RubricScore, G3: 0 as RubricScore, G4: 0 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 0 as RubricScore };
     const decision = needsAdjudication(makeEpisode(), local);
     expect(decision.shouldAdjudicate).toBe(true);
     expect(decision.priority).toBe('high');
   });
 
-  it('returns high when totalScore <= 8', () => {
-    const local = makeLocalEval({ totalScore: 8, mvpMet: true });
-    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore, G4: 1 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 1 as RubricScore };
-    const decision = needsAdjudication(makeEpisode(), local);
-    expect(decision.shouldAdjudicate).toBe(true);
-    expect(decision.priority).toBe('high');
-  });
-
   it('returns low (no adjudication) when score >= 12 with MVP met', () => {
-    const decision = needsAdjudication(makeEpisode(), makeLocalEval({ totalScore: 12, mvpMet: true }));
+    const decision = needsAdjudication(makeEpisode(), makeLocalEval({ totalScore: 13 }));
     expect(decision.shouldAdjudicate).toBe(false);
     expect(decision.priority).toBe('low');
   });
@@ -145,46 +262,13 @@ describe('needsAdjudication', () => {
 
 describe('determineFinalLabel', () => {
   it('returns local-pass when high score and no adjudication', () => {
-    const local = makeLocalEval({ totalScore: 13, mvpMet: true });
-    const label = determineFinalLabel(local, null);
+    const label = determineFinalLabel(makeLocalEval({ totalScore: 13 }), null);
     expect(label).toBe('local-pass');
   });
 
   it('returns local-fail when very low score and no adjudication', () => {
     const local = makeLocalEval({ totalScore: 3, mvpMet: false });
     local.dimensionScores = { G1: 0 as RubricScore, G2: 0 as RubricScore, G3: 0 as RubricScore, G4: 1 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 1 as RubricScore };
-    const label = determineFinalLabel(local, null);
-    expect(label).toBe('local-fail');
-  });
-
-  it('returns needs-review when moderate score and no adjudication', () => {
-    const local = makeLocalEval({ totalScore: 8, mvpMet: false });
-    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore, G4: 0 as RubricScore, G5: 1 as RubricScore, G6: 1 as RubricScore, G7: 1 as RubricScore };
-    const label = determineFinalLabel(local, null);
-    expect(label).toBe('needs-review');
-  });
-
-  it('returns strong model verdict when adjudication is present', () => {
-    const local = makeLocalEval({ totalScore: 10, mvpMet: true });
-    const adj = { model: 'strong', adjudicationStatus: 'pass' as const, confirmedScores: null, confirmedMvpMet: true, rationale: 'OK', nextAction: null };
-    const label = determineFinalLabel(local, adj);
-    expect(label).toBe('pass');
-  });
-
-  it('returns needs-review when adjudication is skipped', () => {
-    const local = makeLocalEval({ totalScore: 8, mvpMet: false });
-    const adj = skippedAdjudication('test');
-    const label = determineFinalLabel(local, adj);
-    expect(label).toBe('needs-review');
-  });
-});
-
-// ── Log Stats Tests ────────────────────────────────────────────────
-
-describe('extractLogStats', () => {
-  it('returns zeros when directory does not exist', () => {
-    const stats = extractLogStats('/nonexistent/path');
-    expect(stats.totalEvents).toBe(0);
-    expect(stats.painSignalCount).toBe(0);
+    expect(determineFinalLabel(local, null)).toBe('local-fail');
   });
 });

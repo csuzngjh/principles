@@ -1,8 +1,8 @@
 /**
  * PRI-361 Quality Scorecard — Report Generator
  *
- * Generates quality scorecard reports in JSON, Markdown, or HTML format.
- * All output is desensitized.
+ * PURE LOGIC — generates report strings. ZERO I/O.
+ * All external strings are escaped before rendering.
  */
 
 import type {
@@ -10,10 +10,11 @@ import type {
   EpisodeEvaluation,
 } from './types.js';
 import { RUBRIC_LABELS, RUBRIC_DIMENSIONS as DIMS } from './types.js';
+import { escapeHtml, escapeMarkdownTable } from './validation.js';
 
 // ── Markdown Report ────────────────────────────────────────────────
 
-function formatScoreTable(eval_: EpisodeEvaluation): string {
+function mdTable(eval_: EpisodeEvaluation): string {
   const local = eval_.localEvaluation;
   const strong = eval_.strongModelAdjudication;
   const header = '| Dimension | Label | Local | Strong | Local Rationale |';
@@ -21,23 +22,23 @@ function formatScoreTable(eval_: EpisodeEvaluation): string {
   const rows = DIMS.map(d => {
     const localScore = `${local.dimensionScores[d]}/2`;
     const strongScore = strong?.confirmedScores ? `${strong.confirmedScores[d]}/2` : '-';
-    return `| ${d} | ${RUBRIC_LABELS[d]} | ${localScore} | ${strongScore} | ${local.dimensionRationales[d].substring(0, 60)} |`;
+    const rationale = escapeMarkdownTable(local.dimensionRationales[d]).substring(0, 60);
+    return `| ${d} | ${RUBRIC_LABELS[d]} | ${localScore} | ${strongScore} | ${rationale} |`;
   });
   return [header, sep, ...rows].join('\n');
 }
 
 export function generateMarkdownReport(report: QualityScorecardReport): string {
   const lines: string[] = [];
-
   lines.push('# PD Quality Scorecard Report');
   lines.push('');
   lines.push(`Generated: ${report.generatedAt}`);
   lines.push('');
 
   // Data source
+  const ds = report.dataSource;
   lines.push('## Data Source');
   lines.push('');
-  const ds = report.dataSource;
   lines.push(`- Pain Events: ${ds.painEventCount}`);
   lines.push(`- Evolution Tasks: ${ds.evolutionTaskCount}`);
   lines.push(`- Principle Events: ${ds.principleEventCount}`);
@@ -74,25 +75,31 @@ export function generateMarkdownReport(report: QualityScorecardReport): string {
   lines.push('');
 
   for (const ev of report.evaluations) {
+    const summary = escapeMarkdownTable(ev.episode.summary);
+    const flags = ev.localEvaluation.flags.map(escapeMarkdownTable).join(', ');
+    const adjRationale = ev.strongModelAdjudication
+      ? escapeMarkdownTable(ev.strongModelAdjudication.rationale ?? '')
+      : '';
+
     lines.push(`### ${ev.episode.episodeId} — ${ev.finalLabel.toUpperCase()}`);
     lines.push('');
-    lines.push(`- Source: ${ev.episode.source}`);
+    lines.push(`- Source: ${escapeMarkdownTable(ev.episode.source)}`);
     lines.push(`- Pain Score: ${ev.episode.score}`);
-    lines.push(`- Severity: ${ev.episode.severity}`);
-    lines.push(`- Summary: ${ev.episode.summary}`);
+    lines.push(`- Severity: ${escapeMarkdownTable(ev.episode.severity)}`);
+    lines.push(`- Summary: ${summary}`);
     lines.push(`- Local Score: ${ev.localEvaluation.totalScore}/14 (MVP: ${ev.localEvaluation.mvpMet ? 'met' : 'not met'})`);
     if (ev.localEvaluation.flags.length > 0) {
-      lines.push(`- Flags: ${ev.localEvaluation.flags.join(', ')}`);
+      lines.push(`- Flags: ${flags}`);
     }
     if (ev.strongModelAdjudication) {
       const adj = ev.strongModelAdjudication;
-      lines.push(`- Adjudication: ${adj.adjudicationStatus} (model: ${adj.model})`);
-      if (adj.rationale) lines.push(`- Adjudication Rationale: ${adj.rationale}`);
+      lines.push(`- Adjudication: ${adj.adjudicationStatus} (model: ${escapeMarkdownTable(adj.model)})`);
+      if (adjRationale) lines.push(`- Adjudication Rationale: ${adjRationale}`);
       if (adj.confirmedMvpMet !== null) lines.push(`- Confirmed MVP: ${adj.confirmedMvpMet ? 'met' : 'not met'}`);
-      if (adj.nextAction) lines.push(`- Next Action: ${adj.nextAction}`);
+      if (adj.nextAction) lines.push(`- Next Action: ${escapeMarkdownTable(adj.nextAction)}`);
     }
     lines.push('');
-    lines.push(formatScoreTable(ev));
+    lines.push(mdTable(ev));
     lines.push('');
     lines.push('---');
     lines.push('');
@@ -102,7 +109,7 @@ export function generateMarkdownReport(report: QualityScorecardReport): string {
   lines.push('## Known Limitations');
   lines.push('');
   for (const lim of report.knownLimitations) {
-    lines.push(`- ${lim}`);
+    lines.push(`- ${escapeMarkdownTable(lim)}`);
   }
   lines.push('');
 
@@ -125,17 +132,24 @@ export function generateHtmlReport(report: QualityScorecardReport): string {
       return `<div class="dim-score"><span class="dim-label">${d}</span><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div><span class="dim-val">${local.dimensionScores[d]}/2</span></div>`;
     }).join('');
 
+    const safeSummary = escapeHtml(ev.episode.summary);
+    const safeSource = escapeHtml(ev.episode.source);
+    const safeFlags = local.flags.map(escapeHtml).join(', ');
+    const safeAdjRationale = adj ? escapeHtml(adj.rationale ?? '') : '';
+    const safeNextAction = adj?.nextAction ? escapeHtml(adj.nextAction) : '';
+
     return `
       <div class="card ${statusClass}">
         <div class="card-header">
-          <span class="ep-id">${ev.episode.episodeId}</span>
-          <span class="badge ${statusClass}">${ev.finalLabel.toUpperCase()}</span>
+          <span class="ep-id">${escapeHtml(ev.episode.episodeId)}</span>
+          <span class="badge ${statusClass}">${escapeHtml(ev.finalLabel.toUpperCase())}</span>
         </div>
         <div class="card-body">
-          <p><strong>Source:</strong> ${ev.episode.source} | <strong>Score:</strong> ${ev.episode.score} | <strong>Local:</strong> ${local.totalScore}/14</p>
-          <p class="summary">${ev.episode.summary}</p>
-          ${local.flags.length > 0 ? `<p class="flags">⚠️ ${local.flags.join(', ')}</p>` : ''}
-          ${adj ? `<p class="adj"><strong>Adjudication:</strong> ${adj.adjudicationStatus} — ${adj.rationale?.substring(0, 100)}</p>` : '<p class="adj"><strong>Adjudication:</strong> skipped (local-only assessment)</p>'}
+          <p><strong>Source:</strong> ${safeSource} | <strong>Score:</strong> ${ev.episode.score} | <strong>Local:</strong> ${local.totalScore}/14</p>
+          <p class="summary">${safeSummary}</p>
+          ${local.flags.length > 0 ? `<p class="flags">⚠️ ${safeFlags}</p>` : ''}
+          ${adj ? `<p class="adj"><strong>Adjudication:</strong> ${escapeHtml(adj.adjudicationStatus)} — ${safeAdjRationale.substring(0, 100)}</p>` : '<p class="adj"><strong>Adjudication:</strong> skipped (local-only assessment)</p>'}
+          ${safeNextAction ? `<p class="adj"><strong>Next Action:</strong> ${safeNextAction}</p>` : ''}
           <div class="score-bars">${scoreBar}</div>
         </div>
       </div>`;
@@ -179,7 +193,7 @@ export function generateHtmlReport(report: QualityScorecardReport): string {
 </head>
 <body>
 <h1>🧬 PD Quality Scorecard</h1>
-<p>Generated: ${report.generatedAt}</p>
+<p>Generated: ${escapeHtml(report.generatedAt)}</p>
 
 <h2>Summary</h2>
 <div class="stats">
@@ -190,14 +204,14 @@ export function generateHtmlReport(report: QualityScorecardReport): string {
   <div class="stat"><div class="stat-val">${s.mvpThresholdMetCount}</div><div class="stat-label">MVP Met</div></div>
 </div>
 
-<p><strong>Config:</strong> Local: ${report.localEvaluatorConfig.model} | Strong: ${report.strongModelConfig.model ?? 'skipped'}</p>
+<p><strong>Config:</strong> Local: ${escapeHtml(report.localEvaluatorConfig.model)} | Strong: ${escapeHtml(report.strongModelConfig.model ?? 'skipped')}</p>
 
 <h2>Episode Evaluations</h2>
 ${episodeCards}
 
 <h2>Known Limitations</h2>
 <ul class="limitations">
-${report.knownLimitations.map(l => `<li>${l}</li>`).join('\n')}
+${report.knownLimitations.map(l => `<li>${escapeHtml(l)}</li>`).join('\n')}
 </ul>
 </body>
 </html>`;
