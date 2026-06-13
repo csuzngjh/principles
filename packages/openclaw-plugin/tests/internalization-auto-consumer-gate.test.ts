@@ -53,7 +53,7 @@ function writeConfigYaml(workspaceDir: string, featureOverrides: Record<string, 
     correction_observer: { category: 'quiet', enabled: false },
     empathy_observer: { category: 'quiet', enabled: false },
     evolution_worker: { category: 'quiet', enabled: false },
-    internalization_auto_consumer: { category: 'core', enabled: true },
+    internalization_auto_consumer: { category: 'quiet', enabled: true },
     nocturnal: { category: 'gone', enabled: false },
   };
   const config = {
@@ -105,7 +105,7 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
   });
 
   describe('shouldStartInternalizationAutoConsumer', () => {
-    it('returns shouldStart=true with defaults (core flag — always enabled)', () => {
+    it('returns shouldStart=true with defaults (quiet flag — default enabled)', () => {
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
       expect(result.shouldStart).toBe(true);
@@ -113,20 +113,24 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
       expect(result.disabledInfo).toBeNull();
     });
 
-    it('returns shouldStart=true even when config attempts to disable (core flag cannot be disabled)', () => {
+    it('returns shouldStart=false when config disables the flag, with reason and nextAction', () => {
       writeConfigYaml(workspaceDir, {
-        internalization_auto_consumer: { category: 'core', enabled: false },
+        internalization_auto_consumer: { category: 'quiet', enabled: false },
       });
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
 
-      expect(result.shouldStart).toBe(true);
-      expect(result.disabledInfo).toBeNull();
+      expect(result.shouldStart).toBe(false);
+      expect(result.disabledInfo).not.toBeNull();
+      const info = JSON.parse(result.disabledInfo!);
+      expect(info.reason).toBe('internalization_auto_consumer_disabled');
+      expect(info.nextAction).toContain('pd runtime internalization run-once');
+      expect(info.flagSource).toBeDefined();
     });
 
     it('returns shouldStart=true with explicit config enabling', () => {
       writeConfigYaml(workspaceDir, {
-        internalization_auto_consumer: { category: 'core', enabled: true },
+        internalization_auto_consumer: { category: 'quiet', enabled: true },
       });
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
@@ -142,13 +146,13 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
       expect(result.source).toBe('defaults');
     });
 
-    it('returns enabled=true even when config attempts to disable (core flag protection)', () => {
+    it('returns enabled=false when config disables the flag (quiet flag can be disabled)', () => {
       writeConfigYaml(workspaceDir, {
-        internalization_auto_consumer: { category: 'core', enabled: false },
+        internalization_auto_consumer: { category: 'quiet', enabled: false },
       });
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'internalization_auto_consumer', logger);
-      expect(result.enabled).toBe(true);
+      expect(result.enabled).toBe(false);
     });
   });
 });

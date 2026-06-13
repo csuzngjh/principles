@@ -41,7 +41,7 @@ const { mockLoadPdConfig, mockComputeFlagsFromLoadResult } = vi.hoisted(() => ({
   mockLoadPdConfig: vi.fn().mockReturnValue({ config: {}, source: 'defaults' }),
   mockComputeFlagsFromLoadResult: vi.fn().mockReturnValue({
     flags: {
-      internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'core' },
+      internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'quiet' },
     },
     source: 'defaults',
     errors: [],
@@ -87,7 +87,7 @@ describe('handleRuntimeInternalizationQueue', () => {
     mockLoadPdConfig.mockReturnValue({ ok: true, effective: {}, source: 'defaults' });
     mockComputeFlagsFromLoadResult.mockReturnValue({
       flags: {
-        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'core' },
+        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'quiet' },
       },
       source: 'defaults',
       errors: [],
@@ -306,7 +306,7 @@ describe('handleRuntimeInternalizationQueue', () => {
     });
     mockComputeFlagsFromLoadResult.mockReturnValue({
       flags: {
-        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'core' },
+        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'quiet' },
       },
       source: 'config',
       errors: [],
@@ -317,6 +317,30 @@ describe('handleRuntimeInternalizationQueue', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.consumerStatus).toBe('auto_consumer_enabled');
     expect(output.nextAction).toBeUndefined();
+  });
+
+  it('ready tasks + auto-consumer disabled via config → consumerStatus=manual_action_required + nextAction in JSON', async () => {
+    mockGetSnapshot.mockResolvedValue({
+      ...emptySnapshot(),
+      pendingCount: 3,
+      readyTasks: [
+        { taskId: 'task_dreamer_1', taskKind: 'dreamer', channel: 'prompt' },
+      ],
+      noReadyTasks: null,
+    });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {
+        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: false, category: 'quiet' },
+      },
+      source: 'config',
+      errors: [],
+    });
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.consumerStatus).toBe('manual_action_required');
+    expect(output.nextAction).toContain('pd runtime internalization run-once');
   });
 
   it('no ready tasks → no consumerStatus or nextAction in JSON', async () => {
@@ -342,5 +366,28 @@ describe('handleRuntimeInternalizationQueue', () => {
     const text = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
     expect(text).toContain('auto_consumer_enabled');
     expect(text).not.toContain('nextAction:');
+  });
+
+  it('ready tasks + auto-consumer disabled in text output shows manual_action_required + nextAction', async () => {
+    mockGetSnapshot.mockResolvedValue({
+      ...emptySnapshot(),
+      pendingCount: 1,
+      readyTasks: [{ taskId: 'task_003', taskKind: 'dreamer', channel: 'prompt' }],
+      noReadyTasks: null,
+    });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {
+        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: false, category: 'quiet' },
+      },
+      source: 'config',
+      errors: [],
+    });
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: false });
+
+    const text = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(text).toContain('manual_action_required');
+    expect(text).toContain('nextAction:');
+    expect(text).toContain('pd runtime internalization run-once');
   });
 });
