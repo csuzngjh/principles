@@ -207,6 +207,22 @@ export function validatePrincipleEventRow(raw: unknown): ValidatedPrincipleEvent
   };
 }
 
+// ── Gate Block Row Validation ───────────────────────────────────────
+
+export interface ValidatedGateRow {
+  session_id: string;
+  cnt: number;
+}
+
+export function validateGateRow(raw: unknown): ValidatedGateRow | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  const session_id = typeof obj.session_id === 'string' ? obj.session_id : '';
+  if (!session_id) return null;
+  const cnt = typeof obj.cnt === 'number' ? obj.cnt : 0;
+  return { session_id, cnt };
+}
+
 // ── CLI Options Validation ─────────────────────────────────────────
 
 export interface ValidationError {
@@ -282,13 +298,15 @@ export function extractJsonFromLlmResponse(text: string): unknown | null {
 
 // ── Desensitization ────────────────────────────────────────────────
 
-const PATH_RE = /[A-Z]:\\[^\s"']+/g;
+const WIN_PATH_RE = /[A-Z]:\\[^\s"']+/g;
+const POSIX_PATH_RE = /(?:\/home|\/mnt|\/Users|\/tmp|\/var|\/opt|\/etc|\/root)\/[^\s"']+/g;
 const TOKEN_RE = /(eyJ[A-Za-z0-9_-]{10,})/g;
 const SESSION_ID_RE = /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/g;
 
 export function sanitize(text: string): string {
   return text
-    .replace(PATH_RE, '<path>')
+    .replace(WIN_PATH_RE, '<path>')
+    .replace(POSIX_PATH_RE, '<path>')
     .replace(TOKEN_RE, '<token-redacted>')
     .replace(SESSION_ID_RE, '<session-id>');
 }

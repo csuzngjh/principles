@@ -14,9 +14,11 @@ import {
   validateLlmScoreResponse,
   validateAdjudicationResponse,
   validatePainRow,
+  validateGateRow,
   validateCliOptions,
   needsAdjudication,
   determineFinalLabel,
+  sanitize,
   type RubricDimension,
   type RubricScore,
 } from '../index.js';
@@ -212,6 +214,69 @@ describe('validateCliOptions', () => {
     expect(errors).toHaveLength(0);
     expect(options.format).toBe('json');
     expect(options.limit).toBe(10);
+  });
+});
+
+// ── Gate Row Validation Tests ──────────────────────────────────────
+
+describe('validateGateRow', () => {
+  it('returns null for null input', () => {
+    expect(validateGateRow(null)).toBeNull();
+  });
+
+  it('returns null for missing session_id', () => {
+    expect(validateGateRow({ cnt: 5 })).toBeNull();
+  });
+
+  it('parses valid row', () => {
+    const row = validateGateRow({ session_id: 'sess-1', cnt: 3 });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.session_id).toBe('sess-1');
+      expect(row.cnt).toBe(3);
+    }
+  });
+
+  it('defaults cnt to 0 for non-number', () => {
+    const row = validateGateRow({ session_id: 'sess-1', cnt: 'bad' });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.cnt).toBe(0);
+    }
+  });
+});
+
+// ── Path Sanitization Tests ─────────────────────────────────────────
+
+describe('sanitize — path redaction', () => {
+  it('redacts Windows paths', () => {
+    const result = sanitize('file at D:\\Code\\principles\\src\\index.ts');
+    expect(result).not.toContain('D:\\');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts POSIX /home/ paths', () => {
+    const result = sanitize('error in /home/user/project/src/index.ts');
+    expect(result).not.toContain('/home/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts WSL /mnt/ paths', () => {
+    const result = sanitize('mounted at /mnt/c/Users/test/file.txt');
+    expect(result).not.toContain('/mnt/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts /tmp/ paths', () => {
+    const result = sanitize('temp file /tmp/build-12345/output.log');
+    expect(result).not.toContain('/tmp/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts JWT-like tokens', () => {
+    const result = sanitize('bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc');
+    expect(result).not.toContain('eyJ');
+    expect(result).toContain('<token-redacted>');
   });
 });
 

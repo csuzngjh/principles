@@ -10,6 +10,7 @@ import {
   validatePainRow,
   validateEvolutionRow,
   validatePrincipleEventRow,
+  validateGateRow,
   sanitize,
   truncate,
 } from '@principles/core/quality-scorecard';
@@ -57,9 +58,10 @@ export async function extractEpisodes(
     const rawPeRows = db.prepare('SELECT principle_id, event_type, created_at FROM principle_events').all();
     const prEvents = rawPeRows.map(validatePrincipleEventRow).filter((r): r is NonNullable<typeof r> => r !== null);
 
-    // Gate blocks count per session
-    const rawGateRows = db.prepare('SELECT session_id, COUNT(*) as cnt FROM gate_blocks GROUP BY session_id').all() as { session_id: string; cnt: number }[];
-    const gateBlockMap = new Map(rawGateRows.map(g => [g.session_id, g.cnt]));
+    // Gate blocks count per session — validate each row
+    const rawGateRows = db.prepare('SELECT session_id, COUNT(*) as cnt FROM gate_blocks GROUP BY session_id').all();
+    const gateRows = rawGateRows.map(validateGateRow).filter((r): r is NonNullable<typeof r> => r !== null);
+    const gateBlockMap = new Map(gateRows.map(g => [g.session_id, g.cnt]));
 
     // Deduplicate by sanitized reason
     const seen = new Set<string>();
@@ -82,8 +84,9 @@ export async function extractEpisodes(
           const eTime = new Date(e.created_at).getTime();
           return Math.abs(eTime - peTime) < 7200000;
         })
-        .map(e => e.principle_id as string)
-        .filter((v, i, a) => v !== null && a.indexOf(v) === i);
+        .map(e => e.principle_id)
+        .filter((v): v is string => v !== null)
+        .filter((v, i, a) => a.indexOf(v) === i);
 
       episodes.push({
         episodeId: `EP-${pe.id}`,
@@ -117,10 +120,11 @@ export async function extractEpisodes(
 export interface LogStats {
   totalEvents: number;
   painSignalCount: number;
+  degradedReasons: string[];
 }
 
 export function extractLogStats(logsDir: string): LogStats {
-  const stats: LogStats = { totalEvents: 0, painSignalCount: 0 };
+  const stats: LogStats = { totalEvents: 0, painSignalCount: 0, degradedReasons: [] };
 
   try {
     const files = readdirSync(logsDir).filter(f => f.endsWith('.jsonl'));
@@ -128,13 +132,19 @@ export function extractLogStats(logsDir: string): LogStats {
       const lines = readFileSync(join(logsDir, file), 'utf-8').split('\n').filter(Boolean);
       for (const line of lines) {
         try {
-          const ev = JSON.parse(line) as { type?: string };
+          const ev = JSON.parse(line) as Record<string, unknown>;
           stats.totalEvents++;
           if (ev.type === 'pain_signal') stats.painSignalCount++;
-        } catch { /* skip */ }
+        } catch (parseErr: unknown) {
+          const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+          stats.degradedReasons.push(`jsonl-parse-fail:${file}:${msg}`);
+        }
       }
     }
-  } catch { /* logs dir may not exist */ }
+  } catch (dirErr: unknown) {
+    const msg = dirErr instanceof Error ? dirErr.message : String(dirErr);
+    stats.degradedReasons.push(`logs-dir-unreadable:${msg}`);
+  }
 
   return stats;
 }

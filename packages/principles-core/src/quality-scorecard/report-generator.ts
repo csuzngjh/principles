@@ -65,7 +65,7 @@ export function generateMarkdownReport(report: QualityScorecardReport): string {
   lines.push(`- Final Pass: ${s.finalPassCount}`);
   lines.push(`- Final Fail: ${s.finalFailCount}`);
   lines.push(`- Needs Review: ${s.needsReviewCount}`);
-  lines.push(`- Skipped (no strong model): ${s.skippedCount}`);
+  lines.push(`- Local-only evaluated (no strong model): ${s.localOnlyCount}`);
   lines.push(`- Average Local Score: ${s.averageLocalScore.toFixed(1)}/14`);
   lines.push(`- MVP Threshold Met: ${s.mvpThresholdMetCount}/${s.totalEpisodes}`);
   lines.push('');

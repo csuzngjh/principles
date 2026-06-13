@@ -48,15 +48,17 @@ function writeJsonError(error: string, nextAction: string): void {
 
 function computeSummary(evaluations: EpisodeEvaluation[]) {
   const totalEpisodes = evaluations.length;
-  const localPassCount = evaluations.filter(e => e.finalLabel === 'local-pass' || e.finalLabel === 'pass').length;
-  const localFailCount = evaluations.filter(e => e.finalLabel === 'local-fail' || e.finalLabel === 'fail').length;
+  // localPassCount/localFailCount: based strictly on local model's own conclusion
+  // (localEval.mvpMet + totalScore), NOT finalLabel which may incorporate strong-model adjudication.
+  const localPassCount = evaluations.filter(e => e.localEvaluation.mvpMet && e.localEvaluation.totalScore >= 12).length;
+  const localFailCount = evaluations.filter(e => e.localEvaluation.totalScore <= 6).length;
   const strongModelReviewedCount = evaluations.filter(e =>
     e.strongModelAdjudication && e.strongModelAdjudication.adjudicationStatus !== 'skipped'
   ).length;
   const finalPassCount = evaluations.filter(e => e.finalLabel === 'pass').length;
   const finalFailCount = evaluations.filter(e => e.finalLabel === 'fail').length;
   const needsReviewCount = evaluations.filter(e => e.finalLabel === 'needs-review').length;
-  const skippedCount = evaluations.filter(e => e.finalLabel === 'local-pass' || e.finalLabel === 'local-fail').length;
+  const localOnlyCount = evaluations.filter(e => e.finalLabel === 'local-pass' || e.finalLabel === 'local-fail').length;
   const averageLocalScore = totalEpisodes > 0
     ? evaluations.reduce((s, e) => s + e.localEvaluation.totalScore, 0) / totalEpisodes
     : 0;
@@ -64,7 +66,7 @@ function computeSummary(evaluations: EpisodeEvaluation[]) {
 
   return {
     totalEpisodes, localPassCount, localFailCount, strongModelReviewedCount,
-    finalPassCount, finalFailCount, needsReviewCount, skippedCount,
+    finalPassCount, finalFailCount, needsReviewCount, localOnlyCount,
     averageLocalScore, mvpThresholdMetCount,
   };
 }

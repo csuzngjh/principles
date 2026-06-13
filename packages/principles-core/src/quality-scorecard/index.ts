@@ -36,6 +36,7 @@ export {
   validatePainRow,
   validateEvolutionRow,
   validatePrincipleEventRow,
+  validateGateRow,
   validateCliOptions,
   extractJsonFromLlmResponse,
   sanitize,
@@ -49,6 +50,7 @@ export type {
   ValidatedPainRow,
   ValidatedEvolutionRow,
   ValidatedPrincipleEventRow,
+  ValidatedGateRow,
   ValidationError,
   AdjudicationDecision,
 } from './validation.js';

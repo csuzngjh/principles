@@ -147,7 +147,7 @@ export interface QualityScorecardReport {
     finalPassCount: number;
     finalFailCount: number;
     needsReviewCount: number;
-    skippedCount: number;
+    localOnlyCount: number;
     averageLocalScore: number;
     mvpThresholdMetCount: number;
   };
