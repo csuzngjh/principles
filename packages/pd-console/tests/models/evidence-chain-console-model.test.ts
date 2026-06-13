@@ -928,6 +928,46 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     expect(record!.dreamerTaskStatus).toBe('pending');
   });
 
+  it('falls back to timestamp cross-reference and retrieves candidate via candidateByTaskId', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain with timestamp-matched task',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task ID format cannot derive painId via legacy stripping (not 'diagnosis_'),
+    // but will be in taskMap and matched via timestamp
+    const rtTaskId = 'runtime_v2_task_xyz123';
+    insertTask(stateDb, {
+      taskId: rtTaskId,
+      taskKind: 'diagnostician',
+      status: 'succeeded',
+      createdAt: '2026-06-07T10:02:00.000Z',  // Within 5 min window
+    });
+    // Candidate linked to this task via taskId
+    insertCandidate(stateDb, {
+      candidateId: 'cand-timestamp-xyz',
+      taskId: rtTaskId,
+      title: 'Candidate from timestamp match',
+      confidence: 0.75,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    // Should be linked via cross-reference
+    expect(record!.linkedTaskId).toBe(rtTaskId);
+    expect(record!.linkedTaskStatus).toBe('succeeded');
+    // Candidate should be found via candidateByTaskId dual index
+    expect(record!.state).toBe('candidate_generated');
+    expect(record!.candidateTitle).toBe('Candidate from timestamp match');
+    expect(record!.confidence).toBe(0.75);
+  });
+
   it('falls back to timestamp cross-reference when input_ref is missing', async () => {
     const trajDb = createTrajectoryDb();
     const rowId = insertPainEvent(trajDb, {

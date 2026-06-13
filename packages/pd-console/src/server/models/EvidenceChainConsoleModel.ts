@@ -743,7 +743,7 @@ export class EvidenceChainConsoleModel {
           if (!painId && taskId.startsWith('diagnosis_')) {
             painId = taskId.slice('diagnosis_'.length);
           }
-          if (painId && candidateId) {
+          if (candidateId) {
             const info: CandidateInfo = {
               candidateId,
               title: hasRichColumns ? readOwnString(c, 'title') : undefined,
@@ -752,8 +752,8 @@ export class EvidenceChainConsoleModel {
                 ? c.confidence : undefined,
               recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
             };
-            candidateMap.set(painId, info);
-            // PRI-380: dual index by taskId for cross-reference lookups
+            // candidateMap requires painId; candidateByTaskId only requires taskId
+            if (painId) candidateMap.set(painId, info);
             if (taskId) candidateByTaskId.set(taskId, info);
           }
         }
