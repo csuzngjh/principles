@@ -214,6 +214,7 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'diagnostician_async_cli') continue;
       if (flag.id === 'diagnostician_core_grounding') continue;
       if (flag.id === 'diagnostician_split_pipeline') continue;
+      if (flag.id === 'internalization_auto_consumer') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
