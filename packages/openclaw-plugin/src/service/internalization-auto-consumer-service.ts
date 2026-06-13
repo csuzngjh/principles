@@ -5,12 +5,14 @@ import {
   DreamerRunner,
   DefaultDreamerValidator,
   PiAiRuntimeAdapter,
+  OpenClawCliRuntimeAdapter,
   storeEmitter,
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
   computeConsumerDecision,
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
+  type PDRuntimeAdapter,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -67,7 +69,7 @@ function getNextActionForError(category?: string): string {
   return 'Run: pd runtime internalization run-once --runner dreamer --runtime config --json to isolate the failure.';
 }
 
-async function runConsumerCycle(
+export async function runConsumerCycle(
   workspaceDir: string,
   logger: PluginLogger,
 ): Promise<void> {
@@ -144,9 +146,11 @@ async function runConsumerCycle(
       return;
     }
 
+    const runtimeKind = runtimeConfigResult.runtimeKind;
+
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },
-      { owner: 'auto-consumer', runtimeKind: 'config', dryRun: true },
+      { owner: 'auto-consumer', runtimeKind, dryRun: true },
     );
 
     const wakeResult = await orchestrator.wakeOnce('dreamer');
@@ -163,15 +167,25 @@ async function runConsumerCycle(
       return;
     }
 
-    const adapter = new PiAiRuntimeAdapter({
-      provider: runtimeConfigResult.provider ?? 'openai',
-      model: runtimeConfigResult.model ?? 'gpt-4o',
-      apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
-      maxRetries: runtimeConfigResult.maxRetries,
-      timeoutMs: runtimeConfigResult.timeoutMs,
-      baseUrl: runtimeConfigResult.baseUrl,
-      workspace: workspaceDir,
-    });
+    let adapter: PDRuntimeAdapter;
+    if (runtimeKind === 'pi-ai') {
+      adapter = new PiAiRuntimeAdapter({
+        provider: runtimeConfigResult.provider ?? 'openai',
+        model: runtimeConfigResult.model ?? 'gpt-4o',
+        apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
+        maxRetries: runtimeConfigResult.maxRetries,
+        timeoutMs: runtimeConfigResult.timeoutMs,
+        baseUrl: runtimeConfigResult.baseUrl,
+        workspace: workspaceDir,
+      });
+    } else if (runtimeKind === 'openclaw-cli') {
+      adapter = new OpenClawCliRuntimeAdapter({
+        runtimeMode: runtimeConfigResult.openclawMode ?? 'default',
+        workspaceDir: workspaceDir,
+      });
+    } else {
+      throw new Error(`Unsupported runtime kind resolved for auto-consumer: ${runtimeKind}`);
+    }
 
     const validator = new DefaultDreamerValidator();
     const runner = new DreamerRunner(
@@ -184,7 +198,7 @@ async function runConsumerCycle(
       },
       {
         owner: 'auto-consumer',
-        runtimeKind: 'config',
+        runtimeKind,
       },
     );
 
@@ -195,7 +209,26 @@ async function runConsumerCycle(
       taskKind: 'dreamer',
     }));
 
-    const runResult = await runner.run(taskId);
+    let runResult;
+    try {
+      runResult = await runner.run(taskId);
+    } catch (runErr) {
+      logger.error(`[PD:AutoConsumer] Runner crashed for task ${taskId}: ${String(runErr)}`);
+      try {
+        const task = await stateManager.getTask(taskId);
+        const failureReason = `Unhandled runner exception: ${runErr instanceof Error ? runErr.message : String(runErr)}`;
+        if (task && stateManager.getRetryPolicy().shouldRetry(task)) {
+          await stateManager.markTaskRetryWait(taskId, 'execution_failed', failureReason);
+          logger.info(`[PD:AutoConsumer] Marked task ${taskId} as retry_wait.`);
+        } else {
+          await stateManager.markTaskFailed(taskId, 'execution_failed', failureReason);
+          logger.info(`[PD:AutoConsumer] Marked task ${taskId} as failed.`);
+        }
+      } catch (dbErr) {
+        logger.error(`[PD:AutoConsumer] Failed to update state for crashed task ${taskId}: ${String(dbErr)}`);
+      }
+      throw runErr;
+    }
 
     if (runResult.status === 'succeeded') {
       const commitResult = await orchestrator.commitNextTaskProposal(taskId);
