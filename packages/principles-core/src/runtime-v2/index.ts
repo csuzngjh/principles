@@ -957,6 +957,18 @@ export type {
   TaskClassificationInput,
 } from './internalization/queue-actionability.js';
 
+// ── Internalization Consumer Decision (PRI-381) ────────────────────────────
+
+export {
+  computeConsumerDecision,
+  DEFAULT_CONSUMER_MAX_TASKS_PER_CYCLE,
+  DEFAULT_CONSUMER_RUNNER_KINDS,
+} from './internalization/internalization-consumer-decision.js';
+export type {
+  ConsumerDecision,
+  ConsumerDecisionInput,
+} from './internalization/internalization-consumer-decision.js';
+
 // ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
 
 export { createRecoverySweepService } from './recovery-sweep-service.js';

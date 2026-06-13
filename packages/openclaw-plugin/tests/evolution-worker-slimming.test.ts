@@ -174,6 +174,8 @@ describe('PRI-294: Surface registry coverage audit', () => {
       'startup:workspace-init',
       'startup:evolution-worker',
       'startup:correction-observer',
+      'service:internalization-auto-consumer',  // PRI-381: bounded auto-consumer
+      'startup:internalization-auto-consumer',  // PRI-381: auto-consumer startup
     ];
     const allowedIds = new Set([...usedSet, ...additionallyRegistered]);
     const unaccounted = PLUGIN_SURFACE_REGISTRY
