@@ -19,7 +19,7 @@ interface QueueOptions {
   json?: boolean;
 }
 
-function formatTextOutput(snap: InternalizationQueueSnapshot, workspaceDir: string): string {
+function formatTextOutput(snap: InternalizationQueueSnapshot, workspaceDir: string, autoConsumerEnabled: boolean): string {
   const lines: string[] = [];
   lines.push(`Internalization Queue Snapshot`);
   lines.push(`  pending: ${snap.pendingCount}  retry_wait: ${snap.retryWaitCount}`);
@@ -80,8 +80,13 @@ function formatTextOutput(snap: InternalizationQueueSnapshot, workspaceDir: stri
   }
 
   if (snap.readyTasks.length > 0) {
-    const nextAction = `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
-    lines.push(`  nextAction: ${nextAction}`);
+    if (autoConsumerEnabled) {
+      lines.push(`  consumerStatus: auto_consumer_enabled`);
+    } else {
+      const nextAction = `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
+      lines.push(`  consumerStatus: manual_action_required`);
+      lines.push(`  nextAction: ${nextAction}`);
+    }
   }
 
   return lines.join('\n');
@@ -119,7 +124,7 @@ export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Pro
 
       console.log(JSON.stringify(output, null, 2));
     } else {
-      console.log(formatTextOutput(snapshot, workspaceDir));
+      console.log(formatTextOutput(snapshot, workspaceDir, autoConsumerEnabled));
     }
   } finally {
     await close();

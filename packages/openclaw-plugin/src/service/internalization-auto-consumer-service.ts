@@ -9,6 +9,8 @@ import {
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
   computeConsumerDecision,
+  InternalizationQueueReadModel,
+  MVP_CORE_TASK_KINDS,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -81,14 +83,22 @@ async function runConsumerCycle(
     handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
     const { stateManager } = handle;
 
+    const readModel = new InternalizationQueueReadModel(stateManager);
+    readModel.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(MVP_CORE_TASK_KINDS),
+    });
+    const snapshot = await readModel.getSnapshot();
+
     const decision = computeConsumerDecision({
       autoConsumerEnabled: true,
-      readyTaskCount: 1,
+      readyTaskCount: snapshot.readyTasks.length,
     });
 
     if (!decision.shouldConsume) {
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
         reason: decision.reason,
+        readyTaskCount: snapshot.readyTasks.length,
       }));
       return;
     }
@@ -100,7 +110,7 @@ async function runConsumerCycle(
 
     const wakeResult = await orchestrator.wakeOnce('dreamer');
 
-    if (wakeResult.decision !== 'would_lease') {
+    if (wakeResult.decision !== 'leased') {
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
         decision: wakeResult.decision,
         reason: wakeResult.decision === 'no_ready_tasks'

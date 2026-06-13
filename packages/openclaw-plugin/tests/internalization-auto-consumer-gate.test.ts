@@ -105,7 +105,7 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
   });
 
   describe('shouldStartInternalizationAutoConsumer', () => {
-    it('returns shouldStart=true with defaults (dogfood — enabled by default)', () => {
+    it('returns shouldStart=true with defaults (core flag — always enabled)', () => {
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
       expect(result.shouldStart).toBe(true);
@@ -113,32 +113,24 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
       expect(result.disabledInfo).toBeNull();
     });
 
-    it('returns shouldStart=false when explicitly disabled in config', () => {
+    it('returns shouldStart=true even when config attempts to disable (core flag cannot be disabled)', () => {
       writeConfigYaml(workspaceDir, {
         internalization_auto_consumer: { category: 'core', enabled: false },
       });
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
 
-      expect(result.shouldStart).toBe(false);
-      expect(result.flagSource).toBeDefined();
-      expect(result.disabledInfo).not.toBeNull();
+      expect(result.shouldStart).toBe(true);
+      expect(result.disabledInfo).toBeNull();
     });
 
-    it('disabled result has structured reason + nextAction (ERR-002)', () => {
+    it('returns shouldStart=true with explicit config enabling', () => {
       writeConfigYaml(workspaceDir, {
-        internalization_auto_consumer: { category: 'core', enabled: false },
+        internalization_auto_consumer: { category: 'core', enabled: true },
       });
       const logger = createMockLogger();
       const result = shouldStartInternalizationAutoConsumer(workspaceDir, logger);
-
-      expect(result.disabledInfo).not.toBeNull();
-      const parsed = JSON.parse(result.disabledInfo!);
-      expect(parsed.reason).toBe('internalization_auto_consumer_disabled');
-      expect(parsed.nextAction).toContain('pd runtime internalization run-once');
-      expect(parsed.nextAction).toContain('--runner dreamer');
-      expect(parsed.featureFlag).toBe('internalization_auto_consumer');
-      expect(parsed.flagSource).toBeDefined();
+      expect(result.shouldStart).toBe(true);
     });
   });
 
@@ -150,13 +142,13 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
       expect(result.source).toBe('defaults');
     });
 
-    it('returns enabled=false when explicitly disabled', () => {
+    it('returns enabled=true even when config attempts to disable (core flag protection)', () => {
       writeConfigYaml(workspaceDir, {
         internalization_auto_consumer: { category: 'core', enabled: false },
       });
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'internalization_auto_consumer', logger);
-      expect(result.enabled).toBe(false);
+      expect(result.enabled).toBe(true);
     });
   });
 });
