@@ -336,7 +336,14 @@
         "viewActivation": "View activation status",
         "approveFailed": "Approval failed. Please try again later.",
         "partialFailure": "Decision applied, but {{failedCount}}/{{totalCount}} records failed. Please verify and retry.",
-        "rejectFailed": "Rejection failed. Please try again later."
+        "rejectFailed": "Rejection failed. Please try again later.",
+        "decisionTitle": "Decision Actions",
+        "parkUnavailable": "Park is not yet available",
+        "reasonDataUnavailable": "Data temporarily unavailable",
+        "reasonAlreadyHandled": "Already handled",
+        "reasonNoRecords": "No pending approval records",
+        "reasonUnsupportedChannel": "Not an MVP supported channel",
+        "unactionableReasonPrefix": "Unactionable reason: "
       }
     },
     "activation": {

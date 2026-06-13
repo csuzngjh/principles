@@ -9,6 +9,7 @@ export interface BrokenLink {
   taskId?: string;
   candidateId?: string;
   artifactId?: string;
+  runId?: string;
   reason: string;
   recommendedAction: string;
 }
@@ -407,8 +408,8 @@ export class InternalizationChainIntegrityReadModel {
               taskId: task.task_id,
               reason: `Task ${task.task_id} is leased but ${reasonSuffix}`,
               recommendedAction: Number.isNaN(expiresAt)
-                ? 'Fix the unparseable lease_expires_at timestamp or manually release the lease.'
-                : 'Run recovery sweep or manually release the lease.',
+                ? 'Fix the unparseable lease_expires_at timestamp then run: pd runtime internalization integrity-repair --workspace <workspace> --confirm'
+                : 'Run: pd runtime internalization integrity-repair --workspace <workspace> --confirm',
             });
           }
         }
@@ -422,6 +423,36 @@ export class InternalizationChainIntegrityReadModel {
             recommendedAction: 'Investigate persistent failure. Consider marking as failed or increasing max_attempts.',
           });
         }
+      }
+
+      // Detect stale running runs (orphan runs where task is no longer leased)
+      for (const run of allRuns) {
+        if (run.execution_status !== 'running') continue;
+
+        // If task is still leased with non-expired lease, the run is live — skip
+        const runTask = taskMap.get(run.task_id);
+        if (runTask?.status === 'leased' && runTask.lease_expires_at) {
+          const expiresAt = new Date(runTask.lease_expires_at).getTime();
+          if (!Number.isNaN(expiresAt) && expiresAt >= Date.now()) {
+            continue;
+          }
+        }
+
+        // If task is still leased with expired lease, already reported as lease_stuck — skip
+        if (runTask?.status === 'leased') continue;
+
+        // Orphaned running run: task is NOT leased but run is still running
+        const taskStatusSummary = runTask
+          ? `task status is ${runTask.status}`
+          : 'task no longer exists';
+        brokenLinks.push({
+          type: 'running_run_stuck',
+          severity: 'error',
+          taskId: run.task_id,
+          runId: run.run_id,
+          reason: `Run ${run.run_id} for task ${run.task_id} is still 'running' but ${taskStatusSummary}`,
+          recommendedAction: `Mark the run as failed: pd runtime internalization integrity-repair --workspace <workspace> --confirm`,
+        });
       }
 
       const idempotencyMap = new Map<string, number>();
