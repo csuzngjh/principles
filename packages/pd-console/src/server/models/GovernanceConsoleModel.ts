@@ -325,6 +325,46 @@ export class GovernanceConsoleModel {
       nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
     }
 
+    // PRI-380: Query trajectory.db for behavior evidence count
+    // Must happen BEFORE response construction so degradation is included in degradedSignals
+    let evidenceInProgressCount = 0;
+    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+    if (fs.existsSync(trajectoryDbPath)) {
+      try {
+        const Database = (await import('better-sqlite3')).default;
+        const trajDb = new Database(trajectoryDbPath, { readonly: true });
+        try {
+          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const [row] = rows;
+            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+              evidenceInProgressCount = row.c;
+            }
+          }
+        } catch (err) {
+          if (!isMissingTableError(err)) throw err;
+          degradedSignals.push({
+            reasonCode: 'trajectory_db_unavailable',
+            nextActionCode: 'check_trajectory_db',
+            reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+            nextAction: 'Check trajectory.db file integrity in .state directory.',
+            source: 'source_unavailable',
+          });
+        } finally {
+          trajDb.close();
+        }
+      } catch (err) {
+        degradedSignals.push({
+          reasonCode: 'trajectory_db_unavailable',
+          nextActionCode: 'check_trajectory_db',
+          reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+          nextAction: 'Check trajectory.db file integrity in .state directory.',
+          source: 'source_unavailable',
+        });
+        if (!(err instanceof Error)) throw err;
+      }
+    }
+
     const response: GovernanceQueueResponse = {
       pendingReviewCount,
       behaviorDeviationCount,
@@ -345,44 +385,8 @@ export class GovernanceConsoleModel {
       response.degradedSignals = degradedSignals;
     }
 
-    // PRI-380: Query trajectory.db for behavior evidence count
-    let evidenceInProgressCount = 0;
-    let trajectoryDegraded = false;
-    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
-    if (fs.existsSync(trajectoryDbPath)) {
-      try {
-        const Database = (await import('better-sqlite3')).default;
-        const trajDb = new Database(trajectoryDbPath, { readonly: true });
-        try {
-          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
-          if (Array.isArray(rows) && rows.length > 0) {
-            const [row] = rows;
-            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
-              evidenceInProgressCount = row.c;
-            }
-          }
-        } catch (err) {
-          if (!isMissingTableError(err)) throw err;
-          trajectoryDegraded = true;
-        } finally {
-          trajDb.close();
-        }
-      } catch (err) {
-        trajectoryDegraded = true;
-        if (!(err instanceof Error)) throw err;
-      }
-    }
     if (evidenceInProgressCount > 0) {
       response.evidenceInProgressCount = evidenceInProgressCount;
-    }
-    if (trajectoryDegraded) {
-      degradedSignals.push({
-        reasonCode: 'trajectory_db_unavailable',
-        nextActionCode: 'check_trajectory_db',
-        reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
-        nextAction: 'Check trajectory.db file integrity in .state directory.',
-        source: 'source_unavailable',
-      });
     }
 
     return response;
