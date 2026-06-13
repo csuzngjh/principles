@@ -131,6 +131,7 @@ export function PrincipleDetailPage() {
     if (!id) return;
     setLoading(true);
     setError(null);
+    setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
     try {
       const [pResult, aResult, lResult] = await Promise.all([
         fetchPrincipleDetail(id),
@@ -154,12 +155,15 @@ export function PrincipleDetailPage() {
       if (aData) {
         const group = aData.groups.find((g) => g.principleId === id);
         setApprovalGroup(group ?? null);
+      } else {
+        setApprovalGroup(null);
       }
 
       const lData = lResult.success ? validateLifecycleMetrics(lResult.data) : null;
       setLifecycle(lData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setApprovalGroup(null);
     } finally {
       setLoading(false);
     }
@@ -170,7 +174,36 @@ export function PrincipleDetailPage() {
   }, [loadData]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
-  const handleApprove = () => setShowConfirm(true);
+  // Actionable Approval Check (PRI-387)
+  let isActionable = false;
+  let reasonKey = "";
+  let defaultReason = "";
+
+  if (!approvalGroup) {
+    reasonKey = "principles.detail.reasonDataUnavailable";
+    defaultReason = "数据暂不可用";
+  } else if (approvalGroup.status !== "pending") {
+    reasonKey = "principles.detail.reasonAlreadyHandled";
+    defaultReason = "已处理";
+  } else if (approvalGroup.records.length === 0) {
+    reasonKey = "principles.detail.reasonNoRecords";
+    defaultReason = "暂无待审批记录";
+  } else {
+    const hasMvpChannel = approvalGroup.records.some(
+      (r) => r.channel === "prompt" || r.channel === "defer_archive"
+    );
+    if (!hasMvpChannel) {
+      reasonKey = "principles.detail.reasonUnsupportedChannel";
+      defaultReason = "不是 MVP 支持通道";
+    } else {
+      isActionable = true;
+    }
+  }
+
+  const handleApprove = () => {
+    if (!isActionable) return;
+    setShowConfirm(true);
+  };
   const cancelConfirm = () => setShowConfirm(false);
 
   // ── Apply decision to all records in the group ──────────────────────────
@@ -205,7 +238,7 @@ export function PrincipleDetailPage() {
   }
 
   const confirmApprove = async () => {
-    if (!approvalGroup || actionLoading) return;
+    if (!isActionable || !approvalGroup || actionLoading) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("approve");
@@ -231,14 +264,17 @@ export function PrincipleDetailPage() {
     }
   };
 
-  const handleReject = () => setShowRejectInput(true);
+  const handleReject = () => {
+    if (!isActionable) return;
+    setShowRejectInput(true);
+  };
   const cancelReject = () => {
     setShowRejectInput(false);
     setRejectReason("");
   };
 
   const confirmReject = async () => {
-    if (!approvalGroup || !rejectReason.trim() || actionLoading) return;
+    if (!isActionable || !approvalGroup || !rejectReason.trim() || actionLoading) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("reject", rejectReason.trim());
@@ -266,7 +302,7 @@ export function PrincipleDetailPage() {
   };
 
   const handlePark = () => {
-    toast.success(t("principles.detail.parked"));
+    // No-op: Park is disabled and not available in this version.
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -458,78 +494,95 @@ export function PrincipleDetailPage() {
         </div>
       </details>
 
-      {/* ── Decision bar ────────────────────────────────────────────────── */}
-      {isPending && (
-        <div className="border-t border-line pt-6">
-          <div className="flex gap-3 flex-wrap">
-            <Button variant="default" onClick={handleApprove} disabled={actionLoading}>
-              {t("principles.detail.approve")}
-            </Button>
-            <Button variant="outline" onClick={handlePark} disabled={actionLoading}>
-              {t("principles.detail.park")}
-            </Button>
-            <Button variant="destructive" onClick={handleReject} disabled={actionLoading}>
-              {t("principles.detail.reject")}
-            </Button>
-          </div>
+      {/* ── Decision section (PRI-387) ────────────────────────────────────── */}
+      <div className="border-t border-line pt-6 mt-6">
+        <SectionTitle>{t("principles.detail.decisionTitle", { defaultValue: "决策操作" })}</SectionTitle>
+        
+        <div className="flex gap-3 flex-wrap items-center">
+          <Button
+            variant="default"
+            onClick={handleApprove}
+            disabled={!isActionable || actionLoading}
+          >
+            {t("principles.detail.approve")}
+          </Button>
+          
+          <Button
+            variant="outline"
+            onClick={handlePark}
+            disabled
+          >
+            {t("principles.detail.park")}
+          </Button>
+          
+          <Button
+            variant="destructive"
+            onClick={handleReject}
+            disabled={!isActionable || actionLoading}
+          >
+            {t("principles.detail.reject")}
+          </Button>
 
-          {/* Confirmation bar (J.1) */}
-          {showConfirm && (
-            <div className="mt-4 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
-              <p className="text-ink-2 text-[13px] mb-3">
-                {t("principles.detail.confirmApprove")}
-              </p>
-              <div className="flex gap-2">
-                <Button variant="default" size="sm" onClick={confirmApprove} disabled={actionLoading}>
-                  {t("principles.detail.confirm")}
-                </Button>
-                <Button variant="outline" size="sm" onClick={cancelConfirm}>
-                  {t("principles.detail.cancel")}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Rejection reason input (inline, not dialog) */}
-          {showRejectInput && (
-            <div className="mt-4 p-3 border border-danger/20 rounded-[var(--radius-md)]">
-              <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
-              </label>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder={t("principles.detail.rejectReasonPlaceholder")}
-                className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                aria-label={t("principles.detail.rejectReasonPlaceholder")}
-              />
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={confirmReject}
-                  disabled={!rejectReason.trim() || actionLoading}
-                >
-                  {t("principles.detail.confirmReject")}
-                </Button>
-                <Button variant="outline" size="sm" onClick={cancelReject}>
-                  {t("principles.detail.cancel")}
-                </Button>
-              </div>
-            </div>
-          )}
+          {/* Park unavailable note */}
+          <span className="text-ink-4 text-[13px]">
+            ({t("principles.detail.parkUnavailable", { defaultValue: "暂存尚未可用" })})
+          </span>
         </div>
-      )}
 
-      {/* Already decided state */}
-      {!isPending && approvalGroup && (
-        <div className="border-t border-line pt-6">
-          <p className="text-ink-3 text-[13px]">
-            {approvalGroup.status === "approved" && t("principles.detail.alreadyApproved", { defaultValue: "此原则已批准。" })}
-            {approvalGroup.status === "rejected" && t("principles.detail.alreadyRejected", { defaultValue: "此原则已拒绝。" })}
+        {/* Actionable or non-actionable status messages */}
+        {!isActionable && (
+          <p className="text-danger text-[13px] mt-3 font-mono">
+            {t("principles.detail.unactionableReasonPrefix", { defaultValue: "不可操作原因: " })}
+            {t(reasonKey, { defaultValue: defaultReason })}
           </p>
-        </div>
-      )}
+        )}
+
+        {/* Confirmation bar (J.1) */}
+        {isActionable && showConfirm && (
+          <div className="mt-4 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
+            <p className="text-ink-2 text-[13px] mb-3">
+              {t("principles.detail.confirmApprove")}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="default" size="sm" onClick={confirmApprove} disabled={actionLoading}>
+                {t("principles.detail.confirm")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={cancelConfirm}>
+                {t("principles.detail.cancel")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Rejection reason input (inline, not dialog) */}
+        {isActionable && showRejectInput && (
+          <div className="mt-4 p-3 border border-danger/20 rounded-[var(--radius-md)]">
+            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+              {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
+            </label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder={t("principles.detail.rejectReasonPlaceholder")}
+              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+              aria-label={t("principles.detail.rejectReasonPlaceholder")}
+            />
+            <div className="flex gap-2 mt-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={confirmReject}
+                disabled={!rejectReason.trim() || actionLoading}
+              >
+                {t("principles.detail.confirmReject")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={cancelReject}>
+                {t("principles.detail.cancel")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
     </PageShell>
   );
 }
