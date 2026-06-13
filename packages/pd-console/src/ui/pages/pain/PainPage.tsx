@@ -36,18 +36,23 @@ function tFallback(t: (key: string) => string, key: string, fallback: string): s
 
 function groupForState(state: EvidenceChainStateData): StateGroup {
   switch (state) {
-    case 'pain_recorded':
-    case 'diagnosis_queued':
-    case 'diagnosis_running':
-    case 'diagnosis_succeeded':
-    case 'candidate_generated':
-    case 'internalization_started':
+    case 'recorded-only':
+    case 'diagnosis-queued':
+    case 'diagnosis-running':
+    case 'diagnosis-succeeded':
+    case 'candidate-generated':
+    case 'internalization-missing':
+    case 'internalization-pending':
+    case 'internalization-running':
+    case 'internalization-succeeded':
+    case 'owner-reviewable':
       return 'active_chain';
-    case 'evidence_only':
-      return 'evidence_only';
-    case 'diagnosis_failed':
-    case 'diagnosis_retry_wait':
+    case 'diagnosis-failed':
+    case 'diagnosis-retry-wait':
+    case 'internalization-failed':
       return 'failed';
+    case 'malformed':
+    case 'degraded':
     default:
       return 'evidence_only';
   }
@@ -438,19 +443,24 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
 
 function stateToVariant(state: EvidenceChainStateData): 'default' | 'amber' | 'green' | 'destructive' | 'secondary' {
   switch (state) {
-    case 'pain_recorded':
-    case 'diagnosis_queued':
-    case 'diagnosis_running':
+    case 'recorded-only':
+    case 'diagnosis-queued':
+    case 'diagnosis-running':
+    case 'internalization-pending':
+    case 'internalization-running':
       return 'amber';
-    case 'diagnosis_succeeded':
-    case 'candidate_generated':
-    case 'internalization_started':
+    case 'diagnosis-succeeded':
+    case 'candidate-generated':
+    case 'internalization-succeeded':
+    case 'owner-reviewable':
       return 'green';
-    case 'diagnosis_failed':
+    case 'diagnosis-failed':
+    case 'internalization-failed':
       return 'destructive';
-    case 'diagnosis_retry_wait':
+    case 'diagnosis-retry-wait':
       return 'amber';
-    case 'evidence_only':
+    case 'malformed':
+    case 'degraded':
     default:
       return 'secondary';
   }

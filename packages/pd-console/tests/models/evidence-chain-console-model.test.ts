@@ -236,7 +236,7 @@ describe('EvidenceChainConsoleModel — numeric event.id (P1 fix)', () => {
     expect(result.records[0].id).toBe(`pain_${rowId}`);
     expect(result.records[0].linkedTaskId).toBe(`diagnosis_pain_${rowId}`);
     expect(result.records[0].linkedTaskStatus).toBe('running');
-    expect(result.records[0].state).toBe('diagnosis_running');
+    expect(result.records[0].state).toBe('diagnosis-running');
   });
 
   it('links candidate to pain event via task', async () => {
@@ -262,14 +262,14 @@ describe('EvidenceChainConsoleModel — numeric event.id (P1 fix)', () => {
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
     expect(result.records[0].linkedCandidateId).toBe('cand-001');
-    expect(result.records[0].state).toBe('candidate_generated');
+    expect(result.records[0].state).toBe('internalization-missing');
   });
 });
 
 // ── Manual pain with diagnosis ────────────────────────────────────────────────
 
 describe('EvidenceChainConsoleModel — manual pain with diagnosis', () => {
-  it('shows manual pain as pain_recorded', async () => {
+  it('shows manual pain as recorded-only', async () => {
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'manual',
@@ -281,7 +281,7 @@ describe('EvidenceChainConsoleModel — manual pain with diagnosis', () => {
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
     expect(result.records[0].sourceKind).toBe('manual');
-    expect(result.records[0].state).toBe('pain_recorded');
+    expect(result.records[0].state).toBe('recorded-only');
     expect(result.records[0].admissionDecision).toBe('store_signal');
   });
 
@@ -303,7 +303,7 @@ describe('EvidenceChainConsoleModel — manual pain with diagnosis', () => {
 
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
-    expect(result.records[0].state).toBe('diagnosis_queued');
+    expect(result.records[0].state).toBe('diagnosis-queued');
     expect(result.records[0].linkedTaskId).toBe(`diagnosis_pain_${rowId}`);
   });
 });
@@ -311,7 +311,7 @@ describe('EvidenceChainConsoleModel — manual pain with diagnosis', () => {
 // ── Evidence-only not shown as pain ───────────────────────────────────────────
 
 describe('EvidenceChainConsoleModel — evidence-only vs pain', () => {
-  it('tool_call source shows as evidence_only', async () => {
+  it('tool_call source shows as recorded-only (admission evidence_only)', async () => {
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'tool_call',
@@ -323,11 +323,11 @@ describe('EvidenceChainConsoleModel — evidence-only vs pain', () => {
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
     expect(result.records[0].sourceKind).toBe('tool_call');
-    expect(result.records[0].state).toBe('evidence_only');
+    expect(result.records[0].state).toBe('recorded-only');
     expect(result.records[0].admissionDecision).toBe('evidence_only');
   });
 
-  it('manual source shows as pain_recorded (not evidence_only)', async () => {
+  it('manual source shows as recorded-only (not admission evidence_only)', async () => {
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'manual',
@@ -338,8 +338,8 @@ describe('EvidenceChainConsoleModel — evidence-only vs pain', () => {
 
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
-    expect(result.records[0].state).toBe('pain_recorded');
-    expect(result.records[0].state).not.toBe('evidence_only');
+    expect(result.records[0].state).toBe('recorded-only');
+    expect(result.records[0].admissionDecision).not.toBe('evidence_only');
   });
 
   it('empathy_inferred source shows as owner_confirmation_required', async () => {
@@ -381,7 +381,7 @@ describe('EvidenceChainConsoleModel — diagnosis failed', () => {
     const result = await model.getEvidenceChain();
     const failedRecord = result.records.find(r => r.id === `pain_${rowId}`);
     expect(failedRecord).toBeDefined();
-    expect(failedRecord!.state).toBe('diagnosis_failed');
+    expect(failedRecord!.state).toBe('diagnosis-failed');
     expect(failedRecord!.failureReason).toContain('invalid JSON');
     expect(failedRecord!.nextAction).toBeTruthy();
   });
@@ -406,7 +406,7 @@ describe('EvidenceChainConsoleModel — diagnosis failed', () => {
     const result = await model.getEvidenceChain();
     const retryRecord = result.records.find(r => r.id === `pain_${rowId}`);
     expect(retryRecord).toBeDefined();
-    expect(retryRecord!.state).toBe('diagnosis_retry_wait');
+    expect(retryRecord!.state).toBe('diagnosis-retry-wait');
     expect(retryRecord!.nextAction).toBeTruthy();
   });
 });
@@ -438,7 +438,7 @@ describe('EvidenceChainConsoleModel — candidate generated', () => {
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
     expect(record!.linkedCandidateId).toBe('cand-001');
-    expect(record!.state).toBe('candidate_generated');
+    expect(record!.state).toBe('internalization-missing');
   });
 
   it('normalizes sub-run task IDs (e.g. diag_router-diagnosis_*) to canonical format', async () => {
@@ -466,7 +466,7 @@ describe('EvidenceChainConsoleModel — candidate generated', () => {
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
     expect(record!.linkedCandidateId).toBe('cand-002');
-    expect(record!.state).toBe('candidate_generated');
+    expect(record!.state).toBe('internalization-missing');
   });
 
   it('normalizes multi-segment prefixed task IDs to canonical format', async () => {
@@ -494,7 +494,7 @@ describe('EvidenceChainConsoleModel — candidate generated', () => {
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
     expect(record!.linkedCandidateId).toBe('cand-003');
-    expect(record!.state).toBe('candidate_generated');
+    expect(record!.state).toBe('internalization-missing');
   });
 
   it('fails loud / degrades with reason when task ID is malformed', async () => {
@@ -561,7 +561,7 @@ describe('EvidenceChainConsoleModel — sanitizer boundary', () => {
     stateDb.close();
 
     const result = await model.getEvidenceChain();
-    const failedRecord = result.records.find(r => r.state === 'diagnosis_failed');
+    const failedRecord = result.records.find(r => r.state === 'diagnosis-failed');
     expect(failedRecord).toBeDefined();
     expect(failedRecord!.failureReason).toBeDefined();
     expect(failedRecord!.failureReason!).not.toContain('C:\\project\\node_modules');
@@ -627,7 +627,7 @@ describe('EvidenceChainConsoleModel — task-only records', () => {
     const result = await model.getEvidenceChain();
     const taskOnlyRecord = result.records.find(r => r.linkedTaskId === 'diagnosis_pain_manual_abc');
     expect(taskOnlyRecord).toBeDefined();
-    expect(taskOnlyRecord!.state).toBe('diagnosis_failed');
+    expect(taskOnlyRecord!.state).toBe('diagnosis-failed');
     expect(taskOnlyRecord!.failureReason).toContain('timeout');
   });
 });
@@ -739,7 +739,7 @@ describe('EvidenceChainConsoleModel — malformed principle ledger', () => {
     const record = result.records.find(r => r.id === painId);
     expect(record).toBeDefined();
     expect(record!.linkedPrincipleId).toBe('princ-001');
-    expect(record!.state).toBe('internalization_started');
+    expect(record!.state).toBe('internalization-succeeded');
     expect(result.degradedReason).toBeFalsy();
   });
 
@@ -757,7 +757,7 @@ describe('EvidenceChainConsoleModel — malformed principle ledger', () => {
     const result = await model.getEvidenceChain();
     expect(result.degradedReason).toBeFalsy();
     expect(result.records).toHaveLength(1);
-    expect(result.records[0].state).toBe('pain_recorded');
+    expect(result.records[0].state).toBe('recorded-only');
   });
 
   it('empty ledger file = no degraded (distinguished from malformed)', async () => {
@@ -951,7 +951,7 @@ describe('EvidenceChainConsoleModel — PRI-340 human-readable fields', () => {
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
     // Other fields should be normal
-    expect(record!.state).toBe('diagnosis_succeeded');
+    expect(record!.state).toBe('diagnosis-succeeded');
     // rootCauseSummary should not be set (invalid JSON)
     expect(record!.rootCauseSummary).toBeUndefined();
     // degradedReason should be set (ERR-002)
@@ -1003,7 +1003,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     const result = await model.getEvidenceChain();
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
-    expect(record!.state).toBe('candidate_generated');
+    expect(record!.state).toBe('internalization-pending');
     expect(record!.rootCauseSummary).toBe('删除前未确认备份');
     expect(record!.candidateTitle).toBe('操作前必须确认');
     expect(record!.confidence).toBe(0.85);
@@ -1046,7 +1046,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     expect(record!.linkedTaskId).toBe(rtTaskId);
     expect(record!.linkedTaskStatus).toBe('succeeded');
     // Candidate should be found via candidateByTaskId dual index
-    expect(record!.state).toBe('candidate_generated');
+    expect(record!.state).toBe('internalization-missing');
     expect(record!.candidateTitle).toBe('Candidate from timestamp match');
     expect(record!.confidence).toBe(0.75);
   });
@@ -1093,7 +1093,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     const result = await model.getEvidenceChain();
     const record = result.records.find(r => r.id === `pain_${rowId}`);
     expect(record).toBeDefined();
-    expect(record!.state).toBe('pain_recorded');
+    expect(record!.state).toBe('recorded-only');
     // No task = no linkage, but the record exists and is not silent
     expect(record!.linkedTaskId).toBeUndefined();
   });

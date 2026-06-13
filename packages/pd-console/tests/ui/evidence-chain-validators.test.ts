@@ -25,7 +25,7 @@ function validRecord(overrides?: Partial<EvidenceChainRecordData>): EvidenceChai
     id: 'pain_1',
     sourceKind: 'manual',
     observedAt: '2026-06-07T10:00:00.000Z',
-    state: 'pain_recorded',
+    state: 'recorded-only',
     summary: 'Agent modified config without approval',
     ...overrides,
   };
@@ -135,7 +135,7 @@ describe('validateEvidenceChainRecord', () => {
     const record = result!.records[0];
     expect(record.id).toBe('pain_1');
     expect(record.sourceKind).toBe('manual');
-    expect(record.state).toBe('pain_recorded');
+    expect(record.state).toBe('recorded-only');
     expect(record.summary).toBe('Agent modified config without approval');
   });
 
@@ -178,15 +178,21 @@ describe('validateEvidenceChainRecord', () => {
 
   it('accepts all valid state values', () => {
     const states = [
-      'evidence_only',
-      'pain_recorded',
-      'diagnosis_queued',
-      'diagnosis_running',
-      'diagnosis_succeeded',
-      'diagnosis_failed',
-      'diagnosis_retry_wait',
-      'candidate_generated',
-      'internalization_started',
+      'recorded-only',
+      'diagnosis-queued',
+      'diagnosis-running',
+      'diagnosis-succeeded',
+      'diagnosis-failed',
+      'diagnosis-retry-wait',
+      'candidate-generated',
+      'internalization-missing',
+      'internalization-pending',
+      'internalization-running',
+      'internalization-failed',
+      'internalization-succeeded',
+      'owner-reviewable',
+      'malformed',
+      'degraded',
     ] as const;
 
     for (const state of states) {
@@ -241,34 +247,34 @@ describe('validateEvidenceChainRecord', () => {
 
   // Evidence-only should not display as pain
   it('distinguishes evidence_only from pain_recorded', () => {
-    const evidenceOnly = validRecord({ state: 'evidence_only', sourceKind: 'tool_call' });
-    const painRecorded = validRecord({ state: 'pain_recorded', sourceKind: 'manual' });
+    const evidenceOnly = validRecord({ state: 'recorded-only', sourceKind: 'tool_call' });
+    const painRecorded = validRecord({ state: 'recorded-only', sourceKind: 'manual' });
 
     const input = validResponse({ records: [evidenceOnly, painRecorded] });
     const result = validateEvidenceChain(input);
     expect(result).not.toBeNull();
-    expect(result!.records[0].state).toBe('evidence_only');
-    expect(result!.records[1].state).toBe('pain_recorded');
+    expect(result!.records[0].state).toBe('recorded-only');
+    expect(result!.records[1].state).toBe('recorded-only');
   });
 
   // Diagnosis failed shows failed/retry reason
   it('accepts diagnosis_failed with failureReason', () => {
     const record = validRecord({
-      state: 'diagnosis_failed',
+      state: 'diagnosis-failed',
       failureReason: 'LLM returned invalid JSON',
       nextAction: 'Check error details and retry',
     });
     const input = validResponse({ records: [record] });
     const result = validateEvidenceChain(input);
     expect(result).not.toBeNull();
-    expect(result!.records[0].state).toBe('diagnosis_failed');
+    expect(result!.records[0].state).toBe('diagnosis-failed');
     expect(result!.records[0].failureReason).toBe('LLM returned invalid JSON');
   });
 
   // Candidate generated shows linked candidate
   it('accepts candidate_generated with linkedCandidateId', () => {
     const record = validRecord({
-      state: 'candidate_generated',
+      state: 'candidate-generated',
       linkedCandidateId: 'cand-abc',
       linkedTaskId: 'diagnosis_pain_1',
       linkedTaskStatus: 'succeeded',

@@ -292,7 +292,7 @@ describe('DreamerRunner', () => {
     // markTaskSucceeded must NOT be called (no accepted artifact)
     expect(mocks._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
     // markTaskRetryWait must be called (retryable)
-    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'output_invalid');
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'output_invalid', expect.stringContaining('Validation failed: No candidates provided'));
   });
 
   // 4. Runtime failure — pollRun returns 'failed' → retried
@@ -310,7 +310,7 @@ describe('DreamerRunner', () => {
     expect(result.status).toBe('retried');
     expect(result.errorCategory).toBe('execution_failed');
     expect(result.failureReason).toContain('failed');
-    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'execution_failed');
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'execution_failed', expect.stringContaining('Runtime execution ended with status: failed. Reason: LLM error'));
   });
 
   // 4b. Timeout handling
@@ -452,6 +452,6 @@ describe('DreamerRunner', () => {
 
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('max_attempts_exceeded');
-    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'max_attempts_exceeded');
+    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'max_attempts_exceeded', expect.stringContaining('Max attempts exceeded: Validation failed: Invalid output'));
   });
 });

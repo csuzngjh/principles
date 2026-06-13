@@ -1050,27 +1050,39 @@ export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | nul
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
 
 const VALID_EVIDENCE_CHAIN_STATES: ReadonlySet<string> = new Set([
-  'evidence_only',
-  'pain_recorded',
-  'diagnosis_queued',
-  'diagnosis_running',
-  'diagnosis_succeeded',
-  'diagnosis_failed',
-  'diagnosis_retry_wait',
-  'candidate_generated',
-  'internalization_started',
+  'recorded-only',
+  'diagnosis-queued',
+  'diagnosis-running',
+  'diagnosis-succeeded',
+  'diagnosis-failed',
+  'diagnosis-retry-wait',
+  'candidate-generated',
+  'internalization-missing',
+  'internalization-pending',
+  'internalization-running',
+  'internalization-failed',
+  'internalization-succeeded',
+  'owner-reviewable',
+  'malformed',
+  'degraded',
 ]);
 
 export type EvidenceChainStateData =
-  | 'evidence_only'
-  | 'pain_recorded'
-  | 'diagnosis_queued'
-  | 'diagnosis_running'
-  | 'diagnosis_succeeded'
-  | 'diagnosis_failed'
-  | 'diagnosis_retry_wait'
-  | 'candidate_generated'
-  | 'internalization_started';
+  | 'recorded-only'
+  | 'diagnosis-queued'
+  | 'diagnosis-running'
+  | 'diagnosis-succeeded'
+  | 'diagnosis-failed'
+  | 'diagnosis-retry-wait'
+  | 'candidate-generated'
+  | 'internalization-missing'
+  | 'internalization-pending'
+  | 'internalization-running'
+  | 'internalization-failed'
+  | 'internalization-succeeded'
+  | 'owner-reviewable'
+  | 'malformed'
+  | 'degraded';
 
 export interface EvidenceChainRecordData {
   id: string;
