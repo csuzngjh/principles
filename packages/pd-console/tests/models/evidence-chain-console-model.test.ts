@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import Database from 'better-sqlite3';
 import { EvidenceChainConsoleModel } from '../../src/server/models/EvidenceChainConsoleModel.js';
+import { crossReferenceByTimestamp } from '../../src/server/models/EvidenceChainConsoleModel.js';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 
@@ -64,7 +65,8 @@ function createStateDb(withCandidates = true): Database.Database {
       updated_at TEXT NOT NULL,
       last_error TEXT,
       attempt_count INTEGER NOT NULL DEFAULT 0,
-      diagnostic_json TEXT
+      diagnostic_json TEXT,
+      input_ref TEXT
     )
   `);
 
@@ -117,9 +119,10 @@ function insertTask(db: Database.Database, task: {
   createdAt?: string;
   lastError?: string;
   diagnosticJson?: string;
+  inputRef?: string;
 }): void {
   db.prepare(
-    'INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, last_error, attempt_count, diagnostic_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, last_error, attempt_count, diagnostic_json, input_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     task.taskId,
     task.taskKind ?? 'diagnostician',
@@ -129,6 +132,7 @@ function insertTask(db: Database.Database, task: {
     task.lastError ?? null,
     1,
     task.diagnosticJson ?? null,
+    task.inputRef ?? null,
   );
 }
 
@@ -869,5 +873,169 @@ describe('EvidenceChainConsoleModel — PRI-340 human-readable fields', () => {
     expect(record!.rootCauseSummary).toBeUndefined();
     // degradedReason should be set (ERR-002)
     expect(record!.degradedReason).toBeTruthy();
+  });
+});
+
+// ── PRI-380: Evidence chain lineage join with Runtime V2 task IDs ─────────────
+
+describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => {
+  it('links pain_309 to diagnosis_manual_* task via input_ref, surfaces candidate and dreamer pending', async () => {
+    const trajDb = createTrajectoryDb();
+    // Simulate pain_events with auto-increment id = 309
+    for (let i = 1; i <= 308; i++) {
+      insertPainEvent(trajDb, { source: 'tool_call', text: `filler ${i}`, createdAt: '2026-06-07T09:00:00.000Z' });
+    }
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent modified config without approval',
+      reason: '用户手动反馈',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    // Simulate Runtime V2 task with diagnosis_manual_* ID and input_ref pointing to pain_309
+    const stateDb = createStateDb();
+    const rtTaskId = 'diagnosis_manual_1781314784282_5v264gy1';
+    insertTask(stateDb, {
+      taskId: rtTaskId,
+      status: 'succeeded',
+      inputRef: `${rowId}`,  // input_ref stores the numeric pain event ID
+      diagnosticJson: '{"rootCause":"删除前未确认备份"}',
+    });
+    // Candidate linked to the Runtime V2 task
+    insertCandidate(stateDb, {
+      candidateId: 'cand-pri380-001',
+      taskId: rtTaskId,
+      title: '操作前必须确认',
+      confidence: 0.85,
+    });
+    // Dreamer task pending for this candidate
+    insertTask(stateDb, {
+      taskId: 'dreamer-cand-pri380-001-principle',
+      taskKind: 'dreamer',
+      status: 'pending',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.state).toBe('candidate_generated');
+    expect(record!.rootCauseSummary).toBe('删除前未确认备份');
+    expect(record!.candidateTitle).toBe('操作前必须确认');
+    expect(record!.confidence).toBe(0.85);
+    // Dreamer pending should be reflected
+    expect(record!.dreamerTaskStatus).toBe('pending');
+  });
+
+  it('falls back to timestamp cross-reference when input_ref is missing', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain without input_ref',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task with same timestamp but no input_ref, and task_id that doesn't directly match
+    insertTask(stateDb, {
+      taskId: 'diagnosis_unknown_xyz123',
+      status: 'running',
+      createdAt: '2026-06-07T10:02:00.000Z',  // Within 5 min window
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    // Should be linked via cross-reference
+    expect(record!.linkedTaskId).toBe('diagnosis_unknown_xyz123');
+    expect(record!.linkedTaskStatus).toBe('running');
+  });
+
+  it('shows loud degradation when pain event cannot be linked (ERR-002)', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Orphan pain event',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    // No tasks at all — pain event has no linked diagnosis
+    const stateDb = createStateDb(false);
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+    expect(record).toBeDefined();
+    expect(record!.state).toBe('pain_recorded');
+    // No task = no linkage, but the record exists and is not silent
+    expect(record!.linkedTaskId).toBeUndefined();
+  });
+});
+
+// ── PRI-380: crossReferenceByTimestamp unit tests ─────────────────────────────
+
+describe('PRI-380: crossReferenceByTimestamp', () => {
+  it('matches pain events to tasks within 5-minute window', () => {
+    const painEvents = [
+      { painId: 'pain_1', createdAt: '2026-06-07T10:00:00.000Z', source: 'manual' },
+    ];
+    const taskMap = new Map();
+    taskMap.set('diagnosis_unknown_abc', {
+      taskId: 'diagnosis_unknown_abc',
+      status: 'running',
+      lastError: null,
+      createdAt: '2026-06-07T10:03:00.000Z',
+    });
+    const coveredPainIds = new Set<string>();
+
+    const result = crossReferenceByTimestamp(painEvents, taskMap, coveredPainIds);
+    expect(result.size).toBe(1);
+    expect(result.get('pain_1')).toBeDefined();
+    expect(result.get('pain_1')!.taskId).toBe('diagnosis_unknown_abc');
+  });
+
+  it('does not match events outside 5-minute window', () => {
+    const painEvents = [
+      { painId: 'pain_1', createdAt: '2026-06-07T10:00:00.000Z', source: 'manual' },
+    ];
+    const taskMap = new Map();
+    taskMap.set('diagnosis_unknown_abc', {
+      taskId: 'diagnosis_unknown_abc',
+      status: 'running',
+      lastError: null,
+      createdAt: '2026-06-07T10:10:00.000Z',  // 10 minutes later
+    });
+    const coveredPainIds = new Set<string>();
+
+    const result = crossReferenceByTimestamp(painEvents, taskMap, coveredPainIds);
+    expect(result.size).toBe(0);
+  });
+
+  it('picks the closest timestamp when multiple tasks are within window', () => {
+    const painEvents = [
+      { painId: 'pain_1', createdAt: '2026-06-07T10:00:00.000Z', source: 'manual' },
+    ];
+    const taskMap = new Map();
+    taskMap.set('diagnosis_far', {
+      taskId: 'diagnosis_far',
+      status: 'running',
+      lastError: null,
+      createdAt: '2026-06-07T10:04:00.000Z',
+    });
+    taskMap.set('diagnosis_near', {
+      taskId: 'diagnosis_near',
+      status: 'succeeded',
+      lastError: null,
+      createdAt: '2026-06-07T10:01:00.000Z',
+    });
+    const coveredPainIds = new Set<string>();
+
+    const result = crossReferenceByTimestamp(painEvents, taskMap, coveredPainIds);
+    expect(result.size).toBe(1);
+    expect(result.get('pain_1')!.taskId).toBe('diagnosis_near');
   });
 });

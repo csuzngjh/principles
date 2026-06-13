@@ -87,6 +87,8 @@ export interface GovernanceQueueResponse {
   inProgressSummary?: string;
   /** Degraded signals when state is 'degraded' */
   degradedSignals?: DegradedSignal[];
+  /** PRI-380: Number of pain events in trajectory.db (behavior evidence in progress) */
+  evidenceInProgressCount?: number;
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely zero */
   note?: string;
@@ -337,6 +339,41 @@ export class GovernanceConsoleModel {
 
     if (degradedSignals.length > 0) {
       response.degradedSignals = degradedSignals;
+    }
+
+    // PRI-380: Query trajectory.db for behavior evidence count
+    let evidenceInProgressCount = 0;
+    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+    if (fs.existsSync(trajectoryDbPath)) {
+      try {
+        const Database = (await import('better-sqlite3')).default;
+        const trajDb = new Database(trajectoryDbPath, { readonly: true });
+        try {
+          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const [row] = rows;
+            if (row !== null && typeof row === 'object' && !Array.isArray(row)) {
+              const rec = row as Record<string, unknown>;
+              if (Object.hasOwn(rec, 'c') && typeof rec.c === 'number') {
+                evidenceInProgressCount = rec.c;
+              }
+            }
+          }
+        } catch (err) {
+          if (!isMissingTableError(err)) throw err;
+        } finally {
+          trajDb.close();
+        }
+      } catch (err) {
+        // trajectory.db not accessible — not a hard failure
+        if (!(err instanceof Error && err.message.includes('no such table'))) {
+          // Only rethrow if not a missing-table error
+          if (!(err instanceof Error)) throw err;
+        }
+      }
+    }
+    if (evidenceInProgressCount > 0) {
+      response.evidenceInProgressCount = evidenceInProgressCount;
     }
 
     return response;

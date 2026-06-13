@@ -54,8 +54,10 @@
       "summaryPending": "条待审",
       "summaryDeviation": "条行为偏差",
       "summaryStagnation": "条停滞信号",
+      "summaryEvidence": "条行为证据进行中",
       "sectionPending": "待你审查",
       "sectionDeviation": "值得关注的行为偏差",
+      "sectionEvidenceInProgress": "行为证据进行中",
       "sectionSignals": "系统信号",
       "emptyPending": "还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。",
       "emptyDeviation": "尚未捕获行为偏差。当智能体的行为偏离拥有者期望时，PD 会检测到偏差信号。",
@@ -126,7 +128,8 @@
         "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。"
       },
       "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
-      "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。"
+      "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
+      "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。"
     },
     "pain": {
       "eyebrow": "行为证据",
@@ -170,6 +173,8 @@
       "chainPrincipleId": "关联原则 ID",
       "chainSourceKind": "来源类型",
       "chainState": "链路状态",
+      "chainInternalizationTask": "内化任务 ID",
+      "chainDreamerStatus": "Dreamer 状态",
       "fieldTrigger": "触发行为",
       "fieldConclusion": "PD 的结论",
       "fieldApplicability": "适用/说明",
