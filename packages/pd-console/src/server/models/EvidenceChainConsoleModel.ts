@@ -462,6 +462,7 @@ interface DreamerTaskInfo {
  */
 function buildDreamerMap(
   db: Database.Database,
+  degradedReasons: string[],
 ): Map<string, DreamerTaskInfo> {
   const dreamerMap = new Map<string, DreamerTaskInfo>();
   try {
@@ -489,7 +490,7 @@ function buildDreamerMap(
       }
     }
   } catch {
-    // Dreamer query failure is non-fatal — candidates still show without dreamer status
+    degradedReasons.push('Dreamer task query failed — internalization pipeline status is unavailable.');
   }
   return dreamerMap;
 }
@@ -647,9 +648,8 @@ export class EvidenceChainConsoleModel {
         for (const task of tasks) {
           const taskId = isString(task.task_id) ? task.task_id : '';
           // PRI-380: Use input_ref for Runtime V2 pain ID when available
-          const inputRef = hasInputRef && isString(getOwnValue(task, 'input_ref'))
-            ? (getOwnValue(task, 'input_ref') as string)
-            : undefined;
+          const inputRefRaw = hasInputRef ? getOwnValue(task, 'input_ref') : undefined;
+          const inputRef = isString(inputRefRaw) ? inputRefRaw : undefined;
           // Derive painId: prefer input_ref (normalize to pain_<id> if numeric), fall back to task_id prefix stripping
           let painId: string;
           if (inputRef) {
@@ -686,7 +686,7 @@ export class EvidenceChainConsoleModel {
         stateDbAvailable = true;
 
         // PRI-380: Build dreamer task map for internalization pipeline visibility
-        dreamerMap = buildDreamerMap(db);
+        dreamerMap = buildDreamerMap(db, degradedReasons);
       } catch (err) {
         if (isMissingTableError(err)) {
           degradedReasons.push('Tasks table not found in state database');
@@ -927,11 +927,9 @@ export class EvidenceChainConsoleModel {
       const score = typeof event.score === 'number' ? event.score : 0;
       const sourceKind = mapSourceKind(source);
 
-      // Look up candidate using the task's inputRef or derived painId
-      const taskPainId = crossRefTask.inputRef
-        || (crossRefTask.taskId.startsWith('diagnosis_') ? crossRefTask.taskId.slice('diagnosis_'.length) : '');
-      const linkedCandidate = candidateMap.get(taskPainId);
-      const linkedPrincipleId = painToPrincipleMap.get(taskPainId) || painToPrincipleMap.get(painId) || undefined;
+      // Look up candidate using painId (already normalized to pain_<id>)
+      const linkedCandidate = candidateMap.get(painId);
+      const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
 
       const state = determineState({
         sourceKind,
