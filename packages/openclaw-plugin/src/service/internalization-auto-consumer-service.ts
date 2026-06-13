@@ -45,6 +45,28 @@ function formatRunOnceCommand(workspaceDir: string): string {
   return `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
 }
 
+function getNextActionForError(category?: string): string {
+  if (category === 'lease_conflict') {
+    return 'Retry later or check for concurrent worker processes.';
+  }
+  if (category === 'timeout') {
+    return 'Check model provider service status/latency, or increase timeout settings in workflows.yaml.';
+  }
+  if (category === 'cancelled') {
+    return 'Re-enqueue or restart the task if it was cancelled by mistake.';
+  }
+  if (category === 'output_invalid') {
+    return 'Verify if model outputs conform to expected schema and adjust prompt or validation templates if needed.';
+  }
+  if (category === 'input_invalid') {
+    return 'Check predecessor task outputs and database integrity for malformed input references.';
+  }
+  if (category === 'max_attempts_exceeded') {
+    return 'Investigate persistent failures, correct the root issue, and clear last_error or reset attempt count.';
+  }
+  return 'Run: pd runtime internalization run-once --runner dreamer --runtime config --json to isolate the failure.';
+}
+
 async function runConsumerCycle(
   workspaceDir: string,
   logger: PluginLogger,
@@ -105,6 +127,10 @@ async function runConsumerCycle(
     });
     const snapshot = await readModel.getSnapshot();
 
+    if (snapshot.readyTasks.length > 5) {
+      logger.warn(`[PD:AutoConsumer] Backlog detected: ${snapshot.readyTasks.length} tasks ready. Processing only one task.`);
+    }
+
     const decision = computeConsumerDecision({
       autoConsumerEnabled: true,
       readyTaskCount: snapshot.readyTasks.length,
@@ -120,12 +146,12 @@ async function runConsumerCycle(
 
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },
-      { owner: 'auto-consumer', runtimeKind: 'config', dryRun: false },
+      { owner: 'auto-consumer', runtimeKind: 'config', dryRun: true },
     );
 
     const wakeResult = await orchestrator.wakeOnce('dreamer');
 
-    if (wakeResult.decision !== 'leased') {
+    if (wakeResult.decision !== 'would_lease') {
       const skipPayload: Record<string, unknown> = {
         decision: wakeResult.decision,
       };
@@ -182,11 +208,19 @@ async function runConsumerCycle(
         `[PD:AutoConsumer] Task ${taskId} succeeded. Successor: ${commitResult.decision}`,
       );
     } else {
+      const errorCategory = runResult.errorCategory;
+      const failureReason = runResult.failureReason;
+      const nextAction = getNextActionForError(errorCategory);
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_TASK_FAILED', JSON.stringify({
         taskId,
         status: runResult.status,
+        errorCategory,
+        failureReason,
+        nextAction,
       }));
-      logger.warn(`[PD:AutoConsumer] Task ${taskId} status: ${runResult.status}`);
+      logger.warn(
+        `[PD:AutoConsumer] Task ${taskId} status: ${runResult.status}. Category: ${errorCategory}. Reason: ${failureReason}. Next Action: ${nextAction}`
+      );
     }
   } catch (err) {
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_ERROR', String(err));

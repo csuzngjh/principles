@@ -270,7 +270,11 @@ export class RuntimeStateManager {
   }
 
   /** Mark a task as failed and emit task_failed event. */
-  async markTaskFailed(taskId: string, lastError: PDErrorCategory): Promise<TaskRecord> {
+  async markTaskFailed(
+    taskId: string,
+    lastError: PDErrorCategory,
+    failureReason?: string,
+  ): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
 
@@ -288,7 +292,7 @@ export class RuntimeStateManager {
       await this._runStore.updateRun(latestRun.runId, {
         executionStatus: 'failed',
         endedAt: now,
-        reason: 'task_failed',
+        reason: failureReason ?? 'task_failed',
         errorCategory: lastError,
       });
     }
@@ -307,7 +311,11 @@ export class RuntimeStateManager {
   /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff.
    *  Sets leaseExpiresAt to now + backoffMs so that canRetryNow() gates correctly.
    */
-  async markTaskRetryWait(taskId: string, errorCategory: PDErrorCategory): Promise<TaskRecord> {
+  async markTaskRetryWait(
+    taskId: string,
+    errorCategory: PDErrorCategory,
+    failureReason?: string,
+  ): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
 
@@ -331,7 +339,7 @@ export class RuntimeStateManager {
       await this._runStore.updateRun(latestRun.runId, {
         executionStatus: 'failed',
         endedAt: now,
-        reason: 'task_retry',
+        reason: failureReason ?? 'task_retry',
         errorCategory,
       });
     }
