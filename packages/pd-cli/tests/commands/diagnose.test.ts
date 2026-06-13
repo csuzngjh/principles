@@ -122,7 +122,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
 }));
 
-import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
+import { handleDiagnoseRun, handleDiagnoseStatus, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
 
 const SUCCEEDED_RESULT = {
   status: 'succeeded' as const,
@@ -809,5 +809,73 @@ describe('Commander wiring for --no-intake', () => {
     await expect(
       program.parseAsync(['node', 'pd', 'diagnose', 'run', '--intake'])
     ).rejects.toThrow();
+  });
+});
+
+describe('pd status stalled-threshold validation', () => {
+  it('accepts valid positive integers', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.status).mockResolvedValueOnce({
+      taskId: 'test-task-1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      lastError: null,
+      commitId: null,
+      artifactId: null,
+      candidateCount: null,
+    });
+
+    await handleDiagnoseStatus({
+      taskId: 'test-task-1',
+      stalledThreshold: '123',
+    });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+    consoleSpy.mockRestore();
+  });
+
+  it('rejects invalid inputs (0, negative, decimals, NaN, empty)', async () => {
+    const invalidInputs = ['0', '-10', '1.5', 'abc', 'NaN', ''];
+    for (const input of invalidInputs) {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await handleDiagnoseStatus({
+        taskId: 'test-task-1',
+        stalledThreshold: input,
+      });
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('positive integer'));
+
+      exitSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('rejects invalid inputs in JSON mode', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handleDiagnoseStatus({
+      taskId: 'test-task-1',
+      stalledThreshold: '0',
+      json: true,
+    });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(consoleSpy).toHaveBeenCalled();
+    const output = JSON.parse((consoleSpy.mock.calls[0] as string[])[0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('invalid_stalled_threshold');
+    expect(output.nextAction).toContain('positive integer');
+
+    exitSpy.mockRestore();
+    consoleSpy.mockRestore();
   });
 });
