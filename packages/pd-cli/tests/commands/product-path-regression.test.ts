@@ -3,6 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+// Resolve __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 describe('Real CLI JSON product-path regression test (PRI-376)', () => {
   it('outputs exactly one parseable JSON object on async pain record', () => {
@@ -33,8 +38,8 @@ ui:
 `;
     fs.writeFileSync(path.join(pdDir, 'config.yaml'), configContent.trim(), 'utf8');
 
-    // Run the actual built CLI command
-    const cliBin = path.resolve(process.cwd(), 'packages/pd-cli/dist/index.js');
+    // Resolve CLI binary path relative to this file to be workspace-independent
+    const cliBin = path.resolve(__dirname, '../../dist/index.js');
     const cmd = `node "${cliBin}" pain record --reason "Regression test frustration" --json --workspace "${tmpDir}"`;
     
     let stdoutStr: string;
@@ -62,13 +67,15 @@ ui:
     expect(parsed.status).toBe('submitted');
     expect(parsed.taskId).toMatch(/^diagnosis_/);
     expect(parsed.message).toBeDefined();
-    expect(parsed.reason).toBeDefined();
-    expect(parsed.nextAction).toBeDefined();
+    expect(parsed.reason).toBeTypeOf('string');
+    expect(parsed.nextAction).toBeTypeOf('string');
 
-    // Verify nextAction structure
-    expect(parsed.nextAction).toContain('pd diagnose run');
-    expect(parsed.nextAction).toContain('--task-id');
-    expect(parsed.nextAction).toContain('--runtime pi-ai');
-    expect(parsed.nextAction).toContain('--json');
-  });
+    // Verify nextAction structure: pd diagnose run --task-id ... --runtime pi-ai --json
+    const nextAction = parsed.nextAction as string;
+    expect(nextAction).toContain('pd diagnose run');
+    expect(nextAction).toContain(`--task-id ${parsed.taskId}`);
+    expect(nextAction).toContain('--runtime pi-ai');
+    expect(nextAction).toContain('--json');
+  }, 20000);
 });
+
