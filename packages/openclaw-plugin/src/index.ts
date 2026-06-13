@@ -166,7 +166,7 @@ export function shouldStartInternalizationAutoConsumer(
   }
   const disabledInfo = JSON.stringify({
     reason: 'internalization_auto_consumer_disabled',
-    nextAction: 'pd runtime internalization run-once --workspace "<workspace>" --runner dreamer --runtime config --json',
+    nextAction: `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`,
     featureFlag: 'internalization_auto_consumer',
     boundedContext: 'internalization_auto_consumer',
     flagSource: flag.source,

@@ -25,9 +25,25 @@ export interface InternalizationAutoConsumerServiceShape {
   stop?: (ctx: OpenClawPluginServiceContext) => void;
 }
 
-let consumerTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let consumerStopped = false;
-const startedWorkspaces = new Set<string>();
+interface WorkspaceConsumerState {
+  stopped: boolean;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+}
+
+const workspaceStates = new Map<string, WorkspaceConsumerState>();
+
+function getWorkspaceState(workspaceDir: string): WorkspaceConsumerState {
+  let state = workspaceStates.get(workspaceDir);
+  if (!state) {
+    state = { stopped: false, timeoutId: null };
+    workspaceStates.set(workspaceDir, state);
+  }
+  return state;
+}
+
+function formatRunOnceCommand(workspaceDir: string): string {
+  return `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
+}
 
 async function runConsumerCycle(
   workspaceDir: string,
@@ -41,8 +57,7 @@ async function runConsumerCycle(
   if (!flag.enabled) {
     const disabledInfo = JSON.stringify({
       reason: 'internalization_auto_consumer_disabled',
-      nextAction:
-        'pd runtime internalization run-once --workspace "<workspace>" --runner dreamer --runtime config --json',
+      nextAction: formatRunOnceCommand(workspaceDir),
       flagSource: flag.source,
     });
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', disabledInfo);
@@ -111,12 +126,16 @@ async function runConsumerCycle(
     const wakeResult = await orchestrator.wakeOnce('dreamer');
 
     if (wakeResult.decision !== 'leased') {
-      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
+      const skipPayload: Record<string, unknown> = {
         decision: wakeResult.decision,
-        reason: wakeResult.decision === 'no_ready_tasks'
-          ? (wakeResult as { reason: string }).reason
-          : undefined,
-      }));
+      };
+      if (Object.hasOwn(wakeResult, 'reason')) {
+        const rawReason = (wakeResult as unknown as Record<string, unknown>).reason;
+        if (typeof rawReason === 'string') {
+          skipPayload.reason = rawReason;
+        }
+      }
+      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify(skipPayload));
       logger.info(`[PD:AutoConsumer] No task to consume: ${wakeResult.decision}`);
       return;
     }
@@ -195,8 +214,9 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
 
     const workspaceDir: string = maybeWorkspaceDir;
+    const state = getWorkspaceState(workspaceDir);
 
-    if (startedWorkspaces.has(workspaceDir)) {
+    if (!state.stopped && state.timeoutId !== null) {
       logger.info(`[PD:AutoConsumer] Already started for workspace: ${workspaceDir}`);
       return;
     }
@@ -209,8 +229,7 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     if (!flag.enabled) {
       const disabledInfo = JSON.stringify({
         reason: 'internalization_auto_consumer_disabled',
-        nextAction:
-          'pd runtime internalization run-once --workspace "<workspace>" --runner dreamer --runtime config --json',
+        nextAction: formatRunOnceCommand(workspaceDir),
         flagSource: flag.source,
       });
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_DISABLED', disabledInfo);
@@ -220,28 +239,31 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
       return;
     }
 
-    startedWorkspaces.add(workspaceDir);
-    consumerStopped = false;
+    state.stopped = false;
 
     const interval = INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS;
 
-    async function runCycle(): Promise<void> {
-      if (consumerStopped) return;
-      await runConsumerCycle(workspaceDir, logger);
-      if (consumerStopped) return;
-      consumerTimeoutId = setTimeout(runCycle, interval);
-      consumerTimeoutId.unref();
+    function scheduleNext(): void {
+      if (state.stopped) return;
+      state.timeoutId = setTimeout(runCycle, interval);
+      state.timeoutId?.unref();
     }
 
-    consumerTimeoutId = setTimeout(() => {
+    async function runCycle(): Promise<void> {
+      if (state.stopped) return;
+      await runConsumerCycle(workspaceDir, logger);
+      scheduleNext();
+    }
+
+    state.timeoutId = setTimeout(() => {
       void runCycle().catch((err: unknown) => {
         logger.error(`[PD:AutoConsumer] Startup cycle failed: ${String(err)}`);
-        if (consumerStopped) return;
-        consumerTimeoutId = setTimeout(runCycle, interval);
-        consumerTimeoutId.unref();
+        if (state.stopped) return;
+        state.timeoutId = setTimeout(runCycle, interval);
+        state.timeoutId?.unref();
       });
     }, INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS);
-    consumerTimeoutId.unref();
+    state.timeoutId?.unref();
 
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_STARTED', JSON.stringify({
       intervalMs: interval,
@@ -252,10 +274,23 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     );
   },
 
-  stop(_ctx: OpenClawPluginServiceContext): void {
-    consumerStopped = true;
-    startedWorkspaces.clear();
-    if (consumerTimeoutId) clearTimeout(consumerTimeoutId);
-    consumerTimeoutId = null;
+  stop(ctx: OpenClawPluginServiceContext): void {
+    const workspaceDir = ctx?.workspaceDir;
+    if (workspaceDir) {
+      const state = workspaceStates.get(workspaceDir);
+      if (state) {
+        state.stopped = true;
+        if (state.timeoutId) clearTimeout(state.timeoutId);
+        state.timeoutId = null;
+      }
+      workspaceStates.delete(workspaceDir);
+    } else {
+      for (const [dir, state] of workspaceStates) {
+        state.stopped = true;
+        if (state.timeoutId) clearTimeout(state.timeoutId);
+        state.timeoutId = null;
+      }
+      workspaceStates.clear();
+    }
   },
 };
