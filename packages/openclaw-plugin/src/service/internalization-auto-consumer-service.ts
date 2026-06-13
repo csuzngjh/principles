@@ -129,11 +129,8 @@ async function runConsumerCycle(
       const skipPayload: Record<string, unknown> = {
         decision: wakeResult.decision,
       };
-      if (Object.hasOwn(wakeResult, 'reason')) {
-        const rawReason = (wakeResult as unknown as Record<string, unknown>).reason;
-        if (typeof rawReason === 'string') {
-          skipPayload.reason = rawReason;
-        }
+      if (wakeResult.decision === 'no_ready_tasks') {
+        skipPayload.reason = wakeResult.reason;
       }
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify(skipPayload));
       logger.info(`[PD:AutoConsumer] No task to consume: ${wakeResult.decision}`);

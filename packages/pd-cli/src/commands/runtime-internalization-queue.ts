@@ -107,6 +107,14 @@ export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Pro
     const snapshot = await readModel.getSnapshot();
 
     const pdConfigResult = loadPdConfig(workspaceDir);
+    if (!pdConfigResult.ok) {
+      const configWarning = JSON.stringify({
+        level: 'warning',
+        source: 'pd_config',
+        errors: pdConfigResult.errors.map(e => ({ reason: e.reason, nextAction: e.nextAction })),
+      });
+      process.stderr.write(`${configWarning}\n`);
+    }
     const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
     const autoConsumerEnabled = pdFlags.flags.internalization_auto_consumer?.enabled ?? false;
 

@@ -101,7 +101,7 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
   afterEach(() => {
     try {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
-    } catch {}
+    } catch { /* best-effort */ }
   });
 
   describe('shouldStartInternalizationAutoConsumer', () => {
@@ -122,7 +122,7 @@ describe('PRI-381: InternalizationAutoConsumer gate', () => {
 
       expect(result.shouldStart).toBe(false);
       expect(result.disabledInfo).not.toBeNull();
-      const info = JSON.parse(result.disabledInfo!);
+      const info = JSON.parse(result.disabledInfo ?? '{}');
       expect(info.reason).toBe('internalization_auto_consumer_disabled');
       expect(info.nextAction).toContain('pd runtime internalization run-once');
       expect(info.flagSource).toBeDefined();
