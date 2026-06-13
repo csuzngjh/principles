@@ -313,4 +313,115 @@ describe('InternalizationChainIntegrityReadModel', () => {
     expect(result.generatedAt).toBeTruthy();
     expect(new Date(result.generatedAt).getTime()).not.toBeNaN();
   });
+
+  it('reports running_run_stuck for orphaned running run when task is not leased', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => [
+          { task_id: 't1', task_kind: 'dreamer', status: 'failed', result_ref: null, lease_owner: null, lease_expires_at: null, attempt_count: 1, max_attempts: 3, diagnostic_json: null },
+        ]), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => [{ run_id: 'run1', task_id: 't1', execution_status: 'running' }]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'running_run_stuck')).toBe(true);
+  });
+
+  it('sets runId on running_run_stuck broken link', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => [
+          { task_id: 't1', task_kind: 'dreamer', status: 'failed', result_ref: null, lease_owner: null, lease_expires_at: null, attempt_count: 1, max_attempts: 3, diagnostic_json: null },
+        ]), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => [{ run_id: 'run-orphan', task_id: 't1', execution_status: 'running' }]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    const link = result.brokenLinks.find(l => l.type === 'running_run_stuck');
+    expect(link?.runId).toBe('run-orphan');
+  });
+
+  it('does NOT report running_run_stuck when task is still leased with active lease', () => {
+    const futureDate = new Date(Date.now() + 60000).toISOString();
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => [
+          { task_id: 't1', task_kind: 'dreamer', status: 'leased', result_ref: null, lease_owner: 'owner1', lease_expires_at: futureDate, attempt_count: 1, max_attempts: 3, diagnostic_json: null },
+        ]), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => [{ run_id: 'run1', task_id: 't1', execution_status: 'running' }]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'running_run_stuck')).toBe(false);
+  });
+
+  it('reports running_run_stuck for running run when task no longer exists', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => [{ run_id: 'run-ghost', task_id: 'ghost-task', execution_status: 'running' }]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    const link = result.brokenLinks.find(l => l.type === 'running_run_stuck');
+    expect(link).toBeDefined();
+    expect(link?.reason).toContain('task no longer exists');
+  });
+
+  it('improves lease_stuck recommendedAction to reference integrity-repair', () => {
+    const pastDate = new Date(Date.now() - 60000).toISOString();
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => [
+          { task_id: 't1', task_kind: 'dreamer', status: 'leased', result_ref: null, lease_owner: 'owner1', lease_expires_at: pastDate, attempt_count: 1, max_attempts: 3, diagnostic_json: null },
+        ]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    const link = result.brokenLinks.find(l => l.type === 'lease_stuck');
+    expect(link?.recommendedAction).toContain('integrity-repair');
+  });
 });
