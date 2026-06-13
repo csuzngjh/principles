@@ -16,6 +16,21 @@ interface BrokenDreamer {
   hasArtifact: boolean;
 }
 
+interface StuckLease {
+  taskId: string;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  isSafe: boolean;
+  reason?: string;
+}
+
+interface OrphanedRun {
+  runId: string;
+  taskId: string;
+  taskExists: boolean;
+  taskStatus: string | null;
+}
+
 export class InternalizationIntegrityRemediation {
   private readonly dbPath: string;
 
@@ -31,11 +46,15 @@ export class InternalizationIntegrityRemediation {
     }
 
     const brokenDreamers = this.detectBrokenDreamers();
+    const stuckLeases = this.detectStuckLeases();
+    const orphanedRuns = this.detectOrphanedRuns();
 
     const actions: RemediationAction[] = [];
+    const warnings: string[] = [];
     let repairedCount = 0;
     let skippedCount = 0;
 
+    // ── 1. Fix broken dreamers (existing logic) ──────────────────────────
     for (const bd of brokenDreamers) {
       if (bd.missingArtifact) {
         if (params.dryRun) {
@@ -162,15 +181,147 @@ export class InternalizationIntegrityRemediation {
       }
     }
 
+    // ── 2. Fix stuck leases ────────────────────────────────────────────
+    for (const sl of stuckLeases) {
+      if (!sl.isSafe) {
+        actions.push(remediationAction({
+          action: 'refuse_repair',
+          targetId: sl.taskId,
+          taskId: sl.taskId,
+          type: 'lease_stuck',
+          severity: 'error',
+          previousState: 'leased',
+          nextState: 'leased',
+          previousStatus: 'leased',
+          newStatus: 'leased',
+          recommendedAction: 'manual_intervention',
+          reason: `Cannot safely repair: ${sl.reason ?? 'unknown reason'}. nextAction: Manually update/fix the task status or lease_expires_at in state.db`,
+        }));
+        warnings.push(`Task ${sl.taskId} has unsafe/unparseable lease state and cannot be safely repaired automatically.`);
+        skippedCount++;
+        continue;
+      }
+
+      if (params.dryRun) {
+        actions.push(remediationAction({
+          action: 'force_expire_lease',
+          targetId: sl.taskId,
+          taskId: sl.taskId,
+          type: 'lease_stuck',
+          severity: 'warning',
+          previousState: 'leased',
+          nextState: 'pending',
+          previousStatus: 'leased',
+          newStatus: 'pending',
+          recommendedAction: 'force_expire_lease',
+          reason: `Task ${sl.taskId} has expired lease (owner: ${sl.leaseOwner ?? 'unknown'}) — would force-expire to pending and mark latest run as failed`,
+        }));
+      } else {
+        const currentStatus = this.getTaskStatus(sl.taskId);
+        if (currentStatus !== 'leased') {
+          actions.push(remediationAction({
+            action: 'already_repaired',
+            targetId: sl.taskId,
+            taskId: sl.taskId,
+            type: 'lease_stuck',
+            severity: 'warning',
+            previousState: currentStatus,
+            nextState: currentStatus,
+            previousStatus: currentStatus,
+            newStatus: currentStatus,
+            recommendedAction: 'already_repaired',
+            reason: `Task already in ${currentStatus} — no repair needed`,
+          }));
+          skippedCount++;
+          continue;
+        }
+
+        this.forceExpireAndMarkRunFailed(sl.taskId);
+        repairedCount++;
+
+        actions.push(remediationAction({
+          action: 'force_expire_lease',
+          targetId: sl.taskId,
+          taskId: sl.taskId,
+          type: 'lease_stuck',
+          severity: 'warning',
+          previousState: 'leased',
+          nextState: 'pending',
+          previousStatus: 'leased',
+          newStatus: 'pending',
+          recommendedAction: 'force_expire_lease',
+          reason: `Task ${sl.taskId} had expired lease (owner: ${sl.leaseOwner ?? 'unknown'}) — force-expired to pending and latest run marked as failed`,
+        }));
+      }
+    }
+
+    // ── 3. Fix orphaned running runs ───────────────────────────────────
+    for (const or of orphanedRuns) {
+      if (params.dryRun) {
+        actions.push(remediationAction({
+          action: 'mark_run_failed',
+          targetId: or.runId,
+          taskId: or.taskId,
+          type: 'running_run_stuck',
+          severity: 'error',
+          previousState: 'running',
+          nextState: 'failed',
+          previousStatus: 'running',
+          newStatus: 'failed',
+          recommendedAction: 'mark_run_failed',
+          reason: `Run ${or.runId} for task ${or.taskId} is 'running' but task status is ${or.taskStatus ?? 'none'} — would mark run as failed`,
+        }));
+      } else {
+        const currentRunStatus = this.getRunStatus(or.runId);
+        if (currentRunStatus !== 'running') {
+          actions.push(remediationAction({
+            action: 'already_repaired',
+            targetId: or.runId,
+            taskId: or.taskId,
+            type: 'running_run_stuck',
+            severity: 'warning',
+            previousState: currentRunStatus,
+            nextState: currentRunStatus,
+            previousStatus: currentRunStatus,
+            newStatus: currentRunStatus,
+            recommendedAction: 'already_repaired',
+            reason: `Run already in ${currentRunStatus} — no repair needed`,
+          }));
+          skippedCount++;
+          continue;
+        }
+
+        this.markOrphanedRunFailed(or.runId, or.taskId);
+        repairedCount++;
+
+        actions.push(remediationAction({
+          action: 'mark_run_failed',
+          targetId: or.runId,
+          taskId: or.taskId,
+          type: 'running_run_stuck',
+          severity: 'error',
+          previousState: 'running',
+          nextState: 'failed',
+          previousStatus: 'running',
+          newStatus: 'failed',
+          recommendedAction: 'mark_run_failed',
+          reason: `Run ${or.runId} for task ${or.taskId} was 'running' with task status ${or.taskStatus ?? 'none'} — marked as failed (recovery repair)`,
+        }));
+      }
+    }
+
     return createRemediationResult({
       mode: params.dryRun ? 'dry_run' : 'confirm',
       repairedCount,
       skippedCount,
       actions,
+      warnings,
       generatedAt,
       includeLegacyDryRun: true,
     });
   }
+
+  // ── Detection helpers ─────────────────────────────────────────────────
 
   private detectBrokenDreamers(): BrokenDreamer[] {
     const db = new Database(this.dbPath, { readonly: true });
@@ -231,6 +382,107 @@ export class InternalizationIntegrityRemediation {
     }
   }
 
+  /**
+   * Detect tasks that are still 'leased' with an expired lease.
+   * These are tasks where the lease owner crashed or the runner failed
+   * before releasing/renewing the lease.
+   */
+  private detectStuckLeases(): StuckLease[] {
+    const db = new Database(this.dbPath, { readonly: true });
+    try {
+      const leasedTasks = db.prepare(
+        "SELECT task_id, lease_owner, lease_expires_at FROM tasks WHERE status = 'leased'",
+      ).all() as { task_id: string; lease_owner: string | null; lease_expires_at: string | null }[];
+
+      const now = Date.now();
+      const results: StuckLease[] = [];
+
+      for (const t of leasedTasks) {
+        if (!t.lease_expires_at) {
+          results.push({
+            taskId: t.task_id,
+            leaseOwner: t.lease_owner,
+            leaseExpiresAt: null,
+            isSafe: false,
+            reason: `Task ${t.task_id} is leased but lease_expires_at is missing/null`,
+          });
+          continue;
+        }
+        const expiresAt = new Date(t.lease_expires_at).getTime();
+        if (Number.isNaN(expiresAt)) {
+          results.push({
+            taskId: t.task_id,
+            leaseOwner: t.lease_owner,
+            leaseExpiresAt: t.lease_expires_at,
+            isSafe: false,
+            reason: `Task ${t.task_id} is leased but lease_expires_at '${t.lease_expires_at}' is unparseable`,
+          });
+          continue;
+        }
+        if (expiresAt < now) {
+          results.push({
+            taskId: t.task_id,
+            leaseOwner: t.lease_owner,
+            leaseExpiresAt: t.lease_expires_at,
+            isSafe: true,
+          });
+        }
+      }
+
+      return results;
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Detect runs that are 'running' but their owning task is no longer
+   * in 'leased' state. These are orphan runs from crashed/completed
+   * runners that didn't properly close the run record.
+   */
+  private detectOrphanedRuns(): OrphanedRun[] {
+    const db = new Database(this.dbPath, { readonly: true });
+    try {
+      const runningRuns = db.prepare(
+        "SELECT run_id, task_id FROM runs WHERE execution_status = 'running'",
+      ).all() as { run_id: string; task_id: string }[];
+
+      const results: OrphanedRun[] = [];
+
+      for (const run of runningRuns) {
+        const taskRow = db.prepare(
+          'SELECT status FROM tasks WHERE task_id = ?',
+        ).get(run.task_id) as { status: string } | undefined;
+
+        if (!taskRow) {
+          // Task no longer exists — definitely a stuck run
+          results.push({
+            runId: run.run_id,
+            taskId: run.task_id,
+            taskExists: false,
+            taskStatus: null,
+          });
+        } else if (taskRow.status !== 'leased') {
+          // Task is no longer leased but run is still 'running'
+          results.push({
+            runId: run.run_id,
+            taskId: run.task_id,
+            taskExists: true,
+            taskStatus: taskRow.status,
+          });
+        }
+        // If task is still 'leased', the run might be legitimate — skip
+      }
+
+      return results;
+    } finally {
+      db.close();
+    }
+  }
+
+  // ── State readers ─────────────────────────────────────────────────────
+
+  // Get current task status from DB
   private getTaskStatus(taskId: string): string {
     const db = new Database(this.dbPath, { readonly: true });
     try {
@@ -240,6 +492,19 @@ export class InternalizationIntegrityRemediation {
       db.close();
     }
   }
+
+  // Get current run execution status from DB
+  private getRunStatus(runId: string): string {
+    const db = new Database(this.dbPath, { readonly: true });
+    try {
+      const row = db.prepare('SELECT execution_status FROM runs WHERE run_id = ?').get(runId) as { execution_status: string } | undefined;
+      return row?.execution_status ?? 'unknown';
+    } finally {
+      db.close();
+    }
+  }
+
+  // ── Mutators ──────────────────────────────────────────────────────────
 
   private requeueTask(taskId: string): void {
     const db = new Database(this.dbPath);
@@ -251,6 +516,63 @@ export class InternalizationIntegrityRemediation {
       db.close();
     }
   }
+
+  /**
+   * Force-expire a stuck lease: set task to 'pending' and mark the latest
+   * running run as 'failed' with a reason.
+   */
+  private forceExpireAndMarkRunFailed(taskId: string): void {
+    const db = new Database(this.dbPath);
+    try {
+      const tx = db.transaction(() => {
+        // Reset task to pending (force-expire lease)
+        db.prepare(`
+          UPDATE tasks
+          SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL, updated_at = datetime('now')
+          WHERE task_id = ?
+        `).run(taskId);
+
+        // Mark the latest run as failed
+        const latestRun = db.prepare(
+          `SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'running' ORDER BY started_at DESC LIMIT 1`,
+        ).get(taskId) as { run_id: string } | undefined;
+
+        if (latestRun) {
+          const now = new Date().toISOString();
+          db.prepare(`
+            UPDATE runs
+            SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
+            WHERE run_id = ?
+          `).run(now, 'Lease expired — force-expired by integrity-repair', 'lease_expired', latestRun.run_id);
+        }
+      });
+
+      tx();
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Mark an orphaned running run as 'failed'. When the owning task still
+   * exists and is in a terminal/failed/retry_wait state, the run should
+   * reflect the terminal outcome.
+   */
+  private markOrphanedRunFailed(runId: string, _taskId: string): void {
+    const db = new Database(this.dbPath);
+    try {
+      const now = new Date().toISOString();
+      db.prepare(`
+        UPDATE runs
+        SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
+        WHERE run_id = ?
+      `).run(now, `Orphaned run — recovered by integrity-repair (task not leased)`, 'recovery_sweep', runId);
+    } finally {
+      db.close();
+    }
+  }
+
+  // ── Successor helpers (unchanged) ──────────────────────────────────────
 
   private findExistingSuccessor(dreamerTaskId: string): string | null {
     const db = new Database(this.dbPath, { readonly: true });
