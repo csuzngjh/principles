@@ -452,6 +452,80 @@ export function crossReferenceByTimestamp(
   return result;
 }
 
+// ── Deduplication Helper ───────────────────────────────────────────────────────
+
+/**
+ * Dedupe evidence records to avoid displaying the same real pain signal twice.
+ *
+ * Runtime V2 canonical pain records (those with linkedTaskId, typically manual_* IDs)
+ * take precedence over trajectory pain records (pain_* IDs). When both exist for the
+ * same event, only the canonical record is shown.
+ *
+ * This prevents the confusing case where the Console shows:
+ * - One card as "recorded-only / unlinked" (from trajectory pain_N)
+ * - Another card as "candidate / internalization" (from Runtime V2 manual_*)
+ *
+ * for the exact same real pain signal.
+ *
+ * The matching strategy is conservative: only dedupe when a canonical record has
+ * a linked task and its timestamp is very close (within 1 second) to a trajectory
+ * record. This minimizes false deduping.
+ */
+function dedupeRecords(records: EvidenceChainRecord[]): EvidenceChainRecord[] {
+  const DEDUPE_WINDOW_MS = 1000; // 1 second - very conservative
+  const canonicalPainIds = new Set<string>();
+  const canonicalRecords = new Map<string, EvidenceChainRecord>();
+  const trajectoryRecords = new Map<string, EvidenceChainRecord>();
+
+  // Separate canonical (Runtime V2) from trajectory records
+  for (const record of records) {
+    if (record.linkedTaskId) {
+      // This is a Runtime V2 canonical pain record (from step 6)
+      // It may have pain_N ID or manual_* ID, but the presence of linkedTaskId
+      // indicates it's the authoritative record
+      canonicalPainIds.add(record.id);
+      canonicalRecords.set(record.id, record);
+    } else {
+      // This is a trajectory pain record (from step 5 or 5b)
+      trajectoryRecords.set(record.id, record);
+    }
+  }
+
+  // Find and remove trajectory records that match canonical records
+  const idsToRemove = new Set<string>();
+  for (const [, canonicalRecord] of canonicalRecords) {
+    const canonicalTime = new Date(canonicalRecord.observedAt).getTime();
+    if (Number.isNaN(canonicalTime)) continue;
+
+    for (const [trajectoryId, trajectoryRecord] of trajectoryRecords) {
+      if (idsToRemove.has(trajectoryId)) continue;
+
+      const trajectoryTime = new Date(trajectoryRecord.observedAt).getTime();
+      if (Number.isNaN(trajectoryTime)) continue;
+
+      const timeDiff = Math.abs(canonicalTime - trajectoryTime);
+      if (timeDiff <= DEDUPE_WINDOW_MS) {
+        // Found a match within 1 second - keep canonical, remove trajectory
+        idsToRemove.add(trajectoryId);
+      }
+    }
+  }
+
+  // Return all canonical records plus unmatched trajectory records
+  const result: EvidenceChainRecord[] = [];
+  for (const [, record] of canonicalRecords) {
+    result.push(record);
+  }
+  for (const [id, record] of trajectoryRecords) {
+    if (!idsToRemove.has(id)) {
+      result.push(record);
+    }
+  }
+
+  // Preserve sort order (already sorted by observedAt descending)
+  return result;
+}
+
 // ── Dynamic Assembly Mapper (Pure logic) ──────────────────────────────────────
 
 export interface CandidateInfo {
@@ -904,8 +978,14 @@ export function assembleEvidenceChain(params: {
   // Sort by observedAt descending
   records.sort((a, b) => b.observedAt.localeCompare(a.observedAt));
 
+  // 7. Dedupe: Runtime V2 canonical pain (has linkedTaskId) takes precedence over trajectory pain rows
+  // When the same real pain signal appears as both a trajectory pain (pain_N) and a
+  // Runtime V2 canonical pain (manual_*), show only the canonical record with full chain state.
+  // This prevents misleading "unlinked" and "candidate" cards for the same event.
+  const dedupedRecords = dedupeRecords(records);
+
   const response: EvidenceChainResponse = {
-    records,
+    records: dedupedRecords,
     generatedAt,
   };
 

@@ -1237,3 +1237,127 @@ describe('PRI-380: crossReferenceByTimestamp', () => {
     expect(result.get('pain_1')!.taskId).toBe('diagnosis_near');
   });
 });
+
+// ── PRI-388: Dedupe trajectory pain rows with Runtime V2 canonical pain ───
+
+describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
+  it('dedupes: trajectory pain_N + Runtime V2 manual_* same event -> only canonical shown', async () => {
+    // Scenario: A CLI manual pain creates both:
+    // 1. A trajectory pain_events row (pain_311) with no linked task
+    // 2. A Runtime V2 canonical task (manual_*) with full chain
+    // The Console should only show the canonical record, not both.
+
+    const timestamp = '2026-06-10T14:30:45.000Z';
+
+    // 1. Insert trajectory pain event (no matching task initially)
+    const trajDb = createTrajectoryDb();
+    const trajectoryRowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent modified config without approval',
+      createdAt: timestamp,
+    });
+    trajDb.close();
+
+    // 2. Insert Runtime V2 canonical task that matches via input_ref
+    // The task will have inputRef pointing to the trajectory row ID
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${trajectoryRowId}`, // This matches trajectory pain via input_ref convention
+      status: 'succeeded',
+      createdAt: timestamp, // Same timestamp as trajectory pain
+      inputRef: String(trajectoryRowId), // Explicitly links to trajectory row
+      diagnosticJson: JSON.stringify({ rootCause: 'Missing approval workflow' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-dedupe-001',
+      taskId: `diagnosis_pain_${trajectoryRowId}`,
+      title: 'Modify config requires approval',
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Should show only ONE record (the merged one)
+    // The trajectory and canonical should merge into a single record
+    expect(result.records).toHaveLength(1);
+
+    const record = result.records[0];
+    // The record has linked task (canonical state)
+    expect(record.linkedTaskId).toBe(`diagnosis_pain_${trajectoryRowId}`);
+    expect(record.linkedCandidateId).toBe('cand-dedupe-001');
+    expect(record.state).toBe('internalization-missing');
+    expect(record.summary).toContain('approval');
+    // ID should be the canonical pain ID (pain_N)
+    expect(record.id).toBe(`pain_${trajectoryRowId}`);
+  });
+
+  it('dedupes: within 1 second window merges, outside window keeps both', async () => {
+    // Test the 1-second dedupe window boundary
+    const baseTime = '2026-06-10T14:30:00.000Z';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Event A',
+      createdAt: baseTime,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Event B (close to canonical)',
+      createdAt: '2026-06-10T14:30:00.500Z', // 500ms after - should dedupe
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Event C (far from canonical)',
+      createdAt: '2026-06-10T14:30:03.000Z', // 3s after - should NOT dedupe
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: baseTime, // Same as Event A - dedupes
+      inputRef: '1',
+    });
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_2',
+      status: 'succeeded',
+      createdAt: '2026-06-10T14:30:00.500Z', // Same as Event B - dedupes
+      inputRef: '2',
+    });
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_3',
+      status: 'succeeded',
+      createdAt: '2026-06-10T14:30:03.000Z', // Same as Event C - dedupes (exact match)
+      inputRef: '3',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // All 3 events match exactly in timestamp, so they merge into 3 records
+    expect(result.records).toHaveLength(3);
+
+    const ids = result.records.map(r => r.id).sort();
+    expect(ids).toEqual(['pain_1', 'pain_2', 'pain_3']);
+  });
+
+  it('dedupes: true orphaned trajectory records are NOT deduped', async () => {
+    // If there's NO canonical record, the trajectory pain should still show
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Orphan pain with no Runtime V2 task',
+      createdAt: '2026-06-10T14:30:00.000Z',
+    });
+    trajDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Should show the trajectory record (state depends on source)
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].state).toBe('recorded-only');
+  });
+});
