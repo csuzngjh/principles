@@ -62,6 +62,9 @@ export interface EvidenceChainRecord {
   rootCauseSummary?: string;
   confidence?: number;
   recommendationKind?: string;
+  /** PRI-380: internalization pipeline linkage */
+  internalizationTaskId?: string;
+  dreamerTaskStatus?: string;
 }
 
 export interface EvidenceChainResponse {
@@ -370,6 +373,130 @@ export function resolveSummary(fields: {
   return fields.fallback;
 }
 
+// ── PRI-380: Timestamp cross-reference ─────────────────────────────────────────
+
+interface TaskMapEntry {
+  taskId: string;
+  status: string;
+  lastError: string | null;
+  createdAt: string;
+  rootCauseSummary?: string;
+  diagnosticJsonDegraded?: boolean;
+  inputRef?: string;
+}
+
+/**
+ * PRI-380: Match unmatched pain events to diagnostician tasks by timestamp proximity.
+ *
+ * When pain_events.id (e.g., 309) does not directly map to a diagnostician task_id
+ * (e.g., diagnosis_manual_1781314784282_5v264gy1), we fall back to matching by
+ * creation timestamp within a ±5 minute window. Manual pain events are matched
+ * first since they have highest admission confidence.
+ *
+ * Returns a Map from painId (pain_<rowId>) to the matched task entry.
+ * Pure function for testability.
+ */
+export function crossReferenceByTimestamp(
+  painEvents: { painId: string; createdAt: string; source: string }[],
+  taskMap: Map<string, TaskMapEntry>,
+  coveredPainIds: Set<string>,
+): Map<string, TaskMapEntry> {
+  const CROSS_REF_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+  const result = new Map<string, TaskMapEntry>();
+  const usedTaskIds = new Set<string>();
+
+  // Collect unmatched pain events
+  const unmatchedEvents = painEvents.filter(e => !coveredPainIds.has(e.painId));
+  if (unmatchedEvents.length === 0) return result;
+
+  // Collect all task entries (regardless of key) that are not already matched
+  const availableTasks: [string, TaskMapEntry][] = [];
+  for (const [key, entry] of taskMap.entries()) {
+    if (!coveredPainIds.has(key)) {
+      availableTasks.push([key, entry]);
+    }
+  }
+
+  // Sort unmatched events by timestamp
+  unmatchedEvents.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  for (const event of unmatchedEvents) {
+    const eventTime = new Date(event.createdAt).getTime();
+    if (Number.isNaN(eventTime)) continue;
+
+    let bestMatch: [string, TaskMapEntry] | null = null;
+    let bestDelta = Infinity;
+
+    for (const [taskKey, taskEntry] of availableTasks) {
+      if (usedTaskIds.has(taskKey)) continue;
+      const taskTime = new Date(taskEntry.createdAt).getTime();
+      if (Number.isNaN(taskTime)) continue;
+
+      const delta = Math.abs(eventTime - taskTime);
+      if (delta <= CROSS_REF_WINDOW_MS && delta < bestDelta) {
+        bestDelta = delta;
+        bestMatch = [taskKey, taskEntry];
+      }
+    }
+
+    if (bestMatch) {
+      usedTaskIds.add(bestMatch[0]);
+      result.set(event.painId, bestMatch[1]);
+    }
+  }
+
+  return result;
+}
+
+// ── PRI-380: Dreamer task linkage ─────────────────────────────────────────────
+
+interface DreamerTaskInfo {
+  taskId: string;
+  status: string;
+}
+
+/**
+ * PRI-380: Query dreamer tasks and build a candidateId → dreamer info map.
+ * Dreamer task IDs follow the pattern: dreamer-<candidateId>-<kind>
+ * e.g., dreamer-9a8687df-28f7-4c40-86a6-f2beaa928ae7-prompt
+ */
+function buildDreamerMap(
+  db: Database.Database,
+  degradedReasons: string[],
+  degradedNextActions: string[],
+): Map<string, DreamerTaskInfo> {
+  const dreamerMap = new Map<string, DreamerTaskInfo>();
+  try {
+    const dreamerTasks = coerceRowsToRecords(
+      db.prepare(
+        "SELECT task_id, status FROM tasks WHERE task_kind = 'dreamer'",
+      ).all(),
+    );
+
+    for (const task of dreamerTasks) {
+      const taskId = isString(task.task_id) ? task.task_id : '';
+      const status = isString(task.status) ? task.status : 'unknown';
+      // Extract candidateId from dreamer-<candidateId>-<kind>
+      if (taskId.startsWith('dreamer-')) {
+        const rest = taskId.slice('dreamer-'.length);
+        const lastDash = rest.lastIndexOf('-');
+        // Format: dreamer-<candidateId>-<kind>
+        // candidateId can be UUID (with dashes) or short ID like "cand-pri380-001"
+        if (lastDash > 0) {
+          const candidateId = rest.slice(0, lastDash);
+          if (candidateId && !dreamerMap.has(candidateId)) {
+            dreamerMap.set(candidateId, { taskId, status });
+          }
+        }
+      }
+    }
+  } catch {
+    degradedReasons.push('Dreamer task query failed — internalization pipeline status is unavailable.');
+    degradedNextActions.push('Check state database dreamer task table integrity.');
+  }
+  return dreamerMap;
+}
+
 // ── Model ──────────────────────────────────────────────────────────────────────
 
 export class EvidenceChainConsoleModel {
@@ -385,6 +512,62 @@ export class EvidenceChainConsoleModel {
       this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     }
     return this.readConnection;
+  }
+
+  /**
+   * PRI-380: Populate candidate fields on a record from linked candidate info.
+   * Extracted from inline code for DRY reuse across direct/cross-ref/unmatched paths.
+   */
+  private populateCandidateFields(
+    record: EvidenceChainRecord,
+    linkedCandidate: CandidateInfo | undefined,
+  ): void {
+    if (!linkedCandidate) return;
+    record.linkedCandidateId = linkedCandidate.candidateId;
+    if (linkedCandidate.title) {
+      record.candidateTitle = sanitizeString(linkedCandidate.title, this.workspaceDir);
+    }
+    if (linkedCandidate.description) {
+      record.candidateSummary = sanitizeString(linkedCandidate.description, this.workspaceDir);
+    }
+    if (typeof linkedCandidate.confidence === 'number' && Number.isFinite(linkedCandidate.confidence)) {
+      record.confidence = linkedCandidate.confidence;
+    }
+    if (linkedCandidate.recommendationKind) {
+      record.recommendationKind = linkedCandidate.recommendationKind;
+    }
+  }
+
+  /**
+   * PRI-380: Populate dreamer/internalization linkage on a record.
+   * Sets internalizationTaskId and dreamerTaskStatus when a dreamer task exists
+   * for the linked candidate. Adds nextAction for candidate_generated + dreamer pending.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private populateDreamerLinkage(
+    record: EvidenceChainRecord,
+    linkedCandidate: CandidateInfo | undefined,
+    dreamerMap: Map<string, DreamerTaskInfo>,
+  ): void {
+    if (!linkedCandidate) return;
+    const dreamerInfo = dreamerMap.get(linkedCandidate.candidateId);
+    if (!dreamerInfo) return;
+
+    record.internalizationTaskId = dreamerInfo.taskId;
+    record.dreamerTaskStatus = dreamerInfo.status;
+
+    // Set nextAction for candidate_generated state when dreamer is pending
+    if (record.state === 'candidate_generated' && !record.nextAction) {
+      if (dreamerInfo.status === 'pending' || dreamerInfo.status === 'queued') {
+        record.nextAction = 'Candidate generated. Internalization task is pending \u2014 wait for dreamer to complete.';
+      } else if (dreamerInfo.status === 'running') {
+        record.nextAction = 'Internalization in progress \u2014 dreamer task is running.';
+      } else if (dreamerInfo.status === 'succeeded') {
+        record.nextAction = 'Internalization task completed. Check for owner-reviewable principle.';
+      } else if (dreamerInfo.status === 'failed') {
+        record.nextAction = 'Internalization task failed. Check dreamer task error and retry if appropriate.';
+      }
+    }
   }
 
   async getEvidenceChain(): Promise<EvidenceChainResponse> {
@@ -424,24 +607,41 @@ export class EvidenceChainConsoleModel {
 
     // ── 2. Read diagnostician tasks from state.db ─────────────────────────
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
-    let taskMap = new Map<string, { taskId: string; status: string; lastError: string | null; createdAt: string; rootCauseSummary?: string; diagnosticJsonDegraded?: boolean }>();
+    let taskMap = new Map<string, TaskMapEntry>();
     let stateDbAvailable = false;
+    // PRI-380: dreamer map for candidate → internalization task linkage
+    let dreamerMap = new Map<string, DreamerTaskInfo>();
 
     if (fs.existsSync(stateDbPath)) {
       try {
         const conn = this.getReadConnection();
         const db = conn.getDb();
         // PRI-340: try to read diagnostic_json for rootCause summary
+        // PRI-380: also read input_ref for Runtime V2 pain ID cross-referencing
         let tasks: Record<string, unknown>[];
+        let hasInputRef = true;
         try {
           tasks = coerceRowsToRecords(db.prepare(
-            "SELECT task_id, status, last_error, created_at, diagnostic_json FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
+            "SELECT task_id, status, last_error, created_at, diagnostic_json, input_ref FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
           ).all());
         } catch (colErr) {
           if (isMissingColumnError(colErr)) {
-            tasks = coerceRowsToRecords(db.prepare(
-              "SELECT task_id, status, last_error, created_at FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
-            ).all());
+            // Try without input_ref first, then without diagnostic_json
+            try {
+              tasks = coerceRowsToRecords(db.prepare(
+                "SELECT task_id, status, last_error, created_at, diagnostic_json FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
+              ).all());
+              hasInputRef = false;
+            } catch (colErr2) {
+              if (isMissingColumnError(colErr2)) {
+                tasks = coerceRowsToRecords(db.prepare(
+                  "SELECT task_id, status, last_error, created_at FROM tasks WHERE task_kind = 'diagnostician' ORDER BY created_at DESC",
+                ).all());
+                hasInputRef = false;
+              } else {
+                throw colErr2;
+              }
+            }
           } else {
             throw colErr;
           }
@@ -449,8 +649,17 @@ export class EvidenceChainConsoleModel {
 
         for (const task of tasks) {
           const taskId = isString(task.task_id) ? task.task_id : '';
-          // Diagnostician task IDs follow pattern "diagnosis_<painId>"
-          const painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : taskId;
+          // PRI-380: Use input_ref for Runtime V2 pain ID when available
+          const inputRefRaw = hasInputRef ? getOwnValue(task, 'input_ref') : undefined;
+          const inputRef = isString(inputRefRaw) ? inputRefRaw : undefined;
+          // Derive painId: prefer input_ref (normalize to pain_<id> if numeric), fall back to task_id prefix stripping
+          let painId: string;
+          if (inputRef) {
+            // input_ref may be numeric (e.g., "309") or already prefixed ("pain_309")
+            painId = /^\d+$/.test(inputRef) ? `pain_${inputRef}` : inputRef;
+          } else {
+            painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : taskId;
+          }
           // PRI-340: parse diagnostic_json for rootCause (ERR-001: no `as`, runtime guards)
           let rootCauseSummary: string | undefined;
           let diagnosticJsonDegraded = false;
@@ -473,9 +682,13 @@ export class EvidenceChainConsoleModel {
             createdAt: isString(task.created_at) ? task.created_at : '',
             rootCauseSummary,
             diagnosticJsonDegraded,
+            inputRef,
           });
         }
         stateDbAvailable = true;
+
+        // PRI-380: Build dreamer task map for internalization pipeline visibility
+        dreamerMap = buildDreamerMap(db, degradedReasons, degradedNextActions);
       } catch (err) {
         if (isMissingTableError(err)) {
           degradedReasons.push('Tasks table not found in state database');
@@ -491,7 +704,14 @@ export class EvidenceChainConsoleModel {
     }
 
     // ── 3. Read candidates from state.db ──────────────────────────────────
+    // PRI-380: taskId → painId reverse map for candidate linkage
+    const taskIdToPainId = new Map<string, string>();
+    for (const [pId, entry] of taskMap) {
+      taskIdToPainId.set(entry.taskId, pId);
+    }
+
     let candidateMap = new Map<string, CandidateInfo>(); // painId → CandidateInfo
+    const candidateByTaskId = new Map<string, CandidateInfo>(); // taskId → CandidateInfo (PRI-380: cross-ref dual index)
     if (stateDbAvailable) {
       try {
         const conn = this.getReadConnection();
@@ -517,17 +737,24 @@ export class EvidenceChainConsoleModel {
         for (const c of candidates) {
           const candidateId = isString(c.candidate_id) ? c.candidate_id : '';
           const taskId = isString(c.task_id) ? c.task_id : '';
-          // Reverse-map: taskId → painId
-          const painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : '';
-          if (painId && candidateId) {
-            candidateMap.set(painId, {
+          // PRI-380: Reverse-map candidate → painId via taskIdToPainId first,
+          // then fall back to legacy taskId prefix stripping
+          let painId = taskIdToPainId.get(taskId) ?? '';
+          if (!painId && taskId.startsWith('diagnosis_')) {
+            painId = taskId.slice('diagnosis_'.length);
+          }
+          if (candidateId) {
+            const info: CandidateInfo = {
               candidateId,
               title: hasRichColumns ? readOwnString(c, 'title') : undefined,
               description: hasRichColumns ? readOwnString(c, 'description') : undefined,
               confidence: hasRichColumns && typeof c.confidence === 'number' && Number.isFinite(c.confidence)
                 ? c.confidence : undefined,
               recommendationKind: hasRichColumns ? readOwnString(c, 'recommendation_kind') : undefined,
-            });
+            };
+            // candidateMap requires painId; candidateByTaskId only requires taskId
+            if (painId) candidateMap.set(painId, info);
+            if (taskId) candidateByTaskId.set(taskId, info);
           }
         }
       } catch (err) {
@@ -556,6 +783,10 @@ export class EvidenceChainConsoleModel {
     }
 
     // ── 5. Build evidence chain records from pain_events ──────────────────
+    // PRI-380: Track pain event metadata for timestamp cross-referencing
+    const painEventMeta = new Array<{ painId: string; createdAt: string; source: string }>();
+    const directMatchedPainIds = new Set<string>();
+
     for (const event of painEvents) {
       // SQLite INTEGER PRIMARY KEY returns number, not string — must coerce
       const eventId = coerceToString(event.id);
@@ -571,8 +802,14 @@ export class EvidenceChainConsoleModel {
       // Use id as a stable painId reference
       const painId = `pain_${eventId}`;
 
+      // Track for cross-referencing
+      painEventMeta.push({ painId, createdAt, source });
+
       // Look up linked task, candidate, principle
       const linkedTask = taskMap.get(painId);
+      if (linkedTask) {
+        directMatchedPainIds.add(painId);
+      }
       const linkedCandidate = candidateMap.get(painId);
       const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
 
@@ -604,21 +841,7 @@ export class EvidenceChainConsoleModel {
       };
 
       // PRI-340: Populate human-readable candidate fields
-      if (linkedCandidate) {
-        record.linkedCandidateId = linkedCandidate.candidateId;
-        if (linkedCandidate.title) {
-          record.candidateTitle = sanitizeString(linkedCandidate.title, this.workspaceDir);
-        }
-        if (linkedCandidate.description) {
-          record.candidateSummary = sanitizeString(linkedCandidate.description, this.workspaceDir);
-        }
-        if (typeof linkedCandidate.confidence === 'number' && Number.isFinite(linkedCandidate.confidence)) {
-          record.confidence = linkedCandidate.confidence;
-        }
-        if (linkedCandidate.recommendationKind) {
-          record.recommendationKind = linkedCandidate.recommendationKind;
-        }
-      }
+      this.populateCandidateFields(record, linkedCandidate);
 
       // PRI-340: Populate rootCause summary from diagnostic_json
       if (linkedTask?.rootCauseSummary) {
@@ -645,8 +868,144 @@ export class EvidenceChainConsoleModel {
         }
       }
 
+      // PRI-380: Dreamer task linkage for candidate → internalization visibility
+      this.populateDreamerLinkage(record, linkedCandidate, dreamerMap);
+
       if (linkedPrincipleId) {
         record.linkedPrincipleId = linkedPrincipleId;
+      }
+
+      // PRI-380: Skip pushing record for unmatched pain events when state.db has tasks.
+      // Section 5b will handle them via cross-reference or loud degradation.
+      if (!linkedTask && stateDbAvailable && taskMap.size > 0) {
+        continue;
+      }
+
+      records.push(record);
+    }
+
+    // ── 5b. PRI-380: Timestamp cross-reference for unmatched pain events ──────
+    // When pain_events.id doesn't directly map to a diagnostician task_id,
+    // match by creation timestamp proximity (±5 min window).
+    const crossRefMap = crossReferenceByTimestamp(painEventMeta, taskMap, directMatchedPainIds);
+
+    for (const event of painEvents) {
+      const eventId = coerceToString(event.id);
+      if (!eventId) continue;
+      const painId = `pain_${eventId}`;
+      if (directMatchedPainIds.has(painId)) continue; // Already processed
+
+      const crossRefTask = crossRefMap.get(painId);
+      if (!crossRefTask) {
+        // PRI-380: No match found — if state.db has tasks, degrade loudly (ERR-002)
+        // instead of silently showing pain_recorded as if no diagnosis happened
+        if (stateDbAvailable && taskMap.size > 0) {
+          const source = isString(event.source) ? event.source : 'unknown';
+          const reason = isString(event.reason) ? event.reason : '';
+          const text = isString(event.text) ? event.text : '';
+          const createdAt = isString(event.created_at) ? event.created_at : '';
+          const score = typeof event.score === 'number' ? event.score : 0;
+          const sourceKind = mapSourceKind(source);
+
+          const record: EvidenceChainRecord = {
+            id: painId,
+            sourceKind,
+            observedAt: createdAt,
+            state: inferAdmissionDecision(sourceKind) === 'store_signal' ? 'pain_recorded' : 'evidence_only',
+            summary: sanitizeString(
+              text || reason || `Pain signal (source: ${source}, score: ${score})`,
+              this.workspaceDir,
+            ),
+            admissionDecision: inferAdmissionDecision(sourceKind),
+            degradedReason: 'Could not link this pain event to a diagnostician task. The chain may be incomplete.',
+            nextAction: 'Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.',
+          };
+          // ERR-002: Surface at response level too
+          degradedReasons.push(`Pain event ${painId} could not be linked to a diagnostician task.`);
+          degradedNextActions.push('Check Runtime V2 pipeline status for unmatched pain ID formats.');
+          records.push(record);
+        }
+        continue;
+      }
+
+      // Build a full record with cross-referenced task data
+      const source = isString(event.source) ? event.source : 'unknown';
+      const reason = isString(event.reason) ? event.reason : '';
+      const text = isString(event.text) ? event.text : '';
+      const createdAt = isString(event.created_at) ? event.created_at : '';
+      const score = typeof event.score === 'number' ? event.score : 0;
+      const sourceKind = mapSourceKind(source);
+
+      // Look up candidate: prefer painId key, fall back to taskId dual index
+      const linkedCandidate = candidateMap.get(painId) || candidateByTaskId.get(crossRefTask.taskId);
+      const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
+
+      const state = determineState({
+        sourceKind,
+        linkedTaskStatus: crossRefTask.status,
+        linkedCandidateId: linkedCandidate?.candidateId,
+        linkedPrincipleId,
+      });
+
+      const rawSummary = resolveSummary({
+        candidateTitle: linkedCandidate?.title,
+        rootCauseSummary: crossRefTask.rootCauseSummary,
+        painText: text,
+        painReason: reason,
+        fallback: `Pain signal (source: ${source}, score: ${score})`,
+      });
+
+      const record: EvidenceChainRecord = {
+        id: painId,
+        sourceKind,
+        observedAt: createdAt,
+        state,
+        summary: sanitizeString(rawSummary, this.workspaceDir),
+        admissionDecision: inferAdmissionDecision(sourceKind),
+        linkedTaskId: crossRefTask.taskId,
+        linkedTaskStatus: crossRefTask.status,
+      };
+
+      // Populate candidate fields
+      this.populateCandidateFields(record, linkedCandidate);
+
+      if (crossRefTask.rootCauseSummary) {
+        record.rootCauseSummary = sanitizeString(crossRefTask.rootCauseSummary, this.workspaceDir);
+      }
+
+      if (crossRefTask.lastError && (state === 'diagnosis_failed' || state === 'diagnosis_retry_wait')) {
+        record.failureReason = sanitizeString(crossRefTask.lastError, this.workspaceDir);
+        record.nextAction = state === 'diagnosis_retry_wait'
+          ? 'Diagnosis is waiting for automatic retry.'
+          : 'Diagnosis failed. Check error details and retry.';
+      } else if (state === 'candidate_generated') {
+        // PRI-380: Check dreamer task status for next action
+        const dreamerInfo = linkedCandidate ? dreamerMap.get(linkedCandidate.candidateId) : undefined;
+        if (dreamerInfo) {
+          record.internalizationTaskId = dreamerInfo.taskId;
+          record.dreamerTaskStatus = dreamerInfo.status;
+          if (dreamerInfo.status === 'pending' || dreamerInfo.status === 'queued') {
+            record.nextAction = 'Candidate generated. Internalization task is pending — wait for dreamer to complete.';
+          } else if (dreamerInfo.status === 'running') {
+            record.nextAction = 'Internalization in progress — dreamer task is running.';
+          }
+        } else {
+          record.nextAction = 'Candidate generated. Waiting for internalization pipeline to seed dreamer task.';
+        }
+      }
+
+      // Dreamer linkage
+      this.populateDreamerLinkage(record, linkedCandidate, dreamerMap);
+
+      if (linkedPrincipleId) {
+        record.linkedPrincipleId = linkedPrincipleId;
+      }
+
+      if (crossRefTask.diagnosticJsonDegraded) {
+        record.degradedReason = 'Diagnostic data for this record could not be parsed';
+        if (!record.nextAction) {
+          record.nextAction = 'Check task diagnostic data integrity.';
+        }
       }
 
       records.push(record);
@@ -656,8 +1015,14 @@ export class EvidenceChainConsoleModel {
     // This catches manual pain that was recorded directly through the bridge
     // without a trajectory.db entry (e.g., pd pain record)
     const coveredPainIds = new Set(records.map(r => r.id));
+    // Also exclude task map entries that were matched via cross-reference
+    const crossRefTaskIds = new Set<string>();
+    for (const entry of crossRefMap.values()) {
+      crossRefTaskIds.add(entry.taskId);
+    }
     for (const [painId, task] of taskMap.entries()) {
       if (coveredPainIds.has(painId)) continue;
+      if (crossRefTaskIds.has(task.taskId)) continue; // Already matched via cross-ref
 
       const linkedCandidate = candidateMap.get(painId);
       const linkedPrincipleId = painToPrincipleMap.get(painId) || undefined;
@@ -697,26 +1062,15 @@ export class EvidenceChainConsoleModel {
       };
 
       // PRI-340: Populate human-readable candidate fields
-      if (linkedCandidate) {
-        record.linkedCandidateId = linkedCandidate.candidateId;
-        if (linkedCandidate.title) {
-          record.candidateTitle = sanitizeString(linkedCandidate.title, this.workspaceDir);
-        }
-        if (linkedCandidate.description) {
-          record.candidateSummary = sanitizeString(linkedCandidate.description, this.workspaceDir);
-        }
-        if (typeof linkedCandidate.confidence === 'number' && Number.isFinite(linkedCandidate.confidence)) {
-          record.confidence = linkedCandidate.confidence;
-        }
-        if (linkedCandidate.recommendationKind) {
-          record.recommendationKind = linkedCandidate.recommendationKind;
-        }
-      }
+      this.populateCandidateFields(record, linkedCandidate);
 
       // PRI-340: Populate rootCause summary from diagnostic_json
       if (task.rootCauseSummary) {
         record.rootCauseSummary = sanitizeString(task.rootCauseSummary, this.workspaceDir);
       }
+
+      // PRI-380: Dreamer task linkage
+      this.populateDreamerLinkage(record, linkedCandidate, dreamerMap);
 
       // PRI-340: diagnostic_json parse failure → degrade (ERR-002)
       if (task.diagnosticJsonDegraded) {

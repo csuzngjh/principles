@@ -407,6 +407,20 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
                 </>
               )}
 
+              {layers.layer3.internalizationTaskId && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainInternalizationTask')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.internalizationTaskId}</span>
+                </>
+              )}
+
+              {layers.layer3.dreamerTaskStatus && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.chainDreamerStatus')}</span>
+                  <span className="font-mono text-ink-2">{layers.layer3.dreamerTaskStatus}</span>
+                </>
+              )}
+
               <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
               <span className="font-mono text-ink-2">{layers.layer3.sourceKind}</span>
 
