@@ -1152,8 +1152,38 @@ export class EvidenceChainConsoleModel {
     };
 
     if (degradedReasons.length > 0) {
-      response.degradedReason = degradedReasons.join('; ');
-      response.nextAction = degradedNextActions.join(' ');
+      // Group unmatched pain event warnings to prevent flooding the global degradedReason (PRI-382)
+      const unmatchedPainIds: string[] = [];
+      const otherReasons: string[] = [];
+      const unmatchedPainRegex = /^Pain event (.*) could not be linked to a diagnostician task\.$/;
+
+      for (const reason of degradedReasons) {
+        const match = unmatchedPainRegex.exec(reason);
+        if (match) {
+          unmatchedPainIds.push(match[1]);
+        } else {
+          otherReasons.push(reason);
+        }
+      }
+
+      const finalReasons: string[] = [];
+      if (unmatchedPainIds.length > 0) {
+        if (unmatchedPainIds.length === 1) {
+          finalReasons.push(`Pain event ${unmatchedPainIds[0]} could not be linked to a diagnostician task.`);
+        } else {
+          finalReasons.push(`${unmatchedPainIds.length} evidence records could not be linked to diagnostician tasks. Showing per-record details below.`);
+        }
+      }
+
+      // Keep other unique degradation reasons
+      const uniqueOtherReasons = Array.from(new Set(otherReasons));
+      finalReasons.push(...uniqueOtherReasons);
+
+      response.degradedReason = finalReasons.join('; ');
+
+      // Deduplicate next actions so we don't repeat the same action multiple times
+      const uniqueNextActions = Array.from(new Set(degradedNextActions));
+      response.nextAction = uniqueNextActions.join(' ');
     }
 
     // Note when evidence-only sources exist but no pain signals
