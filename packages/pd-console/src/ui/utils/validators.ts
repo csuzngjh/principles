@@ -575,6 +575,7 @@ export interface GovernanceQueueData {
   nextAction: string;
   inProgressSummary?: string;
   degradedSignals?: DegradedSignalData[];
+  evidenceInProgressCount?: number;
   note?: string;
   generatedAt?: string;
 }
@@ -627,6 +628,11 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
   if (Object.hasOwn(v, 'generatedAt')) {
     if (!isString(v.generatedAt)) return null;
     result.generatedAt = v.generatedAt;
+  }
+  // PRI-380: evidence in progress count
+  if (Object.hasOwn(v, 'evidenceInProgressCount')) {
+    if (!isNumber(v.evidenceInProgressCount)) return null;
+    result.evidenceInProgressCount = v.evidenceInProgressCount;
   }
   return result;
 }
@@ -1087,6 +1093,9 @@ export interface EvidenceChainRecordData {
   rootCauseSummary?: string;
   confidence?: number;
   recommendationKind?: string;
+  /** PRI-380: internalization task linkage */
+  internalizationTaskId?: string;
+  dreamerTaskStatus?: string;
 }
 
 function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
@@ -1165,6 +1174,16 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
   if (Object.hasOwn(v, 'recommendationKind')) {
     if (!isString(v.recommendationKind)) return null;
     result.recommendationKind = v.recommendationKind;
+  }
+
+  // PRI-380: internalization task linkage (all optional)
+  if (Object.hasOwn(v, 'internalizationTaskId')) {
+    if (!isString(v.internalizationTaskId)) return null;
+    result.internalizationTaskId = v.internalizationTaskId;
+  }
+  if (Object.hasOwn(v, 'dreamerTaskStatus')) {
+    if (!isString(v.dreamerTaskStatus)) return null;
+    result.dreamerTaskStatus = v.dreamerTaskStatus;
   }
 
   return result;

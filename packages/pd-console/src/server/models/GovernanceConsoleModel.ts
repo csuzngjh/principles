@@ -30,8 +30,8 @@ export type GovernanceState = 'none' | 'in_progress' | 'owner_review_ready' | 'd
  * Machine-readable codes for degraded signals.
  * Frontend maps these via i18n; `reason` is English debug text.
  */
-export type DegradedReasonCode = 'task_retry_wait' | 'task_failed' | 'approval_table_missing';
-export type DegradedNextActionCode = 'check_task_status' | 'fix_and_retry' | 'run_integrity_check';
+export type DegradedReasonCode = 'task_retry_wait' | 'task_failed' | 'approval_table_missing' | 'trajectory_db_unavailable';
+export type DegradedNextActionCode = 'check_task_status' | 'fix_and_retry' | 'run_integrity_check' | 'check_trajectory_db';
 
 export interface DegradedSignal {
   /** Machine-readable code for i18n mapping */
@@ -87,6 +87,8 @@ export interface GovernanceQueueResponse {
   inProgressSummary?: string;
   /** Degraded signals when state is 'degraded' */
   degradedSignals?: DegradedSignal[];
+  /** PRI-380: Number of pain events in trajectory.db (behavior evidence in progress) */
+  evidenceInProgressCount?: number;
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely zero */
   note?: string;
@@ -95,6 +97,10 @@ export interface GovernanceQueueResponse {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export class GovernanceConsoleModel {
@@ -319,6 +325,46 @@ export class GovernanceConsoleModel {
       nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
     }
 
+    // PRI-380: Query trajectory.db for behavior evidence count
+    // Must happen BEFORE response construction so degradation is included in degradedSignals
+    let evidenceInProgressCount = 0;
+    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+    if (fs.existsSync(trajectoryDbPath)) {
+      try {
+        const Database = (await import('better-sqlite3')).default;
+        const trajDb = new Database(trajectoryDbPath, { readonly: true });
+        try {
+          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const [row] = rows;
+            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+              evidenceInProgressCount = row.c;
+            }
+          }
+        } catch (err) {
+          if (!isMissingTableError(err)) throw err;
+          degradedSignals.push({
+            reasonCode: 'trajectory_db_unavailable',
+            nextActionCode: 'check_trajectory_db',
+            reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+            nextAction: 'Check trajectory.db file integrity in .state directory.',
+            source: 'source_unavailable',
+          });
+        } finally {
+          trajDb.close();
+        }
+      } catch (err) {
+        degradedSignals.push({
+          reasonCode: 'trajectory_db_unavailable',
+          nextActionCode: 'check_trajectory_db',
+          reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+          nextAction: 'Check trajectory.db file integrity in .state directory.',
+          source: 'source_unavailable',
+        });
+        if (!(err instanceof Error)) throw err;
+      }
+    }
+
     const response: GovernanceQueueResponse = {
       pendingReviewCount,
       behaviorDeviationCount,
@@ -337,6 +383,10 @@ export class GovernanceConsoleModel {
 
     if (degradedSignals.length > 0) {
       response.degradedSignals = degradedSignals;
+    }
+
+    if (evidenceInProgressCount > 0) {
+      response.evidenceInProgressCount = evidenceInProgressCount;
     }
 
     return response;
