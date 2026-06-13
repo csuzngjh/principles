@@ -52,6 +52,7 @@ import { handleSamplesCommand } from './commands/samples.js';
 import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { CorrectionObserverService } from './service/correction-observer-service.js';
+import { InternalizationAutoConsumerService } from './service/internalization-auto-consumer-service.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
 import { CentralSyncService } from './service/central-sync-service.js';
@@ -144,6 +145,30 @@ export function shouldStartCorrectionObserver(
     nextAction: 'set features.correction_observer.enabled=true in .pd/config.yaml to enable',
     featureFlag: 'correction_observer',
     boundedContext: 'correction_observer_service',
+    flagSource: flag.source,
+  });
+  return { shouldStart: false, flagSource: flag.source, disabledInfo };
+}
+
+export interface InternalizationAutoConsumerGateResult {
+  shouldStart: boolean;
+  flagSource: string;
+  disabledInfo: string | null;
+}
+
+export function shouldStartInternalizationAutoConsumer(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): InternalizationAutoConsumerGateResult {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'internalization_auto_consumer', logger);
+  if (flag.enabled) {
+    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
+  }
+  const disabledInfo = JSON.stringify({
+    reason: 'internalization_auto_consumer_disabled',
+    nextAction: 'pd runtime internalization run-once --workspace "<workspace>" --runner dreamer --runtime config --json',
+    featureFlag: 'internalization_auto_consumer',
+    boundedContext: 'internalization_auto_consumer',
     flagSource: flag.source,
   });
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
@@ -257,6 +282,23 @@ const plugin = {
             } else {
               api.logger.info(`[PD] CorrectionObserver NOT started for workspace: ${workspaceDir}. ${corrGate.disabledInfo}`);
               SystemLogger.log(workspaceDir, 'CORRECTION_OBSERVER_DISABLED', corrGate.disabledInfo ?? '');
+            }
+
+            // ── Start InternalizationAutoConsumer for THIS workspace ──
+            // PRI-381: Bounded auto-consumer for dreamer ready tasks.
+            // Default ON for dogfood; kill switch via features.internalization_auto_consumer.enabled=false.
+            const autoConsGate = shouldStartInternalizationAutoConsumer(workspaceDir, api.logger);
+            if (autoConsGate.shouldStart) {
+              InternalizationAutoConsumerService.start({
+                config: api.config,
+                workspaceDir,
+                stateDir: path.join(workspaceDir, '.state'),
+                logger: api.logger,
+              });
+              api.logger.info(`[PD] InternalizationAutoConsumer started for workspace: ${workspaceDir} (flag source: ${autoConsGate.flagSource})`);
+            } else {
+              api.logger.info(`[PD] InternalizationAutoConsumer NOT started for workspace: ${workspaceDir}. ${autoConsGate.disabledInfo}`);
+              SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_DISABLED', autoConsGate.disabledInfo ?? '');
             }
           }
 
@@ -562,6 +604,8 @@ const plugin = {
       if (guardedPdTask) api.registerService(guardedPdTask);
       const guardedCentralSync = guardService('service:central-sync', CentralSyncService, api.logger);
       if (guardedCentralSync) api.registerService(guardedCentralSync);
+      const guardedAutoConsumer = guardService('service:internalization-auto-consumer', InternalizationAutoConsumerService, api.logger);
+      if (guardedAutoConsumer) api.registerService(guardedAutoConsumer);
     } catch (err) {
       api.logger.error(`[PD] Failed to register services: ${String(err)}`);
     }

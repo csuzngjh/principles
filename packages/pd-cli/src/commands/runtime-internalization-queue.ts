@@ -12,13 +12,14 @@ import { createInternalizationQueueReadModel } from '@principles/core/runtime-v2
 import type { InternalizationQueueSnapshot } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
 interface QueueOptions {
   workspace?: string;
   json?: boolean;
 }
 
-function formatTextOutput(snap: InternalizationQueueSnapshot): string {
+function formatTextOutput(snap: InternalizationQueueSnapshot, workspaceDir: string): string {
   const lines: string[] = [];
   lines.push(`Internalization Queue Snapshot`);
   lines.push(`  pending: ${snap.pendingCount}  retry_wait: ${snap.retryWaitCount}`);
@@ -78,6 +79,11 @@ function formatTextOutput(snap: InternalizationQueueSnapshot): string {
     }
   }
 
+  if (snap.readyTasks.length > 0) {
+    const nextAction = `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
+    lines.push(`  nextAction: ${nextAction}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -95,10 +101,25 @@ export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Pro
   try {
     const snapshot = await readModel.getSnapshot();
 
+    const pdConfigResult = loadPdConfig(workspaceDir);
+    const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
+    const autoConsumerEnabled = pdFlags.flags.internalization_auto_consumer?.enabled ?? false;
+
     if (opts.json) {
-      console.log(JSON.stringify(snapshot, null, 2));
+      const output: Record<string, unknown> = { ...snapshot };
+
+      if (snapshot.readyTasks.length > 0) {
+        if (autoConsumerEnabled) {
+          output.consumerStatus = 'auto_consumer_enabled';
+        } else {
+          output.nextAction = `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
+          output.consumerStatus = 'manual_action_required';
+        }
+      }
+
+      console.log(JSON.stringify(output, null, 2));
     } else {
-      console.log(formatTextOutput(snapshot));
+      console.log(formatTextOutput(snapshot, workspaceDir));
     }
   } finally {
     await close();

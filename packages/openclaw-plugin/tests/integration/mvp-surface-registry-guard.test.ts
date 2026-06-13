@@ -244,6 +244,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       const expectedIds = [
         'service:central-sync',
         'service:correction-observer',
+        'service:internalization-auto-consumer',
         'service:pd-task',
         'service:trajectory',
       ].sort();

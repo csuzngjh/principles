@@ -37,6 +37,16 @@ vi.mock('../../src/services/feature-flag-loader.js', () => ({
   }),
 }));
 
+const { mockLoadPdConfig, mockComputeFlagsFromLoadResult } = vi.hoisted(() => ({
+  mockLoadPdConfig: vi.fn(),
+  mockComputeFlagsFromLoadResult: vi.fn(),
+}));
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: mockLoadPdConfig,
+  computeFlagsFromLoadResult: mockComputeFlagsFromLoadResult,
+}));
+
 import { handleRuntimeInternalizationQueue } from '../../src/commands/runtime-internalization-queue.js';
 
 const WS = '/fake/workspace';
@@ -68,6 +78,12 @@ describe('handleRuntimeInternalizationQueue', () => {
     vi.clearAllMocks();
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockLoadPdConfig.mockReturnValue({ ok: true, effective: {}, source: 'defaults' });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {},
+      source: 'defaults',
+      errors: [],
+    });
   });
 
   afterEach(() => {
@@ -249,5 +265,81 @@ describe('handleRuntimeInternalizationQueue', () => {
     expect(output.countsByTaskKind.dreamer).toBe(2);
     expect(output.countsByTaskKind.scribe).toBe(1);
     expect(output.countsByChannel.prompt).toBe(3);
+  });
+
+  // ── nextAction / consumerStatus (PRI-381) ──────────────────────────────────
+
+  it('ready tasks + auto-consumer disabled → consumerStatus=manual_action_required + nextAction in JSON', async () => {
+    mockGetSnapshot.mockResolvedValue({
+      ...emptySnapshot(),
+      pendingCount: 3,
+      readyTasks: [
+        { taskId: 'task_dreamer_1', taskKind: 'dreamer', channel: 'prompt' },
+        { taskId: 'task_dreamer_2', taskKind: 'dreamer', channel: 'prompt' },
+      ],
+      noReadyTasks: null,
+    });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {},
+      source: 'defaults',
+      errors: [],
+    });
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.consumerStatus).toBe('manual_action_required');
+    expect(output.nextAction).toContain('pd runtime internalization run-once');
+    expect(output.nextAction).toContain('--runner dreamer');
+    expect(output.nextAction).toContain('--json');
+  });
+
+  it('ready tasks + auto-consumer enabled → consumerStatus=auto_consumer_enabled in JSON', async () => {
+    mockGetSnapshot.mockResolvedValue({
+      ...emptySnapshot(),
+      pendingCount: 3,
+      readyTasks: [
+        { taskId: 'task_dreamer_1', taskKind: 'dreamer', channel: 'prompt' },
+      ],
+      noReadyTasks: null,
+    });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {
+        internalization_auto_consumer: { id: 'internalization_auto_consumer', enabled: true, category: 'core' },
+      },
+      source: 'config',
+      errors: [],
+    });
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.consumerStatus).toBe('auto_consumer_enabled');
+    expect(output.nextAction).toBeUndefined();
+  });
+
+  it('no ready tasks → no consumerStatus or nextAction in JSON', async () => {
+    mockGetSnapshot.mockResolvedValue(emptySnapshot());
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.consumerStatus).toBeUndefined();
+    expect(output.nextAction).toBeUndefined();
+  });
+
+  it('ready tasks in text output show nextAction', async () => {
+    mockGetSnapshot.mockResolvedValue({
+      ...emptySnapshot(),
+      pendingCount: 1,
+      readyTasks: [{ taskId: 'task_003', taskKind: 'dreamer', channel: 'prompt' }],
+      noReadyTasks: null,
+    });
+
+    await handleRuntimeInternalizationQueue({ workspace: WS, json: false });
+
+    const text = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(text).toContain('nextAction:');
+    expect(text).toContain('pd runtime internalization run-once');
   });
 });
