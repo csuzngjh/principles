@@ -179,6 +179,7 @@ describe('validateEvidenceChainRecord', () => {
   it('accepts all valid state values', () => {
     const states = [
       'recorded-only',
+      'evidence-only',
       'diagnosis-queued',
       'diagnosis-running',
       'diagnosis-succeeded',
@@ -245,16 +246,20 @@ describe('validateEvidenceChainRecord', () => {
     expect(validateEvidenceChain(input)).toBeNull();
   });
 
-  // Evidence-only should not display as pain
-  it('distinguishes evidence_only from pain_recorded', () => {
-    const evidenceOnly = validRecord({ state: 'recorded-only', sourceKind: 'tool_call' });
+  // Evidence-only must be a distinct state from recorded-only (PRI-385 P1-2).
+  // The previous assertion claimed to "distinguish" the two but gave both the same
+  // `recorded-only` state — a vacuous test. evidence_only observations now carry their
+  // own `evidence-only` state so they cannot be grouped into the active pain chain.
+  it('distinguishes evidence_only (evidence-only) from store_signal (recorded-only)', () => {
+    const evidenceOnly = validRecord({ state: 'evidence-only', sourceKind: 'tool_call' });
     const painRecorded = validRecord({ state: 'recorded-only', sourceKind: 'manual' });
 
     const input = validResponse({ records: [evidenceOnly, painRecorded] });
     const result = validateEvidenceChain(input);
     expect(result).not.toBeNull();
-    expect(result!.records[0].state).toBe('recorded-only');
+    expect(result!.records[0].state).toBe('evidence-only');
     expect(result!.records[1].state).toBe('recorded-only');
+    expect(result!.records[0].state).not.toBe(result!.records[1].state);
   });
 
   // Diagnosis failed shows failed/retry reason

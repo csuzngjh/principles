@@ -13,6 +13,7 @@ import { Type } from '@sinclair/typebox';
 
 export type EvidenceChainState =
   | 'recorded-only'
+  | 'evidence-only'
   | 'diagnosis-queued'
   | 'diagnosis-running'
   | 'diagnosis-succeeded'
@@ -30,6 +31,7 @@ export type EvidenceChainState =
 
 export const EvidenceChainStateSchema = Type.Union([
   Type.Literal('recorded-only'),
+  Type.Literal('evidence-only'),
   Type.Literal('diagnosis-queued'),
   Type.Literal('diagnosis-running'),
   Type.Literal('diagnosis-succeeded'),
@@ -235,19 +237,87 @@ export function determineState(params: ChainStateParams): EvidenceChainState {
   }
 
   const admission = inferAdmissionDecision(sourceKind);
-  if (admission === 'store_signal') {
-    return 'recorded-only';
+  if (admission === 'evidence_only') {
+    // Observed evidence that has NOT entered the governance chain (tool_call / hook /
+    // rulehost observations). Kept distinct from `recorded-only` so owners do not
+    // mistake passive observations for active governance. (PRI-385 P1-2)
+    return 'evidence-only';
   }
-  return 'recorded-only'; // All evidence-only also defaults to recorded-only
+  // store_signal (manual/review) and owner_confirmation_required (empathy_inferred)
+  // are owner-admitted signals awaiting the pipeline → active chain.
+  return 'recorded-only';
 }
 
-export function determineNextAction(state: EvidenceChainState, workspaceDir: string): string | undefined {
-  const ws = workspaceDir;
+/**
+ * Derive the raw painId accepted by `pd pain retry --pain-id` from a diagnostician
+ * task_id. Convention (PainToPrincipleService): `task_id = diagnosis_${painId}`, so the
+ * painId is `task_id` with a single leading `diagnosis_` stripped — and it must round-trip
+ * (`diagnosis_` + painId === original linkedTaskId).
+ *
+ * Only the canonical `diagnosis_<painId>` form is safe: sub-run ids like
+ * `diag_router-diagnosis_*` do NOT start with `diagnosis_`, so they fall through to the
+ * `pd diagnose run --task-id` fallback. The record display id (`pain_*` / `manual_*`) is
+ * intentionally NOT used here — it does not satisfy the `diagnosis_${painId}` convention.
+ * (ERR-008: lineage/painId must come from one consistent source = the real task_id.)
+ */
+function deriveRetryPainId(linkedTaskId: string | undefined): string | undefined {
+  if (!linkedTaskId || !linkedTaskId.startsWith('diagnosis_')) return undefined;
+  const painId = linkedTaskId.slice('diagnosis_'.length);
+  // Reject empty remainder or a remainder that still carries the prefix (ambiguous).
+  if (!painId || painId.startsWith('diagnosis_')) return undefined;
+  return painId;
+}
+
+/**
+ * Build an executable recovery command for failed/retry-wait diagnosis.
+ *
+ * Priority (PRI-385 P1-1):
+ *   1. Safe raw painId  → `pd pain retry --pain-id <painId> --workspace "<ws>" --runtime <kind>`
+ *   2. Any linkedTaskId → `pd diagnose run --task-id <linkedTaskId> --workspace "<ws>" --runtime <kind>`
+ *   3. Neither          → returns undefined (caller emits a reason-style nextAction instead).
+ *
+ * `--workspace` is always explicit (per PRI-385 owner note: recovery commands must
+ * preserve workspace identity). `--runtime <kind>` is shown as a required placeholder
+ * because `pd pain retry` / `pd diagnose run` refuse without an explicit runtime.
+ */
+function buildRetryCommand(linkedTaskId: string | undefined, ws: string): string | undefined {
+  const painId = deriveRetryPainId(linkedTaskId);
+  if (painId) {
+    return `pd pain retry --pain-id ${painId} --workspace "${ws}" --runtime <kind>`;
+  }
+  if (linkedTaskId) {
+    return `pd diagnose run --task-id ${linkedTaskId} --workspace "${ws}" --runtime <kind>`;
+  }
+  return undefined;
+}
+
+export interface NextActionContext {
+  state: EvidenceChainState;
+  workspaceDir: string;
+  /**
+   * Display record id (`pain_*` / `manual_*` / task-derived). Carried for context only;
+   * it is NOT a valid `--pain-id` (format mismatch with the `diagnosis_${painId}` convention).
+   */
+  recordId?: string;
+  /** The actual diagnostician task_id; the authoritative source for the retry painId (ERR-008). */
+  linkedTaskId?: string;
+}
+
+export function determineNextAction(ctx: NextActionContext): string | undefined {
+  const { state, workspaceDir: ws, linkedTaskId } = ctx;
   switch (state) {
-    case 'diagnosis-retry-wait':
-      return `Diagnosis is waiting for automatic retry. Run: pd pain retry --workspace "${ws}" to force retry.`;
-    case 'diagnosis-failed':
-      return `Diagnosis failed. Check the error details and retry if appropriate, or run: pd pain retry --workspace "${ws}"`;
+    case 'diagnosis-retry-wait': {
+      const cmd = buildRetryCommand(linkedTaskId, ws);
+      return cmd
+        ? `Diagnosis is waiting for automatic retry. Force retry: ${cmd}`
+        : 'Diagnosis is waiting for automatic retry, but no retryable task id is linked. Check Runtime V2 pipeline status.';
+    }
+    case 'diagnosis-failed': {
+      const cmd = buildRetryCommand(linkedTaskId, ws);
+      return cmd
+        ? `Diagnosis failed. Retry: ${cmd}`
+        : 'Diagnosis failed, but no retryable task id is linked. Check the failure details and Runtime V2 pipeline status.';
+    }
     case 'diagnosis-succeeded':
       return 'Diagnosis completed. A principle candidate may be generated shortly.';
     case 'candidate-generated':
@@ -634,7 +704,7 @@ export function assembleEvidenceChain(params: {
     }
 
     // Generate nextAction from state
-    record.nextAction = determineNextAction(state, workspaceDir);
+    record.nextAction = determineNextAction({ state, workspaceDir, recordId: painId, linkedTaskId: linkedTask?.taskId });
 
     if (!linkedTask && stateDbAvailable && taskMap.size > 0) {
       continue;
@@ -662,11 +732,15 @@ export function assembleEvidenceChain(params: {
         const score = typeof event.score === 'number' ? event.score : 0;
         const sourceKind = mapSourceKind(source);
 
+        // No linked task/candidate: state is admission-driven. tool_call/hook observations
+        // are `evidence-only`; manual/review are `recorded-only`. (PRI-385 P1-2)
+        const unmatchedState = determineState({ sourceKind, hasCandidate: false });
+
         const record: EvidenceChainRecord = {
           id: painId,
           sourceKind,
           observedAt: createdAt,
-          state: 'recorded-only',
+          state: unmatchedState,
           summary: text || reason || `Pain signal (source: ${source}, score: ${score})`,
           admissionDecision: inferAdmissionDecision(sourceKind),
           degradedReason: 'Could not link this pain event to a diagnostician task. The chain may be incomplete.',
@@ -743,7 +817,7 @@ export function assembleEvidenceChain(params: {
       record.linkedPrincipleId = linkedPrincipleId;
     }
 
-    record.nextAction = determineNextAction(state, workspaceDir);
+    record.nextAction = determineNextAction({ state, workspaceDir, recordId: painId, linkedTaskId: crossRefTask.taskId });
 
     if (crossRefTask.diagnosticJsonDegraded) {
       record.degradedReason = 'Diagnostic data for this record could not be parsed';
@@ -818,7 +892,7 @@ export function assembleEvidenceChain(params: {
       record.linkedPrincipleId = linkedPrincipleId;
     }
 
-    record.nextAction = determineNextAction(state, workspaceDir);
+    record.nextAction = determineNextAction({ state, workspaceDir, recordId: painId, linkedTaskId: task.taskId });
 
     if (task.diagnosticJsonDegraded) {
       record.degradedReason = 'Diagnostic data for this record could not be parsed';

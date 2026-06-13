@@ -1051,6 +1051,7 @@ export function validateApprovalsGrouped(v: unknown): ApprovalsGroupedData | nul
 
 const VALID_EVIDENCE_CHAIN_STATES: ReadonlySet<string> = new Set([
   'recorded-only',
+  'evidence-only',
   'diagnosis-queued',
   'diagnosis-running',
   'diagnosis-succeeded',
@@ -1069,6 +1070,7 @@ const VALID_EVIDENCE_CHAIN_STATES: ReadonlySet<string> = new Set([
 
 export type EvidenceChainStateData =
   | 'recorded-only'
+  | 'evidence-only'
   | 'diagnosis-queued'
   | 'diagnosis-running'
   | 'diagnosis-succeeded'

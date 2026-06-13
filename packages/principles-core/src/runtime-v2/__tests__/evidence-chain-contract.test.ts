@@ -54,6 +54,18 @@ describe('Pain Evidence Chain Contract (PRI-385)', () => {
       expect(state).toBe('recorded-only');
     });
 
+    it('returns evidence-only for tool_call observations (evidence_only admission)', () => {
+      // Observations that never entered the governance chain must NOT collapse into
+      // recorded-only/active_chain (PRI-385 P1-2).
+      expect(determineState({ sourceKind: 'tool_call', hasCandidate: false })).toBe('evidence-only');
+      expect(determineState({ sourceKind: 'rulehost', hasCandidate: false })).toBe('evidence-only');
+    });
+
+    it('keeps manual/review as recorded-only (store_signal admission)', () => {
+      expect(determineState({ sourceKind: 'manual', hasCandidate: false })).toBe('recorded-only');
+      expect(determineState({ sourceKind: 'review', hasCandidate: false })).toBe('recorded-only');
+    });
+
     it('returns diagnosis-queued when task is pending', () => {
       const state = determineState({
         sourceKind: 'manual',
@@ -103,24 +115,68 @@ describe('Pain Evidence Chain Contract (PRI-385)', () => {
     });
   });
 
-  // 3. determineNextAction workspace safety checks
-  describe('determineNextAction workspace safety', () => {
+  // 3. determineNextAction recovery command correctness (PRI-385 P1-1)
+  describe('determineNextAction recovery commands', () => {
     const ws = '/workspace/test';
 
-    it('includes workspace path in diagnosis-retry-wait action command', () => {
-      const action = determineNextAction('diagnosis-retry-wait', ws);
-      expect(action).toContain(`--workspace "${ws}"`);
+    it('diagnosis-failed with canonical task id emits pd pain retry with --pain-id and --workspace', () => {
+      // Convention: task_id = diagnosis_<painId>; the safe painId is the suffix that
+      // round-trips. diagnosis_manual_1 → painId manual_1 (NOT the record id pain_*).
+      const action = determineNextAction({
+        state: 'diagnosis-failed',
+        workspaceDir: ws,
+        recordId: 'pain_1',
+        linkedTaskId: 'diagnosis_manual_1',
+      });
+      expect(action).toBeDefined();
       expect(action).toContain('pd pain retry');
+      expect(action).toContain('--pain-id manual_1');
+      expect(action).toContain(`--workspace "${ws}"`);
+      // record id must NOT leak into --pain-id (format mismatch with diagnosis_<painId>).
+      expect(action).not.toContain('--pain-id pain_1');
     });
 
-    it('includes workspace path in diagnosis-failed action command', () => {
-      const action = determineNextAction('diagnosis-failed', ws);
-      expect(action).toContain(`--workspace "${ws}"`);
+    it('diagnosis-retry-wait with canonical task id emits pd pain retry with --pain-id and --workspace', () => {
+      const action = determineNextAction({
+        state: 'diagnosis-retry-wait',
+        workspaceDir: ws,
+        linkedTaskId: 'diagnosis_pain_42',
+      });
+      expect(action).toBeDefined();
       expect(action).toContain('pd pain retry');
+      expect(action).toContain('--pain-id pain_42');
+      expect(action).toContain(`--workspace "${ws}"`);
     });
 
-    it('includes workspace path in candidate-generated / internalization-missing command', () => {
-      const action = determineNextAction('candidate-generated', ws);
+    it('falls back to pd diagnose run --task-id for sub-run task ids (no blind strip)', () => {
+      // diag_router-diagnosis_* does NOT start with diagnosis_, so it cannot be retried
+      // via pd pain retry. Fall back to the exact task id (PRI-385 P1-1).
+      const action = determineNextAction({
+        state: 'diagnosis-failed',
+        workspaceDir: ws,
+        linkedTaskId: 'diag_router-diagnosis_manual_2',
+      });
+      expect(action).toBeDefined();
+      expect(action).toContain('pd diagnose run --task-id diag_router-diagnosis_manual_2');
+      expect(action).toContain(`--workspace "${ws}"`);
+      expect(action).not.toContain('pd pain retry');
+    });
+
+    it('emits a reason-style nextAction (no command) when no task id is linked', () => {
+      const action = determineNextAction({
+        state: 'diagnosis-failed',
+        workspaceDir: ws,
+      });
+      expect(action).toBeDefined();
+      expect(action).not.toContain('pd pain retry');
+      expect(action).not.toContain('pd diagnose run');
+    });
+
+    it('keeps --workspace in candidate-generated / internalization-missing command', () => {
+      const action = determineNextAction({
+        state: 'candidate-generated',
+        workspaceDir: ws,
+      });
       expect(action).toContain(`--workspace "${ws}"`);
       expect(action).toContain('pd runtime internalization run-once');
     });
@@ -190,14 +246,51 @@ describe('Pain Evidence Chain Contract (PRI-385)', () => {
       expect(res.degradedReason).toBeUndefined();
     });
 
-    it('workspaceMismatchWarning: warns about unmatched pain signals', () => {
+    it('workspaceMismatchWarning: unmatched tool_call observation is evidence-only, not active chain', () => {
+      // PRI-385 P1-2: a hook/tool_call observation that could not be linked to a
+      // diagnostician task must surface as `evidence-only`, never `recorded-only`
+      // (which groups into active_chain). This is the real unmatched assembly path.
       const { res } = firstRecordOf('workspaceMismatchWarning');
       expect(res.records).toHaveLength(2);
       const record = res.records.find(r => r.id === 'pain_10');
       expect(record).toBeDefined();
-      expect(record?.state).toBe('recorded-only');
+      expect(record?.state).toBe('evidence-only');
+      expect(record?.admissionDecision).toBe('evidence_only');
       expect(record?.degradedReason).toContain('Could not link this pain event to a diagnostician task');
       expect(res.degradedReason).toContain('Pain event pain_10 could not be linked');
+    });
+
+    it('diagnosis-failed record (real assembleEvidenceChain path) emits retry command with --pain-id and --workspace', () => {
+      // PRI-385 P1-1 / ERR-025: prove the executable nextAction flows through the real
+      // assembly mapper, not just the isolated determineNextAction helper.
+      const res = assembleEvidenceChain({
+        workspaceDir: '/workspace/dogfood',
+        painEvents: [
+          { id: 21, source: 'manual', reason: 'Failed diagnosis', created_at: '2026-06-13T10:30:00.000Z', score: 90 },
+        ],
+        tasks: [
+          {
+            task_id: 'diagnosis_manual_21',
+            task_kind: 'diagnostician',
+            status: 'failed',
+            created_at: '2026-06-13T10:31:00.000Z',
+            input_ref: 'pain_21',
+            last_error: 'LLM timed out',
+          },
+        ],
+        candidates: [],
+        dreamerTasks: [],
+        ledgerPrinciples: [],
+        trajectoryDbAvailable: true,
+        stateDbAvailable: true,
+      });
+      const record = res.records.find(r => r.id === 'pain_21');
+      expect(record).toBeDefined();
+      expect(record?.state).toBe('diagnosis-failed');
+      expect(record?.linkedTaskId).toBe('diagnosis_manual_21');
+      expect(record?.nextAction).toContain('pd pain retry');
+      expect(record?.nextAction).toContain('--pain-id manual_21');
+      expect(record?.nextAction).toContain('--workspace "/workspace/dogfood"');
     });
 
     it('autoConsumerSuccess: links success to internalization-succeeded state', () => {

@@ -36,6 +36,8 @@ function tFallback(t: (key: string) => string, key: string, fallback: string): s
 
 function groupForState(state: EvidenceChainStateData): StateGroup {
   switch (state) {
+    case 'evidence-only':
+      return 'evidence_only';
     case 'recorded-only':
     case 'diagnosis-queued':
     case 'diagnosis-running':
@@ -443,6 +445,8 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
 
 function stateToVariant(state: EvidenceChainStateData): 'default' | 'amber' | 'green' | 'destructive' | 'secondary' {
   switch (state) {
+    case 'evidence-only':
+      return 'secondary';
     case 'recorded-only':
     case 'diagnosis-queued':
     case 'diagnosis-running':

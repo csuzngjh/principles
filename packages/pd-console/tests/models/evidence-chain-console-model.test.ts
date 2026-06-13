@@ -311,7 +311,10 @@ describe('EvidenceChainConsoleModel — manual pain with diagnosis', () => {
 // ── Evidence-only not shown as pain ───────────────────────────────────────────
 
 describe('EvidenceChainConsoleModel — evidence-only vs pain', () => {
-  it('tool_call source shows as recorded-only (admission evidence_only)', async () => {
+  it('tool_call observation shows as evidence-only (not active chain)', async () => {
+    // PRI-385 P1-2: a tool_call observation (admission evidence_only) that never entered
+    // the governance chain must surface as `evidence-only`, not `recorded-only`, so the
+    // owner is not misled into thinking PD is actively processing it. Real DB path.
     const trajDb = createTrajectoryDb();
     insertPainEvent(trajDb, {
       source: 'tool_call',
@@ -323,7 +326,7 @@ describe('EvidenceChainConsoleModel — evidence-only vs pain', () => {
     const result = await model.getEvidenceChain();
     expect(result.records).toHaveLength(1);
     expect(result.records[0].sourceKind).toBe('tool_call');
-    expect(result.records[0].state).toBe('recorded-only');
+    expect(result.records[0].state).toBe('evidence-only');
     expect(result.records[0].admissionDecision).toBe('evidence_only');
   });
 
