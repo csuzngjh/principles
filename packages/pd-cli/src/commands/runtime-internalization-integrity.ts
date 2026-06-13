@@ -33,6 +33,7 @@ function formatTextOutput(result: ChainIntegrityResult): string {
       const sevIcon = link.severity === 'error' ? '✗' : '⚠';
       lines.push(`  ${sevIcon} [${link.severity}] ${link.type}: ${link.reason}`);
       if (link.taskId) lines.push(`    taskId: ${link.taskId}`);
+      if (link.runId) lines.push(`    runId: ${link.runId}`);
       if (link.candidateId) lines.push(`    candidateId: ${link.candidateId}`);
       lines.push(`    action: ${link.recommendedAction}`);
     }
