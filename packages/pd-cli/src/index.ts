@@ -927,4 +927,28 @@ consoleCmd.action(async (opts) => {
   });
 });
 
+// ─── Quality Scorecard (PRI-361) ──────────────────────────────────
+
+const qualityCmd = program
+  .command('quality')
+  .description('Quality scoring and evaluation');
+
+qualityCmd
+  .command('scorecard')
+  .description('Generate quality scorecard report for PD pain→diagnosis→principle chain')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--local-model <id>', 'LM Studio model ID', 'qwen3.6-27b-mtp')
+  .option('--local-url <url>', 'LM Studio base URL', 'http://localhost:12341/v1')
+  .option('--strong-model <id>', 'Strong model for adjudication (provider/model)')
+  .option('--skip-strong-model', 'Skip strong model adjudication', false)
+  .option('--min-score <n>', 'Minimum pain score to evaluate', '50')
+  .option('--limit <n>', 'Max episodes to evaluate (0=all)', '0')
+  .option('--format <fmt>', 'Output format: json, markdown, html', 'markdown')
+  .option('--output <path>', 'Output file path')
+  .option('--json', 'Output as JSON', false)
+  .action(async (opts) => {
+    const { handleQualityScorecard } = await import('./commands/quality-scorecard.js');
+    await handleQualityScorecard(opts);
+  });
+
 program.parse();
