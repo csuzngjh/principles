@@ -12,6 +12,7 @@ import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { TaskRecord } from '../task-status.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
+import { StalledDiagnosticianTaskReadModel } from '../stalled-diagnostician-task-read-model.js';
 
 /** Options for pd candidate list */
 export interface CandidateListOptions {
@@ -78,6 +79,8 @@ export interface DiagnoseStatusOptions {
   taskId: string;
   /** Initialized RuntimeStateManager instance. */
   stateManager: RuntimeStateManager;
+  /** Age threshold in seconds for classifying task as stalled (default: 300) */
+  stalledThresholdSeconds?: number;
 }
 
 /** Structured status result per D-03, extended per CLIV-04 for commit/candidate info. */
@@ -93,6 +96,11 @@ export interface DiagnoseStatusResult {
   readonly artifactId: string | null;
   /** Populated only when status is 'succeeded' — number of candidates registered */
   readonly candidateCount: number | null;
+  // Extended fields for stalled tasks (PRI-377)
+  readonly inputRef?: string | null;
+  readonly age?: number | null;
+  readonly reason?: string | null;
+  readonly nextAction?: string | null;
 }
 
 /**
@@ -133,6 +141,10 @@ export async function status(options: DiagnoseStatusOptions): Promise<DiagnoseSt
     }
   }
 
+  // Check if task is stalled (PRI-377)
+  const readModel = new StalledDiagnosticianTaskReadModel({ stateManager: options.stateManager });
+  const stalledInfo = await readModel.checkStalledTask(options.taskId, options.stalledThresholdSeconds);
+
   return {
     taskId: task.taskId,
     status: task.status,
@@ -142,6 +154,12 @@ export async function status(options: DiagnoseStatusOptions): Promise<DiagnoseSt
     commitId,
     artifactId,
     candidateCount,
+    ...(stalledInfo ? {
+      inputRef: stalledInfo.inputRef,
+      age: stalledInfo.age,
+      reason: stalledInfo.reason,
+      nextAction: stalledInfo.nextAction,
+    } : {}),
   };
 }
 

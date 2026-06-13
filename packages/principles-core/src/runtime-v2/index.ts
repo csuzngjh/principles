@@ -317,6 +317,10 @@ export type { CandidateAuditResult } from './candidate-audit.js';
 export { OperatorHealthReadModel } from './operator-health-read-model.js';
 export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHealthStatus } from './operator-health-read-model.js';
 
+// Stalled diagnostician task read model (PRI-377)
+export { StalledDiagnosticianTaskReadModel } from './stalled-diagnostician-task-read-model.js';
+export type { StalledDiagnosticianTaskInfo, StalledDiagnosticianTaskReadModelOptions } from './stalled-diagnostician-task-read-model.js';
+
 // Synthetic baseline (PRI-206) — pure contract/helpers only; I/O runner lives in pd-cli
 export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
 export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
