@@ -133,6 +133,7 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
           reason: malformedError?.message ?? 'Unknown malformed run schema',
           nextAction: 'Use integrity-repair to clean up or recover malformed runs, or fix runs in DB',
         }, null, 2));
+        process.exitCode = 1;
       } else {
         console.log(JSON.stringify({ task, runs }, null, 2));
       }

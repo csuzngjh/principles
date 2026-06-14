@@ -124,7 +124,7 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
         summaryNextAction = `Run with --confirm to recover tasks, and use --force to recover exhausted tasks`;
       }
     } else {
-      summaryReason = `Successfully recovered ${recoveredCount} failed tasks, skipped ${skippedCount} exhausted tasks`;
+      summaryReason = `Successfully recovered ${recoveredCount} failed tasks, skipped ${skippedCount} tasks`;
       summaryNextAction = recoveredCount > 0
         ? 'Run pd runtime internalization run-once to execute recovered tasks'
         : 'No tasks recovered';
