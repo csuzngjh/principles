@@ -4,6 +4,7 @@ import {
   determineState,
   determineNextAction,
   normalizeDiagnosticianTaskId,
+  normalizeSummaryForDedupe,
 } from '../types/evidence-chain-contract.js';
 import { GOLDEN_FIXTURES } from '../internalization/golden-dogfood-fixtures.js';
 
@@ -41,6 +42,83 @@ describe('Pain Evidence Chain Contract (PRI-385)', () => {
       const res = normalizeDiagnosticianTaskId('diag_router_diagnosis_manual_2');
       expect(res.success).toBe(false);
       expect(res.reason).toContain('Malformed');
+    });
+  });
+
+  // 1b. normalizeSummaryForDedupe Unicode-aware normalization tests (reviewer P1 round 3)
+  //
+  // The previous implementation used `/[^\w\s]/g` which only retains
+  // `[A-Za-z0-9_]`. That pattern DROPS CJK ideographs entirely, so every
+  // Chinese pain summary collapsed to whatever ASCII prefix it had (often the
+  // empty string), making content-hash dedupe silently wrong for non-ASCII
+  // owners. The Unicode-aware pipeline (NFKC + \p{L}\p{N} + u flag) keeps
+  // letters and digits across every script.
+  describe('Summary Normalization for Dedupe (Unicode-aware)', () => {
+    it('lowercases ASCII and strips punctuation but keeps the words', () => {
+      // Baseline behavior — must still hold after the Unicode fix.
+      expect(normalizeSummaryForDedupe('Agent modified config!'))
+        .toBe('agent modified config');
+      expect(normalizeSummaryForDedupe('Agent modified config'))
+        .toBe('agent modified config');
+      // Both must hash to the SAME key (regression assertion).
+      expect(normalizeSummaryForDedupe('Agent modified config!'))
+        .toBe(normalizeSummaryForDedupe('agent modified config'));
+    });
+
+    it('preserves CJK ideographs (the P1 round-3 regression)', () => {
+      // Pre-fix, `/[^\w\s]/g` reduced this to 'agent' — losing the Chinese
+      // content entirely and collapsing every Chinese pain to one hash.
+      expect(normalizeSummaryForDedupe('Agent 未经批准修改了配置'))
+        .toBe('agent 未经批准修改了配置');
+      // Punctuation (CJK fullwidth exclamation) is stripped but the words stay.
+      expect(normalizeSummaryForDedupe('Agent 未经批准修改了配置！'))
+        .toBe('agent 未经批准修改了配置');
+      // Both variants must hash to the same key — the core dedupe guarantee.
+      expect(normalizeSummaryForDedupe('Agent 未经批准修改了配置！'))
+        .toBe(normalizeSummaryForDedupe('Agent 未经批准修改了配置'));
+    });
+
+    it('collapses fullwidth forms via NFKC', () => {
+      // Fullwidth Latin letters + fullwidth space (U+3000) must fold to their
+      // ASCII counterparts before content-hash comparison. Different owners
+      // using different input methods (or copy-pasted text) should still match.
+      expect(normalizeSummaryForDedupe('Ａｇｅｎｔ　修改'))
+        .toBe(normalizeSummaryForDedupe('Agent 修改'));
+      // Fullwidth digits fold too.
+      expect(normalizeSummaryForDedupe('配置错误 １２３'))
+        .toBe(normalizeSummaryForDedupe('配置错误 123'));
+    });
+
+    it('preserves Cyrillic and Arabic letters, not just ASCII + CJK', () => {
+      // \p{L} is script-agnostic; we don't want a CJK-only patch that silently
+      // breaks again for the next non-ASCII script.
+      expect(normalizeSummaryForDedupe('Агент изменил конфиг!'))
+        .toBe('агент изменил конфиг');
+      // Arabic letters are preserved. Combining marks (\p{M}, e.g. Arabic
+      // shadda ّ U+0651) are intentionally stripped — they are pronunciation
+      // guides rather than lexical content, and stripping them gives better
+      // dedupe: the same word written with/without shadda hashes to the same
+      // key. (The fix here is \p{L}\p{N}; we deliberately do NOT include
+      // \p{M}.)
+      expect(normalizeSummaryForDedupe('الوكيل عدّل الإعدادات'))
+        .toBe('الوكيل عدل الإعدادات');
+    });
+
+    it('collapses runs of whitespace (incl. CJK fullwidth space) to a single space', () => {
+      expect(normalizeSummaryForDedupe('Agent   modified\tconfig'))
+        .toBe('agent modified config');
+      // U+3000 fullwidth space folds to ' ' via NFKC, then collapses.
+      expect(normalizeSummaryForDedupe('Agent　　modified'))
+        .toBe('agent modified');
+    });
+
+    it('returns the empty string for whitespace/punctuation-only input', () => {
+      // Important: the dedupe code uses `if (!normalized) continue;` to skip
+      // empty keys. This MUST stay falsy after the Unicode change so we never
+      // build a wildcard "match everything" key.
+      expect(normalizeSummaryForDedupe('')).toBe('');
+      expect(normalizeSummaryForDedupe('   ')).toBe('');
+      expect(normalizeSummaryForDedupe('！！！')).toBe('');
     });
   });
 
