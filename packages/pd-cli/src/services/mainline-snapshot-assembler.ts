@@ -80,6 +80,38 @@ function readOwnString(obj: Record<string, unknown>, key: string): string | unde
   return isNonEmptyString(value) ? value : undefined;
 }
 
+// ── Row validators (ERR-001: DB rows are untrusted) ───────────────────────────
+
+interface DiagnosticianArtifactRow {
+  artifactId: string;
+  runId: string;
+  taskId: string;
+  artifactKind: string;
+  contentJson: string;
+}
+
+function validateDiagnosticianArtifactRow(value: unknown): DiagnosticianArtifactRow | null {
+  if (!isObject(value)) return null;
+  const artifactId = readOwnString(value, 'artifact_id');
+  const runId = readOwnString(value, 'run_id');
+  const taskId = readOwnString(value, 'task_id');
+  const artifactKind = readOwnString(value, 'artifact_kind');
+  const contentJson = readOwnString(value, 'content_json');
+  if (!artifactId || !contentJson) return null;
+  return { artifactId, runId: runId ?? '', taskId: taskId ?? '', artifactKind: artifactKind ?? '', contentJson };
+}
+
+interface ConsumedCandidateRow {
+  candidateId: string;
+}
+
+function validateConsumedCandidateRow(value: unknown): ConsumedCandidateRow | null {
+  if (!isObject(value)) return null;
+  const candidateId = readOwnString(value, 'candidate_id');
+  if (!candidateId) return null;
+  return { candidateId };
+}
+
 // ── Context hash helper ──────────────────────────────────────────────────────
 
 function hashContextRefs(contextRefs: string[]): string {
@@ -191,24 +223,30 @@ async function findDiagnosticianArtifact(
        ORDER BY created_at DESC
        LIMIT 1`,
     )
-    .all(diagnosisTaskId) as { artifact_id: string; run_id: string; task_id: string; artifact_kind: string; content_json: string }[];
+    .all(diagnosisTaskId);
 
-  const [row] = rows;
-  if (!row) return null;
+  const [raw] = rows;
+  if (!raw) return null;
+
+  const row = validateDiagnosticianArtifactRow(raw);
+  if (!row) {
+    warnings.push(`Malformed diagnostician artifact row for task ${diagnosisTaskId}: missing artifact_id or content_json`);
+    return null;
+  }
 
   let sourcePainId: string | null = painId;
-  const parsed = safeJsonParse(row.content_json);
+  const parsed = safeJsonParse(row.contentJson);
   if (parsed.ok && isObject(parsed.value)) {
     const artifactPainId = readOwnString(parsed.value, 'painId');
     if (artifactPainId) {
       sourcePainId = artifactPainId;
     }
   } else if (parsed.ok === false) {
-    warnings.push(`Artifact ${row.artifact_id} content_json parse failed: ${parsed.reason}`);
+    warnings.push(`Artifact ${row.artifactId} content_json parse failed: ${parsed.reason}`);
   }
 
   return {
-    artifactId: row.artifact_id,
+    artifactId: row.artifactId,
     sourcePainId,
   };
 }
@@ -432,21 +470,27 @@ async function assembleChain(input: AssembleChainInput): Promise<MainlineChainSn
 
 async function findConsumedCandidatesMissingDreamer(
   stateManager: RuntimeStateManager,
+  warnings: string[],
 ): Promise<string[]> {
   const db = stateManager.connection.getDb();
   const rows = db
     .prepare(
       `SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'`,
     )
-    .all() as { candidate_id: string; task_id: string }[];
+    .all();
 
   const allTasks = await stateManager.listTasks();
   const dreamerTasks = allTasks.filter((t) => t.taskKind === 'dreamer');
   const dreamerTaskIds = new Set(dreamerTasks.map((t) => t.taskId));
 
   const orphans: string[] = [];
-  for (const row of rows) {
-    const { candidate_id: candidateId } = row;
+  for (const raw of rows) {
+    const row = validateConsumedCandidateRow(raw);
+    if (!row) {
+      warnings.push('Malformed consumed candidate row: missing candidate_id');
+      continue;
+    }
+    const { candidateId } = row;
     const predictableIds = [
       `dreamer-${candidateId}-prompt`,
       `dreamer-${candidateId}-code_tool_hook`,
@@ -482,7 +526,7 @@ export async function assembleMainlineSnapshot(
     const { painId, diagnosisTask } = await findDiagnosisTask(stateManager, options.painId, warnings);
 
     const chain = await assembleChain({ stateManager, painId, diagnosisTask, warnings });
-    const consumedCandidatesMissingDreamer = await findConsumedCandidatesMissingDreamer(stateManager);
+    const consumedCandidatesMissingDreamer = await findConsumedCandidatesMissingDreamer(stateManager, warnings);
 
     const snapshot: MainlineSnapshot = {
       readiness,

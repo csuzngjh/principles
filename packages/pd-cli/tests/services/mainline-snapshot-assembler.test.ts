@@ -363,6 +363,56 @@ describe('assembleMainlineSnapshot', () => {
     expect(verdict.stages.some((s) => s.stage === 'auto_consumption' && s.status === 'violation')).toBe(true);
   });
 
+  it('malformed artifact row (missing content_json) does not crash; warnings include reason', async () => {
+    await sm.initialize();
+    const painId = 'pain-malformed-artifact-row';
+    const taskId = await seedDiagnosisTask(sm, painId);
+    await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
+    const runs = await sm.getRunsByTask(taskId);
+    const runId = runs[0]?.runId;
+    if (!runId) throw new Error(`No run created for task ${taskId}`);
+    await sm.markTaskSucceeded(taskId);
+
+    const artifactId = 'malformed-row-artifact';
+    sm.connection.getDb().prepare(
+      `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(artifactId, runId, taskId, 'diagnostician_output', '', new Date().toISOString());
+
+    const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
+
+    expect(warnings.some((w) => w.includes('Malformed diagnostician artifact row'))).toBe(true);
+    expect(snapshot.chain.diagnosticianArtifact).toBeNull();
+    const verdict = assertMainlineContract(snapshot);
+    expect(verdict.overall).toBe('violation');
+  });
+
+  it('malformed consumed candidate row (missing candidate_id) does not produce undefined orphan; warnings include reason', async () => {
+    await sm.initialize();
+    const painId = 'pain-consumed-malformed';
+    const taskId = await seedDiagnosisTask(sm, painId);
+    await runDiagnosisToSucceeded(sm, taskId, validDiagnosticianOutput(painId));
+    const candidates = await sm.getCandidatesByTaskId(taskId);
+    const candidate = candidates[0];
+    expect(candidate).toBeDefined();
+    await sm.updateCandidateStatus(candidate!.candidateId, { status: 'consumed' });
+
+    // Insert a row with empty candidate_id to exercise the malformed-row path.
+    const db = sm.connection.getDb();
+    db.prepare(
+      `INSERT INTO principle_candidates (candidate_id, task_id, artifact_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind)
+       VALUES ('', ?, ?, ?, 'malformed', '', ?, 'consumed', ?, 'principle')`,
+    ).run(taskId, candidate!.artifactId, candidate!.sourceRunId, `idemp-${Date.now()}`, new Date().toISOString());
+
+    const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
+
+    expect(warnings.some((w) => w.includes('Malformed consumed candidate row'))).toBe(true);
+    for (const id of snapshot.consumedCandidatesMissingDreamer) {
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+    }
+  });
+
   it('resolves painId from latest diagnostician task when not provided', async () => {
     await sm.initialize();
     const painId = 'pain-latest';
