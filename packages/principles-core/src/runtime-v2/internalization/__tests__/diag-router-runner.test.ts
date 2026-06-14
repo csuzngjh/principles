@@ -161,6 +161,10 @@ function createMockDeps(overrides: Partial<DiagRouterRunnerDeps> = {}): DiagRout
       return Promise.resolve(undefined);
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: ROUTER_TASK_ID }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: RUN_ID, taskId: ROUTER_TASK_ID }],
+      degradedRuns: [],
+    }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),

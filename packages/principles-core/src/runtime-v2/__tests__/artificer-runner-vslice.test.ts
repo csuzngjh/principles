@@ -131,6 +131,10 @@ describe('ArtificerRunner (PRI-111)', () => {
         runtimeKind: 'artificer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-artificer-001', taskId: ARTIFICER_TASK_ID, runtimeKind: 'artificer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
@@ -710,6 +714,10 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
         runtimeKind: 'artificer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-integration-001', taskId: ARTIFICER_TASK_ID, runtimeKind: 'artificer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),

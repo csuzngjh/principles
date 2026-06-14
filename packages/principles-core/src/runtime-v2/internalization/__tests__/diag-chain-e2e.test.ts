@@ -110,6 +110,9 @@ function makeMockStateManager(taskOverrides: Record<string, TaskRecord>) {
       // Return a run record for each task so resolveStoreRunId works
       return Promise.resolve([{ runId: `run-${taskId}`, taskId }]);
     }),
+    getValidRunsByTaskTolerant: vi.fn().mockImplementation((taskId: string) => {
+      return Promise.resolve({ runs: [{ runId: `run-${taskId}`, taskId }], degradedRuns: [] });
+    }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),

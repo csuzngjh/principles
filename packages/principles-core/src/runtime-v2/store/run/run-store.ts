@@ -10,6 +10,25 @@
 import type { RunHandle, RunExecutionStatus } from '../../runtime-protocol.js';
 import type { PDErrorCategory } from '../../error-categories.js';
 
+/**
+ * Information about a run row that failed schema validation.
+ *
+ * Returned (never thrown) by the tolerant accessors so callers on the
+ * execution/completion path can keep working with the valid runs while
+ * still observing which historical rows are malformed (ERR-002).
+ */
+export interface DegradedRunInfo {
+  runId: string;
+  error: string;
+  rawRow: Record<string, unknown>;
+}
+
+/** Result of a tolerant run listing: valid runs plus any degraded rows. */
+export interface TolerantRunListResult {
+  runs: RunRecord[];
+  degradedRuns: DegradedRunInfo[];
+}
+
 export interface RunRecord extends RunHandle {
   taskId: string;
   attemptNumber: number;
@@ -45,6 +64,17 @@ export interface RunStore {
 
   /** List all runs for a task, ordered by startedAt ascending. */
   listRunsByTask(taskId: string): Promise<RunRecord[]>;
+
+  /**
+   * Tolerant variant of listRunsByTask: returns the valid runs AND any
+   * degraded (schema-invalid) rows instead of throwing MalformedRunError.
+   *
+   * Used by the runner execution/completion path so that malformed
+   * historical run rows do not block recovery of a task that has at
+   * least one valid run (the one created by acquireLease). Callers MUST
+   * observe non-empty `degradedRuns` via telemetry/notes (ERR-002).
+   */
+  listValidRunsByTaskTolerant(taskId: string): Promise<TolerantRunListResult>;
 
   /** Delete a run by ID. Returns true if a row was deleted. */
   deleteRun(runId: string): Promise<boolean>;

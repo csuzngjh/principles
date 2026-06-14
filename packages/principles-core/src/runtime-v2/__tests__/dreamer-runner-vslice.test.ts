@@ -55,6 +55,10 @@ function createMockDeps(artifactStore: PIArtifactStore): DreamerRunnerDeps {
       runtimeKind: 'dreamer' as const,
       startedAt: new Date().toISOString(),
     }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: 'run-001', taskId: 'task-dreamer-001', runtimeKind: 'dreamer' as const, startedAt: new Date().toISOString() }],
+      degradedRuns: [],
+    }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
@@ -361,6 +365,10 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
         runtimeKind: 'dreamer' as const,
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-001', taskId: 'task-dreamer-001', runtimeKind: 'dreamer' as const, startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
@@ -531,6 +539,10 @@ describe('DreamerRunner output_extraction_failed telemetry', () => {
         runtimeKind: 'dreamer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-ext-001', taskId: 'task-dreamer-ext-001', runtimeKind: 'dreamer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
