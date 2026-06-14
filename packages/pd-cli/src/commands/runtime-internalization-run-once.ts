@@ -580,14 +580,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultDreamerValidator();
           const runner = new DreamerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'philosopher') {
           const validator = new DefaultPhilosopherValidator();
           const runner = new PhilosopherRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
@@ -597,35 +597,35 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultScribeValidator();
           const runner = new ScribeRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'artificer') {
           const validator = new DefaultArtificerValidator();
           const runner = new ArtificerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'evaluator') {
           const validator = new DefaultEvaluatorValidator();
           const runner = new EvaluatorRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'rollout_reviewer') {
           const validator = new DefaultRolloutReviewerValidator();
           const runner = new RolloutReviewerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'trainer') {
           const validator = new DefaultTrainerValidator();
           const runner = new TrainerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else {

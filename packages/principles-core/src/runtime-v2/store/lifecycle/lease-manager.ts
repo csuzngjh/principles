@@ -11,6 +11,8 @@
  * Source: PD Runtime Protocol SPEC v1, Section 12 (Task lease protocol)
  * Source: Diagnostician v2 Detailed Design, Section 7-8 (Task queue, lease)
  */
+import { Value } from '@sinclair/typebox/value';
+import { RuntimeKindSchema } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { TaskStore } from '../task/task-store.js';
@@ -119,6 +121,9 @@ export class DefaultLeaseManager implements LeaseManager {
 
   async acquireLease(options: AcquireLeaseOptions): Promise<TaskRecord> {
     const { taskId, owner, durationMs = 300_000, runtimeKind } = options;
+    if (!Value.Check(RuntimeKindSchema, runtimeKind)) {
+      throw new PDRuntimeError('input_invalid', `Invalid runtime kind: ${runtimeKind}`);
+    }
     const db = this.connection.getDb();
 
     const tx = db.transaction(() => {

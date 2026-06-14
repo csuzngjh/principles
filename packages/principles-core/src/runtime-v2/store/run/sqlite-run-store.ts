@@ -5,15 +5,29 @@
  * Validates every row read with TypeBox Value.Check().
  */
 import { Value } from '@sinclair/typebox/value';
-import { RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../../runtime-protocol.js';
+import { RuntimeKindSchema, RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../../runtime-protocol.js';
 import { PDRuntimeError, type PDErrorCategory } from '../../error-categories.js';
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { RunStore } from './run-store.js';
+
+export class MalformedRunError extends PDRuntimeError {
+  constructor(
+    message: string,
+    public readonly validRuns: RunRecord[],
+    public readonly degradedRuns: { runId: string; error: string; rawRow: Record<string, unknown> }[],
+  ) {
+    super('storage_unavailable', message);
+    this.name = 'MalformedRunError';
+  }
+}
 
 export class SqliteRunStore implements RunStore {
   constructor(private readonly connection: SqliteConnection) {}
 
   async createRun(record: Omit<RunRecord, 'createdAt' | 'updatedAt'>): Promise<RunRecord> {
+    if (!Value.Check(RuntimeKindSchema, record.runtimeKind)) {
+      throw new PDRuntimeError('input_invalid', `Invalid runtime kind: ${record.runtimeKind}`);
+    }
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 
@@ -46,7 +60,16 @@ export class SqliteRunStore implements RunStore {
       .prepare('SELECT * FROM runs WHERE run_id = ?')
       .get(runId) as Record<string, unknown> | undefined;
     if (!row) return null;
-    return SqliteRunStore.rowToRecord(row);
+    try {
+      return SqliteRunStore.rowToRecord(row);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new MalformedRunError(
+        `Run ${runId} has invalid schema`,
+        [],
+        [{ runId, error: msg, rawRow: row }]
+      );
+    }
   }
 
   async updateRun(
@@ -101,7 +124,34 @@ export class SqliteRunStore implements RunStore {
     const rows = db
       .prepare('SELECT * FROM runs WHERE task_id = ? ORDER BY started_at ASC')
       .all(taskId) as Record<string, unknown>[];
-    return rows.map((row) => SqliteRunStore.rowToRecord(row));
+
+    const validRuns: RunRecord[] = [];
+    const degradedRuns: { runId: string; error: string; rawRow: Record<string, unknown> }[] = [];
+
+    for (const row of rows) {
+      try {
+        const record = SqliteRunStore.rowToRecord(row);
+        validRuns.push(record);
+      } catch (err) {
+        const runId = row.run_id ? String(row.run_id) : 'unknown';
+        const msg = err instanceof Error ? err.message : String(err);
+        degradedRuns.push({
+          runId,
+          error: msg,
+          rawRow: row,
+        });
+      }
+    }
+
+    if (degradedRuns.length > 0) {
+      throw new MalformedRunError(
+        `Task ${taskId} has ${degradedRuns.length} malformed run(s)`,
+        validRuns,
+        degradedRuns,
+      );
+    }
+
+    return validRuns;
   }
 
   async deleteRun(runId: string): Promise<boolean> {
@@ -131,9 +181,11 @@ export class SqliteRunStore implements RunStore {
     };
 
     if (!Value.Check(RunRecordSchema, record)) {
+      const errors = [...Value.Errors(RunRecordSchema, record)];
+      const details = errors.map(e => `${e.path}: ${e.message}`).join(', ');
       throw new PDRuntimeError(
         'storage_unavailable',
-        `Run ${runId} has invalid schema — DB may be corrupted`,
+        `Run ${runId} has invalid schema: ${details}`,
       );
     }
 

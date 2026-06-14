@@ -158,6 +158,7 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       updateRunOutput: vi.fn().mockResolvedValue({}),
     } as unknown as RuntimeStateManager,
     runtimeAdapter: {
+      kind: vi.fn().mockReturnValue('test-double'),
       startRun: vi.fn().mockResolvedValue({
         runId: 'run-001',
         runtimeKind: 'test-double',
