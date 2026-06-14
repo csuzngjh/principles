@@ -6,7 +6,7 @@
  *   pd task show <taskId>
  */
 import * as path from 'path';
-import { RuntimeStateManager } from '@principles/core';
+import { RuntimeStateManager, MalformedRunError, type RunRecord } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface TaskListOptions {
@@ -77,14 +77,66 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     const task = await stateManager.getTask(opts.id);
 
     if (!task) {
-      console.error(`Task not found: ${opts.id}`);
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: `Task not found: ${opts.id}`,
+          nextAction: 'Specify a valid taskId',
+        }, null, 2));
+      } else {
+        console.error(`Task not found: ${opts.id}`);
+      }
       process.exit(1);
+      return;
     }
 
-    const runs = await stateManager.getRunsByTask(opts.id);
+    let runs: RunRecord[] = [];
+    let degradedRuns: { runId: string; error: string; rawRow: Record<string, unknown> }[] = [];
+    let isDegraded = false;
+    let malformedError: MalformedRunError | null = null;
+
+    try {
+      runs = await stateManager.getRunsByTask(opts.id);
+    } catch (err: unknown) {
+      if (err instanceof MalformedRunError) {
+        const { validRuns, degradedRuns: malformedRuns } = err;
+        runs = validRuns;
+        degradedRuns = malformedRuns;
+        isDegraded = true;
+        malformedError = err;
+      } else {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        if (opts.json) {
+          console.log(JSON.stringify({
+            ok: false,
+            reason: errorMsg,
+            nextAction: 'Check state.db connection and schema integrity',
+          }, null, 2));
+        } else {
+          console.error(`Error: ${errorMsg}`);
+        }
+        process.exit(1);
+        return;
+      }
+    }
 
     if (opts.json) {
-      console.log(JSON.stringify({ task, runs }, null, 2));
+      if (isDegraded) {
+        console.log(JSON.stringify({
+          ok: false,
+          task,
+          runs,
+          degradedRuns: degradedRuns.map(dr => ({
+            runId: dr.runId,
+            error: dr.error,
+          })),
+          reason: malformedError?.message ?? 'Unknown malformed run schema',
+          nextAction: 'Use integrity-repair to clean up or recover malformed runs, or fix runs in DB',
+        }, null, 2));
+        process.exitCode = 1;
+      } else {
+        console.log(JSON.stringify({ task, runs }, null, 2));
+      }
       return;
     }
 
@@ -124,6 +176,30 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
       }
       console.log('');
     }
+
+    if (isDegraded && degradedRuns.length > 0) {
+      console.warn(`WARNING: Task has ${degradedRuns.length} malformed run(s) in database!`);
+      console.warn(`Reason: ${malformedError?.message ?? 'Unknown malformed run schema'}`);
+      console.warn(`nextAction: Use integrity-repair to clean up or recover malformed runs, or fix runs in DB\n`);
+      console.log('Degraded Runs:');
+      for (const dr of degradedRuns) {
+        console.log(`  - Run: ${dr.runId}`);
+        console.log(`    Error: ${dr.error}`);
+      }
+      console.log('');
+      process.exitCode = 1;
+    }
+  } catch (err: unknown) {
+    if (opts.json) {
+      console.log(JSON.stringify({
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+        nextAction: 'Check workspace path and task ID',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }

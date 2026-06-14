@@ -44,6 +44,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
+import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
@@ -643,6 +644,24 @@ recoveryCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeRecoverySweep({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
+  });
+
+recoveryCmd
+  .command('failed-tasks')
+  .description('Recover failed internalization tasks')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)')
+  .option('--confirm', 'Actually recover failed tasks')
+  .option('--force', 'Force recovery of tasks that exhausted max attempts')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeRecoveryFailedTasks({
+      workspace: opts.workspace,
+      dryRun: opts.dryRun,
+      confirm: opts.confirm,
+      force: opts.force,
+      json: opts.json,
+    });
   });
 
 diagnosticsCmd

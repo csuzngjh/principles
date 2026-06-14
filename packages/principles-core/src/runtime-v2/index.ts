@@ -148,7 +148,7 @@ export type { CandidateIntakeServiceOptions } from './candidate-intake-service.j
 
 // Store
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
-export { SqliteRunStore } from './store/run/sqlite-run-store.js';
+export { SqliteRunStore, MalformedRunError } from './store/run/sqlite-run-store.js';
 export { MemoryTaskStore } from './store/task/memory-task-store.js';
 export { MemoryRunStore } from './store/run/memory-run-store.js';
 export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
@@ -987,7 +987,7 @@ export type {
 // ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
 
 export { createRecoverySweepService } from './recovery-sweep-service.js';
-export type { RecoverySweepService, RecoverySweepServiceHandle } from './recovery-sweep-service.js';
+export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult } from './recovery-sweep-service.js';
 
 // ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────
 

@@ -385,17 +385,18 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     let runner: DiagnosticianRunnerLike;
     if (isSplitPipeline) {
+      const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
       const rootCauseRunner = new DiagRootCauseRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
-        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
       );
       const distillerRunner = new DiagDistillerRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
       );
       const routerRunner = new DiagRouterRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
-        { owner: 'pd-cli-pain-retry', runtimeKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
       );
 
       runner = new SplitDiagnosticianRunner({

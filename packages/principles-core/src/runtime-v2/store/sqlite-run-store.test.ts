@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import type { MalformedRunError } from './run/sqlite-run-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
 
@@ -39,11 +40,11 @@ function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, 'creat
 
 describe('SqliteRunStore', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
-  /* eslint-disable @typescript-eslint/init-declarations */
+   
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let runStore: SqliteRunStore;
-  /* eslint-enable @typescript-eslint/init-declarations */
+   
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -166,6 +167,58 @@ describe('SqliteRunStore', () => {
     it('returns false for non-existent run', async () => {
       const deleted = await runStore.deleteRun('non-existent');
       expect(deleted).toBe(false);
+    });
+  });
+
+  describe('schema validation and degradation resilience', () => {
+    it('createRun blocks invalid runtimeKind config', async () => {
+      const taskId = 'task-invalid-kind';
+      await taskStore.createTask(makeTaskInput(taskId));
+      const run = makeRunInput(taskId, 1) as unknown as Record<string, unknown>;
+      // force invalid runtimeKind
+      run.runtimeKind = 'config';
+      await expect(runStore.createRun(run as unknown as Omit<RunRecord, 'createdAt' | 'updatedAt'>)).rejects.toThrow('Invalid runtime kind: config');
+    });
+
+    it('getRun throws MalformedRunError for a malformed run row in DB', async () => {
+      const taskId = 'task-malformed';
+      await taskStore.createTask(makeTaskInput(taskId));
+      conn.getDb().prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run('run_malformed_1', taskId, 'config', new Date().toISOString(), 1, 'failed', new Date().toISOString(), new Date().toISOString());
+
+      await expect(runStore.getRun('run_malformed_1')).rejects.toThrowError('Run run_malformed_1 has invalid schema');
+    });
+
+    it('listRunsByTask throws MalformedRunError grouping valid and degraded runs', async () => {
+      const taskId = 'task-mixed';
+      await taskStore.createTask(makeTaskInput(taskId));
+
+      // insert valid run
+      await runStore.createRun(makeRunInput(taskId, 1));
+
+      // insert malformed run using raw SQL
+      conn.getDb().prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run('run_malformed_2', taskId, 'config', new Date().toISOString(), 2, 'failed', new Date().toISOString(), new Date().toISOString());
+
+      let caughtError: unknown = null;
+      try {
+        await runStore.listRunsByTask(taskId);
+      } catch (err) {
+        caughtError = err;
+      }
+
+      expect(caughtError).toBeDefined();
+      const malformedErr = caughtError as MalformedRunError;
+      expect(malformedErr.name).toBe('MalformedRunError');
+      expect(malformedErr.validRuns.length).toBe(1);
+      expect(malformedErr.degradedRuns.length).toBe(1);
+      expect(malformedErr.degradedRuns[0]).toBeDefined();
+      expect(malformedErr.degradedRuns[0]?.runId).toBe('run_malformed_2');
+      expect(malformedErr.degradedRuns[0]?.error).toContain('runtimeKind');
     });
   });
 });
