@@ -457,13 +457,35 @@ export function crossReferenceByTimestamp(
 /**
  * Normalize a summary string for dedupe matching.
  *
- * Lowercases, collapses whitespace, strips non-word characters so that
- * "Agent modified config!" and "agent modified config" hash to the same key.
+ * Pipeline (Unicode-aware, reviewer P1 round 3):
+ *   1. NFKC normalization — folds compatibility characters and fullwidth
+ *      forms (e.g. "Ａｇｅｎｔ" -> "Agent", "ＡＧＥＮＴ<U+3000>修改" -> "AGENT 修改")
+ *      so visually identical text produced by different input methods
+ *      collapses to the same canonical form.
+ *   2. Lowercase.
+ *   3. Strip every character that is NOT a Unicode letter (\p{L}), Unicode
+ *      number (\p{N}), or whitespace. This is the critical fix: the previous
+ *      pattern `[^\w\s]` only retained `[A-Za-z0-9_]`, which deleted CJK
+ *      ideographs entirely — a Chinese pain summary like "Agent 未经批准修改了配置"
+ *      was reduced to "agent", making every Chinese pain hash to the same key
+ *      and silently breaking content-hash dedupe for non-ASCII owners.
+ *      \p{L} keeps all letters across every script (Latin, CJK, Cyrillic,
+ *      Arabic, ...); \p{N} keeps all digits; whitespace is preserved for the
+ *      collapse step below.
+ *   4. Collapse runs of whitespace to a single space and trim.
+ *
+ * Examples:
+ *   - "Agent modified config!" and "agent modified config" hash to the same key.
+ *   - "Agent 未经批准修改了配置！" and "agent 未经批准修改了配置" hash to the same key.
+ *   - "Ａｇｅｎｔ<U+3000>修改" and "Agent 修改" hash to the same key (NFKC fold).
+ *
+ * Exported for direct unit testing of the normalization rules.
  */
-function normalizeSummaryForDedupe(summary: string): string {
+export function normalizeSummaryForDedupe(summary: string): string {
   return summary
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^\w\s]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }

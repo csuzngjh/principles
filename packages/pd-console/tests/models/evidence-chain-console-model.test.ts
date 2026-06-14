@@ -1524,4 +1524,97 @@ describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
     expect(ids).toContain('pain_2'); // the recurrence is preserved
     expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
   });
+
+  // Fixture 7 (reviewer-requested P1 round 3): Chinese summaries MUST
+  // participate in content-hash dedupe. Before the round-3 fix,
+  // normalizeSummaryForDedupe used `/[^\w\s]/g` which DROPPED all CJK
+  // ideographs, reducing any Chinese pain summary to its ASCII prefix (often
+  // empty). That broke content-hash dedupe for non-ASCII owners in two
+  // complementary ways, both covered here:
+  //   7a — same Chinese content within the 1s window: DEDUPE (positive case)
+  //   7b — same Chinese content 8h apart: PRESERVE RECURRENCE (negative case)
+
+  // 7a — positive dedupe, Chinese content, within 1s window.
+  it('dedupes: identical Chinese content within the 1s proximity window', async () => {
+    const t0 = '2026-06-11T10:00:00.000Z';
+    const t1 = '2026-06-11T10:00:00.500Z'; // 500ms later, within CONTENT_DEDUPE_PROXIMITY_MS
+    const sharedText = 'Agent 未经批准修改了配置';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t0 });
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t1 });
+    trajDb.close();
+
+    // Canonical task ONLY for pain_1 (first occurrence). Its candidate title
+    // matches the trajectory text — the content-hash match must succeed for
+    // Chinese text after the Unicode-aware normalization fix.
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-zh-dedupe',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Only the canonical card remains. pain_1 dedupes via condition (a)
+    // (diagnosis_pain_1 round-trip); pain_2 dedupes via condition (b) —
+    // CRUCIALLY this requires Chinese content to hash to the same key as the
+    // canonical title, which was impossible before the NFKC + \p{L}\p{N} fix.
+    // Pre-fix, both pains normalized to 'agent' (Chinese stripped) which would
+    // ALSO match — but only by accident, and it would have suppressed every
+    // Chinese pain starting with 'Agent' regardless of the actual content.
+    expect(result.records).toHaveLength(1);
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
+
+  // 7b — recurrence preserved, Chinese content, 8h apart.
+  it('does NOT dedupe: identical Chinese content but 8h apart (recurrence preserved)', async () => {
+    const t0 = '2026-06-11T10:00:00.000Z';
+    const t1 = '2026-06-11T18:00:00.000Z'; // 8h later, well outside the 1s window
+    const sharedText = 'Agent 未经批准修改了配置';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t0 });
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t1 });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-zh-recurrence',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Two records: the canonical card + pain_2 (the recurrence, 8h outside
+    // the proximity window). pain_1 dedupes via condition (a) + (b); pain_2
+    // survives because, although its Chinese content matches, observedAt is
+    // far outside the 1s window. This is the same regression as Fixture 6 but
+    // for Chinese text — without the Unicode fix the content match itself
+    // would have been broken.
+    expect(result.records).toHaveLength(2);
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2'); // the Chinese recurrence is preserved
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
 });
