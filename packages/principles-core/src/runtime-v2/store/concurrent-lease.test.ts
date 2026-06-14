@@ -8,15 +8,15 @@ import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { DefaultLeaseManager } from './lifecycle/lease-manager.js';
 
 describe('ConcurrentLeaseConflict', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let tmpdir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let connection: SqliteConnection;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let taskStore: SqliteTaskStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let runStore: SqliteRunStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let leaseManager: DefaultLeaseManager;
 
   beforeEach(() => {
@@ -30,7 +30,11 @@ describe('ConcurrentLeaseConflict', () => {
 
   afterEach(() => {
     connection.close();
-    fs.rmSync(tmpdir, { force: true, recursive: true });
+    try {
+      fs.rmSync(tmpdir, { force: true, recursive: true });
+    } catch {
+      // ignore EPERM on windows temp dir cleanup if locks are held briefly
+    }
   });
 
   it('second acquireLease on same task throws lease_conflict', async () => {
@@ -45,14 +49,14 @@ describe('ConcurrentLeaseConflict', () => {
     await leaseManager.acquireLease({
       taskId: 'task-1',
       owner: 'runtime-A',
-      runtimeKind: 'test',
+      runtimeKind: 'test-double',
     });
 
     await expect(
       leaseManager.acquireLease({
         taskId: 'task-1',
         owner: 'runtime-B',
-        runtimeKind: 'test',
+        runtimeKind: 'test-double',
       })
     ).rejects.toThrow('lease_conflict');
   });
@@ -69,7 +73,7 @@ describe('ConcurrentLeaseConflict', () => {
     await leaseManager.acquireLease({
       taskId: 'task-2',
       owner: 'runtime-A',
-      runtimeKind: 'test',
+      runtimeKind: 'test-double',
     });
 
     await expect(
@@ -89,7 +93,7 @@ describe('ConcurrentLeaseConflict', () => {
     await leaseManager.acquireLease({
       taskId: 'task-3',
       owner: 'runtime-A',
-      runtimeKind: 'test',
+      runtimeKind: 'test-double',
     });
 
     await expect(
@@ -110,7 +114,7 @@ describe('ConcurrentLeaseConflict', () => {
       taskId: 'task-4',
       owner: 'runtime-A',
       durationMs: 60_000,
-      runtimeKind: 'test',
+      runtimeKind: 'test-double',
     });
 
     const renewed = await leaseManager.renewLease('task-4', 'runtime-A', 120_000);
@@ -139,14 +143,14 @@ describe('ConcurrentLeaseConflict', () => {
     await managerA.acquireLease({
       taskId: 'task-5',
       owner: 'runtime-A',
-      runtimeKind: 'test',
+      runtimeKind: 'test-double',
     });
 
     await expect(
       managerB.acquireLease({
         taskId: 'task-5',
         owner: 'runtime-B',
-        runtimeKind: 'test',
+        runtimeKind: 'test-double',
       })
     ).rejects.toThrow('lease_conflict');
 
