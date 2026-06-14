@@ -64,31 +64,50 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
         });
         skippedCount++;
       } else {
-        const actionText = isDryRun ? 'would_recover' : 'recovered';
-        const reasonText = t.isExhausted
-          ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
-          : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`;
-        const nextActionText = isDryRun
-          ? 'Run with --confirm to recover this task'
-          : 'Task recovered to pending. Run pd runtime internalization run-once to execute.';
-
         if (isConfirm) {
-          await handle.service.recoverFailedTask(t.taskId, opts.force);
-          recoveredCount++;
+          const result = await handle.service.recoverFailedTask(t.taskId, opts.force);
+          if (result) {
+            recoveredCount++;
+            taskDetails.push({
+              taskId: t.taskId,
+              taskKind: t.taskKind,
+              status: t.status,
+              attemptCount: t.attemptCount,
+              maxAttempts: t.maxAttempts,
+              action: 'recovered',
+              reason: t.isExhausted
+                ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
+                : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`,
+              nextAction: 'Task recovered to pending. Run pd runtime internalization run-once to execute.',
+            });
+          } else {
+            skippedCount++;
+            taskDetails.push({
+              taskId: t.taskId,
+              taskKind: t.taskKind,
+              status: t.status,
+              attemptCount: t.attemptCount,
+              maxAttempts: t.maxAttempts,
+              action: 'skipped',
+              reason: 'Task recovery skipped (task no longer failed or concurrently modified)',
+              nextAction: 'Verify task status using task list',
+            });
+          }
         } else {
           recoveredCount++;
+          taskDetails.push({
+            taskId: t.taskId,
+            taskKind: t.taskKind,
+            status: t.status,
+            attemptCount: t.attemptCount,
+            maxAttempts: t.maxAttempts,
+            action: 'would_recover',
+            reason: t.isExhausted
+              ? `Task exhausted max attempts (${t.attemptCount}/${t.maxAttempts}) but --force specified — reset to pending`
+              : `Task failed and attempts remain (${t.attemptCount}/${t.maxAttempts}) — reset to pending`,
+            nextAction: 'Run with --confirm to recover this task',
+          });
         }
-
-        taskDetails.push({
-          taskId: t.taskId,
-          taskKind: t.taskKind,
-          status: t.status,
-          attemptCount: t.attemptCount,
-          maxAttempts: t.maxAttempts,
-          action: actionText,
-          reason: reasonText,
-          nextAction: nextActionText,
-        });
       }
     }
 

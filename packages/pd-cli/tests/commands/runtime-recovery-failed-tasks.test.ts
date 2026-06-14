@@ -169,4 +169,33 @@ describe('pd runtime recovery failed-tasks command contract', () => {
       reason: expect.stringContaining('mutually exclusive'),
     });
   });
+
+  it('confirm JSON handles concurrent task modification gracefully (null result)', async () => {
+    mockDetectFailedTasks.mockResolvedValue([
+      {
+        taskId: 'task-concurrent',
+        taskKind: 'dreamer',
+        attemptCount: 1,
+        maxAttempts: 3,
+        isExhausted: false,
+        status: 'failed',
+      },
+    ]);
+    mockRecoverFailedTask.mockResolvedValue(null);
+
+    await handleRuntimeRecoveryFailedTasks({ workspace: '/fake/workspace', confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(output).toMatchObject({
+      ok: true,
+      mode: 'confirm',
+      recoveredCount: 0,
+      skippedCount: 1,
+    });
+    expect(output.tasks[0]).toMatchObject({
+      taskId: 'task-concurrent',
+      action: 'skipped',
+      reason: expect.stringContaining('no longer failed or concurrently modified'),
+    });
+  });
 });

@@ -173,6 +173,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    */
   async run(taskId: string): Promise<PeerRunnerResult<TOutput>> {
     this.phase = RunnerPhase.Idle;
+    const runtimeKind = this.getRuntimeKind();
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
     let leasedTask: TaskRecord;
@@ -180,7 +181,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       leasedTask = await this.stateManager.acquireLease({
         taskId,
         owner: this.resolvedOptions.owner,
-        runtimeKind: this.getRuntimeKind(),
+        runtimeKind,
       });
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
@@ -221,7 +222,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       this.phase = RunnerPhase.Invoking;
       const runHandle = await this.invokeRuntime(taskId, context);
       this.emitEvent('run_started', taskId, {
-        runtimeKind: this.getRuntimeKind(),
+        runtimeKind,
       });
 
       // 5. Poll until terminal

@@ -77,8 +77,17 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     const task = await stateManager.getTask(opts.id);
 
     if (!task) {
-      console.error(`Task not found: ${opts.id}`);
+      if (opts.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          reason: `Task not found: ${opts.id}`,
+          nextAction: 'Specify a valid taskId',
+        }, null, 2));
+      } else {
+        console.error(`Task not found: ${opts.id}`);
+      }
       process.exit(1);
+      return;
     }
 
     let runs: RunRecord[] = [];
@@ -107,6 +116,7 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
           console.error(`Error: ${errorMsg}`);
         }
         process.exit(1);
+        return;
       }
     }
 
