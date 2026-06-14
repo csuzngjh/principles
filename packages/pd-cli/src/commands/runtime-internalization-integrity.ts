@@ -2,6 +2,7 @@ import * as path from 'path';
 import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime-v2';
 import type { ChainIntegrityResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { assembleMainlineSnapshot } from '../services/mainline-snapshot-assembler.js';
 
 interface InternalizationIntegrityOptions {
   workspace?: string;
@@ -47,7 +48,14 @@ export async function handleRuntimeInternalizationIntegrity(opts: Internalizatio
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
-  const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
+  const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir });
+  if (!opts.json && warnings.length > 0) {
+    for (const warning of warnings) {
+      console.warn(`Warning: ${warning}`);
+    }
+  }
+
+  const model = new InternalizationChainIntegrityReadModel({ workspaceDir, mainlineSnapshot: snapshot });
   const result = model.check();
 
   if (opts.json) {
