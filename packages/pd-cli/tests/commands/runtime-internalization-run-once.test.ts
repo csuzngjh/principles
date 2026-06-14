@@ -141,7 +141,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     model: 'test-model',
     apiKeyEnv: 'TEST_API_KEY',
   }),
-  isRuntimeConfigError: vi.fn().mockImplementation((result: any) => result != null && typeof result === 'object' && 'reason' in result && !('runtimeKind' in result)),
+  isRuntimeConfigError: vi.fn().mockImplementation((result: unknown) => result != null && typeof result === 'object' && Object.hasOwn(result, 'reason') && !Object.hasOwn(result, 'runtimeKind')),
   validateRuntimeConfig: vi.fn(),
   resolveRuntimeConfigFromPdConfig: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
@@ -438,29 +438,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(OpenClawMock).toHaveBeenCalled();
   });
 
-  it('--runtime config resolves adapter from .pd/config.yaml (PRI-393)', async () => {
-    mockWakeOnce.mockResolvedValue({
-      decision: 'would_lease',
-      taskId: 'task-dreamer-008',
-      taskKind: 'dreamer',
-    });
-
-    mockRun.mockResolvedValue({
-      status: 'succeeded',
-      taskId: 'task-dreamer-008',
-      runId: 'run-008',
-      artifactId: 'pi-art-task-dreamer-008-run-008',
-      resultRef: 'dreamer://run-008',
-      attemptCount: 1,
-    });
-
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
-
-    // PRI-393: verify resolveRuntimeFromPdConfig was called (not old resolveRuntimeConfig)
-    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalled();
-  });
-
-  it('--runtime config reads from .pd/config.yaml via resolveRuntimeFromPdConfig (PRI-393)', async () => {
+  it('--runtime config resolves adapter from .pd/config.yaml with workspace path (PRI-393)', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-009',
@@ -480,7 +458,9 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: customWs, runtime: 'config', json: true });
 
     // PRI-393: verify resolveRuntimeFromPdConfig was called with workspace dir
-    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalled();
+    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith(
+      expect.stringContaining('test-workspace'),
+    );
   });
 
   it('--runner philosopher dispatches PhilosopherRunner', async () => {

@@ -219,7 +219,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
       }
       const { openclawMode } = configResult;
-      if (!openclawMode) {
+      // CLI flags override config (PRI-393)
+      const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
+      const effectiveMode = flagMode ?? openclawMode;
+      if (!effectiveMode) {
         refuseExit(opts, {
           painId: opts.painId,
           taskId,
@@ -230,7 +233,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       }
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: openclawMode,
+        runtimeMode: effectiveMode,
         workspaceDir,
         agentId: opts.agent ?? 'main',
       });

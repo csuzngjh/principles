@@ -200,7 +200,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         return;
       }
       const { openclawMode } = configResult;
-      if (!openclawMode) {
+      // CLI flags override config (PRI-393)
+      const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
+      const effectiveMode = flagMode ?? openclawMode;
+      if (!effectiveMode) {
         if (opts.json) {
           console.log(JSON.stringify({ ok: false, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml' }));
         } else {
@@ -212,7 +215,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: openclawMode,
+        runtimeMode: effectiveMode,
         workspaceDir,
         agentId: opts.agent ?? 'main',
       });
@@ -226,7 +229,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         agentId: 'openclaw-cli-adapter',
         payload: {
           runtimeKind: 'openclaw-cli',
-          runtimeMode: openclawMode,
+          runtimeMode: effectiveMode,
         },
       });
     } else if (runtimeKind === 'test-double') {

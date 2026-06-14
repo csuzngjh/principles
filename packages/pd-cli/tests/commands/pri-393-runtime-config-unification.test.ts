@@ -90,7 +90,7 @@ describe('PRI-393: runtime config unification', () => {
   });
 
   describe('Guard: legacy resolveRuntimeConfig not imported by production commands', () => {
-    it('production command source files do NOT import legacy resolveRuntimeConfig', async () => {
+    it('production command source files do NOT import legacy resolveRuntimeConfig', () => {
       // Read the source of each production command and verify the import
       const commandFiles = [
         'packages/pd-cli/src/commands/runtime.ts',
@@ -106,12 +106,17 @@ describe('PRI-393: runtime config unification', () => {
 
         // Check that resolveRuntimeConfig is NOT imported from @principles/core/runtime-v2
         // (it may appear in comments or as resolveRuntimeConfigFromPdConfig)
-        const importLines = source.split('\n').filter(
-          (line) => line.includes('import') && line.includes('@principles/core/runtime-v2'),
-        );
-        for (const importLine of importLines) {
+        // Match the full import block (handles multi-line imports)
+        const importPattern = /import\s*[\s\S]*?@principles\/core\/runtime-v2['";]/g;
+        const importBlocks: string[] = [];
+        let match;
+        while ((match = importPattern.exec(source)) !== null) {
+          importBlocks.push(match[0]);
+        }
+
+        for (const block of importBlocks) {
           // Allow resolveRuntimeConfigFromPdConfig but NOT bare resolveRuntimeConfig
-          if (importLine.includes('resolveRuntimeConfig') && !importLine.includes('resolveRuntimeConfigFromPdConfig')) {
+          if (block.includes('resolveRuntimeConfig') && !block.includes('resolveRuntimeConfigFromPdConfig')) {
             // This is the legacy import — fail
             expect.fail(
               `${file} still imports legacy resolveRuntimeConfig from @principles/core/runtime-v2. ` +

@@ -279,7 +279,7 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode', async () => {
+  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -303,6 +303,13 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
+    // Flag override: config says gateway, flag says local → adapter gets local
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'local' }),
+    );
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();

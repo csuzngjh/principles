@@ -480,6 +480,81 @@ describe('pd pain retry — validation and error paths', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'gateway',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      json: true,
+    });
+
+    // Flag override: config says gateway, flag says local → adapter gets local
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'local' }),
+    );
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-09: openclaw-cli flag overrides file config mode (config=local, flag=gateway → runtimeMode=gateway)', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'local',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawGateway: true,
+      json: true,
+    });
+
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'gateway' }),
+    );
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('pd pain retry — success paths', () => {
