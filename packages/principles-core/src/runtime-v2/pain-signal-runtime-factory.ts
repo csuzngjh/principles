@@ -106,6 +106,11 @@ export interface ResolveRuntimeConfigOptions {
  * Resolve runtime configuration from the pd-runtime-v2-diagnosis funnel policy.
  * Falls back to defaults if no funnel is found.
  *
+ * @deprecated PRI-393: This function reads .state/workflows.yaml and MUST NOT be
+ * called by production execution paths (probe, run-once, diagnose, pain-retry).
+ * Use resolveRuntimeConfigFromPdConfig() with loadPdConfig() instead.
+ * Retained only for legacy warning / migration detection.
+ *
  * When `requestedRuntimeKind === 'openclaw-cli'` or policy `runtimeKind === 'openclaw-cli'`:
  *   - CLI flag or file config must provide exactly one mode (local or gateway).
  *   - Both provided: fail loud (conflicting mode).

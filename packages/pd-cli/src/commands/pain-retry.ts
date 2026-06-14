@@ -30,7 +30,6 @@ import {
   OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
   PDRuntimeError,
-  resolveRuntimeConfig,
   isRuntimeConfigError,
   CandidateIntakeService,
   run as diagnoseRun,
@@ -39,6 +38,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -114,7 +114,6 @@ function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: 
 
 export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  const stateDir = `${workspaceDir}/.state`;
 
   // Step 1: Resolve painId → taskId
   const resolution = resolveTaskIdFromPainId(opts.painId);
@@ -191,16 +190,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // P1 fix: pd pain retry must NOT default to test-double.
     // This command is for real workspace pain fixes — test-double would generate
     // fake candidates/ledger in a real .pd/state.db. Require explicit --runtime
-    // or fall back to workflows.yaml config.
+    // or fall back to .pd/config.yaml.
     let runtimeKind = opts.runtime;
     if (!runtimeKind) {
-      try {
-        const configResult = resolveRuntimeConfig(stateDir);
-        if (!isRuntimeConfigError(configResult) && configResult.runtimeKind) {
-          ({ runtimeKind } = configResult);
-        }
-      } catch {
-        // Config load failed — fall through to refusal
+      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+      if (!isRuntimeConfigError(resolved.result) && resolved.result.runtimeKind) {
+        ({ runtimeKind } = resolved.result);
       }
     }
 
@@ -209,7 +204,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         painId: opts.painId,
         taskId,
         reason: 'missing_runtime',
-        message: 'No --runtime specified and no workflows.yaml config found. pd pain retry must not default to test-double to prevent fake data in real workspaces.',
+        message: 'No --runtime specified and no .pd/config.yaml runtime binding found. pd pain retry must not default to test-double to prevent fake data in real workspaces.',
         nextAction: `Specify --runtime explicitly: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider <provider> --model <model> --apiKeyEnv <ENV>`,
       });
     }
@@ -218,7 +213,8 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     let runtimeAdapter: PDRuntimeAdapter;
 
     if (runtimeKind === 'openclaw-cli') {
-      const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway, requestedRuntimeKind: 'openclaw-cli' });
+      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+      const configResult = resolved.result;
       if (isRuntimeConfigError(configResult)) {
         refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
       }
@@ -265,17 +261,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         }),
       });
     } else if (runtimeKind === 'pi-ai') {
+      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+      for (const w of resolved.legacyWarnings) console.warn(`[pd pain retry] ${w}`);
+
       let policyConfig: RuntimeConfig | null = null;
-      try {
-        const configResult = resolveRuntimeConfig(stateDir);
-        if (!isRuntimeConfigError(configResult)) {
-          policyConfig = configResult;
-        } else {
-          console.warn(`[pd pain retry] workflows.yaml policy load failed: ${configResult.message}. Using CLI flags if provided.`);
-        }
-      } catch (err: unknown) {
-        const detail = err instanceof Error ? err.message : String(err);
-        console.warn(`[pd pain retry] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
+      if (!isRuntimeConfigError(resolved.result)) {
+        policyConfig = resolved.result;
+      } else {
+        console.warn(`[pd pain retry] .pd/config.yaml resolution failed: ${resolved.result.message}. Using CLI flags if provided.`);
       }
 
       const provider = opts.provider ?? policyConfig?.provider;

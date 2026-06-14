@@ -20,6 +20,27 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
+const { mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
+  const mockResolveRuntimeFromPdConfig = vi.fn().mockReturnValue({
+    result: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      timeoutMs: 300_000,
+      agentId: 'main',
+    },
+    legacyWarnings: [],
+    configSource: '.pd/config.yaml',
+    configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+  });
+  return { mockResolveRuntimeFromPdConfig };
+});
+
+vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
+  resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
+}));
+
 vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
@@ -120,8 +141,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     model: 'test-model',
     apiKeyEnv: 'TEST_API_KEY',
   }),
-  isRuntimeConfigError: vi.fn().mockReturnValue(false),
+  isRuntimeConfigError: vi.fn().mockImplementation((result: any) => result != null && typeof result === 'object' && 'reason' in result && !('runtimeKind' in result)),
   validateRuntimeConfig: vi.fn(),
+  resolveRuntimeConfigFromPdConfig: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
@@ -381,12 +403,16 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('--runtime openclaw-cli resolves OpenClawCliRuntimeAdapter', async () => {
-    const { resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
-    vi.mocked(resolveRuntimeConfig).mockReturnValue({
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'local',
-      timeoutMs: 300_000,
-      agentId: 'main',
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'local',
+        timeoutMs: 300_000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
 
     mockWakeOnce.mockResolvedValue({
@@ -412,7 +438,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(OpenClawMock).toHaveBeenCalled();
   });
 
-  it('--runtime config resolves adapter from workflows.yaml', async () => {
+  it('--runtime config resolves adapter from .pd/config.yaml (PRI-393)', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-008',
@@ -430,13 +456,11 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
 
-    const ResolveConfigMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.resolveRuntimeConfig),
-    );
-    expect(ResolveConfigMock).toHaveBeenCalled();
+    // PRI-393: verify resolveRuntimeFromPdConfig was called (not old resolveRuntimeConfig)
+    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalled();
   });
 
-  it('--runtime config reads from workspaceDir/.state (not .pd)', async () => {
+  it('--runtime config reads from .pd/config.yaml via resolveRuntimeFromPdConfig (PRI-393)', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-009',
@@ -455,12 +479,8 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     const customWs = '/tmp/test-workspace';
     await handleRuntimeInternalizationRunOnce({ workspace: customWs, runtime: 'config', json: true });
 
-    const ResolveConfigMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.resolveRuntimeConfig),
-    );
-    const resolvedWorkspace = path.resolve(customWs);
-    const expectedStateDir = path.join(resolvedWorkspace, '.state');
-    expect(ResolveConfigMock).toHaveBeenCalledWith(expectedStateDir, { requestedRuntimeKind: 'config' });
+    // PRI-393: verify resolveRuntimeFromPdConfig was called with workspace dir
+    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalled();
   });
 
   it('--runner philosopher dispatches PhilosopherRunner', async () => {
@@ -810,7 +830,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.timeoutSource).toBe('runner_poll');
   });
 
-  it('--timeout-ms overrides workflows.yaml timeoutMs for PiAiRuntimeAdapter', async () => {
+  it('--timeout-ms overrides .pd/config.yaml timeoutMs for PiAiRuntimeAdapter (PRI-393)', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-ov',
@@ -1258,14 +1278,17 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('--runtime config with missing config outputs structured JSON error', async () => {
-    const { resolveRuntimeConfig, isRuntimeConfigError } = await import('@principles/core/runtime-v2');
-    vi.mocked(resolveRuntimeConfig).mockReturnValue({
-      ok: false,
-      reason: 'explicit_config_missing',
-      message: 'runtime=config requested but no workflows.yaml funnel policy found',
-      nextAction: 'Create a pd-runtime-v2-diagnosis funnel policy in workflows.yaml',
+    // PRI-393: mock resolveRuntimeFromPdConfig to return config error
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        reason: 'explicit_config_missing',
+        message: 'runtime=config requested but no .pd/config.yaml runtime binding found',
+        nextAction: 'Add runtime binding to .pd/config.yaml',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: false, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    vi.mocked(isRuntimeConfigError).mockReturnValue(true);
 
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
@@ -1283,14 +1306,17 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('--runtime config with missing config outputs text error', async () => {
-    const { resolveRuntimeConfig, isRuntimeConfigError } = await import('@principles/core/runtime-v2');
-    vi.mocked(resolveRuntimeConfig).mockReturnValue({
-      ok: false,
-      reason: 'explicit_config_missing',
-      message: 'runtime=config requested but no workflows.yaml funnel policy found',
-      nextAction: 'Create a pd-runtime-v2-diagnosis funnel policy in workflows.yaml',
+    // PRI-393: mock resolveRuntimeFromPdConfig to return config error
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        reason: 'explicit_config_missing',
+        message: 'runtime=config requested but no .pd/config.yaml runtime binding found',
+        nextAction: 'Add runtime binding to .pd/config.yaml',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: false, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    vi.mocked(isRuntimeConfigError).mockReturnValue(true);
 
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',

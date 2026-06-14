@@ -20,13 +20,13 @@ import {
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
-  resolveRuntimeConfig,
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
+import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -472,12 +472,13 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
     });
   }
 
-  const stateDir = path.join(opts.workspaceDir, '.state');
-  const configResult = resolveRuntimeConfig(stateDir, { requestedRuntimeKind: opts.runtimeKind });
+  // PRI-393: resolve runtime from .pd/config.yaml (not .state/workflows.yaml)
+  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir);
+  const configResult = resolved.result;
 
   if (isRuntimeConfigError(configResult)) {
     throw new ConfigResolutionError(
-      `Config resolution failed: ${configResult.reason}. ` +
+      `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ` +
       `${configResult.message}. nextAction: ${configResult.nextAction}`,
     );
   }

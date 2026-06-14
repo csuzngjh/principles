@@ -55,7 +55,7 @@ const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   return { MockPrincipleTreeLedgerAdapter };
 });
 
-const { mockRun, mockResolveRuntimeConfig } = vi.hoisted(() => {
+const { mockRun, mockResolveRuntimeConfig, mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
   const mockRun = vi.fn().mockResolvedValue({
     status: 'succeeded',
     taskId: 'diagnosis_test-pain-1',
@@ -70,7 +70,20 @@ const { mockRun, mockResolveRuntimeConfig } = vi.hoisted(() => {
     timeoutMs: 300000,
     agentId: 'main',
   });
-  return { mockRun, mockResolveRuntimeConfig };
+  const mockResolveRuntimeFromPdConfig = vi.fn().mockReturnValue({
+    result: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    },
+    legacyWarnings: [],
+    configSource: '.pd/config.yaml',
+    configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+  });
+  return { mockRun, mockResolveRuntimeConfig, mockResolveRuntimeFromPdConfig };
 });
 
 vi.mock('../../src/resolve-workspace.js', () => ({
@@ -126,6 +139,10 @@ vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
 
 vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+}));
+
+vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
+  resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
 import { handlePainRetry } from '../../src/commands/pain-retry.js';
@@ -200,6 +217,19 @@ describe('pd pain retry — validation and error paths', () => {
       apiKeyEnv: 'TEST_KEY',
       timeoutMs: 300000,
       agentId: 'main',
+    });
+    mockResolveRuntimeFromPdConfig.mockReturnValue({
+      result: {
+        runtimeKind: 'pi-ai',
+        provider: 'test-provider',
+        model: 'test-model',
+        apiKeyEnv: 'TEST_KEY',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
     mockGetTask.mockResolvedValue(null);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
@@ -342,11 +372,16 @@ describe('pd pain retry — validation and error paths', () => {
 
   it('RETRY-05a: missing --runtime and no config — refused with reason + nextAction (JSON)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
-    // Make resolveRuntimeConfig return an error so no runtime is resolved from config
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      reason: 'config_not_found',
-      message: 'No workflows.yaml found',
-      nextAction: 'Create workflows.yaml or pass --runtime',
+    // PRI-393: resolveRuntimeFromPdConfig returns error → no runtime resolved
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        reason: 'config_not_found',
+        message: 'No .pd/config.yaml found',
+        nextAction: 'Create .pd/config.yaml or pass --runtime',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: false, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -404,14 +439,19 @@ describe('pd pain retry — validation and error paths', () => {
 
   it('RETRY-05c: blank provider/model/apiKeyEnv — refused with missing_required_config', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
-    // Config returns blank strings for provider/model/apiKeyEnv
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      runtimeKind: 'pi-ai',
-      provider: '',
-      model: '   ',
-      apiKeyEnv: '',
-      timeoutMs: 300000,
-      agentId: 'main',
+    // PRI-393: resolveRuntimeFromPdConfig returns config with blank strings
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'pi-ai',
+        provider: '',
+        model: '   ',
+        apiKeyEnv: '',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
