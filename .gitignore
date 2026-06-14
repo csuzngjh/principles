@@ -159,3 +159,8 @@ evidence/*
 .trae/
 .plan/
 .vercel
+
+# Project-specific local tool outputs
+.codex-output/
+.hermes-reports/
+.omo/

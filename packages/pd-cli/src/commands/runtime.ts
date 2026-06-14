@@ -9,7 +9,8 @@
  */
 import * as path from 'path';
 import { probeRuntime } from '@principles/core/runtime-v2';
-import { PDRuntimeError } from '@principles/core/runtime-v2';
+import { PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime-v2';
+import { resolveRuntimeFromPdConfig, resolveRuntimeWithOverrides } from '../services/resolve-runtime-from-pd-config.js';
 
 interface RuntimeProbeOptions {
   runtime: string;
@@ -139,48 +140,55 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
   let model = opts.model ?? '';
   let apiKeyEnv = opts.apiKeyEnv ?? '';
   let baseUrl = opts.baseUrl ?? '';
-  let {timeoutMs} = opts;
+  let { timeoutMs, maxRetries } = opts;
 
-  // D-01: always load workspace policy; CLI values take priority as override
+  // PRI-393: always load workspace policy from .pd/config.yaml (not .state/workflows.yaml)
   if (workspaceDir) {
-    try {
-      const { resolveRuntimeConfig, isRuntimeConfigError } = await import('@principles/core/runtime-v2');
-      const configResult = resolveRuntimeConfig(path.join(workspaceDir, '.state'));
-      if (isRuntimeConfigError(configResult)) {
-        console.warn(`Warning: could not load workspace runtime config — ${configResult.message}`);
-      } else {
-        const config = configResult;
-        provider = provider || config.provider || '';
-        model = model || config.model || '';
-        apiKeyEnv = apiKeyEnv || config.apiKeyEnv || '';
-        baseUrl = baseUrl || config.baseUrl || '';
-        timeoutMs = timeoutMs ?? config.timeoutMs;
-      }
-    } catch (err) {
-      console.warn(`Warning: could not load workspace runtime config — policy fallback disabled: ${err instanceof Error ? err.message : String(err)}`);
+    const resolved = resolveRuntimeWithOverrides(workspaceDir, {
+      provider: opts.provider,
+      model: opts.model,
+      apiKeyEnv: opts.apiKeyEnv,
+      baseUrl: opts.baseUrl,
+      maxRetries: opts.maxRetries,
+      timeoutMs: opts.timeoutMs,
+    });
+    for (const w of resolved.legacyWarnings) console.warn(`Warning: ${w}`);
+    if (resolved.mergedConfig) {
+      provider = provider || resolved.mergedConfig.provider || '';
+      model = model || resolved.mergedConfig.model || '';
+      apiKeyEnv = apiKeyEnv || resolved.mergedConfig.apiKeyEnv || '';
+      baseUrl = baseUrl || resolved.mergedConfig.baseUrl || '';
+      timeoutMs = timeoutMs ?? resolved.mergedConfig.timeoutMs;
+      maxRetries = maxRetries ?? resolved.mergedConfig.maxRetries;
+    } else if (isRuntimeConfigError(resolved.result)) {
+      console.warn(`Warning: could not resolve runtime from .pd/config.yaml — ${resolved.result.message}`);
     }
   }
 
   if (!provider) {
-    console.error("error: --provider is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --provider is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
   if (!model) {
-    console.error("error: --model is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --model is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
   if (!apiKeyEnv) {
-    console.error("error: --apiKeyEnv is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --apiKeyEnv is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
 
   // D-09: check env var exists before calling probeRuntime
   if (!process.env[apiKeyEnv]) {
     console.error(`error: environment variable '${apiKeyEnv}' is not set`);
     process.exit(1);
+    return;
   }
 
   try {
@@ -190,7 +198,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
       model,
       apiKeyEnv,
       baseUrl,
-      maxRetries: opts.maxRetries,
+      maxRetries: maxRetries,
       timeoutMs: timeoutMs ?? 120_000, // D-04: probe timeout 120s (matches Runtime defaults)
     });
 
@@ -265,7 +273,66 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
 }
 
 /**
- * pd runtime probe — dispatches to openclaw-cli or pi-ai branch.
+ * --runtime config probe branch — PRI-393
+ * Resolves runtime from .pd/config.yaml, then dispatches to pi-ai or openclaw-cli probe.
+ */
+async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : undefined;
+  if (!workspaceDir) {
+    console.error('error: --workspace is required for --runtime config');
+    process.exit(1);
+    return;
+  }
+
+  const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+  for (const w of resolved.legacyWarnings) console.warn(`Warning: ${w}`);
+
+  if (isRuntimeConfigError(resolved.result)) {
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        errorCategory: 'config_error',
+        message: resolved.result.message,
+        reason: resolved.result.reason,
+        nextAction: resolved.result.nextAction,
+        configSource: resolved.configSource,
+      }, null, 2));
+    } else {
+      console.error(`error: ${resolved.result.message}`);
+      console.error(`nextAction: ${resolved.result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  const config = resolved.result;
+  // Dispatch to the appropriate runtime probe
+  if (config.runtimeKind === 'pi-ai') {
+    return handlePiAiProbe({
+      ...opts,
+      provider: opts.provider ?? config.provider,
+      model: opts.model ?? config.model,
+      apiKeyEnv: opts.apiKeyEnv ?? config.apiKeyEnv,
+      baseUrl: opts.baseUrl ?? config.baseUrl,
+      timeoutMs: opts.timeoutMs ?? config.timeoutMs,
+    });
+  }
+
+  if (config.runtimeKind === 'openclaw-cli') {
+    return handleOpenClawProbe({
+      ...opts,
+      openclawLocal: config.openclawMode === 'local' ? true : opts.openclawLocal,
+      openclawGateway: config.openclawMode === 'gateway' ? true : opts.openclawGateway,
+    });
+  }
+
+  console.error(`error: unsupported runtimeKind '${config.runtimeKind}' from .pd/config.yaml`);
+  process.exit(1);
+  return;
+}
+
+/**
+ * pd runtime probe — dispatches to openclaw-cli, pi-ai, or config branch.
  */
 export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<void> {
   if (opts.runtime === 'openclaw-cli') {
@@ -276,6 +343,11 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
     return handlePiAiProbe(opts);
   }
 
-  console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai)`);
+  if (opts.runtime === 'config') {
+    return handleConfigProbe(opts);
+  }
+
+  console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai, config)`);
   process.exit(1);
+  return;
 }

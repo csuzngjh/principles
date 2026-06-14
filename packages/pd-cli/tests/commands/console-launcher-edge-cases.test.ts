@@ -55,65 +55,32 @@ describe('Port competition scenarios', () => {
   });
 
   it('findAvailablePort skips occupied ports in sequence', async () => {
-    // Occupy 3 consecutive ports using dynamically allocated base port
-    const servers: net.Server[] = [];
-    // First, get a dynamic port to use as base
-    const probeServer = net.createServer();
-    const basePort = await new Promise<number>((resolve) => {
-      probeServer.listen(0, '127.0.0.1', () => {
-        const addr = probeServer.address();
-        if (typeof addr === 'object' && addr) resolve(addr.port);
-      });
-    });
-    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
-
-    for (let i = 0; i < 3; i++) {
-      const s = net.createServer();
-      await new Promise<void>((resolve) => {
-        s.listen(basePort + i, '127.0.0.1', () => resolve());
-      });
-      servers.push(s);
-    }
-
+    // Use mock to simulate 3 consecutive occupied ports — avoids flaky real-network I/O
+    const basePort = 49200;
+    (globalThis as any).__mockIsPortInUse = async (_host: string, port: number) => {
+      return port >= basePort && port <= basePort + 2;
+    };
     try {
-      // Should skip all 3 and return the next free one
       const port = await findAvailablePort('127.0.0.1', basePort, 5);
+      // Should skip basePort, basePort+1, basePort+2 and return basePort+3
       expect(port).toBe(basePort + 3);
     } finally {
-      for (const s of servers) {
-        await new Promise<void>((resolve) => s.close(() => resolve()));
-      }
+      delete (globalThis as any).__mockIsPortInUse;
     }
   });
 
   it('returns null when all fallback ports are exhausted', async () => {
-    // Occupy a range of ports using dynamically allocated base port
-    const servers: net.Server[] = [];
-    const probeServer = net.createServer();
-    const basePort = await new Promise<number>((resolve) => {
-      probeServer.listen(0, '127.0.0.1', () => {
-        const addr = probeServer.address();
-        if (typeof addr === 'object' && addr) resolve(addr.port);
-      });
-    });
-    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
-
-    for (let i = 0; i < 10; i++) {
-      const s = net.createServer();
-      await new Promise<void>((resolve) => {
-        s.listen(basePort + i, '127.0.0.1', () => resolve());
-      });
-      servers.push(s);
-    }
-
+    // Use mock to simulate all ports occupied — avoids flaky real-network I/O
+    const basePort = 49300;
+    (globalThis as any).__mockIsPortInUse = async (_host: string, port: number) => {
+      return port >= basePort && port <= basePort + 9;
+    };
     try {
-      // With limit=5, should return null after exhausting fallback
+      // With limit=5, all 5 candidates are occupied → null
       const port = await findAvailablePort('127.0.0.1', basePort, 5);
       expect(port).toBeNull();
     } finally {
-      for (const s of servers) {
-        await new Promise<void>((resolve) => s.close(() => resolve()));
-      }
+      delete (globalThis as any).__mockIsPortInUse;
     }
   });
 });
