@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { assertMainlineContract, type MainlineSnapshot } from './mainline-contract.js';
 
 export interface BrokenLink {
   type: string;
@@ -29,6 +30,8 @@ export interface ChainIntegrityResult {
 
 export interface InternalizationChainIntegrityReadModelOptions {
   workspaceDir: string;
+  /** Optional pre-assembled mainline snapshot. When provided, its contract verdict is merged into brokenLinks. */
+  mainlineSnapshot?: MainlineSnapshot;
 }
 
 function readOwnProperty(obj: object, key: string): unknown {
@@ -148,9 +151,11 @@ export function extractPIMetadata(diagJson: string | null): PIMetadataParseResul
 
 export class InternalizationChainIntegrityReadModel {
   private readonly dbPath: string;
+  private readonly mainlineSnapshot?: MainlineSnapshot;
 
   constructor(opts: InternalizationChainIntegrityReadModelOptions) {
     this.dbPath = path.join(opts.workspaceDir, '.pd', 'state.db');
+    this.mainlineSnapshot = opts.mainlineSnapshot;
   }
 
   check(): ChainIntegrityResult {
@@ -468,6 +473,21 @@ export class InternalizationChainIntegrityReadModel {
             severity: 'warning',
             reason: `Duplicate PI artifact: source_task_id=${sourceTaskId}, artifact_kind=${artifactKind} appears ${count} times`,
             recommendedAction: 'Investigate idempotency violation in artifact commit logic.',
+          });
+        }
+      }
+
+      // Merge mainline contract verdicts when a pre-assembled snapshot is provided.
+      if (this.mainlineSnapshot) {
+        const verdict = assertMainlineContract(this.mainlineSnapshot);
+        for (const stage of verdict.stages) {
+          if (stage.status !== 'violation') continue;
+          const painId = verdict.painId ?? 'unknown';
+          brokenLinks.push({
+            type: `mainline_contract_${stage.stage}`,
+            severity: 'error',
+            reason: `[painId=${painId}] ${stage.reason}`,
+            recommendedAction: stage.nextAction ?? 'Review the mainline contract output and fix the reported stage.',
           });
         }
       }
