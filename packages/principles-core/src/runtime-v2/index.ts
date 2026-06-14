@@ -1094,6 +1094,26 @@ export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityRea
 export { InternalizationIntegrityRemediation } from './internalization-integrity-remediation.js';
 export type { InternalizationIntegrityRemediationOptions } from './internalization-integrity-remediation.js';
 
+// ── Mainline Contract (Runtime Mainline Convergence — single source of truth) ──
+export { assertMainlineContract, EMPTY_CONTEXT_SENTINEL } from './mainline-contract.js';
+export type {
+  MainlineStage,
+  StageStatus,
+  StageVerdict,
+  MainlineVerdict,
+  ArtifactRefSnapshot,
+  RuntimeReadinessSnapshot,
+  DiagnosisTaskSnapshot,
+  DiagnosticianArtifactSnapshot,
+  CandidateSnapshot,
+  DreamerTaskSnapshot,
+  DreamerContextSnapshot,
+  SuccessorSnapshot,
+  OwnerReviewablePrincipleSnapshot,
+  MainlineChainSnapshot,
+  MainlineSnapshot,
+} from './mainline-contract.js';
+
 export {
   createRemediationResult,
   remediationAction,
