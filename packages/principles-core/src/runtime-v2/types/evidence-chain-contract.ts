@@ -452,6 +452,213 @@ export function crossReferenceByTimestamp(
   return result;
 }
 
+// ── Deduplication Helper ───────────────────────────────────────────────────────
+
+/**
+ * Normalize a summary string for dedupe matching.
+ *
+ * Pipeline (Unicode-aware, reviewer P1 round 3):
+ *   1. NFKC normalization — folds compatibility characters and fullwidth
+ *      forms (e.g. "Ａｇｅｎｔ" -> "Agent", "ＡＧＥＮＴ<U+3000>修改" -> "AGENT 修改")
+ *      so visually identical text produced by different input methods
+ *      collapses to the same canonical form.
+ *   2. Lowercase.
+ *   3. Strip every character that is NOT a Unicode letter (\p{L}), Unicode
+ *      number (\p{N}), or whitespace. This is the critical fix: the previous
+ *      pattern `[^\w\s]` only retained `[A-Za-z0-9_]`, which deleted CJK
+ *      ideographs entirely — a Chinese pain summary like "Agent 未经批准修改了配置"
+ *      was reduced to "agent", making every Chinese pain hash to the same key
+ *      and silently breaking content-hash dedupe for non-ASCII owners.
+ *      \p{L} keeps all letters across every script (Latin, CJK, Cyrillic,
+ *      Arabic, ...); \p{N} keeps all digits; whitespace is preserved for the
+ *      collapse step below.
+ *   4. Collapse runs of whitespace to a single space and trim.
+ *
+ * Examples:
+ *   - "Agent modified config!" and "agent modified config" hash to the same key.
+ *   - "Agent 未经批准修改了配置！" and "agent 未经批准修改了配置" hash to the same key.
+ *   - "Ａｇｅｎｔ<U+3000>修改" and "Agent 修改" hash to the same key (NFKC fold).
+ *
+ * Exported for direct unit testing of the normalization rules.
+ */
+export function normalizeSummaryForDedupe(summary: string): string {
+  return summary
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Maximum allowed observedAt gap (in milliseconds) for content-hash dedupe
+ * under condition (b) below.
+ *
+ * Content alone is NOT strong enough: an owner may legitimately log the same
+ * pain ("Agent modified config without approval") today AND again tomorrow as
+ * two separate real recurrences. Suppressing the second occurrence would
+ * silently hide real recurrence signal from the owner, which is dangerous for
+ * pain/episode judgement.
+ *
+ * We therefore require content-hash match AND observedAt within this window.
+ * The 1s value matches the original (loose) timestamp-window behavior, but is
+ * now AND'd with content equality rather than acting alone — strict addition,
+ * never a replacement. Recurrence aggregation across wide time windows is
+ * intentionally NOT done here; it belongs to the (future) episode layer so
+ * the owner never loses raw recurrence signal at the evidence-chain stage.
+ */
+const CONTENT_DEDUPE_PROXIMITY_MS = 1000;
+
+/**
+ * Dedupe evidence records so the same real pain signal is not shown twice.
+ *
+ * Background (PRI-388): a single CLI/manual pain may end up both as a row in
+ * trajectory.db.pain_events (shown as `pain_N`, often "recorded-only / unlinked")
+ * and as a Runtime V2 canonical pain record (e.g. `manual_*`, shown with full
+ * candidate/internalization state). Showing both cards misleads the owner into
+ * thinking the same signal is simultaneously "untouched" and "in flight".
+ *
+ * Lineage policy (reviewer P1): deduping CANNOT rely on timestamp alone OR on
+ * content alone — two DIFFERENT real pains can land within 1s (would be wrongly
+ * merged by time alone), AND the same pain text can legitimately recur at very
+ * different times (would be wrongly merged by content alone, hiding real
+ * recurrence signal). We therefore require STRONG lineage evidence before
+ * suppressing a trajectory row:
+ *
+ *   (a) the canonical record's linkedTaskId round-trips to the trajectory pain
+ *       id via the `diagnosis_<painId>` convention — a diagnosis task IS the
+ *       canonical record for that specific trajectory row; OR
+ *   (b) the canonical record and the trajectory record share the same
+ *       sourceKind, their normalized summaries match exactly (a content hash,
+ *       not a substring contains() — see G.2 / F.3 in shared-constraints),
+ *       AND their observedAt timestamps fall within CONTENT_DEDUPE_PROXIMITY_MS
+ *       of each other.
+ *
+ * Either condition is sufficient. Time alone is NEVER a dedupe signal.
+ * Content alone is NEVER a dedupe signal. The two are AND'd for condition (b)
+ * precisely so that real recurrences (same text, far-apart timestamps) survive.
+ *
+ * Ordering (reviewer P1-2): the input array is already sorted by observedAt
+ * descending. We MUST preserve that order, so we filter in place instead of
+ * rebuilding canonical-then-trajectory buckets (which would scramble the sort).
+ *
+ * Privacy: no raw prompt/chat/trajectory text is exposed beyond what each
+ * record already carries (G.2 / F.3 / F.5).
+ */
+function dedupeRecords(records: EvidenceChainRecord[]): EvidenceChainRecord[] {
+  if (records.length === 0) return records;
+
+  // 1. Collect canonical (Runtime V2) records — those that carry a linkedTaskId
+  //    and therefore represent the authoritative chain state for their event.
+  const canonicalRecords: EvidenceChainRecord[] = [];
+  for (const record of records) {
+    if (record.linkedTaskId) {
+      canonicalRecords.push(record);
+    }
+  }
+  if (canonicalRecords.length === 0) return records;
+
+  // 2. Build a lookup of trajectory pain ids that a canonical task explicitly
+  //    references via the `diagnosis_<painId>` round-trip (condition a).
+  //    Also build a (sourceKind, normalizedSummary) -> canonical observedAt ms
+  //    multi-map for content-hash matching (condition b). We collect ALL
+  //    observedAt timestamps per content key so the trajectory-side check can
+  //    apply the proximity window — a single global set is unsafe because it
+  //    would suppress recurrences logged far outside the canonical's time.
+  const diagnosisTrajectoryIds = new Set<string>();
+  const canonicalObservedAtByKey = new Map<string, number[]>();
+
+  for (const canonical of canonicalRecords) {
+    // Condition (a): linkedTaskId of form `diagnosis_<painId>` where <painId>
+    // is itself a trajectory pain id (pain_N).
+    const { linkedTaskId } = canonical;
+    if (linkedTaskId && linkedTaskId.startsWith('diagnosis_')) {
+      const painId = linkedTaskId.slice('diagnosis_'.length);
+      if (painId.startsWith('pain_')) {
+        diagnosisTrajectoryIds.add(painId);
+      }
+    }
+
+    // Condition (b) content key: same sourceKind + normalized summary. We fold
+    // candidateTitle and rootCauseSummary into the canonical's content signature
+    // so a trajectory row whose text matches the candidate title or root cause
+    // still dedupes against the canonical card. We collect observedAt ms per
+    // key so the trajectory check can require time proximity AND content match.
+    const canonicalObservedAtMs = Date.parse(canonical.observedAt);
+    if (Number.isNaN(canonicalObservedAtMs)) continue;
+    const parts = [
+      canonical.summary,
+      canonical.candidateTitle,
+      canonical.rootCauseSummary,
+    ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+    for (const part of parts) {
+      const normalized = normalizeSummaryForDedupe(part);
+      if (!normalized) continue;
+      const key = `${canonical.sourceKind}||${normalized}`;
+      const arr = canonicalObservedAtByKey.get(key);
+      if (arr) {
+        arr.push(canonicalObservedAtMs);
+      } else {
+        canonicalObservedAtByKey.set(key, [canonicalObservedAtMs]);
+      }
+    }
+  }
+
+  if (diagnosisTrajectoryIds.size === 0 && canonicalObservedAtByKey.size === 0) {
+    return records;
+  }
+
+  // 3. Mark trajectory records (no linkedTaskId) that have STRONG lineage to a
+  //    canonical record. Only strong lineage suppresses a row. For condition
+  //    (b), strong lineage = same sourceKind + same normalized summary +
+  //    observedAt within CONTENT_DEDUPE_PROXIMITY_MS. Content alone or time
+  //    alone is never sufficient.
+  const idsToRemove = new Set<string>();
+  for (const record of records) {
+    if (record.linkedTaskId) continue; // canonical records are never removed
+
+    let suppress = false;
+
+    // Condition (a): trajectory id explicitly referenced by a diagnosis_* task.
+    // This is the strongest lineage — a diagnosis task IS the canonical record
+    // for that specific trajectory row.
+    if (diagnosisTrajectoryIds.has(record.id)) {
+      suppress = true;
+    }
+
+    // Condition (b): same sourceKind + normalized summary hash AND observedAt
+    // within the proximity window. Without the time-window gate, an owner who
+    // logs the same pain today AND tomorrow (a real recurrence) would have the
+    // second trajectory row silently deleted whenever any canonical task shares
+    // its content — losing the recurrence signal that episode judgement needs.
+    if (!suppress) {
+      const normalized = normalizeSummaryForDedupe(record.summary);
+      if (normalized) {
+        const key = `${record.sourceKind}||${normalized}`;
+        const candidates = canonicalObservedAtByKey.get(key);
+        if (candidates && candidates.length > 0) {
+          const tMs = Date.parse(record.observedAt);
+          if (
+            !Number.isNaN(tMs) &&
+            candidates.some(c => Math.abs(c - tMs) <= CONTENT_DEDUPE_PROXIMITY_MS)
+          ) {
+            suppress = true;
+          }
+        }
+      }
+    }
+
+    if (suppress) {
+      idsToRemove.add(record.id);
+    }
+  }
+
+  if (idsToRemove.size === 0) return records;
+
+  // 4. Filter in place to preserve the observedAt-descending sort order.
+  return records.filter(record => !idsToRemove.has(record.id));
+}
+
 // ── Dynamic Assembly Mapper (Pure logic) ──────────────────────────────────────
 
 export interface CandidateInfo {
@@ -715,6 +922,12 @@ export function assembleEvidenceChain(params: {
 
   // 5b. Proximity Cross-Referencing for Unmatched Pain Events
   const crossRefMap = crossReferenceByTimestamp(painEventMeta, taskMap, directMatchedPainIds);
+  // Tasks whose cross-ref is backed by STRONG lineage (content hash match
+  // between trajectory text and task candidate title / root cause). These
+  // are NOT added to the weak crossRefTaskIds set, so step 6 will emit the
+  // canonical task-id record for them. (PRI-388 reviewer P1: dedupe must
+  // rely on strong lineage, not timestamp alone.)
+  const strongMatchedTaskIds = new Set<string>();
 
   for (const event of painEvents) {
     const eventId = coerceToString(event.id);
@@ -751,6 +964,32 @@ export function assembleEvidenceChain(params: {
         records.push(record);
       }
       continue;
+    }
+
+    // ── Strong-lineage gate (PRI-388 reviewer P1) ────────────────────────
+    // If the trajectory event's text strongly matches the cross-referenced
+    // task's candidate title or root cause (a content hash, NOT timestamp
+    // alone), they describe the SAME real event. Skip emitting a
+    // trajectory-id (pain_<N>) record here; step 6 will emit the canonical
+    // task-id record instead. This prevents two cards for one event while
+    // still emitting trajectory-id records for genuine timestamp-only
+    // (weak) cross-refs where content does not match.
+    const trajText = readOwnString(event, 'text') ?? '';
+    const trajReason = readOwnString(event, 'reason') ?? '';
+    const trajectoryContentKey = normalizeSummaryForDedupe(trajText || trajReason);
+    if (trajectoryContentKey) {
+      const crossCandidate = candidateByTaskId.get(crossRefTask.taskId);
+      const taskContentFields = [
+        crossRefTask.rootCauseSummary,
+        crossCandidate?.title,
+      ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+      const isStrongLineageMatch = taskContentFields.some(
+        c => normalizeSummaryForDedupe(c) === trajectoryContentKey
+      );
+      if (isStrongLineageMatch) {
+        strongMatchedTaskIds.add(crossRefTask.taskId);
+        continue;
+      }
     }
 
     const source = readOwnString(event, 'source') ?? 'unknown';
@@ -828,8 +1067,12 @@ export function assembleEvidenceChain(params: {
 
   // 6. Include tasks that have no matching pain_event (e.g. CLI direct records)
   const coveredPainIds = new Set(records.map(r => r.id));
+  // Only WEAK cross-refs (timestamp-only) block step 6 from creating a
+  // task-id record. Strong-lineage cross-refs deferred in step 5b so the
+  // canonical task-id form is shown. (PRI-388 reviewer P1.)
   const crossRefTaskIds = new Set<string>();
   for (const entry of crossRefMap.values()) {
+    if (strongMatchedTaskIds.has(entry.taskId)) continue;
     crossRefTaskIds.add(entry.taskId);
   }
 
@@ -904,8 +1147,14 @@ export function assembleEvidenceChain(params: {
   // Sort by observedAt descending
   records.sort((a, b) => b.observedAt.localeCompare(a.observedAt));
 
+  // 7. Dedupe: Runtime V2 canonical pain (has linkedTaskId) takes precedence over trajectory pain rows
+  // When the same real pain signal appears as both a trajectory pain (pain_N) and a
+  // Runtime V2 canonical pain (manual_*), show only the canonical record with full chain state.
+  // This prevents misleading "unlinked" and "candidate" cards for the same event.
+  const dedupedRecords = dedupeRecords(records);
+
   const response: EvidenceChainResponse = {
-    records,
+    records: dedupedRecords,
     generatedAt,
   };
 
