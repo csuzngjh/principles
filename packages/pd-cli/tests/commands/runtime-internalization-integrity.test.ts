@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as path from 'path';
 
 const mockCheck = vi.hoisted(() => vi.fn());
+const mockAssemble = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
+}));
+
+vi.mock('../../src/services/mainline-snapshot-assembler.js', () => ({
+  assembleMainlineSnapshot: mockAssemble,
+  assertMainlineContract: vi.fn(),
 }));
 
 vi.mock('@principles/core/runtime-v2', () => ({
@@ -14,8 +21,31 @@ vi.mock('@principles/core/runtime-v2', () => ({
 }));
 
 import { handleRuntimeInternalizationIntegrity } from '../../src/commands/runtime-internalization-integrity.js';
+import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime-v2';
 
 const WS = '/fake/workspace';
+
+function fakeSnapshot() {
+  return {
+    readiness: {
+      configDoctorProfile: 'openclaw.default',
+      runtimeProbeProfile: 'openclaw.default',
+      configSource: '.pd/config.yaml',
+      probeConfigSource: '.pd/config.yaml',
+      diagnosticianReady: true,
+    },
+    chain: {
+      painId: 'pain-test',
+      diagnosisTask: null,
+      diagnosticianArtifact: null,
+      candidate: null,
+      dreamerTask: null,
+      dreamerContext: null,
+      successor: null,
+      principle: null,
+    },
+  };
+}
 
 function okResult() {
   return {
@@ -59,6 +89,7 @@ describe('handleRuntimeInternalizationIntegrity', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAssemble.mockResolvedValue({ snapshot: fakeSnapshot(), warnings: [], resolvedPainId: 'pain-test' });
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -67,6 +98,12 @@ describe('handleRuntimeInternalizationIntegrity', () => {
     mockCheck.mockReturnValue(okResult());
 
     await handleRuntimeInternalizationIntegrity({ workspace: WS, json: true });
+
+    const resolvedWorkspace = path.resolve(WS);
+    expect(mockAssemble).toHaveBeenCalledWith({ workspaceDir: resolvedWorkspace });
+    const modelCallArgs = (InternalizationChainIntegrityReadModel as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(modelCallArgs.workspaceDir).toBe(resolvedWorkspace);
+    expect(modelCallArgs.mainlineSnapshot).toEqual(fakeSnapshot());
 
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.overallStatus).toBe('ok');
