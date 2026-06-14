@@ -164,19 +164,22 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
   }
 
   if (!provider) {
-    console.error("error: --provider is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --provider is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
   if (!model) {
-    console.error("error: --model is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --model is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
   if (!apiKeyEnv) {
-    console.error("error: --apiKeyEnv is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("error: --apiKeyEnv is required for --runtime pi-ai (or set in .pd/config.yaml)");
     console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
+    return;
   }
 
   // D-09: check env var exists before calling probeRuntime
@@ -275,6 +278,7 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
   if (!workspaceDir) {
     console.error('error: --workspace is required for --runtime config');
     process.exit(1);
+    return;
   }
 
   const resolved = resolveRuntimeFromPdConfig(workspaceDir);
@@ -295,6 +299,7 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
       console.error(`nextAction: ${resolved.result.nextAction}`);
     }
     process.exit(1);
+    return;
   }
 
   const config = resolved.result;
@@ -320,6 +325,7 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
 
   console.error(`error: unsupported runtimeKind '${config.runtimeKind}' from .pd/config.yaml`);
   process.exit(1);
+  return;
 }
 
 /**
@@ -340,4 +346,5 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
 
   console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai, config)`);
   process.exit(1);
+  return;
 }

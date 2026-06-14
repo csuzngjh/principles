@@ -281,15 +281,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       if (missing.length > 0) {
         console.error(
           `error: missing required pi-ai config: ${missing.join(', ')}.\n` +
-          `Pass via --flag or add to workflows.yaml pd-runtime-v2-diagnosis funnel policy.\n` +
+          `Pass via --flag or add to .pd/config.yaml runtime profile.\n` +
           `Example:\n` +
           `  pd diagnose run --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY\n` +
-          `  Or add to workflows.yaml:\n` +
-          `    policy:\n` +
-          `      runtimeKind: pi-ai\n` +
-          `      provider: openrouter\n` +
-          `      model: anthropic/claude-sonnet-4\n` +
-          `      apiKeyEnv: OPENROUTER_API_KEY`,
+          `  Or add to .pd/config.yaml:\n` +
+          `    runtimeProfiles:\n` +
+          `      - id: openrouter\n` +
+          `        type: pi-ai\n` +
+          `        provider: openrouter\n` +
+          `        model: anthropic/claude-sonnet-4\n` +
+          `        apiKeyEnv: OPENROUTER_API_KEY`,
         );
         process.exit(1);
       }

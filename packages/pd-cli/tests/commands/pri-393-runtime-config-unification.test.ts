@@ -52,27 +52,26 @@ function makeValidConfigYaml(overrides?: { provider?: string; model?: string }):
   return {
     version: 1,
     features: {
-      prompt: { enabled: true },
-      correction_observer: { enabled: false },
+      prompt: { enabled: true, category: 'core' },
+      correction_observer: { enabled: false, category: 'quiet' },
     },
-    runtimeProfiles: [
-      {
-        id: 'lmstudio',
+    runtimeProfiles: {
+      lmstudio: {
         type: 'pi-ai',
         provider: overrides?.provider ?? 'lmstudio',
         model: overrides?.model ?? 'local-model',
         apiKeyEnv: 'LMSTUDIO_API_KEY',
         baseUrl: 'http://localhost:1234/v1',
       },
-    ],
+    },
     internalAgents: {
-      agents: [
-        {
-          name: 'diagnostician',
+      defaultRuntime: 'lmstudio',
+      agents: {
+        diagnostician: {
           enabled: true,
           runtimeProfile: 'lmstudio',
         },
-      ],
+      },
     },
   };
 }
@@ -250,11 +249,17 @@ funnels:
       fs.writeFileSync(path.join(pdDir, 'config.yaml'), 'version: [unterminated', 'utf8');
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const { isRuntimeConfigError: isErr } = await import('@principles/core/runtime-v2');
       const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
 
-      // Should still produce a result (with defaults) — the error is in configLoadResult
+      // Malformed config must produce a RuntimeConfigError — never fall back to defaults
       expect(resolved.configLoadResult.ok).toBe(false);
       expect(resolved.configSource).toBe('.pd/config.yaml');
+      expect(isErr(resolved.result)).toBe(true);
+      if (isErr(resolved.result)) {
+        expect(resolved.result.reason).toContain('config_malformed');
+        expect(resolved.result.nextAction).toBeTruthy();
+      }
     });
   });
 

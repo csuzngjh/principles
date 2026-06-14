@@ -289,7 +289,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
           taskId,
           reason: `missing_required_config: ${missing.join(', ')}`,
           message: `Missing or blank required pi-ai config: ${missing.join(', ')}`,
-          nextAction: `Pass via --flag or add to workflows.yaml. Example: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY`,
+          nextAction: `Pass via --flag or add to .pd/config.yaml. Example: pd pain retry --pain-id ${opts.painId} --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY`,
         });
       }
 

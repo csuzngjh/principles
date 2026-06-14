@@ -485,7 +485,7 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
 
   if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'pi-ai')) {
     validateRuntimeConfig(configResult);
-    // CLI --timeout-ms overrides workflows.yaml timeoutMs
+    // CLI --timeout-ms overrides config timeoutMs
     const adapterTimeoutMs = opts.timeoutMs ?? configResult.timeoutMs;
     return new PiAiRuntimeAdapter({
       provider: String(configResult.provider),
@@ -503,8 +503,8 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
     if (!openclawMode) {
       throw new ConfigResolutionError(
         `runtimeKind 'openclaw-cli' requires openclawMode. ` +
-        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml. ` +
-        `nextAction: Add openclawMode: local|gateway to your funnel policy or use CLI flags.`,
+        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml. ` +
+        `nextAction: Add openclawMode: local|gateway to your .pd/config.yaml runtime profile or use CLI flags.`,
       );
     }
     return new OpenClawCliRuntimeAdapter({
@@ -534,7 +534,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   if (runtimeKind === 'test-double' && !opts.allowTestDouble) {
     console.error('Error: test-double runtime mutates real queue state (leases tasks, marks them succeeded with empty output).');
     console.error('Use --runtime test-double --allow-test-double to acknowledge this risk.');
-    console.error('For production use, use --runtime config (reads from workflows.yaml) or --runtime pi-ai / openclaw-cli.');
+    console.error('For production use, use --runtime config (reads from .pd/config.yaml) or --runtime pi-ai / openclaw-cli.');
     process.exitCode = 1;
     return;
   }
@@ -717,7 +717,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         decision: isConfigError ? 'config_error' : 'runtime_error',
         reason: message,
         nextAction: isConfigError
-          ? 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags'
+          ? 'Fix the .pd/config.yaml runtime profile, or use --runtime pi-ai / openclaw-cli with explicit flags'
           : 'Check runner logs and workspace state; re-run with --runtime test-double to isolate',
       }, null, 2));
     } else {

@@ -20,6 +20,7 @@ import {
 import type {
   RuntimeConfigResult,
   RuntimeConfig,
+  RuntimeConfigError,
 } from '@principles/core/runtime-v2';
 import { loadPdConfig } from './pd-config-loader.js';
 import type { PdConfigLoadResult } from './pd-config-loader.js';
@@ -52,12 +53,34 @@ export function resolveRuntimeFromPdConfig(
 ): ResolvedRuntimeFromPdConfig {
   const configLoadResult = loadPdConfig(workspaceDir);
 
-  // Use the effective config (or defaults if malformed) to resolve runtime
-  const effective = configLoadResult.ok
-    ? configLoadResult.effective
-    : configLoadResult.defaults;
+  // Malformed config → fail loud. Do NOT fall back to defaults for execution.
+  // Missing config is ok (loadPdConfig returns ok:true with defaults), but
+  // ok:false always means the file exists and is broken.
+  if (!configLoadResult.ok) {
+    const [firstError] = configLoadResult.errors;
+    const result: RuntimeConfigError = {
+      ok: false,
+      reason: `config_malformed:${firstError?.reason ?? 'unknown'}`,
+      message: firstError?.reason ?? '.pd/config.yaml is malformed',
+      nextAction: firstError?.nextAction ?? 'Fix .pd/config.yaml syntax and retry',
+    };
 
-  const result = resolveRuntimeConfigFromPdConfig(effective, getEnvVar);
+    const legacyWarnings = configLoadResult.legacyFilesDetected.length > 0
+      ? [
+          `Legacy config files detected: ${configLoadResult.legacyFilesDetected.join(', ')}. ` +
+          `These are NOT used for runtime resolution. PD uses .pd/config.yaml exclusively.`,
+        ]
+      : [];
+
+    return {
+      result,
+      legacyWarnings,
+      configLoadResult,
+      configSource: '.pd/config.yaml',
+    };
+  }
+
+  const result = resolveRuntimeConfigFromPdConfig(configLoadResult.effective, getEnvVar);
 
   const legacyWarnings = configLoadResult.legacyFilesDetected.length > 0
     ? [
@@ -73,6 +96,7 @@ export function resolveRuntimeFromPdConfig(
     configSource: '.pd/config.yaml',
   };
 }
+
 
 /**
  * Resolve runtime config from .pd/config.yaml, then merge with CLI flag overrides.
