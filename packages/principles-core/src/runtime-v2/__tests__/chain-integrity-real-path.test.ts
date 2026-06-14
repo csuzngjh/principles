@@ -26,16 +26,19 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS runs (
   run_id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL,
-  runtime_kind TEXT NOT NULL DEFAULT 'openclaw',
+  runtime_kind TEXT NOT NULL,
   execution_status TEXT NOT NULL DEFAULT 'queued',
-  started_at TEXT,
+  started_at TEXT NOT NULL,
   ended_at TEXT,
   reason TEXT,
   output_ref TEXT,
+  input_payload TEXT,
+  output_payload TEXT,
   error_category TEXT,
   attempt_number INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS pi_artifacts (
@@ -114,10 +117,16 @@ describe('Chain Integrity — Real Production Path', () => {
     );
   }
 
-  function insertRun(opts: { runId: string; taskId: string; executionStatus: string }) {
+  function insertRun(opts: { runId: string; taskId: string; executionStatus: string; runtimeKind?: string; attemptNumber?: number }) {
+    const now = new Date().toISOString();
+    // runtime_kind defaults to 'openclaw' (valid RuntimeKindSchema enum) so the
+    // row passes schema validation and is NOT flagged as malformed by
+    // detectMalformedRuns. Schema now matches production (NOT NULL on
+    // started_at/created_at/updated_at/runtime_kind).
     db.prepare(
-      `INSERT OR REPLACE INTO runs (run_id, task_id, execution_status) VALUES (?, ?, ?)`,
-    ).run(opts.runId, opts.taskId, opts.executionStatus);
+      `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(opts.runId, opts.taskId, opts.runtimeKind ?? 'openclaw', opts.executionStatus, now, opts.attemptNumber ?? 1, now, now);
   }
 
   function insertPIArtifact(opts: { artifactId: string; artifactKind: string; sourceTaskId: string }) {

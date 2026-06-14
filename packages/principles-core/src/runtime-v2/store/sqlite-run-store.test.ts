@@ -272,5 +272,108 @@ describe('SqliteRunStore', () => {
       expect(result.degradedRuns).toHaveLength(1);
       expect(result.degradedRuns[0]!.runId).toBe('run_all_bad');
     });
+
+    // ── P1: missing/wrong-typed required fields must fail loud via rowToRecord ──
+    // The DB enforces NOT NULL on these columns, so a NULL never reaches the reader
+    // in a healthy DB. But schema drift (a migration that drops/renames a column,
+    // or a manual ALTER) can make row.xxx undefined. String()/Number() coercion
+    // would wash undefined into "undefined"/NaN and PASS schema validation, hiding
+    // the malformed row. These tests prove the field-level readers reject that.
+    // We test rowToRecord directly with hand-built rows (the trust boundary).
+    function validRowBase(): Record<string, unknown> {
+      const now = new Date().toISOString();
+      return {
+        run_id: 'run-direct-1',
+        task_id: 'task-direct',
+        runtime_kind: 'openclaw',
+        execution_status: 'running',
+        started_at: now,
+        attempt_number: 1,
+        created_at: now,
+        updated_at: now,
+      };
+    }
+
+    it('rowToRecord accepts a fully-valid row', () => {
+      expect(() => SqliteRunStore.rowToRecord(validRowBase())).not.toThrow();
+    });
+
+    it('rowToRecord throws when started_at is undefined (not coerced to "undefined")', () => {
+      const row = validRowBase();
+      delete row.started_at;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/started_at: expected string, got undefined/);
+    });
+
+    it('rowToRecord throws when created_at is undefined', () => {
+      const row = validRowBase();
+      delete row.created_at;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/created_at: expected string, got undefined/);
+    });
+
+    it('rowToRecord throws when updated_at is undefined', () => {
+      const row = validRowBase();
+      delete row.updated_at;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/updated_at: expected string, got undefined/);
+    });
+
+    it('rowToRecord throws when task_id is undefined (not coerced to "undefined")', () => {
+      const row = validRowBase();
+      delete row.task_id;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/task_id: expected string, got undefined/);
+    });
+
+    it('rowToRecord throws when run_id is undefined', () => {
+      const row = validRowBase();
+      delete row.run_id;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/run_id: expected string, got undefined/);
+    });
+
+    it('rowToRecord throws when attempt_number is undefined (not coerced to NaN→0)', () => {
+      const row = validRowBase();
+      delete row.attempt_number;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/attempt_number: expected integer, got undefined/);
+    });
+
+    it('rowToRecord throws when attempt_number is a non-integer number', () => {
+      const row = validRowBase();
+      row.attempt_number = 1.5;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/attempt_number: expected integer/);
+    });
+
+    it('rowToRecord accepts null for optional string fields (ended_at, reason, output_ref)', () => {
+      const row = validRowBase();
+      row.ended_at = null;
+      row.reason = null;
+      row.output_ref = null;
+      const rec = SqliteRunStore.rowToRecord(row);
+      expect(rec.endedAt).toBeUndefined();
+      expect(rec.reason).toBeUndefined();
+      expect(rec.outputRef).toBeUndefined();
+    });
+
+    it('rowToRecord throws when an optional string field is a non-string non-null type (e.g. number)', () => {
+      const row = validRowBase();
+      row.output_ref = 12345;
+      expect(() => SqliteRunStore.rowToRecord(row)).toThrow(/output_ref: expected string\|null, got number/);
+    });
+
+    it('rowToRecord error message never contains the literal "undefined" string for a missing field', () => {
+      // Regression guard: the old String() coercion produced "undefined" which
+      // would pass Type.String(). The reader must reject, and the message must
+      // name the field + type, not silently coerce.
+      const row = validRowBase();
+      delete row.started_at;
+      let msg = '';
+      try {
+        SqliteRunStore.rowToRecord(row);
+      } catch (e) {
+        msg = e instanceof Error ? e.message : String(e);
+      }
+      expect(msg).toContain('started_at');
+      expect(msg).not.toMatch(/^$/); // must not be empty
+      // The value must be reported as "undefined" type, but the FIELD must not
+      // have been coerced into the string "undefined" that would pass validation.
+      expect(msg).toContain('got undefined');
+    });
   });
 });

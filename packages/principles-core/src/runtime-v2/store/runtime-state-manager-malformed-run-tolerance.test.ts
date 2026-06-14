@@ -62,8 +62,8 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     await mgr.initialize();
   });
 
-  afterEach(() => {
-    mgr.close();
+  afterEach(async () => {
+    await mgr.close();
     try {
       fs.rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -71,12 +71,20 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     }
   });
 
-  function degradationEventsFor(taskId: string): TelemetryEvent[] {
+  function degradationEventsFor(_taskId: string): TelemetryEvent[] {
     return events.filter(
       (e) => e.eventType === 'degradation_triggered'
-        && e.traceId === taskId
         && e.payload?.trigger === 'malformed_historical_run_rows',
     );
+  }
+
+  /** Runtime-guarded field read from a telemetry payload (no `as` cast on untrusted shape). */
+  function payloadField(ev: TelemetryEvent, field: string): unknown {
+    const {payload} = ev;
+    if (typeof payload !== 'object' || payload === null) {
+      throw new Error(`payload is not an object for event ${ev.traceId}`);
+    }
+    return (payload as Record<string, unknown>)[field];
   }
 
   // ── getValidRunsByTaskTolerant ──────────────────────────────────────────────
@@ -125,10 +133,13 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
     // ERR-002: degradation must be observable, not silent.
     const degradations = degradationEventsFor(taskId);
     expect(degradations.length).toBeGreaterThanOrEqual(1);
-    const payload = degradations[0]!.payload as Record<string, unknown>;
-    expect(payload.caller).toBe('markTaskSucceeded');
-    expect(payload.degradedCount).toBe(1);
-    expect(payload.runIds).toEqual(['run_bad_succ']);
+    const ev = degradations[0]!;
+    const caller = payloadField(ev, 'caller');
+    expect(caller).toBe('markTaskSucceeded');
+    const degradedCount = payloadField(ev, 'degradedCount');
+    expect(degradedCount).toBe(1);
+    const runIds = payloadField(ev, 'runIds');
+    expect(runIds).toEqual(['run_bad_succ']);
   });
 
   // ── markTaskFailed tolerates malformed historical runs ──────────────────────
@@ -151,7 +162,7 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
 
     const degradations = degradationEventsFor(taskId);
     expect(degradations.length).toBeGreaterThanOrEqual(1);
-    expect((degradations[0]!.payload as Record<string, unknown>).caller).toBe('markTaskFailed');
+    expect(payloadField(degradations[0]!, 'caller')).toBe('markTaskFailed');
   });
 
   // ── markTaskRetryWait tolerates malformed historical runs ───────────────────
@@ -173,6 +184,6 @@ describe('RuntimeStateManager malformed-run tolerance', () => {
 
     const degradations = degradationEventsFor(taskId);
     expect(degradations.length).toBeGreaterThanOrEqual(1);
-    expect((degradations[0]!.payload as Record<string, unknown>).caller).toBe('markTaskRetryWait');
+    expect(payloadField(degradations[0]!, 'caller')).toBe('markTaskRetryWait');
   });
 });

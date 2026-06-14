@@ -6,9 +6,72 @@
  */
 import { Value } from '@sinclair/typebox/value';
 import { RuntimeKindSchema, RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../../runtime-protocol.js';
-import { PDRuntimeError, type PDErrorCategory } from '../../error-categories.js';
+import { PDRuntimeError } from '../../error-categories.js';
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { DegradedRunInfo, RunStore, TolerantRunListResult } from './run-store.js';
+
+// ── Field-level runtime readers (trust boundary for untrusted DB rows) ───────
+//
+// These exist because String()/Number() coercion washes missing/wrong-typed
+// values into legal-looking ones (e.g. String(undefined) → "undefined" passes
+// Type.String()), which hides malformed rows from detection. Each reader is a
+// runtime guard: required fields fail loud, optional fields only accept their
+// declared nullable shape. Enum fields are intentionally NOT coerced here —
+// TypeBox Value.Check is the single authority on enum membership.
+
+/** Read a required non-empty string. Fails loud on missing/non-string/empty. */
+function readRequiredString(value: unknown, fieldName: string, runIdForError: string): string {
+  if (typeof value !== 'string') {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Run ${runIdForError} has invalid schema: /${fieldName}: expected string, got ${value === null ? 'null' : typeof value}`,
+    );
+  }
+  if (value.length === 0) {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Run ${runIdForError} has invalid schema: /${fieldName}: expected non-empty string`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Read a required non-negative integer. Fails loud on missing/non-number/
+ * non-integer/negative. NaN is explicitly rejected (Number(undefined)===NaN
+ * must not silently become 0).
+ */
+function readRequiredInt(value: unknown, fieldName: string, runIdForError: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Run ${runIdForError} has invalid schema: /${fieldName}: expected integer, got ${value === null ? 'null' : typeof value}`,
+    );
+  }
+  if (value < 0) {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Run ${runIdForError} has invalid schema: /${fieldName}: expected non-negative integer, got ${value}`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Read an optional string. Only string | null | undefined are acceptable.
+ * A non-string truthy value (number, object, etc.) is a malformed row and
+ * fails loud rather than being coerced. null/undefined → undefined.
+ */
+function readOptionalString(value: unknown, fieldName: string, runIdForError: string): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `Run ${runIdForError} has invalid schema: /${fieldName}: expected string|null, got ${typeof value}`,
+    );
+  }
+  return value;
+}
 
 export class MalformedRunError extends PDRuntimeError {
   constructor(
@@ -170,26 +233,42 @@ export class SqliteRunStore implements RunStore {
    * validation logic as the production read path (EP-01: no duplicated
    * schema validation that can drift from the real one).
    *
+   * Trust boundary (ERR-001, ERR-005): the row is UNTRUSTED data. We must NOT
+   * use String()/Number() coercion — that washes missing fields into legal
+   * strings/numbers (e.g. `String(undefined)` → `"undefined"` passes Type.String()),
+   * hiding malformed rows from detection. Instead each field is read with a
+   * runtime guard; required fields fail loud, optional fields only accept their
+   * declared nullable shape, and enum fields are passed through as-is so TypeBox
+   * is the single authority on enum validity.
+   *
    * @throws PDRuntimeError{storage_unavailable} if the row fails schema validation.
    */
   static rowToRecord(row: Record<string, unknown>): RunRecord {
-    const runId = String(row.run_id);
+    // runId is extracted first (best-effort) so error messages can name the row,
+    // but it is still validated below — do not trust this value for logic.
+    const runIdForError = typeof row.run_id === 'string' && row.run_id.length > 0
+      ? row.run_id
+      : '<missing run_id>';
+
     const record: RunRecord = {
-      runId,
-      taskId: String(row.task_id),
-      runtimeKind: String(row.runtime_kind) as RunRecord['runtimeKind'],
-      executionStatus: String(row.execution_status) as RunExecutionStatus,
-      startedAt: String(row.started_at),
-      endedAt: row.ended_at ? String(row.ended_at) : undefined,
-      reason: row.reason ? String(row.reason) : undefined,
-      outputRef: row.output_ref ? String(row.output_ref) : undefined,
-      attemptNumber: Number(row.attempt_number ?? 0),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-      // Use ?? undefined so null DB values become undefined (TypeBox validates undefined for optional fields)
-      inputPayload: (row.input_payload as string | null) ?? undefined,
-      outputPayload: (row.output_payload as string | null) ?? undefined,
-      errorCategory: (row.error_category as PDErrorCategory | null) ?? undefined,
+      runId: readRequiredString(row.run_id, 'run_id', runIdForError),
+      taskId: readRequiredString(row.task_id, 'task_id', runIdForError),
+      // Enums: read the raw value without coercion. TypeBox Value.Check below is
+      // the single authority on whether it is a valid enum member.
+      runtimeKind: row.runtime_kind as RunRecord['runtimeKind'],
+      executionStatus: row.execution_status as RunExecutionStatus,
+      startedAt: readRequiredString(row.started_at, 'started_at', runIdForError),
+      attemptNumber: readRequiredInt(row.attempt_number, 'attempt_number', runIdForError),
+      createdAt: readRequiredString(row.created_at, 'created_at', runIdForError),
+      updatedAt: readRequiredString(row.updated_at, 'updated_at', runIdForError),
+      // Optional strings: only string | null | undefined are acceptable shapes.
+      endedAt: readOptionalString(row.ended_at, 'ended_at', runIdForError),
+      reason: readOptionalString(row.reason, 'reason', runIdForError),
+      outputRef: readOptionalString(row.output_ref, 'output_ref', runIdForError),
+      inputPayload: readOptionalString(row.input_payload, 'input_payload', runIdForError),
+      outputPayload: readOptionalString(row.output_payload, 'output_payload', runIdForError),
+      // Optional enum: pass through as-is; TypeBox validates enum membership.
+      errorCategory: (row.error_category ?? undefined) as RunRecord['errorCategory'],
     };
 
     if (!Value.Check(RunRecordSchema, record)) {
@@ -197,7 +276,7 @@ export class SqliteRunStore implements RunStore {
       const details = errors.map(e => `${e.path}: ${e.message}`).join(', ');
       throw new PDRuntimeError(
         'storage_unavailable',
-        `Run ${runId} has invalid schema: ${details}`,
+        `Run ${runIdForError} has invalid schema: ${details}`,
       );
     }
 
