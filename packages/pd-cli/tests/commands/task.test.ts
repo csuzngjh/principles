@@ -30,6 +30,7 @@ import { MalformedRunError } from '@principles/core';
 describe('pd task show command handler', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
   let processExitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -55,6 +56,7 @@ describe('pd task show command handler', () => {
     process.exitCode = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
   });
 
@@ -111,8 +113,11 @@ describe('pd task show command handler', () => {
       runs: [{ runId: 'run-valid' }],
       degradedRuns: [{ runId: 'run-bad', error: 'runtimeKind missing' }],
       reason: expect.stringContaining('Malformed schema'),
-      nextAction: expect.stringContaining('integrity-repair'),
+      // Honest nextAction: must NOT promise an auto-repair that doesn't exist,
+      // and must point at the real quarantine command (integrity-repair --confirm).
+      nextAction: expect.stringContaining('not auto-repaired'),
     });
+    expect(output.nextAction).toContain('integrity-repair --confirm');
     expect(process.exitCode).toBe(1);
     expect(processExitSpy).not.toHaveBeenCalled();
   });
@@ -139,6 +144,9 @@ describe('pd task show command handler', () => {
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Task: task-123'));
+    // The text-mode warning must also carry the honest nextAction.
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('not auto-repaired'));
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('integrity-repair --confirm'));
     expect(process.exitCode).toBe(1);
     expect(processExitSpy).not.toHaveBeenCalled();
   });

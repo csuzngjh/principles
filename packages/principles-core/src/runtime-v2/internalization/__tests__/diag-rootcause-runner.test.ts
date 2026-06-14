@@ -90,6 +90,10 @@ function createMockDeps(overrides: Partial<DiagRootCauseRunnerDeps> = {}): DiagR
     acquireLease: vi.fn().mockResolvedValue(taskRecord),
     getTask: vi.fn().mockResolvedValue(taskRecord),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: ROOTCAUSE_TASK_ID }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: RUN_ID, taskId: ROOTCAUSE_TASK_ID }],
+      degradedRuns: [],
+    }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),

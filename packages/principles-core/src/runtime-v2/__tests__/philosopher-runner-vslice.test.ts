@@ -124,6 +124,10 @@ describe('PhilosopherRunner (PRI-90)', () => {
         runtimeKind: 'philosopher',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-phil-001', taskId: PHILOSOPHER_TASK_ID, runtimeKind: 'philosopher', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),

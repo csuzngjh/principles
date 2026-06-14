@@ -82,6 +82,44 @@ describe('handleRuntimeInternalizationIntegrityRepair', () => {
     expect(jsonOutput.repairedCount).toBe(1);
   });
 
+  it('emits malformed_run_row quarantine actions as a single JSON object', async () => {
+    // Verifies the new malformed-run repair pass flows through the CLI contract
+    // unchanged: exactly one JSON object on stdout, with the quarantine action present.
+    mockRepair.mockReturnValue(makeResult({
+      dryRun: false,
+      repairedCount: 1,
+      actions: [
+        {
+          action: 'quarantine_malformed_run',
+          targetId: 'run-malf-1',
+          taskId: 'task-1',
+          type: 'malformed_run_row',
+          severity: 'warning',
+          previousState: 'queued',
+          nextState: 'failed',
+          previousStatus: 'queued',
+          newStatus: 'failed',
+          recommendedAction: 'quarantine_malformed_run',
+          reason: 'Run run-malf-1 (task task-1) failed schema validation — quarantined',
+        },
+      ],
+    }));
+
+    await handleRuntimeInternalizationIntegrityRepair({ workspace: WS, confirm: true, json: true });
+
+    // Exactly one console.log call (single JSON object, no banners/extra stdout).
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.repairedCount).toBe(1);
+    expect(jsonOutput.actions).toHaveLength(1);
+    expect(jsonOutput.actions[0]).toMatchObject({
+      type: 'malformed_run_row',
+      recommendedAction: 'quarantine_malformed_run',
+      newStatus: 'failed',
+      targetId: 'run-malf-1',
+    });
+  });
+
   it('outputs text format when --json not specified', async () => {
     mockRepair.mockReturnValue(makeResult({ dryRun: true }));
 

@@ -46,6 +46,7 @@ describe('InternalizationIntegrityRemediation', () => {
       CREATE TABLE IF NOT EXISTS runs (
         run_id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
+        runtime_kind TEXT NOT NULL DEFAULT 'openclaw',
         execution_status TEXT NOT NULL DEFAULT 'queued',
         started_at TEXT,
         ended_at TEXT,
@@ -113,13 +114,16 @@ describe('InternalizationIntegrityRemediation', () => {
     return (row?.[field] as string | number | null) ?? null;
   }
 
-  function insertRun(opts: { runId: string; taskId: string; executionStatus: string; }) {
+  function insertRun(opts: { runId: string; taskId: string; executionStatus: string; runtimeKind?: string; attemptNumber?: number; }) {
     const d = new Database(dbPath);
     const now = new Date().toISOString();
+    // runtime_kind defaults to 'openclaw' (a valid RuntimeKindSchema enum value)
+    // so the row passes schema validation and is NOT flagged as malformed by
+    // detectMalformedRuns. Tests that need a malformed row use insertMalformedRunRow.
     d.prepare(
-      `INSERT OR REPLACE INTO runs (run_id, task_id, execution_status, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(opts.runId, opts.taskId, opts.executionStatus, now, now, now);
+      `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(opts.runId, opts.taskId, opts.runtimeKind ?? 'openclaw', opts.executionStatus, now, opts.attemptNumber ?? 1, now, now);
     d.close();
   }
 
@@ -496,6 +500,107 @@ describe('InternalizationIntegrityRemediation', () => {
 
       expect(result.warnings.length).toBe(2);
       expect(result.safeToConfirm).toBe(false);
+    });
+  });
+
+  // ── Malformed run row quarantine (PRI-392 follow-up) ────────────────────────
+  describe('malformed run row quarantine', () => {
+    /**
+     * Insert a schema-malformed run row via raw SQL. runtime_kind='config'
+     * is not in the RuntimeKindSchema enum, so Value.Check(RunRecordSchema)
+     * fails — exactly the failure mode that throws MalformedRunError from
+     * SqliteRunStore and historically blocked runner recovery.
+     */
+    function insertMalformedRunRow(runId: string, taskId: string): void {
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'config', ?, 1, 'queued', ?, ?)`,
+      ).run(runId, taskId, now, now, now);
+      d.close();
+    }
+
+    it('dry-run detects malformed run row but does NOT mutate DB', () => {
+      // Need a task row so detection has something to attribute.
+      insertTask({ taskId: 'malf-task-1', taskKind: 'dreamer', status: 'succeeded' });
+      insertMalformedRunRow('run-malf-1', 'malf-task-1');
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      expect(result.dryRun).toBe(true);
+      const action = findAction(result.actions, 'malf-task-1', 'malformed_run_row');
+      expect(action).toBeDefined();
+      expect(action?.targetId).toBe('run-malf-1');
+      expect(action?.recommendedAction).toBe('quarantine_malformed_run');
+      expect(action?.reason).toContain('schema validation');
+      expect(action?.newStatus).toBe('failed');
+
+      // Dry-run must NOT mutate the DB.
+      expect(getRunField('run-malf-1', 'execution_status')).toBe('queued');
+    });
+
+    it('confirm quarantines malformed run row as failed + storage_unavailable, without deleting it', () => {
+      insertTask({ taskId: 'malf-task-2', taskKind: 'dreamer', status: 'succeeded' });
+      insertMalformedRunRow('run-malf-2', 'malf-task-2');
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: false });
+
+      expect(result.repairedCount).toBeGreaterThanOrEqual(1);
+      const action = findAction(result.actions, 'malf-task-2', 'malformed_run_row');
+      expect(action).toBeDefined();
+      expect(action?.recommendedAction).toBe('quarantine_malformed_run');
+
+      // Row must be quarantined, NOT deleted (audit history preserved).
+      expect(getRunField('run-malf-2', 'execution_status')).toBe('failed');
+      expect(getRunField('run-malf-2', 'error_category')).toBe('storage_unavailable');
+      const reason = getRunField('run-malf-2', 'reason');
+      expect(String(reason)).toContain('quarantined');
+
+      // Never marked succeeded (no forging a successful run).
+      expect(getRunField('run-malf-2', 'execution_status')).not.toBe('succeeded');
+    });
+
+    it('is idempotent — second confirm skips already-quarantined rows', () => {
+      insertTask({ taskId: 'malf-task-3', taskKind: 'dreamer', status: 'succeeded' });
+      insertMalformedRunRow('run-malf-3', 'malf-task-3');
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result1 = remediation.repair({ dryRun: false });
+      const result2 = remediation.repair({ dryRun: false });
+
+      // First run quarantines the row.
+      const action1 = findAction(result1.actions, 'malf-task-3', 'malformed_run_row');
+      expect(action1?.recommendedAction).toBe('quarantine_malformed_run');
+
+      // Second run: row is already failed → already_repaired, no new mutation.
+      const action2 = findAction(result2.actions, 'malf-task-3', 'malformed_run_row');
+      expect(action2?.recommendedAction).toBe('already_repaired');
+      // repairedCount on the second pass must not count the already-failed row.
+      const secondQuarantineActions = result2.actions.filter(
+        (a) => a.type === 'malformed_run_row' && a.recommendedAction === 'quarantine_malformed_run',
+      );
+      expect(secondQuarantineActions.length).toBe(0);
+    });
+
+    it('valid run rows are NOT flagged as malformed', () => {
+      insertTask({ taskId: 'malf-task-4', taskKind: 'dreamer', status: 'succeeded' });
+      // Insert a fully-valid run row.
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'succeeded', ?, ?)`,
+      ).run('run-valid-4', 'malf-task-4', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      const action = findAction(result.actions, 'malf-task-4', 'malformed_run_row');
+      expect(action).toBeUndefined();
     });
   });
 });

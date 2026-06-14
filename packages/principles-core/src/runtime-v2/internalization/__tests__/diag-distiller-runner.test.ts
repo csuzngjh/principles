@@ -125,6 +125,10 @@ function createMockDeps(overrides: Partial<DiagDistillerRunnerDeps> = {}): DiagD
       return Promise.resolve(undefined);
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: DISTILLER_TASK_ID }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: RUN_ID, taskId: DISTILLER_TASK_ID }],
+      degradedRuns: [],
+    }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),

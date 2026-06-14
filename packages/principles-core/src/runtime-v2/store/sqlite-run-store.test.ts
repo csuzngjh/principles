@@ -220,5 +220,57 @@ describe('SqliteRunStore', () => {
       expect(malformedErr.degradedRuns[0]?.runId).toBe('run_malformed_2');
       expect(malformedErr.degradedRuns[0]?.error).toContain('runtimeKind');
     });
+
+    it('listValidRunsByTaskTolerant returns valid + degraded runs WITHOUT throwing when a malformed row is present', async () => {
+      const taskId = 'task-tolerant-mixed';
+      await taskStore.createTask(makeTaskInput(taskId));
+
+      // valid run (attempt 1)
+      await runStore.createRun(makeRunInput(taskId, 1));
+
+      // malformed run via raw SQL (invalid runtime_kind 'config')
+      conn.getDb().prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run('run_tol_malformed', taskId, 'config', new Date().toISOString(), 2, 'failed', new Date().toISOString(), new Date().toISOString());
+
+      const result = await runStore.listValidRunsByTaskTolerant(taskId);
+
+      // Must NOT throw — the whole point of the tolerant accessor.
+      expect(result.runs).toHaveLength(1);
+      expect(result.runs[0]!.runId).toBe(`run_${taskId}_1`);
+      expect(result.degradedRuns).toHaveLength(1);
+      expect(result.degradedRuns[0]!.runId).toBe('run_tol_malformed');
+      expect(result.degradedRuns[0]!.error).toContain('runtimeKind');
+      // rawRow is preserved for diagnostics (ERR-002: observable, not silent)
+      expect(result.degradedRuns[0]!.rawRow).toBeDefined();
+    });
+
+    it('listValidRunsByTaskTolerant returns empty runs + empty degradedRuns for a task with only valid runs', async () => {
+      const taskId = 'task-tolerant-clean';
+      await taskStore.createTask(makeTaskInput(taskId));
+      await runStore.createRun(makeRunInput(taskId, 1));
+
+      const result = await runStore.listValidRunsByTaskTolerant(taskId);
+      expect(result.runs).toHaveLength(1);
+      expect(result.degradedRuns).toEqual([]);
+    });
+
+    it('listValidRunsByTaskTolerant returns empty runs + only degradedRuns when ALL rows are malformed', async () => {
+      // This is the worst case: no valid run exists. The tolerant accessor
+      // still must NOT throw — callers (resolveStoreRunId) decide to fail
+      // loud when runs.length === 0.
+      const taskId = 'task-tolerant-all-malformed';
+      await taskStore.createTask(makeTaskInput(taskId));
+      conn.getDb().prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run('run_all_bad', taskId, 'config', new Date().toISOString(), 1, 'failed', new Date().toISOString(), new Date().toISOString());
+
+      const result = await runStore.listValidRunsByTaskTolerant(taskId);
+      expect(result.runs).toEqual([]);
+      expect(result.degradedRuns).toHaveLength(1);
+      expect(result.degradedRuns[0]!.runId).toBe('run_all_bad');
+    });
   });
 });
