@@ -1466,4 +1466,62 @@ describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
     const ids = result.records.map(r => r.id);
     expect(ids).toContain('pain_2');
   });
+
+  // Fixture 6 (reviewer-requested P1+P2 round 2): same content, FAR-APART
+  // timestamps. This is the recurrence-preservation regression. Before the
+  // fix, condition (b) used a GLOBAL (sourceKind, normalizedSummary) set, so
+  // any trajectory row whose content matched ANY canonical was suppressed —
+  // even hours or days later. That silently hid real recurrences from the
+  // owner. With the time-windowed condition (b), the recurrence MUST survive.
+  it('does NOT dedupe: identical content but different timestamps (recurrence preserved)', async () => {
+    // The owner logs the same pain 8 hours apart — a real recurrence, not a
+    // duplicate of the same event.
+    const t0 = '2026-06-10T10:00:00.000Z';
+    const t1 = '2026-06-10T18:00:00.000Z';
+    const sharedText = 'Agent modified config without approval';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: sharedText,
+      createdAt: t0,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: sharedText, // identical text, 8 hours later
+      createdAt: t1,
+    });
+    trajDb.close();
+
+    // Canonical task ONLY for pain_1 (the first occurrence). Its candidate
+    // title matches the trajectory text — content-hash match is satisfied.
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-config',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Two records remain: the canonical card (linkedTaskId='diagnosis_pain_1')
+    // and pain_2 — the recurrence. pain_1 is suppressed via condition (a)
+    // (diagnosis_pain_1 round-trip) AND condition (b) (content match + same
+    // observedAt). pain_2 is preserved because, although its content matches
+    // the canonical, its observedAt is 8 hours outside the proximity window.
+    expect(result.records).toHaveLength(2);
+
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2'); // the recurrence is preserved
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
 });
