@@ -1237,3 +1237,384 @@ describe('PRI-380: crossReferenceByTimestamp', () => {
     expect(result.get('pain_1')!.taskId).toBe('diagnosis_near');
   });
 });
+
+// ── PRI-388: Dedupe trajectory pain rows with Runtime V2 canonical pain ───
+//
+// Reviewer P1/P2 requirements covered here:
+//   - dedupe MUST rely on strong lineage, not timestamp alone
+//   - two different real pains landing within 1s MUST both survive
+//   - observedAt desc order MUST be preserved after dedupe
+//   - a true orphan trajectory row (no canonical counterpart) MUST survive
+
+describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
+  // Fixture 1 (reviewer-requested): real manual_* canonical + pain_N trajectory
+  // form, where the trajectory row's text matches the canonical candidate title.
+  // Same event -> dedupe to a single canonical card.
+  it('dedupes: trajectory pain_N + Runtime V2 manual_* same event (matched summary) -> only canonical shown', async () => {
+    const timestamp = '2026-06-10T14:30:45.000Z';
+    const sharedText = 'Agent modified config without approval';
+
+    // 1. trajectory pain_events row (pain_1) — no linked task by id
+    const trajDb = createTrajectoryDb();
+    const trajectoryRowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: sharedText,
+      createdAt: timestamp,
+    });
+    trajDb.close();
+
+    // 2. Runtime V2 canonical task with a DIFFERENT id namespace (manual_*),
+    //    so the task is not auto-merged in step 1. Its candidate title matches
+    //    the trajectory text, which is the strong-lineage content hash.
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'manual_1781355083586_8cfc3yqe',
+      status: 'succeeded',
+      createdAt: timestamp,
+      inputRef: 'manual_1781355083586_8cfc3yqe', // self-referential, not the trajectory row id
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-dedupe-001',
+      taskId: 'manual_1781355083586_8cfc3yqe',
+      title: sharedText, // matches trajectory text -> content-hash lineage
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Only ONE card remains: the canonical (manual_*) record.
+    // The trajectory pain_1 row was suppressed because its summary hashes to
+    // the same (sourceKind, normalizedSummary) key as the canonical candidate.
+    expect(result.records).toHaveLength(1);
+
+    const record = result.records[0];
+    expect(record.linkedTaskId).toBe('manual_1781355083586_8cfc3yqe');
+    expect(record.linkedCandidateId).toBe('cand-dedupe-001');
+    expect(record.state).toBe('internalization-missing');
+    // The trajectory row (pain_<rowId>) must NOT appear as a separate card.
+    expect(result.records.some(r => r.id === `pain_${trajectoryRowId}`)).toBe(false);
+  });
+
+  // Fixture 2 (reviewer-requested P1): two DIFFERENT real pains within 1s.
+  // They share source and timestamp window but have different content.
+  // They MUST both survive — dedupe must not rely on time alone.
+  it('does NOT dedupe: two different pains within 1 second (same source, different text)', async () => {
+    const t0 = '2026-06-10T14:30:00.000Z';
+    const t1 = '2026-06-10T14:30:00.500Z'; // 500ms apart
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent deleted a file without confirmation',
+      createdAt: t0,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent ran a shell command without approval',
+      createdAt: t1,
+    });
+    trajDb.close();
+
+    // Canonical task ONLY for the second pain (different content from first).
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_2',
+      status: 'succeeded',
+      createdAt: t1,
+      inputRef: '2',
+      diagnosticJson: JSON.stringify({ rootCause: 'Agent ran a shell command without approval' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-shell',
+      taskId: 'diagnosis_pain_2',
+      title: 'Shell commands require approval',
+      confidence: 0.85,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Both pains survive: pain_2 has canonical state; pain_1 stays as a
+    // trajectory-only card because its content does not hash-match the canonical.
+    expect(result.records).toHaveLength(2);
+
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_1');
+    expect(ids).toContain('pain_2');
+
+    // pain_1 (the different pain) must NOT be silently suppressed by the
+    // 500ms timestamp proximity to pain_2's canonical task.
+    const pain1 = result.records.find(r => r.id === 'pain_1');
+    expect(pain1).toBeDefined();
+    expect(pain1!.linkedTaskId).toBeUndefined();
+  });
+
+  // Fixture 3 (reviewer-requested P1-2): dedupe preserves observedAt desc order.
+  it('preserves observedAt descending order after dedupe', async () => {
+    // Three trajectory rows. The middle one shares content with a canonical
+    // record and should be suppressed; the remaining two must stay in
+    // descending observedAt order.
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Oldest event',
+      createdAt: '2026-06-10T14:00:00.000Z',
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Shared event text',
+      createdAt: '2026-06-10T15:00:00.000Z',
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Newest event',
+      createdAt: '2026-06-10T16:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Canonical task whose candidate title matches the middle trajectory row.
+    insertTask(stateDb, {
+      taskId: 'manual_canonical_shared',
+      status: 'succeeded',
+      createdAt: '2026-06-10T15:00:00.000Z',
+      inputRef: 'manual_canonical_shared',
+      diagnosticJson: JSON.stringify({ rootCause: 'Shared event text' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-shared',
+      taskId: 'manual_canonical_shared',
+      title: 'Shared event text',
+      confidence: 0.8,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Three records: pain_3 (Newest, 16:00), manual_canonical_shared (15:00),
+// pain_1 (Oldest, 14:00). pain_2 was suppressed.
+    expect(result.records).toHaveLength(3);
+
+    const observedAts = result.records.map(r => r.observedAt);
+    expect(observedAts).toEqual([
+      '2026-06-10T16:00:00.000Z',
+      '2026-06-10T15:00:00.000Z',
+      '2026-06-10T14:00:00.000Z',
+    ]);
+
+    // The suppressed middle trajectory row must not reappear.
+    expect(result.records.some(r => r.id === 'pain_2')).toBe(false);
+  });
+
+  // Fixture 4: true orphan trajectory row (no canonical counterpart at all).
+  it('does NOT dedupe: orphan trajectory records with no canonical counterpart', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Orphan pain with no Runtime V2 task',
+      createdAt: '2026-06-10T14:30:00.000Z',
+    });
+    trajDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].state).toBe('recorded-only');
+  });
+
+  // Fixture 5: same source + same timestamp, but different content — no dedupe.
+  // This is the strongest form of the P1 regression test.
+  it('does NOT dedupe: identical timestamp + source but different content', async () => {
+    const sameTimestamp = '2026-06-10T14:30:00.000Z';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain alpha',
+      createdAt: sameTimestamp,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Pain beta',
+      createdAt: sameTimestamp,
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: sameTimestamp,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: 'Pain alpha' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-alpha',
+      taskId: 'diagnosis_pain_1',
+      title: 'Pain alpha',
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // pain_1 dedupes against the canonical (same content hash).
+    // pain_2 MUST survive: identical timestamp + source, but different content.
+    expect(result.records).toHaveLength(2);
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2');
+  });
+
+  // Fixture 6 (reviewer-requested P1+P2 round 2): same content, FAR-APART
+  // timestamps. This is the recurrence-preservation regression. Before the
+  // fix, condition (b) used a GLOBAL (sourceKind, normalizedSummary) set, so
+  // any trajectory row whose content matched ANY canonical was suppressed —
+  // even hours or days later. That silently hid real recurrences from the
+  // owner. With the time-windowed condition (b), the recurrence MUST survive.
+  it('does NOT dedupe: identical content but different timestamps (recurrence preserved)', async () => {
+    // The owner logs the same pain 8 hours apart — a real recurrence, not a
+    // duplicate of the same event.
+    const t0 = '2026-06-10T10:00:00.000Z';
+    const t1 = '2026-06-10T18:00:00.000Z';
+    const sharedText = 'Agent modified config without approval';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: sharedText,
+      createdAt: t0,
+    });
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: sharedText, // identical text, 8 hours later
+      createdAt: t1,
+    });
+    trajDb.close();
+
+    // Canonical task ONLY for pain_1 (the first occurrence). Its candidate
+    // title matches the trajectory text — content-hash match is satisfied.
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-config',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Two records remain: the canonical card (linkedTaskId='diagnosis_pain_1')
+    // and pain_2 — the recurrence. pain_1 is suppressed via condition (a)
+    // (diagnosis_pain_1 round-trip) AND condition (b) (content match + same
+    // observedAt). pain_2 is preserved because, although its content matches
+    // the canonical, its observedAt is 8 hours outside the proximity window.
+    expect(result.records).toHaveLength(2);
+
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2'); // the recurrence is preserved
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
+
+  // Fixture 7 (reviewer-requested P1 round 3): Chinese summaries MUST
+  // participate in content-hash dedupe. Before the round-3 fix,
+  // normalizeSummaryForDedupe used `/[^\w\s]/g` which DROPPED all CJK
+  // ideographs, reducing any Chinese pain summary to its ASCII prefix (often
+  // empty). That broke content-hash dedupe for non-ASCII owners in two
+  // complementary ways, both covered here:
+  //   7a — same Chinese content within the 1s window: DEDUPE (positive case)
+  //   7b — same Chinese content 8h apart: PRESERVE RECURRENCE (negative case)
+
+  // 7a — positive dedupe, Chinese content, within 1s window.
+  it('dedupes: identical Chinese content within the 1s proximity window', async () => {
+    const t0 = '2026-06-11T10:00:00.000Z';
+    const t1 = '2026-06-11T10:00:00.500Z'; // 500ms later, within CONTENT_DEDUPE_PROXIMITY_MS
+    const sharedText = 'Agent 未经批准修改了配置';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t0 });
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t1 });
+    trajDb.close();
+
+    // Canonical task ONLY for pain_1 (first occurrence). Its candidate title
+    // matches the trajectory text — the content-hash match must succeed for
+    // Chinese text after the Unicode-aware normalization fix.
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-zh-dedupe',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Only the canonical card remains. pain_1 dedupes via condition (a)
+    // (diagnosis_pain_1 round-trip); pain_2 dedupes via condition (b) —
+    // CRUCIALLY this requires Chinese content to hash to the same key as the
+    // canonical title, which was impossible before the NFKC + \p{L}\p{N} fix.
+    // Pre-fix, both pains normalized to 'agent' (Chinese stripped) which would
+    // ALSO match — but only by accident, and it would have suppressed every
+    // Chinese pain starting with 'Agent' regardless of the actual content.
+    expect(result.records).toHaveLength(1);
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
+
+  // 7b — recurrence preserved, Chinese content, 8h apart.
+  it('does NOT dedupe: identical Chinese content but 8h apart (recurrence preserved)', async () => {
+    const t0 = '2026-06-11T10:00:00.000Z';
+    const t1 = '2026-06-11T18:00:00.000Z'; // 8h later, well outside the 1s window
+    const sharedText = 'Agent 未经批准修改了配置';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t0 });
+    insertPainEvent(trajDb, { source: 'manual', text: sharedText, createdAt: t1 });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      createdAt: t0,
+      inputRef: '1',
+      diagnosticJson: JSON.stringify({ rootCause: sharedText }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-zh-recurrence',
+      taskId: 'diagnosis_pain_1',
+      title: sharedText,
+      confidence: 0.9,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+
+    // Two records: the canonical card + pain_2 (the recurrence, 8h outside
+    // the proximity window). pain_1 dedupes via condition (a) + (b); pain_2
+    // survives because, although its Chinese content matches, observedAt is
+    // far outside the 1s window. This is the same regression as Fixture 6 but
+    // for Chinese text — without the Unicode fix the content match itself
+    // would have been broken.
+    expect(result.records).toHaveLength(2);
+    const ids = result.records.map(r => r.id);
+    expect(ids).toContain('pain_2'); // the Chinese recurrence is preserved
+    expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
+});
