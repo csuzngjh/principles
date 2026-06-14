@@ -1,4 +1,17 @@
-import { describe, it } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import {
+  RuntimeStateManager,
+  SqliteDiagnosticianCommitter,
+  assertMainlineContract,
+} from '../index.js';
+import type {
+  DiagnosticianOutputV1,
+  MainlineSnapshot,
+  RuntimeReadinessSnapshot,
+} from '../index.js';
 
 /**
  * Mainline product-path test — THE LOAD-BEARING WALL of the convergence sprint.
@@ -31,11 +44,111 @@ import { describe, it } from 'vitest';
  *   - Create the dreamer task through `seedIntakeTask` / `handleCandidateInternalize`,
  *     never by hand-writing dependencyTaskIds (that is what full-chain-real-llm.test.ts
  *     does and why it never caught the severed-lineage bug).
- *   - Assemble the snapshot with `assembleMainlineSnapshot` below (to be implemented
- *     as the shared reader that integrity/smoke/Console also use).
+ *   - Assemble the snapshot with the shared reader in
+ *     `packages/pd-cli/src/services/mainline-snapshot-assembler.ts` (or equivalent
+ *     I/O-boundary reader) so integrity/smoke/Console share one source of truth.
  */
 
+function createTempWorkspace(): string {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pri-394-product-path-'));
+  return tmpDir;
+}
+
+function removeTempWorkspace(dir: string): void {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+function alignedReadiness(): RuntimeReadinessSnapshot {
+  return {
+    configDoctorProfile: 'openclaw.default',
+    runtimeProbeProfile: 'openclaw.default',
+    configSource: '.pd/config.yaml',
+    probeConfigSource: '.pd/config.yaml',
+    diagnosticianReady: true,
+  };
+}
+
+function diagnosticianDiagnosticJson(painId: string): string {
+  return JSON.stringify({
+    sourcePainId: painId,
+    reasonSummary: 'Repeated edits without reading instructions first',
+    source: 'test',
+    severity: 'high',
+    sessionIdHint: null,
+    agentIdHint: null,
+    provenance: 'automatic_hook',
+    provenanceReason: 'automatic hook',
+    evidence: [{ sourceRef: 'session://test', note: 'edited README before reading' }],
+    workspaceDir: null,
+  });
+}
+
+function validDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
+  return {
+    valid: true,
+    diagnosisId: `diag-${painId}`,
+    summary: 'Repeated edits without reading instructions first',
+    rootCause: 'Assumption: agent assumes it knows the workspace conventions',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'session://test', note: 'edited README before reading' }],
+    recommendations: [{
+      kind: 'principle',
+      description: 'Read AGENTS.md and PLAN.md before editing protected files',
+      abstractedPrinciple: 'Read workspace instructions before protected edits',
+    }],
+    confidence: 0.9,
+  };
+}
+
+async function seedDiagnosisToCandidate(
+  sm: RuntimeStateManager,
+  painId: string,
+): Promise<{ taskId: string; candidateId: string }> {
+  const taskId = `diagnostician-${painId}`;
+  await sm.createTask({
+    taskId,
+    taskKind: 'diagnostician',
+    inputRef: painId,
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: 3,
+    diagnosticJson: diagnosticianDiagnosticJson(painId),
+  });
+
+  const committer = new SqliteDiagnosticianCommitter(sm.connection);
+  await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
+  const runs = await sm.getRunsByTask(taskId);
+  const runId = runs[0]?.runId;
+  if (!runId) throw new Error(`No run created for task ${taskId}`);
+
+  const commitResult = await committer.commit({
+    runId,
+    taskId,
+    output: validDiagnosticianOutput(painId),
+    idempotencyKey: `idem-${taskId}`,
+  });
+  await sm.markTaskSucceeded(taskId, `artifact://${commitResult.artifactId}`);
+
+  const candidates = await sm.getCandidatesByTaskId(taskId);
+  const [candidate] = candidates;
+  if (!candidate) throw new Error('No candidate produced by diagnostician committer');
+  return { taskId, candidateId: candidate.candidateId };
+}
+
 describe('mainline product-path (load-bearing wall)', () => {
+  let workspaceDir = '';
+  let sm: RuntimeStateManager;
+
+  beforeEach(() => {
+    workspaceDir = createTempWorkspace();
+    sm = new RuntimeStateManager({ workspaceDir });
+  });
+
+  afterEach(async () => {
+    try { await sm.close(); } catch { /* ignore */ }
+    removeTempWorkspace(workspaceDir);
+  });
+
   it.todo('PRI-C: config doctor and probe resolve the same profile from .pd/config.yaml');
 
   it.todo('seeds a real pain row and runs the diagnostician via a stub runtime adapter');
@@ -50,50 +163,35 @@ describe('mainline product-path (load-bearing wall)', () => {
   it.todo('PRI-B: DreamerRunner.buildContext returns contextRefs.length > 0 and contextHash !== "empty"');
 
   it.todo(
-    'assembleMainlineSnapshot(stateManager, painId) + assertMainlineContract → overall "ok" ' +
+    'shared reader + assertMainlineContract → overall "ok" ' +
       'with zero violations across all stages',
   );
 
-  it.todo('a consumed candidate left without a dreamer task makes the contract report auto_consumption violation');
-});
+  it('a consumed candidate left without a dreamer task makes the contract report auto_consumption violation', async () => {
+    await sm.initialize();
+    const painId = 'pain-auto-consumption';
+    const { candidateId } = await seedDiagnosisToCandidate(sm, painId);
+    await sm.updateCandidateStatus(candidateId, { status: 'consumed' });
 
-/* ───────────────────────────────────────────────────────────────────────────
- * Reference implementation sketch for the shared snapshot assembler.
- * Lives here as a comment until PRI-A wiring is split into its own module so
- * integrity-read-model, `pd mvp smoke`, and the Console chain view all import it
- * (one source of truth — EP-02). Pseudocode, not executable yet:
- *
- *   export async function assembleMainlineSnapshot(
- *     sm: RuntimeStateManager,
- *     painId: string,
- *     readiness: RuntimeReadinessSnapshot,
- *   ): Promise<MainlineSnapshot> {
- *     const diagnosisTask = await findDiagnosisTaskForPain(sm, painId);
- *     const artifact      = diagnosisTask ? await findDiagnosticianArtifact(sm, diagnosisTask.taskId) : null;
- *     const candidate     = artifact ? await sm.getCandidatesByArtifactId(artifact.artifactId)[0] : null;
- *     const dreamerTask   = candidate ? await sm.getTask(`dreamer-${candidate.candidateId}-${channel}`) : null;
- *     const dreamerCtx    = dreamerTask ? await new DreamerRunner(...).buildContext(dreamerTask.taskId) : null;
- *     const successor     = dreamerTask ? await findSuccessor(sm, dreamerTask.taskId) : null;
- *     const principle     = successor ? await findReviewablePrinciple(sm, successor.taskId) : null;
- *     return {
- *       readiness,
- *       chain: {
- *         painId,
- *         diagnosisTask: diagnosisTask && { taskId, status, hasSucceededRun: await hasSucceededRun(sm, taskId) },
- *         diagnosticianArtifact: artifact && { artifactId, sourcePainId: traceArtifactToPain(artifact) },
- *         candidate: candidate && {
- *           candidateId, status,
- *           sourceTaskId: candidate.taskId,
- *           sourceArtifactId: candidate.artifactId,
- *           sourceRunId: candidate.sourceRunId,
- *         },
- *         dreamerTask: dreamerTask && hydratePITaskRecord(dreamerTask) && {
- *           taskId, dependencyTaskIds, inputArtifactRefs,
- *         },
- *         dreamerContext: dreamerCtx && { contextHash, contextRefs },
- *         successor, principle,
- *       },
- *       consumedCandidatesMissingDreamer: await findConsumedCandidatesWithoutDreamer(sm),
- *     };
- *   }
- * ─────────────────────────────────────────────────────────────────────────── */
+    const snapshot: MainlineSnapshot = {
+      readiness: alignedReadiness(),
+      chain: {
+        painId,
+        diagnosisTask: null,
+        diagnosticianArtifact: null,
+        candidate: null,
+        dreamerTask: null,
+        dreamerContext: null,
+        successor: null,
+        principle: null,
+      },
+      consumedCandidatesMissingDreamer: [candidateId],
+    };
+
+    const verdict = assertMainlineContract(snapshot);
+    expect(verdict.stages.some((s) => s.stage === 'auto_consumption' && s.status === 'violation')).toBe(true);
+    const autoConsumption = verdict.stages.find((s) => s.stage === 'auto_consumption');
+    expect(autoConsumption?.reason).toContain(candidateId);
+    expect(autoConsumption?.nextAction).toBeTruthy();
+  });
+});
