@@ -41,6 +41,23 @@ const { MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   return { MockPrincipleTreeLedgerAdapter };
 });
 
+const { mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
+  const mockResolveRuntimeFromPdConfig = vi.fn().mockReturnValue({
+    result: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    },
+    legacyWarnings: [],
+    configSource: '.pd/config.yaml',
+    configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+  });
+  return { mockResolveRuntimeFromPdConfig };
+});
+
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
@@ -122,6 +139,10 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
 }));
 
+vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
+  resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
+}));
+
 import { handleDiagnoseRun, handleDiagnoseStatus, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
 
 const SUCCEEDED_RESULT = {
@@ -177,14 +198,18 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('HG-03: --runtime openclaw-cli without mode (no file config) fails via resolveRuntimeConfig', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      ok: false,
-      reason: 'missing_openclaw_mode',
-      message: 'runtimeKind is openclaw-cli but no mode specified',
-      nextAction: 'Provide exactly one mode',
+  it('HG-03: --runtime openclaw-cli without mode (no file config) fails via resolveRuntimeFromPdConfig', async () => {
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        ok: false,
+        reason: 'missing_openclaw_mode',
+        message: 'runtimeKind is openclaw-cli but no mode specified',
+        nextAction: 'Provide exactly one mode',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(true);
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -196,7 +221,7 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('no mode specified'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('no mode resolved'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
@@ -226,13 +251,17 @@ describe('pd diagnose run --runtime routing', () => {
   });
 
   it('DPB-09: openclaw-cli with file config openclawMode succeeds without CLI flag', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'local',
-      timeoutMs: 300000,
-      agentId: 'main',
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'local',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(false);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -250,14 +279,18 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'gateway',
-      timeoutMs: 300000,
-      agentId: 'main',
+  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'gateway',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(false);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -270,6 +303,13 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
+    // Flag override: config says gateway, flag says local → adapter gets local
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'local' }),
+    );
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
@@ -277,13 +317,17 @@ describe('pd diagnose run --runtime routing', () => {
   });
 
   it('DPB-09: openclaw-cli missing mode (--json) outputs JSON error', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      ok: false,
-      reason: 'missing_openclaw_mode',
-      message: 'runtimeKind is openclaw-cli but no mode specified',
-      nextAction: 'Provide exactly one mode',
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: undefined,
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(true);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -323,13 +367,17 @@ describe('pd diagnose run --runtime routing', () => {
   });
 
   it('DPB-09: openclaw-cli --openclaw-gateway constructs adapter with runtimeMode=gateway', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'gateway',
-      timeoutMs: 300000,
-      agentId: 'main',
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'gateway',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(false);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -355,13 +403,17 @@ describe('pd diagnose run --runtime routing', () => {
   });
 
   it('DPB-09: openclaw-cli --openclaw-local constructs adapter with runtimeMode=local', async () => {
-    mockResolveRuntimeConfig.mockReturnValueOnce({
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'local',
-      timeoutMs: 300000,
-      agentId: 'main',
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'local',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
-    mockIsRuntimeConfigError.mockReturnValueOnce(false);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);

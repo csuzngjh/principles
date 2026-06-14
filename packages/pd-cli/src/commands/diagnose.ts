@@ -26,7 +26,6 @@ import {
   OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
   PDRuntimeError,
-  resolveRuntimeConfig,
   isRuntimeConfigError,
   CandidateIntakeService,
   run as diagnoseRun,
@@ -37,6 +36,7 @@ import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js'
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
 import * as path from 'path';
 
@@ -187,8 +187,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
      
     let runtimeAdapter: PDRuntimeAdapter;
     if (runtimeKind === 'openclaw-cli') {
-      const stateDir = `${workspaceDir}/.state`;
-      const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway, requestedRuntimeKind: 'openclaw-cli' });
+      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+      const configResult = resolved.result;
       if (isRuntimeConfigError(configResult)) {
         if (opts.json) {
           console.log(JSON.stringify({ ok: false, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction }));
@@ -200,19 +200,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         return;
       }
       const { openclawMode } = configResult;
-      if (!openclawMode) {
+      // CLI flags override config (PRI-393)
+      const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
+      const effectiveMode = flagMode ?? openclawMode;
+      if (!effectiveMode) {
         if (opts.json) {
-          console.log(JSON.stringify({ ok: false, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml' }));
+          console.log(JSON.stringify({ ok: false, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml' }));
         } else {
           console.error('error: runtimeKind is openclaw-cli but no mode resolved');
-          console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml');
+          console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml');
         }
         process.exit(1);
         return;
       }
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: openclawMode,
+        runtimeMode: effectiveMode,
         workspaceDir,
         agentId: opts.agent ?? 'main',
       });
@@ -226,7 +229,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         agentId: 'openclaw-cli-adapter',
         payload: {
           runtimeKind: 'openclaw-cli',
-          runtimeMode: openclawMode,
+          runtimeMode: effectiveMode,
         },
       });
     } else if (runtimeKind === 'test-double') {
@@ -256,18 +259,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }),
       });
     } else if (runtimeKind === 'pi-ai') {
-      const stateDir = `${workspaceDir}/.state`;
+      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+      for (const w of resolved.legacyWarnings) console.warn(`[pd diagnose] ${w}`);
+
       let policyConfig: RuntimeConfig | null = null;
-      try {
-        const configResult = resolveRuntimeConfig(stateDir);
-        if (!isRuntimeConfigError(configResult)) {
-          policyConfig = configResult;
-        } else {
-          console.warn(`[pd diagnose] workflows.yaml policy load failed: ${configResult.message}. Using CLI flags if provided.`);
-        }
-      } catch (err: unknown) {
-        const detail = err instanceof Error ? err.message : String(err);
-        console.warn(`[pd diagnose] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
+      if (!isRuntimeConfigError(resolved.result)) {
+        policyConfig = resolved.result;
+      } else {
+        console.warn(`[pd diagnose] .pd/config.yaml resolution failed: ${resolved.result.message}. Using CLI flags if provided.`);
       }
 
       const provider = opts.provider ?? policyConfig?.provider;
@@ -285,15 +284,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       if (missing.length > 0) {
         console.error(
           `error: missing required pi-ai config: ${missing.join(', ')}.\n` +
-          `Pass via --flag or add to workflows.yaml pd-runtime-v2-diagnosis funnel policy.\n` +
+          `Pass via --flag or add to .pd/config.yaml runtime profile.\n` +
           `Example:\n` +
           `  pd diagnose run --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY\n` +
-          `  Or add to workflows.yaml:\n` +
-          `    policy:\n` +
-          `      runtimeKind: pi-ai\n` +
-          `      provider: openrouter\n` +
-          `      model: anthropic/claude-sonnet-4\n` +
-          `      apiKeyEnv: OPENROUTER_API_KEY`,
+          `  Or add to .pd/config.yaml:\n` +
+          `    runtimeProfiles:\n` +
+          `      - id: openrouter\n` +
+          `        type: pi-ai\n` +
+          `        provider: openrouter\n` +
+          `        model: anthropic/claude-sonnet-4\n` +
+          `        apiKeyEnv: OPENROUTER_API_KEY`,
         );
         process.exit(1);
       }
