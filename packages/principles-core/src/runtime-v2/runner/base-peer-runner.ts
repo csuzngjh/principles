@@ -412,10 +412,38 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // ── Store helpers ──────────────────────────────────────────────────────────
 
   private async resolveStoreRunId(taskId: string): Promise<string> {
-    const runs = await this.stateManager.getRunsByTask(taskId);
+    // Tolerant read: a malformed HISTORICAL run row must not block recovery of
+    // a task whose lease just created a fresh valid run. acquireLease always
+    // inserts a valid 'running' run in the same transaction, so `runs` is
+    // guaranteed non-empty here under normal operation. We observe any
+    // degraded rows via telemetry (ERR-002) without throwing.
+    const { runs, degradedRuns } = await this.stateManager.getValidRunsByTaskTolerant(taskId);
+    if (degradedRuns.length > 0) {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'degradation_triggered',
+        traceId: taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: this.resolvedOptions.owner,
+        agentId: this.resolvedOptions.agentId,
+        payload: {
+          component: 'BasePeerRunner',
+          runnerName: this.config.runnerName,
+          trigger: 'malformed_historical_run_rows',
+          degradedCount: degradedRuns.length,
+          runIds: degradedRuns.map((r) => r.runId),
+          errors: degradedRuns.map((r) => r.error),
+          nextAction:
+            'Quarantine malformed run rows: pd runtime internalization integrity-repair --confirm',
+        },
+      });
+    }
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
-      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
+      throw new PDRuntimeError(
+        'execution_failed',
+        `No valid run records found for task ${taskId} after lease acquisition. ` +
+          `If historical runs are malformed, quarantine them first: pd runtime internalization integrity-repair --confirm`,
+      );
     }
     return latestRun.runId;
   }

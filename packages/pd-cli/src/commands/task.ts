@@ -131,7 +131,7 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
             error: dr.error,
           })),
           reason: malformedError?.message ?? 'Unknown malformed run schema',
-          nextAction: 'Use integrity-repair to clean up or recover malformed runs, or fix runs in DB',
+          nextAction: 'Malformed run rows are visible here but not auto-repaired. Runner execution tolerates them (uses the latest valid run). To quarantine malformed rows: pd runtime internalization integrity-repair --confirm --json',
         }, null, 2));
         process.exitCode = 1;
       } else {
@@ -180,7 +180,7 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     if (isDegraded && degradedRuns.length > 0) {
       console.warn(`WARNING: Task has ${degradedRuns.length} malformed run(s) in database!`);
       console.warn(`Reason: ${malformedError?.message ?? 'Unknown malformed run schema'}`);
-      console.warn(`nextAction: Use integrity-repair to clean up or recover malformed runs, or fix runs in DB\n`);
+      console.warn(`nextAction: Malformed run rows are visible here but not auto-repaired. Runner execution tolerates them (uses the latest valid run). To quarantine malformed rows: pd runtime internalization integrity-repair --confirm --json\n`);
       console.log('Degraded Runs:');
       for (const dr of degradedRuns) {
         console.log(`  - Run: ${dr.runId}`);

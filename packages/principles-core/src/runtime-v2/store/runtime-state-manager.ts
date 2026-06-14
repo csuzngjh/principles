@@ -19,7 +19,7 @@
  */
 import type { SqliteConnection } from './sqlite-connection.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task/task-store.js';
-import type { RunStore, RunRecord } from './run/run-store.js';
+import type { RunStore, RunRecord, TolerantRunListResult } from './run/run-store.js';
 import type { LeaseManager, AcquireLeaseOptions } from './lifecycle/lease-manager.js';
 import type { RetryPolicy, RetryPolicyConfig } from './lifecycle/retry-policy.js';
 import type { RecoverySweep, RecoveryResult } from './lifecycle/recovery-sweep.js';
@@ -200,6 +200,20 @@ export class RuntimeStateManager {
     return this._runStore.listRunsByTask(taskId);
   }
 
+  /**
+   * Tolerant variant of getRunsByTask: returns valid runs AND any
+   * schema-degraded historical rows instead of throwing MalformedRunError.
+   *
+   * Used by the runner execution/completion path so a malformed historical
+   * run row does not block recovery of a task that still has a valid run
+   * (the one created by acquireLease). Callers MUST surface a non-empty
+   * degradedRuns list via telemetry/notes — silent swallowing is a bug (ERR-002).
+   */
+  async getValidRunsByTaskTolerant(taskId: string): Promise<TolerantRunListResult> {
+    this.assertInitialized();
+    return this._runStore.listValidRunsByTaskTolerant(taskId);
+  }
+
   async getRun(runId: string): Promise<RunRecord | null> {
     this.assertInitialized();
     return this._runStore.getRun(runId);
@@ -247,7 +261,8 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to terminal 'succeeded' state
-    const runs = await this._runStore.listRunsByTask(taskId);
+    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
+    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskSucceeded');
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
       await this._runStore.updateRun(latestRun.runId, {
@@ -286,7 +301,8 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to terminal 'failed' state
-    const runs = await this._runStore.listRunsByTask(taskId);
+    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
+    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskFailed');
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
       await this._runStore.updateRun(latestRun.runId, {
@@ -333,7 +349,8 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to 'failed' state with error category
-    const runs = await this._runStore.listRunsByTask(taskId);
+    const { runs, degradedRuns } = await this._runStore.listValidRunsByTaskTolerant(taskId);
+    this.observeMalformedRuns(taskId, degradedRuns, 'markTaskRetryWait');
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
       await this._runStore.updateRun(latestRun.runId, {
@@ -379,6 +396,40 @@ export class RuntimeStateManager {
     });
 
     return updated;
+  }
+
+  /**
+   * Observe malformed historical run rows without blocking the caller.
+   *
+   * The execution/completion path tolerates schema-invalid historical run
+   * rows (they must not block recovery of a task that has a valid run from
+   * acquireLease). But tolerance MUST be observable — silently swallowing
+   * degraded rows is a bug (ERR-002). This emits a structured
+   * degradation_triggered event naming the affected runIds so operators can
+   * find and quarantine them via `pd runtime internalization integrity-repair`.
+   */
+  private observeMalformedRuns(
+    taskId: string,
+    degradedRuns: { runId: string; error: string }[],
+    caller: string,
+  ): void {
+    if (degradedRuns.length === 0) return;
+    this.emitter.emitTelemetry({
+      eventType: 'degradation_triggered',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'runtime-state-manager',
+      payload: {
+        component: 'RuntimeStateManager',
+        caller,
+        trigger: 'malformed_historical_run_rows',
+        degradedCount: degradedRuns.length,
+        runIds: degradedRuns.map((r) => r.runId),
+        errors: degradedRuns.map((r) => r.error),
+        nextAction:
+          'Quarantine malformed run rows: pd runtime internalization integrity-repair --confirm',
+      },
+    });
   }
 
   // ── Retry/Recovery operations ─────────────────────────────────────────────

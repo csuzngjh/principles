@@ -1,7 +1,7 @@
 /**
  * RunStore — in-memory test double using a Map.
  */
-import type { RunRecord, RunStore } from './run-store.js';
+import type { RunRecord, RunStore, TolerantRunListResult } from './run-store.js';
 
 export class MemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();
@@ -15,6 +15,12 @@ export class MemoryRunStore implements RunStore {
 
   async listRunsByTask(taskId: string): Promise<RunRecord[]> {
     return [...this.runs.values()].filter((r) => r.taskId === taskId);
+  }
+
+  async listValidRunsByTaskTolerant(taskId: string): Promise<TolerantRunListResult> {
+    // In-memory store only ever holds schema-valid RunRecords, so there are
+    // never any degraded rows. The tolerant contract is preserved for callers.
+    return { runs: await this.listRunsByTask(taskId), degradedRuns: [] };
   }
 
   async getRun(runId: string): Promise<RunRecord | null> {

@@ -8,13 +8,13 @@ import { Value } from '@sinclair/typebox/value';
 import { RuntimeKindSchema, RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../../runtime-protocol.js';
 import { PDRuntimeError, type PDErrorCategory } from '../../error-categories.js';
 import type { SqliteConnection } from '../sqlite-connection.js';
-import type { RunStore } from './run-store.js';
+import type { DegradedRunInfo, RunStore, TolerantRunListResult } from './run-store.js';
 
 export class MalformedRunError extends PDRuntimeError {
   constructor(
     message: string,
     public readonly validRuns: RunRecord[],
-    public readonly degradedRuns: { runId: string; error: string; rawRow: Record<string, unknown> }[],
+    public readonly degradedRuns: DegradedRunInfo[],
   ) {
     super('storage_unavailable', message);
     this.name = 'MalformedRunError';
@@ -71,7 +71,6 @@ export class SqliteRunStore implements RunStore {
       );
     }
   }
-
   async updateRun(
     runId: string,
     patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
@@ -120,18 +119,30 @@ export class SqliteRunStore implements RunStore {
   }
 
   async listRunsByTask(taskId: string): Promise<RunRecord[]> {
+    const { runs, degradedRuns } = await this.listValidRunsByTaskTolerant(taskId);
+    if (degradedRuns.length > 0) {
+      throw new MalformedRunError(
+        `Task ${taskId} has ${degradedRuns.length} malformed run(s)`,
+        runs,
+        degradedRuns,
+      );
+    }
+    return runs;
+  }
+
+  async listValidRunsByTaskTolerant(taskId: string): Promise<TolerantRunListResult> {
     const db = this.connection.getDb();
     const rows = db
       .prepare('SELECT * FROM runs WHERE task_id = ? ORDER BY started_at ASC')
       .all(taskId) as Record<string, unknown>[];
 
-    const validRuns: RunRecord[] = [];
-    const degradedRuns: { runId: string; error: string; rawRow: Record<string, unknown> }[] = [];
+    const runs: RunRecord[] = [];
+    const degradedRuns: DegradedRunInfo[] = [];
 
     for (const row of rows) {
       try {
         const record = SqliteRunStore.rowToRecord(row);
-        validRuns.push(record);
+        runs.push(record);
       } catch (err) {
         const runId = row.run_id ? String(row.run_id) : 'unknown';
         const msg = err instanceof Error ? err.message : String(err);
@@ -143,15 +154,7 @@ export class SqliteRunStore implements RunStore {
       }
     }
 
-    if (degradedRuns.length > 0) {
-      throw new MalformedRunError(
-        `Task ${taskId} has ${degradedRuns.length} malformed run(s)`,
-        validRuns,
-        degradedRuns,
-      );
-    }
-
-    return validRuns;
+    return { runs, degradedRuns };
   }
 
   async deleteRun(runId: string): Promise<boolean> {
@@ -160,7 +163,16 @@ export class SqliteRunStore implements RunStore {
     return result.changes > 0;
   }
 
-  private static rowToRecord(row: Record<string, unknown>): RunRecord {
+  /**
+   * Convert a raw DB row into a validated RunRecord.
+   *
+   * Public so the integrity-repair detection pass can reuse the EXACT same
+   * validation logic as the production read path (EP-01: no duplicated
+   * schema validation that can drift from the real one).
+   *
+   * @throws PDRuntimeError{storage_unavailable} if the row fails schema validation.
+   */
+  static rowToRecord(row: Record<string, unknown>): RunRecord {
     const runId = String(row.run_id);
     const record: RunRecord = {
       runId,
