@@ -140,7 +140,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
   let model = opts.model ?? '';
   let apiKeyEnv = opts.apiKeyEnv ?? '';
   let baseUrl = opts.baseUrl ?? '';
-  let {timeoutMs} = opts;
+  let { timeoutMs, maxRetries } = opts;
 
   // PRI-393: always load workspace policy from .pd/config.yaml (not .state/workflows.yaml)
   if (workspaceDir) {
@@ -149,6 +149,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
       model: opts.model,
       apiKeyEnv: opts.apiKeyEnv,
       baseUrl: opts.baseUrl,
+      maxRetries: opts.maxRetries,
       timeoutMs: opts.timeoutMs,
     });
     for (const w of resolved.legacyWarnings) console.warn(`Warning: ${w}`);
@@ -158,6 +159,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
       apiKeyEnv = apiKeyEnv || resolved.mergedConfig.apiKeyEnv || '';
       baseUrl = baseUrl || resolved.mergedConfig.baseUrl || '';
       timeoutMs = timeoutMs ?? resolved.mergedConfig.timeoutMs;
+      maxRetries = maxRetries ?? resolved.mergedConfig.maxRetries;
     } else if (isRuntimeConfigError(resolved.result)) {
       console.warn(`Warning: could not resolve runtime from .pd/config.yaml — ${resolved.result.message}`);
     }
@@ -186,6 +188,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
   if (!process.env[apiKeyEnv]) {
     console.error(`error: environment variable '${apiKeyEnv}' is not set`);
     process.exit(1);
+    return;
   }
 
   try {
@@ -195,7 +198,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
       model,
       apiKeyEnv,
       baseUrl,
-      maxRetries: opts.maxRetries,
+      maxRetries: maxRetries,
       timeoutMs: timeoutMs ?? 120_000, // D-04: probe timeout 120s (matches Runtime defaults)
     });
 

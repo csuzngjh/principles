@@ -1,7 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleRuntimeProbe, type RuntimeProbeOptions } from '../../src/commands/runtime.js';
 
-// Mock probeRuntime
+// Mock resolveRuntimeWithOverrides
+const { mockResolveRuntimeWithOverrides } = vi.hoisted(() => {
+  const fn = vi.fn().mockReturnValue({
+    result: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      maxRetries: 2,
+      timeoutMs: 180_000,
+    },
+    mergedConfig: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      maxRetries: 2,
+      timeoutMs: 180_000,
+    },
+    legacyWarnings: [],
+    configSource: '.pd/config.yaml',
+    configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+  });
+  return { mockResolveRuntimeWithOverrides: fn };
+});
+
+vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
+  resolveRuntimeWithOverrides: mockResolveRuntimeWithOverrides,
+}));
+
 vi.mock('@principles/core/runtime-v2', () => ({
   probeRuntime: vi.fn().mockResolvedValue({
     runtimeKind: 'openclaw-cli',
@@ -256,6 +285,100 @@ describe('pd runtime probe', () => {
       expect.stringContaining("unsupported")
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // ── pi-ai probe: maxRetries backfill from .pd/config.yaml ───────────────
+  it('PRI-393: pi-ai probe reads maxRetries from .pd/config.yaml when --maxRetries not passed', async () => {
+    process.env.TEST_API_KEY = 'test-value';
+    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    vi.mocked(probeRuntime).mockResolvedValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      health: { healthy: true, degraded: false, warnings: [], lastCheckedAt: '2026-06-14T00:00:00.000Z' },
+      capabilities: {},
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    // mockResolveRuntimeWithOverrides returns maxRetries: 2
+    // No --maxRetries CLI flag
+    await handleRuntimeProbe({
+      runtime: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      workspace: '/tmp/ws',
+      json: true,
+    } as RuntimeProbeOptions);
+
+    expect(vi.mocked(probeRuntime)).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 2 }),
+    );
+
+    delete process.env.TEST_API_KEY;
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-393: CLI --maxRetries overrides .pd/config.yaml maxRetries', async () => {
+    process.env.TEST_API_KEY = 'test-value';
+    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    vi.mocked(probeRuntime).mockResolvedValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      health: { healthy: true, degraded: false, warnings: [], lastCheckedAt: '2026-06-14T00:00:00.000Z' },
+      capabilities: {},
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleRuntimeProbe({
+      runtime: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY',
+      maxRetries: 5,
+      workspace: '/tmp/ws',
+      json: true,
+    } as RuntimeProbeOptions);
+
+    expect(vi.mocked(probeRuntime)).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 5 }),
+    );
+
+    delete process.env.TEST_API_KEY;
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-393: env var missing → process.exit(1) and does NOT call probeRuntime', async () => {
+    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    vi.mocked(probeRuntime).mockClear();
+
+    // Ensure NONEXISTENT_VAR is NOT set
+    delete process.env.NONEXISTENT_VAR;
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleRuntimeProbe({
+      runtime: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'NONEXISTENT_VAR',
+      json: true,
+    } as RuntimeProbeOptions);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('NONEXISTENT_VAR'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(probeRuntime)).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
