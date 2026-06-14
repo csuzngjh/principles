@@ -124,6 +124,10 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
         runtimeKind: 'rollout_reviewer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-rollout-reviewer-001', taskId: ROLLOUT_REVIEWER_TASK_ID, runtimeKind: 'rollout_reviewer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
@@ -709,6 +713,10 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
         runtimeKind: 'rollout_reviewer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-integration-001', taskId: ROLLOUT_REVIEWER_TASK_ID, runtimeKind: 'rollout_reviewer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),

@@ -127,6 +127,10 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
         runtimeKind: 'scribe',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-scribe-001', taskId: SCRIBE_TASK_ID, runtimeKind: 'scribe', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
