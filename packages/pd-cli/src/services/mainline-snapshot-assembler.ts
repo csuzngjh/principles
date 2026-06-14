@@ -94,11 +94,19 @@ function hashContextRefs(contextRefs: string[]): string {
 
 // ── Readiness fallback ───────────────────────────────────────────────────────
 
-function buildDefaultReadiness(workspaceDir: string): RuntimeReadinessSnapshot {
+function buildDefaultReadiness(workspaceDir: string, warnings: string[]): RuntimeReadinessSnapshot {
   const configLoadResult = loadPdConfig(workspaceDir);
-  const defaultProfile = configLoadResult.ok
-    ? (configLoadResult.effective.config.internalAgents?.defaultRuntime ?? 'openclaw.default')
-    : null;
+  const effective = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
+  const defaultProfile = effective.config?.internalAgents?.defaultRuntime ?? 'openclaw.default';
+
+  if (!configLoadResult.ok) {
+    for (const err of configLoadResult.errors) {
+      warnings.push(`${err.path}: ${err.reason}`);
+    }
+  }
+  if (configLoadResult.warnings.length > 0) {
+    warnings.push(...configLoadResult.warnings);
+  }
 
   return {
     configDoctorProfile: defaultProfile,
@@ -121,7 +129,8 @@ async function findDiagnosisTask(
   const diagTasks = allTasks.filter((t) => t.taskKind === 'diagnostician');
 
   if (requestedPainId) {
-    for (const task of diagTasks) {
+    const sortedByDate = [...diagTasks].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+    for (const task of sortedByDate) {
       const parsed = safeJsonParse(task.diagnosticJson);
       if (!parsed.ok) continue;
       const sourcePainId = isObject(parsed.value) ? readOwnString(parsed.value, 'sourcePainId') : undefined;
@@ -433,17 +442,24 @@ async function findConsumedCandidatesMissingDreamer(
 
   const allTasks = await stateManager.listTasks();
   const dreamerTasks = allTasks.filter((t) => t.taskKind === 'dreamer');
+  const dreamerTaskIds = new Set(dreamerTasks.map((t) => t.taskId));
 
   const orphans: string[] = [];
   for (const row of rows) {
     const { candidate_id: candidateId } = row;
-    const hasDreamer = dreamerTasks.some((dt) => {
+    const predictableIds = [
+      `dreamer-${candidateId}-prompt`,
+      `dreamer-${candidateId}-code_tool_hook`,
+      `dreamer-${candidateId}-defer_archive`,
+    ];
+    const hasDreamerByTaskId = predictableIds.some((taskId) => dreamerTaskIds.has(taskId));
+    const hasDreamerByJson = !hasDreamerByTaskId && dreamerTasks.some((dt) => {
       const parsed = safeJsonParse(dt.diagnosticJson);
       if (!parsed.ok) return false;
       const id = isObject(parsed.value) ? readOwnString(parsed.value, 'candidateId') : undefined;
       return id === candidateId;
     });
-    if (!hasDreamer) {
+    if (!hasDreamerByTaskId && !hasDreamerByJson) {
       orphans.push(candidateId);
     }
   }
@@ -461,7 +477,7 @@ export async function assembleMainlineSnapshot(
   try {
     await stateManager.initialize();
 
-    const readiness = options.readiness ?? buildDefaultReadiness(options.workspaceDir);
+    const readiness = options.readiness ?? buildDefaultReadiness(options.workspaceDir, warnings);
 
     const { painId, diagnosisTask } = await findDiagnosisTask(stateManager, options.painId, warnings);
 

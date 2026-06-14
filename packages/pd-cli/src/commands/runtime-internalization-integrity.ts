@@ -48,7 +48,38 @@ export async function handleRuntimeInternalizationIntegrity(opts: Internalizatio
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
-  const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir });
+  let warnings: string[];
+  let snapshot;
+  try {
+    ({ snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir }));
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const failure: ChainIntegrityResult = {
+      overallStatus: 'error',
+      brokenLinks: [{
+        type: 'mainline_snapshot_assembly_failed',
+        severity: 'error',
+        reason: `Failed to assemble mainline snapshot: ${reason}`,
+        recommendedAction: 'Verify workspace state.db/config and rerun `pd runtime internalization integrity`.',
+      }],
+      chainSummaries: {
+        totalCandidates: 0,
+        totalDreamerTasks: 0,
+        totalPhilosopherTasks: 0,
+        totalPIArtifacts: 0,
+        chainsWithBrokenLinks: 0,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(failure, null, 2));
+    } else {
+      console.error(`FAIL: ${failure.brokenLinks[0].reason}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   if (!opts.json && warnings.length > 0) {
     for (const warning of warnings) {
       console.warn(`Warning: ${warning}`);
