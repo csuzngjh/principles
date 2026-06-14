@@ -52,6 +52,8 @@ describe('InternalizationIntegrityRemediation', () => {
         ended_at TEXT,
         reason TEXT,
         output_ref TEXT,
+        input_payload TEXT,
+        output_payload TEXT,
         error_category TEXT,
         attempt_number INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -273,6 +275,7 @@ describe('InternalizationIntegrityRemediation', () => {
 
     it('does not touch non-dreamer tasks', () => {
       insertTask({ taskId: 'diagnostician-001', taskKind: 'diagnostician', status: 'succeeded' });
+      insertRun({ runId: 'run-diag-1', taskId: 'diagnostician-001', executionStatus: 'succeeded' });
 
       const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
       const result = remediation.repair({ dryRun: false });
@@ -284,6 +287,7 @@ describe('InternalizationIntegrityRemediation', () => {
     it('does not touch dreamer tasks with artifact and successor', () => {
       insertTask({ taskId: 'dreamer-ok', taskKind: 'dreamer', status: 'succeeded' });
       insertArtifact({ artifactId: 'art-ok', sourceTaskId: 'dreamer-ok', kind: 'principle', content: '{"valid":true}' });
+      insertRun({ runId: 'run-dream-ok', taskId: 'dreamer-ok', executionStatus: 'succeeded' });
       insertTask({
         taskId: 'philosopher-ok',
         taskKind: 'philosopher',
@@ -600,6 +604,60 @@ describe('InternalizationIntegrityRemediation', () => {
       const result = remediation.repair({ dryRun: true });
 
       const action = findAction(result.actions, 'malf-task-4', 'malformed_run_row');
+      expect(action).toBeUndefined();
+    });
+  });
+
+  describe('task_succeeded_no_succeeded_run', () => {
+    it('dry-run reports task_succeeded_no_succeeded_run but does not mutate DB', () => {
+      insertTask({ taskId: 'task-no-run-1', taskKind: 'diagnostician', status: 'succeeded' });
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      const action = findAction(result.actions, 'task-no-run-1', 'task_succeeded_no_succeeded_run');
+      expect(action).toBeDefined();
+      expect(action?.recommendedAction).toBe('supplement_succeeded_run');
+
+      // Check that DB is not mutated (no run inserted)
+      const d = new Database(dbPath);
+      const row = d.prepare("SELECT 1 FROM runs WHERE task_id = 'task-no-run-1'").get();
+      d.close();
+      expect(row).toBeUndefined();
+    });
+
+    it('confirm supplements a canonical succeeded run and is schema-valid', () => {
+      insertTask({ taskId: 'task-no-run-2', taskKind: 'diagnostician', status: 'succeeded' });
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: false });
+
+      expect(result.repairedCount).toBe(1);
+      const action = findAction(result.actions, 'task-no-run-2', 'task_succeeded_no_succeeded_run');
+      expect(action).toBeDefined();
+      expect(action?.recommendedAction).toBe('supplement_succeeded_run');
+
+      // Check that DB contains a valid succeeded run
+      const d = new Database(dbPath);
+      const run = d.prepare("SELECT * FROM runs WHERE task_id = 'task-no-run-2' AND execution_status = 'succeeded'").get() as Record<string, unknown> | undefined;
+      d.close();
+      expect(run).toBeDefined();
+      expect(run?.runtime_kind).toBe('openclaw');
+      expect(run?.attempt_number).toBe(1);
+      expect(run?.reason).toContain('Supplemented');
+    });
+
+    it('is idempotent — second confirm skips already-supplemented runs', () => {
+      insertTask({ taskId: 'task-no-run-3', taskKind: 'diagnostician', status: 'succeeded' });
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result1 = remediation.repair({ dryRun: false });
+      const result2 = remediation.repair({ dryRun: false });
+
+      expect(result1.repairedCount).toBe(1);
+      expect(result2.repairedCount).toBe(0);
+
+      const action = findAction(result2.actions, 'task-no-run-3', 'task_succeeded_no_succeeded_run');
       expect(action).toBeUndefined();
     });
   });

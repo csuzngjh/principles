@@ -1,10 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
+import { Value } from '@sinclair/typebox/value';
 import { extractPIMetadata } from './internalization-chain-integrity-read-model.js';
 import { createRemediationResult, remediationAction } from './remediation-contract.js';
 import type { RemediationAction, RemediationResult } from './remediation-contract.js';
 import { SqliteRunStore } from './store/run/sqlite-run-store.js';
+import { RunRecordSchema, RuntimeKindSchema } from './runtime-protocol.js';
+import type { RunRecord, RunExecutionStatus } from './runtime-protocol.js';
+import type { PDErrorCategory } from './error-categories.js';
 
 export interface InternalizationIntegrityRemediationOptions {
   workspaceDir: string;
@@ -389,6 +394,74 @@ export class InternalizationIntegrityRemediation {
       }
     }
 
+    // ── 5. Supplement succeeded runs for task_succeeded_no_succeeded_run ──
+    const succeededTasksNoRun = this.detectSucceededTasksWithoutSucceededRun();
+    for (const st of succeededTasksNoRun) {
+      if (params.dryRun) {
+        actions.push(remediationAction({
+          action: 'supplement_succeeded_run',
+          targetId: st.taskId,
+          taskId: st.taskId,
+          type: 'task_succeeded_no_succeeded_run',
+          severity: 'error',
+          previousState: 'missing',
+          nextState: 'succeeded',
+          previousStatus: 'missing',
+          newStatus: 'succeeded',
+          recommendedAction: 'supplement_succeeded_run',
+          reason: `Task ${st.taskId} is succeeded but has no succeeded run — would supplement a canonical succeeded run`,
+        }));
+      } else {
+        try {
+          this.supplementSucceededRun(st.taskId, st.resultRef);
+          repairedCount++;
+          actions.push(remediationAction({
+            action: 'supplement_succeeded_run',
+            targetId: st.taskId,
+            taskId: st.taskId,
+            type: 'task_succeeded_no_succeeded_run',
+            severity: 'error',
+            previousState: 'missing',
+            nextState: 'succeeded',
+            previousStatus: 'missing',
+            newStatus: 'succeeded',
+            recommendedAction: 'supplement_succeeded_run',
+            reason: `Task ${st.taskId} is succeeded but had no succeeded run — supplemented a canonical succeeded run`,
+          }));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          actions.push(remediationAction({
+            action: 'refuse_repair',
+            targetId: st.taskId,
+            taskId: st.taskId,
+            type: 'task_succeeded_no_succeeded_run',
+            severity: 'error',
+            previousState: 'missing',
+            nextState: 'missing',
+            previousStatus: 'missing',
+            newStatus: 'missing',
+            recommendedAction: 'manual_intervention',
+            reason: `Cannot safely supplement run for ${st.taskId}: ${msg}. nextAction: Manually create a run row in state.db`,
+          }));
+          skippedCount++;
+        }
+      }
+    }
+
+    if (!params.dryRun) {
+      // Perform a post-repair verification check
+      const postBrokenDreamers = this.detectBrokenDreamers();
+      const postStuckLeases = this.detectStuckLeases();
+      const postOrphanedRuns = this.detectOrphanedRuns();
+      const postMalformedRuns = this.detectMalformedRuns();
+      const postSucceededTasksNoRun = this.detectSucceededTasksWithoutSucceededRun();
+
+      const totalUnresolved = postBrokenDreamers.length + postStuckLeases.length + postOrphanedRuns.length + postMalformedRuns.length + postSucceededTasksNoRun.length;
+      if (totalUnresolved > 0) {
+        console.warn(`[Integrity Check Post-Repair] ${totalUnresolved} unresolved issue(s) remaining.`);
+      }
+    }
+
     return createRemediationResult({
       mode: params.dryRun ? 'dry_run' : 'confirm',
       repairedCount,
@@ -575,18 +648,29 @@ export class InternalizationIntegrityRemediation {
       const rows = db.prepare('SELECT * FROM runs').all() as Record<string, unknown>[];
       const results: MalformedRun[] = [];
       for (const row of rows) {
+        let isMalformed = false;
+        let errMsg = '';
         try {
           SqliteRunStore.rowToRecord(row);
+          // If it is schema-valid but has been quarantined by integrity-repair
+          const reason = typeof row.reason === 'string' ? row.reason : '';
+          if (row.execution_status === 'failed' && row.error_category === 'storage_unavailable' && reason.includes('quarantined')) {
+            isMalformed = true;
+            errMsg = reason;
+          }
         } catch (err) {
-          // rowToRecord throws PDRuntimeError{storage_unavailable} for invalid rows.
+          isMalformed = true;
+          errMsg = err instanceof Error ? err.message : String(err);
+        }
+
+        if (isMalformed) {
           const runId = typeof row.run_id === 'string' ? row.run_id : String(row.run_id ?? 'unknown');
           const taskId = typeof row.task_id === 'string' ? row.task_id : String(row.task_id ?? 'unknown');
           const executionStatus = typeof row.execution_status === 'string' ? row.execution_status : null;
-          const msg = err instanceof Error ? err.message : String(err);
           results.push({
             runId,
             taskId,
-            error: msg,
+            error: errMsg,
             currentStatus: executionStatus,
           });
         }
@@ -640,8 +724,9 @@ export class InternalizationIntegrityRemediation {
    */
   private forceExpireAndMarkRunFailed(taskId: string): void {
     const db = new Database(this.dbPath);
+    let latestRunId: string | undefined;
     try {
-      const tx = db.transaction(() => {
+      db.transaction(() => {
         // Reset task to pending (force-expire lease)
         db.prepare(`
           UPDATE tasks
@@ -653,20 +738,18 @@ export class InternalizationIntegrityRemediation {
         const latestRun = db.prepare(
           `SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'running' ORDER BY started_at DESC LIMIT 1`,
         ).get(taskId) as { run_id: string } | undefined;
-
-        if (latestRun) {
-          const now = new Date().toISOString();
-          db.prepare(`
-            UPDATE runs
-            SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
-            WHERE run_id = ?
-          `).run(now, 'Lease expired — force-expired by integrity-repair', 'lease_expired', latestRun.run_id);
-        }
-      });
-
-      tx();
+        latestRunId = latestRun?.run_id;
+      })();
     } finally {
       db.close();
+    }
+
+    if (latestRunId) {
+      this.safeUpdateRunRow(latestRunId, {
+        executionStatus: 'failed',
+        reason: 'Lease expired — force-expired by integrity-repair',
+        errorCategory: 'lease_expired',
+      });
     }
   }
 
@@ -676,17 +759,11 @@ export class InternalizationIntegrityRemediation {
    * reflect the terminal outcome.
    */
   private markOrphanedRunFailed(runId: string, _taskId: string): void {
-    const db = new Database(this.dbPath);
-    try {
-      const now = new Date().toISOString();
-      db.prepare(`
-        UPDATE runs
-        SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
-        WHERE run_id = ?
-      `).run(now, `Orphaned run — recovered by integrity-repair (task not leased)`, 'recovery_sweep', runId);
-    } finally {
-      db.close();
-    }
+    this.safeUpdateRunRow(runId, {
+      executionStatus: 'failed',
+      reason: 'Orphaned run — recovered by integrity-repair (task not leased)',
+      errorCategory: 'execution_failed',
+    });
   }
 
   /**
@@ -698,22 +775,11 @@ export class InternalizationIntegrityRemediation {
    *   - The reason records the validation error so operators can trace root cause
    */
   private quarantineMalformedRun(runId: string, validationError: string): void {
-    const db = new Database(this.dbPath);
-    try {
-      const now = new Date().toISOString();
-      db.prepare(`
-        UPDATE runs
-        SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
-        WHERE run_id = ?
-      `).run(
-        now,
-        `Malformed run row quarantined by integrity-repair. Validation error: ${validationError}`,
-        'storage_unavailable',
-        runId,
-      );
-    } finally {
-      db.close();
-    }
+    this.safeUpdateRunRow(runId, {
+      executionStatus: 'failed',
+      reason: `Malformed run row quarantined by integrity-repair. Validation error: ${validationError}`,
+      errorCategory: 'storage_unavailable',
+    });
   }
 
   // ── Successor helpers (unchanged) ──────────────────────────────────────
@@ -777,5 +843,293 @@ export class InternalizationIntegrityRemediation {
     } finally {
       db.close();
     }
+  }
+
+  /**
+   * Helper to check if input_payload and output_payload exist in the database.
+   */
+  private static checkRunsSchema(db: Database.Database): { hasInputPayload: boolean; hasOutputPayload: boolean } {
+    try {
+      const columns = db.pragma("table_info(runs)") as { name: string }[];
+      return {
+        hasInputPayload: columns.some(c => c.name === 'input_payload'),
+        hasOutputPayload: columns.some(c => c.name === 'output_payload'),
+      };
+    } catch {
+      return { hasInputPayload: false, hasOutputPayload: false };
+    }
+  }
+
+  /**
+   * Helper to update a run row under a database transaction with pre-write
+   * and post-write schema validation checks. Rollback is triggered on error.
+   */
+  private safeUpdateRunRow(
+    runId: string,
+    patch: {
+      executionStatus: RunExecutionStatus;
+      reason: string;
+      errorCategory?: PDErrorCategory;
+    }
+  ): void {
+    const db = new Database(this.dbPath);
+    try {
+      const tx = db.transaction(() => {
+        // 1. Read existing row
+        const rawRow = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId) as Record<string, unknown> | undefined;
+        if (!rawRow) {
+          throw new Error(`Run not found: ${runId}`);
+        }
+
+        const now = new Date().toISOString();
+        const schema = InternalizationIntegrityRemediation.checkRunsSchema(db);
+
+        // 2. Build candidate patched record
+        const candidateRecord: RunRecord = {
+          runId: typeof rawRow.run_id === 'string' && rawRow.run_id.length > 0 ? rawRow.run_id : runId,
+          taskId: typeof rawRow.task_id === 'string' && rawRow.task_id.length > 0 ? rawRow.task_id : String(rawRow.task_id ?? 'unknown-task'),
+          runtimeKind: typeof rawRow.runtime_kind === 'string' && Value.Check(RuntimeKindSchema, rawRow.runtime_kind)
+            ? rawRow.runtime_kind
+            : 'openclaw',
+          executionStatus: patch.executionStatus,
+          startedAt: typeof rawRow.started_at === 'string' && rawRow.started_at.length > 0
+            ? rawRow.started_at
+            : now,
+          attemptNumber: typeof rawRow.attempt_number === 'number' && Number.isInteger(rawRow.attempt_number) && rawRow.attempt_number >= 0
+            ? rawRow.attempt_number
+            : 0,
+          createdAt: typeof rawRow.created_at === 'string' && rawRow.created_at.length > 0
+            ? rawRow.created_at
+            : now,
+          updatedAt: now,
+          endedAt: now,
+          reason: patch.reason,
+          errorCategory: patch.errorCategory,
+          outputRef: typeof rawRow.output_ref === 'string' ? rawRow.output_ref : undefined,
+          inputPayload: schema.hasInputPayload && typeof rawRow.input_payload === 'string' ? rawRow.input_payload : undefined,
+          outputPayload: schema.hasOutputPayload && typeof rawRow.output_payload === 'string' ? rawRow.output_payload : undefined,
+        };
+
+        // 写前校验
+        if (!Value.Check(RunRecordSchema, candidateRecord)) {
+          const errors = [...Value.Errors(RunRecordSchema, candidateRecord)];
+          const details = errors.map(e => `${e.path}: ${e.message}`).join(', ');
+          throw new Error(`Run ${runId} failed pre-write schema check: ${details}`);
+        }
+
+        // 3. Update DB dynamically based on available columns
+        const sets = [
+          'task_id = ?',
+          'runtime_kind = ?',
+          'execution_status = ?',
+          'started_at = ?',
+          'attempt_number = ?',
+          'created_at = ?',
+          'updated_at = ?',
+          'ended_at = ?',
+          'reason = ?',
+          'error_category = ?',
+          'output_ref = ?',
+        ];
+        const params: unknown[] = [
+          candidateRecord.taskId,
+          candidateRecord.runtimeKind,
+          candidateRecord.executionStatus,
+          candidateRecord.startedAt,
+          candidateRecord.attemptNumber,
+          candidateRecord.createdAt,
+          candidateRecord.updatedAt,
+          candidateRecord.endedAt,
+          candidateRecord.reason,
+          candidateRecord.errorCategory ?? null,
+          candidateRecord.outputRef ?? null,
+        ];
+
+        if (schema.hasInputPayload) {
+          sets.push('input_payload = ?');
+          params.push(candidateRecord.inputPayload ?? null);
+        }
+        if (schema.hasOutputPayload) {
+          sets.push('output_payload = ?');
+          params.push(candidateRecord.outputPayload ?? null);
+        }
+
+        params.push(candidateRecord.runId);
+
+        db.prepare(`
+          UPDATE runs
+          SET ${sets.join(', ')}
+          WHERE run_id = ?
+        `).run(...params);
+
+        // 写后复校
+        const updatedRow = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId) as Record<string, unknown>;
+        SqliteRunStore.rowToRecord(updatedRow);
+      });
+
+      tx();
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Helper to insert a run row under a database transaction with pre-write
+   * and post-write schema validation checks. Rollback is triggered on error.
+   */
+  private safeInsertRunRow(record: RunRecord): void {
+    const db = new Database(this.dbPath);
+    try {
+      const tx = db.transaction(() => {
+        // 写前校验
+        if (!Value.Check(RunRecordSchema, record)) {
+          const errors = [...Value.Errors(RunRecordSchema, record)];
+          const details = errors.map(e => `${e.path}: ${e.message}`).join(', ');
+          throw new Error(`Run ${(record as RunRecord).runId} failed pre-write schema check: ${details}`);
+        }
+
+        const schema = InternalizationIntegrityRemediation.checkRunsSchema(db);
+
+        const columns = [
+          'run_id',
+          'task_id',
+          'runtime_kind',
+          'execution_status',
+          'started_at',
+          'ended_at',
+          'reason',
+          'output_ref',
+          'attempt_number',
+          'created_at',
+          'updated_at',
+          'error_category'
+        ];
+        const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
+        const params: unknown[] = [
+          record.runId,
+          record.taskId,
+          record.runtimeKind,
+          record.executionStatus,
+          record.startedAt,
+          record.endedAt ?? null,
+          record.reason ?? null,
+          record.outputRef ?? null,
+          record.attemptNumber,
+          record.createdAt,
+          record.updatedAt,
+          record.errorCategory ?? null,
+        ];
+
+        if (schema.hasInputPayload) {
+          columns.push('input_payload');
+          placeholders.push('?');
+          params.push(record.inputPayload ?? null);
+        }
+        if (schema.hasOutputPayload) {
+          columns.push('output_payload');
+          placeholders.push('?');
+          params.push(record.outputPayload ?? null);
+        }
+
+        db.prepare(`
+          INSERT INTO runs (${columns.join(', ')})
+          VALUES (${placeholders.join(', ')})
+        `).run(...params);
+
+        // 写后复校
+        const insertedRow = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(record.runId) as Record<string, unknown>;
+        SqliteRunStore.rowToRecord(insertedRow);
+      });
+
+      tx();
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Detect tasks that succeeded but have no succeeded run record.
+   */
+  private detectSucceededTasksWithoutSucceededRun(): { taskId: string; resultRef: string | null }[] {
+    const db = new Database(this.dbPath, { readonly: true });
+    try {
+      const succeededTasks = db.prepare(
+        "SELECT task_id, result_ref FROM tasks WHERE status = 'succeeded'",
+      ).all() as { task_id: string; result_ref: string | null }[];
+
+      const results: { taskId: string; resultRef: string | null }[] = [];
+
+      for (const t of succeededTasks) {
+        const hasSucceededRun = db.prepare(
+          "SELECT 1 FROM runs WHERE task_id = ? AND execution_status = 'succeeded' LIMIT 1",
+        ).get(t.task_id);
+
+        if (!hasSucceededRun) {
+          results.push({
+            taskId: t.task_id,
+            resultRef: t.result_ref,
+          });
+        }
+      }
+
+      return results;
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Supplements a canonical succeeded run for a succeeded task.
+   * Resolves runtime kind from task's existing runs or defaults to 'openclaw'.
+   */
+  private supplementSucceededRun(taskId: string, resultRef: string | null): void {
+    const db = new Database(this.dbPath, { readonly: true });
+    let runtimeKind: RunRecord['runtimeKind'] = 'openclaw';
+    let attemptNumber = 1;
+    let startedAt = new Date().toISOString();
+    let createdAt = startedAt;
+
+    try {
+      // Resolve runtimeKind from any existing run of this task
+      const existingRun = db.prepare(
+        'SELECT runtime_kind, attempt_number, started_at, created_at FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1',
+      ).get(taskId) as { runtime_kind: string; attempt_number: number; started_at: string; created_at: string } | undefined;
+
+      if (existingRun) {
+        if (Value.Check(RuntimeKindSchema, existingRun.runtime_kind)) {
+          runtimeKind = existingRun.runtime_kind;
+        }
+        attemptNumber = existingRun.attempt_number;
+        startedAt = existingRun.started_at;
+        createdAt = existingRun.created_at;
+      } else {
+        // Query task attributes
+        const taskRow = db.prepare('SELECT attempt_count, created_at, updated_at FROM tasks WHERE task_id = ?').get(taskId) as { attempt_count: number; created_at: string; updated_at: string } | undefined;
+        if (taskRow) {
+          attemptNumber = Math.max(1, taskRow.attempt_count);
+          startedAt = taskRow.created_at;
+          createdAt = taskRow.created_at;
+        }
+      }
+    } finally {
+      db.close();
+    }
+
+    const now = new Date().toISOString();
+    const runRecord: RunRecord = {
+      runId: crypto.randomUUID(),
+      taskId,
+      runtimeKind,
+      executionStatus: 'succeeded',
+      startedAt,
+      endedAt: now,
+      attemptNumber,
+      createdAt,
+      updatedAt: now,
+      reason: 'Supplemented succeeded run for succeeded task by integrity-repair',
+      outputRef: resultRef ?? undefined,
+    };
+
+    this.safeInsertRunRow(runRecord);
   }
 }
