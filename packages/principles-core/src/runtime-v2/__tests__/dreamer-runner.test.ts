@@ -94,6 +94,7 @@ interface MockStateful {
   updateRunOutput: ReturnType<typeof vi.fn>;
   getRetryPolicy: ReturnType<typeof vi.fn>;
   getRunsByTask: ReturnType<typeof vi.fn>;
+  getValidRunsByTaskTolerant: ReturnType<typeof vi.fn>;
   getTask: ReturnType<typeof vi.fn>;
 }
 
@@ -128,6 +129,10 @@ function createMocks() {
       shouldRetry: vi.fn().mockReturnValue(true),
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: TASK_ID }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: RUN_ID, taskId: TASK_ID }],
+      degradedRuns: [],
+    }),
     getTask: vi.fn().mockResolvedValue({ ...taskRecord, dependencyTaskIds: [] }),
   };
 
@@ -405,12 +410,13 @@ describe('DreamerRunner', () => {
     expect(stateManagerCalls).not.toContain('createTask');
     expect(stateManagerCalls).not.toContain('enqueueTask');
 
-    // Confirm only the expected state manager methods are called
+    // Confirm only the expected state manager methods are called.
+    // resolveStoreRunId now reads via the tolerant accessor (malformed-run tolerance).
     const expectedCalls = [
       'acquireLease',
       'markTaskSucceeded',
       'updateRunOutput',
-      'getRunsByTask',
+      'getValidRunsByTaskTolerant',
     ];
     for (const call of expectedCalls) {
       expect(mocks._stateManager[call as keyof MockStateful]).toHaveBeenCalled();

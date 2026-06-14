@@ -105,6 +105,10 @@ function createMockStateManager(opts: {
       shouldRetry: vi.fn().mockReturnValue(!noRetry),
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: TASK_ID }]),
+    getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+      runs: [{ runId: RUN_ID, taskId: TASK_ID }],
+      degradedRuns: [],
+    }),
     createTask: vi.fn().mockResolvedValue({
       taskId: `philosopher-${TASK_ID}-prompt`,
       taskKind: 'philosopher',

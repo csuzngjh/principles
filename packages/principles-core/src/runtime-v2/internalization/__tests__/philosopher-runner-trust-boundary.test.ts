@@ -133,6 +133,10 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
         runtimeKind: 'philosopher',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-phil-tb-001', taskId: PHILOSOPHER_TASK_ID, runtimeKind: 'philosopher', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),

@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { extractPIMetadata } from './internalization-chain-integrity-read-model.js';
 import { createRemediationResult, remediationAction } from './remediation-contract.js';
 import type { RemediationAction, RemediationResult } from './remediation-contract.js';
+import { SqliteRunStore } from './store/run/sqlite-run-store.js';
 
 export interface InternalizationIntegrityRemediationOptions {
   workspaceDir: string;
@@ -31,6 +32,22 @@ interface OrphanedRun {
   taskStatus: string | null;
 }
 
+/**
+ * A run row that failed TypeBox schema validation against RunRecordSchema.
+ *
+ * Detection reuses SqliteRunStore.getRun() so this uses the EXACT same
+ * validation path as the production store (EP-01: no duplicated validation
+ * logic that can drift from the real one). Repair quarantines the row as
+ * failed + storage_unavailable — it never deletes it and never marks it
+ * succeeded, preserving audit history.
+ */
+interface MalformedRun {
+  runId: string;
+  taskId: string;
+  error: string;
+  currentStatus: string | null;
+}
+
 export class InternalizationIntegrityRemediation {
   private readonly dbPath: string;
 
@@ -48,6 +65,7 @@ export class InternalizationIntegrityRemediation {
     const brokenDreamers = this.detectBrokenDreamers();
     const stuckLeases = this.detectStuckLeases();
     const orphanedRuns = this.detectOrphanedRuns();
+    const malformedRuns = this.detectMalformedRuns();
 
     const actions: RemediationAction[] = [];
     const warnings: string[] = [];
@@ -310,6 +328,67 @@ export class InternalizationIntegrityRemediation {
       }
     }
 
+    // ── 4. Quarantine malformed run rows ────────────────────────────────
+    // Schema-invalid historical run rows block runner recovery (resolveStoreRunId
+    // and the mark* completion methods tolerate them at runtime, but they stay
+    // in the DB forever without this pass). Quarantine is conservative:
+    //   - mark execution_status='failed' + error_category='storage_unavailable'
+    //   - NEVER delete the row (preserves audit history)
+    //   - NEVER mark as succeeded (would forge a successful run)
+    //   - idempotent: rows already 'failed' are skipped
+    for (const mr of malformedRuns) {
+      if (mr.currentStatus === 'failed') {
+        actions.push(remediationAction({
+          action: 'already_repaired',
+          targetId: mr.runId,
+          taskId: mr.taskId,
+          type: 'malformed_run_row',
+          severity: 'warning',
+          previousState: 'failed',
+          nextState: 'failed',
+          previousStatus: 'failed',
+          newStatus: 'failed',
+          recommendedAction: 'already_repaired',
+          reason: `Malformed run ${mr.runId} already quarantined (failed). Validation error: ${mr.error}`,
+        }));
+        skippedCount++;
+        continue;
+      }
+
+      if (params.dryRun) {
+        actions.push(remediationAction({
+          action: 'quarantine_malformed_run',
+          targetId: mr.runId,
+          taskId: mr.taskId,
+          type: 'malformed_run_row',
+          severity: 'warning',
+          previousState: mr.currentStatus ?? 'unknown',
+          nextState: 'failed',
+          previousStatus: mr.currentStatus ?? 'unknown',
+          newStatus: 'failed',
+          recommendedAction: 'quarantine_malformed_run',
+          reason: `Run ${mr.runId} (task ${mr.taskId}) failed schema validation — would quarantine as failed + storage_unavailable. Error: ${mr.error}`,
+        }));
+      } else {
+        this.quarantineMalformedRun(mr.runId, mr.error);
+        repairedCount++;
+
+        actions.push(remediationAction({
+          action: 'quarantine_malformed_run',
+          targetId: mr.runId,
+          taskId: mr.taskId,
+          type: 'malformed_run_row',
+          severity: 'warning',
+          previousState: mr.currentStatus ?? 'unknown',
+          nextState: 'failed',
+          previousStatus: mr.currentStatus ?? 'unknown',
+          newStatus: 'failed',
+          recommendedAction: 'quarantine_malformed_run',
+          reason: `Run ${mr.runId} (task ${mr.taskId}) failed schema validation — quarantined as failed + storage_unavailable. Error: ${mr.error}`,
+        }));
+      }
+    }
+
     return createRemediationResult({
       mode: params.dryRun ? 'dry_run' : 'confirm',
       repairedCount,
@@ -480,6 +559,44 @@ export class InternalizationIntegrityRemediation {
     }
   }
 
+  /**
+   * Detect run rows that fail TypeBox schema validation against
+   * RunRecordSchema — the exact failure mode that throws MalformedRunError
+   * from SqliteRunStore and historically blocked runner recovery.
+   *
+   * Detection reuses SqliteRunStore.rowToRecord() (the SAME validation used
+   * by production reads — EP-01: no duplicated schema logic that can drift).
+   * rowToRecord throws PDRuntimeError{storage_unavailable} for invalid rows;
+   * we capture the validation message.
+   */
+  private detectMalformedRuns(): MalformedRun[] {
+    const db = new Database(this.dbPath, { readonly: true });
+    try {
+      const rows = db.prepare('SELECT * FROM runs').all() as Record<string, unknown>[];
+      const results: MalformedRun[] = [];
+      for (const row of rows) {
+        try {
+          SqliteRunStore.rowToRecord(row);
+        } catch (err) {
+          // rowToRecord throws PDRuntimeError{storage_unavailable} for invalid rows.
+          const runId = typeof row.run_id === 'string' ? row.run_id : String(row.run_id ?? 'unknown');
+          const taskId = typeof row.task_id === 'string' ? row.task_id : String(row.task_id ?? 'unknown');
+          const executionStatus = typeof row.execution_status === 'string' ? row.execution_status : null;
+          const msg = err instanceof Error ? err.message : String(err);
+          results.push({
+            runId,
+            taskId,
+            error: msg,
+            currentStatus: executionStatus,
+          });
+        }
+      }
+      return results;
+    } finally {
+      db.close();
+    }
+  }
+
   // ── State readers ─────────────────────────────────────────────────────
 
   // Get current task status from DB
@@ -567,6 +684,33 @@ export class InternalizationIntegrityRemediation {
         SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
         WHERE run_id = ?
       `).run(now, `Orphaned run — recovered by integrity-repair (task not leased)`, 'recovery_sweep', runId);
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Quarantine a schema-malformed run row: mark it failed + storage_unavailable.
+   *
+   * Conservative by design:
+   *   - NEVER deletes the row (audit history preserved)
+   *   - NEVER marks as succeeded (would forge a successful run)
+   *   - The reason records the validation error so operators can trace root cause
+   */
+  private quarantineMalformedRun(runId: string, validationError: string): void {
+    const db = new Database(this.dbPath);
+    try {
+      const now = new Date().toISOString();
+      db.prepare(`
+        UPDATE runs
+        SET execution_status = 'failed', ended_at = ?, reason = ?, error_category = ?
+        WHERE run_id = ?
+      `).run(
+        now,
+        `Malformed run row quarantined by integrity-repair. Validation error: ${validationError}`,
+        'storage_unavailable',
+        runId,
+      );
     } finally {
       db.close();
     }

@@ -149,6 +149,14 @@ function createMockDeps(overrides?: Partial<PeerRunnerDeps>): PeerRunnerDeps {
       } satisfies TaskRecord),
       getTask: vi.fn().mockResolvedValue(null),
       getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-001' }]),
+      // resolveStoreRunId now reads via the tolerant accessor so malformed
+      // historical runs don't block the runner. The mock provides a clean
+      // (no degraded) result; malformed-row tolerance is covered by the
+      // dedicated runtime-state-manager-malformed-run-tolerance integration test.
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-001' }],
+        degradedRuns: [],
+      }),
       getRetryPolicy: vi.fn().mockReturnValue({
         shouldRetry: vi.fn().mockReturnValue(false),
       }),

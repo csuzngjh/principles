@@ -132,6 +132,10 @@ describe('TrainerRunner (vertical slice)', () => {
         runtimeKind: 'trainer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-trainer-001', taskId: TRAINER_TASK_ID, runtimeKind: 'trainer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
@@ -532,6 +536,10 @@ describe('TrainerRunner integration: test-double captures sourceRolloutReviewerA
         runtimeKind: 'trainer',
         startedAt: new Date().toISOString(),
       }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-integration-001', taskId: TRAINER_TASK_ID, runtimeKind: 'trainer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
