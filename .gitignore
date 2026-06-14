@@ -159,9 +159,8 @@ evidence/*
 .trae/
 .plan/
 .vercel
-.hermes-reports/pd-daily-scout-20260614.md
-.codex-output/linear-mainline/c5-cli-smoke.md
-.codex-output/linear-mainline/c4-repair.md
-.codex-output/linear-mainline/c3-lineage.md
-.codex-output/linear-mainline/c2-contract-reader.md
-.codex-output/linear-mainline/c1-config.md
+
+# Project-specific local tool outputs
+.codex-output/
+.hermes-reports/
+.omo/
