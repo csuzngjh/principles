@@ -233,6 +233,7 @@ export type { RuntimeStateManagerOptions } from './runtime-v2/index.js';
 export {
   SqliteTaskStore,
   SqliteRunStore,
+  MalformedRunError,
   SqliteConnection,
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,

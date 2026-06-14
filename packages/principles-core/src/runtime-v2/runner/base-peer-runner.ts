@@ -24,6 +24,7 @@ import type {
   PDRuntimeAdapter,
   RunHandle,
   RunStatus,
+  RuntimeKind,
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
@@ -103,6 +104,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     return this.phase;
   }
 
+  private getRuntimeKind(): RuntimeKind {
+    return (typeof this.runtimeAdapter.kind === 'function'
+      ? this.runtimeAdapter.kind()
+      : this.resolvedOptions.runtimeKind) as RuntimeKind;
+  }
+
   // ── Abstract: subclass must implement ───────────────────────────────────────
 
   /** Permanent error categories — runner's inherent property. */
@@ -166,6 +173,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    */
   async run(taskId: string): Promise<PeerRunnerResult<TOutput>> {
     this.phase = RunnerPhase.Idle;
+    const runtimeKind = this.getRuntimeKind();
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
     let leasedTask: TaskRecord;
@@ -173,7 +181,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       leasedTask = await this.stateManager.acquireLease({
         taskId,
         owner: this.resolvedOptions.owner,
-        runtimeKind: this.resolvedOptions.runtimeKind,
+        runtimeKind,
       });
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
@@ -214,7 +222,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       this.phase = RunnerPhase.Invoking;
       const runHandle = await this.invokeRuntime(taskId, context);
       this.emitEvent('run_started', taskId, {
-        runtimeKind: this.resolvedOptions.runtimeKind,
+        runtimeKind,
       });
 
       // 5. Poll until terminal
