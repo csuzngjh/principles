@@ -21,8 +21,7 @@ import {
   loadLedger,
   getLedgerFilePathPublic,
   decideInternalizationRoute,
-  computeBridgeDecision,
-  buildDreamerTaskSeed,
+  buildDreamerSeedFromCandidate,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -226,6 +225,8 @@ interface CandidateInternalizeResult {
   channel?: string;
   status: 'created' | 'existing' | 'dry_run' | 'no_task_created';
   reason?: string;
+  /** Required for degraded/refused/failed statuses — tells the operator what to do next. */
+  nextAction?: string;
 }
 
 export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
@@ -242,6 +243,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         route: 'unknown',
         status: 'no_task_created',
         reason: `Candidate not found: ${opts.candidateId}`,
+        nextAction: 'Verify candidate ID and run pd candidate show <id> to check existence',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -256,24 +258,20 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
     const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-    const bridgeInput = {
-      candidateId: opts.candidateId,
-      recommendationKind: recommendation.kind,
-      route: decision.route,
-      ready: decision.ready,
-    };
-
-    const bridgeDecision = computeBridgeDecision(bridgeInput);
-
-    if (bridgeDecision.decision !== 'seeded') {
-      const reason = bridgeDecision.decision === 'already_exists'
-        ? `Task ${bridgeDecision.taskId} already exists`
-        : bridgeDecision.reason;
+    const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+    if ('decision' in seed) {
+      const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
+      const reason = decisionResult.decision === 'already_exists'
+        ? `Task ${decisionResult.taskId} already exists`
+        : decisionResult.reason ?? 'Seed not created';
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
         route: decision.route,
         status: 'no_task_created',
         reason,
+        nextAction: reason.startsWith('Candidate ')
+          ? 'Check candidate lineage fields (taskId, artifactId, sourceRunId)'
+          : 'Verify internalization route configuration and candidate readiness',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -281,20 +279,21 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
         console.log(`  Route:   ${decision.route}`);
         console.log(`  Ready:   ${decision.ready}`);
-        console.log(`  Reason:  ${decision.reason}`);
+        console.log(`  Reason:  ${reason}`);
+        console.log(`  Next:    ${result.nextAction}`);
         console.log('');
       }
       return;
     }
 
-    const {channel} = bridgeDecision;
-    const {taskId} = bridgeDecision;
+    const { channel } = seed;
+    const { taskId } = seed;
 
     if (opts.dryRun) {
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
         route: decision.route,
-        channel,
+        channel: seed.channel,
         status: 'dry_run',
         reason: 'Dry-run mode — no task created',
       };
@@ -316,7 +315,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         candidateId: opts.candidateId,
         route: decision.route,
         taskId: existingTask.taskId,
-        channel,
+        channel: seed.channel,
         status: 'existing',
         reason: 'Task already exists for this candidate+channel combination',
       };
@@ -328,22 +327,6 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         console.log(`  Channel:  ${channel}`);
         console.log(`  Task:     ${existingTask.taskId} (existing)`);
         console.log('');
-      }
-      return;
-    }
-
-    const seed = buildDreamerTaskSeed(bridgeInput);
-    if ('decision' in seed) {
-      const result: CandidateInternalizeResult = {
-        candidateId: opts.candidateId,
-        route: decision.route,
-        status: 'no_task_created',
-        reason: (seed as { reason: string }).reason,
-      };
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        console.error(`Bridge seed failed: ${(seed as { reason: string }).reason}`);
       }
       return;
     }
@@ -361,7 +344,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       candidateId: opts.candidateId,
       route: decision.route,
       taskId: task.taskId,
-      channel,
+      channel: seed.channel,
       status: 'created',
     };
     if (opts.json) {
@@ -845,26 +828,19 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
       const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-      const bridgeInput = {
-        candidateId,
-        recommendationKind: recommendation.kind,
-        route: decision.route,
-        ready: decision.ready,
-      };
-
-      const bridgeDecision = computeBridgeDecision(bridgeInput);
-
-      if (bridgeDecision.decision !== 'seeded') {
+      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+      if ('decision' in seed) {
         output.deferred++;
-        const reason = bridgeDecision.decision === 'already_exists'
-          ? `Task ${bridgeDecision.taskId} already exists`
-          : bridgeDecision.reason;
-        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped' });
+        const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
+        const reason = decisionResult.decision === 'already_exists'
+          ? `Task ${decisionResult.taskId} already exists`
+          : decisionResult.reason ?? 'Seed not created';
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: reason.startsWith('Candidate ') ? 'Check candidate lineage fields (taskId, artifactId, sourceRunId)' : 'Verify internalization route configuration' });
         continue;
       }
 
-      const {channel} = bridgeDecision;
-      const {taskId} = bridgeDecision;
+      const { channel } = seed;
+      const { taskId } = seed;
 
       const existingTask = await stateManager.getTask(taskId);
       if (existingTask) {
@@ -890,13 +866,6 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       try {
-        const seed = buildDreamerTaskSeed(bridgeInput);
-        if ('decision' in seed) {
-          output.errors++;
-          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'Investigate bridge seed failure' });
-          continue;
-        }
-
         const task = await stateManager.createTask({
           taskId: seed.taskId,
           taskKind: seed.taskKind,
@@ -930,26 +899,19 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
       const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-      const bridgeInput = {
-        candidateId,
-        recommendationKind: recommendation.kind,
-        route: decision.route,
-        ready: decision.ready,
-      };
-
-      const bridgeDecision = computeBridgeDecision(bridgeInput);
-
-      if (bridgeDecision.decision !== 'seeded') {
+      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+      if ('decision' in seed) {
         output.deferred++;
-        const reason = bridgeDecision.decision === 'already_exists'
-          ? `Task ${bridgeDecision.taskId} already exists`
-          : bridgeDecision.reason;
+        const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
+        const reason = decisionResult.decision === 'already_exists'
+          ? `Task ${decisionResult.taskId} already exists`
+          : decisionResult.reason ?? 'Seed not created';
         output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'Investigate why bridge decision is not seeded' });
         continue;
       }
 
-      const {channel} = bridgeDecision;
-      const {taskId} = bridgeDecision;
+      const { channel } = seed;
+      const { taskId } = seed;
 
       if (!isConfirm) {
         output.missingDreamerTask++;
@@ -989,13 +951,6 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       try {
-        const seed = buildDreamerTaskSeed(bridgeInput);
-        if ('decision' in seed) {
-          output.errors++;
-          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'skipped', nextAction: 'Intake succeeded but dreamer seed failed — candidate is consumed, re-run backfill for consumed candidates' });
-          continue;
-        }
-
         const task = await stateManager.createTask({
           taskId: seed.taskId,
           taskKind: seed.taskKind,
