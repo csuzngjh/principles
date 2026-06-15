@@ -225,6 +225,8 @@ interface CandidateInternalizeResult {
   channel?: string;
   status: 'created' | 'existing' | 'dry_run' | 'no_task_created';
   reason?: string;
+  /** Required for degraded/refused/failed statuses — tells the operator what to do next. */
+  nextAction?: string;
 }
 
 export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
@@ -241,6 +243,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         route: 'unknown',
         status: 'no_task_created',
         reason: `Candidate not found: ${opts.candidateId}`,
+        nextAction: 'Verify candidate ID and run pd candidate show <id> to check existence',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -266,6 +269,9 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         route: decision.route,
         status: 'no_task_created',
         reason,
+        nextAction: reason.startsWith('Candidate ')
+          ? 'Check candidate lineage fields (taskId, artifactId, sourceRunId)'
+          : 'Verify internalization route configuration and candidate readiness',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -274,6 +280,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
         console.log(`  Route:   ${decision.route}`);
         console.log(`  Ready:   ${decision.ready}`);
         console.log(`  Reason:  ${reason}`);
+        console.log(`  Next:    ${result.nextAction}`);
         console.log('');
       }
       return;
@@ -828,7 +835,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         const reason = decisionResult.decision === 'already_exists'
           ? `Task ${decisionResult.taskId} already exists`
           : decisionResult.reason ?? 'Seed not created';
-        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped' });
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: reason.startsWith('Candidate ') ? 'Check candidate lineage fields (taskId, artifactId, sourceRunId)' : 'Verify internalization route configuration' });
         continue;
       }
 

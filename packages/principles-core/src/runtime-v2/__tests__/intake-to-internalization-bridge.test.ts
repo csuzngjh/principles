@@ -407,13 +407,27 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       expect('decision' in result).toBe(true);
     });
 
-    it('handles missing optional fields gracefully', () => {
+    it('rejects candidate with all empty lineage fields (PRI-395)', () => {
       const candidate = makeCandidate({
         taskId: '',
         artifactId: '',
         sourceRunId: '',
       });
-      // route is ready → seeded but with empty lineage
+      const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+      expect('decision' in result).toBe(true);
+      if (!('decision' in result)) throw new Error('expected decision');
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('no diagnostician lineage');
+      }
+    });
+
+    it('accepts candidate with at least one lineage field', () => {
+      const candidate = makeCandidate({
+        taskId: 'diagnostician-pain-99',
+        artifactId: '',
+        sourceRunId: '',
+      });
       const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
       expect('decision' in result).toBe(false);
       if ('decision' in result) throw new Error('expected seed');
@@ -421,10 +435,7 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       const meta = parsePITaskMetadata(result.diagnosticJson);
       expect(meta).not.toBeNull();
       if (meta) {
-        expect(meta.dependencyTaskIds).toEqual([]);
-        expect(meta.inputArtifactRefs).toEqual([
-          { artifactType: 'candidate', ref: 'candidate://cand-99' },
-        ]);
+        expect(meta.dependencyTaskIds).toEqual(['diagnostician-pain-99']);
       }
     });
   });

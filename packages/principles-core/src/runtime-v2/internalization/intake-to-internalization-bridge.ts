@@ -1,7 +1,7 @@
 import type { InternalizationChannel } from './peer-runner-contracts.js';
 import type { InternalizationRouteKind } from './internalization-route.js';
 import type { CandidateRecord } from '../store/candidate/candidate-store.js';
-import { createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { PI_METADATA_KEY } from './pitask-metadata.js';
 
 export interface IntakeToInternalizationBridgeInput {
   candidateId: string;
@@ -120,33 +120,23 @@ export function buildDreamerTaskSeed(
     dependencyTaskIds.push(input.sourceTaskId);
   }
 
-  const diagnosticJson = createPITaskDiagnosticJson({
-    dependencyTaskIds,
-    channel: decision.channel,
-    timeoutMs: 300_000,
-    inputArtifactRefs,
-    outputArtifactRefs: [],
-    parentTaskId: undefined,
-    correlationId: input.candidateId,
+  // Build diagnosticJson as a single object — no parse round-trip
+  const finalDiagnosticJson = JSON.stringify({
+    [PI_METADATA_KEY]: {
+      dependencyTaskIds,
+      channel: decision.channel,
+      timeoutMs: 300_000,
+      inputArtifactRefs,
+      outputArtifactRefs: [],
+      parentTaskId: undefined,
+      correlationId: input.candidateId,
+    },
+    candidateId: input.candidateId,
+    ...(input.sourcePainId?.trim() ? { sourcePainId: input.sourcePainId.trim() } : {}),
+    ...(input.sourceTaskId?.trim() ? { sourceTaskId: input.sourceTaskId.trim() } : {}),
+    ...(input.sourceArtifactId?.trim() ? { sourceArtifactId: input.sourceArtifactId.trim() } : {}),
+    ...(input.sourceRunId?.trim() ? { sourceRunId: input.sourceRunId.trim() } : {}),
   });
-
-  // Merge top-level candidate / lineage fields into diagnosticJson
-  // for chain integrity reads (candidateId, sourcePainId, etc.).
-  const diagObj = JSON.parse(diagnosticJson) as Record<string, unknown>;
-  diagObj.candidateId = input.candidateId;
-  if (input.sourcePainId && input.sourcePainId.trim() !== '') {
-    diagObj.sourcePainId = input.sourcePainId;
-  }
-  if (input.sourceTaskId && input.sourceTaskId.trim() !== '') {
-    diagObj.sourceTaskId = input.sourceTaskId;
-  }
-  if (input.sourceArtifactId && input.sourceArtifactId.trim() !== '') {
-    diagObj.sourceArtifactId = input.sourceArtifactId;
-  }
-  if (input.sourceRunId && input.sourceRunId.trim() !== '') {
-    diagObj.sourceRunId = input.sourceRunId;
-  }
-  const finalDiagnosticJson = JSON.stringify(diagObj);
 
   return {
     taskId: decision.taskId,
@@ -182,6 +172,21 @@ export function buildDreamerSeedFromCandidate(
   options: BuildDreamerSeedFromCandidateOptions,
 ): BridgeTaskSeed | BridgeDecision {
   const { route, ready, sourcePainId } = options;
+
+  // PRI-395: Fail loud when all lineage fields are empty — an empty seed
+  // provides no traceability and indicates the candidate lacks diagnostician lineage.
+  const lineageFields = [
+    candidate.taskId?.trim(),
+    candidate.artifactId?.trim(),
+    candidate.sourceRunId?.trim(),
+  ];
+  if (lineageFields.every(f => !f)) {
+    return {
+      decision: 'invalid_candidate',
+      reason: `Candidate ${candidate.candidateId} has no diagnostician lineage (taskId, artifactId, sourceRunId all empty/blank)`,
+    };
+  }
+
   return buildDreamerTaskSeed({
     candidateId: candidate.candidateId,
     recommendationKind: candidate.recommendationKind ?? 'unknown',

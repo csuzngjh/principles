@@ -327,13 +327,13 @@ export class PainSignalBridge {
                   maxAttempts: seed.maxAttempts,
                   diagnosticJson: seed.diagnosticJson,
                 });
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seeded',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { taskId: seed.taskId, channel: seed.channel },
+                });
               }
-              this.eventEmitter?.emitTelemetry({
-                eventType: 'candidate_dreamer_task_seeded',
-                traceId: candidate.candidateId,
-                timestamp: new Date().toISOString(),
-                payload: { taskId: seed.taskId, channel: seed.channel },
-              });
             }
           }
         } catch (seedErr) {
