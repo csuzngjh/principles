@@ -8,8 +8,8 @@
  * HG-01 HARD GATE: This command must deliver.
  */
 import * as path from 'path';
-import { probeRuntime } from '@principles/core/runtime-v2';
-import { PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime-v2';
+import type { Command } from 'commander';
+import { probeRuntime, PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig, resolveRuntimeWithOverrides } from '../services/resolve-runtime-from-pd-config.js';
 
 interface RuntimeProbeOptions {
@@ -445,4 +445,29 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
   console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai, config)`);
   process.exit(1);
   return;
+}
+
+/**
+ * Register the `pd runtime probe` command on a Commander instance.
+ * Used by index.ts and tests to ensure real command wiring is verified (EP-04).
+ */
+export function registerRuntimeProbeCommand(runtimeCmd: Command): Command {
+  return runtimeCmd
+    .command('probe')
+    .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
+    .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'pi-ai', or 'config'")
+    .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+    .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+    .option('-a, --agent <agentId>', 'Agent ID to probe')
+    .option('--provider <name>', 'LLM provider (e.g., openrouter) \u2014 for pi-ai, falls back to .pd/config.yaml')
+    .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) \u2014 for pi-ai, falls back to .pd/config.yaml')
+    .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) \u2014 for pi-ai, falls back to .pd/config.yaml')
+    .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers \u2014 for pi-ai, falls back to .pd/config.yaml')
+    .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
+    .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
+    .option('-w, --workspace <path>', 'Workspace directory \u2014 loads pi-ai config from .pd/config.yaml')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleRuntimeProbe(opts);
+    });
 }

@@ -313,88 +313,86 @@ runtimeProfiles:
 
 // ─── Tests: program.parseAsync against real Commander registration (EP-04) ──
 
-describe('PRI-402: probe command flag wiring (EP-04)', () => {
-  it('registers --runtime as required option', () => {
-    const program = new Command();
-    program.exitOverride();
+// Import the real command registration function to test actual production wiring
+const { registerRuntimeProbeCommand } = await import('../runtime.js');
+
+interface CapturedAction {
+  opts: Record<string, unknown> | null;
+}
+
+function attachCapture(cmd: Command, state: CapturedAction): void {
+  // Override the action handler to capture opts without calling the real handler
+  cmd.action((...args: unknown[]) => {
+    // Find the opts object (last non-Command, non-null object arg)
+    let optsArg: Record<string, unknown> | null = null;
+    for (let i = args.length - 1; i >= 0; i--) {
+      const arg: unknown = args[i];
+      if (arg !== null && typeof arg === 'object' && !(arg instanceof Command)) {
+        optsArg = arg as Record<string, unknown>;
+        break;
+      }
+    }
+    state.opts = optsArg ?? {};
+    // Do NOT call original action (would call handleRuntimeProbe which needs real runtime)
+  });
+}
+
+function freshProgram(): Command {
+  const program = new Command();
+  program.name('pd').exitOverride();
+  return program;
+}
+
+describe('PRI-402: probe command flag wiring (EP-04 real registration)', () => {
+  it('registers --runtime as required option via real registration', () => {
+    const program = freshProgram();
     const runtimeCmd = program.command('runtime');
-    const probeCmd = runtimeCmd
-      .command('probe')
-      .requiredOption('-r, --runtime <kind>', "Runtime kind")
-      .option('--provider <name>', 'Provider')
-      .option('--model <id>', 'Model')
-      .option('--apiKeyEnv <name>', 'API key env')
-      .option('--baseUrl <url>', 'Base URL')
-      .option('-w, --workspace <path>', 'Workspace')
-      .option('--json', 'JSON output');
+    const probeCmd = registerRuntimeProbeCommand(runtimeCmd);
 
     const runtimeOpt = probeCmd.options.find((o) => o.long === '--runtime');
     expect(runtimeOpt).toBeDefined();
     expect(runtimeOpt?.required).toBe(true);
   });
 
-  it('registers --workspace with -w shorthand', () => {
-    const program = new Command();
-    program.exitOverride();
+  it('registers --workspace with -w shorthand via real registration', () => {
+    const program = freshProgram();
     const runtimeCmd = program.command('runtime');
-    const probeCmd = runtimeCmd
-      .command('probe')
-      .requiredOption('-r, --runtime <kind>', "Runtime kind")
-      .option('-w, --workspace <path>', 'Workspace')
-      .option('--json', 'JSON output');
+    const probeCmd = registerRuntimeProbeCommand(runtimeCmd);
 
     const wsOpt = probeCmd.options.find((o) => o.short === '-w');
     expect(wsOpt).toBeDefined();
     expect(wsOpt?.long).toBe('--workspace');
   });
 
-  it('parses --runtime pi-ai --workspace <dir> --json correctly', async () => {
-    const program = new Command();
-    program.exitOverride();
-    program.name('pd');
+  it('parses --runtime pi-ai --workspace <dir> --json correctly via real registration', async () => {
+    const program = freshProgram();
     const runtimeCmd = program.command('runtime');
-
-    const captured: Record<string, unknown>[] = [];
-    runtimeCmd
-      .command('probe')
-      .requiredOption('-r, --runtime <kind>', "Runtime kind")
-      .option('--provider <name>', 'Provider')
-      .option('--model <id>', 'Model')
-      .option('--apiKeyEnv <name>', 'API key env')
-      .option('--baseUrl <url>', 'Base URL')
-      .option('-w, --workspace <path>', 'Workspace')
-      .option('--json', 'JSON output')
-      .action((opts: Record<string, unknown>) => { captured.push(opts); });
+    const probeCmd = registerRuntimeProbeCommand(runtimeCmd);
+    const captured: CapturedAction = { opts: null };
+    attachCapture(probeCmd, captured);
 
     await program.parseAsync(['node', 'pd', 'runtime', 'probe', '--runtime', 'pi-ai', '--workspace', '/tmp/test', '--json']);
 
-    expect(captured.length).toBe(1);
-    const [opts1] = captured;
-    expect(opts1.runtime).toBe('pi-ai');
-    expect(opts1.workspace).toBe('/tmp/test');
-    expect(opts1.json).toBe(true);
+    expect(captured.opts).not.toBeNull();
+    if (!captured.opts) throw new Error('captured.opts is null');
+    expect(captured.opts.runtime).toBe('pi-ai');
+    expect(captured.opts.workspace).toBe('/tmp/test');
+    expect(captured.opts.json).toBe(true);
   });
 
-  it('parses --runtime config --workspace <dir> correctly', async () => {
-    const program = new Command();
-    program.exitOverride();
-    program.name('pd');
+  it('parses --runtime config --workspace <dir> correctly via real registration', async () => {
+    const program = freshProgram();
     const runtimeCmd = program.command('runtime');
-
-    const captured: Record<string, unknown>[] = [];
-    runtimeCmd
-      .command('probe')
-      .requiredOption('-r, --runtime <kind>', "Runtime kind")
-      .option('-w, --workspace <path>', 'Workspace')
-      .option('--json', 'JSON output')
-      .action((opts: Record<string, unknown>) => { captured.push(opts); });
+    const probeCmd = registerRuntimeProbeCommand(runtimeCmd);
+    const captured: CapturedAction = { opts: null };
+    attachCapture(probeCmd, captured);
 
     await program.parseAsync(['node', 'pd', 'runtime', 'probe', '--runtime', 'config', '--workspace', '/tmp/test']);
 
-    expect(captured.length).toBe(1);
-    const [opts2] = captured;
-    expect(opts2.runtime).toBe('config');
-    expect(opts2.workspace).toBe('/tmp/test');
+    expect(captured.opts).not.toBeNull();
+    if (!captured.opts) throw new Error('captured.opts is null');
+    expect(captured.opts.runtime).toBe('config');
+    expect(captured.opts.workspace).toBe('/tmp/test');
   });
 });
 
