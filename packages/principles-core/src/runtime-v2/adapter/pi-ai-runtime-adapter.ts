@@ -91,6 +91,12 @@ export interface PiAiRuntimeAdapterConfig {
   outputPathStrategy?: OutputPathStrategy;
   /** Maximum repair attempts for structured output repair loop (PRI-271 A1). Default: 3. */
   maxRepairAttempts?: number;
+  /**
+   * Maximum completion tokens for LLM response (BUG-007a).
+   * Prevents reasoning models from spending entire budget on thinking tokens.
+   * Default: 4096. Set to 0 or undefined to omit (use model default).
+   */
+  maxTokens?: number;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
   _testBackoffDelayMs?: number;
 }
@@ -247,10 +253,17 @@ function classifyFailure(
  *   stopReason:'aborted'                              → timeout
  *   stopReason:'error' + timeout/abort in errorMessage → timeout
  *   stopReason:'error' + other                        → execution_failed
- *   no text content block                              → output_invalid
+ *   stopReason:'length' + no extractable content      → output_invalid (truncated)
+ *   no text or thinking content block                  → output_invalid
+ *
+ * Reasoning-model fallback (BUG-007a):
+ *   When all content blocks have empty text (common with reasoning models that
+ *   spend the entire token budget on thinking), extract JSON from ThinkingContent
+ *   blocks. The thinking text is treated as untrusted (EP-01) and must go through
+ *   the same extractJsonObject → schema validation path as normal text.
  */
 function extractAssistantTextOrThrow(
-  response: { content: { type: string; text?: string }[]; stopReason?: string; errorMessage?: string },
+  response: { content: { type: string; text?: string; thinking?: string }[]; stopReason?: string; errorMessage?: string },
   signal?: AbortSignal,
 ): string {
   // Handle resolved-error responses from pi-ai
@@ -274,11 +287,33 @@ function extractAssistantTextOrThrow(
 
   // Find text content (may be mixed with thinking content from reasoning-enabled models)
   const textContent = response.content.find(c => c.type === 'text' && c.text && c.text.trim().length > 0);
-  if (!textContent || textContent.type !== 'text' || !textContent.text) {
-    throw new PDRuntimeError('output_invalid', `No text content in LLM response. Content types: ${response.content.map(c => c.type).join(', ')}`);
+  if (textContent && textContent.type === 'text' && textContent.text) {
+    return textContent.text;
   }
 
-  return textContent.text;
+  // BUG-007a: Reasoning-model fallback — extract from ThinkingContent blocks
+  // When reasoning models spend all token budget on thinking, content is empty
+  // but thinking (reasoning_content) may contain the structured output.
+  // EP-01: thinking field is untrusted LLM output — validate type before use.
+  const thinkingBlock = response.content.find(c => c.type === 'thinking' && typeof c.thinking === 'string' && c.thinking.trim().length > 0);
+  if (thinkingBlock && thinkingBlock.type === 'thinking' && typeof thinkingBlock.thinking === 'string' && thinkingBlock.thinking.trim().length > 0) {
+    return thinkingBlock.thinking;
+  }
+
+  // BUG-007b: finish_reason=length with no extractable content → fail-loud (EP-03)
+  if (response.stopReason === 'length') {
+    throw new PDRuntimeError(
+      'output_invalid',
+      'LLM response truncated (finish_reason=length); no extractable content',
+      { nextAction: 'reduce input size or increase maxTokens in .pd/config.yaml' },
+    );
+  }
+
+  throw new PDRuntimeError(
+    'output_invalid',
+    `No text or reasoning content in LLM response. Content types: ${response.content.map(c => c.type).join(', ')}`,
+    { nextAction: 'check if the model supports structured output or increase maxTokens' },
+  );
 }
 
 /** Internal run state for one-shot pattern. */
@@ -850,7 +885,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * calling, the response contains ToolCall content blocks with pre-parsed
    * arguments that we validate against the schema.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- stateless helper; kept as private method for cohesion
+   
   private async tryToolCallPath(
     params: {
       model: ReturnType<typeof resolveModel>;
@@ -875,6 +910,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
+        maxTokens: this.config.maxTokens ?? 4096,
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -933,7 +969,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * Injects `response_format: { type: 'json_object' }` via onPayload
    * to force the provider to output valid JSON. Then parses and validates.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- stateless helper; kept as private method for cohesion
+   
   private async tryJsonModePath(
     params: {
       model: ReturnType<typeof resolveModel>;
@@ -953,6 +989,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
+        maxTokens: this.config.maxTokens ?? 4096,
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1037,7 +1074,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * call immediately timing out when the original call consumed most of the
    * original timeout budget (e.g., 5min original → 4m50s elapsed → 10s left).
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- REPAIR_TIMEOUT_MS is a constant; this method is intentionally stateless
+   
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
@@ -1058,6 +1095,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
+      maxTokens: this.config.maxTokens ?? 4096,
     });
 
     // extractAssistantTextOrThrow throws:
@@ -1139,6 +1177,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           apiKey: options.apiKey,
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
+          maxTokens: this.config.maxTokens ?? 4096, // BUG-007a: prevent reasoning models from exhausting budget
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;
