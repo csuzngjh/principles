@@ -154,6 +154,8 @@ export class PainToPrincipleService {
             workspaceDir: this.opts.workspaceDir,
             stateDir: this.opts.stateDir,
             data: painData,
+            canonicalPainId: painId,
+            runtimeTaskId: taskIdResult.taskId,
           });
           observabilityWarnings = obs.warnings;
         }
@@ -190,6 +192,8 @@ export class PainToPrincipleService {
           workspaceDir: this.opts.workspaceDir,
           stateDir: this.opts.stateDir,
           data: painData,
+          canonicalPainId: painId,
+          runtimeTaskId: taskId,
         });
         observabilityWarnings = obs.warnings;
       }
