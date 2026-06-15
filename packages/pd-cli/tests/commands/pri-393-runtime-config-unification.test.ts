@@ -369,8 +369,15 @@ funnels:
       const { isRuntimeConfigError } = await import('@principles/core/runtime-v2');
       const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
 
-      // Should either return defaults or error depending on validation
-      expect(resolved.configLoadResult.ok).toBeDefined();
+      // Missing runtimeProfiles should either load with defaults or produce
+      // a RuntimeConfigError — never silently succeed with wrong config.
+      if (isRuntimeConfigError(resolved.result)) {
+        expect(resolved.result.reason).toBeTruthy();
+        expect(resolved.result.nextAction).toBeTruthy();
+      } else {
+        // If defaults were returned, configLoadResult.ok should be true
+        expect(resolved.configLoadResult.ok).toBe(true);
+      }
     });
 
     it('handles config with invalid runtime profile type', async () => {
@@ -388,10 +395,15 @@ funnels:
       });
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const { isRuntimeConfigError } = await import('@principles/core/runtime-v2');
       const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
 
-      // Invalid type should be caught by validation
-      expect(resolved.configLoadResult.ok).toBe(false);
+      // Invalid type should be caught — verify external contract, not internal state
+      expect(isRuntimeConfigError(resolved.result)).toBe(true);
+      if (isRuntimeConfigError(resolved.result)) {
+        expect(resolved.result.reason).toBeTruthy();
+        expect(resolved.result.nextAction).toBeTruthy();
+      }
     });
 
     it('handles env var returning undefined for apiKeyEnv', async () => {

@@ -114,16 +114,22 @@ describe('computeConsumerDecision — boundary conditions', () => {
     expect(result.maxTasksPerCycle).toBe(0);
   });
 
-  it('handles negative readyTaskCount (treats as 0)', () => {
-    // Negative count is invalid input, but function should handle gracefully
+  it('negative readyTaskCount produces negative maxTasksPerCycle (known edge case)', () => {
+    // Negative count is invalid input. The function does not guard against it:
+    // -5 !== 0 bypasses the no_ready_tasks check, so shouldConsume=true.
+    // Math.min(1, -5) = -5 → maxTasksPerCycle is negative.
+    // This documents the current behavior; callers should validate input.
     const result = computeConsumerDecision({
       autoConsumerEnabled: true,
       readyTaskCount: -5,
     });
 
-    // -5 !== 0, so shouldConsume=true, but maxTasksPerCycle = min(1, -5) = -5
-    // This is an edge case that reveals potential bug
     expect(result.shouldConsume).toBe(true);
+    // maxTasksPerCycle = Math.min(DEFAULT=1, -5) = -5
+    expect(result.maxTasksPerCycle).toBe(-5);
+    expect(result.runnerKinds).toEqual(['dreamer']);
+    // No reason because readyTaskCount !== 0 and autoConsumer is enabled
+    expect(result.reason).toBeUndefined();
   });
 
   it('handles very large readyTaskCount', () => {

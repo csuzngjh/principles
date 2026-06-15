@@ -766,17 +766,22 @@ describe('InternalizationIntegrityRemediation', () => {
       insertTask({ taskId: 'null-fields-task', taskKind: 'dreamer', status: 'succeeded' });
 
       const d = new Database(dbPath);
+      // Provide valid NOT NULL values (runtime_kind='invalid_null_kind', attempt_number=0)
+      // so the INSERT succeeds, but started_at=NULL triggers detection.
+      // runtime_kind is invalid (not in RuntimeKindSchema) → malformed.
       d.prepare(
         `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
-         VALUES (?, ?, NULL, NULL, NULL, 'queued', ?, ?)`,
+         VALUES (?, ?, 'invalid_null_kind', NULL, 0, 'queued', ?, ?)`,
       ).run('run-null-fields', 'null-fields-task', new Date().toISOString(), new Date().toISOString());
       d.close();
 
       const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
       const result = remediation.repair({ dryRun: true });
 
+      // 'invalid_null_kind' is not in RuntimeKindSchema → malformed
       const action = findAction(result.actions, 'null-fields-task', 'malformed_run_row');
       expect(action).toBeDefined();
+      expect(action?.reason).toContain('schema validation');
     });
 
     it('handles run row with wrong data types', () => {
