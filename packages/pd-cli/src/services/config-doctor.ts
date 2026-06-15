@@ -320,8 +320,8 @@ function diagnoseInternalAgent(
         runtimeProfileId: agent.runtimeProfileId,
         runtimeProfileLabel: agent.runtimeProfileLabel,
         readiness: 'needs_setup',
-        provider: null,
-        model: null,
+        provider: profile.provider ?? null,
+        model: profile.model ?? null,
         apiKeyEnv: null,
         apiKeyPresent: false,
         reason: `pi-ai profile '${profile.id}' missing apiKeyEnv`,
@@ -336,8 +336,8 @@ function diagnoseInternalAgent(
         runtimeProfileId: agent.runtimeProfileId,
         runtimeProfileLabel: agent.runtimeProfileLabel,
         readiness: 'needs_setup',
-        provider: null,
-        model: null,
+        provider: profile.provider ?? null,
+        model: profile.model ?? null,
         apiKeyEnv,
         apiKeyPresent: false,
         reason: `Environment variable '${apiKeyEnv}' is not set or empty`,
@@ -352,8 +352,8 @@ function diagnoseInternalAgent(
       runtimeProfileId: agent.runtimeProfileId,
       runtimeProfileLabel: agent.runtimeProfileLabel,
       readiness: 'not_ready', // runtime availability unknown without actual probe
-      provider: null,
-      model: null,
+      provider: profile.provider ?? null,
+      model: profile.model ?? null,
       apiKeyEnv,
       apiKeyPresent: true,
       reason: `pi-ai profile configured with apiKeyEnv='${apiKeyEnv}' (key present); runtime availability unknown`,
@@ -465,8 +465,8 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
       ? 'config_missing'
       : 'needs_probe';
     providerHealth.push({
-      provider: null,
-      model: null,
+      provider: agent.provider,
+      model: agent.model,
       apiKeyEnv: agent.apiKeyEnv,
       apiKeyPresent: agent.apiKeyPresent,
       classification,
