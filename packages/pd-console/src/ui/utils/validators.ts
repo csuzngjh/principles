@@ -276,6 +276,8 @@ export interface RedactedRuntimeProfileSummaryData {
   type: string;
   label: string;
   apiKeyEnv?: string;
+  provider?: string;
+  model?: string;
   readiness: ReadinessStatus;
 }
 
@@ -285,12 +287,16 @@ function validateRuntimeProfileSummary(v: unknown): RedactedRuntimeProfileSummar
   if (!Object.hasOwn(v, 'type') || !isString(v.type)) return null;
   if (!Object.hasOwn(v, 'label') || !isString(v.label)) return null;
   if (Object.hasOwn(v, 'apiKeyEnv') && !isString(v.apiKeyEnv)) return null;
+  if (Object.hasOwn(v, 'provider') && !isString(v.provider)) return null;
+  if (Object.hasOwn(v, 'model') && !isString(v.model)) return null;
   if (!Object.hasOwn(v, 'readiness')) return null;
   const readiness = validateReadinessStatus(v.readiness);
   if (readiness === null) return null;
   return {
     id: v.id, type: v.type, label: v.label,
     ...(Object.hasOwn(v, 'apiKeyEnv') && isString(v.apiKeyEnv) ? { apiKeyEnv: v.apiKeyEnv } : {}),
+    ...(Object.hasOwn(v, 'provider') && isString(v.provider) ? { provider: v.provider } : {}),
+    ...(Object.hasOwn(v, 'model') && isString(v.model) ? { model: v.model } : {}),
     readiness,
   };
 }
