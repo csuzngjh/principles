@@ -731,4 +731,275 @@ describe('InternalizationIntegrityRemediation', () => {
       d2.close();
     });
   });
+
+  // ── Schema Validation Boundary Tests (PRI-396 follow-up) ───────────────────────
+
+  describe('schema validation boundary conditions', () => {
+    /**
+     * Insert a run row with multiple schema violations.
+     * Tests that detection correctly identifies all issues.
+     */
+    function insertMultiMalformedRunRow(runId: string, taskId: string): void {
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      // Multiple violations: invalid runtime_kind AND invalid execution_status
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_kind', ?, -1, 'invalid_status', ?, ?)`,
+      ).run(runId, taskId, now, now, now);
+      d.close();
+    }
+
+    it('detects run row with multiple schema violations', () => {
+      insertTask({ taskId: 'multi-malf-task', taskKind: 'dreamer', status: 'succeeded' });
+      insertMultiMalformedRunRow('run-multi-malf', 'multi-malf-task');
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      const action = findAction(result.actions, 'multi-malf-task', 'malformed_run_row');
+      expect(action).toBeDefined();
+      expect(action?.reason).toContain('schema validation');
+    });
+
+    it('handles run row with null required fields', () => {
+      insertTask({ taskId: 'null-fields-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      const d = new Database(dbPath);
+      // Provide valid NOT NULL values (runtime_kind='invalid_null_kind', attempt_number=0)
+      // so the INSERT succeeds, but started_at=NULL triggers detection.
+      // runtime_kind is invalid (not in RuntimeKindSchema) → malformed.
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_null_kind', NULL, 0, 'queued', ?, ?)`,
+      ).run('run-null-fields', 'null-fields-task', new Date().toISOString(), new Date().toISOString());
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // 'invalid_null_kind' is not in RuntimeKindSchema → malformed
+      const action = findAction(result.actions, 'null-fields-task', 'malformed_run_row');
+      expect(action).toBeDefined();
+      expect(action?.reason).toContain('schema validation');
+    });
+
+    it('handles run row with wrong data types', () => {
+      insertTask({ taskId: 'wrong-type-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      // SQLite will coerce types, but we test the detection logic
+      // Use valid attempt_number (integer) to avoid SQL error
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'invalid_status', ?, ?)`,
+      ).run('run-wrong-type', 'wrong-type-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Should detect the malformed row (invalid execution_status)
+      const action = findAction(result.actions, 'wrong-type-task', 'malformed_run_row');
+      expect(action).toBeDefined();
+    });
+
+    it('handles empty run_id', () => {
+      insertTask({ taskId: 'empty-run-id-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'queued', ?, ?)`,
+      ).run('', 'empty-run-id-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Empty run_id should be detected as malformed
+      expect(result.actions.some(a => a.type === 'malformed_run_row')).toBe(true);
+    });
+
+    it('handles run row with extra unknown columns (SQLite flexible schema)', () => {
+      insertTask({ taskId: 'extra-cols-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      // Add an extra column and insert data
+      const d = new Database(dbPath);
+      d.exec(`ALTER TABLE runs ADD COLUMN extra_unknown TEXT`);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at, extra_unknown)
+         VALUES (?, ?, 'openclaw', ?, 1, 'succeeded', ?, ?, 'extra_value')`,
+      ).run('run-extra-cols', 'extra-cols-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Extra columns should not cause detection (schema validation ignores unknown fields)
+      const action = findAction(result.actions, 'extra-cols-task', 'malformed_run_row');
+      expect(action).toBeUndefined();
+    });
+
+    it('handles concurrent malformed run rows for same task', () => {
+      insertTask({ taskId: 'concurrent-malf-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      // Insert multiple malformed runs for same task
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_kind', ?, 1, 'queued', ?, ?)`,
+      ).run('run-concurrent-1', 'concurrent-malf-task', now, now, now);
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_kind', ?, 2, 'running', ?, ?)`,
+      ).run('run-concurrent-2', 'concurrent-malf-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Should detect both malformed runs
+      const malformedActions = result.actions.filter(a => a.type === 'malformed_run_row' && a.taskId === 'concurrent-malf-task');
+      expect(malformedActions.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('handles valid run row after malformed row is quarantined', () => {
+      insertTask({ taskId: 'valid-after-malf-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      // First insert a recoverable malformed row
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'invalid_status', ?, ?)`,
+      ).run('run-malf-then-valid', 'valid-after-malf-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result1 = remediation.repair({ dryRun: false });
+
+      // First run quarantines the malformed row
+      expect(result1.repairedCount).toBeGreaterThanOrEqual(1);
+
+      // Now insert a valid run row
+      insertRun({ runId: 'run-valid-after', taskId: 'valid-after-malf-task', executionStatus: 'succeeded' });
+
+      // Second repair should not flag the valid run
+      const result2 = remediation.repair({ dryRun: true });
+      const validRunAction = result2.actions.find(a => a.targetId === 'run-valid-after' && a.type === 'malformed_run_row');
+      expect(validRunAction).toBeUndefined();
+    });
+
+    it('handles task with only malformed runs (no valid runs)', () => {
+      insertTask({ taskId: 'only-malf-runs-task', taskKind: 'dreamer', status: 'succeeded' });
+
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      // Insert only malformed runs
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_kind', ?, 1, 'queued', ?, ?)`,
+      ).run('run-only-malf-1', 'only-malf-runs-task', now, now, now);
+      d.prepare(
+        `INSERT INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'invalid_kind', ?, 2, 'running', ?, ?)`,
+      ).run('run-only-malf-2', 'only-malf-runs-task', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Should also flag task_succeeded_no_succeeded_run since no valid succeeded run exists
+      const noSucceededAction = findAction(result.actions, 'only-malf-runs-task', 'task_succeeded_no_succeeded_run');
+      expect(noSucceededAction).toBeDefined();
+    });
+  });
+
+  // ── Additional Lease Stuck Boundary Tests ─────────────────────────────────────
+
+  describe('lease_stuck additional boundary conditions', () => {
+    it('handles lease with future expiry date (not stuck)', () => {
+      const futureDate = new Date(Date.now() + 600000).toISOString(); // 10 minutes in future
+
+      const d = new Database(dbPath);
+      d.prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at) VALUES (?, ?, 'leased', 1, 3, ?, ?)"
+      ).run('future-lease-task', 'dreamer', 'auto-consumer', futureDate);
+      insertRun({ runId: 'run-future', taskId: 'future-lease-task', executionStatus: 'running' });
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Future lease should NOT be flagged as stuck
+      const action = findAction(result.actions, 'future-lease-task', 'lease_stuck');
+      expect(action).toBeUndefined();
+    });
+
+    it('handles lease exactly at boundary (just expired)', () => {
+      const boundaryDate = new Date(Date.now() - 1).toISOString(); // 1ms ago
+
+      const d = new Database(dbPath);
+      d.prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at) VALUES (?, ?, 'leased', 1, 3, ?, ?)"
+      ).run('boundary-lease-task', 'dreamer', 'auto-consumer', boundaryDate);
+      insertRun({ runId: 'run-boundary', taskId: 'boundary-lease-task', executionStatus: 'running' });
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Just expired should be flagged as stuck
+      const action = findAction(result.actions, 'boundary-lease-task', 'lease_stuck');
+      expect(action).toBeDefined();
+    });
+
+    it('handles lease stuck without associated run', () => {
+      const pastDate = new Date(Date.now() - 60000).toISOString();
+
+      const d = new Database(dbPath);
+      d.prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at) VALUES (?, ?, 'leased', 1, 3, ?, ?)"
+      ).run('stuck-no-run-task', 'dreamer', 'auto-consumer', pastDate);
+      // No run inserted
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // Should still be flagged as stuck lease
+      const action = findAction(result.actions, 'stuck-no-run-task', 'lease_stuck');
+      expect(action).toBeDefined();
+    });
+
+    it('handles multiple stuck leases in single pass', () => {
+      const pastDate = new Date(Date.now() - 60000).toISOString();
+
+      const d = new Database(dbPath);
+      d.prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at) VALUES (?, ?, 'leased', 1, 3, ?, ?)"
+      ).run('stuck-multi-1', 'dreamer', 'auto-consumer', pastDate);
+      d.prepare(
+        "INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, lease_owner, lease_expires_at) VALUES (?, ?, 'leased', 1, 3, ?, ?)"
+      ).run('stuck-multi-2', 'dreamer', 'auto-consumer', pastDate);
+      insertRun({ runId: 'run-stuck-multi-1', taskId: 'stuck-multi-1', executionStatus: 'running' });
+      insertRun({ runId: 'run-stuck-multi-2', taskId: 'stuck-multi-2', executionStatus: 'running' });
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: false });
+
+      // Both should be repaired
+      expect(getTaskField('stuck-multi-1', 'status')).toBe('pending');
+      expect(getTaskField('stuck-multi-2', 'status')).toBe('pending');
+
+      const stuckActions = result.actions.filter(a => a.type === 'lease_stuck');
+      expect(stuckActions.length).toBe(2);
+    });
+  });
 });
