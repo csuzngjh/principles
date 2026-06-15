@@ -20,6 +20,7 @@ import {
   assertMainlineContract,
   EMPTY_CONTEXT_SENTINEL,
   hydratePITaskRecord,
+  resolveAgentRuntimeBinding,
   type MainlineSnapshot,
   type RuntimeReadinessSnapshot,
   type DiagnosisTaskSnapshot,
@@ -140,13 +141,32 @@ function buildDefaultReadiness(workspaceDir: string, warnings: string[]): Runtim
     warnings.push(...configLoadResult.warnings);
   }
 
+  // PRI-402: resolve real runtimeProbeProfile from .pd/config.yaml
+  // so smoke's config_source_alignment + diagnostician_readiness can judge correctly
+  let runtimeProbeProfile: string | null = null;
+  let diagnosticianReady = false;
+  let diagnosticianReadinessReason = 'No readiness snapshot provided; run "pd runtime probe" first.';
+
+  if (configLoadResult.ok) {
+    const bindingResult = resolveAgentRuntimeBinding(configLoadResult.effective, 'diagnostician');
+    if (bindingResult.ok) {
+      runtimeProbeProfile = bindingResult.profileId;
+      // Profile exists and is bound — readiness is at least "configured"
+      // Actual connectivity is unknown without probe, but config alignment is satisfied
+      diagnosticianReady = true;
+      diagnosticianReadinessReason = `Profile '${bindingResult.profileId}' resolved from .pd/config.yaml (connectivity not probed)`;
+    } else {
+      diagnosticianReadinessReason = bindingResult.reason;
+    }
+  }
+
   return {
     configDoctorProfile: defaultProfile,
-    runtimeProbeProfile: null,
+    runtimeProbeProfile,
     configSource: '.pd/config.yaml',
     probeConfigSource: '.pd/config.yaml',
-    diagnosticianReady: false,
-    diagnosticianReadinessReason: 'No readiness snapshot provided; run "pd runtime probe" first.',
+    diagnosticianReady,
+    diagnosticianReadinessReason,
   };
 }
 

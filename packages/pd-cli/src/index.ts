@@ -433,17 +433,17 @@ demoCmd
 runtimeCmd
   .command('probe')
   .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
-  .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli' or 'pi-ai'")
+  .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'pi-ai', or 'config'")
   .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
   .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
   .option('-a, --agent <agentId>', 'Agent ID to probe')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers 鈥?for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) \u2014 for pi-ai, falls back to .pd/config.yaml')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) \u2014 for pi-ai, falls back to .pd/config.yaml')
+  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) \u2014 for pi-ai, falls back to .pd/config.yaml')
+  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers \u2014 for pi-ai, falls back to .pd/config.yaml')
   .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
   .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
-  .option('-w, --workspace <path>', 'Workspace directory 鈥?loads pi-ai policy from .state/workflows.yaml')
+  .option('-w, --workspace <path>', 'Workspace directory \u2014 loads pi-ai config from .pd/config.yaml')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeProbe(opts);
