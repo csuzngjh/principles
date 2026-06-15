@@ -110,6 +110,8 @@ export interface DoctorOutput {
   nextActions: string[];
   /** Legacy files detected (informational only, not used for resolution) */
   legacyFilesDetected: string[];
+  /** PRI-404: Next actions for removing legacy files */
+  legacyFileNextActions: string[];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -450,6 +452,9 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   warnings.push(...loadResult.warnings);
   warnings.push(...flags.warnings);
 
+  // PRI-404: Add legacy file nextActions (separate field, not mixed into general nextActions)
+  const { legacyFileNextActions } = loadResult;
+
   if (!loadResult.ok) {
     for (const err of loadResult.errors) {
       warnings.push(`Config error at ${err.path}: ${err.reason}`);
@@ -567,6 +572,7 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
     warnings,
     nextActions: nextActions.length > 0 ? nextActions : ['All checks passed — configuration is valid'],
     legacyFilesDetected: loadResult.legacyFilesDetected,
+    legacyFileNextActions,
   };
 
   if (reason) out.reason = reason;
