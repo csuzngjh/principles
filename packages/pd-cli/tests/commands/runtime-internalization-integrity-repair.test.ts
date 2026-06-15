@@ -203,6 +203,37 @@ describe('Commander wiring for integrity-repair', () => {
       program.parseAsync(['node', 'pd', 'internalization', 'integrity-repair', '--workspace', WS, '--dry-run', '--confirm', '--json']),
     ).rejects.toThrow('process.exit:1');
 
+    // Verify it printed a single JSON error object on stdout
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('mutually exclusive'),
+      nextAction: expect.any(String),
+    });
+
+    exitSpy.mockRestore();
+  });
+
+  it('outputs structured JSON failure on exception in JSON mode', async () => {
+    mockRepair.mockImplementation(() => {
+      throw new Error('Database connection failed');
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
+
+    const program = createTestProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'internalization', 'integrity-repair', '--workspace', WS, '--confirm', '--json']),
+    ).rejects.toThrow('process.exit:1');
+
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput).toMatchObject({
+      ok: false,
+      reason: 'Database connection failed',
+      nextAction: 'Check workspace path and DB connectivity',
+    });
+
     exitSpy.mockRestore();
   });
 });
