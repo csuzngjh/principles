@@ -239,6 +239,21 @@ describe('Legacy file detection', () => {
       expect(output.legacyFilesDetected[0]).toContain('feature-flags.yaml');
     } finally { rmTmpDir(tmp); }
   });
+
+  it('PRI-404: legacyFileNextActions contains Remove-Item commands and does not pollute nextActions', async () => {
+    const tmp = mkTmpDir();
+    const stateDir = path.join(tmp, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), 'version: 1\n', 'utf8');
+    try {
+      const output = await buildDoctorOutput({ workspaceDir: tmp });
+      expect(output.legacyFileNextActions.length).toBeGreaterThan(0);
+      expect(output.legacyFileNextActions[0]).toContain('Remove-Item');
+      expect(output.legacyFileNextActions[0]).toContain('workflows.yaml');
+      // Regression: legacyFileNextActions must NOT appear in general nextActions
+      expect(output.nextActions.some(na => na.includes('Remove-Item') && na.includes('workflows.yaml'))).toBe(false);
+    } finally { rmTmpDir(tmp); }
+  });
 });
 
 // ── Feature flags from config.yaml ───────────────────────────────────────────
