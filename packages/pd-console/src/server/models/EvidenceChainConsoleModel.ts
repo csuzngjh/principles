@@ -205,9 +205,23 @@ export class EvidenceChainConsoleModel {
       let trajDb: Database.Database | null = null;
       try {
         trajDb = new Database(trajectoryDbPath, { readonly: true });
-        painEvents = trajDb.prepare(
-          'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id FROM pain_events ORDER BY created_at DESC LIMIT 100',
-        ).all();
+        // PRI-406: Try SELECT with canonical_pain_id and runtime_task_id columns.
+        // If the DB was created before the PRI-406 migration, these columns won't exist.
+        // Fall back to the legacy SELECT without them.
+        try {
+          painEvents = trajDb.prepare(
+            'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id FROM pain_events ORDER BY created_at DESC LIMIT 100',
+          ).all();
+        } catch (colErr: unknown) {
+          const colMessage = colErr instanceof Error ? colErr.message : String(colErr);
+          if (colMessage.includes('no such column')) {
+            painEvents = trajDb.prepare(
+              'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
+            ).all();
+          } else {
+            throw colErr;
+          }
+        }
         trajectoryDbAvailable = true;
       } catch (err) {
         if (isMissingTableError(err)) {
