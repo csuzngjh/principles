@@ -363,7 +363,17 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
 async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : undefined;
   if (!workspaceDir) {
-    console.error('error: --workspace is required for --runtime config');
+    if (opts.json) {
+      console.log(JSON.stringify({
+        ok: false,
+        status: 'failed',
+        reason: 'workspace_missing',
+        message: '--workspace is required for --runtime config',
+        nextAction: 'Provide --workspace <path> pointing to a PD workspace directory',
+      }, null, 2));
+    } else {
+      console.error('error: --workspace is required for --runtime config');
+    }
     process.exit(1);
     return;
   }
@@ -374,6 +384,7 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
   if (isRuntimeConfigError(resolved.result)) {
     if (opts.json) {
       console.log(JSON.stringify({
+        ok: false,
         status: 'failed',
         errorCategory: 'config_error',
         message: resolved.result.message,
