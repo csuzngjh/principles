@@ -727,7 +727,7 @@ describe('PiAiRuntimeAdapter', () => {
     });
 
     it('creates run state before LLM call', async () => {
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let resolveComplete: ((value: unknown) => void) | undefined;
       const blockedPromise = new Promise(resolve => { resolveComplete = resolve; });
       mockComplete.mockReturnValueOnce(blockedPromise);
@@ -1609,6 +1609,169 @@ describe('PiAiRuntimeAdapter', () => {
       expect(caughtErr).toBeDefined();
       expect(caughtErr?.category).toBe('execution_failed');
       expect(caughtErr?.details?.timeoutClassification).toBeUndefined();
+    });
+  });
+
+  // ── PRI-400: Reasoning-model output handling (BUG-007a/b) ──
+
+  describe('PRI-400: reasoning-model output handling (BUG-007a/b)', () => {
+    /** Create an AssistantMessage with empty text content but ThinkingContent with valid JSON. */
+    function makeThinkingOnlyResponse(thinkingText: string, overrides: Record<string, unknown> = {}) {
+      return {
+        content: [
+          { type: 'text' as const, text: '' },
+          { type: 'thinking' as const, thinking: thinkingText },
+        ],
+        role: 'assistant' as const,
+        stopReason: 'length' as const,
+        api: 'openai-completions',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        timestamp: Date.now(),
+        ...overrides,
+      };
+    }
+
+    /** Create an AssistantMessage with empty content and no thinking. */
+    function makeEmptyContentResponse(overrides: Record<string, unknown> = {}) {
+      return {
+        content: [{ type: 'text' as const, text: '' }],
+        role: 'assistant' as const,
+        stopReason: 'length' as const,
+        api: 'openai-completions',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        timestamp: Date.now(),
+        ...overrides,
+      };
+    }
+
+    it('(a) content="" + ThinkingContent with valid JSON + stopReason="length" → extracts JSON from thinking', async () => {
+      // Simulates the exact dogfood scenario: reasoning model spends all tokens on thinking
+      const thinkingWithJson = `Let me analyze this step by step...\n\n${JSON.stringify(VALID_DIAGNOSIS)}`;
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse(thinkingWithJson));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('(b) content="" + no ThinkingContent → fail-loud with "No text or reasoning"', async () => {
+      mockComplete.mockResolvedValueOnce(makeEmptyContentResponse());
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+      expect(caughtErr?.message).toContain('truncated');
+      expect(caughtErr?.details?.nextAction).toBeDefined();
+    });
+
+    it('(c) content="normal JSON" + no ThinkingContent → existing path unchanged (regression)', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('content="" + ThinkingContent with no extractable JSON → output_invalid', async () => {
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse('Just thinking prose, no JSON here'));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+    });
+
+    it('stopReason="length" with empty content and empty thinking → fail-loud with nextAction', async () => {
+      mockComplete.mockResolvedValueOnce(makeEmptyContentResponse());
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+      expect(caughtErr?.message).toContain('finish_reason=length');
+      expect(caughtErr?.details?.nextAction).toContain('maxTokens');
+    });
+
+    it('stopReason="length" with valid thinking content → succeeds despite truncation', async () => {
+      const thinkingWithJson = JSON.stringify(VALID_DIAGNOSIS);
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse(thinkingWithJson));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('completeWithRetry passes maxTokens=4096 by default', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxTokens).toBe(4096);
+    });
+
+    it('completeWithRetry uses config.maxTokens override when provided', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only', maxTokens: 8192 });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxTokens).toBe(8192);
+    });
+
+    it('mixed content: text + thinking → prefers text content (regression)', async () => {
+      // When both text and thinking are present, text should be preferred
+      const mixedResponse = {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(VALID_DIAGNOSIS) },
+          { type: 'thinking' as const, thinking: 'Some reasoning here' },
+        ],
+        role: 'assistant' as const,
+        stopReason: 'stop' as const,
+        api: 'openai-completions',
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4',
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        timestamp: Date.now(),
+      };
+      mockComplete.mockResolvedValueOnce(mixedResponse);
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
   });
 });
