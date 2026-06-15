@@ -13,10 +13,12 @@ interface TaskListOptions {
   status?: string;
   kind?: string;
   limit?: number;
+  workspace?: string;
+  json?: boolean;
 }
 
 export async function handleTaskList(opts: TaskListOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
@@ -26,8 +28,27 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
     if (opts.kind) filter.taskKind = opts.kind;
     if (opts.limit) filter.limit = opts.limit;
 
-     
     const tasks = await stateManager.listTasks(Object.keys(filter).length > 0 ? filter : undefined);
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        ok: true,
+        count: tasks.length,
+        workspace: workspaceDir,
+        tasks: tasks.map((t) => ({
+          taskId: t.taskId,
+          taskKind: t.taskKind,
+          status: t.status,
+          attemptCount: t.attemptCount,
+          maxAttempts: t.maxAttempts,
+          leaseOwner: t.leaseOwner ?? null,
+          leaseExpiresAt: t.leaseExpiresAt ?? null,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+        })),
+      }, null, 2));
+      return;
+    }
 
     if (tasks.length === 0) {
       console.log('No tasks found.');
