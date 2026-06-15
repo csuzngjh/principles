@@ -181,6 +181,10 @@ export interface RedactedRuntimeProfileSummary {
   label: string;
   /** For pi-ai profiles: the env var name, never the value */
   apiKeyEnv?: string;
+  /** Provider name (e.g. "lmstudio") — not sensitive, safe to expose */
+  provider?: string;
+  /** Model ID (e.g. "qwen3.6-27b-mtp") — not sensitive, safe to expose */
+  model?: string;
   /** Whether the profile appears ready (has required fields) */
   readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
 }
