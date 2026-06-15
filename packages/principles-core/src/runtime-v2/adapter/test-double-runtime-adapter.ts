@@ -4,6 +4,11 @@
  * First real implementation of the M1 PDRuntimeAdapter interface.
  * Default behavior: succeed-on-first-poll with valid DiagnosticianOutputV1.
  * All methods overridable via TestDoubleBehaviorOverrides callbacks.
+ *
+ * BUG-008: Default fetchOutput dispatches stage-aware mock outputs based on
+ * taskId prefix (diag_rootcause/diag_distiller/diag_router), reusing fixtures
+ * from split-pipeline-mock-outputs.ts. Non-split taskIds fall back to the
+ * original monolithic DiagnosticianOutputV1 shape (backward-compatible).
  */
 import type {
   PDRuntimeAdapter,
@@ -17,6 +22,7 @@ import type {
   RuntimeArtifactRef,
   ContextItem,
 } from '../runtime-protocol.js';
+import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from '../internalization/__tests__/__fixtures__/split-pipeline-mock-outputs.js';
 
 /** Optional callbacks to override default TestDoubleRuntimeAdapter behavior. */
 export interface TestDoubleBehaviorOverrides {
@@ -34,6 +40,8 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
   private readonly overrides: TestDoubleBehaviorOverrides;
   private readonly defaultTaskId: string;
   private runCounter = 0;
+  /** BUG-008: Map runId → taskId so fetchOutput can dispatch by stage prefix. */
+  private readonly runIdToTaskId = new Map<string, string>();
 
   constructor(overrides?: TestDoubleBehaviorOverrides, defaultTaskId?: string) {
     this.overrides = overrides ?? {};
@@ -79,8 +87,14 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
       return this.overrides.onStartRun(input);
     }
     this.runCounter += 1;
+    const runId = `td-${this.runCounter}`;
+    // BUG-008: Store taskId from taskRef so fetchOutput can dispatch by stage prefix
+    const taskId = input.taskRef?.taskId;
+    if (typeof taskId === 'string') {
+      this.runIdToTaskId.set(runId, taskId);
+    }
     return {
-      runId: `td-${this.runCounter}`,
+      runId,
       runtimeKind: 'test-double',
       startedAt: new Date().toISOString(),
     };
@@ -104,6 +118,41 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
     if (this.overrides.onFetchOutput) {
       return this.overrides.onFetchOutput(runId);
     }
+
+    // BUG-008: Dispatch stage-aware mock outputs based on taskId prefix.
+    // Reuse fixtures from split-pipeline-mock-outputs.ts (R6).
+    const taskId = this.runIdToTaskId.get(runId) ?? this.defaultTaskId;
+
+    if (taskId.includes('diag_rootcause')) {
+      return {
+        runId,
+        payload: {
+          ...MOCK_ROOT_CAUSE_OUTPUTS.R6,
+          taskId,
+        },
+      };
+    }
+
+    if (taskId.includes('diag_distiller')) {
+      return {
+        runId,
+        payload: {
+          ...MOCK_DISTILLER_OUTPUTS.R6,
+          taskId,
+        },
+      };
+    }
+
+    if (taskId.includes('diag_router')) {
+      return {
+        runId,
+        payload: {
+          ...MOCK_ROUTER_OUTPUTS.R6,
+        },
+      };
+    }
+
+    // Backward-compatible: monolithic DiagnosticianOutputV1 for non-split taskIds
     return {
       runId,
       payload: {

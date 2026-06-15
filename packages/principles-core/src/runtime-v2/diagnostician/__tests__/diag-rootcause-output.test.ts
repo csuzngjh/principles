@@ -61,4 +61,43 @@ describe('DiagRootCauseOutputV1Schema', () => {
     const result = await validator.validate(output, 'task-001');
     expect(result.valid).toBe(true);
   });
+
+  // ── BUG-007c: taskId re-injection tests (PRI-401) ───────────────────────────
+
+  it('re-injects taskId when LLM outputs parent task ID (BUG-007c)', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, taskId: 'diagnosis_manual_xxx' };
+    const expectedTaskId = 'diag_rootcause-diagnosis_manual_xxx';
+    const result = await validator.validate(output, expectedTaskId);
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings?.length).toBeGreaterThan(0);
+    expect(result.warnings?.[0]).toContain('re-injected');
+    // Verify the output was mutated to have the correct taskId
+    expect(output.taskId).toBe(expectedTaskId);
+  });
+
+  it('re-injection value comes from caller expectedTaskId, not LLM output (ERR-008)', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, taskId: 'diagnosis_manual_xxx' };
+    const expectedTaskId = 'diag_rootcause-diagnosis_manual_xxx';
+    await validator.validate(output, expectedTaskId);
+    // The re-injected value must be the caller's expectedTaskId
+    expect(output.taskId).toBe(expectedTaskId);
+  });
+
+  it('still errors on truly mismatched taskId (not parent/child relationship)', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, taskId: 'completely-different-task' };
+    const result = await validator.validate(output, 'diag_rootcause-diagnosis_manual_xxx');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('taskId mismatch'))).toBe(true);
+  });
+
+  it('still errors when taskId matches but other fields are invalid', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, taskId: 'task-001', rootCauseCategory: 'InvalidCategory' };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+  });
 });
