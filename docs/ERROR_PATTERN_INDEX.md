@@ -35,7 +35,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: touching `packages/pd-cli`, operator commands, installers, command registration, or JSON mode.
 - **Failure mode**: flags parse differently than handlers expect, `process.exit()` falls through, dry-run mutates, JSON stdout is polluted, or nextAction is unusable.
 - **Must check**: parser-level tests use the real Commander program; failed paths stop execution and do not mutate state; `--json` emits exactly one parseable object; `--no-<flag>` options are stored as the positive form (e.g., `--no-enqueue-next` → `opts.enqueueNext`), never `opts.noEnqueueNext`.
-- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063.
+- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063, ERR-066.
 - **Automation target**: command wiring tests that call `program.parseAsync()` with full command paths.
 
 ### EP-05 Loop State Freshness
