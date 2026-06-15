@@ -1864,4 +1864,48 @@ describe('PRI-406: Canonical pain identity linkage', () => {
     expect(records[0].id).toBe(`pain_${rowId1}`);
     expect(records[0].linkMode).toBe('canonical');
   });
+
+  // (f) Regression: legacy DB without canonical_pain_id column → graceful fallback
+  it('(f) falls back to legacy SELECT when DB lacks canonical_pain_id column', async () => {
+    // Create a trajectory DB WITHOUT the new columns (simulating pre-PRI-406 DB)
+    const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pain_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score REAL NOT NULL DEFAULT 0,
+        reason TEXT,
+        severity TEXT,
+        origin TEXT,
+        confidence REAL,
+        text TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    db.prepare(
+      'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run('session-001', 'manual', 0.8, 'Legacy DB pain', 'medium', 'Legacy DB pain', '2026-06-07T10:00:00.000Z');
+    db.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      inputRef: '1',
+      createdAt: '2026-06-07T10:00:01.000Z',
+      diagnosticJson: JSON.stringify({ rootCause: 'Legacy DB test' }),
+    });
+    stateDb.close();
+
+    // Should not throw — gracefully falls back to legacy SELECT
+    const result = await model.getEvidenceChain();
+    expect(result.records.length).toBeGreaterThanOrEqual(1);
+    // Legacy rows won't have canonicalPainId or linkMode
+    const legacyRecord = result.records.find(r => r.id === 'pain_1');
+    expect(legacyRecord).toBeDefined();
+    expect(legacyRecord!.canonicalPainId).toBeUndefined();
+  });
 });

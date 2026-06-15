@@ -1033,17 +1033,13 @@ export function assembleEvidenceChain(params: {
           record.runtimeTaskId = eventRuntimeTaskId;
         }
 
-        // PRI-406: Distinguish canonical rows from legacy rows.
-        // Canonical rows that can't link: the precise join failed — this is a real problem.
-        // Legacy rows (no canonical_pain_id) that can't link: expected for pre-canonical data.
-        // Both get "Could not link" banner (ERR-002), but the reason differs.
+        // PRI-406: Both canonical and legacy unlinked rows get the same
+        // "Could not link" banner (ERR-002). The linkMode field distinguishes
+        // the linking strategy used; legacy rows additionally get linkMode='legacy'.
+        record.degradedReason = 'Could not link this pain event to a diagnostician task. The chain may be incomplete.';
+        record.nextAction = `Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.`;
         if (!eventCanonicalPainId) {
           record.linkMode = 'legacy';
-          record.degradedReason = 'Could not link this pain event to a diagnostician task. The chain may be incomplete.';
-          record.nextAction = `Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.`;
-        } else {
-          record.degradedReason = 'Could not link this pain event to a diagnostician task. The chain may be incomplete.';
-          record.nextAction = `Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.`;
         }
         degradedReasons.push(`Pain event ${painId} could not be linked to a diagnostician task.`);
         degradedNextActions.push('Check Runtime V2 pipeline status for unmatched pain ID formats.');
