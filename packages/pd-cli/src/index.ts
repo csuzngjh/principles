@@ -50,6 +50,7 @@ import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
+import { handleMvpSmoke } from './commands/mvp-smoke.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -197,8 +198,10 @@ rtTaskCmd
   .option('-s, --status <status>', 'Filter by status (pending, leased, retry_wait, succeeded, failed)')
   .option('-k, --kind <kind>', 'Filter by task kind')
   .option('-l, --limit <number>', 'Limit number of results', parseInt, 50)
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleTaskList(opts);
+    await handleTaskList({ status: opts.status, kind: opts.kind, limit: opts.limit, workspace: opts.workspace, json: opts.json });
   });
 
 rtTaskCmd
@@ -883,6 +886,21 @@ const _legacyCleanupCmd = legacyCmd
       process.exit(1);
     }
     await handleLegacyCleanup(opts.workspace, apply);
+  });
+
+// ─── MVP Smoke (PRI-397) ────────────────────────────────────────────────────
+
+const mvpCmd = program
+  .command('mvp')
+  .description('MVP readiness commands');
+
+mvpCmd
+  .command('smoke')
+  .description('Check MVP mainline readiness: assemble snapshot → assert contract → structured verdict')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleMvpSmoke({ workspace: opts.workspace, json: opts.json });
   });
 
 const consoleCmd = program
