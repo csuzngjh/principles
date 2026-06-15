@@ -1660,7 +1660,7 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
 
-    it('(b) content="" + no ThinkingContent → fail-loud with "No text or reasoning"', async () => {
+    it('(b) content="" + no ThinkingContent + stopReason="length" → fail-loud with truncation error', async () => {
       mockComplete.mockResolvedValueOnce(makeEmptyContentResponse());
 
       const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
@@ -1674,6 +1674,23 @@ describe('PiAiRuntimeAdapter', () => {
       expect(caughtErr).toBeInstanceOf(PDRuntimeError);
       expect(caughtErr?.category).toBe('output_invalid');
       expect(caughtErr?.message).toContain('truncated');
+      expect(caughtErr?.details?.nextAction).toBeDefined();
+    });
+
+    it('content="" + no ThinkingContent + stopReason="stop" → fail-loud with "No text or reasoning"', async () => {
+      mockComplete.mockResolvedValueOnce(makeEmptyContentResponse({ stopReason: 'stop' }));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+      expect(caughtErr?.message).toContain('No text or reasoning content');
       expect(caughtErr?.details?.nextAction).toBeDefined();
     });
 
