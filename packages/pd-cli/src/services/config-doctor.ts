@@ -450,6 +450,11 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   warnings.push(...loadResult.warnings);
   warnings.push(...flags.warnings);
 
+  // PRI-404: Add legacy file nextActions
+  if (loadResult.legacyFileNextActions.length > 0) {
+    nextActions.push(...loadResult.legacyFileNextActions);
+  }
+
   if (!loadResult.ok) {
     for (const err of loadResult.errors) {
       warnings.push(`Config error at ${err.path}: ${err.reason}`);

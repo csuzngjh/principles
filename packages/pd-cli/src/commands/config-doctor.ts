@@ -109,6 +109,11 @@ function formatTextOutput(output: DoctorOutput): string {
     for (const f of output.legacyFilesDetected) {
       lines.push(`  [!] ${f}`);
     }
+    // PRI-404: Show nextAction for each legacy file
+    const legacyActions = output.nextActions.filter(na => na.startsWith('Run '));
+    for (const na of legacyActions) {
+      lines.push(`  → ${na}`);
+    }
     lines.push('');
   }
 
