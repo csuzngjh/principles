@@ -206,7 +206,7 @@ export class EvidenceChainConsoleModel {
       try {
         trajDb = new Database(trajectoryDbPath, { readonly: true });
         painEvents = trajDb.prepare(
-          'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
+          'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id FROM pain_events ORDER BY created_at DESC LIMIT 100',
         ).all();
         trajectoryDbAvailable = true;
       } catch (err) {

@@ -68,6 +68,10 @@ export interface TrajectoryPainEventInput {
   confidence?: number | null;
   text?: string;
   createdAt?: string;
+  /** PRI-406: Canonical pain identity (e.g. manual_<ts>_<hash> or pain_<ts>_<hash>). */
+  canonicalPainId?: string;
+  /** PRI-406: Runtime V2 diagnostician task ID linked to this pain event. */
+  runtimeTaskId?: string;
 }
 
 export interface TrajectoryGateBlockInput {

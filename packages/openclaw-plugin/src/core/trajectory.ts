@@ -243,8 +243,9 @@ export class TrajectoryDatabase {
     this.withWrite(() => {
       const runResult = this.db.prepare(`
         INSERT INTO pain_events (
-          session_id, source, score, reason, severity, origin, confidence, text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          session_id, source, score, reason, severity, origin, confidence, text, created_at,
+          canonical_pain_id, runtime_task_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.source,
@@ -255,6 +256,8 @@ export class TrajectoryDatabase {
         input.confidence ?? null,
         input.text ?? null,
         input.createdAt ?? nowIso(),
+        input.canonicalPainId ?? null,
+        input.runtimeTaskId ?? null,
       );
       insertedId = runResult.lastInsertRowid as number;
     });
@@ -1331,6 +1334,28 @@ export class TrajectoryDatabase {
         throw err;
       }
     }
+
+    // PRI-406: Add canonical_pain_id and runtime_task_id columns to pain_events
+    for (const col of [
+      { name: 'canonical_pain_id', type: 'TEXT' },
+      { name: 'runtime_task_id', type: 'TEXT' },
+    ]) {
+      try {
+        this.db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+          throw err;
+        }
+      }
+    }
+
+    // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
+      ON pain_events(canonical_pain_id)
+      WHERE canonical_pain_id IS NOT NULL
+    `);
 
     // Create FTS5 virtual table for pain_events text search (MEM-04)
     this.db.exec(`
