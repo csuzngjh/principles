@@ -1,6 +1,7 @@
 import type { InternalizationChannel } from './peer-runner-contracts.js';
 import type { InternalizationRouteKind } from './internalization-route.js';
-import { createPITaskDiagnosticJson } from './pitask-metadata.js';
+import type { CandidateRecord } from '../store/candidate/candidate-store.js';
+import { PI_METADATA_KEY } from './pitask-metadata.js';
 
 export interface IntakeToInternalizationBridgeInput {
   candidateId: string;
@@ -10,6 +11,12 @@ export interface IntakeToInternalizationBridgeInput {
   sourcePainId?: string;
   workspaceDir?: string;
   now?: string;
+  /** Diagnostician task ID that produced this candidate (lineage). */
+  sourceTaskId?: string;
+  /** Artifact ID of the diagnostician artifact (lineage). */
+  sourceArtifactId?: string;
+  /** Run ID of the diagnostician execution (lineage). */
+  sourceRunId?: string;
 }
 
 export type BridgeDecision =
@@ -95,19 +102,41 @@ export function buildDreamerTaskSeed(
     return decision;
   }
 
-  const diagnosticJson = createPITaskDiagnosticJson({
-    dependencyTaskIds: [],
-    channel: decision.channel,
-    timeoutMs: 300_000,
-    inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${input.candidateId}` }],
-    outputArtifactRefs: [],
-    parentTaskId: undefined,
-    correlationId: input.candidateId,
-  });
+  // Build inputArtifactRefs: always include the candidate itself
+  const inputArtifactRefs: { artifactType: string; ref: string }[] = [
+    { artifactType: 'candidate', ref: `candidate://${input.candidateId}` },
+  ];
+  // If we have the diagnostician artifact, include it for lineage traceability
+  if (input.sourceArtifactId && input.sourceArtifactId.trim() !== '') {
+    inputArtifactRefs.push({
+      artifactType: 'diagnostician_output',
+      ref: `artifact://${input.sourceArtifactId}`,
+    });
+  }
 
-  const diagObj = JSON.parse(diagnosticJson);
-  diagObj.candidateId = input.candidateId;
-  const finalDiagnosticJson = JSON.stringify(diagObj);
+  // Build dependencyTaskIds from sourceTaskId (the diagnostician task)
+  const dependencyTaskIds: string[] = [];
+  if (input.sourceTaskId && input.sourceTaskId.trim() !== '') {
+    dependencyTaskIds.push(input.sourceTaskId);
+  }
+
+  // Build diagnosticJson as a single object — no parse round-trip
+  const finalDiagnosticJson = JSON.stringify({
+    [PI_METADATA_KEY]: {
+      dependencyTaskIds,
+      channel: decision.channel,
+      timeoutMs: 300_000,
+      inputArtifactRefs,
+      outputArtifactRefs: [],
+      parentTaskId: undefined,
+      correlationId: input.candidateId,
+    },
+    candidateId: input.candidateId,
+    ...(input.sourcePainId?.trim() ? { sourcePainId: input.sourcePainId.trim() } : {}),
+    ...(input.sourceTaskId?.trim() ? { sourceTaskId: input.sourceTaskId.trim() } : {}),
+    ...(input.sourceArtifactId?.trim() ? { sourceArtifactId: input.sourceArtifactId.trim() } : {}),
+    ...(input.sourceRunId?.trim() ? { sourceRunId: input.sourceRunId.trim() } : {}),
+  });
 
   return {
     taskId: decision.taskId,
@@ -118,6 +147,56 @@ export function buildDreamerTaskSeed(
     attemptCount: 0,
     maxAttempts: 3,
   };
+}
+
+/**
+ * Build a dreamer task seed from a CandidateRecord, preserving diagnostician lineage.
+ *
+ * Extracts sourceTaskId, sourceArtifactId, and sourceRunId from the candidate record
+ * so the resulting dreamer task carries real dependencyTaskIds and inputArtifactRefs
+ * instead of empty lineage and weak candidate:// refs.
+ *
+ * This is the preferred factory for candidate→dreamer seeding. New production
+ * entrypoints should call this rather than hand-building the bridge input.
+ * The optional sourcePainId is for callers that already have a painId in scope
+ * (e.g. PainSignalBridge).
+ */
+export interface BuildDreamerSeedFromCandidateOptions {
+  route: InternalizationRouteKind;
+  ready: boolean;
+  sourcePainId?: string;
+}
+
+export function buildDreamerSeedFromCandidate(
+  candidate: CandidateRecord,
+  options: BuildDreamerSeedFromCandidateOptions,
+): BridgeTaskSeed | BridgeDecision {
+  const { route, ready, sourcePainId } = options;
+
+  // PRI-395: Fail loud when all lineage fields are empty — an empty seed
+  // provides no traceability and indicates the candidate lacks diagnostician lineage.
+  const lineageFields = [
+    candidate.taskId?.trim(),
+    candidate.artifactId?.trim(),
+    candidate.sourceRunId?.trim(),
+  ];
+  if (lineageFields.every(f => !f)) {
+    return {
+      decision: 'invalid_candidate',
+      reason: `Candidate ${candidate.candidateId} has no diagnostician lineage (taskId, artifactId, sourceRunId all empty/blank)`,
+    };
+  }
+
+  return buildDreamerTaskSeed({
+    candidateId: candidate.candidateId,
+    recommendationKind: candidate.recommendationKind ?? 'unknown',
+    route,
+    ready,
+    sourcePainId,
+    sourceTaskId: candidate.taskId?.trim() || undefined,
+    sourceArtifactId: candidate.artifactId?.trim() || undefined,
+    sourceRunId: candidate.sourceRunId?.trim() || undefined,
+  });
 }
 
 export interface BridgeTaskStore {

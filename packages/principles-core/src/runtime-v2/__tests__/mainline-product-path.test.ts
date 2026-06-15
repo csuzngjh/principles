@@ -6,11 +6,19 @@ import {
   RuntimeStateManager,
   SqliteDiagnosticianCommitter,
   assertMainlineContract,
+  buildDreamerSeedFromCandidate,
+  DreamerRunner,
+  PassThroughDreamerValidator,
+  parsePITaskMetadata,
 } from '../index.js';
 import type {
   DiagnosticianOutputV1,
   MainlineSnapshot,
   RuntimeReadinessSnapshot,
+  PDRuntimeAdapter,
+  StoreEventEmitter,
+  PIArtifactStore,
+  PeerRunnerOptions,
 } from '../index.js';
 
 /**
@@ -155,12 +163,123 @@ describe('mainline product-path (load-bearing wall)', () => {
 
   it.todo('intake produces a candidate carrying sourceTaskId/sourceArtifactId/sourceRunId lineage');
 
-  it.todo(
-    'PRI-B: pd candidate internalize seeds a dreamer task whose dependencyTaskIds ' +
-      'includes the diagnosis task and whose inputArtifactRefs reference the diagnostician artifact',
-  );
+  // ── PRI-B: candidate → dreamer lineage preservation ──────────────────────────
 
-  it.todo('PRI-B: DreamerRunner.buildContext returns contextRefs.length > 0 and contextHash !== "empty"');
+  it('PRI-B: buildDreamerSeedFromCandidate preserves diagnosis taskId and artifact in dreamer seed', async () => {
+    await sm.initialize();
+    const painId = 'pain-pri-b-001';
+    const { taskId: diagTaskId, candidateId } = await seedDiagnosisToCandidate(sm, painId);
+
+    const candidate = await sm.getCandidate(candidateId);
+    expect(candidate).not.toBeNull();
+    if (!candidate) throw new Error('Candidate not found');
+
+    // Exercise the REAL factory — NOT a hand-written dependencyTaskIds array
+    const seed = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+    expect('decision' in seed).toBe(false);
+    if ('decision' in seed) throw new Error(`Unexpected decision: ${(seed as { decision: string }).decision}`);
+
+    // Verify the PI metadata carries real lineage
+    const meta = parsePITaskMetadata(seed.diagnosticJson);
+    expect(meta).not.toBeNull();
+    if (meta) {
+      expect(meta.dependencyTaskIds).toContain(diagTaskId);
+      expect(meta.dependencyTaskIds.length).toBe(1);
+      expect(meta.inputArtifactRefs.length).toBeGreaterThanOrEqual(2);
+      expect(meta.inputArtifactRefs.some((a) => a.artifactType === 'candidate')).toBe(true);
+      expect(meta.inputArtifactRefs.some((a) => a.artifactType === 'diagnostician_output')).toBe(true);
+      expect(meta.inputArtifactRefs.some((a) => a.ref.includes(candidate.artifactId))).toBe(true);
+    }
+
+    // Top-level diagObj has both candidateId and sourceTaskId
+    const diagObj = JSON.parse(seed.diagnosticJson);
+    expect(diagObj.candidateId).toBe(candidateId);
+    expect(diagObj.sourceTaskId).toBe(diagTaskId);
+    expect(diagObj.sourceArtifactId).toBe(candidate.artifactId);
+
+    // Now persist the dreamer task through the REAL createTask path
+    const taskRecord = await sm.createTask({
+      taskId: seed.taskId,
+      taskKind: seed.taskKind,
+      status: seed.status,
+      attemptCount: seed.attemptCount,
+      maxAttempts: seed.maxAttempts,
+      diagnosticJson: seed.diagnosticJson,
+    });
+    expect(taskRecord.taskId).toBe(seed.taskId);
+
+    // Read back — verify the task's diagnosticJson is stored and hydratable
+    const storedTask = await sm.getTask(seed.taskId);
+    expect(storedTask).not.toBeNull();
+    if (storedTask) {
+      const storedMeta = parsePITaskMetadata(storedTask.diagnosticJson || '');
+      expect(storedMeta).not.toBeNull();
+      if (storedMeta) {
+        expect(storedMeta.dependencyTaskIds).toContain(diagTaskId);
+      }
+    }
+  });
+
+  it('PRI-B: DreamerRunner.buildContext returns non-empty context for seeded dreamer task', async () => {
+    await sm.initialize();
+    const painId = 'pain-pri-b-002';
+    const { candidateId } = await seedDiagnosisToCandidate(sm, painId);
+
+    const candidate = await sm.getCandidate(candidateId);
+    if (!candidate) throw new Error('Candidate not found');
+
+    // Seed dreamer through factory
+    const seed = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+    if ('decision' in seed) throw new Error(`Unexpected decision: ${(seed as { decision: string }).decision}`);
+    await sm.createTask({
+      taskId: seed.taskId,
+      taskKind: seed.taskKind,
+      status: seed.status,
+      attemptCount: seed.attemptCount,
+      maxAttempts: seed.maxAttempts,
+      diagnosticJson: seed.diagnosticJson,
+    });
+
+    // Minimal mock deps — only stateManager matters for buildContext
+    const mockRuntimeAdapter = {
+      startRun: () => Promise.reject(new Error('not needed')),
+      pollRun: () => Promise.reject(new Error('not needed')),
+      cancelRun: () => Promise.reject(new Error('not needed')),
+      fetchOutput: () => Promise.reject(new Error('not needed')),
+      kind: () => 'test-double',
+    };
+    const mockEventEmitter = {
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      emitTelemetry: () => {},
+    } as unknown as StoreEventEmitter;
+    const mockArtifactStore: PIArtifactStore = {
+      listBySourceTaskId: async () => [],
+      createArtifact: () => Promise.reject(new Error('not needed')),
+      upsertArtifact: () => Promise.reject(new Error('not needed')),
+      getArtifactById: () => Promise.resolve(null),
+      listLineage: () => Promise.resolve([]),
+      updateValidationStatus: () => Promise.resolve(false),
+    };
+
+    const runner = new DreamerRunner(
+      {
+        stateManager: sm,
+        runtimeAdapter: mockRuntimeAdapter as unknown as PDRuntimeAdapter,
+        eventEmitter: mockEventEmitter,
+        artifactStore: mockArtifactStore,
+        validator: new PassThroughDreamerValidator(),
+      },
+      { owner: 'test', runtimeKind: 'test-double' } as PeerRunnerOptions,
+    );
+
+    const context = await runner.buildContext(seed.taskId);
+
+    // The core assertions — lineage must flow into context
+    expect(context.contextHash, 'contextHash must not be "empty" (lineage present)')
+      .not.toBe('empty');
+    expect(context.contextRefs.length, 'contextRefs must be > 0 (diagnostician artifact)')
+      .toBeGreaterThan(0);
+  });
 
   it.todo(
     'shared reader + assertMainlineContract → overall "ok" ' +

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   computeBridgeDecision,
   buildDreamerTaskSeed,
+  buildDreamerSeedFromCandidate,
   seedIntakeTask,
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,
@@ -11,6 +12,7 @@ import type {
   IntakeToInternalizationBridgeInput,
   BridgeTaskStore,
 } from '../internalization/intake-to-internalization-bridge.js';
+import type { CandidateRecord } from '../store/candidate/candidate-store.js';
 import { parsePITaskMetadata } from '../internalization/pitask-metadata.js';
 import type { InternalizationRouteKind } from '../internalization/internalization-route.js';
 
@@ -259,7 +261,7 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       expect(diagObj.candidateId).toBe('cand-001');
     });
 
-    it('dependencyTaskIds is empty, channel is correct, taskKind is dreamer', () => {
+    it('dependencyTaskIds is empty when no sourceTaskId provided, channel is correct, taskKind is dreamer', () => {
       const result = buildDreamerTaskSeed(validInput);
       expect('decision' in result).toBe(false);
       if ('decision' in result) {
@@ -271,6 +273,170 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         expect(meta.channel).toBe('prompt');
       }
       expect(result.taskKind).toBe('dreamer');
+    });
+
+    // ── PRI-395: Lineage preservation ────────────────────────────────────────
+
+    it('populates dependencyTaskIds from sourceTaskId when provided (PRI-395)', () => {
+      const input: IntakeToInternalizationBridgeInput = {
+        ...validInput,
+        sourceTaskId: 'diagnostician-pain-001',
+        sourceArtifactId: 'artifact-001',
+        sourceRunId: 'run-001',
+      };
+      const result = buildDreamerTaskSeed(input);
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual(['diagnostician-pain-001']);
+      }
+    });
+
+    it('populates inputArtifactRefs with diagnostician artifact when sourceArtifactId provided (PRI-395)', () => {
+      const input: IntakeToInternalizationBridgeInput = {
+        ...validInput,
+        sourceTaskId: 'diagnostician-pain-002',
+        sourceArtifactId: 'artifact-002',
+      };
+      const result = buildDreamerTaskSeed(input);
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.inputArtifactRefs).toEqual([
+          { artifactType: 'candidate', ref: 'candidate://cand-001' },
+          { artifactType: 'diagnostician_output', ref: 'artifact://artifact-002' },
+        ]);
+      }
+    });
+
+    it('includes sourcePainId, sourceTaskId, sourceArtifactId, sourceRunId in diagnosticJson top level (PRI-395)', () => {
+      const input: IntakeToInternalizationBridgeInput = {
+        ...validInput,
+        candidateId: 'cand-lineage-1',
+        sourcePainId: 'pain-abc',
+        sourceTaskId: 'diagnostician-pain-abc',
+        sourceArtifactId: 'artifact-abc',
+        sourceRunId: 'run-abc',
+      };
+      const result = buildDreamerTaskSeed(input);
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const diagObj = JSON.parse(result.diagnosticJson);
+      expect(diagObj.candidateId).toBe('cand-lineage-1');
+      expect(diagObj.sourcePainId).toBe('pain-abc');
+      expect(diagObj.sourceTaskId).toBe('diagnostician-pain-abc');
+      expect(diagObj.sourceArtifactId).toBe('artifact-abc');
+      expect(diagObj.sourceRunId).toBe('run-abc');
+    });
+
+    it('omits empty/whitespace lineage fields (PRI-395)', () => {
+      const input: IntakeToInternalizationBridgeInput = {
+        ...validInput,
+        sourceTaskId: '   ',
+        sourceArtifactId: '',
+        sourceRunId: '   ',
+      };
+      const result = buildDreamerTaskSeed(input);
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual([]);
+        expect(meta.inputArtifactRefs).toEqual([
+          { artifactType: 'candidate', ref: 'candidate://cand-001' },
+        ]);
+      }
+      const diagObj = JSON.parse(result.diagnosticJson);
+      expect(diagObj.sourceTaskId).toBeUndefined();
+      expect(diagObj.sourceArtifactId).toBeUndefined();
+      expect(diagObj.sourceRunId).toBeUndefined();
+    });
+  });
+
+  describe('buildDreamerSeedFromCandidate (PRI-395)', () => {
+    function makeCandidate(overrides: Partial<CandidateRecord> = {}): CandidateRecord {
+      return {
+        candidateId: 'cand-99',
+        artifactId: 'artifact-99',
+        taskId: 'diagnostician-pain-99',
+        sourceRunId: 'run-99',
+        title: 'Test candidate',
+        description: 'Test description',
+        confidence: 0.85,
+        sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: 'Test' }),
+        recommendationKind: 'principle',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        ...overrides,
+      };
+    }
+
+    it('produces a dreamer seed with dependencyTaskIds from candidate.taskId', () => {
+      const candidate = makeCandidate();
+      const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual(['diagnostician-pain-99']);
+        expect(meta.inputArtifactRefs).toEqual([
+          { artifactType: 'candidate', ref: 'candidate://cand-99' },
+          { artifactType: 'diagnostician_output', ref: 'artifact://artifact-99' },
+        ]);
+      }
+      const diagObj = JSON.parse(result.diagnosticJson);
+      expect(diagObj.sourceTaskId).toBe('diagnostician-pain-99');
+      expect(diagObj.sourceArtifactId).toBe('artifact-99');
+      expect(diagObj.sourceRunId).toBe('run-99');
+    });
+
+    it('returns not_internalizable for an empty-taskId candidate when route is not ready', () => {
+      const candidate = makeCandidate({ taskId: '', artifactId: '' });
+      const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: false });
+      expect('decision' in result).toBe(true);
+    });
+
+    it('rejects candidate with all empty lineage fields (PRI-395)', () => {
+      const candidate = makeCandidate({
+        taskId: '',
+        artifactId: '',
+        sourceRunId: '',
+      });
+      const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+      expect('decision' in result).toBe(true);
+      if (!('decision' in result)) throw new Error('expected decision');
+      expect(result.decision).toBe('invalid_candidate');
+      if (result.decision === 'invalid_candidate') {
+        expect(result.reason).toContain('no diagnostician lineage');
+      }
+    });
+
+    it('accepts candidate with at least one lineage field', () => {
+      const candidate = makeCandidate({
+        taskId: 'diagnostician-pain-99',
+        artifactId: '',
+        sourceRunId: '',
+      });
+      const result = buildDreamerSeedFromCandidate(candidate, { route: 'principle-ledger', ready: true });
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) throw new Error('expected seed');
+
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual(['diagnostician-pain-99']);
+      }
     });
   });
 

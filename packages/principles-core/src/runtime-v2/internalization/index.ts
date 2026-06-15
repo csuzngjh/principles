@@ -446,5 +446,6 @@ export {
   CANDIDATE_KIND_TO_ROUTE,
   computeBridgeDecision,
   buildDreamerTaskSeed,
+  buildDreamerSeedFromCandidate,
   seedIntakeTask,
 } from './intake-to-internalization-bridge.js';
