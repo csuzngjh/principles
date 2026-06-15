@@ -23,6 +23,10 @@ export interface RecordPainSignalObservabilityOptions {
   workspaceDir: string;
   stateDir: string;
   data: PainDetectedData;
+  /** PRI-406: Canonical pain identity to write into pain_events.canonical_pain_id. */
+  canonicalPainId?: string;
+  /** PRI-406: Runtime V2 task ID to write into pain_events.runtime_task_id. */
+  runtimeTaskId?: string;
 }
 
 function nowIso(): string {
@@ -97,15 +101,42 @@ interface TrajectoryRecordOptions {
   data: PainDetectedData;
   timestamp: string;
   workspaceDir?: string;
+  /** PRI-406: Canonical pain identity to write into pain_events.canonical_pain_id. */
+  canonicalPainId?: string;
+  /** PRI-406: Runtime V2 task ID to write into pain_events.runtime_task_id. */
+  runtimeTaskId?: string;
 }
 
 function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | undefined {
-  const { stateDir, data, timestamp, workspaceDir } = opts;
+  const { stateDir, data, timestamp, workspaceDir, canonicalPainId, runtimeTaskId } = opts;
   const dbPath = nodePath.join(stateDir, 'trajectory.db');
   fs.mkdirSync(nodePath.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   try {
     ensurePainEventsSchema(db);
+
+    // PRI-406: Add canonical_pain_id and runtime_task_id columns if missing
+    for (const col of [
+      { name: 'canonical_pain_id', type: 'TEXT' },
+      { name: 'runtime_task_id', type: 'TEXT' },
+    ]) {
+      try {
+        db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+          throw err;
+        }
+      }
+    }
+
+    // PRI-406: Create partial unique index for canonical_pain_id dedup
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
+      ON pain_events(canonical_pain_id)
+      WHERE canonical_pain_id IS NOT NULL
+    `);
+
     const sessionId = data.sessionId ?? 'cli';
     const sessionColumns = getSessionsColumns(db);
     const hasMetadataJson = sessionColumns.includes('metadata_json');
@@ -126,8 +157,9 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
 
     const result = db.prepare(`
       INSERT INTO pain_events (
-        session_id, source, score, reason, severity, origin, confidence, text, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        session_id, source, score, reason, severity, origin, confidence, text, created_at,
+        canonical_pain_id, runtime_task_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       sessionId,
       data.source,
@@ -138,6 +170,8 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
       1,
       sanitizeString(data.reason ?? '', workspaceDir),
       timestamp,
+      canonicalPainId ?? null,
+      runtimeTaskId ?? null,
     );
     return Number(result.lastInsertRowid);
   } finally {
@@ -208,7 +242,10 @@ export function recordPainSignalObservability(
   }
 
   try {
-    result.trajectoryPainEventId = recordTrajectoryPainEvent({ stateDir: opts.stateDir, data: opts.data, timestamp, workspaceDir: opts.workspaceDir });
+    result.trajectoryPainEventId = recordTrajectoryPainEvent({
+      stateDir: opts.stateDir, data: opts.data, timestamp, workspaceDir: opts.workspaceDir,
+      canonicalPainId: opts.canonicalPainId, runtimeTaskId: opts.runtimeTaskId,
+    });
   } catch (err) {
     warnings.push(`trajectory pain_events write failed: ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -70,6 +70,12 @@ export interface EvidenceChainRecord {
   recommendationKind?: string;
   internalizationTaskId?: string;
   dreamerTaskStatus?: string;
+  /** PRI-406: Canonical pain identity (e.g. manual_<ts>_<hash>). */
+  canonicalPainId?: string;
+  /** PRI-406: Runtime V2 diagnostician task ID. */
+  runtimeTaskId?: string;
+  /** PRI-406: How this record was linked — 'canonical' (precise via canonical_pain_id) or 'legacy' (timestamp/content heuristic). */
+  linkMode?: 'canonical' | 'legacy';
 }
 
 export const EvidenceChainRecordSchema = Type.Object({
@@ -94,6 +100,9 @@ export const EvidenceChainRecordSchema = Type.Object({
   recommendationKind: Type.Optional(Type.String()),
   internalizationTaskId: Type.Optional(Type.String()),
   dreamerTaskStatus: Type.Optional(Type.String()),
+  canonicalPainId: Type.Optional(Type.String()),
+  runtimeTaskId: Type.Optional(Type.String()),
+  linkMode: Type.Optional(Type.Union([Type.Literal('canonical'), Type.Literal('legacy')])),
 });
 
 export interface EvidenceChainResponse {
@@ -840,17 +849,49 @@ export function assembleEvidenceChain(params: {
     const text = readOwnString(event, 'text') ?? '';
     const createdAt = readOwnString(event, 'created_at') ?? '';
     const score = typeof event.score === 'number' ? event.score : 0;
+    // PRI-406: Read canonical_pain_id and runtime_task_id from pain_events
+    const canonicalPainId = readOwnString(event, 'canonical_pain_id');
+    const runtimeTaskId = readOwnString(event, 'runtime_task_id');
 
     const sourceKind = mapSourceKind(source);
     const painId = `pain_${eventId}`;
     painEventMeta.push({ painId, createdAt, source });
 
-    const linkedTask = taskMap.get(painId);
+    // PRI-406: Prefer precise join via canonical_pain_id → tasks.input_ref.
+    // When a pain event carries canonical_pain_id, look up the task by that ID
+    // first (the taskMap key is derived from input_ref, which equals canonical_pain_id).
+    // This is the authoritative join path — no timestamp/content heuristic needed.
+    let linkedTask = taskMap.get(painId);
+    let linkMode: 'canonical' | 'legacy' | undefined;
+
+    if (canonicalPainId) {
+      const canonicalTask = taskMap.get(canonicalPainId);
+      if (canonicalTask) {
+        linkedTask = canonicalTask;
+        linkMode = 'canonical';
+      } else if (runtimeTaskId) {
+        // Fallback: try to find task by runtimeTaskId in taskMap values
+        for (const [, entry] of taskMap.entries()) {
+          if (entry.taskId === runtimeTaskId) {
+            linkedTask = entry;
+            linkMode = 'canonical';
+            break;
+          }
+        }
+      }
+    }
+
     if (linkedTask) {
       directMatchedPainIds.add(painId);
+      if (!linkMode) {
+        linkMode = 'legacy';
+      }
     }
-    const linkedCandidate = candidateMap.get(painId);
-    const linkedPrincipleId = painToPrincipleMap.get(painId);
+    const linkedCandidate = candidateMap.get(painId)
+      || (canonicalPainId ? candidateMap.get(canonicalPainId) : undefined)
+      || (linkedTask ? candidateByTaskId.get(linkedTask.taskId) : undefined);
+    const linkedPrincipleId = painToPrincipleMap.get(painId)
+      || (canonicalPainId ? painToPrincipleMap.get(canonicalPainId) : undefined);
     const ledgerPrincipleStatus = linkedPrincipleId ? principleStatusMap.get(linkedPrincipleId) : undefined;
     const dreamerInfo = linkedCandidate ? dreamerMap.get(linkedCandidate.candidateId) : undefined;
 
@@ -878,6 +919,24 @@ export function assembleEvidenceChain(params: {
       summary: rawSummary,
       admissionDecision: inferAdmissionDecision(sourceKind),
     };
+
+    // PRI-406: Set canonical identity and link mode
+    if (canonicalPainId) {
+      record.canonicalPainId = canonicalPainId;
+    }
+    if (runtimeTaskId) {
+      record.runtimeTaskId = runtimeTaskId;
+    }
+    if (linkMode) {
+      record.linkMode = linkMode;
+    }
+
+    // PRI-406: When a pain event is linked via canonical_pain_id, also mark
+    // the canonical ID as covered so step 6 doesn't create a duplicate record
+    // for the same task.
+    if (canonicalPainId && linkedTask) {
+      directMatchedPainIds.add(canonicalPainId);
+    }
 
     if (linkedCandidate) {
       record.linkedCandidateId = linkedCandidate.candidateId;
@@ -914,6 +973,11 @@ export function assembleEvidenceChain(params: {
     record.nextAction = determineNextAction({ state, workspaceDir, recordId: painId, linkedTaskId: linkedTask?.taskId });
 
     if (!linkedTask && stateDbAvailable && taskMap.size > 0) {
+      // PRI-406: Rows without canonical_pain_id that have no linked task
+      // continue to get the "Could not link" banner (same as before).
+      // Rows WITH canonical_pain_id that have no linked task also get the
+      // banner — this is a real problem since the precise join should have worked.
+      // The linkMode field distinguishes the linking strategy used.
       continue;
     }
 
@@ -944,6 +1008,9 @@ export function assembleEvidenceChain(params: {
         const createdAt = readOwnString(event, 'created_at') ?? '';
         const score = typeof event.score === 'number' ? event.score : 0;
         const sourceKind = mapSourceKind(source);
+        // PRI-406: Read canonical fields
+        const eventCanonicalPainId = readOwnString(event, 'canonical_pain_id');
+        const eventRuntimeTaskId = readOwnString(event, 'runtime_task_id');
 
         // No linked task/candidate: state is admission-driven. tool_call/hook observations
         // are `evidence-only`; manual/review are `recorded-only`. (PRI-385 P1-2)
@@ -956,9 +1023,24 @@ export function assembleEvidenceChain(params: {
           state: unmatchedState,
           summary: text || reason || `Pain signal (source: ${source}, score: ${score})`,
           admissionDecision: inferAdmissionDecision(sourceKind),
-          degradedReason: 'Could not link this pain event to a diagnostician task. The chain may be incomplete.',
-          nextAction: `Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.`,
         };
+
+        // PRI-406: Set canonical identity fields
+        if (eventCanonicalPainId) {
+          record.canonicalPainId = eventCanonicalPainId;
+        }
+        if (eventRuntimeTaskId) {
+          record.runtimeTaskId = eventRuntimeTaskId;
+        }
+
+        // PRI-406: Both canonical and legacy unlinked rows get the same
+        // "Could not link" banner (ERR-002). The linkMode field distinguishes
+        // the linking strategy used; legacy rows additionally get linkMode='legacy'.
+        record.degradedReason = 'Could not link this pain event to a diagnostician task. The chain may be incomplete.';
+        record.nextAction = `Check Runtime V2 pipeline status. The diagnostician task may have a different pain ID format.`;
+        if (!eventCanonicalPainId) {
+          record.linkMode = 'legacy';
+        }
         degradedReasons.push(`Pain event ${painId} could not be linked to a diagnostician task.`);
         degradedNextActions.push('Check Runtime V2 pipeline status for unmatched pain ID formats.');
         records.push(record);
@@ -998,9 +1080,15 @@ export function assembleEvidenceChain(params: {
     const createdAt = readOwnString(event, 'created_at') ?? '';
     const score = typeof event.score === 'number' ? event.score : 0;
     const sourceKind = mapSourceKind(source);
+    // PRI-406: Read canonical fields for cross-ref records
+    const eventCanonicalPainId = readOwnString(event, 'canonical_pain_id');
+    const eventRuntimeTaskId = readOwnString(event, 'runtime_task_id');
 
-    const linkedCandidate = candidateMap.get(painId) || candidateByTaskId.get(crossRefTask.taskId);
-    const linkedPrincipleId = painToPrincipleMap.get(painId);
+    const linkedCandidate = candidateMap.get(painId)
+      || (eventCanonicalPainId ? candidateMap.get(eventCanonicalPainId) : undefined)
+      || candidateByTaskId.get(crossRefTask.taskId);
+    const linkedPrincipleId = painToPrincipleMap.get(painId)
+      || (eventCanonicalPainId ? painToPrincipleMap.get(eventCanonicalPainId) : undefined);
     const ledgerPrincipleStatus = linkedPrincipleId ? principleStatusMap.get(linkedPrincipleId) : undefined;
     const dreamerInfo = linkedCandidate ? dreamerMap.get(linkedCandidate.candidateId) : undefined;
 
@@ -1029,7 +1117,16 @@ export function assembleEvidenceChain(params: {
       admissionDecision: inferAdmissionDecision(sourceKind),
       linkedTaskId: crossRefTask.taskId,
       linkedTaskStatus: crossRefTask.status,
+      linkMode: 'legacy', // Cross-ref is always legacy (timestamp heuristic)
     };
+
+    // PRI-406: Set canonical identity fields
+    if (eventCanonicalPainId) {
+      record.canonicalPainId = eventCanonicalPainId;
+    }
+    if (eventRuntimeTaskId) {
+      record.runtimeTaskId = eventRuntimeTaskId;
+    }
 
     if (linkedCandidate) {
       record.linkedCandidateId = linkedCandidate.candidateId;
@@ -1067,6 +1164,13 @@ export function assembleEvidenceChain(params: {
 
   // 6. Include tasks that have no matching pain_event (e.g. CLI direct records)
   const coveredPainIds = new Set(records.map(r => r.id));
+  // PRI-406: Also consider canonicalPainId as covered to prevent step 6 from
+  // creating a duplicate record for the same task that step 5 already linked.
+  for (const r of records) {
+    if (r.canonicalPainId) {
+      coveredPainIds.add(r.canonicalPainId);
+    }
+  }
   // Only WEAK cross-refs (timestamp-only) block step 6 from creating a
   // task-id record. Strong-lineage cross-refs deferred in step 5b so the
   // canonical task-id form is shown. (PRI-388 reviewer P1.)
@@ -1108,6 +1212,10 @@ export function assembleEvidenceChain(params: {
       admissionDecision: 'store_signal',
       linkedTaskId: task.taskId,
       linkedTaskStatus: task.status,
+      // PRI-406: Task-only records from Runtime V2 are canonical-linked
+      // (their painId IS the canonical pain identity, e.g. manual_*)
+      canonicalPainId: painId.startsWith('pain_') ? undefined : painId,
+      linkMode: 'canonical',
     };
 
     if (linkedCandidate) {
