@@ -108,7 +108,7 @@ export interface DiagRootCauseValidator {
    * @param taskId - Expected taskId for lineage verification (ERR-008)
    * @returns Validation result with valid flag, errors, and optional error category
    */
-  validate(output: unknown, taskId: string): Promise<{ valid: boolean; errors: string[]; errorCategory?: string }>;
+  validate(output: unknown, taskId: string): Promise<{ valid: boolean; errors: string[]; errorCategory?: string; warnings?: string[] }>;
 }
 
 /**
@@ -127,8 +127,9 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
   async validate(
     output: unknown,
     taskId: string,
-  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string }> {
+  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string; warnings?: string[] }> {
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     // ── Step 1: Object guard ────────────────────────────────────────────────
     if (typeof output !== 'object' || output === null) {
@@ -139,8 +140,24 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
     const record = output as Record<string, unknown>;
 
     // ── Step 2: taskId lineage check (ERR-008) ──────────────────────────────
+    // BUG-007c: If LLM outputs the parent task ID (without diag_rootcause- prefix),
+    // re-inject the expected taskId from the caller (trusted source) instead of
+    // treating it as a hard error. The re-injection value MUST come from the
+    // caller's `taskId` parameter, never from LLM output (ERR-008).
     if (typeof record.taskId !== 'string' || record.taskId !== taskId) {
-      errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
+      const DIAG_ROOTCAUSE_PREFIX = 'diag_rootcause-';
+      if (
+        typeof record.taskId === 'string'
+        && taskId.startsWith(DIAG_ROOTCAUSE_PREFIX)
+        && record.taskId === taskId.slice(DIAG_ROOTCAUSE_PREFIX.length)
+      ) {
+        // LLM output the parent task ID — re-inject the expected stage taskId
+        const parentTaskId = record.taskId;
+        record.taskId = taskId;
+        warnings.push(`taskId re-injected: LLM output parent ID "${parentTaskId}", corrected to "${taskId}" (ERR-008)`);
+      } else {
+        errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
+      }
     }
 
     // ── Step 3: valid flag must be true ─────────────────────────────────────
@@ -212,9 +229,9 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
     }
 
     if (errors.length > 0) {
-      return { valid: false, errors, errorCategory: 'output_invalid' };
+      return { valid: false, errors, errorCategory: 'output_invalid', warnings };
     }
 
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings };
   }
 }
