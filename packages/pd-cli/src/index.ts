@@ -16,7 +16,7 @@ import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
 import { handleHealth } from './commands/health.js';
 import { handleCentralSync } from './commands/central-sync.js';
-import { handleTaskList, handleTaskShow } from './commands/task.js';
+import { handleTaskShow, registerTaskListCommand } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
 import { handleHistoryQuery } from './commands/history.js';
@@ -50,7 +50,7 @@ import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
-import { handleMvpSmoke } from './commands/mvp-smoke.js';
+import { registerMvpCommands } from './commands/mvp-smoke.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -192,17 +192,7 @@ const rtTaskCmd = program
   .command('task')
   .description('Runtime v2 task inspection');
 
-rtTaskCmd
-  .command('list')
-  .description('List runtime tasks')
-  .option('-s, --status <status>', 'Filter by status (pending, leased, retry_wait, succeeded, failed)')
-  .option('-k, --kind <kind>', 'Filter by task kind')
-  .option('-l, --limit <number>', 'Limit number of results', parseInt, 50)
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleTaskList({ status: opts.status, kind: opts.kind, limit: opts.limit, workspace: opts.workspace, json: opts.json });
-  });
+registerTaskListCommand(rtTaskCmd);
 
 rtTaskCmd
   .command('show <taskId>')
@@ -890,18 +880,7 @@ const _legacyCleanupCmd = legacyCmd
 
 // ─── MVP Smoke (PRI-397) ────────────────────────────────────────────────────
 
-const mvpCmd = program
-  .command('mvp')
-  .description('MVP readiness commands');
-
-mvpCmd
-  .command('smoke')
-  .description('Check MVP mainline readiness: assemble snapshot → assert contract → structured verdict')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleMvpSmoke({ workspace: opts.workspace, json: opts.json });
-  });
+registerMvpCommands(program);
 
 const consoleCmd = program
   .command('console')
