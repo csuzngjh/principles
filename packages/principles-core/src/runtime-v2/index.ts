@@ -942,6 +942,7 @@ export {
   ROUTE_CHANNEL_MAP,
   computeBridgeDecision,
   buildDreamerTaskSeed,
+  buildDreamerSeedFromCandidate,
   seedIntakeTask,
 } from './internalization/intake-to-internalization-bridge.js';
 
