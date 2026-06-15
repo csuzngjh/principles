@@ -66,6 +66,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
 | ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
+| ERR-066 | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw | PRI-397 |
 
 ---
 
@@ -705,8 +706,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 63 |
-| Last updated | 2026-06-05 |
+| Total lessons | 65 |
+| Last updated | 2026-06-15 |
 | Top category | Schema & Type |
 | Recurring errors | 27 |
 
@@ -941,3 +942,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-08
 - **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
 [ERR-064]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
+
+---
+
+**[ERR-066]** | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw
+
+- **What happened**: PRI-397's `pd mvp smoke --json` and `pd task list --json` handlers did not wrap their work in try/catch. On any assembler/state-manager throw (e.g., fresh post-PRI-398 workspace, missing `.pd/state.db`, corrupt config), the throw bubbled to the top of the async function, the test runner saw a raw stack trace on stderr, and the exit code was non-zero with no JSON output on stdout. This violated EP-04 Rules 1 (single parseable JSON object on stdout) and 6 (failure paths must carry reason + nextAction). The handler was shipped untested for the failure path. I marked my self-review Phase 6.5 as "no real issues" without running the failure path through a test or even a manual `pd mvp smoke --workspace <nonexistent>` against the production binary.
+- **Why it's wrong**: The first operator run after a workspace reset (the explicit PRI-398 motivation for `pd mvp smoke`) is precisely when the database is missing or unreadable — i.e., when the failure path triggers. A CLI that emits a raw stack trace on the most common first-failure scenario defeats the entire purpose of the command. The bug is a process failure as well: I trusted the success-path tests as proof of completeness, when the failure path was the load-bearing one.
+- **Correct approach**: For every new --json handler, add a test that calls the handler with a workspace that will fail (nonexistent dir, corrupt DB) and asserts: (1) exit code is 1, (2) stdout contains exactly one parseable JSON object, (3) the object has `ok: false`, `reason: string`, `nextAction: string`. Use a structured error classifier (e.g., `classifySmokeError(err)`) that names the specific next action (e.g., "Run pd runtime internalization integrity-repair --confirm") rather than a generic "retry" hint. When writing the self-review, run the production binary with a bad workspace and confirm the JSON output looks right end-to-end.
+- **How to prevent**: (1) The CLI/Operator Contract gate already requires this — apply it as a hard checklist before claiming "no real issues": for every --json command, run a manual test with a failing workspace, run a real `program.parseAsync` test with a failing workspace, and assert the JSON shape. (2) Add the failure-path test to the same test block as the success-path test so they ship together. (3) Self-review must NEVER mark "no real issues" without first running the failure path through a real test or a real production binary invocation. (4) Prefer shared registration helpers (e.g., `registerMvpCommands(program)`) so the failure-path test runs the same registration as production — a hand-rebuilt command tree can pass tests while production is broken.
+- **Source**: PRI-397 / PR #932
+- **Date**: 2026-06-15
+- **Recurrence**: First occurrence (related to EP-04 missing tests; same pattern as ERR-021, ERR-029, ERR-033, ERR-053)
+[ERR-066]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
