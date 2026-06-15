@@ -259,22 +259,41 @@ export class InternalizationIntegrityRemediation {
           continue;
         }
 
-        this.forceExpireAndMarkRunFailed(sl.taskId);
-        repairedCount++;
+        try {
+          this.forceExpireAndMarkRunFailed(sl.taskId);
+          repairedCount++;
 
-        actions.push(remediationAction({
-          action: 'force_expire_lease',
-          targetId: sl.taskId,
-          taskId: sl.taskId,
-          type: 'lease_stuck',
-          severity: 'warning',
-          previousState: 'leased',
-          nextState: 'pending',
-          previousStatus: 'leased',
-          newStatus: 'pending',
-          recommendedAction: 'force_expire_lease',
-          reason: `Task ${sl.taskId} had expired lease (owner: ${sl.leaseOwner ?? 'unknown'}) — force-expired to pending and latest run marked as failed`,
-        }));
+          actions.push(remediationAction({
+            action: 'force_expire_lease',
+            targetId: sl.taskId,
+            taskId: sl.taskId,
+            type: 'lease_stuck',
+            severity: 'warning',
+            previousState: 'leased',
+            nextState: 'pending',
+            previousStatus: 'leased',
+            newStatus: 'pending',
+            recommendedAction: 'force_expire_lease',
+            reason: `Task ${sl.taskId} had expired lease (owner: ${sl.leaseOwner ?? 'unknown'}) — force-expired to pending and latest run marked as failed`,
+          }));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          actions.push(remediationAction({
+            action: 'refuse_repair',
+            targetId: sl.taskId,
+            taskId: sl.taskId,
+            type: 'lease_stuck',
+            severity: 'error',
+            previousState: 'leased',
+            nextState: 'leased',
+            previousStatus: 'leased',
+            newStatus: 'leased',
+            recommendedAction: 'manual_intervention',
+            reason: `Cannot safely force-expire lease for task ${sl.taskId}: ${msg}. nextAction: Manually update/delete the task/run in state.db`,
+          }));
+          warnings.push(`Cannot safely force-expire lease for task ${sl.taskId}: ${msg}`);
+          skippedCount++;
+        }
       }
     }
 
@@ -314,22 +333,41 @@ export class InternalizationIntegrityRemediation {
           continue;
         }
 
-        this.markOrphanedRunFailed(or.runId, or.taskId);
-        repairedCount++;
+        try {
+          this.markOrphanedRunFailed(or.runId, or.taskId);
+          repairedCount++;
 
-        actions.push(remediationAction({
-          action: 'mark_run_failed',
-          targetId: or.runId,
-          taskId: or.taskId,
-          type: 'running_run_stuck',
-          severity: 'error',
-          previousState: 'running',
-          nextState: 'failed',
-          previousStatus: 'running',
-          newStatus: 'failed',
-          recommendedAction: 'mark_run_failed',
-          reason: `Run ${or.runId} for task ${or.taskId} was 'running' with task status ${or.taskStatus ?? 'none'} — marked as failed (recovery repair)`,
-        }));
+          actions.push(remediationAction({
+            action: 'mark_run_failed',
+            targetId: or.runId,
+            taskId: or.taskId,
+            type: 'running_run_stuck',
+            severity: 'error',
+            previousState: 'running',
+            nextState: 'failed',
+            previousStatus: 'running',
+            newStatus: 'failed',
+            recommendedAction: 'mark_run_failed',
+            reason: `Run ${or.runId} for task ${or.taskId} was 'running' with task status ${or.taskStatus ?? 'none'} — marked as failed (recovery repair)`,
+          }));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          actions.push(remediationAction({
+            action: 'refuse_repair',
+            targetId: or.runId,
+            taskId: or.taskId,
+            type: 'running_run_stuck',
+            severity: 'error',
+            previousState: 'running',
+            nextState: 'running',
+            previousStatus: 'running',
+            newStatus: 'running',
+            recommendedAction: 'manual_intervention',
+            reason: `Cannot safely mark stuck run as failed: ${msg}. nextAction: Manually update/delete the run row in state.db`,
+          }));
+          warnings.push(`Cannot safely mark stuck run ${or.runId} as failed: ${msg}`);
+          skippedCount++;
+        }
       }
     }
 
@@ -375,22 +413,41 @@ export class InternalizationIntegrityRemediation {
           reason: `Run ${mr.runId} (task ${mr.taskId}) failed schema validation — would quarantine as failed + storage_unavailable. Error: ${mr.error}`,
         }));
       } else {
-        this.quarantineMalformedRun(mr.runId, mr.error);
-        repairedCount++;
+        try {
+          this.quarantineMalformedRun(mr.runId, mr.error);
+          repairedCount++;
 
-        actions.push(remediationAction({
-          action: 'quarantine_malformed_run',
-          targetId: mr.runId,
-          taskId: mr.taskId,
-          type: 'malformed_run_row',
-          severity: 'warning',
-          previousState: mr.currentStatus ?? 'unknown',
-          nextState: 'failed',
-          previousStatus: mr.currentStatus ?? 'unknown',
-          newStatus: 'failed',
-          recommendedAction: 'quarantine_malformed_run',
-          reason: `Run ${mr.runId} (task ${mr.taskId}) failed schema validation — quarantined as failed + storage_unavailable. Error: ${mr.error}`,
-        }));
+          actions.push(remediationAction({
+            action: 'quarantine_malformed_run',
+            targetId: mr.runId,
+            taskId: mr.taskId,
+            type: 'malformed_run_row',
+            severity: 'warning',
+            previousState: mr.currentStatus ?? 'unknown',
+            nextState: 'failed',
+            previousStatus: mr.currentStatus ?? 'unknown',
+            newStatus: 'failed',
+            recommendedAction: 'quarantine_malformed_run',
+            reason: `Run ${mr.runId} (task ${mr.taskId}) failed schema validation — quarantined as failed + storage_unavailable. Error: ${mr.error}`,
+          }));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          actions.push(remediationAction({
+            action: 'refuse_repair',
+            targetId: mr.runId,
+            taskId: mr.taskId,
+            type: 'malformed_run_row',
+            severity: 'error',
+            previousState: mr.currentStatus ?? 'unknown',
+            nextState: mr.currentStatus ?? 'unknown',
+            previousStatus: mr.currentStatus ?? 'unknown',
+            newStatus: mr.currentStatus ?? 'unknown',
+            recommendedAction: 'manual_intervention',
+            reason: `Cannot safely quarantine malformed run ${mr.runId}: ${msg}. nextAction: Manually delete or update the run row in state.db`,
+          }));
+          warnings.push(`Cannot safely quarantine malformed run ${mr.runId}: ${msg}`);
+          skippedCount++;
+        }
       }
     }
 
@@ -724,9 +781,8 @@ export class InternalizationIntegrityRemediation {
    */
   private forceExpireAndMarkRunFailed(taskId: string): void {
     const db = new Database(this.dbPath);
-    let latestRunId: string | undefined;
     try {
-      db.transaction(() => {
+      const tx = db.transaction(() => {
         // Reset task to pending (force-expire lease)
         db.prepare(`
           UPDATE tasks
@@ -738,18 +794,19 @@ export class InternalizationIntegrityRemediation {
         const latestRun = db.prepare(
           `SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'running' ORDER BY started_at DESC LIMIT 1`,
         ).get(taskId) as { run_id: string } | undefined;
-        latestRunId = latestRun?.run_id;
-      })();
+
+        if (latestRun) {
+          this.safeUpdateRunRow(latestRun.run_id, {
+            executionStatus: 'failed',
+            reason: 'Lease expired — force-expired by integrity-repair',
+            errorCategory: 'lease_expired',
+          }, db);
+        }
+      });
+
+      tx();
     } finally {
       db.close();
-    }
-
-    if (latestRunId) {
-      this.safeUpdateRunRow(latestRunId, {
-        executionStatus: 'failed',
-        reason: 'Lease expired — force-expired by integrity-repair',
-        errorCategory: 'lease_expired',
-      });
     }
   }
 
@@ -870,9 +927,10 @@ export class InternalizationIntegrityRemediation {
       executionStatus: RunExecutionStatus;
       reason: string;
       errorCategory?: PDErrorCategory;
-    }
+    },
+    existingDb?: Database.Database
   ): void {
-    const db = new Database(this.dbPath);
+    const db = existingDb ?? new Database(this.dbPath);
     try {
       const tx = db.transaction(() => {
         // 1. Read existing row
@@ -881,26 +939,35 @@ export class InternalizationIntegrityRemediation {
           throw new Error(`Run not found: ${runId}`);
         }
 
+        // Validate required fields from the raw DB row before patching
+        if (typeof rawRow.task_id !== 'string' || rawRow.task_id.length === 0) {
+          throw new Error(`Run row is missing required task_id`);
+        }
+        if (typeof rawRow.runtime_kind !== 'string' || !Value.Check(RuntimeKindSchema, rawRow.runtime_kind)) {
+          throw new Error(`Run row has invalid runtime_kind: '${rawRow.runtime_kind}'`);
+        }
+        if (typeof rawRow.started_at !== 'string' || rawRow.started_at.length === 0) {
+          throw new Error(`Run row is missing required started_at`);
+        }
+        if (typeof rawRow.created_at !== 'string' || rawRow.created_at.length === 0) {
+          throw new Error(`Run row is missing required created_at`);
+        }
+        if (typeof rawRow.attempt_number !== 'number' || !Number.isInteger(rawRow.attempt_number) || rawRow.attempt_number < 0) {
+          throw new Error(`Run row has invalid attempt_number: '${rawRow.attempt_number}'`);
+        }
+
         const now = new Date().toISOString();
         const schema = InternalizationIntegrityRemediation.checkRunsSchema(db);
 
         // 2. Build candidate patched record
         const candidateRecord: RunRecord = {
           runId: typeof rawRow.run_id === 'string' && rawRow.run_id.length > 0 ? rawRow.run_id : runId,
-          taskId: typeof rawRow.task_id === 'string' && rawRow.task_id.length > 0 ? rawRow.task_id : String(rawRow.task_id ?? 'unknown-task'),
-          runtimeKind: typeof rawRow.runtime_kind === 'string' && Value.Check(RuntimeKindSchema, rawRow.runtime_kind)
-            ? rawRow.runtime_kind
-            : 'openclaw',
+          taskId: rawRow.task_id,
+          runtimeKind: rawRow.runtime_kind,
           executionStatus: patch.executionStatus,
-          startedAt: typeof rawRow.started_at === 'string' && rawRow.started_at.length > 0
-            ? rawRow.started_at
-            : now,
-          attemptNumber: typeof rawRow.attempt_number === 'number' && Number.isInteger(rawRow.attempt_number) && rawRow.attempt_number >= 0
-            ? rawRow.attempt_number
-            : 0,
-          createdAt: typeof rawRow.created_at === 'string' && rawRow.created_at.length > 0
-            ? rawRow.created_at
-            : now,
+          startedAt: rawRow.started_at,
+          attemptNumber: rawRow.attempt_number,
+          createdAt: rawRow.created_at,
           updatedAt: now,
           endedAt: now,
           reason: patch.reason,
@@ -969,7 +1036,9 @@ export class InternalizationIntegrityRemediation {
 
       tx();
     } finally {
-      db.close();
+      if (!existingDb) {
+        db.close();
+      }
     }
   }
 
@@ -1060,11 +1129,22 @@ export class InternalizationIntegrityRemediation {
       const results: { taskId: string; resultRef: string | null }[] = [];
 
       for (const t of succeededTasks) {
-        const hasSucceededRun = db.prepare(
-          "SELECT 1 FROM runs WHERE task_id = ? AND execution_status = 'succeeded' LIMIT 1",
-        ).get(t.task_id);
+        const runs = db.prepare(
+          "SELECT * FROM runs WHERE task_id = ? AND execution_status = 'succeeded'",
+        ).all(t.task_id) as Record<string, unknown>[];
 
-        if (!hasSucceededRun) {
+        let hasValidSucceededRun = false;
+        for (const run of runs) {
+          try {
+            SqliteRunStore.rowToRecord(run);
+            hasValidSucceededRun = true;
+            break;
+          } catch {
+            // Malformed run row — ignore it as a valid succeeded run
+          }
+        }
+
+        if (!hasValidSucceededRun) {
           results.push({
             taskId: t.task_id,
             resultRef: t.result_ref,

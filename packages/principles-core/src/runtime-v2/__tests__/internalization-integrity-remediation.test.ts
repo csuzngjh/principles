@@ -545,31 +545,72 @@ describe('InternalizationIntegrityRemediation', () => {
       expect(getRunField('run-malf-1', 'execution_status')).toBe('queued');
     });
 
-    it('confirm quarantines malformed run row as failed + storage_unavailable, without deleting it', () => {
+    it('confirm refuses to repair malformed run row when required fields are unrecoverable', () => {
       insertTask({ taskId: 'malf-task-2', taskKind: 'dreamer', status: 'succeeded' });
       insertMalformedRunRow('run-malf-2', 'malf-task-2');
 
       const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
       const result = remediation.repair({ dryRun: false });
 
-      expect(result.repairedCount).toBeGreaterThanOrEqual(1);
+      // runtime_kind='config' fails RuntimeKindSchema validation in
+      // safeUpdateRunRow pre-write check → refuse_repair with manual_intervention
       const action = findAction(result.actions, 'malf-task-2', 'malformed_run_row');
+      expect(action).toBeDefined();
+      expect(action?.recommendedAction).toBe('manual_intervention');
+      expect(action?.action).toBe('refuse_repair');
+
+      // Row must NOT be mutated (we refused, not quarantined)
+      expect(getRunField('run-malf-2', 'execution_status')).toBe('queued');
+      expect(getRunField('run-malf-2', 'error_category')).toBeNull();
+
+      // Warnings must be emitted explaining the refusal
+      expect(result.warnings.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('confirm quarantines malformed run row when optional fields are invalid (recoverable)', () => {
+      insertTask({ taskId: 'malf-task-6', taskKind: 'dreamer', status: 'succeeded' });
+
+      // Insert a row where required fields (task_id, runtime_kind, started_at,
+      // created_at, attempt_number) are VALID, but execution_status is invalid.
+      // rowToRecord fails because execution_status='invalid_status' is not a
+      // valid RunExecutionStatus → detectMalformedRuns catches it.
+      // safeUpdateRunRow replaces execution_status with 'failed' → quarantine succeeds.
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'invalid_status', ?, ?)`,
+      ).run('run-malf-6', 'malf-task-6', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: false });
+
+      expect(result.repairedCount).toBeGreaterThanOrEqual(1);
+      const action = findAction(result.actions, 'malf-task-6', 'malformed_run_row');
       expect(action).toBeDefined();
       expect(action?.recommendedAction).toBe('quarantine_malformed_run');
 
-      // Row must be quarantined, NOT deleted (audit history preserved).
-      expect(getRunField('run-malf-2', 'execution_status')).toBe('failed');
-      expect(getRunField('run-malf-2', 'error_category')).toBe('storage_unavailable');
-      const reason = getRunField('run-malf-2', 'reason');
+      // Row must be quarantined
+      expect(getRunField('run-malf-6', 'execution_status')).toBe('failed');
+      expect(getRunField('run-malf-6', 'error_category')).toBe('storage_unavailable');
+      const reason = getRunField('run-malf-6', 'reason');
       expect(String(reason)).toContain('quarantined');
 
-      // Never marked succeeded (no forging a successful run).
-      expect(getRunField('run-malf-2', 'execution_status')).not.toBe('succeeded');
+      // Never marked succeeded
+      expect(getRunField('run-malf-6', 'execution_status')).not.toBe('succeeded');
     });
 
     it('is idempotent — second confirm skips already-quarantined rows', () => {
       insertTask({ taskId: 'malf-task-3', taskKind: 'dreamer', status: 'succeeded' });
-      insertMalformedRunRow('run-malf-3', 'malf-task-3');
+      // Use recoverable malformed row (invalid execution_status, valid runtime_kind)
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'openclaw', ?, 1, 'invalid_status', ?, ?)`,
+      ).run('run-malf-3', 'malf-task-3', now, now, now);
+      d.close();
 
       const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
       const result1 = remediation.repair({ dryRun: false });
@@ -659,6 +700,35 @@ describe('InternalizationIntegrityRemediation', () => {
 
       const action = findAction(result2.actions, 'task-no-run-3', 'task_succeeded_no_succeeded_run');
       expect(action).toBeUndefined();
+    });
+
+    it('dry-run reports supplement_succeeded_run when succeeded task has only malformed succeeded run rows', () => {
+      insertTask({ taskId: 'task-malf-run', taskKind: 'diagnostician', status: 'succeeded' });
+
+      // Insert a schema-invalid succeeded run (runtime_kind='config' not in RuntimeKindSchema)
+      const d = new Database(dbPath);
+      const now = new Date().toISOString();
+      d.prepare(
+        `INSERT OR REPLACE INTO runs (run_id, task_id, runtime_kind, started_at, attempt_number, execution_status, created_at, updated_at)
+         VALUES (?, ?, 'config', ?, 1, 'succeeded', ?, ?)`,
+      ).run('run-schema-invalid', 'task-malf-run', now, now, now);
+      d.close();
+
+      const remediation = new InternalizationIntegrityRemediation({ workspaceDir: tmpDir });
+      const result = remediation.repair({ dryRun: true });
+
+      // The malformed succeeded run is not a valid succeeded run, so
+      // supplement_succeeded_run should be shown
+      const action = findAction(result.actions, 'task-malf-run', 'task_succeeded_no_succeeded_run');
+      expect(action).toBeDefined();
+      expect(action?.recommendedAction).toBe('supplement_succeeded_run');
+
+      // DB must NOT be mutated (dry-run)
+      const d2 = new Database(dbPath);
+      const rows = d2.prepare("SELECT execution_status FROM runs WHERE task_id = 'task-malf-run'").all() as { execution_status: string }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.execution_status).toBe('succeeded');
+      d2.close();
     });
   });
 });
