@@ -6,8 +6,10 @@
  *   pd task show <taskId>
  */
 import * as path from 'path';
+import type { Command } from 'commander';
 import { RuntimeStateManager, MalformedRunError, type RunRecord } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { withWorkspaceAndJson } from './command-helpers.js';
 
 interface TaskListOptions {
   status?: string;
@@ -18,11 +20,14 @@ interface TaskListOptions {
 }
 
 export async function handleTaskList(opts: TaskListOptions): Promise<void> {
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  // Pass through resolveWorkspaceDir to honor its consistency warning when
+  // --workspace disagrees with workspace.default in .pd/config.yaml.
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
 
   try {
+    await stateManager.initialize();
+
     const filter: Record<string, string | number> = {};
     if (opts.status) filter.status = opts.status;
     if (opts.kind) filter.taskKind = opts.kind;
@@ -78,6 +83,23 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
       );
     }
     console.log('');
+  } catch (err: unknown) {
+    // EP-04: failure paths emit a single parseable JSON object with
+    // structured reason + nextAction (mirror handleTaskShow).
+    if (opts.json) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(JSON.stringify({
+        ok: false,
+        count: 0,
+        workspace: workspaceDir,
+        reason,
+        nextAction: 'Check workspace path and database accessibility. The workspace may need bootstrap (run "pd runtime internalization integrity-repair --confirm") or the workspace dir may be wrong.',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exit(1);
+    return;
   } finally {
     await stateManager.close();
   }
@@ -224,4 +246,26 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
   } finally {
     await stateManager.close();
   }
+}
+
+/**
+ * Register the `pd task list` subcommand.
+ *
+ * Single source of truth for both production (`index.ts`) and parser tests
+ * (mvp-smoke.test.ts). Reuses the `withWorkspaceAndJson` helper so adding a
+ * new --workspace/--json pair elsewhere is one line, not five.
+ */
+export function registerTaskListCommand(taskCmd: Command): Command {
+  const listCmd = taskCmd
+    .command('list')
+    .description('List runtime tasks')
+    .option('-s, --status <status>', 'Filter by status (pending, leased, retry_wait, succeeded, failed)')
+    .option('-k, --kind <kind>', 'Filter by task kind')
+    .option('-l, --limit <number>', 'Limit number of results', parseInt, 50)
+    .action(async (opts: { status?: string; kind?: string; limit?: number; workspace?: string; json?: boolean }) => {
+      await handleTaskList({ status: opts.status, kind: opts.kind, limit: opts.limit, workspace: opts.workspace, json: opts.json });
+    });
+
+  withWorkspaceAndJson(listCmd);
+  return listCmd;
 }
