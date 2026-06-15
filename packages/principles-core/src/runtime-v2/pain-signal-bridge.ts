@@ -7,8 +7,7 @@ import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
-import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
-import type { IntakeToInternalizationBridgeInput } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 
 export type { PainProvenance };
 
@@ -314,32 +313,27 @@ export class PainSignalBridge {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
           if (route) {
             const channel = ROUTE_CHANNEL_MAP[route];
-            const bridgeInput: IntakeToInternalizationBridgeInput = {
-              candidateId: candidate.candidateId,
-              recommendationKind: candidate.recommendationKind ?? 'unknown',
-              route,
-              ready: !!channel && MVP_ENABLED_CHANNELS.has(channel),
-              sourcePainId: painId,
-            };
-            const seedResult = await seedIntakeTask(bridgeInput, {
-              getTask: (id) => this.stateManager.getTask(id),
-              createTask: (input) => this.stateManager.createTask({
-                taskId: input.taskId,
-                taskKind: input.taskKind,
-                inputRef: '',
-                status: input.status,
-                attemptCount: input.attemptCount,
-                maxAttempts: input.maxAttempts,
-                diagnosticJson: input.diagnosticJson,
-              }),
-            });
-            if (seedResult.decision === 'seeded') {
-              this.eventEmitter?.emitTelemetry({
-                eventType: 'candidate_dreamer_task_seeded',
-                traceId: candidate.candidateId,
-                timestamp: new Date().toISOString(),
-                payload: { taskId: seedResult.taskId, channel: seedResult.channel },
-              });
+            const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+            const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: painId });
+            if (!('decision' in seed)) {
+              const existingTask = await this.stateManager.getTask(seed.taskId);
+              if (!existingTask) {
+                await this.stateManager.createTask({
+                  taskId: seed.taskId,
+                  taskKind: seed.taskKind,
+                  inputRef: '',
+                  status: seed.status,
+                  attemptCount: seed.attemptCount,
+                  maxAttempts: seed.maxAttempts,
+                  diagnosticJson: seed.diagnosticJson,
+                });
+                this.eventEmitter?.emitTelemetry({
+                  eventType: 'candidate_dreamer_task_seeded',
+                  traceId: candidate.candidateId,
+                  timestamp: new Date().toISOString(),
+                  payload: { taskId: seed.taskId, channel: seed.channel },
+                });
+              }
             }
           }
         } catch (seedErr) {

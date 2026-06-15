@@ -2901,12 +2901,13 @@ describe('PRI-139 L1 Hard Cap & LRU Eviction', () => {
 // ── PRI-142: IntakeToInternalizationBridge ──────────────────────────────────────
 
 describe('PRI-142 IntakeToInternalizationBridge', () => {
-  it('core barrel exports computeBridgeDecision, buildDreamerTaskSeed, seedIntakeTask, ROUTE_CHANNEL_MAP', async () => {
+  it('core barrel exports computeBridgeDecision, buildDreamerTaskSeed, buildDreamerSeedFromCandidate, seedIntakeTask, ROUTE_CHANNEL_MAP', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
     expect(src).toContain('computeBridgeDecision');
     expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('buildDreamerSeedFromCandidate');
     expect(src).toContain('seedIntakeTask');
     expect(src).toContain('ROUTE_CHANNEL_MAP');
   });
@@ -2937,6 +2938,7 @@ describe('PRI-142 IntakeToInternalizationBridge', () => {
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
     expect(src).toContain('computeBridgeDecision');
     expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('buildDreamerSeedFromCandidate');
     expect(src).toContain('seedIntakeTask');
     expect(src).toContain('ROUTE_CHANNEL_MAP');
     expect(src).toContain('IntakeToInternalizationBridgeInput');
