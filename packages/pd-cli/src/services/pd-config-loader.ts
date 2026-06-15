@@ -46,6 +46,8 @@ export interface PdConfigLoadResultOk {
   warnings: string[];
   /** If legacy files were detected */
   legacyFilesDetected: string[];
+  /** PRI-404: Next actions for removing legacy files (empty if none detected) */
+  legacyFileNextActions: string[];
 }
 
 export interface PdConfigLoadResultErr {
@@ -58,6 +60,8 @@ export interface PdConfigLoadResultErr {
   /** Warnings from config resolution */
   warnings: string[];
   legacyFilesDetected: string[];
+  /** PRI-404: Next actions for removing legacy files (empty if none detected) */
+  legacyFileNextActions: string[];
 }
 
 export type PdConfigLoadResult = PdConfigLoadResultOk | PdConfigLoadResultErr;
@@ -84,6 +88,14 @@ function detectLegacyFiles(workspaceDir: string): string[] {
   return detected;
 }
 
+/** PRI-404: Generate nextAction suggestions for removing legacy files. */
+function buildLegacyFileNextActions(legacyFiles: string[]): string[] {
+  return legacyFiles.map(f => {
+    const escaped = f.replace(/\\/g, '\\\\');
+    return `Run 'Remove-Item ${escaped} -Force' to remove legacy config`;
+  });
+}
+
 // ── Load PD Config ───────────────────────────────────────────────────────────
 
 /**
@@ -98,6 +110,7 @@ function detectLegacyFiles(workspaceDir: string): string[] {
 export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
   const configPath = getPdConfigPath(workspaceDir);
   const legacyFilesDetected = detectLegacyFiles(workspaceDir);
+  const legacyFileNextActions = buildLegacyFileNextActions(legacyFilesDetected);
 
   // 1) Config file missing → use defaults
   if (!fs.existsSync(configPath)) {
@@ -114,6 +127,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
           : []),
       ],
       legacyFilesDetected,
+      legacyFileNextActions,
     };
   }
 
@@ -132,6 +146,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
       warnings: [],
       defaults: effective,
       legacyFilesDetected,
+      legacyFileNextActions,
     };
   }
 
@@ -150,6 +165,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
       warnings: [],
       defaults: effective,
       legacyFilesDetected,
+      legacyFileNextActions,
     };
   }
 
@@ -170,6 +186,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
       warnings: [],
       defaults: effective,
       legacyFilesDetected,
+      legacyFileNextActions,
     };
   }
 
@@ -188,6 +205,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
         : []),
     ],
     legacyFilesDetected,
+    legacyFileNextActions,
   };
 }
 

@@ -347,6 +347,29 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.description).toContain('PEAT-B1');
   });
 
+  it('PRI-404: pain_evidence_admission snake_case alias is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'pain_evidence_admission');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('pain_evidence_admission flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-06-15');
+    expect(flag.description).toContain('Snake-case');
+  });
+
+  it('PRI-404: pain_evidence_admission is recognized by computeEffectiveFlags (no unknown warning)', () => {
+    const userFlags = {
+      pain_evidence_admission: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const flag = result.flags.pain_evidence_admission;
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.enabled).toBe(true);
+    }
+    expect(result.warnings.some(w => w.includes('pain_evidence_admission') && w.includes('unknown'))).toBe(false);
+  });
+
   it('PRI-375: diagnostician_async_cli is registered as quiet, default-off', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_async_cli');
     expect(flag).toBeDefined();

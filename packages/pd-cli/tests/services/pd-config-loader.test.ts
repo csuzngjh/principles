@@ -445,6 +445,27 @@ describe('Legacy file detection', () => {
       expect(result.warnings.some(w => w.includes('Legacy config files detected'))).toBe(true);
     } finally { rmTmpDir(tmp); }
   });
+
+  it('PRI-404: includes legacyFileNextActions with Remove-Item command when legacy files detected', () => {
+    const tmp = mkTmpDir();
+    const stateDir = path.join(tmp, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), 'version: 1\n', 'utf8');
+    try {
+      const result = loadPdConfig(tmp);
+      expect(result.legacyFileNextActions.length).toBeGreaterThan(0);
+      expect(result.legacyFileNextActions[0]).toContain('Remove-Item');
+      expect(result.legacyFileNextActions[0]).toContain('workflows.yaml');
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('PRI-404: legacyFileNextActions is empty when no legacy files', () => {
+    const tmp = mkTmpDir();
+    try {
+      const result = loadPdConfig(tmp);
+      expect(result.legacyFileNextActions).toEqual([]);
+    } finally { rmTmpDir(tmp); }
+  });
 });
 
 // ── JSON purity ──────────────────────────────────────────────────────────────
