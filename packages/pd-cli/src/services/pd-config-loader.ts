@@ -91,8 +91,7 @@ function detectLegacyFiles(workspaceDir: string): string[] {
 /** PRI-404: Generate nextAction suggestions for removing legacy files. */
 function buildLegacyFileNextActions(legacyFiles: string[]): string[] {
   return legacyFiles.map(f => {
-    const escaped = f.replace(/\\/g, '\\\\');
-    return `Run 'Remove-Item ${escaped} -Force' to remove legacy config`;
+    return `Run 'Remove-Item ${f} -Force' to remove legacy config`;
   });
 }
 
