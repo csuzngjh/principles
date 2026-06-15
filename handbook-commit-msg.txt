@@ -1,7 +1,0 @@
-docs: add ERR-066 to error experience handbook (PRI-397)
-
-Captures the CLI --json failure-path-not-structured root cause found
-during PR #932 review. EP-04 missing tests class. Process fix: self-
-review must NEVER mark "no real issues" without first running the
-failure path through a real test or a real production binary
-invocation.
