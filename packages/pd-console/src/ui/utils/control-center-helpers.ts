@@ -22,6 +22,8 @@ export interface RedactedRuntimeProfileSummary {
   type: string;
   label: string;
   apiKeyEnv?: string;
+  provider?: string;
+  model?: string;
   readiness: ReadinessStatus;
 }
 

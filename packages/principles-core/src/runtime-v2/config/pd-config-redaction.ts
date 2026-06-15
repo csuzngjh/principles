@@ -137,6 +137,12 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
     if (profile.type === 'pi-ai') {
       const pd = profile;
       summary.apiKeyEnv = pd.apiKeyEnv;
+      summary.provider = pd.provider;
+      summary.model = pd.model;
+    } else if (profile.type === 'openclaw') {
+      const oc = profile;
+      if (oc.provider) summary.provider = oc.provider;
+      if (oc.model) summary.model = oc.model;
     }
 
     runtimeProfiles.push(summary);
