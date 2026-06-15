@@ -44,8 +44,17 @@ function createTrajectoryDb(): Database.Database {
       origin TEXT,
       confidence REAL,
       text TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      canonical_pain_id TEXT,
+      runtime_task_id TEXT
     )
+  `);
+
+  // PRI-406: Partial unique index for canonical_pain_id dedup
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
+    ON pain_events(canonical_pain_id)
+    WHERE canonical_pain_id IS NOT NULL
   `);
 
   return db;
@@ -97,9 +106,11 @@ function insertPainEvent(db: Database.Database, event: {
   severity?: string;
   text?: string;
   createdAt?: string;
+  canonicalPainId?: string;
+  runtimeTaskId?: string;
 }): number {
   const info = db.prepare(
-    'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at, canonical_pain_id, runtime_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     event.sessionId ?? 'session-001',
     event.source,
@@ -108,6 +119,8 @@ function insertPainEvent(db: Database.Database, event: {
     event.severity ?? 'medium',
     event.text ?? 'Agent modified config without approval',
     event.createdAt ?? '2026-06-07T10:00:00.000Z',
+    event.canonicalPainId ?? null,
+    event.runtimeTaskId ?? null,
   );
   return Number(info.lastInsertRowid);
 }
@@ -1103,10 +1116,13 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
 
   it('shows loud degradation with degradedReason when tasks exist but none link (ERR-002)', async () => {
     const trajDb = createTrajectoryDb();
+    // PRI-406: Use canonicalPainId so the "Could not link" banner is shown
+    // (legacy rows without canonicalPainId get the legacy-degraded label instead)
     const rowId = insertPainEvent(trajDb, {
       source: 'manual',
       text: 'Unlinked pain event',
       createdAt: '2026-06-07T10:00:00.000Z',
+      canonicalPainId: 'manual_1781409830758_unlinked1',
     });
     trajDb.close();
 
@@ -1135,13 +1151,15 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
 
   it('aggregates multiple unmatched pain event warnings at response level and deduplicates nextAction (PRI-382)', async () => {
     const trajDb = createTrajectoryDb();
-    // Insert 5 unmatched pain events
+    // PRI-406: Insert 5 unmatched pain events WITH canonicalPainId
+    // (only canonical rows trigger the "Could not link" banner)
     const rowIds: number[] = [];
     for (let i = 0; i < 5; i++) {
       rowIds.push(insertPainEvent(trajDb, {
         source: 'manual',
         text: `Unlinked pain event ${i}`,
         createdAt: `2026-06-07T10:0${i}:00.000Z`,
+        canonicalPainId: `manual_1781409830758_unlinked_${i}`,
       }));
     }
     trajDb.close();
@@ -1616,5 +1634,278 @@ describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
     const ids = result.records.map(r => r.id);
     expect(ids).toContain('pain_2'); // the Chinese recurrence is preserved
     expect(result.records.some(r => r.linkedTaskId === 'diagnosis_pain_1')).toBe(true);
+  });
+});
+
+// ── PRI-406: Canonical pain identity linkage golden fixtures ────────────────
+//
+// Five required scenarios (a–e):
+//   a) canonical painId → precise link to diagnostician task
+//   b) canonical painId → link to candidate/artifact chain
+//   c) legacy pain_N → fallback render with degraded label
+//   d) completely unlinked → reason + nextAction, no Error
+//   e) duplicate canonical_pain_id write → dedup (partial unique index)
+
+describe('PRI-406: Canonical pain identity linkage', () => {
+  // (a) canonical painId → precise link to diagnostician task
+  it('(a) links canonical painId to diagnostician task via precise join', async () => {
+    const canonicalId = 'manual_1781409830758_67f4cgg4';
+    const taskId = 'diag_rootcause-manual_1781409830758_67f4cgg4';
+
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent modified config without approval',
+      createdAt: '2026-06-07T09:42:00.000Z',
+      canonicalPainId: canonicalId,
+      runtimeTaskId: taskId,
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId,
+      status: 'succeeded',
+      inputRef: canonicalId,
+      createdAt: '2026-06-07T09:42:01.000Z',
+      diagnosticJson: JSON.stringify({ rootCause: 'Config modification without approval' }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+
+    expect(record).toBeDefined();
+    // Precise join: linked via canonical_pain_id, not timestamp heuristic
+    expect(record!.linkMode).toBe('canonical');
+    expect(record!.canonicalPainId).toBe(canonicalId);
+    expect(record!.runtimeTaskId).toBe(taskId);
+    expect(record!.linkedTaskId).toBe(taskId);
+    expect(record!.linkedTaskStatus).toBe('succeeded');
+    // No degradation — this is a clean canonical link
+    expect(record!.degradedReason).toBeUndefined();
+  });
+
+  // (b) canonical painId → link to candidate/artifact chain
+  it('(b) links canonical painId to candidate and principle chain', async () => {
+    const canonicalId = 'manual_1781409830758_67f4cgg4';
+    const taskId = 'diag_rootcause-manual_1781409830758_67f4cgg4';
+
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent modified config without approval',
+      createdAt: '2026-06-07T09:42:00.000Z',
+      canonicalPainId: canonicalId,
+      runtimeTaskId: taskId,
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId,
+      status: 'succeeded',
+      inputRef: canonicalId,
+      createdAt: '2026-06-07T09:42:01.000Z',
+      diagnosticJson: JSON.stringify({ rootCause: 'Config modification without approval' }),
+    });
+    insertCandidate(stateDb, {
+      candidateId: 'cand-config-approval',
+      taskId,
+      title: 'Config modifications require explicit approval',
+      confidence: 0.92,
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+
+    expect(record).toBeDefined();
+    expect(record!.linkMode).toBe('canonical');
+    expect(record!.linkedTaskId).toBe(taskId);
+    // Candidate chain is linked
+    expect(record!.linkedCandidateId).toBe('cand-config-approval');
+    expect(record!.candidateTitle).toBe('Config modifications require explicit approval');
+    expect(record!.confidence).toBe(0.92);
+  });
+
+  // (c) legacy pain_N → fallback render with degraded label
+  it('(c) marks legacy pain_N rows as legacy-degraded with linkMode=legacy', async () => {
+    const trajDb = createTrajectoryDb();
+    // Legacy row: no canonicalPainId, no runtimeTaskId
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Legacy pain event from before canonical identity',
+      createdAt: '2026-06-07T09:42:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task exists but won't match via legacy heuristic (far timestamp)
+    insertTask(stateDb, {
+      taskId: 'diagnosis_manual_9999_other',
+      status: 'succeeded',
+      inputRef: '999',
+      createdAt: '2026-06-07T20:00:00.000Z',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+
+    expect(record).toBeDefined();
+    // Legacy row: linkMode is 'legacy', not 'canonical'
+    expect(record!.linkMode).toBe('legacy');
+    // Legacy rows still get "Could not link" banner (ERR-002) — no silent fallback
+    expect(record!.degradedReason).toBeDefined();
+    expect(record!.degradedReason).toContain('Could not link');
+    expect(record!.nextAction).toBeDefined();
+    // Response-level degradation should also be present
+    expect(result.degradedReason).toBeDefined();
+  });
+
+  // (d) completely unlinked canonical row → reason + nextAction, no Error
+  it('(d) shows reason + nextAction for unlinked canonical row without throwing', async () => {
+    const canonicalId = 'manual_1781409830758_orphan1';
+
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Canonical pain with no matching task',
+      createdAt: '2026-06-07T09:42:00.000Z',
+      canonicalPainId: canonicalId,
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Task exists but doesn't match this canonical ID
+    insertTask(stateDb, {
+      taskId: 'diagnosis_other_task',
+      status: 'succeeded',
+      inputRef: 'manual_other_id',
+      createdAt: '2026-06-07T20:00:00.000Z',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records.find(r => r.id === `pain_${rowId}`);
+
+    expect(record).toBeDefined();
+    // Canonical row that can't link: this IS a real problem, show "Could not link"
+    expect(record!.canonicalPainId).toBe(canonicalId);
+    expect(record!.degradedReason).toContain('Could not link');
+    expect(record!.nextAction).toBeDefined();
+    expect(record!.nextAction).toContain('Runtime V2');
+    // Response-level degradation should be present
+    expect(result.degradedReason).toBeDefined();
+    // No error thrown — graceful degradation
+  });
+
+  // (e) duplicate canonical_pain_id write → dedup (partial unique index)
+  it('(e) deduplicates rows with same canonical_pain_id via partial unique index', async () => {
+    const canonicalId = 'manual_1781409830758_dedup1';
+    const taskId = 'diag_rootcause-manual_1781409830758_dedup1';
+
+    const trajDb = createTrajectoryDb();
+    // First write succeeds
+    const rowId1 = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'First write of this pain',
+      createdAt: '2026-06-07T09:42:00.000Z',
+      canonicalPainId: canonicalId,
+      runtimeTaskId: taskId,
+    });
+
+    // Second write with same canonicalPainId should throw due to unique index
+    let duplicateThrew = false;
+    try {
+      insertPainEvent(trajDb, {
+        source: 'manual',
+        text: 'Duplicate write of same pain',
+        createdAt: '2026-06-07T09:42:01.000Z',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: taskId,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+        duplicateThrew = true;
+      }
+    }
+
+    // Verify the unique index prevented the duplicate at the DB level
+    expect(duplicateThrew).toBe(true);
+
+    // Verify only one row in the DB for this canonical pain ID
+    const rows = trajDb.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').all(canonicalId);
+    expect(rows).toHaveLength(1);
+
+    trajDb.close();
+
+    // Also verify by reading the file directly (same path the model uses)
+    const directDb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const directRows = directDb.prepare('SELECT id, canonical_pain_id FROM pain_events WHERE canonical_pain_id = ?').all(canonicalId);
+    expect(directRows).toHaveLength(1);
+    directDb.close();
+
+    // Only one row exists for this canonical pain ID in the evidence chain
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId,
+      status: 'succeeded',
+      inputRef: canonicalId,
+      createdAt: '2026-06-07T09:42:01.000Z',
+      diagnosticJson: JSON.stringify({ rootCause: 'Dedup test' }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const records = result.records.filter(r => r.canonicalPainId === canonicalId);
+    expect(records).toHaveLength(1);
+    expect(records[0].id).toBe(`pain_${rowId1}`);
+    expect(records[0].linkMode).toBe('canonical');
+  });
+
+  // (f) Regression: legacy DB without canonical_pain_id column → graceful fallback
+  it('(f) falls back to legacy SELECT when DB lacks canonical_pain_id column', async () => {
+    // Create a trajectory DB WITHOUT the new columns (simulating pre-PRI-406 DB)
+    const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pain_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score REAL NOT NULL DEFAULT 0,
+        reason TEXT,
+        severity TEXT,
+        origin TEXT,
+        confidence REAL,
+        text TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    db.prepare(
+      'INSERT INTO pain_events (session_id, source, score, reason, severity, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run('session-001', 'manual', 0.8, 'Legacy DB pain', 'medium', 'Legacy DB pain', '2026-06-07T10:00:00.000Z');
+    db.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: 'diagnosis_pain_1',
+      status: 'succeeded',
+      inputRef: '1',
+      createdAt: '2026-06-07T10:00:01.000Z',
+      diagnosticJson: JSON.stringify({ rootCause: 'Legacy DB test' }),
+    });
+    stateDb.close();
+
+    // Should not throw — gracefully falls back to legacy SELECT
+    const result = await model.getEvidenceChain();
+    expect(result.records.length).toBeGreaterThanOrEqual(1);
+    // Legacy rows won't have canonicalPainId or linkMode
+    const legacyRecord = result.records.find(r => r.id === 'pain_1');
+    expect(legacyRecord).toBeDefined();
+    expect(legacyRecord!.canonicalPainId).toBeUndefined();
   });
 });
