@@ -16,6 +16,7 @@ import {
   validatePainRow,
   validateGateRow,
   validateCliOptions,
+  validateEvolutionRow,
   needsAdjudication,
   determineFinalLabel,
   sanitize,
@@ -335,5 +336,309 @@ describe('determineFinalLabel', () => {
     const local = makeLocalEval({ totalScore: 3, mvpMet: false });
     local.dimensionScores = { G1: 0 as RubricScore, G2: 0 as RubricScore, G3: 0 as RubricScore, G4: 1 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 1 as RubricScore };
     expect(determineFinalLabel(local, null)).toBe('local-fail');
+  });
+});
+
+// ── Additional Boundary Condition Tests ───────────────────────────────────────
+
+describe('validateLlmScoreResponse — boundary conditions', () => {
+  it('handles array input (invalid)', () => {
+    const result = validateLlmScoreResponse([1, 2, 3]);
+    // Array input is treated as object with numeric keys, so scores default to 0
+    expect(result.scores.G1).toBe(0);
+    // flags are empty because the input is technically an object
+    expect(result.flags).toEqual([]);
+  });
+
+  it('handles empty object input', () => {
+    const result = validateLlmScoreResponse({});
+    expect(result.scores.G1).toBe(0);
+    expect(result.rationales.G1).toBe('No rationale provided');
+  });
+
+  it('handles scores with extra dimensions (ignores unknown)', () => {
+    const result = validateLlmScoreResponse({
+      scores: { G1: 2, G2: 1, G8: 5, G9: 3 }, // G8, G9 are unknown
+      rationales: {},
+      flags: [],
+    });
+    expect(result.scores.G1).toBe(2);
+    expect(result.scores.G2).toBe(1);
+    // Unknown dimensions should not appear
+    expect('G8' in result.scores).toBe(false);
+  });
+
+  it('handles rationales with non-string values', () => {
+    const result = validateLlmScoreResponse({
+      scores: { G1: 2 },
+      rationales: { G1: 123, G2: null, G3: undefined },
+      flags: [],
+    });
+    expect(result.rationales.G1).toBe('No rationale provided');
+    expect(result.rationales.G2).toBe('No rationale provided');
+    expect(result.rationales.G3).toBe('No rationale provided');
+  });
+
+  it('handles flags with mixed types (filters non-strings)', () => {
+    const result = validateLlmScoreResponse({
+      scores: {},
+      rationales: {},
+      flags: ['valid_flag', 123, null, { obj: true }, 'another_valid'],
+    });
+    expect(result.flags).toEqual(['valid_flag', 'another_valid']);
+  });
+});
+
+describe('validateAdjudicationResponse — boundary conditions', () => {
+  it('handles array input (invalid)', () => {
+    const result = validateAdjudicationResponse([1, 2, 3]);
+    expect(result.verdict).toBe('needs-review');
+    // rationale defaults to 'No rationale provided' for invalid input
+    expect(result.rationale).toBe('No rationale provided');
+  });
+
+  it('handles empty object input', () => {
+    const result = validateAdjudicationResponse({});
+    expect(result.verdict).toBe('needs-review');
+    expect(result.rationale).toBe('No rationale provided');
+  });
+
+  it('handles verdict with wrong case (normalizes to lowercase)', () => {
+    const result = validateAdjudicationResponse({
+      scores: {},
+      rationale: 'test',
+      verdict: 'PASS', // uppercase
+    });
+    expect(result.verdict).toBe('pass');
+  });
+
+  it('handles invalid verdict values', () => {
+    const result = validateAdjudicationResponse({
+      scores: {},
+      rationale: 'test',
+      verdict: 'invalid_status',
+    });
+    expect(result.verdict).toBe('needs-review');
+  });
+
+  it('handles numeric rationale', () => {
+    const result = validateAdjudicationResponse({
+      scores: {},
+      rationale: 123,
+      verdict: 'pass',
+    });
+    expect(result.rationale).toBe('No rationale provided');
+  });
+});
+
+describe('validatePainRow — boundary conditions', () => {
+  it('returns null for array input', () => {
+    expect(validatePainRow([1, 2, 3])).toBeNull();
+  });
+
+  it('returns null for string input', () => {
+    expect(validatePainRow('not an object')).toBeNull();
+  });
+
+  it('returns null for negative id', () => {
+    expect(validatePainRow({ id: -1, reason: 'test' })).toBeNull();
+  });
+
+  it('returns null for empty reason', () => {
+    expect(validatePainRow({ id: 1, reason: '' })).toBeNull();
+  });
+
+  it('defaults missing fields appropriately', () => {
+    const row = validatePainRow({ id: 1, reason: 'test' });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.session_id).toBe('');
+      expect(row.source).toBe('unknown');
+      expect(row.score).toBe(0);
+      expect(row.severity).toBe('unknown');
+    }
+  });
+
+  it('handles non-number id (defaults to -1 → null)', () => {
+    expect(validatePainRow({ id: 'not-a-number', reason: 'test' })).toBeNull();
+  });
+
+  it('handles non-number score (defaults to 0)', () => {
+    const row = validatePainRow({ id: 1, reason: 'test', score: 'high' });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.score).toBe(0);
+    }
+  });
+});
+
+describe('validateEvolutionRow — boundary conditions', () => {
+  it('returns null for null input', () => {
+    expect(validateEvolutionRow(null)).toBeNull();
+  });
+
+  it('returns null for missing task_id', () => {
+    expect(validateEvolutionRow({ score: 80 })).toBeNull();
+  });
+
+  it('returns null for empty task_id', () => {
+    expect(validateEvolutionRow({ task_id: '' })).toBeNull();
+  });
+
+  it('defaults missing fields appropriately', () => {
+    const row = validateEvolutionRow({ task_id: 'task-1' });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.score).toBe(0);
+      expect(row.status).toBe('unknown');
+      expect(row.resolution).toBeNull();
+    }
+  });
+});
+
+describe('validateCliOptions — boundary conditions', () => {
+  it('rejects minPainScore > 100', () => {
+    const { errors } = validateCliOptions({ minPainScore: 150, localModelBaseUrl: 'http://x', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'minPainScore')).toBe(true);
+  });
+
+  it('rejects non-numeric minPainScore', () => {
+    const { errors } = validateCliOptions({ minPainScore: 'high', localModelBaseUrl: 'http://x', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'minPainScore')).toBe(true);
+  });
+
+  it('rejects missing output path', () => {
+    const { errors } = validateCliOptions({ localModelBaseUrl: 'http://x', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'output')).toBe(true);
+  });
+
+  it('rejects missing localModelId', () => {
+    const { errors } = validateCliOptions({ localModelBaseUrl: 'http://x', output: 'out.md' });
+    expect(errors.some(e => e.field === 'localModelId')).toBe(true);
+  });
+
+  it('rejects baseUrl without protocol', () => {
+    const { errors } = validateCliOptions({ localModelBaseUrl: 'localhost:1234', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'localModelBaseUrl')).toBe(true);
+  });
+
+  it('rejects ftp:// protocol', () => {
+    const { errors } = validateCliOptions({ localModelBaseUrl: 'ftp://server', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'localModelBaseUrl')).toBe(true);
+  });
+
+  it('accepts https:// protocol', () => {
+    const { errors } = validateCliOptions({ localModelBaseUrl: 'https://api.example.com', output: 'out.md', localModelId: 'm' });
+    expect(errors.some(e => e.field === 'localModelBaseUrl')).toBe(false);
+  });
+
+  it('defaults format to markdown when invalid', () => {
+    const { options } = validateCliOptions({ format: 'invalid', localModelBaseUrl: 'http://x', output: 'out.md', localModelId: 'm' });
+    expect(options.format).toBe('markdown');
+  });
+
+  it('handles multiple errors at once', () => {
+    const { errors } = validateCliOptions({
+      format: 'xml',
+      minPainScore: -50,
+      limit: -5,
+      localModelBaseUrl: 'invalid',
+      output: '',
+      localModelId: '',
+    });
+    expect(errors.length).toBeGreaterThan(3);
+  });
+});
+
+describe('sanitize — additional boundary conditions', () => {
+  it('redacts /var/ paths', () => {
+    const result = sanitize('log file /var/log/app.log');
+    expect(result).not.toContain('/var/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts /etc/ paths', () => {
+    const result = sanitize('config at /etc/nginx/nginx.conf');
+    expect(result).not.toContain('/etc/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts /root/ paths', () => {
+    const result = sanitize('file in /root/.bashrc');
+    expect(result).not.toContain('/root/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts /opt/ paths', () => {
+    const result = sanitize('installed at /opt/app/bin');
+    expect(result).not.toContain('/opt/');
+    expect(result).toContain('<path>');
+  });
+
+  it('redacts UUID-like session IDs', () => {
+    const result = sanitize('session: 12345678-1234-1234-1234-123456789abc');
+    expect(result).toContain('<session-id>');
+    expect(result).not.toContain('12345678-1234');
+  });
+
+  it('preserves normal text without sensitive patterns', () => {
+    const result = sanitize('This is a normal message without paths or tokens');
+    expect(result).toBe('This is a normal message without paths or tokens');
+  });
+
+  it('handles multiple patterns in same string', () => {
+    const result = sanitize('Error at /home/user/file.txt with token eyJhbGciOiJIUzI1NiJ9');
+    expect(result).toContain('<path>');
+    expect(result).toContain('<token-redacted>');
+    expect(result).not.toContain('/home/');
+    expect(result).not.toContain('eyJ');
+  });
+});
+
+describe('needsAdjudication — additional boundary conditions', () => {
+  it('returns medium when zero-score dimensions exist', () => {
+    const local = makeLocalEval({ totalScore: 10, mvpMet: true });
+    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 2 as RubricScore, G4: 0 as RubricScore, G5: 2 as RubricScore, G6: 2 as RubricScore, G7: 0 as RubricScore };
+    const decision = needsAdjudication(makeEpisode(), local);
+    expect(decision.shouldAdjudicate).toBe(true);
+    expect(decision.priority).toBe('medium');
+    expect(decision.reason).toContain('Zero-score');
+  });
+
+  it('returns high when total score <= 8', () => {
+    const local = makeLocalEval({ totalScore: 7, mvpMet: false });
+    const decision = needsAdjudication(makeEpisode(), local);
+    expect(decision.shouldAdjudicate).toBe(true);
+    expect(decision.priority).toBe('high');
+  });
+
+  it('returns medium for moderate scores (9-11)', () => {
+    const local = makeLocalEval({ totalScore: 10, mvpMet: true });
+    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore, G4: 1 as RubricScore, G5: 2 as RubricScore, G6: 2 as RubricScore, G7: 0 as RubricScore };
+    const decision = needsAdjudication(makeEpisode(), local);
+    expect(decision.shouldAdjudicate).toBe(true);
+    expect(decision.priority).toBe('medium');
+    // When there's a zero-score dimension, reason mentions that
+    expect(decision.reason).toContain('Zero-score');
+  });
+});
+
+describe('determineFinalLabel — additional boundary conditions', () => {
+  it('returns needs-review for moderate score without adjudication', () => {
+    const local = makeLocalEval({ totalScore: 8, mvpMet: true });
+    const label = determineFinalLabel(local, null);
+    expect(label).toBe('needs-review');
+  });
+
+  it('returns adjudication status when provided', () => {
+    const local = makeLocalEval({ totalScore: 10 });
+    const label = determineFinalLabel(local, { adjudicationStatus: 'fail' });
+    expect(label).toBe('fail');
+  });
+
+  it('returns needs-review when adjudication is skipped', () => {
+    const local = makeLocalEval({ totalScore: 10, mvpMet: false });
+    const label = determineFinalLabel(local, { adjudicationStatus: 'skipped' });
+    expect(label).toBe('needs-review');
   });
 });

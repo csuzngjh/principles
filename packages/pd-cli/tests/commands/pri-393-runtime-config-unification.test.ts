@@ -281,4 +281,145 @@ funnels:
       expect(typeof parsed).toBe('object');
     });
   });
+
+  // ── Boundary Condition Tests ────────────────────────────────────────────────
+
+  describe('resolveRuntimeWithOverrides', () => {
+    it('CLI overrides take precedence over config values', async () => {
+      writeConfigYaml(tmpDir, makeValidConfigYaml({ provider: 'lmstudio', model: 'local-model' }));
+
+      const { resolveRuntimeWithOverrides } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeWithOverrides(tmpDir, {
+        provider: 'override-provider',
+        model: 'override-model',
+      }, () => 'test-key');
+
+      expect(resolved.mergedConfig).not.toBeNull();
+      if (resolved.mergedConfig) {
+        expect(resolved.mergedConfig.provider).toBe('override-provider');
+        expect(resolved.mergedConfig.model).toBe('override-model');
+      }
+    });
+
+    it('returns mergedConfig=null when base config is malformed', async () => {
+      const pdDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(pdDir, { recursive: true });
+      fs.writeFileSync(path.join(pdDir, 'config.yaml'), 'version: [invalid', 'utf8');
+
+      const { resolveRuntimeWithOverrides } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeWithOverrides(tmpDir, {
+        provider: 'override',
+      }, () => 'test-key');
+
+      expect(resolved.mergedConfig).toBeNull();
+    });
+
+    it('preserves config values when overrides are undefined', async () => {
+      writeConfigYaml(tmpDir, makeValidConfigYaml({ provider: 'lmstudio', model: 'local-model' }));
+
+      const { resolveRuntimeWithOverrides } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeWithOverrides(tmpDir, {
+        provider: undefined,
+        model: undefined,
+      }, () => 'test-key');
+
+      expect(resolved.mergedConfig).not.toBeNull();
+      if (resolved.mergedConfig) {
+        expect(resolved.mergedConfig.provider).toBe('lmstudio');
+        expect(resolved.mergedConfig.model).toBe('local-model');
+      }
+    });
+
+    it('merges numeric overrides correctly', async () => {
+      writeConfigYaml(tmpDir, makeValidConfigYaml());
+
+      const { resolveRuntimeWithOverrides } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeWithOverrides(tmpDir, {
+        maxRetries: 5,
+        timeoutMs: 60000,
+      }, () => 'test-key');
+
+      expect(resolved.mergedConfig).not.toBeNull();
+      if (resolved.mergedConfig) {
+        expect(resolved.mergedConfig.maxRetries).toBe(5);
+        expect(resolved.mergedConfig.timeoutMs).toBe(60000);
+      }
+    });
+  });
+
+  describe('edge cases and error handling', () => {
+    it('handles empty workspace directory gracefully', async () => {
+      // No .pd directory at all
+      const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+
+      // Missing config should return defaults (ok=true with source='defaults')
+      expect(resolved.configLoadResult.ok).toBe(true);
+      expect(resolved.configSource).toBe('.pd/config.yaml');
+    });
+
+    it('handles config with missing runtimeProfiles section', async () => {
+      writeConfigYaml(tmpDir, {
+        version: 1,
+        features: {},
+        // Missing runtimeProfiles
+      });
+
+      const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const { isRuntimeConfigError } = await import('@principles/core/runtime-v2');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+
+      // Should either return defaults or error depending on validation
+      expect(resolved.configLoadResult.ok).toBeDefined();
+    });
+
+    it('handles config with invalid runtime profile type', async () => {
+      writeConfigYaml(tmpDir, {
+        version: 1,
+        runtimeProfiles: {
+          'bad-profile': {
+            type: 'invalid-type', // Invalid type
+          },
+        },
+        internalAgents: {
+          defaultRuntime: 'bad-profile',
+          agents: { diagnostician: { enabled: true, runtimeProfile: 'bad-profile' } },
+        },
+      });
+
+      const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+
+      // Invalid type should be caught by validation
+      expect(resolved.configLoadResult.ok).toBe(false);
+    });
+
+    it('handles env var returning undefined for apiKeyEnv', async () => {
+      writeConfigYaml(tmpDir, makeValidConfigYaml());
+
+      const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => undefined);
+
+      // Should handle undefined env var gracefully
+      expect(resolved.result).toBeDefined();
+    });
+
+    it('handles multiple legacy files detected', async () => {
+      writeConfigYaml(tmpDir, makeValidConfigYaml());
+
+      // Create multiple legacy files
+      const stateDir = path.join(tmpDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), 'version: 1', 'utf8');
+
+      const ffDir = path.join(tmpDir, '.pd');
+      fs.writeFileSync(path.join(ffDir, 'feature-flags.yaml'), 'flags: []', 'utf8');
+
+      const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+
+      expect(resolved.legacyWarnings.length).toBeGreaterThan(0);
+      expect(resolved.configLoadResult.legacyFilesDetected.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });

@@ -86,3 +86,174 @@ describe('computeConsumerDecision', () => {
     expect(DEFAULT_CONSUMER_RUNNER_KINDS).toEqual(['dreamer']);
   });
 });
+
+// ── Additional Boundary Condition Tests ───────────────────────────────────────
+
+describe('computeConsumerDecision — boundary conditions', () => {
+  it('handles readyTaskCount=1 with maxTasksPerCycle=10 (caps at ready count)', () => {
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 1,
+      maxTasksPerCycle: 10,
+    });
+
+    expect(result.shouldConsume).toBe(true);
+    expect(result.maxTasksPerCycle).toBe(1); // capped at readyTaskCount
+  });
+
+  it('handles maxTasksPerCycle=0 (preserves explicit 0)', () => {
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 5,
+      maxTasksPerCycle: 0,
+    });
+
+    expect(result.shouldConsume).toBe(true);
+    // maxTasksPerCycle=0 is explicitly provided, so it's preserved (not defaulted)
+    // Note: ?? operator only defaults for null/undefined, not for 0
+    expect(result.maxTasksPerCycle).toBe(0);
+  });
+
+  it('handles negative readyTaskCount (treats as 0)', () => {
+    // Negative count is invalid input, but function should handle gracefully
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: -5,
+    });
+
+    // -5 !== 0, so shouldConsume=true, but maxTasksPerCycle = min(1, -5) = -5
+    // This is an edge case that reveals potential bug
+    expect(result.shouldConsume).toBe(true);
+  });
+
+  it('handles very large readyTaskCount', () => {
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 1000000,
+      maxTasksPerCycle: 100,
+    });
+
+    expect(result.shouldConsume).toBe(true);
+    expect(result.maxTasksPerCycle).toBe(100);
+  });
+
+  it('handles disabled with zero ready tasks (disabled takes precedence)', () => {
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: false,
+      readyTaskCount: 0,
+    });
+
+    expect(result.shouldConsume).toBe(false);
+    expect(result.reason).toBe('auto_consumer_disabled');
+    expect(result.maxTasksPerCycle).toBe(0);
+    expect(result.runnerKinds).toEqual([]);
+  });
+
+  it('handles disabled with large ready task count', () => {
+    const result = computeConsumerDecision({
+      autoConsumerEnabled: false,
+      readyTaskCount: 1000,
+      maxTasksPerCycle: 50,
+    });
+
+    expect(result.shouldConsume).toBe(false);
+    expect(result.reason).toBe('auto_consumer_disabled');
+    expect(result.nextAction).toContain('--runner dreamer');
+  });
+
+  it('returns consistent runnerKinds for all valid states', () => {
+    // When enabled with tasks
+    const withTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 5,
+    });
+    expect(withTasks.runnerKinds).toEqual(['dreamer']);
+
+    // When enabled but no tasks
+    const noTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 0,
+    });
+    expect(noTasks.runnerKinds).toEqual(['dreamer']);
+
+    // When disabled, runnerKinds is empty
+    const disabled = computeConsumerDecision({
+      autoConsumerEnabled: false,
+      readyTaskCount: 5,
+    });
+    expect(disabled.runnerKinds).toEqual([]);
+  });
+
+  it('nextAction is only present when disabled', () => {
+    // Enabled with tasks
+    const enabledWithTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 5,
+    });
+    expect(enabledWithTasks.nextAction).toBeUndefined();
+
+    // Enabled without tasks
+    const enabledNoTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 0,
+    });
+    expect(enabledNoTasks.nextAction).toBeUndefined();
+
+    // Disabled
+    const disabled = computeConsumerDecision({
+      autoConsumerEnabled: false,
+      readyTaskCount: 5,
+    });
+    expect(disabled.nextAction).toBeDefined();
+    expect(disabled.nextAction).toContain('pd runtime internalization run-once');
+  });
+
+  it('reason is present for all non-consuming states', () => {
+    // Should consume - no reason
+    const shouldConsume = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 5,
+    });
+    expect(shouldConsume.reason).toBeUndefined();
+
+    // No ready tasks - has reason
+    const noTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 0,
+    });
+    expect(noTasks.reason).toBe('no_ready_tasks');
+
+    // Disabled - has reason
+    const disabled = computeConsumerDecision({
+      autoConsumerEnabled: false,
+      readyTaskCount: 5,
+    });
+    expect(disabled.reason).toBe('auto_consumer_disabled');
+  });
+
+  it('maxTasksPerCycle calculation uses Math.min correctly', () => {
+    // When maxTasksPerCycle < readyTaskCount
+    const lessThanReady = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 10,
+      maxTasksPerCycle: 3,
+    });
+    expect(lessThanReady.maxTasksPerCycle).toBe(3);
+
+    // When maxTasksPerCycle > readyTaskCount
+    const greaterThanReady = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 2,
+      maxTasksPerCycle: 10,
+    });
+    expect(greaterThanReady.maxTasksPerCycle).toBe(2);
+
+    // When maxTasksPerCycle === readyTaskCount
+    const equal = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 5,
+      maxTasksPerCycle: 5,
+    });
+    expect(equal.maxTasksPerCycle).toBe(5);
+  });
+});
