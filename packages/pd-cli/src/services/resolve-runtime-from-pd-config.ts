@@ -16,6 +16,7 @@
 import {
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
+  resolveAgentRuntimeBinding,
 } from '@principles/core/runtime-v2';
 import type {
   RuntimeConfigResult,
@@ -34,6 +35,33 @@ export interface ResolvedRuntimeFromPdConfig {
   configLoadResult: PdConfigLoadResult;
   /** Canonical config source label, e.g. ".pd/config.yaml". */
   configSource: string;
+  /**
+   * PRI-402: Resolved runtime profile ID for the diagnostician agent.
+   * e.g. "pi-ai.lmstudio". null when config resolution fails or profile is not found.
+   */
+  runtimeProfileId: string | null;
+  /**
+   * PRI-402: Human-readable runtime profile label for the diagnostician agent.
+   * e.g. "pi-ai: lmstudio/qwen3.6-27b-mtp". null when config resolution fails.
+   * Matches the label format used by `pd config doctor`.
+   */
+  runtimeProfileLabel: string | null;
+}
+
+/**
+ * Build a profile label matching the format used by `pd config doctor`.
+ * Mirrors `buildProfileLabel` in `pd-config-redaction.ts` (core).
+ */
+function buildProfileLabel(profileId: string, profile: { type: string; provider?: string; model?: string; source?: string }): string {
+  if (profile.type === 'openclaw') {
+    const parts: string[] = ['openclaw'];
+    if (profile.provider) parts.push(profile.provider);
+    if (profile.model) parts.push(profile.model);
+    if (profile.source && !profile.provider && !profile.model) parts.push(profile.source);
+    return parts.join(': ');
+  }
+  // pi-ai
+  return `pi-ai: ${profile.provider ?? 'unknown'}/${profile.model ?? 'unknown'}`;
 }
 
 /**
@@ -77,10 +105,21 @@ export function resolveRuntimeFromPdConfig(
       legacyWarnings,
       configLoadResult,
       configSource: '.pd/config.yaml',
+      runtimeProfileId: null,
+      runtimeProfileLabel: null,
     };
   }
 
   const result = resolveRuntimeConfigFromPdConfig(configLoadResult.effective, getEnvVar);
+
+  // PRI-402: Extract profile ID and label for probe output alignment with doctor
+  let runtimeProfileId: string | null = null;
+  let runtimeProfileLabel: string | null = null;
+  const bindingResult = resolveAgentRuntimeBinding(configLoadResult.effective, 'diagnostician');
+  if (bindingResult.ok) {
+    runtimeProfileId = bindingResult.profileId;
+    runtimeProfileLabel = buildProfileLabel(bindingResult.profileId, bindingResult.profile);
+  }
 
   const legacyWarnings = configLoadResult.legacyFilesDetected.length > 0
     ? [
@@ -94,6 +133,8 @@ export function resolveRuntimeFromPdConfig(
     legacyWarnings,
     configLoadResult,
     configSource: '.pd/config.yaml',
+    runtimeProfileId,
+    runtimeProfileLabel,
   };
 }
 

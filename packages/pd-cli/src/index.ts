@@ -24,7 +24,7 @@ import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
-import { handleRuntimeProbe } from './commands/runtime.js';
+import { registerRuntimeProbeCommand } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from './commands/runtime-pruning.js';
@@ -430,24 +430,7 @@ demoCmd
     });
   });
 
-runtimeCmd
-  .command('probe')
-  .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
-  .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli' or 'pi-ai'")
-  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
-  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
-  .option('-a, --agent <agentId>', 'Agent ID to probe')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers 鈥?for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
-  .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
-  .option('-w, --workspace <path>', 'Workspace directory 鈥?loads pi-ai policy from .state/workflows.yaml')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleRuntimeProbe(opts);
-  });
+registerRuntimeProbeCommand(runtimeCmd);
 
 const flowCmd = runtimeCmd
   .command('flow')
