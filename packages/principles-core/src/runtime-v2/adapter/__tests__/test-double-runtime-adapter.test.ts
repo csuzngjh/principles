@@ -78,6 +78,102 @@ describe('TestDoubleRuntimeAdapter', () => {
     });
   });
 
+  // ── BUG-008: Stage-aware dispatch tests (PRI-401) ───────────────────────────
+
+  describe('stage-aware dispatch (BUG-008)', () => {
+    it('dispatches DiagRootCauseOutputV1 for diag_rootcause taskId', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_rootcause-diagnosis_pain-001' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.valid).toBe(true);
+      expect(payload.taskId).toBe('diag_rootcause-diagnosis_pain-001');
+      expect(payload.rootCauseCategory).toBe('Design');
+      expect(Array.isArray(payload.causalChain)).toBe(true);
+      expect((payload.causalChain as unknown[]).length).toBeGreaterThan(0);
+    });
+
+    it('dispatches DiagDistillerOutputV1 for diag_distiller taskId', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_distiller-diagnosis_pain-001' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.valid).toBe(true);
+      expect(payload.taskId).toBe('diag_distiller-diagnosis_pain-001');
+      expect(payload.abstractedPrinciple).toBeTruthy();
+      expect(payload.sourceRootCauseArtifactId).toBeTruthy();
+    });
+
+    it('dispatches DiagnosticianOutputV1 for diag_router taskId', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_router-diagnosis_pain-001' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.valid).toBe(true);
+      expect(payload.summary).toBeTruthy();
+      expect(payload.rootCause).toBeTruthy();
+      expect(Array.isArray(payload.recommendations)).toBe(true);
+    });
+
+    it('falls back to monolithic DiagnosticianOutputV1 for non-split taskId', async () => {
+      const adapter = new TestDoubleRuntimeAdapter({}, 'my-task');
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diagnosis_pain-001' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.valid).toBe(true);
+      expect(payload.taskId).toBe('my-task');
+      // Monolithic output should NOT have rootCauseCategory
+      expect(payload.rootCauseCategory).toBeUndefined();
+    });
+
+    it('falls back to defaultTaskId when no taskRef provided', async () => {
+      const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.taskId).toBe('fallback-task');
+    });
+  });
+
   describe('behavior overrides', () => {
     it('onStartRun callback overrides default startRun behavior', async () => {
       const overrides: TestDoubleBehaviorOverrides = {
