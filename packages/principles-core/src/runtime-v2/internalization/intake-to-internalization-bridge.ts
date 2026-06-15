@@ -1,5 +1,6 @@
 import type { InternalizationChannel } from './peer-runner-contracts.js';
 import type { InternalizationRouteKind } from './internalization-route.js';
+import type { CandidateRecord } from '../store/candidate/candidate-store.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
 export interface IntakeToInternalizationBridgeInput {
@@ -10,6 +11,12 @@ export interface IntakeToInternalizationBridgeInput {
   sourcePainId?: string;
   workspaceDir?: string;
   now?: string;
+  /** Diagnostician task ID that produced this candidate (lineage). */
+  sourceTaskId?: string;
+  /** Artifact ID of the diagnostician artifact (lineage). */
+  sourceArtifactId?: string;
+  /** Run ID of the diagnostician execution (lineage). */
+  sourceRunId?: string;
 }
 
 export type BridgeDecision =
@@ -95,18 +102,50 @@ export function buildDreamerTaskSeed(
     return decision;
   }
 
+  // Build inputArtifactRefs: always include the candidate itself
+  const inputArtifactRefs: { artifactType: string; ref: string }[] = [
+    { artifactType: 'candidate', ref: `candidate://${input.candidateId}` },
+  ];
+  // If we have the diagnostician artifact, include it for lineage traceability
+  if (input.sourceArtifactId && input.sourceArtifactId.trim() !== '') {
+    inputArtifactRefs.push({
+      artifactType: 'diagnostician_output',
+      ref: `artifact://${input.sourceArtifactId}`,
+    });
+  }
+
+  // Build dependencyTaskIds from sourceTaskId (the diagnostician task)
+  const dependencyTaskIds: string[] = [];
+  if (input.sourceTaskId && input.sourceTaskId.trim() !== '') {
+    dependencyTaskIds.push(input.sourceTaskId);
+  }
+
   const diagnosticJson = createPITaskDiagnosticJson({
-    dependencyTaskIds: [],
+    dependencyTaskIds,
     channel: decision.channel,
     timeoutMs: 300_000,
-    inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${input.candidateId}` }],
+    inputArtifactRefs,
     outputArtifactRefs: [],
     parentTaskId: undefined,
     correlationId: input.candidateId,
   });
 
-  const diagObj = JSON.parse(diagnosticJson);
+  // Merge top-level candidate / lineage fields into diagnosticJson
+  // for chain integrity reads (candidateId, sourcePainId, etc.).
+  const diagObj = JSON.parse(diagnosticJson) as Record<string, unknown>;
   diagObj.candidateId = input.candidateId;
+  if (input.sourcePainId && input.sourcePainId.trim() !== '') {
+    diagObj.sourcePainId = input.sourcePainId;
+  }
+  if (input.sourceTaskId && input.sourceTaskId.trim() !== '') {
+    diagObj.sourceTaskId = input.sourceTaskId;
+  }
+  if (input.sourceArtifactId && input.sourceArtifactId.trim() !== '') {
+    diagObj.sourceArtifactId = input.sourceArtifactId;
+  }
+  if (input.sourceRunId && input.sourceRunId.trim() !== '') {
+    diagObj.sourceRunId = input.sourceRunId;
+  }
   const finalDiagnosticJson = JSON.stringify(diagObj);
 
   return {
@@ -118,6 +157,41 @@ export function buildDreamerTaskSeed(
     attemptCount: 0,
     maxAttempts: 3,
   };
+}
+
+/**
+ * Build a dreamer task seed from a CandidateRecord, preserving diagnostician lineage.
+ *
+ * Extracts sourceTaskId, sourceArtifactId, and sourceRunId from the candidate record
+ * so the resulting dreamer task carries real dependencyTaskIds and inputArtifactRefs
+ * instead of empty lineage and weak candidate:// refs.
+ *
+ * This is the preferred factory for candidate→dreamer seeding. New production
+ * entrypoints should call this rather than hand-building the bridge input.
+ * The optional sourcePainId is for callers that already have a painId in scope
+ * (e.g. PainSignalBridge).
+ */
+export interface BuildDreamerSeedFromCandidateOptions {
+  route: InternalizationRouteKind;
+  ready: boolean;
+  sourcePainId?: string;
+}
+
+export function buildDreamerSeedFromCandidate(
+  candidate: CandidateRecord,
+  options: BuildDreamerSeedFromCandidateOptions,
+): BridgeTaskSeed | BridgeDecision {
+  const { route, ready, sourcePainId } = options;
+  return buildDreamerTaskSeed({
+    candidateId: candidate.candidateId,
+    recommendationKind: candidate.recommendationKind ?? 'unknown',
+    route,
+    ready,
+    sourcePainId,
+    sourceTaskId: candidate.taskId?.trim() || undefined,
+    sourceArtifactId: candidate.artifactId?.trim() || undefined,
+    sourceRunId: candidate.sourceRunId?.trim() || undefined,
+  });
 }
 
 export interface BridgeTaskStore {
