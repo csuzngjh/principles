@@ -111,11 +111,11 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
   });
 
   describe('SSOT: HybridLedgerStore defined exactly once in core src/', () => {
-    it('core principle-tree-ledger.ts is the sole HybridLedgerStore definition in core/src/', () => {
+    it('core principle-tree-ledger.ts is the sole HybridLedgerStore definition in core/src/', async () => {
       // Scan all .ts files under core/src/ for `interface HybridLedgerStore` declarations
       // The only hit should be in principle-tree-ledger.ts
-      const { readdirSync, statSync } = require('fs') as typeof import('fs');
-      const { join } = require('path') as typeof import('path');
+      const { readdirSync, statSync } = await import('node:fs');
+      const { join } = await import('node:path');
 
       const coreSrcDir = resolve(__dirname, '..', 'src');
       const hits: string[] = [];

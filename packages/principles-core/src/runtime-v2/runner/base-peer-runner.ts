@@ -164,10 +164,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected postFetchTransform(_taskId: string, untrustedOutput: unknown, _context: TContext): void {
     // Override generatedAt with actual timestamp — LLM may echo prompt example date
-    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
-      const record = untrustedOutput as Record<string, unknown>;
-      if (Object.hasOwn(record, 'generatedAt')) {
-        record.generatedAt = new Date().toISOString();
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
+      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
+        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
       }
     }
   }
