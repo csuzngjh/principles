@@ -199,6 +199,14 @@ function validatePdLocalProfile(
     errors.push(err(`${path}.timeoutMs`, `profile '${profileId}' timeoutMs must be positive, got ${timeoutMs}`, `Set timeoutMs in profile '${profileId}' to a positive number`));
   }
 
+  const maxRetries = readOwn(raw, 'maxRetries');
+  if (maxRetries !== undefined && !isNumber(maxRetries)) {
+    errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be a finite number, got ${safePreview(maxRetries)}`, `Fix maxRetries in profile '${profileId}'`));
+  }
+  if (isNumber(maxRetries) && maxRetries < 0) {
+    errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be non-negative, got ${maxRetries}`, `Set maxRetries in profile '${profileId}' to a non-negative number`));
+  }
+
   // Reject raw secret values
   const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token', 'secret', 'password', 'auth'];
   for (const fk of forbiddenValueKeys) {
@@ -219,6 +227,7 @@ function validatePdLocalProfile(
   };
   if (isString(baseUrl)) result.baseUrl = baseUrl;
   if (isNumber(timeoutMs)) result.timeoutMs = timeoutMs;
+  if (isNumber(maxRetries)) result.maxRetries = maxRetries;
   return { ok: true, value: result };
 }
 
