@@ -276,8 +276,13 @@ export class TrajectoryDatabase {
           SET runtime_task_id = COALESCE(?, runtime_task_id)
           WHERE canonical_pain_id = ?
         `).run(input.runtimeTaskId ?? null, input.canonicalPainId);
-        const row = this.db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(input.canonicalPainId) as { id: number } | undefined;
-        insertedId = row?.id ?? -1;
+        const rawRow = this.db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(input.canonicalPainId);
+        // Runtime Contract #1/#2: validate DB row instead of `as` cast
+        if (rawRow && typeof rawRow === 'object' && Object.hasOwn(rawRow, 'id') && typeof (rawRow as Record<string, unknown>).id === 'number') {
+          insertedId = (rawRow as { id: number }).id;
+        } else {
+          insertedId = -1;
+        }
       } else {
         throw insertErr;
       }
