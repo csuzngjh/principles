@@ -929,6 +929,20 @@ export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-art
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
 export { SqlitePIArtifactStore } from './store/artifact/sqlite-pi-artifact-store.js';
 
+// ── L2 Agent Loop Tools (PRI-419) ─────────────────────────────────────────────
+
+export {
+  buildDreamerL2Tools,
+  DREAMER_L2_TOOL_WHITELIST,
+} from './tools/agent-tool-contract.js';
+export type {
+  PdL2ToolContext,
+  PdL2ArtifactReader,
+  PdL2PrincipleReader,
+  L2OutputCapture,
+} from './tools/agent-tool-contract.js';
+export { DreamerOutputV1Typebox, DreamerCandidateTypebox } from './tools/dreamer-output-typebox.js';
+
 // ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
 
 export type {

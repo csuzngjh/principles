@@ -176,6 +176,9 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/diag-rootcause-runner.ts',
   'internalization/diag-distiller-runner.ts',
   'internalization/diag-router-runner.ts',
+  // PRI-419: L2 agent loop tool contract + typebox output redeclaration (pure logic, no I/O)
+  'tools/agent-tool-contract.ts',
+  'tools/dreamer-output-typebox.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
