@@ -410,6 +410,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       });
     }
 
+    // P0-1 fix: convert non-terminal `retried` to `failed` with reason
+    if (result.status === 'retried') {
+      result = {
+        ...result,
+        status: 'failed',
+        failureReason: `Max retry loops (${maxRetryLoops}) exceeded without reaching terminal state. ${result.failureReason ?? ''}`,
+      };
+    }
+
     if (result.status !== 'succeeded') {
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
