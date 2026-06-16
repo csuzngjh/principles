@@ -235,15 +235,20 @@ async function findDiagnosticianArtifact(
 ): Promise<DiagnosticianArtifactSnapshot | null> {
   const { stateManager, diagnosisTaskId, painId, warnings } = input;
   const db = stateManager.connection.getDb();
+
+  // PRI-411: Split pipeline stores the diagnostician artifact under the
+  // diag_router child task (e.g. "diag_router-diagnosis_xxx"), not the
+  // parent "diagnosis_xxx". Fallback to diag_router-{parentTaskId} when
+  // the parent lookup returns no rows.
   const rows = db
     .prepare(
       `SELECT artifact_id, run_id, task_id, artifact_kind, content_json
        FROM artifacts
-       WHERE task_id = ? AND artifact_kind = 'diagnostician_output'
+       WHERE (task_id = ? OR task_id = 'diag_router-' || ?) AND artifact_kind = 'diagnostician_output'
        ORDER BY created_at DESC
        LIMIT 1`,
     )
-    .all(diagnosisTaskId);
+    .all(diagnosisTaskId, diagnosisTaskId);
 
   const [raw] = rows;
   if (!raw) return null;
@@ -254,6 +259,8 @@ async function findDiagnosticianArtifact(
     return null;
   }
 
+  // EP-07: If artifact was found via diag_router fallback, verify lineage
+  // consistency — the artifact's sourcePainId must match the parent pain.
   let sourcePainId: string | null = painId;
   const parsed = safeJsonParse(row.contentJson);
   if (parsed.ok && isObject(parsed.value)) {
@@ -263,6 +270,14 @@ async function findDiagnosticianArtifact(
     }
   } else if (parsed.ok === false) {
     warnings.push(`Artifact ${row.artifactId} content_json parse failed: ${parsed.reason}`);
+  }
+
+  // EP-07 mismatch guard: warn when artifact lineage doesn't match parent pain
+  if (painId && sourcePainId && sourcePainId !== painId) {
+    warnings.push(
+      `Artifact ${row.artifactId} (task ${row.taskId}) sourcePainId "${sourcePainId}" ` +
+      `mismatches parent painId "${painId}" — lineage may be broken`,
+    );
   }
 
   return {

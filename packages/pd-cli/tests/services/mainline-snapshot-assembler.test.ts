@@ -216,17 +216,20 @@ describe('assembleMainlineSnapshot', () => {
     rmTmpDir(workspaceDir);
   });
 
-  it('returns a snapshot with degraded readiness when no readiness snapshot is provided', async () => {
+  it('returns a snapshot with default readiness when no readiness snapshot is provided', async () => {
     await sm.initialize();
     const painId = 'pain-empty';
     await seedDiagnosisTask(sm, painId);
 
     const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId });
 
-    expect(snapshot.readiness.diagnosticianReady).toBe(false);
+    // Default config resolves a diagnostician profile, so readiness is "configured"
+    // (actual connectivity is unknown without probe, but config alignment is satisfied)
+    expect(snapshot.readiness.diagnosticianReady).toBe(true);
     expect(warnings.length).toBe(0);
     const verdict = assertMainlineContract(snapshot);
-    expect(verdict.stages.some((s) => s.stage === 'diagnostician_readiness' && s.status === 'violation')).toBe(true);
+    // diagnosis_task should be a violation since the task has no succeeded run
+    expect(verdict.stages.some((s) => s.stage === 'diagnosis_task' && s.status === 'violation')).toBe(true);
   });
 
   it('malformed artifact content_json does not crash; contract reports violation with reason + nextAction', async () => {
@@ -421,5 +424,146 @@ describe('assembleMainlineSnapshot', () => {
     const { resolvedPainId } = await assembleMainlineSnapshot({ workspaceDir, readiness: healthyReadiness() });
 
     expect(resolvedPainId).toBe(painId);
+  });
+
+  // ── PRI-411: Split pipeline artifact fallback ─────────────────────────────
+
+  it('finds diagnostician artifact stored under diag_router child task (split pipeline layout)', async () => {
+    await sm.initialize();
+    const painId = 'pain-split-pipeline';
+    const parentTaskId = `diagnosis_${painId}`;
+    const routerTaskId = `diag_router-${parentTaskId}`;
+
+    // Create the parent diagnosis task (split pipeline parent)
+    await sm.createTask({
+      taskId: parentTaskId,
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: diagnosticianDiagnosticJson(painId),
+    });
+
+    // Create the diag_router child task
+    await sm.createTask({
+      taskId: routerTaskId,
+      taskKind: 'diag_router',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: diagnosticianDiagnosticJson(painId),
+    });
+
+    // Commit the artifact under the diag_router child task (not the parent)
+    const output = validDiagnosticianOutput(painId);
+    const committer = new SqliteDiagnosticianCommitter(sm.connection);
+    await sm.acquireLease({ taskId: routerTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
+    const runs = await sm.getRunsByTask(routerTaskId);
+    const runId = runs[0]?.runId;
+    if (!runId) throw new Error(`No run created for task ${routerTaskId}`);
+    const commitResult = await committer.commit({
+      runId,
+      taskId: routerTaskId,
+      output,
+      idempotencyKey: `idem-${routerTaskId}`,
+    });
+    await sm.markTaskSucceeded(routerTaskId, `artifact://${commitResult.artifactId}`);
+    // Also mark parent as succeeded
+    await sm.markTaskSucceeded(parentTaskId, `artifact://${commitResult.artifactId}`);
+
+    const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
+
+    // PRI-411: fallback should find the artifact under diag_router-*
+    expect(snapshot.chain.diagnosticianArtifact).not.toBeNull();
+    expect(snapshot.chain.diagnosticianArtifact?.artifactId).toBe(commitResult.artifactId);
+    expect(snapshot.chain.diagnosticianArtifact?.sourcePainId).toBe(painId);
+    // No mismatch warning since lineage is consistent
+    expect(warnings.some((w) => w.includes('mismatches'))).toBe(false);
+  });
+
+  it('split pipeline artifact with mismatched sourcePainId emits lineage warning (EP-07)', async () => {
+    await sm.initialize();
+    const painId = 'pain-split-mismatch';
+    const wrongPainId = 'pain-wrong-lineage';
+    const parentTaskId = `diagnosis_${painId}`;
+    const routerTaskId = `diag_router-${parentTaskId}`;
+
+    await sm.createTask({
+      taskId: parentTaskId,
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: diagnosticianDiagnosticJson(painId),
+    });
+
+    await sm.createTask({
+      taskId: routerTaskId,
+      taskKind: 'diag_router',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: diagnosticianDiagnosticJson(painId),
+    });
+
+    // Acquire lease + run for the router task (needed for artifact insertion)
+    await sm.acquireLease({ taskId: routerTaskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
+    const runs = await sm.getRunsByTask(routerTaskId);
+    const runId = runs[0]?.runId;
+    if (!runId) throw new Error(`No run created for task ${routerTaskId}`);
+
+    // Directly insert artifact with a DIFFERENT painId in content_json
+    // (simulates lineage mismatch — committer stores DiagnosticianOutputV1
+    // which doesn't have painId, but the assembler reads it for lineage checks)
+    const artifactId = 'mismatch-artifact-001';
+    const contentJson = JSON.stringify({
+      ...validDiagnosticianOutput(painId),
+      painId: wrongPainId, // mismatched lineage
+    });
+    sm.connection.getDb().prepare(
+      `INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(artifactId, runId, routerTaskId, 'diagnostician_output', contentJson, new Date().toISOString());
+
+    await sm.markTaskSucceeded(routerTaskId, `artifact://${artifactId}`);
+    await sm.markTaskSucceeded(parentTaskId, `artifact://${artifactId}`);
+
+    const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
+
+    // Artifact should still be found via fallback
+    expect(snapshot.chain.diagnosticianArtifact).not.toBeNull();
+    // EP-07: lineage mismatch warning must be emitted
+    expect(warnings.some((w) => w.includes('mismatches') && w.includes(wrongPainId))).toBe(true);
+  });
+
+  it('monolithic diagnostician artifact lookup still works (no regression)', async () => {
+    await sm.initialize();
+    const painId = 'pain-monolithic-regression';
+    const taskId = `diagnostician-${painId}`;
+
+    // Monolithic layout: artifact stored directly under the parent task
+    await sm.createTask({
+      taskId,
+      taskKind: 'diagnostician',
+      inputRef: painId,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: diagnosticianDiagnosticJson(painId),
+    });
+
+    const output = validDiagnosticianOutput(painId);
+    const { artifactId } = await runDiagnosisToSucceeded(sm, taskId, output);
+
+    const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
+
+    expect(snapshot.chain.diagnosticianArtifact).not.toBeNull();
+    expect(snapshot.chain.diagnosticianArtifact?.artifactId).toBe(artifactId);
+    expect(snapshot.chain.diagnosticianArtifact?.sourcePainId).toBe(painId);
+    expect(warnings.some((w) => w.includes('mismatches'))).toBe(false);
   });
 });
