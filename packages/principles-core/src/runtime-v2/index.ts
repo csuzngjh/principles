@@ -929,6 +929,11 @@ export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-art
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
 export { SqlitePIArtifactStore } from './store/artifact/sqlite-pi-artifact-store.js';
 
+// ── L2 Agent Loop Adapter (PRI-419) ──────────────────────────────────────────
+
+export { L2AgentLoopAdapter } from './adapter/l2-agent-loop-adapter.js';
+export type { L2AgentLoopAdapterConfig, L2AgentLoopAdapterDeps } from './adapter/l2-agent-loop-adapter.js';
+
 // ── L2 Agent Loop Tools (PRI-419) ─────────────────────────────────────────────
 
 export {

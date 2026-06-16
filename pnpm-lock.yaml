@@ -340,6 +340,9 @@ importers:
       '@earendil-works/pi-agent-core':
         specifier: ^0.79.4
         version: 0.79.4(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
+      '@earendil-works/pi-ai':
+        specifier: ^0.79.4
+        version: 0.79.4(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
       '@mariozechner/pi-ai':
         specifier: ^0.73.1
         version: 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
