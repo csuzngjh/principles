@@ -206,14 +206,14 @@ export async function runConsumerCycle(
         );
       } else {
         adapter = new PiAiRuntimeAdapter({
-        provider: runtimeConfigResult.provider ?? 'openai',
-        model: runtimeConfigResult.model ?? 'gpt-4o',
-        apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
-        maxRetries: runtimeConfigResult.maxRetries,
-        timeoutMs: runtimeConfigResult.timeoutMs,
-        baseUrl: runtimeConfigResult.baseUrl,
-        workspace: workspaceDir,
-      });
+          provider: runtimeConfigResult.provider ?? 'openai',
+          model: runtimeConfigResult.model ?? 'gpt-4o',
+          apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
+          maxRetries: runtimeConfigResult.maxRetries,
+          timeoutMs: runtimeConfigResult.timeoutMs,
+          baseUrl: runtimeConfigResult.baseUrl,
+          workspace: workspaceDir,
+        });
       }
     } else if (runtimeKind === 'openclaw-cli') {
       adapter = new OpenClawCliRuntimeAdapter({

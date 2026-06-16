@@ -83,8 +83,9 @@ export interface L2AgentLoopAdapterConfig {
 
 /**
  * Resolve a pi-ai Model from provider/model/baseUrl config (mirrors PiAiRuntimeAdapter's
- * internal resolveModel). Built-in providers use getModel(); custom OpenAI-compatible
- * endpoints construct a Model object directly.
+ * internal resolveModel — duplicated here because L2 imports from the @earendil-works scope
+ * while L1 uses @mariozechner; the two scopes must not cross-import). Built-in providers use
+ * getModel(); custom OpenAI-compatible endpoints construct a Model object directly.
  */
 function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
   const knownProviders = getProviders();
@@ -98,11 +99,12 @@ function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Mo
       `Provider '${provider}' is not a built-in pi-ai provider and requires a custom baseUrl.`,
     );
   }
-  // Custom provider with baseUrl — construct Model object directly (openai-completions API).
-  return {
+  // Custom provider with baseUrl — construct a Model object directly (openai-completions API).
+  // The literal object doesn't fully satisfy Model<string>'s discriminant union, so narrow via unknown.
+  const customModel = {
     id: modelId,
     name: modelId,
-    api: 'openai-completions',
+    api: 'openai-completions' as const,
     provider,
     baseUrl,
     reasoning: false,
@@ -123,7 +125,8 @@ function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Mo
       thinkingFormat: 'deepseek',
       supportsStrictMode: false,
     },
-    } as unknown as Model<string>;
+  };
+  return customModel as unknown as Model<string>;
 }
 
 /** Read-only readers injected by the factory (bound to the dreamer's task + stores). */
@@ -404,9 +407,10 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     if (!state) {
       return { runId, status: 'failed', reason: 'unknown runId' };
     }
+    // L2RunState.status values ('succeeded'|'failed'|'timed_out') are already valid RunExecutionStatus.
     return {
       runId,
-      status: state.status === 'succeeded' ? 'succeeded' : state.status === 'timed_out' ? 'timed_out' : 'failed',
+      status: state.status,
       startedAt: state.startedAt,
       endedAt: state.endedAt,
       reason: state.reason,

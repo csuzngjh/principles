@@ -32,10 +32,19 @@ import { DreamerOutputV1Typebox } from './dreamer-output-typebox.js';
 // PIArtifactStore satisfies this structurally; passing the full store is allowed but
 // the tools can only call what this interface declares.
 
+/** Shape returned by both reader methods (reused to avoid repeating the inline literal). */
+interface ArtifactSummary {
+  artifactId: string;
+  artifactKind: string;
+  sourceTaskId: string;
+  contentJson: string;
+  createdAt: string;
+}
+
 /** Read-only view of the artifact store used by read_artifact. */
 export interface PdL2ArtifactReader {
-  getArtifactById(artifactId: string): Promise<{ artifactId: string; artifactKind: string; sourceTaskId: string; contentJson: string; createdAt: string } | null>;
-  listBySourceTaskId(sourceTaskId: string): Promise<{ artifactId: string; artifactKind: string; sourceTaskId: string; contentJson: string; createdAt: string }[]>;
+  getArtifactById(artifactId: string): Promise<ArtifactSummary | null>;
+  listBySourceTaskId(sourceTaskId: string): Promise<ArtifactSummary[]>;
 }
 
 /** Read-only view of the internalized-principle ledger used by read_principles. */
@@ -80,7 +89,7 @@ export interface PdL2ToolContext {
   onToolExecution?: (info: { toolName: string; ok: boolean; error?: string }) => void;
 }
 
-function formatArtifact(a: { artifactId: string; artifactKind: string; sourceTaskId: string; contentJson: string; createdAt: string }): string {
+function formatArtifact(a: ArtifactSummary): string {
   return [
     `artifactId: ${a.artifactId}`,
     `kind: ${a.artifactKind}`,
@@ -88,6 +97,28 @@ function formatArtifact(a: { artifactId: string; artifactKind: string; sourceTas
     `createdAt: ${a.createdAt}`,
     `content: ${a.contentJson}`,
   ].join('\n');
+}
+
+/**
+ * Resolve the text response for read_artifact. Extracted so the execute() body stays flat:
+ * one success-path telemetry call + one catch-path telemetry call, no repetition.
+ */
+async function readArtifactText(ctx: PdL2ToolContext, params: { artifactId?: string; sourceTaskId?: string }): Promise<string> {
+  if (typeof params.artifactId === 'string' && params.artifactId.length > 0) {
+    const artifact = await ctx.artifactReader.getArtifactById(params.artifactId);
+    return artifact
+      ? formatArtifact(artifact)
+      : `No artifact found with id '${params.artifactId}'.`;
+  }
+  if (typeof params.sourceTaskId === 'string' && params.sourceTaskId.length > 0) {
+    const artifacts = await ctx.artifactReader.listBySourceTaskId(params.sourceTaskId);
+    if (artifacts.length === 0) {
+      return `No artifacts found for sourceTaskId '${params.sourceTaskId}'.`;
+    }
+    return artifacts.map(formatArtifact).join('\n\n');
+  }
+  // Missing both params — structured guidance, not a silent empty result (R9).
+  return 'Provide either artifactId (a specific artifact) or sourceTaskId (the predecessor task). Both were empty.';
 }
 
 /**
@@ -143,41 +174,9 @@ export function buildDreamerL2Tools(ctx: PdL2ToolContext): AgentTool[] {
     parameters: readArtifactSchema,
     execute: async (_id, params): Promise<AgentToolResult<undefined>> => {
       try {
-        if (typeof params.artifactId === 'string' && params.artifactId.length > 0) {
-          const artifact = await ctx.artifactReader.getArtifactById(params.artifactId);
-          if (!artifact) {
-            ctx.onToolExecution?.({ toolName: 'read_artifact', ok: true });
-            return {
-              content: [{ type: 'text', text: `No artifact found with id '${params.artifactId}'.` }],
-              details: undefined,
-            };
-          }
-          ctx.onToolExecution?.({ toolName: 'read_artifact', ok: true });
-          return {
-            content: [{ type: 'text', text: formatArtifact(artifact) }],
-            details: undefined,
-          };
-        }
-        if (typeof params.sourceTaskId === 'string' && params.sourceTaskId.length > 0) {
-          const artifacts = await ctx.artifactReader.listBySourceTaskId(params.sourceTaskId);
-          ctx.onToolExecution?.({ toolName: 'read_artifact', ok: true });
-          if (artifacts.length === 0) {
-            return {
-              content: [{ type: 'text', text: `No artifacts found for sourceTaskId '${params.sourceTaskId}'.` }],
-              details: undefined,
-            };
-          }
-          return {
-            content: [{ type: 'text', text: artifacts.map(formatArtifact).join('\n\n') }],
-            details: undefined,
-          };
-        }
-        // Missing both params — structured guidance, not a silent empty result (R9).
+        const text = await readArtifactText(ctx, params);
         ctx.onToolExecution?.({ toolName: 'read_artifact', ok: true });
-        return {
-          content: [{ type: 'text', text: 'Provide either artifactId (a specific artifact) or sourceTaskId (the predecessor task). Both were empty.' }],
-          details: undefined,
-        };
+        return { content: [{ type: 'text', text }], details: undefined };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         ctx.onToolExecution?.({ toolName: 'read_artifact', ok: false, error });
