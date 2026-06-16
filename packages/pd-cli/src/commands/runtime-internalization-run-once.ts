@@ -231,8 +231,11 @@ function makeDreamerPrincipleReader(stateDir: string): PdL2PrincipleReader {
         const principles = ledger.tree.principles ?? {};
         const active = Object.values(principles).filter(p => p.status === 'active');
         return active.map(p => ({ id: p.id, statement: p.text }));
-      } catch {
-        // Graceful degradation: no ledger or unreadable → empty list (Runtime Contract R9).
+      } catch (error) {
+        // Graceful degradation WITH an observable reason (Runtime Contract R9): the L2
+        // dreamer proceeds with only core axioms; the degradation is logged for debugging.
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[l2_dreamer] listActivePrinciples degraded — no internalized principles loaded: ${reason}`);
         return [];
       }
     },

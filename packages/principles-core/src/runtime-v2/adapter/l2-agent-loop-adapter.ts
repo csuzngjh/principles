@@ -158,9 +158,12 @@ function extractLastAssistantText(messages: AgentMessage[]): string | null {
     }
     if (Array.isArray(content)) {
       for (const part of content) {
-        if (part && typeof part === 'object' && 'type' in part && (part as { type: string }).type === 'text') {
-          const {text} = (part as { text?: unknown });
-          if (typeof text === 'string' && text.trim().length > 0) return text;
+        if (part && typeof part === 'object' && Object.hasOwn(part, 'type')) {
+          const typeValue = Reflect.get(part, 'type');
+          if (typeValue === 'text') {
+            const textValue = Reflect.get(part, 'text');
+            if (typeof textValue === 'string' && textValue.trim().length > 0) return textValue;
+          }
         }
       }
     }
@@ -246,9 +249,26 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     const budgetTimer = setTimeout(() => abortController.abort(), totalBudgetMs);
 
     // Build the prompt message (the dreamer prompt builder already produces one JSON-string message).
-    const messageContent = typeof input.inputPayload === 'string'
-      ? input.inputPayload
-      : JSON.stringify(input.inputPayload);
+    // Serialized before the try block: if inputPayload is non-serializable (circular/BigInt),
+    // fail loud with cleanup so budgetTimer/abortController don't leak.
+    let messageContent: string;
+    try {
+      messageContent = typeof input.inputPayload === 'string'
+        ? input.inputPayload
+        : JSON.stringify(input.inputPayload);
+    } catch (err) {
+      clearTimeout(budgetTimer);
+      this.abortControllers.delete(runId);
+      const reason = err instanceof Error ? err.message : String(err);
+      runState.status = 'failed';
+      runState.reason = `inputPayload not serializable: ${reason}`;
+      runState.endedAt = new Date().toISOString();
+      throw new PDRuntimeError(
+        'input_invalid',
+        `L2 inputPayload is not serializable: ${reason}`,
+        { nextAction: 'ensure StartRunInput.inputPayload is a string or JSON-serializable object' },
+      );
+    }
 
     // Tool usage instruction appended so the model knows the tool protocol.
     const toolInstruction =

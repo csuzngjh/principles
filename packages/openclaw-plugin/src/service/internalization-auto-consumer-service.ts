@@ -185,7 +185,9 @@ export async function runConsumerCycle(
               return Object.values(principles)
                 .filter(p => p.status === 'active')
                 .map(p => ({ id: p.id, statement: p.text }));
-            } catch {
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              logger.warn(`[PD:AutoConsumer] L2 dreamer principle reader degraded: ${reason}`);
               return [];
             }
           },
@@ -200,7 +202,18 @@ export async function runConsumerCycle(
             totalBudgetMs: runtimeConfigResult.timeoutMs,
           },
           {
-            artifactReader: stateManager.piArtifactStore as unknown as PdL2ArtifactReader,
+            artifactReader: {
+              // Explicit adapter: PIArtifactRecord → PdL2ArtifactReader. The store returns
+              // PIArtifactRecord (with PIArtifactKind enum); map to the ArtifactSummary shape.
+              getArtifactById: async (id: string) => {
+                const r = await stateManager.piArtifactStore.getArtifactById(id);
+                return r ? { artifactId: r.artifactId, artifactKind: String(r.artifactKind), sourceTaskId: r.sourceTaskId, contentJson: r.contentJson, createdAt: r.createdAt } : null;
+              },
+              listBySourceTaskId: async (taskId: string) => {
+                const records = await stateManager.piArtifactStore.listBySourceTaskId(taskId);
+                return records.map(r => ({ artifactId: r.artifactId, artifactKind: String(r.artifactKind), sourceTaskId: r.sourceTaskId, contentJson: r.contentJson, createdAt: r.createdAt }));
+              },
+            },
             principleReader,
           },
         );

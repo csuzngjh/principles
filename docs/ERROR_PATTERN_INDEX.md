@@ -48,11 +48,11 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-06 Source of Truth and Generated Artifacts
 
-- **Use when**: editing bundled packages, generated copies, package manifests, installer payloads, or files under `packages/create-principles-disciple`.
-- **Failure mode**: fixes are applied to generated copies or source-tree tests pass while the published artifact is incomplete.
-- **Must check**: edit the source of truth and rerun the generator; package runtime dependencies are declared in the package that imports them; smoke tests install from packed output.
-- **Representative ERRs**: ERR-040, ERR-041, ERR-050.
-- **Automation target**: generated-artifact checks plus clean `npm pack` install smoke tests.
+- **Use when**: editing bundled packages, generated copies, package manifests, installer payloads, lockfiles, or files under `packages/create-principles-disciple`.
+- **Failure mode**: fixes are applied to generated copies or source-tree tests pass while the published artifact is incomplete; or the wrong package manager's lockfile is updated so CI's install step fails.
+- **Must check**: edit the source of truth and rerun the generator; package runtime dependencies are declared in the package that imports them; the lockfile CI consumes (check workflows for `npm ci` vs `pnpm install`) is the one updated; smoke tests install from packed output.
+- **Representative ERRs**: ERR-040, ERR-041, ERR-050, ERR-068.
+- **Automation target**: generated-artifact checks plus clean `npm pack` install smoke tests; CI lockfile-consistency gate.
 
 ### EP-07 Runtime State Source Alignment
 
