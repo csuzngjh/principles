@@ -335,6 +335,7 @@ export function resolveRuntimeConfigFromPdConfig(
       apiKeyEnv: adapterConfig.apiKeyEnv,
       baseUrl: adapterConfig.baseUrl,
       timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxRetries: adapterConfig.maxRetries,
       agentId: 'main',
     };
   }
