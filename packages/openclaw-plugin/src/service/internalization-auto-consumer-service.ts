@@ -5,6 +5,8 @@ import {
   DreamerRunner,
   DefaultDreamerValidator,
   PiAiRuntimeAdapter,
+  L2AgentLoopAdapter,
+  loadLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
   resolveRuntimeConfigFromPdConfig,
@@ -13,6 +15,8 @@ import {
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
+  type PdL2ArtifactReader,
+  type PdL2PrincipleReader,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -169,7 +173,39 @@ export async function runConsumerCycle(
 
     let adapter: PDRuntimeAdapter;
     if (runtimeKind === 'pi-ai') {
-      adapter = new PiAiRuntimeAdapter({
+      // PRI-419: when l2_dreamer flag is on, route through the L2 multi-turn agent loop.
+      const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
+      if (l2Flag.enabled) {
+        const stateDir = `${workspaceDir}/.state`;
+        const principleReader: PdL2PrincipleReader = {
+          listActivePrinciples: async () => {
+            try {
+              const ledger = loadLedger(stateDir);
+              const principles = ledger.tree.principles ?? {};
+              return Object.values(principles)
+                .filter(p => p.status === 'active')
+                .map(p => ({ id: p.id, statement: p.text }));
+            } catch {
+              return [];
+            }
+          },
+        };
+        adapter = new L2AgentLoopAdapter(
+          {
+            provider: runtimeConfigResult.provider ?? 'openai',
+            model: runtimeConfigResult.model ?? 'gpt-4o',
+            apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
+            baseUrl: runtimeConfigResult.baseUrl,
+            workspace: workspaceDir,
+            totalBudgetMs: runtimeConfigResult.timeoutMs,
+          },
+          {
+            artifactReader: stateManager.piArtifactStore as unknown as PdL2ArtifactReader,
+            principleReader,
+          },
+        );
+      } else {
+        adapter = new PiAiRuntimeAdapter({
         provider: runtimeConfigResult.provider ?? 'openai',
         model: runtimeConfigResult.model ?? 'gpt-4o',
         apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
@@ -178,6 +214,7 @@ export async function runConsumerCycle(
         baseUrl: runtimeConfigResult.baseUrl,
         workspace: workspaceDir,
       });
+      }
     } else if (runtimeKind === 'openclaw-cli') {
       adapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: runtimeConfigResult.openclawMode ?? 'default',

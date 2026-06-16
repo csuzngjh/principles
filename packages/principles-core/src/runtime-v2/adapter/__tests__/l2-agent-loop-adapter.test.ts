@@ -95,10 +95,11 @@ function makeStartRun(overrides: Partial<StartRunInput> = {}): StartRunInput {
 function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number } = {}): L2AgentLoopAdapter {
   return new L2AgentLoopAdapter(
     {
-      provider: 'openai',
+      // Custom baseUrl so resolveL2Model builds the model inline (no getModel lookup).
+      provider: 'test-provider',
       model: 'test-model',
       apiKeyEnv: 'TEST_API_KEY',
-      resolvedModel: { id: 'test-model', name: 'test-model', api: 'openai-completions', provider: 'openai' } as never,
+      baseUrl: 'http://localhost:1234/v1',
       maxTurns: overrides.maxTurns,
       totalBudgetMs: overrides.totalBudgetMs ?? 60_000,
     },

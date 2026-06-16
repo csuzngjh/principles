@@ -34,7 +34,8 @@
  */
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
-import type { Model, Message } from '@earendil-works/pi-ai';
+import { getModel, getProviders } from '@earendil-works/pi-ai';
+import type { Model, Message, KnownProvider } from '@earendil-works/pi-ai';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { PDRuntimeError } from '../error-categories.js';
@@ -70,8 +71,6 @@ export interface L2AgentLoopAdapterConfig {
   apiKeyEnv: string;
   /** Optional custom base URL (OpenAI-compatible endpoints). */
   baseUrl?: string;
-  /** Resolved pi-ai model object (built by the factory's resolveModel). */
-  resolvedModel: Model<string>;
   /** Optional workspace path (for diagnostics only). */
   workspace?: string;
   /** Optional event emitter; defaults to the shared singleton. */
@@ -80,6 +79,51 @@ export interface L2AgentLoopAdapterConfig {
   maxTurns?: number;
   /** Total wall-clock budget for the whole loop in ms (default 300_000). */
   totalBudgetMs?: number;
+}
+
+/**
+ * Resolve a pi-ai Model from provider/model/baseUrl config (mirrors PiAiRuntimeAdapter's
+ * internal resolveModel). Built-in providers use getModel(); custom OpenAI-compatible
+ * endpoints construct a Model object directly.
+ */
+function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
+  const knownProviders = getProviders();
+  if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
+    // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
+    return getModel(provider as KnownProvider, modelId);
+  }
+  if (!baseUrl) {
+    throw new PDRuntimeError(
+      'runtime_unavailable',
+      `Provider '${provider}' is not a built-in pi-ai provider and requires a custom baseUrl.`,
+    );
+  }
+  // Custom provider with baseUrl — construct Model object directly (openai-completions API).
+  return {
+    id: modelId,
+    name: modelId,
+    api: 'openai-completions',
+    provider,
+    baseUrl,
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 32000,
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      supportsUsageInStreaming: true,
+      maxTokensField: 'max_tokens',
+      requiresToolResultName: false,
+      requiresAssistantAfterToolResult: false,
+      requiresThinkingAsText: false,
+      requiresReasoningContentOnAssistantMessages: false,
+      thinkingFormat: 'deepseek',
+      supportsStrictMode: false,
+    },
+    } as unknown as Model<string>;
 }
 
 /** Read-only readers injected by the factory (bound to the dreamer's task + stores). */
@@ -253,7 +297,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     };
 
     const loopConfig: AgentLoopConfig = {
-      model: this.config.resolvedModel,
+      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
       apiKey,
       // AgentMessage is `Message | CustomAgentMessages`; for the dreamer's standard
       // user/assistant/toolResult shape, the identity map is correct. Custom message
