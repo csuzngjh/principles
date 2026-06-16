@@ -103,6 +103,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
 | ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
+| ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 
 ---
 
@@ -955,3 +956,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-15
 - **Recurrence**: First occurrence (related to EP-04 missing tests; same pattern as ERR-021, ERR-029, ERR-033, ERR-053)
 [ERR-066]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
+
+---
+
+**[ERR-067]** | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI
+
+- **What happened**: When a sub-runner (e.g., DiagRootCauseRunner) returns `status: "retried"` from `retryOrFail()`, the SplitDiagnosticianRunner treats it as failure (since `resultA.status !== "succeeded"`) and immediately marks the parent task as failed. The retry mechanism in BasePeerRunner works correctly (marks task as `retry_wait`, increments attemptCount), but the orchestrator doesn't wait for or trigger the retry. Similarly, `diagnose run` CLI command checks `result.status !== "succeeded"` and exits with code 1, never giving the retry a chance. This means `output_invalid` errors from LLM schema non-compliance (e.g., qwen3.6-27b-mtp missing `rootCauseCategory`) are never retried, even though `output_invalid` is not in `permanentErrorCategories` and `shouldRetry()` returns true.
+- **Why it's wrong**: The retry mechanism was designed to handle transient LLM failures (schema non-compliance, truncated output, etc.), but the orchestrator layer defeats it by treating `retried` as a terminal failure. This makes the entire retry infrastructure useless for the split pipeline — the most important use case where LLM schema compliance is hardest to guarantee.
+- **Affected code**:
+  1. `SplitDiagnosticianRunner.run()` — Lines 126-137, 180-191, 240-251: `if (resultA.status !== "succeeded")` treats `retried` as failure
+  2. `diagnose.ts` CLI — Lines 389-407: `if (result.status !== "succeeded")` exits with code 1 on `retried`
+  3. `SplitDiagnosticianRunner.run()` — Lines 106-113: resets `attemptCount: 0` on `retry_wait` tasks, losing retry progress
+- **Correct approach**: (1) SplitDiagnosticianRunner should distinguish `retried` from `failed`: on `retried`, wait for the retry backoff period and re-run the stage, up to maxAttempts. (2) `diagnose run` CLI should loop: on `retried`, sleep for the backoff period and call `runner.run()` again until `succeeded` or `failed`. (3) SplitDiagnosticianRunner should NOT reset `attemptCount: 0` on `retry_wait` tasks — this loses retry progress and makes `shouldRetry()` always return true.
+- **How to prevent**: (1) Any orchestrator that calls `runner.run()` must handle all three terminal statuses: `succeeded`, `retried`, `failed`. (2) Tests for orchestrators must include a `retried` → retry → `succeeded` scenario. (3) Never use `status !== "succeeded"` as a failure check — explicitly check `status === "failed" || status === "max_attempts_exceeded"`. (4) Never reset `attemptCount` on `retry_wait` tasks.
+- **Source**: PRI-405
+- **Date**: 2026-06-16
+- **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring)
+[ERR-067]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
