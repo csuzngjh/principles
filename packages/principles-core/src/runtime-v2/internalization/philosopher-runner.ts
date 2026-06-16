@@ -348,10 +348,11 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
 
-    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
-      const record = untrustedOutput as Record<string, unknown>;
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
       // Override generatedAt with actual timestamp — LLM may echo prompt example date
-      record.generatedAt = new Date().toISOString();
+      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
+        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
+      }
     }
   }
 

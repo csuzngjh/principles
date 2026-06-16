@@ -39,7 +39,7 @@ export function buildScribeProtocolInstruction(
   opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage } = {},
 ): string {
   const { outputLanguage, ...axiomOpts } = opts;
-  const coreAxiomsBlock = buildCoreAxiomBlock(axiomOpts);
+  const coreAxiomsBlock = buildCoreAxiomBlock({ ...axiomOpts, outputLanguage });
   const languageDirective = buildLanguageDirective(outputLanguage);
 
   return `You are a Scribe agent in a principle internalization pipeline. Your role is to distill the Philosopher's analysis into a formal, implementable principle draft.

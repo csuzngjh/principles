@@ -21,6 +21,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { isCorePrincipleId } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -318,16 +319,17 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
 
-    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
-      const record = untrustedOutput as Record<string, unknown>;
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
       // Override generatedAt with actual timestamp — LLM may echo prompt example date
-      record.generatedAt = new Date().toISOString();
+      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
+        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
+      }
       // Strip fabricated sourcePrincipleId — LLM invents placeholders like pri-unknown, pri-000, pri-999
-      if (Object.hasOwn(record, 'sourcePrincipleId') && typeof record.sourcePrincipleId === 'string') {
-        const val = record.sourcePrincipleId;
-        // Core principle IDs follow pattern T-XX (e.g. T-01, T-10). Anything else is fabricated.
-        if (!/^T-\d{2}$/.test(val)) {
-          delete record.sourcePrincipleId;
+      if (Object.hasOwn(untrustedOutput, 'sourcePrincipleId') && typeof (untrustedOutput as Record<string, unknown>).sourcePrincipleId === 'string') {
+        const val = (untrustedOutput as Record<string, unknown>).sourcePrincipleId as string;
+        // Use registry membership check — format-only regex would accept T-99 etc.
+        if (!isCorePrincipleId(val)) {
+          Reflect.deleteProperty(untrustedOutput, 'sourcePrincipleId');
         }
       }
     }
