@@ -54,6 +54,8 @@ export interface PdLocalRuntimeProfile {
   baseUrl?: string;
   /** Optional timeout in milliseconds */
   timeoutMs?: number;
+  /** Optional maximum number of retries */
+  maxRetries?: number;
 }
 
 export type RuntimeProfile = OpenClawRuntimeProfile | PdLocalRuntimeProfile;
