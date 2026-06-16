@@ -232,7 +232,17 @@ export class SplitDiagnosticianRunner {
     // ERR-067 fix: do NOT reset attemptCount on retry_wait/failed tasks.
     // The retry policy (shouldRetry) uses attemptCount to decide whether
     // to retry. Resetting it would cause infinite retries.
-    if (existing.status === 'retry_wait' || existing.status === 'failed') {
+    // P1-2 fix: check shouldRetry() before transitioning failed → pending.
+    if (existing.status === 'retry_wait') {
+      await this.stateManager.updateTask(taskId, {
+        status: 'pending',
+        lastError: null,
+      });
+    } else if (existing.status === 'failed') {
+      if (!this.retryPolicy.shouldRetry(existing)) {
+        // Task has exhausted its retry budget — do not re-pend
+        return;
+      }
       await this.stateManager.updateTask(taskId, {
         status: 'pending',
         lastError: null,
@@ -269,6 +279,20 @@ export class SplitDiagnosticianRunner {
       }
 
       if (result.status === 'retried') {
+        // Get the current task state for shouldRetry check and backoff calculation
+        const task = await this.stateManager.getTask(taskId);
+
+        // P1-1 fix: check shouldRetry() against task's maxAttempts
+        if (task && !this.retryPolicy.shouldRetry(task)) {
+          return {
+            status: 'failed',
+            taskId: result.taskId,
+            errorCategory: result.errorCategory ?? 'max_attempts_exceeded',
+            failureReason: `Stage ${stageLabel}: attemptCount (${task.attemptCount}) >= maxAttempts (${task.maxAttempts}). ${result.failureReason ?? ''}`,
+            attemptCount: result.attemptCount,
+          };
+        }
+
         if (attempt >= maxRetries) {
           // Safety: break out of potential infinite loop
           return {
@@ -280,8 +304,7 @@ export class SplitDiagnosticianRunner {
           };
         }
 
-        // Get the current task state to calculate backoff
-        const task = await this.stateManager.getTask(taskId);
+        // Calculate backoff from task state
         const backoffMs = task
           ? this.retryPolicy.calculateBackoff(task.attemptCount)
           : 30_000; // fallback: 30s
@@ -319,7 +342,7 @@ export class SplitDiagnosticianRunner {
       status: stageResult.status === 'retried' ? 'failed' : stageResult.status,
       taskId: parentTaskId,
       errorCategory: stageResult.errorCategory,
-      failureReason: stageResult.failureReason,
+      failureReason: stageResult.failureReason ?? `Stage failed for parent task ${parentTaskId}`,
       attemptCount: stageResult.attemptCount,
     };
   }
