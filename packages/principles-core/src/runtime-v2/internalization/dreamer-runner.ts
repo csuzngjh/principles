@@ -66,6 +66,8 @@ export interface ResolvedDreamerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Whether to inject CORE_PRINCIPLES into the dreamer prompt (default: true). */
+  readonly coreGrounding: boolean;
 }
 
 export const DEFAULT_DREAMER_RUNNER_OPTIONS: Readonly<Omit<ResolvedDreamerRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -73,6 +75,7 @@ export const DEFAULT_DREAMER_RUNNER_OPTIONS: Readonly<Omit<ResolvedDreamerRunner
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
   agentId: 'dreamer',
+  coreGrounding: true,
 } as const;
 
 export function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): ResolvedDreamerRunnerOptions {
@@ -83,6 +86,7 @@ export function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): Reso
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_DREAMER_RUNNER_OPTIONS.agentId,
+    coreGrounding: options.coreGrounding ?? DEFAULT_DREAMER_RUNNER_OPTIONS.coreGrounding,
   };
 }
 
@@ -171,13 +175,14 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
-    const builder = new DreamerPromptBuilder({ coreGrounding: true });
+    const {coreGrounding} = this.resolvedOptions;
+    const builder = new DreamerPromptBuilder({ coreGrounding });
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
       predecessorOutput: context.predecessorOutput,
-      coreGrounding: true,
+      coreGrounding,
     });
 
     return this.runtimeAdapter.startRun({

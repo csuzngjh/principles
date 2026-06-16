@@ -77,6 +77,8 @@ export interface ResolvedPhilosopherRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Whether to inject CORE_PRINCIPLES into the philosopher prompt (default: true). */
+  readonly coreGrounding: boolean;
 }
 
 export const DEFAULT_PHILOSOPHER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPhilosopherRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -84,6 +86,7 @@ export const DEFAULT_PHILOSOPHER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPhilosoph
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
   agentId: 'philosopher',
+  coreGrounding: true,
 } as const;
 
 export function resolvePhilosopherRunnerOptions(options: PhilosopherRunnerOptions): ResolvedPhilosopherRunnerOptions {
@@ -94,6 +97,7 @@ export function resolvePhilosopherRunnerOptions(options: PhilosopherRunnerOption
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.agentId,
+    coreGrounding: options.coreGrounding ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.coreGrounding,
   };
 }
 
@@ -167,6 +171,8 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
   }
 
   async invokeRuntime(taskId: string, context: PhilosopherContext): Promise<RunHandle> {
+    const {coreGrounding} = this.resolvedOptions;
+
     let parsedDreamerArtifact: unknown;
     try {
       parsedDreamerArtifact = JSON.parse(context.dreamerArtifact);
@@ -174,13 +180,13 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
       parsedDreamerArtifact = context.dreamerArtifact;
     }
 
-    const builder = new PhilosopherPromptBuilder({ coreGrounding: true });
+    const builder = new PhilosopherPromptBuilder({ coreGrounding });
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       dreamerArtifact: parsedDreamerArtifact,
       sourceDreamerArtifactId: context.sourceDreamerArtifactId,
-      coreGrounding: true,
+      coreGrounding,
     });
 
     return this.runtimeAdapter.startRun({

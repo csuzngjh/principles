@@ -49,6 +49,7 @@ const DEFAULT_PEER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPeerRunnerOptions, 'own
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
   agentId: 'peer-runner',
+  coreGrounding: true,
 } as const;
 
 function resolvePeerRunnerOptions(
@@ -63,6 +64,7 @@ function resolvePeerRunnerOptions(
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? defaultAgentId,
     outputLanguage: options.outputLanguage,
+    coreGrounding: options.coreGrounding ?? true,
   };
 }
 

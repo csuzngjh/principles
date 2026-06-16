@@ -80,6 +80,8 @@ export interface ResolvedScribeRunnerOptions {
   readonly agentId: string;
   /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
   readonly outputLanguage?: OutputLanguage;
+  /** Whether to inject CORE_PRINCIPLES into the scribe prompt (default: true). */
+  readonly coreGrounding: boolean;
 }
 
 export const DEFAULT_SCRIBE_RUNNER_OPTIONS: Readonly<Omit<ResolvedScribeRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -87,6 +89,7 @@ export const DEFAULT_SCRIBE_RUNNER_OPTIONS: Readonly<Omit<ResolvedScribeRunnerOp
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
   agentId: 'scribe',
+  coreGrounding: true,
 } as const;
 
 export function resolveScribeRunnerOptions(options: ScribeRunnerOptions): ResolvedScribeRunnerOptions {
@@ -98,6 +101,7 @@ export function resolveScribeRunnerOptions(options: ScribeRunnerOptions): Resolv
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_SCRIBE_RUNNER_OPTIONS.agentId,
     outputLanguage: options.outputLanguage,
+    coreGrounding: options.coreGrounding ?? DEFAULT_SCRIBE_RUNNER_OPTIONS.coreGrounding,
   };
 }
 
@@ -172,6 +176,8 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   }
 
   async invokeRuntime(taskId: string, context: ScribeContext): Promise<RunHandle> {
+    const {coreGrounding} = this.resolvedOptions;
+
     let parsedPhilosopherArtifact: unknown;
     try {
       parsedPhilosopherArtifact = JSON.parse(context.philosopherArtifact);
@@ -179,14 +185,14 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       parsedPhilosopherArtifact = context.philosopherArtifact;
     }
 
-    const builder = new ScribePromptBuilder({ coreGrounding: true, outputLanguage: this.resolvedOptions.outputLanguage });
+    const builder = new ScribePromptBuilder({ coreGrounding, outputLanguage: this.resolvedOptions.outputLanguage });
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
       sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId,
       outputLanguage: this.resolvedOptions.outputLanguage,
-      coreGrounding: true,
+      coreGrounding,
     });
 
     return this.runtimeAdapter.startRun({
