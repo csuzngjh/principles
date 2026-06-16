@@ -19,7 +19,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: adding validators, dispatchers, activation paths, CLI commands, baselines, guards, or helper APIs.
 - **Failure mode**: a component exists and has isolated tests, but the real user/operator path never calls it.
 - **Must check**: tests exercise the production entry point, not only leaf helpers; new CLI commands are registered in Commander; activation writes are read by the live prompt path.
-- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064.
+- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064, ERR-067.
 - **Automation target**: command-tree tests, production-path smoke tests, and fixture evidence that names the real dispatcher/facade.
 
 ### EP-03 Fail Loud and Observable Degradation
@@ -43,7 +43,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: implementing retries, repairs, multi-attempt validation, evidence timelines, or iterative LLM repair.
 - **Failure mode**: current, next, and recorded state are conflated, so telemetry and repair prompts use stale errors.
 - **Must check**: each iteration reads fresh errors; records are written with current-iteration data; next-attempt state is not stored as current-attempt evidence.
-- **Representative ERRs**: ERR-015, ERR-018, ERR-019.
+- **Representative ERRs**: ERR-015, ERR-018, ERR-019, ERR-067.
 - **Automation target**: tests with two distinct failing attempts and assertions on per-attempt recorded errors.
 
 ### EP-06 Source of Truth and Generated Artifacts
