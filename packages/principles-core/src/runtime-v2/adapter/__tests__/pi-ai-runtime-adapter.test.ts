@@ -1791,4 +1791,145 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
   });
+
+  // ── PRI-405: Reasoning-model E2E stub tests ───────────────────────────────
+
+  describe('PRI-405: reasoning-model E2E stub tests', () => {
+    /** Valid DiagRootCauseOutputV1 for split pipeline Stage A. */
+    const VALID_ROOT_CAUSE_OUTPUT = {
+      valid: true,
+      diagnosisId: 'diag-pri405-1',
+      taskId: 'diag_rootcause-diagnosis_pain-pri405',
+      summary: 'AI助手在修改代码前未阅读错误手册，导致重复了类型断言绕过校验问题',
+      causalChain: [
+        {
+          why: 1,
+          statement: 'AI助手直接使用as类型断言绕过运行时校验',
+          evidenceRefs: ['owner_reported:cli'],
+        },
+        {
+          why: 2,
+          statement: '修改代码前未阅读AGENTS.md中的错误手册和ERR-001相关条目',
+          evidenceRefs: ['owner_reported:cli'],
+        },
+        {
+          why: 3,
+          statement: '缺乏强制性的代码修改前必读规范检查机制',
+          evidenceRefs: ['owner_reported:cli'],
+        },
+      ],
+      rootCause: 'Design: 缺乏强制性的代码修改前必读规范检查机制，导致AI助手绕过关键校验步骤',
+      rootCauseCategory: 'Design',
+      evidence: [
+        {
+          sourceRef: 'owner_reported:cli',
+          note: 'AI助手在修改代码时使用了as类型断言绕过运行时校验，违反了AGENTS.md中ERR-001的规定',
+        },
+      ],
+      confidence: 0.85,
+      ambiguityNotes: [
+        '关联核心公理: T-01 (先理解结构再修改)',
+      ],
+    };
+
+    /** Create a thinking-only response (no text block) simulating reasoning model output. */
+    function makeThinkingOnlyResponse(thinkingText: string, overrides: Record<string, unknown> = {}) {
+      return {
+        content: [
+          { type: 'thinking' as const, thinking: thinkingText },
+        ],
+        role: 'assistant' as const,
+        stopReason: 'length' as const,
+        api: 'openai-completions',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        timestamp: Date.now(),
+        ...overrides,
+      };
+    }
+
+    // ── Scenario A: thinking fallback + schema validation passes ──
+
+    it('Scenario A: thinking-only response with valid JSON passes diag-rootcause-output-v1 schema validation', async () => {
+      // Simulates reasoning model that puts all structured output in thinking block
+      const thinkingWithJson = `让我逐步分析这个pain信号...\n\n${JSON.stringify(VALID_ROOT_CAUSE_OUTPUT)}`;
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse(thinkingWithJson));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'diag-rootcause-output-v1',
+        taskRef: { taskId: 'diag_rootcause-diagnosis_pain-pri405' },
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      // Schema validation passed — output was extracted from thinking and validated
+      expect(output?.payload).toMatchObject({
+        valid: true,
+        diagnosisId: 'diag-pri405-1',
+        rootCauseCategory: 'Design',
+      });
+      // taskId is a lineage field — stripped by adapter (PRI-272)
+      const payload = output?.payload as Record<string, unknown>;
+      expect(payload.taskId).toBeUndefined();
+    });
+
+    // ── Scenario B: thinking with prose (no JSON) + truncated → fail-loud ──
+
+    it('Scenario B: thinking with prose but no JSON + stopReason=length → fail-loud output_invalid', async () => {
+      // Simulates reasoning model that spent all tokens on thinking prose, no JSON output.
+      // extractAssistantTextOrThrow extracts the thinking text (it has content),
+      // but extractJsonObject finds no JSON → output_invalid.
+      // This is the correct fail-loud path: the adapter does NOT silently succeed.
+      const thinkingProseOnly = 'Here is a thinking process: 1. analyze the pain signal 2. identify root cause 3. classify the category...';
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse(thinkingProseOnly));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput({
+          outputSchemaRef: 'diag-rootcause-output-v1',
+          taskRef: { taskId: 'diag_rootcause-diagnosis_pain-pri405' },
+        }));
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      // EP-03: fail-loud with structured reason — adapter does NOT silently succeed
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+      // The error must indicate why: either no JSON found, truncated, or finish_reason=length
+      const reason = caughtErr?.message ?? '';
+      expect(
+        reason.includes('No valid JSON') || reason.includes('truncated') || reason.includes('finish_reason=length'),
+        `Expected reason to indicate extraction failure, got: ${reason}`,
+      ).toBe(true);
+    });
+
+    it('Scenario B (variant): empty thinking + stopReason=length → fail-loud with truncated + nextAction containing maxTokens', async () => {
+      // When thinking is empty and stopReason=length, extractAssistantTextOrThrow
+      // throws the specific truncated error with nextAction guidance.
+      mockComplete.mockResolvedValueOnce(makeThinkingOnlyResponse('', { stopReason: 'length' }));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      let caughtErr: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput({
+          outputSchemaRef: 'diag-rootcause-output-v1',
+          taskRef: { taskId: 'diag_rootcause-diagnosis_pain-pri405' },
+        }));
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      // EP-03: fail-loud with structured reason and nextAction
+      expect(caughtErr).toBeInstanceOf(PDRuntimeError);
+      expect(caughtErr?.category).toBe('output_invalid');
+      expect(caughtErr?.message).toContain('truncated');
+      expect(caughtErr?.details?.nextAction).toBeDefined();
+      const nextAction = String(caughtErr?.details?.nextAction ?? '');
+      expect(nextAction.includes('maxTokens')).toBe(true);
+    });
+  });
 });
