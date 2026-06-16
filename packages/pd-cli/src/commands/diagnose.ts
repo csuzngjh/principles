@@ -380,11 +380,35 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`Workspace: ${workspaceDir}\n`);
     }
 
-    const result = await diagnoseRun({
+    // ERR-067 fix: loop on `retried` status — the SplitDiagnosticianRunner
+    // handles per-stage retry internally, but the CLI must also loop in case
+    // the top-level result is `retried` (e.g., from a non-split pipeline).
+    const retryPolicy = stateManager.getRetryPolicy();
+    let result = await diagnoseRun({
       taskId: opts.taskId,
       stateManager,
       runner,
     });
+
+    let retryLoopCount = 0;
+    const maxRetryLoops = 10; // Safety limit
+    while (result.status === 'retried' && retryLoopCount < maxRetryLoops) {
+      retryLoopCount++;
+      const task = await stateManager.getTask(opts.taskId);
+      const backoffMs = task ? retryPolicy.calculateBackoff(task.attemptCount) : 30_000;
+
+      if (!opts.json) {
+        console.log(`  Retry ${retryLoopCount}: waiting ${Math.round(backoffMs / 1000)}s before re-running...`);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+      result = await diagnoseRun({
+        taskId: opts.taskId,
+        stateManager,
+        runner,
+      });
+    }
 
     if (result.status !== 'succeeded') {
       if (opts.json) {
