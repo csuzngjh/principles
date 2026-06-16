@@ -15,7 +15,6 @@ import {
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
-  type PdL2ArtifactReader,
   type PdL2PrincipleReader,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
