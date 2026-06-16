@@ -1,3 +1,0 @@
-Warning: Legacy config files detected: D:\.openclaw\workspace\.state\workflows.yaml. These are NOT used for runtime resolution. PD uses .pd/config.yaml exclusively.
-
-KILLED 90s timeout

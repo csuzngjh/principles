@@ -1,6 +1,0 @@
-PROBE TIMEOUT NOTES
-probe 30s 内未输出 JSON（KILLED），卡在等待 LM Studio 响应
-doctor 中所有 internalAgents readiness=not_ready
-providerHealth: needs_probe × 5
-建议: 启动 LM Studio 并加载 qwen3.6-27b-mtp 后重跑 probe
-doctor warnings 显示: 用了 .pd/config.yaml (非 legacy workflows.yaml) → source 一致性 OK

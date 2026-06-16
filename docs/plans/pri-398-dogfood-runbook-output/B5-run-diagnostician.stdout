@@ -1,7 +1,0 @@
-{
-  "status": "retried",
-  "taskId": "diagnosis_manual_1781525232835_va394ait",
-  "errorCategory": "output_invalid",
-  "failureReason": "Validation failed: taskId mismatch: expected diag_rootcause-diagnosis_manual_1781525232835_va394ait, got diagnosis_manual_1781525232835_va394ait; rootCauseCategory must be one of People|Design|Assumption|Tooling, got undefined; /causalChain: Expected required property; /rootCauseCategory: Expected required property; /causalChain: Expected array; /rootCauseCategory: Expected union value",
-  "attemptCount": 1
-}

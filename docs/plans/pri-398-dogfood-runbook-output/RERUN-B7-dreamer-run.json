@@ -1,7 +1,0 @@
-{
-  "decision": "no_ready_tasks",
-  "reason": "filtered_out",
-  "inspectedCount": 0,
-  "runnerKind": "dreamer",
-  "effectiveTimeoutMs": 600000
-}

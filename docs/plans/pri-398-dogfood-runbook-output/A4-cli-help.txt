@@ -1,3 +1,0 @@
-
-  console [options]  Start the pd-console web UI for principle review (default:
-
