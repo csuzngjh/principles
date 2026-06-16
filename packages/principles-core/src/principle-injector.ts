@@ -10,7 +10,7 @@
  * This implementation does NOT depend on openclaw-plugin internals.
  * It uses only SDK types (InjectablePrinciple, InjectionContext).
  */
-import type { InjectablePrinciple } from './types.js';
+import type { InjectablePrinciple } from './prompt-builder/principle-selection.js';
 
 /**
  * Generic injection context -- no framework-specific fields.

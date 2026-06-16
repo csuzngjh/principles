@@ -43,9 +43,6 @@ export class AsyncQueueLock {
   }
 }
 
-// Module-level singleton for recordPainSignal to use
-export const painFlagLock = new AsyncQueueLock();
-
 // Sync mutex: promise chain for synchronous code sections that need serialization.
 // Use for single-process CLI tools that need atomic file access within the same process.
 // NOT a distributed lock — each process gets its own chain on import.

@@ -1,0 +1,25 @@
+A4 Console Pain 重复问题评估
+
+Console 启动: OK (http://127.0.0.1:4321, auth disabled)
+API 端点验证: /api/health (200), /api/principles (200, 60 条数据), 其他 14 个路由全部 404
+
+Behavior Evidence 页面 (/#/pain) 截图已保存: A4-behavior-evidence-page.png
+
+=== 检查点 ===
+1) 每条 pain 是否只显示一行？
+   FAIL — PRI-361 core boundary violation 在 09:42/09:45/09:47/09:48 出现 3+ 条相似 pain 记录 (recorded-only 状态)
+
+2) 是否出现 pain_N could not be linked 未匹配警告？
+   YES — 页面顶部红框: '4 evidence records could not be linked to diagnostician tasks. Showing per-record details below. Check Runtime V2 pipeline status for unmatched pain ID formats.'
+   4 条 recorded-only 证据卡 (09:42/09:45/09:47/20:56) 显示 'Could not link this pain event to a diagnostician task. The chain may be incomplete.'
+
+3) 诊断链 (pain -> diagnosis -> candidate -> principle) 是否可见？
+   PARTIAL — internalization-succeeded 的 4 条显示完整链路 (含 PD 的结论、置信度、建议操作); recorded-only 的 4 条仅显示'数据降级原因'，无诊断链
+
+=== PRI-390 裁决 ===
+BUG-PRI390-needed: TRIGGERED
+原因: 
+  - 同一 pain (PRI-361) 在 evidence 页显示多条记录 (重复)
+  - 4 条 evidence 无法 link 到 diagnostician task (painId 格式不匹配)
+  - 顶部 banner 警告 'pain ID formats' 不匹配
+结论: PRI-390 (canonical pain identity) 必须做 — Console 已在自述'Check Runtime V2 pipeline status for unmatched pain ID formats'

@@ -1,0 +1,73 @@
+{
+  "ok": false,
+  "verdict": {
+    "overall": "violation",
+    "painId": "manual_1781525232835_va394ait",
+    "stages": [
+      {
+        "stage": "config_source_alignment",
+        "status": "violation",
+        "reason": "Cannot confirm runtime profile: doctor=pi-ai.lmstudio, probe=null.",
+        "nextAction": "Run \"pd config doctor\" and \"pd runtime probe\" in the same workspace and ensure both resolve a profile from .pd/config.yaml."
+      },
+      {
+        "stage": "diagnostician_readiness",
+        "status": "violation",
+        "reason": "Diagnostician not ready: No readiness snapshot provided; run \"pd runtime probe\" first..",
+        "nextAction": "Run \"pd runtime probe\" to verify provider connectivity; the chain cannot produce candidates until the diagnostician is ready."
+      },
+      {
+        "stage": "pain_record",
+        "status": "ok",
+        "reason": "Canonical painId \"manual_1781525232835_va394ait\" present."
+      },
+      {
+        "stage": "diagnosis_task",
+        "status": "violation",
+        "reason": "Diagnosis task diagnosis_manual_1781525232835_va394ait status=\"failed\", hasSucceededRun=false (task_succeeded_no_succeeded_run if succeeded without a run).",
+        "nextAction": "Run \"pd runtime internalization integrity-repair --confirm\" to reconcile task/run state for diagnosis_manual_1781525232835_va394ait, or re-run the diagnosis."
+      },
+      {
+        "stage": "diagnostician_artifact",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "candidate_lineage",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "dreamer_task_lineage",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "dreamer_context",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "successor",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "owner_reviewable_principle",
+        "status": "skipped",
+        "reason": "Upstream stage \"diagnosis_task\" not satisfied — cannot evaluate."
+      },
+      {
+        "stage": "auto_consumption",
+        "status": "ok",
+        "reason": "No consumed candidates are missing a dreamer task."
+      }
+    ],
+    "generatedAt": "2026-06-15T12:11:25.993Z"
+  },
+  "warnings": [
+    "feature 'pain_evidence_admission': unknown flag accepted as-is",
+    "Legacy config files detected (1): D:\\.openclaw\\workspace\\.state\\workflows.yaml. PD now uses .pd/config.yaml."
+  ],
+  "resolvedPainId": "manual_1781525232835_va394ait"
+}

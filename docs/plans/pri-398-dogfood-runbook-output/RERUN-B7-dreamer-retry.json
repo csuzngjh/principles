@@ -1,0 +1,1 @@
+{"status":"refused","painId":"diagnosis_manual_1781579191884_scltkjra","taskId":null,"reason":"painId 'diagnosis_manual_1781579191884_scltkjra' already has 'diagnosis_' prefix — this looks like a taskId, not a painId","nextAction":"Use the raw painId (without 'diagnosis_' prefix), or use 'pd diagnose run --task-id diagnosis_manual_1781579191884_scltkjra' directly"}

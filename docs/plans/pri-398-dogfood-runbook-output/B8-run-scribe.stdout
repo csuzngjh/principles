@@ -1,0 +1,7 @@
+{
+  "decision": "no_ready_tasks",
+  "reason": "filtered_out",
+  "inspectedCount": 0,
+  "runnerKind": "scribe",
+  "effectiveTimeoutMs": 300000
+}

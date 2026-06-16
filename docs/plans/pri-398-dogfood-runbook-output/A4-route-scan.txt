@@ -1,0 +1,17 @@
+[200] /api/health len=871
+[200] /api/principles len=28895
+[ERR] /api/candidates - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/diagnostics - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/pains - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/queue - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/owner-queue - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/principle/queue - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/console/health - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/dashboard - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/principles/queue - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/owner-review - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/owner/review - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/pain - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/behavior-evidence - Response status code does not indicate success: 404 (Not Found).
+[ERR] /api/evidence-chain - Response status code does not indicate success: 404 (Not Found).
+

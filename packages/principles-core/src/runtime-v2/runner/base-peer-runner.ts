@@ -155,10 +155,19 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Transform output after fetch, before validation.
    * Used by runners that need to re-inject lineage fields stripped by the adapter.
    * Receives untrusted data — must NOT assume TOutput shape.
+   *
+   * Base implementation overrides `generatedAt` with the actual current timestamp,
+   * because LLM may echo the prompt's example date instead of generating the real time.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown, _context: TContext): void {
-    // default no-op
+  protected postFetchTransform(_taskId: string, untrustedOutput: unknown, _context: TContext): void {
+    // Override generatedAt with actual timestamp — LLM may echo prompt example date
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
+      const record = untrustedOutput as Record<string, unknown>;
+      if (Object.hasOwn(record, 'generatedAt')) {
+        record.generatedAt = new Date().toISOString();
+      }
+    }
   }
 
   // ── Template method: full pipeline ─────────────────────────────────────────

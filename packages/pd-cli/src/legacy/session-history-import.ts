@@ -201,31 +201,3 @@ export async function importSessionHistory(
 
   return { sessionsProcessed, entriesImported };
 }
-
-function _buildConversationEntries(
-  assistantTurns: AssistantTurn[],
-  userTurns: UserTurn[],
-  toolCalls: ToolCall[],
-): string {
-  // Interleave and sort by timestamp for a unified view
-  type Entry = { ts: string; role: string; text: string; toolName?: string };
-  const entries: Entry[] = [];
-
-  for (const t of assistantTurns) {
-    entries.push({ ts: t.created_at, role: 'assistant', text: t.sanitized_text });
-  }
-  for (const t of userTurns) {
-    entries.push({ ts: t.created_at, role: 'user', text: t.raw_text ?? '' });
-  }
-  for (const t of toolCalls) {
-    entries.push({
-      ts: t.created_at,
-      role: 'tool',
-      text: `${t.tool_name}: ${t.outcome}${t.error_message ? ` — ${t.error_message}` : ''}`,
-      toolName: t.tool_name,
-    });
-  }
-
-  entries.sort((a, b) => a.ts.localeCompare(b.ts));
-  return JSON.stringify(entries, null, 2);
-}

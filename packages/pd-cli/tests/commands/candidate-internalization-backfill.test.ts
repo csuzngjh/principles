@@ -17,19 +17,16 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn((workspace?: string) => workspace ?? '/fake/workspace'),
 }));
 
-vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
-  PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function () {
-    return {
-      intake: mockIntake,
-      existsForCandidate: mockExistsForCandidate,
-    };
-  }),
-}));
-
 vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   const original = await importOriginal() as Record<string, unknown>;
   return {
     ...original,
+    PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function () {
+      return {
+        intake: mockIntake,
+        existsForCandidate: mockExistsForCandidate,
+      };
+    }),
     RuntimeStateManager: vi.fn().mockImplementation(function (opts: Record<string, unknown>) {
       mockRuntimeStateManagerOpts(opts);
       return {

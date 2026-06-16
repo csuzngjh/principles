@@ -1,0 +1,7 @@
+{
+  "candidateId": "mock-test-9a8687df-28f7-4c40-86a6-f2beaa928ae7",
+  "route": "unknown",
+  "status": "no_task_created",
+  "reason": "Candidate not found: mock-test-9a8687df-28f7-4c40-86a6-f2beaa928ae7",
+  "nextAction": "Verify candidate ID and run pd candidate show <id> to check existence"
+}

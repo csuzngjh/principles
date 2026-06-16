@@ -33,7 +33,7 @@ PROTOCOL:
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"taskId":"task-123","sourceArtificerArtifactId":"pi-art-artificer-001","evaluation":{"decision":"approved","summary":"The implementation plan is well-structured and addresses the identified issues.","score":0.85,"strengths":["Clear change descriptions with specific file targets","Good test coverage plan"],"concerns":["Rollout notes could be more specific about monitoring"],"requiredChanges":[]},"sourceTrace":{"artificerArtifactId":"pi-art-artificer-001"},"risks":["May need additional integration tests"],"generatedAt":"2026-05-11T12:00:00.000Z"}
+{"taskId":"task-123","sourceArtificerArtifactId":"pi-art-artificer-001","evaluation":{"decision":"approved","summary":"The implementation plan is well-structured and addresses the identified issues.","score":0.85,"strengths":["Clear change descriptions with specific file targets","Good test coverage plan"],"concerns":["Rollout notes could be more specific about monitoring"],"requiredChanges":[]},"sourceTrace":{"artificerArtifactId":"pi-art-artificer-001"},"risks":["May need additional integration tests"],"generatedAt":"<current ISO-8601 timestamp>"}
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
@@ -49,7 +49,7 @@ CONSTRAINTS:
 - sourceTrace.philosopherArtifactId is optional — include only if available from artificer artifact
 - sourceTrace.dreamerArtifactId is optional — include only if available from artificer artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
-- generatedAt MUST be an ISO-8601 timestamp string
+- generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
 export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v1';

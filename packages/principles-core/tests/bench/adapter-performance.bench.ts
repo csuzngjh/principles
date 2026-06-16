@@ -22,7 +22,8 @@ import { WritingPainAdapter } from '../../src/adapters/writing/writing-pain-adap
 import { DefaultPrincipleInjector } from '../../src/principle-injector.js';
 import type { PluginHookAfterToolCallEvent } from '../../src/adapters/coding/openclaw-event-types.js';
 import type { TextAnalysisResult } from '../../src/adapters/writing/writing-types.js';
-import type { InjectablePrinciple, InjectionContext } from '../../src/types.js';
+import type { InjectablePrinciple } from '../../src/prompt-builder/principle-selection.js';
+import type { InjectionContext } from '../../src/principle-injector.js';
 
 // ---------------------------------------------------------------------------
 // Synthetic fixtures

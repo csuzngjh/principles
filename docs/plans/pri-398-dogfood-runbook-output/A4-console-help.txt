@@ -1,0 +1,15 @@
+Usage: pd console [options] [command]
+
+Start the pd-console web UI for principle review (default: legacy launcher)
+
+Options:
+  -w, --workspace <path>  Workspace directory
+  -p, --port <port>       Port to listen on (default: "3100")
+  --no-auth               Disable authentication (local dev only)
+  --json                  Output JSON status (default: false)
+  -h, --help              display help for command
+
+Commands:
+  start [options]         Legacy launcher 鈥?start the pd-console on the
+                          requested port (no reuse, no browser open)
+  open [options]          Open the pd-console in your browser (PRI-300) 鈥?                          auto-port, reuses running console, loopback-only

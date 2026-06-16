@@ -30,9 +30,9 @@ import {
   CandidateIntakeService,
   run as diagnoseRun,
   status as diagnoseStatus,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
-import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';

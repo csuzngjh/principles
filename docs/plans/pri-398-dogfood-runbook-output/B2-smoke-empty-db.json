@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "reason": "unable to open database file",
+  "nextAction": "Inspect the workspace state and retry. Run \"pd config doctor --json\" to validate the workspace.",
+  "workspace": "D:\\.openclaw\\workspace"
+}

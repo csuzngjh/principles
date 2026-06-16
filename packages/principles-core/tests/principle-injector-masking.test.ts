@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DefaultPrincipleInjector } from '../src/principle-injector.js';
 import type { InjectionContext } from '../src/principle-injector.js';
-import type { InjectablePrinciple } from '../src/types.js';
+import type { InjectablePrinciple } from '../src/prompt-builder/principle-selection.js';
 
 const injector = new DefaultPrincipleInjector();
 

@@ -1,0 +1,219 @@
+{
+  "overallStatus": "degraded",
+  "checks": [
+    {
+      "name": "schema_conformance",
+      "status": "healthy",
+      "summary": "All tables and columns conform to expected schema.",
+      "details": {
+        "overallStatus": "ok",
+        "checkedDatabasePath": "D:\\.openclaw\\workspace\\.pd\\state.db",
+        "tables": {
+          "tasks": {
+            "exists": true,
+            "missingColumns": []
+          },
+          "runs": {
+            "exists": true,
+            "missingColumns": []
+          },
+          "artifacts": {
+            "exists": true,
+            "missingColumns": []
+          },
+          "commits": {
+            "exists": true,
+            "missingColumns": []
+          },
+          "principle_candidates": {
+            "exists": true,
+            "missingColumns": []
+          },
+          "pi_artifacts": {
+            "exists": true,
+            "missingColumns": []
+          }
+        },
+        "indexes": {
+          "missingIndexes": []
+        },
+        "migrationsNeeded": [],
+        "generatedAt": "2026-06-15T12:06:26.003Z"
+      }
+    },
+    {
+      "name": "candidate_audit",
+      "status": "healthy",
+      "summary": "Candidate/ledger consistency OK.",
+      "details": {
+        "status": "ok",
+        "consumedCount": 0,
+        "orphanCandidateCount": 0,
+        "missingLedgerCount": 0
+      }
+    },
+    {
+      "name": "gfi_snapshot",
+      "status": "healthy",
+      "summary": "GFI feature flag disabled — skipping snapshot."
+    },
+    {
+      "name": "pruning_orphans",
+      "status": "degraded",
+      "summary": "56 orphan derived candidate(s) found. dbReadable: true",
+      "details": {
+        "orphanDerivedCandidateCount": 56,
+        "dbReadable": true,
+        "samples": [
+          {
+            "candidateId": "54012712-d4e2-415f-a426-6aa1da89662b",
+            "principleId": "af50b87c-8e66-4e98-a103-40113d6a9166",
+            "reason": "candidate not found in state.db",
+            "sourceRef": "derivedFromPainIds",
+            "status": "candidate"
+          },
+          {
+            "candidateId": "1bce7857-6b18-4c11-b812-60d5b0758862",
+            "principleId": "d2db1cfa-246c-45a2-9af0-a6abe8ecab1f",
+            "reason": "candidate not found in state.db",
+            "sourceRef": "derivedFromPainIds",
+            "status": "candidate"
+          },
+          {
+            "candidateId": "cacc263d-9173-4597-aa60-d68ab2a90bb4",
+            "principleId": "774edf11-3f57-43ab-a290-77846be8ec56",
+            "reason": "candidate not found in state.db",
+            "sourceRef": "derivedFromPainIds",
+            "status": "candidate"
+          },
+          {
+            "candidateId": "def24c30-9ca1-4fcf-8ce3-6ad6d93c3d31",
+            "principleId": "bbe97d93-0b99-4fb8-a2b9-b0ee811b8008",
+            "reason": "candidate not found in state.db",
+            "sourceRef": "derivedFromPainIds",
+            "status": "candidate"
+          },
+          {
+            "candidateId": "e0f1da64-c88b-4817-805c-e1a5374d6a81",
+            "principleId": "f8beff32-fe85-46b5-8ed4-2c447430ce71",
+            "reason": "candidate not found in state.db",
+            "sourceRef": "derivedFromPainIds",
+            "status": "candidate"
+          }
+        ]
+      }
+    },
+    {
+      "name": "internalization_queue",
+      "status": "healthy",
+      "summary": "Queue OK. 0 ready, 0 pending, 0 retry_wait (1 suppressed non-MVP).",
+      "details": {
+        "pendingCount": 0,
+        "retryWaitCount": 0,
+        "countsByTaskKind": {},
+        "countsByChannel": {},
+        "invalidMetadataCount": 0,
+        "sampleInvalidTaskIds": [],
+        "blockedSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "dependencyFailedSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "leaseConflictSummary": {
+          "count": 0,
+          "samples": [],
+          "sampleTaskIds": []
+        },
+        "retryWaitPendingSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "unresolvableSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "readyTasks": [],
+        "noReadyTasks": {
+          "reason": "no_candidates",
+          "inspectedCount": 0
+        },
+        "suppressedTasks": [
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781524792505_wtaxecqw",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime_health",
+      "status": "degraded",
+      "summary": "Runtime health: degraded. Actions: Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.; High orphan-derived-candidate count (56) — run pruning to clean up.; GFI degraded: No active sessions, 107 stale sessions with high GFI (max: 63.779296875873115) — run cleanup or investigate session lifecycle.; Run `pd runtime uat --workspace <path> --count 3` to establish baseline.",
+      "details": {
+        "generatedAt": "2026-06-15T12:06:26.028Z",
+        "workspace": "D:\\.openclaw\\workspace",
+        "painChain": {
+          "lastSuccessfulChain": null,
+          "failureCategory": null
+        },
+        "candidateLedger": {
+          "auditStatus": "ok",
+          "orphanCandidateCount": 0,
+          "missingLedgerCount": 0
+        },
+        "pruning": {
+          "watchCount": 14,
+          "reviewCount": 0,
+          "orphanDerivedCandidateCount": 56
+        },
+        "gfi": {
+          "active": null,
+          "staleSessionCount": 107,
+          "staleGfiRange": {
+            "min": 0,
+            "max": 63.779296875873115
+          },
+          "totalSessionCount": 107,
+          "activeSessionCount": 0,
+          "generatedAt": "2026-06-15T12:06:26.049Z"
+        },
+        "overallStatus": "degraded",
+        "recommendedActions": [
+          "Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.",
+          "High orphan-derived-candidate count (56) — run pruning to clean up.",
+          "GFI degraded: No active sessions, 107 stale sessions with high GFI (max: 63.779296875873115) — run cleanup or investigate session lifecycle.",
+          "Run `pd runtime uat --workspace <path> --count 3` to establish baseline."
+        ],
+        "totalTaskCount": 2
+      }
+    },
+    {
+      "name": "pd_shim_info",
+      "status": "healthy",
+      "summary": "PD CLI accessible at D:\\Code\\principles\\packages\\pd-cli\\dist\\index.js",
+      "details": {
+        "cliPath": "D:\\Code\\principles\\packages\\pd-cli\\dist\\index.js",
+        "exists": true,
+        "version": "0.1.0"
+      }
+    }
+  ],
+  "recommendedNextActions": [
+    "Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.",
+    "Run `pd runtime uat --workspace <path> --count 3` to establish baseline."
+  ],
+  "generatedAt": "2026-06-15T12:06:26.003Z",
+  "internalizationQueueSummary": {
+    "readyCount": 0,
+    "retryWaitCount": 0,
+    "pendingCount": 0,
+    "nextReadyTaskKind": null,
+    "nextReadyTaskId": null,
+    "noReadyReason": "no_candidates"
+  }
+}

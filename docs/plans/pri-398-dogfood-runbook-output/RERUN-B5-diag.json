@@ -1,0 +1,8 @@
+[pd diagnose] Legacy config files detected: D:\.openclaw\workspace\.state\workflows.yaml. These are NOT used for runtime resolution. PD uses .pd/config.yaml exclusively.
+{
+  "status": "retried",
+  "taskId": "diagnosis_manual_1781579191884_scltkjra",
+  "errorCategory": "timeout",
+  "failureReason": "[timeout] LLM request timed out: Request timed out.",
+  "attemptCount": 1
+}
