@@ -446,7 +446,7 @@ describe('Legacy file detection', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('PRI-404: includes legacyFileNextActions with Remove-Item command when legacy files detected', () => {
+  it('PRI-404: includes legacyFileNextActions with rm command when legacy files detected', () => {
     const tmp = mkTmpDir();
     const stateDir = path.join(tmp, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -454,7 +454,7 @@ describe('Legacy file detection', () => {
     try {
       const result = loadPdConfig(tmp);
       expect(result.legacyFileNextActions.length).toBeGreaterThan(0);
-      expect(result.legacyFileNextActions[0]).toContain('Remove-Item');
+      expect(result.legacyFileNextActions[0]).toContain('rm ');
       expect(result.legacyFileNextActions[0]).toContain('workflows.yaml');
     } finally { rmTmpDir(tmp); }
   });

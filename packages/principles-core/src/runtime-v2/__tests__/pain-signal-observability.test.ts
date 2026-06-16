@@ -195,4 +195,62 @@ describe('recordPainSignalObservability', () => {
     expect(parsed.data.reason).toContain('___REDACTED___');
     expect(parsed.data.reason).not.toContain('sk-proj-abcdefghijklmnopqrstuvwxyz0123456789');
   });
+
+  it('handles UNIQUE constraint violation on canonical_pain_id via upsert', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const canonicalPainId = 'manual_duplicate_test_001';
+
+    // First insert — should succeed
+    const result1 = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: canonicalPainId,
+        taskId: 'diagnosis_duplicate_001',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'first insert',
+        score: 80,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+      canonicalPainId,
+      runtimeTaskId: 'task_001',
+    });
+    expect(result1.trajectoryPainEventId).toBeGreaterThan(0);
+    expect(result1.warnings).toEqual([]);
+
+    // Second insert with same canonicalPainId — should NOT throw, should upsert
+    const result2 = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: canonicalPainId,
+        taskId: 'diagnosis_duplicate_002',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'second insert (should upsert)',
+        score: 90,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+      canonicalPainId,
+      runtimeTaskId: 'task_002',
+    });
+    // Should succeed without UNIQUE constraint error
+    expect(result2.warnings).toEqual([]);
+
+    // Verify only one row exists for this canonicalPainId
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const rows = db.prepare(
+        'SELECT canonical_pain_id, runtime_task_id FROM pain_events WHERE canonical_pain_id = ?'
+      ).all(canonicalPainId) as { canonical_pain_id: string; runtime_task_id: string | null }[];
+      expect(rows.length).toBe(1);
+      // runtime_task_id should be updated to the new value
+      expect(rows[0]!.runtime_task_id).toBe('task_002');
+    } finally {
+      db.close();
+    }
+  });
 });
