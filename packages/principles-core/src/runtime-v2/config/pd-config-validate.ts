@@ -204,7 +204,10 @@ function validatePdLocalProfile(
     errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be a finite number, got ${safePreview(maxRetries)}`, `Fix maxRetries in profile '${profileId}'`));
   }
   if (isNumber(maxRetries) && maxRetries < 0) {
-    errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be non-negative, got ${maxRetries}`, `Set maxRetries in profile '${profileId}' to a non-negative number`));
+    errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be non-negative, got ${maxRetries}`, `Set maxRetries in profile '${profileId}' to a non-negative integer`));
+  }
+  if (isNumber(maxRetries) && !Number.isInteger(maxRetries)) {
+    errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be an integer, got ${maxRetries}`, `Set maxRetries in profile '${profileId}' to a non-negative integer`));
   }
 
   // Reject raw secret values

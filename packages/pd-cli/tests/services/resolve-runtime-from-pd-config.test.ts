@@ -244,7 +244,8 @@ describe('resolveRuntimeFromPdConfig', () => {
     try {
       const result = resolveRuntimeFromPdConfig(tmp);
       expect(isRuntimeConfigError(result.result)).toBe(true);
-      expect((result.result as { ok: false }).reason).toContain('config_malformed');
+      if (!isRuntimeConfigError(result.result)) throw new Error('Expected RuntimeConfigError');
+      expect(result.result.reason).toContain('config_malformed');
       expect(result.runtimeProfileId).toBe(null);
       expect(result.runtimeProfileLabel).toBe(null);
     } finally { rmTmpDir(tmp); }
@@ -256,7 +257,8 @@ describe('resolveRuntimeFromPdConfig', () => {
     try {
       const result = resolveRuntimeFromPdConfig(tmp);
       expect(isRuntimeConfigError(result.result)).toBe(true);
-      expect((result.result as { ok: false }).reason).toContain('config_malformed');
+      if (!isRuntimeConfigError(result.result)) throw new Error('Expected RuntimeConfigError');
+      expect(result.result.reason).toContain('config_malformed');
     } finally { rmTmpDir(tmp); }
   });
 
@@ -290,7 +292,8 @@ describe('resolveRuntimeFromPdConfig', () => {
     try {
       const result = resolveRuntimeFromPdConfig(tmp, () => undefined);
       expect(isRuntimeConfigError(result.result)).toBe(true);
-      expect((result.result as { ok: false }).reason).toBe('not_ready');
+      if (!isRuntimeConfigError(result.result)) throw new Error('Expected RuntimeConfigError');
+      expect(result.result.reason).toBe('not_ready');
     } finally { rmTmpDir(tmp); }
   });
 });
