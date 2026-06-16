@@ -4,7 +4,7 @@
  *
  * Add entries here whenever a new service/read-model boundary is established.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 
 // ── Source-file existence ──────────────────────────────────────────────────
 
