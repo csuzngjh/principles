@@ -241,6 +241,10 @@ export class TrajectoryDatabase {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     let insertedId = -1;
     this.withWrite(() => {
+    // Try INSERT; on UNIQUE constraint violation for canonical_pain_id, do UPDATE instead.
+    // SQLite UPSERT (ON CONFLICT) does not support partial unique indexes, so we
+    // handle the conflict manually.
+    try {
       const runResult = this.db.prepare(`
         INSERT INTO pain_events (
           session_id, source, score, reason, severity, origin, confidence, text, created_at,
@@ -259,7 +263,30 @@ export class TrajectoryDatabase {
         input.canonicalPainId ?? null,
         input.runtimeTaskId ?? null,
       );
-      insertedId = runResult.lastInsertRowid as number;
+      insertedId = Number(runResult.lastInsertRowid);
+    } catch (insertErr: unknown) {
+      if (
+        input.canonicalPainId &&
+        insertErr instanceof Error &&
+        insertErr.message.includes('UNIQUE constraint failed') &&
+        insertErr.message.includes('canonical_pain_id')
+      ) {
+        this.db.prepare(`
+          UPDATE pain_events
+          SET runtime_task_id = COALESCE(?, runtime_task_id)
+          WHERE canonical_pain_id = ?
+        `).run(input.runtimeTaskId ?? null, input.canonicalPainId);
+        const rawRow = this.db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(input.canonicalPainId);
+        // Runtime Contract #1/#2: validate DB row instead of `as` cast
+        if (rawRow && typeof rawRow === 'object' && Object.hasOwn(rawRow, 'id') && typeof (rawRow as Record<string, unknown>).id === 'number') {
+          insertedId = (rawRow as { id: number }).id;
+        } else {
+          insertedId = -1;
+        }
+      } else {
+        throw insertErr;
+      }
+    }
     });
     // FTS indexing is best-effort — run outside the transaction so it cannot
     // roll back the committed pain event row (MEM-03, MEM-04).
