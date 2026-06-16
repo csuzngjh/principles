@@ -9,7 +9,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CodeReviewPainAdapter } from '../../../src/adapters/code-review/code-review-pain-adapter.js';
 import { DefaultPrincipleInjector } from '../../../src/principle-injector.js';
 import type { ReviewEvent, ReviewComment } from '../../../src/adapters/code-review/review-event-types.js';
-import type { InjectablePrinciple, InjectionContext } from '../../../src/types.js';
+import type { InjectablePrinciple } from '../../../src/prompt-builder/principle-selection.js';
+import type { InjectionContext } from '../../../src/principle-injector.js';
 
 describe('CodeReview E2E: Pain → Injection Pipeline', () => {
   let adapter: CodeReviewPainAdapter;

@@ -30,9 +30,6 @@ export const PD_DIRS = {
     SESSIONS: posixJoin('.state', 'sessions'),
     PAIN_SAMPLES: posixJoin('memory', 'pain'),
     LOCKS: posixJoin('memory', '.locks'),
-    NOCTURNAL_SAMPLES: posixJoin('.state', 'nocturnal', 'samples'),
-    NOCTURNAL_MEMORY: posixJoin('.state', 'nocturnal', 'memory'),
-    NOCTURNAL_EXPORTS: posixJoin('.state', 'exports', 'orpo'),
     IMPL_CODE_DIR: posixJoin('.state', 'principles', 'implementations'),
 };
 
@@ -63,9 +60,6 @@ export const PD_FILES = {
     DICTIONARY: posixJoin(PD_DIRS.STATE, 'pain_dictionary.json'),
     PRINCIPLE_BLACKLIST: posixJoin(PD_DIRS.STATE, 'principle_blacklist.json'),
     WORKFLOWS_YAML: posixJoin(PD_DIRS.STATE, 'workflows.yaml'),
-    NOCTURNAL_SAMPLES_DIR: PD_DIRS.NOCTURNAL_SAMPLES,
-    NOCTURNAL_MEMORY_DIR: PD_DIRS.NOCTURNAL_MEMORY,
-    NOCTURNAL_EXPORTS_DIR: PD_DIRS.NOCTURNAL_EXPORTS,
     IMPL_CODE_DIR: PD_DIRS.IMPL_CODE_DIR,
 
     MEMORY_MD: 'MEMORY.md',

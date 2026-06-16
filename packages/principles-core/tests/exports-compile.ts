@@ -23,14 +23,6 @@ const _painSeverity: PainSeverity = 'low';
 import { PainSignalAdapter } from '../src/pain-signal-adapter.js';
 const _painSignalAdapter = PainSignalAdapter;
 
-// Verify evolution-hook exports
-import { EvolutionHook, noOpEvolutionHook } from '../src/evolution-hook.js';
-import type { PrincipleCreatedEvent, PrinciplePromotedEvent } from '../src/evolution-hook.js';
-const _evolutionHook = EvolutionHook;
-const _noOpEvolutionHook = noOpEvolutionHook;
-const _principleCreatedEvent: PrincipleCreatedEvent = {} as PrincipleCreatedEvent;
-const _principlePromotedEvent: PrinciplePromotedEvent = {} as PrinciplePromotedEvent;
-
 // Verify telemetry-event exports
 import { TelemetryEventSchema, validateTelemetryEvent } from '../src/telemetry-event.js';
 import type { TelemetryEvent, TelemetryEventValidationResult, TelemetryEventType } from '../src/telemetry-event.js';
@@ -39,21 +31,11 @@ const _validateTelemetryEvent = validateTelemetryEvent;
 const _telemetryEvent: TelemetryEvent = {} as TelemetryEvent;
 const _telemetryEventType: TelemetryEventType = 'principle_candidate_created';
 
-// Verify storage-adapter exports
-import { StorageAdapter } from '../src/storage-adapter.js';
-const _storageAdapter = StorageAdapter;
-
 // Verify principle-injector exports (interface + implementation)
 import { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from '../src/principle-injector.js';
 const _principleInjector = PrincipleInjector;
 const _defaultPrincipleInjector = DefaultPrincipleInjector;
 const _injectionContext: InjectionContext = {} as InjectionContext;
-
-// Verify types exports
-import type { InjectablePrinciple } from '../src/types.js';
-import type { HybridLedgerStore } from '../src/types.js';
-const _injectablePrinciple: InjectablePrinciple = {} as InjectablePrinciple;
-const _hybridLedgerStore: HybridLedgerStore = {} as HybridLedgerStore;
 
 // If this file compiles without errors, all exports are correct TypeScript.
 // This is the ONLY valid way to verify interface exports (interfaces don't exist at runtime).

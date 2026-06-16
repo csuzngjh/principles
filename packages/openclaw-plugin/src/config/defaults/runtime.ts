@@ -94,17 +94,6 @@ export const EVENT_LOG_FLUSH_INTERVAL_MS = 30 * MS_PER_SECOND;
 /** Default busy timeout for SQLite operations (5 seconds) */
 export const DEFAULT_BUSY_TIMEOUT_MS = 5 * MS_PER_SECOND;
 
-// ── Nocturnal Runtime Settings ─────────────────────────────────────────────────
-
-/** Idle threshold (30 minutes) */
-export const DEFAULT_IDLE_THRESHOLD_MS = 30 * ONE_MINUTE_MS;
-
-/** Quota window (24 hours) */
-export const DEFAULT_QUOTA_WINDOW_MS = ONE_DAY_MS;
-
-/** Cool down period (30 minutes) */
-export const DEFAULT_COOLDOWN_MS = 30 * ONE_MINUTE_MS;
-
 // ── String & Size Limits ────────────────────────────────────────────────────────
 
 /** Max string length for trajectory/event logs */

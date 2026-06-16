@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ScribePromptBuilder, SCRIBE_PROTOCOL_INSTRUCTION } from '../scribe-prompt-builder.js';
+import { ScribePromptBuilder, buildScribeProtocolInstruction } from '../scribe-prompt-builder.js';
 
 /** Trust-boundary helper: validate parsed prompt JSON before property access. */
 function parsePromptJson(raw: string): Record<string, unknown> {
@@ -57,8 +57,9 @@ describe('ScribePromptBuilder — outputLanguage (PRI-336)', () => {
     const { message } = builder.buildPrompt(BASE_INPUT);
     const parsed = parsePromptJson(message);
 
-    // scribeInstruction should be the base SCRIBE_PROTOCOL_INSTRUCTION without language directive
-    expect(parsed.scribeInstruction).toBe(SCRIBE_PROTOCOL_INSTRUCTION);
+    // scribeInstruction should be the base instruction without language directive
+    const baseInstruction = buildScribeProtocolInstruction();
+    expect(parsed.scribeInstruction).toBe(baseInstruction);
     expect(parsed.scribeInstruction).not.toContain('LANGUAGE DIRECTIVE');
     expect(parsed.scribeInstruction).not.toContain('PRI-336');
   });

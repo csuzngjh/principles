@@ -9,7 +9,7 @@
  * If openclaw-plugin types evolve incompatibly, this test will fail to compile.
  */
 import { describe, it, expect } from 'vitest';
-import type { InjectablePrinciple as SDKInjectablePrinciple } from '../src/types.js';
+import type { InjectablePrinciple as SDKInjectablePrinciple } from '../src/prompt-builder/principle-selection.js';
 import type { PrincipleInjector as SDKPrincipleInjector } from '../src/principle-injector.js';
 import type { InjectionContext as SDKInjectionContext } from '../src/principle-injector.js';
 import { DefaultPrincipleInjector } from '../src/principle-injector.js';
