@@ -169,22 +169,24 @@ export function resolveRuntimeWithOverrides(
 
   const config = base.result;
   // CLI flags override config values
+  // Use ?? (not ||) so empty-string overrides are preserved until the guard below
   const merged: RuntimeConfig = {
     ...config,
-    provider: overrides.provider || config.provider,
-    model: overrides.model || config.model,
-    apiKeyEnv: overrides.apiKeyEnv || config.apiKeyEnv,
-    baseUrl: overrides.baseUrl || config.baseUrl,
+    provider: overrides.provider ?? config.provider,
+    model: overrides.model ?? config.model,
+    apiKeyEnv: overrides.apiKeyEnv ?? config.apiKeyEnv,
+    baseUrl: overrides.baseUrl ?? config.baseUrl,
     maxRetries: overrides.maxRetries ?? config.maxRetries,
     timeoutMs: overrides.timeoutMs ?? config.timeoutMs,
   };
 
-  // Guard: empty-string provider/model/apiKeyEnv after merge means the user
+  // Guard: empty-string provider/model/apiKeyEnv/baseUrl after merge means the user
   // explicitly passed '' or the config has a blank value. Normalise to
   // undefined so downstream validation (handlePiAiProbe) can catch it.
   if (!merged.provider) merged.provider = undefined;
   if (!merged.model) merged.model = undefined;
   if (!merged.apiKeyEnv) merged.apiKeyEnv = undefined;
+  if (!merged.baseUrl) merged.baseUrl = undefined;
 
   return { ...base, mergedConfig: merged };
 }

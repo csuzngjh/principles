@@ -191,8 +191,12 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
           SET runtime_task_id = COALESCE(?, runtime_task_id)
           WHERE canonical_pain_id = ?
         `).run(runtimeTaskId ?? null, canonicalPainId);
-        const row = db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId) as { id: number } | undefined;
-        return row?.id;
+        const rawRow = db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId);
+        // Runtime Contract #1/#2: validate DB row instead of `as` cast
+        if (rawRow && typeof rawRow === 'object' && Object.hasOwn(rawRow, 'id') && typeof (rawRow as Record<string, unknown>).id === 'number') {
+          return (rawRow as { id: number }).id;
+        }
+        return undefined;
       }
       throw insertErr;
     }
