@@ -62,7 +62,7 @@ CONSTRAINTS:
 - sourceTrace.philosopherArtifactId is optional — include only if available from scribe artifact
 - sourceTrace.dreamerArtifactId is optional — include only if available from scribe artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
-- generatedAt MUST be an ISO-8601 timestamp string
+- generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v1.prompt.v1';

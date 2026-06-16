@@ -783,4 +783,10 @@ describe('Regression: Flag Registry Consistency', () => {
     expect(Object.hasOwn(defaults.features, 'diagnostician_core_grounding')).toBe(true);
     expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: true });
   });
+
+  it('internalization_core_grounding is in defaults', () => {
+    const defaults = getDefaultPdConfig();
+    expect(Object.hasOwn(defaults.features, 'internalization_core_grounding')).toBe(true);
+    expect(defaults.features.internalization_core_grounding).toEqual({ category: 'quiet', enabled: true });
+  });
 });

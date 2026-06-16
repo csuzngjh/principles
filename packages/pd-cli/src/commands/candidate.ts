@@ -22,9 +22,9 @@ import {
   getLedgerFilePathPublic,
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
+  PrincipleTreeLedgerAdapter,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
-import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';

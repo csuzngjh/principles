@@ -35,12 +35,12 @@ import {
   run as diagnoseRun,
   isFeatureEnabled,
   SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
-import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import * as path from 'path';

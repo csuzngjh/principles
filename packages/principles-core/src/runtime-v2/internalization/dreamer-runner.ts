@@ -21,6 +21,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { isCorePrincipleId } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -66,6 +67,8 @@ export interface ResolvedDreamerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Whether to inject CORE_PRINCIPLES into the dreamer prompt (default: true). */
+  readonly coreGrounding: boolean;
 }
 
 export const DEFAULT_DREAMER_RUNNER_OPTIONS: Readonly<Omit<ResolvedDreamerRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -73,6 +76,7 @@ export const DEFAULT_DREAMER_RUNNER_OPTIONS: Readonly<Omit<ResolvedDreamerRunner
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
   agentId: 'dreamer',
+  coreGrounding: true,
 } as const;
 
 export function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): ResolvedDreamerRunnerOptions {
@@ -83,6 +87,7 @@ export function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): Reso
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_DREAMER_RUNNER_OPTIONS.agentId,
+    coreGrounding: options.coreGrounding ?? DEFAULT_DREAMER_RUNNER_OPTIONS.coreGrounding,
   };
 }
 
@@ -171,12 +176,14 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
-    const builder = new DreamerPromptBuilder();
+    const {coreGrounding} = this.resolvedOptions;
+    const builder = new DreamerPromptBuilder({ coreGrounding });
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
       predecessorOutput: context.predecessorOutput,
+      coreGrounding,
     });
 
     return this.runtimeAdapter.startRun({
@@ -303,10 +310,29 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
    * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
    * Only fill when absent via Object.hasOwn — present-but-falsy values
    * must reach validation and fail loud (Runtime Contract Rule 3).
+   *
+   * Also overrides generatedAt with the actual current timestamp (LLM may
+   * echo the prompt's example date) and strips fabricated sourcePrincipleId
+   * values (LLM invents placeholders like "pri-unknown", "pri-000", etc.).
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
+      // Override generatedAt with actual timestamp — LLM may echo prompt example date
+      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
+        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
+      }
+      // Strip fabricated sourcePrincipleId — LLM invents placeholders like pri-unknown, pri-000, pri-999
+      if (Object.hasOwn(untrustedOutput, 'sourcePrincipleId') && typeof (untrustedOutput as Record<string, unknown>).sourcePrincipleId === 'string') {
+        const val = (untrustedOutput as Record<string, unknown>).sourcePrincipleId as string;
+        // Use registry membership check — format-only regex would accept T-99 etc.
+        if (!isCorePrincipleId(val)) {
+          Reflect.deleteProperty(untrustedOutput, 'sourcePrincipleId');
+        }
+      }
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: DreamerOutput): void {

@@ -20,6 +20,7 @@
 - [ ] 文档已更新
 - [ ] 无破坏性变更（或已标记为 breaking change）
 - [ ] 通过 Thinking OS 检查（T-01/T-04/T-05）
+- [ ] 迁移删除检查：如果删除了源文件，确认 barrel (`index.ts`) 和 compile test (`exports-compile.ts`) 已同步清理
 
 ### 相关 Issue
 <!-- 关闭的 issue：Closes #XX -->
