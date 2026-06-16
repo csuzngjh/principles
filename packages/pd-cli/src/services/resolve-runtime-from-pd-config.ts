@@ -179,5 +179,12 @@ export function resolveRuntimeWithOverrides(
     timeoutMs: overrides.timeoutMs ?? config.timeoutMs,
   };
 
+  // Guard: empty-string provider/model/apiKeyEnv after merge means the user
+  // explicitly passed '' or the config has a blank value. Normalise to
+  // undefined so downstream validation (handlePiAiProbe) can catch it.
+  if (!merged.provider) merged.provider = undefined;
+  if (!merged.model) merged.model = undefined;
+  if (!merged.apiKeyEnv) merged.apiKeyEnv = undefined;
+
   return { ...base, mergedConfig: merged };
 }
