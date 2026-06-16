@@ -4,8 +4,12 @@
  * Verifies default behavior (succeed-on-first-poll) and callback override mechanism.
  */
 import { describe, it, expect } from 'vitest';
+import { Value } from '@sinclair/typebox/value';
 import { TestDoubleRuntimeAdapter } from '../test-double-runtime-adapter.js';
 import type { TestDoubleBehaviorOverrides } from '../test-double-runtime-adapter.js';
+import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
+import { DiagDistillerOutputV1Schema } from '../../diagnostician/diag-distiller-output.js';
+import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 
 describe('TestDoubleRuntimeAdapter', () => {
   describe('default behavior', () => {
@@ -226,6 +230,149 @@ describe('TestDoubleRuntimeAdapter', () => {
       const adapter = new TestDoubleRuntimeAdapter(overrides);
       await adapter.cancelRun('td-42');
       expect(cancelledRunIds).toEqual(['td-42']);
+    });
+  });
+
+  // ── PRI-405: Split pipeline 3-stage test-double validation ──────────────────
+
+  describe('PRI-405: split pipeline 3-stage test-double validation', () => {
+    const PARENT_TASK_ID = 'diagnosis_pain-pri405';
+
+    it('Scenario C: Stage A (diag_rootcause) output passes DiagRootCauseOutputV1Schema', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const stageATaskId = `diag_rootcause-${PARENT_TASK_ID}`;
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_rootcause', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageATaskId },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+
+      const payload = output.payload as Record<string, unknown>;
+      // Inject taskId for schema validation (adapter adds it from taskRef)
+      expect(payload.taskId).toBe(stageATaskId);
+      expect(payload.valid).toBe(true);
+
+      // Schema validation — the real check that prevents BUG-007 recurrence (EP-09)
+      const schemaValid = Value.Check(DiagRootCauseOutputV1Schema, payload);
+      expect(
+        schemaValid,
+        `Stage A output failed DiagRootCauseOutputV1Schema validation. Errors: ${[...Value.Errors(DiagRootCauseOutputV1Schema, payload)].map(e => `${e.path}: ${e.message}`).join('; ')}`,
+      ).toBe(true);
+    });
+
+    it('Scenario C: Stage B (diag_distiller) output passes DiagDistillerOutputV1Schema', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const stageBTaskId = `diag_distiller-${PARENT_TASK_ID}`;
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_distiller', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageBTaskId },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.taskId).toBe(stageBTaskId);
+      expect(payload.valid).toBe(true);
+
+      // Schema validation
+      const schemaValid = Value.Check(DiagDistillerOutputV1Schema, payload);
+      expect(
+        schemaValid,
+        `Stage B output failed DiagDistillerOutputV1Schema validation. Errors: ${[...Value.Errors(DiagDistillerOutputV1Schema, payload)].map(e => `${e.path}: ${e.message}`).join('; ')}`,
+      ).toBe(true);
+    });
+
+    it('Scenario C: Stage C (diag_router) output passes DiagnosticianOutputV1Schema', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const stageCTaskId = `diag_router-${PARENT_TASK_ID}`;
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_router', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageCTaskId },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.valid).toBe(true);
+
+      // Schema validation
+      const schemaValid = Value.Check(DiagnosticianOutputV1Schema, payload);
+      expect(
+        schemaValid,
+        `Stage C output failed DiagnosticianOutputV1Schema validation. Errors: ${[...Value.Errors(DiagnosticianOutputV1Schema, payload)].map(e => `${e.path}: ${e.message}`).join('; ')}`,
+      ).toBe(true);
+    });
+
+    it('Scenario C: all 3 stages succeed with correct taskId (no mismatch, PRI-401 re-injection)', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+
+      // Run all 3 stages sequentially, as the split pipeline would
+      const stageATaskId = `diag_rootcause-${PARENT_TASK_ID}`;
+      const stageBTaskId = `diag_distiller-${PARENT_TASK_ID}`;
+      const stageCTaskId = `diag_router-${PARENT_TASK_ID}`;
+
+      // Stage A
+      const handleA = await adapter.startRun({
+        agentSpec: { agentId: 'diag_rootcause', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageATaskId },
+      });
+      const statusA = await adapter.pollRun(handleA.runId);
+      expect(statusA.status).toBe('succeeded');
+      const outputA = await adapter.fetchOutput(handleA.runId);
+      expect(outputA).not.toBeNull();
+      if (!outputA) throw new Error('outputA is null');
+      const payloadA = outputA.payload as Record<string, unknown>;
+      // PRI-401 re-injection: taskId must match the expected stage prefix
+      expect(payloadA.taskId).toBe(stageATaskId);
+
+      // Stage B
+      const handleB = await adapter.startRun({
+        agentSpec: { agentId: 'diag_distiller', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageBTaskId },
+      });
+      const statusB = await adapter.pollRun(handleB.runId);
+      expect(statusB.status).toBe('succeeded');
+      const outputB = await adapter.fetchOutput(handleB.runId);
+      expect(outputB).not.toBeNull();
+      if (!outputB) throw new Error('outputB is null');
+      const payloadB = outputB.payload as Record<string, unknown>;
+      expect(payloadB.taskId).toBe(stageBTaskId);
+
+      // Stage C
+      const handleC = await adapter.startRun({
+        agentSpec: { agentId: 'diag_router', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: stageCTaskId },
+      });
+      const statusC = await adapter.pollRun(handleC.runId);
+      expect(statusC.status).toBe('succeeded');
+      const outputC = await adapter.fetchOutput(handleC.runId);
+      expect(outputC).not.toBeNull();
+
+      // All 3 stages succeeded — no taskId mismatch
+      expect(payloadA.taskId).toContain('diag_rootcause-');
+      expect(payloadB.taskId).toContain('diag_distiller-');
     });
   });
 });

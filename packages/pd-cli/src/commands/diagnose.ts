@@ -349,17 +349,18 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     let runner: DiagnosticianRunnerLike;
     if (isSplitPipeline) {
       const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
+      const perStageTimeoutMs = pipelineTimeoutMs / 3;
       const rootCauseRunner = new DiagRootCauseRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
       const distillerRunner = new DiagDistillerRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
       const routerRunner = new DiagRouterRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
 
       runner = new SplitDiagnosticianRunner({
@@ -368,7 +369,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         routerRunner,
         stateManager,
         committer,
-        perStageTimeoutMs: pipelineTimeoutMs / 3,
+        perStageTimeoutMs,
       });
     } else {
       runner = new DisabledDiagnosticianRunner();
@@ -379,11 +380,44 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`Workspace: ${workspaceDir}\n`);
     }
 
-    const result = await diagnoseRun({
+    // ERR-067 fix: loop on `retried` status — the SplitDiagnosticianRunner
+    // handles per-stage retry internally, but the CLI must also loop in case
+    // the top-level result is `retried` (e.g., from a non-split pipeline).
+    const retryPolicy = stateManager.getRetryPolicy();
+    let result = await diagnoseRun({
       taskId: opts.taskId,
       stateManager,
       runner,
     });
+
+    let retryLoopCount = 0;
+    const maxRetryLoops = 10; // Safety limit
+    while (result.status === 'retried' && retryLoopCount < maxRetryLoops) {
+      retryLoopCount++;
+      const task = await stateManager.getTask(opts.taskId);
+      const backoffMs = task ? retryPolicy.calculateBackoff(task.attemptCount) : 30_000;
+
+      if (!opts.json) {
+        console.log(`  Retry ${retryLoopCount}: waiting ${Math.round(backoffMs / 1000)}s before re-running...`);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+      result = await diagnoseRun({
+        taskId: opts.taskId,
+        stateManager,
+        runner,
+      });
+    }
+
+    // P0-1 fix: convert non-terminal `retried` to `failed` with reason
+    if (result.status === 'retried') {
+      result = {
+        ...result,
+        status: 'failed',
+        failureReason: `Max retry loops (${maxRetryLoops}) exceeded without reaching terminal state. ${result.failureReason ?? ''}`,
+      };
+    }
 
     if (result.status !== 'succeeded') {
       if (opts.json) {
