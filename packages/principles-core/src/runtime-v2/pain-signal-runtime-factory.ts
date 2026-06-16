@@ -65,9 +65,11 @@ const DIAGNOSTIC_FUNNEL_ID = 'pd-runtime-v2-diagnosis';
 /** Default per-stage timeout (5 min). Same for monolith and split-per-stage. */
 const DEFAULT_TIMEOUT_MS = 300_000;
 
-/** Total timeout for the 3-stage split pipeline (3 × 5 min = 15 min).
- *  Shared with pd-cli diagnose command to avoid divergence. */
-export const SPLIT_PIPELINE_TOTAL_TIMEOUT_MS = 900_000;
+/** Total timeout for the 3-stage split pipeline (3 × 20 min = 60 min).
+ *  Local GPU inference (e.g. qwen3.6-27b-mtp with 200K context) needs
+ *  10-18 min per stage; 20 min per stage provides headroom.
+ *  Shared with pd-cli diagnose command. */
+export const SPLIT_PIPELINE_TOTAL_TIMEOUT_MS = 3_600_000;
 
 /** Resolved runtime configuration from funnel policy. */
 export interface RuntimeConfig {

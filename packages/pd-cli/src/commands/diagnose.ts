@@ -349,17 +349,18 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     let runner: DiagnosticianRunnerLike;
     if (isSplitPipeline) {
       const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
+      const perStageTimeoutMs = pipelineTimeoutMs / 3;
       const rootCauseRunner = new DiagRootCauseRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
       const distillerRunner = new DiagDistillerRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
       const routerRunner = new DiagRouterRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs },
       );
 
       runner = new SplitDiagnosticianRunner({
@@ -368,7 +369,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         routerRunner,
         stateManager,
         committer,
-        perStageTimeoutMs: pipelineTimeoutMs / 3,
+        perStageTimeoutMs,
       });
     } else {
       runner = new DisabledDiagnosticianRunner();
