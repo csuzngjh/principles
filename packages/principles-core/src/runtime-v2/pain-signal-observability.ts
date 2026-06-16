@@ -155,25 +155,47 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
       `).run(sessionId, timestamp, timestamp);
     }
 
-    const result = db.prepare(`
-      INSERT INTO pain_events (
-        session_id, source, score, reason, severity, origin, confidence, text, created_at,
-        canonical_pain_id, runtime_task_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      sessionId,
-      data.source,
-      data.score ?? 80,
-      sanitizeString(data.reason ?? '', workspaceDir),
-      severityFromScore(data.score ?? 80),
-      data.source === 'manual' ? 'user_manual' : 'system_infer',
-      1,
-      sanitizeString(data.reason ?? '', workspaceDir),
-      timestamp,
-      canonicalPainId ?? null,
-      runtimeTaskId ?? null,
-    );
-    return Number(result.lastInsertRowid);
+    // Try INSERT; on UNIQUE constraint violation for canonical_pain_id, do UPDATE instead.
+    // SQLite UPSERT (ON CONFLICT) does not support partial unique indexes, so we
+    // handle the conflict manually.
+    try {
+      const result = db.prepare(`
+        INSERT INTO pain_events (
+          session_id, source, score, reason, severity, origin, confidence, text, created_at,
+          canonical_pain_id, runtime_task_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        sessionId,
+        data.source,
+        data.score ?? 80,
+        sanitizeString(data.reason ?? '', workspaceDir),
+        severityFromScore(data.score ?? 80),
+        data.source === 'manual' ? 'user_manual' : 'system_infer',
+        1,
+        sanitizeString(data.reason ?? '', workspaceDir),
+        timestamp,
+        canonicalPainId ?? null,
+        runtimeTaskId ?? null,
+      );
+      return Number(result.lastInsertRowid);
+    } catch (insertErr: unknown) {
+      // If UNIQUE constraint violation on canonical_pain_id, upsert manually
+      if (
+        canonicalPainId &&
+        insertErr instanceof Error &&
+        insertErr.message.includes('UNIQUE constraint failed') &&
+        insertErr.message.includes('canonical_pain_id')
+      ) {
+        db.prepare(`
+          UPDATE pain_events
+          SET runtime_task_id = COALESCE(?, runtime_task_id)
+          WHERE canonical_pain_id = ?
+        `).run(runtimeTaskId ?? null, canonicalPainId);
+        const row = db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId) as { id: number } | undefined;
+        return row?.id;
+      }
+      throw insertErr;
+    }
   } finally {
     db.close();
   }
