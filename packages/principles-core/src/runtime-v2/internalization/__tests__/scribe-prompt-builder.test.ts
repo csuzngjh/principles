@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ScribePromptBuilder, SCRIBE_PROTOCOL_INSTRUCTION, SCRIBE_PROMPT_CONTRACT_VERSION } from '../scribe-prompt-builder.js';
+import { ScribePromptBuilder, buildScribeProtocolInstruction, SCRIBE_PROMPT_CONTRACT_VERSION } from '../scribe-prompt-builder.js';
 
 describe('ScribePromptBuilder (PRI-109)', () => {
   const builder = new ScribePromptBuilder();
@@ -22,26 +22,31 @@ describe('ScribePromptBuilder (PRI-109)', () => {
   });
 
   it('instruction says copy sourcePhilosopherArtifactId exactly', () => {
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId');
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId');
   });
 
   it('instruction says Output ONLY valid JSON', () => {
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('Output ONLY valid JSON');
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('Output ONLY valid JSON');
   });
 
   it('instruction says no markdown, no code fences', () => {
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('no markdown');
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('no code fences');
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('no markdown');
+    expect(instruction).toContain('no code fences');
   });
 
   it('instruction specifies confidence must be number 0..1', () => {
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('confidence MUST be a number between 0.0 and 1.0');
-    expect(SCRIBE_PROTOCOL_INSTRUCTION).toContain('NOT a string');
+    const instruction = buildScribeProtocolInstruction();
+    expect(instruction).toContain('confidence MUST be a number between 0.0 and 1.0');
+    expect(instruction).toContain('NOT a string');
   });
 
   it('promptInput includes scribeInstruction', () => {
     const { promptInput } = builder.buildPrompt(defaultInput);
-    expect(promptInput.scribeInstruction).toBe(SCRIBE_PROTOCOL_INSTRUCTION);
+    const expectedInstruction = buildScribeProtocolInstruction();
+    expect(promptInput.scribeInstruction).toBe(expectedInstruction);
   });
 
   it('promptInput includes promptContractVersion', () => {

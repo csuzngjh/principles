@@ -1,3 +1,5 @@
+import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
+import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
@@ -8,6 +10,8 @@ export interface ScribePromptBuilderInput {
   philosopherArtifact: unknown;
   /** Owner's preferred language for principle generation (PRI-336). */
   outputLanguage?: OutputLanguage;
+  /** Inject core axiom grounding section (default: false). */
+  coreGrounding?: boolean;
 }
 
 export interface ScribePromptInput {
@@ -24,7 +28,21 @@ export interface ScribePromptBuildResult {
   readonly promptInput: ScribePromptInput;
 }
 
-export const SCRIBE_PROTOCOL_INSTRUCTION = `You are a Scribe agent in a principle internalization pipeline. Your role is to distill the Philosopher's analysis into a formal, implementable principle draft.
+/**
+ * Build the Scribe protocol instruction with optional core axiom grounding.
+ *
+ * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
+ * Scribe can ensure the formal principle draft is consistent with the
+ * existing core principle framework.
+ */
+export function buildScribeProtocolInstruction(
+  opts: CoreAxiomBlockOptions & { outputLanguage?: OutputLanguage } = {},
+): string {
+  const { outputLanguage, ...axiomOpts } = opts;
+  const coreAxiomsBlock = buildCoreAxiomBlock(axiomOpts);
+  const languageDirective = buildLanguageDirective(outputLanguage);
+
+  return `You are a Scribe agent in a principle internalization pipeline. Your role is to distill the Philosopher's analysis into a formal, implementable principle draft.
 
 PROTOCOL:
 1. Review the philosopherArtifact to understand the philosophical thesis and principle candidate
@@ -32,8 +50,7 @@ PROTOCOL:
 3. Preserve the lineage trace from dreamer and philosopher artifacts
 4. Identify risks associated with applying this principle
 5. The principle draft should be concrete enough to guide implementation, not just philosophical
-
-OUTPUT FORMAT (pure JSON, no markdown):
+${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
 {
   "taskId": "<from input>",
   "sourcePhilosopherArtifactId": "<copy exactly from input.sourcePhilosopherArtifactId>",
@@ -65,25 +82,33 @@ CONSTRAINTS:
 - sourceTrace.philosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId
 - sourceTrace.dreamerArtifactId is optional — include only if available from philosopher artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
-- generatedAt MUST be an ISO-8601 timestamp string
-`;
+- generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
+- If the CORE AXIOMS section is provided, ensure the principle draft does not duplicate or contradict any existing core axiom. If overlap exists, note it in risks
+${languageDirective}`;
+}
 
 export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v1';
 
 export class ScribePromptBuilder {
+  private readonly coreGrounding: boolean;
+  private readonly outputLanguage?: OutputLanguage;
+
+  constructor(opts: { coreGrounding?: boolean; outputLanguage?: OutputLanguage } = {}) {
+    this.coreGrounding = opts.coreGrounding ?? false;
+    this.outputLanguage = opts.outputLanguage;
+  }
+
   /**
-   * Build a scribe prompt with optional language directive (PRI-336).
-   *
-   * When `input.outputLanguage` is provided, a language directive is appended
-   * to the scribe instruction telling the LLM to produce human-readable
-   * principle fields in the owner's preferred language.
+   * Build a scribe prompt with optional core axiom grounding and language directive (PRI-336).
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: ScribePromptBuilderInput): ScribePromptBuildResult {
-    const languageDirective = buildLanguageDirective(input.outputLanguage);
-    const scribeInstruction = input.outputLanguage
-      ? SCRIBE_PROTOCOL_INSTRUCTION + languageDirective
-      : SCRIBE_PROTOCOL_INSTRUCTION;
+    const coreGrounding = input.coreGrounding ?? this.coreGrounding;
+    const outputLanguage = input.outputLanguage ?? this.outputLanguage;
+
+    const scribeInstruction = buildScribeProtocolInstruction({
+      coreGrounding,
+      outputLanguage,
+    });
 
     const promptInput: ScribePromptInput = {
       taskId: input.taskId,

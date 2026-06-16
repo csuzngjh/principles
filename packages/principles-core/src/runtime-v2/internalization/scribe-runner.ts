@@ -179,13 +179,14 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       parsedPhilosopherArtifact = context.philosopherArtifact;
     }
 
-    const builder = new ScribePromptBuilder();
+    const builder = new ScribePromptBuilder({ coreGrounding: true, outputLanguage: this.resolvedOptions.outputLanguage });
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
       sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId,
       outputLanguage: this.resolvedOptions.outputLanguage,
+      coreGrounding: true,
     });
 
     return this.runtimeAdapter.startRun({
@@ -339,10 +340,19 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
    * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
    * Only fill when absent via Object.hasOwn — present-but-falsy values
    * must reach validation and fail loud (Runtime Contract Rule 3).
+   *
+   * Also overrides generatedAt with the actual current timestamp (LLM may
+   * echo the prompt's example date).
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+
+    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
+      const record = untrustedOutput as Record<string, unknown>;
+      // Override generatedAt with actual timestamp — LLM may echo prompt example date
+      record.generatedAt = new Date().toISOString();
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: ScribeOutputV1): void {
