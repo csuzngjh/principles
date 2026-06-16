@@ -35,7 +35,7 @@ PROTOCOL:
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"taskId":"task-123","sourceEvaluatorArtifactId":"pi-art-evaluator-001","review":{"decision":"approve_rollout","summary":"The evaluation is thorough and the plan is safe to proceed with rollout.","confidence":0.9,"requiredChanges":[],"rolloutRisks":["Feature flag configuration may need adjustment"],"safetyChecks":["Verify feature flag is properly configured","Monitor error rates for 24h post-deploy"]},"sourceTrace":{"evaluatorArtifactId":"pi-art-evaluator-001"},"risks":["Rollback plan should be tested before deployment"],"generatedAt":"2026-05-11T12:00:00.000Z"}
+{"taskId":"task-123","sourceEvaluatorArtifactId":"pi-art-evaluator-001","review":{"decision":"approve_rollout","summary":"The evaluation is thorough and the plan is safe to proceed with rollout.","confidence":0.9,"requiredChanges":[],"rolloutRisks":["Feature flag configuration may need adjustment"],"safetyChecks":["Verify feature flag is properly configured","Monitor error rates for 24h post-deploy"]},"sourceTrace":{"evaluatorArtifactId":"pi-art-evaluator-001"},"risks":["Rollback plan should be tested before deployment"],"generatedAt":"<current ISO-8601 timestamp>"}
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
@@ -52,7 +52,7 @@ CONSTRAINTS:
 - sourceTrace.philosopherArtifactId is optional — include only if available from evaluator artifact
 - sourceTrace.dreamerArtifactId is optional — include only if available from evaluator artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
-- generatedAt MUST be an ISO-8601 timestamp string
+- generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
 export const ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION = 'rollout-reviewer-output-v1.prompt.v1';

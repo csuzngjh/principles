@@ -174,18 +174,6 @@ export function getSafeUatWorkspacePath(): string {
 }
 
 /**
- * Check if --allow-production-workspace-for-uat flag is set.
- *
- * This is the escape hatch for cases where the operator explicitly wants to run UAT on production.
- * The flag must be very explicit in both name and output (as required by PRI-334).
- */
-export function isProductionWorkspaceAllowed(): boolean {
-  // Check if the flag was parsed and passed through opts
-  // This will be called from command handlers after Commander parses flags
-  return false; // Placeholder; actual check depends on Commander opts
-}
-
-/**
  * Format guard refusal for console output.
  *
  * Follows EP-03/EP-04: structured reason + nextAction.

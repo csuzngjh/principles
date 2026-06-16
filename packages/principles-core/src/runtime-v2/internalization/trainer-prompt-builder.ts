@@ -34,7 +34,7 @@ PROTOCOL:
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"taskId":"task-123","sourceRolloutReviewerArtifactId":"pi-art-rollout-reviewer-001","ruleCandidate":{"toolScope":"tool_call","triggerCondition":"When a tool is called with invalid parameters","proposedDecision":"auto_correct","proposedCorrection":{"description":"Use default parameters instead","proposedParams":{"defaultTimeout":5000}},"rationale":"Safe to auto-correct with sensible defaults","confidence":0.88},"safety":{"limitations":["Requires feature flag enabled"],"falsePositiveRisks":["May incorrectly auto-correct edge case inputs"],"requiredReplayCases":["tool_call with null params","tool_call with empty toolName"]},"sourceTrace":{"rolloutReviewerArtifactId":"pi-art-rollout-reviewer-001"},"goldenTraceRefs":["gt-case-001","gt-case-002"],"generatedAt":"2026-05-11T12:00:00.000Z"}
+{"taskId":"task-123","sourceRolloutReviewerArtifactId":"pi-art-rollout-reviewer-001","ruleCandidate":{"toolScope":"tool_call","triggerCondition":"When a tool is called with invalid parameters","proposedDecision":"auto_correct","proposedCorrection":{"description":"Use default parameters instead","proposedParams":{"defaultTimeout":5000}},"rationale":"Safe to auto-correct with sensible defaults","confidence":0.88},"safety":{"limitations":["Requires feature flag enabled"],"falsePositiveRisks":["May incorrectly auto-correct edge case inputs"],"requiredReplayCases":["tool_call with null params","tool_call with empty toolName"]},"sourceTrace":{"rolloutReviewerArtifactId":"pi-art-rollout-reviewer-001"},"goldenTraceRefs":["gt-case-001","gt-case-002"],"generatedAt":"<current ISO-8601 timestamp>"}
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
@@ -57,7 +57,7 @@ CONSTRAINTS:
 - sourceTrace.dreamerArtifactId is optional — include only if available from rollout reviewer artifact
 - goldenTraceRefs is optional — array of strings if present
 - inlineGoldenTraceCases is optional — array of case objects if present
-- generatedAt MUST be an ISO-8601 timestamp string
+- generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 `;
 
 export const TRAINER_PROMPT_CONTRACT_VERSION = 'trainer-output-v1.prompt.v1';

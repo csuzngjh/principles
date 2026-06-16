@@ -4,7 +4,7 @@
  *
  * Add entries here whenever a new service/read-model boundary is established.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 
 // ── Source-file existence ──────────────────────────────────────────────────
 
@@ -3494,6 +3494,90 @@ describe('PRI-372: split diagnostician runners extend BasePeerRunner', () => {
     const { DiagRouterRunner } = await import('../internalization/diag-router-runner.js');
     const { BasePeerRunner } = await import('../runner/base-peer-runner.js');
     expect(DiagRouterRunner.prototype).toBeInstanceOf(BasePeerRunner);
+  });
+});
+
+// ── PRI-416: Type Single-Ownership Guards ──────────────────────────────────────
+//
+// These guards ensure that critical types/functions are defined exactly once
+// within principles-core/src/. This prevents the "duplicate type definition"
+// debt that led to PRI-413/PRI-415 (e.g., HybridLedgerStore in both
+// principle-tree-ledger.ts and types.ts).
+
+describe('PRI-416: type single-ownership guards', () => {
+  let fs: typeof import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+  let pathModule: typeof import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+  let coreSrcDir: string;
+
+  beforeAll(async () => {
+    fs = await import('fs');
+    pathModule = await import('path');
+    coreSrcDir = pathModule.resolve(__dirname, '..', '..');
+  });
+
+  function findDefinitions(pattern: RegExp): string[] {
+    const hits: string[] = [];
+    function scan(dir: string): void {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = pathModule.join(dir, entry);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          if (entry === 'node_modules' || entry === '__tests__') continue;
+          scan(full);
+        } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts') && !entry.endsWith('.d.ts')) {
+          const content = fs.readFileSync(full, 'utf-8');
+          if (pattern.test(content)) {
+            hits.push(full.replace(coreSrcDir + pathModule.sep, '').replace(coreSrcDir + '/', '').replace(/\\/g, '/'));
+          }
+        }
+      }
+    }
+    scan(coreSrcDir);
+    return hits;
+  }
+
+  it('InjectablePrinciple is defined exactly once in core/src/', () => {
+    const hits = findDefinitions(/export\s+interface\s+InjectablePrinciple\s*\{/);
+    expect(hits).toEqual(['prompt-builder/principle-selection.ts']);
+  });
+
+  it('HybridLedgerStore is defined exactly once in core/src/', () => {
+    const hits = findDefinitions(/export\s+interface\s+HybridLedgerStore\s*\{/);
+    expect(hits).toEqual(['principle-tree-ledger.ts']);
+  });
+
+  it('atomicWriteFileSync is defined exactly once in core/src/', () => {
+    const hits = findDefinitions(/export\s+function\s+atomicWriteFileSync\s*\(/);
+    expect(hits).toEqual(['io.ts']);
+  });
+});
+
+// ── PRI-416: Barrel Cap Guards ────────────────────────────────────────────────
+//
+// The barrel export file (index.ts) must stay lean to avoid bloat.
+// After PRI-415 cleanup, it has ~263 total lines and ~40 export lines.
+// Set upper limits to prevent future regression.
+
+describe('PRI-416: barrel cap guards', () => {
+  const BARREL_MAX_TOTAL_LINES = 300;
+  const BARREL_MAX_EXPORT_LINES = 50;
+
+  it('index.ts total lines <= ' + BARREL_MAX_TOTAL_LINES, async () => {
+    const fsMod: typeof import('fs') = await import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const pathMod: typeof import('path') = await import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const barrelPath = pathMod.resolve(__dirname, '..', '..', 'index.ts');
+    const content = fsMod.readFileSync(barrelPath, 'utf-8');
+    const lineCount = content.split('\n').length;
+    expect(lineCount).toBeLessThanOrEqual(BARREL_MAX_TOTAL_LINES);
+  });
+
+  it('index.ts export lines <= ' + BARREL_MAX_EXPORT_LINES, async () => {
+    const fsMod: typeof import('fs') = await import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const pathMod: typeof import('path') = await import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const barrelPath = pathMod.resolve(__dirname, '..', '..', 'index.ts');
+    const content = fsMod.readFileSync(barrelPath, 'utf-8');
+    const exportLines = content.split('\n').filter((l: string) => /^\s*export\s/.test(l));
+    expect(exportLines.length).toBeLessThanOrEqual(BARREL_MAX_EXPORT_LINES);
   });
 });
 

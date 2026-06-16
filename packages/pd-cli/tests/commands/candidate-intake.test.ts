@@ -71,9 +71,6 @@ vi.mock('@principles/core/runtime-v2', () => ({
   CandidateIntakeError: MockCandidateIntakeError,
   RuntimeStateManager: MockRuntimeStateManager,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
-}));
-
-vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
 }));
 

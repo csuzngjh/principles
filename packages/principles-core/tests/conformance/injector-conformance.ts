@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { PrincipleInjector, InjectionContext } from '../../src/principle-injector.js';
-import type { InjectablePrinciple } from '../../src/types.js';
+import type { InjectablePrinciple } from '../../src/prompt-builder/principle-selection.js';
 
 export type InjectorFactory = () => PrincipleInjector;
 

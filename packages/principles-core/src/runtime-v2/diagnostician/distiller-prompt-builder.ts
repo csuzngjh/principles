@@ -21,7 +21,7 @@ import type { SchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DefaultSchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DiagDistillerOutputV1Schema } from './diag-distiller-output.js';
 import type { DiagRootCauseOutputV1 } from './diag-rootcause-output.js';
-import { CORE_PRINCIPLES } from '../core-principles/core-principle-registry.js';
+import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import type { BuildPromptOptions } from '../diagnostician-prompt-builder.js';
@@ -123,17 +123,10 @@ export function buildDistillerProtocolInstruction(
   const languageDirective = buildLanguageDirective(outputLanguage);
 
   // Core Axioms section — only when coreGrounding is true
-  const coreAxiomsBlock = coreGrounding
-    ? `
-CORE AXIOMS:
-The following core axioms are the system's foundational behavioral principles.
-You MUST only reference axiom IDs from this list. Fabricating IDs not in this
-list will cause validation failure.
-
-${CORE_PRINCIPLES.map(p => `${p.id}: ${p.statement}`).join('\n')}
-
-`
-    : '';
+  const coreAxiomsBlock = buildCoreAxiomBlock({
+    coreGrounding,
+    outputLanguage,
+  });
 
   return `You are a principle distiller. Your job is to abstract a specific root cause into a general, cross-scenario principle.
 

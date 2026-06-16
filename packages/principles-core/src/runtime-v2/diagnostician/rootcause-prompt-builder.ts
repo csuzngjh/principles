@@ -26,7 +26,7 @@ import { DiagRootCauseOutputV1Schema } from './diag-rootcause-output.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
-import { CORE_PRINCIPLES } from '../core-principles/core-principle-registry.js';
+import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type {
   BuildPromptOptions,
   PromptBuildResult,
@@ -86,18 +86,15 @@ export function buildRootCauseProtocolInstruction(
   // T-E (PRI-371): When coreGrounding is true, insert PHASE 3.5.
   // When false or undefined, output is byte-identical to the original
   // (EP-03: no silent fallback).
-  const phase35Block = coreGrounding
-    ? `
-PHASE 3.5 — Core Axiom Grounding:
-The following core axioms are the system's foundational behavioral principles.
-If the root cause relates to any of these axioms, note the axiom ID (e.g. T-01)
-in the ambiguityNotes field of your output.
-
-Core Axioms:
-${CORE_PRINCIPLES.map(p => `${p.id}: ${p.statement}`).join('\n')}
-
-`
-    : '\n';
+  const phase35Block = buildCoreAxiomBlock({
+    coreGrounding,
+    sectionTitle: 'PHASE 3.5 — Core Axiom Grounding:',
+    instruction:
+      'If the root cause relates to any of these axioms, note the axiom ID (e.g. T-01)\n' +
+      'in the ambiguityNotes field of your output.\n\nCore Axioms:',
+    outputLanguage,
+    fallback: '\n',
+  });
 
   return `You are a root cause analysis expert. Follow this protocol:
 

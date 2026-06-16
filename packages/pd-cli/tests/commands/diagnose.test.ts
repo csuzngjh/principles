@@ -123,12 +123,9 @@ vi.mock('@principles/core/runtime-v2', () => {
       },
     }),
     status: vi.fn(),
+    PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
   };
 });
-
-vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
-  PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
-}));
 
 vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),

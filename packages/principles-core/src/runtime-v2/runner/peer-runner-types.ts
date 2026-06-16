@@ -35,6 +35,11 @@ export interface PeerRunnerOptions {
    * Undefined = no language directive (backward compatible).
    */
   readonly outputLanguage?: OutputLanguage;
+  /**
+   * Whether to inject CORE_PRINCIPLES into the prompt (default: true).
+   * Controlled by the `internalization_core_grounding` feature flag.
+   */
+  readonly coreGrounding?: boolean;
 }
 
 /** Resolved options with defaults applied. */
@@ -47,6 +52,8 @@ export interface ResolvedPeerRunnerOptions {
   readonly agentId: string;
   /** Owner's preferred language for principle generation (PRI-336). Undefined = no directive. */
   readonly outputLanguage?: OutputLanguage;
+  /** Whether to inject CORE_PRINCIPLES into the prompt (default: true). */
+  readonly coreGrounding: boolean;
 }
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
