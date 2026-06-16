@@ -59,6 +59,7 @@ export interface PiAiAdapterConfigResult {
   apiKeyEnv: string;
   baseUrl?: string;
   timeoutMs?: number;
+  maxRetries?: number;
   workspace: string;
 }
 
@@ -264,6 +265,9 @@ export function createAdapterConfigFromProfile(
     }
     if (profile.timeoutMs) {
       result.timeoutMs = profile.timeoutMs;
+    }
+    if (profile.maxRetries !== undefined) {
+      result.maxRetries = profile.maxRetries;
     }
     return result;
   }
