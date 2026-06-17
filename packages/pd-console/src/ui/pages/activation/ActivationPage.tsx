@@ -19,20 +19,12 @@ import {
   validateLifecycleMetricsData,
   isReversibleChannel,
 } from "./ActivationValidators.js";
+import { enumLabel } from "../../utils/enum-labels.js";
 
 // ── Channel label helper ─────────────────────────────────────────────────────
 
 function getChannelLabel(channel: string, t: (key: string) => string): string {
-  switch (channel) {
-    case "prompt":
-      return t("pages.activation.channelPrompt");
-    case "defer_archive":
-      return t("pages.activation.channelDeferArchive");
-    case "code_tool_hook":
-      return t("pages.activation.channelCodeToolHook");
-    default:
-      return channel;
-  }
+  return enumLabel('channel', channel, t);
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -110,16 +102,19 @@ function ActivationFactCard({
         )}
       </div>
 
-      {/* Principle info */}
+      {/* Principle info — action is the human-readable anchor; principleId
+          is demoted to a secondary mono identifier (also available via hover) */}
       <div className="mt-[14px] mb-2">
         <span className="text-ink-2 text-[13px]">{t("pages.activation.principleLabel")}</span>{" "}
         <Link
           to={`/principles/${record.principleId}`}
           className="text-gov text-[13px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           data-testid={`principle-link-${record.principleId}`}
+          title={record.principleId}
         >
-          {record.principleId}
+          {record.action}
         </Link>
+        <span className="ml-2 font-mono text-[11px] text-ink-4">{record.principleId}</span>
       </div>
 
       {/* Action / target / time */}
@@ -493,7 +488,8 @@ export function ActivationPage() {
                 >
                   <div className="text-ink-2 text-sm leading-relaxed">
                     <span className="font-medium text-ink">{t("pages.activation.neverActivatedCard")}</span>{" "}
-                    — {record.principleId} · {record.channel}
+                    — {record.action} · {getChannelLabel(record.channel, t)}
+                    <span className="ml-2 font-mono text-[11px] text-ink-4">{record.principleId}</span>
                   </div>
                   <Link
                     to="/debt"

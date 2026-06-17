@@ -33,8 +33,30 @@ const WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'CLAUDE.md'];
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolvePluginDir(workspaceDir: string): string {
-  return path.join(path.dirname(workspaceDir), 'extensions', 'principles-disciple');
+/**
+ * Resolve the OpenClaw installation home.
+ *
+ * Priority:
+ * 1. `OPENCLAW_HOME` env var (explicit override)
+ * 2. `~/.openclaw` (default install location)
+ *
+ * Note: the workspace (where PD state lives) and the OpenClaw install home
+ * (where extensions live) are NOT necessarily the same directory or even
+ * siblings — the workspace can be on a different drive. Do not derive the
+ * extensions dir from `path.dirname(workspaceDir)`.
+ */
+function resolveOpenclawHome(): string {
+  const envHome = process.env.OPENCLAW_HOME;
+  if (envHome && envHome.trim().length > 0) return path.resolve(envHome);
+  return path.join(os.homedir(), '.openclaw');
+}
+
+function resolveExtensionsDir(): string {
+  return path.join(resolveOpenclawHome(), 'extensions');
+}
+
+function resolvePluginDir(_workspaceDir: string): string {
+  return path.join(resolveExtensionsDir(), 'principles-disciple');
 }
 
 function readCurrentVersion(pluginDir: string): string | undefined {
@@ -71,8 +93,10 @@ function isValidMergeStrategy(value: unknown): value is 'smart' | 'overwrite' | 
 function validatePathInWorkspace(target: string, workspaceDir: string): boolean {
   const resolved = path.resolve(target);
   const resolvedWorkspace = path.resolve(workspaceDir);
-  // Allow paths within workspace or within the extensions directory
-  const extensionsDir = path.resolve(path.join(path.dirname(workspaceDir), 'extensions'));
+  // Allow paths within workspace or within the OpenClaw extensions directory.
+  // The extensions dir is under the OpenClaw install home (~/.openclaw/extensions),
+  // which is NOT derived from the workspace dir (the two may be on different drives).
+  const extensionsDir = path.resolve(resolveExtensionsDir());
   return resolved.startsWith(resolvedWorkspace + path.sep) || resolved === resolvedWorkspace
     || resolved.startsWith(extensionsDir + path.sep) || resolved === extensionsDir;
 }

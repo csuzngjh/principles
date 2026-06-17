@@ -582,6 +582,7 @@ export interface GovernanceQueueData {
   inProgressSummary?: string;
   degradedSignals?: DegradedSignalData[];
   evidenceInProgressCount?: number;
+  gateBlocksToday?: number;
   note?: string;
   generatedAt?: string;
 }
@@ -639,6 +640,11 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
   if (Object.hasOwn(v, 'evidenceInProgressCount')) {
     if (!isNumber(v.evidenceInProgressCount)) return null;
     result.evidenceInProgressCount = v.evidenceInProgressCount;
+  }
+  // Wave 4: gate blocks today (seconds-level auto-blocks)
+  if (Object.hasOwn(v, 'gateBlocksToday')) {
+    if (!isNumber(v.gateBlocksToday)) return null;
+    result.gateBlocksToday = v.gateBlocksToday;
   }
   return result;
 }
@@ -758,35 +764,48 @@ export function validateLifecycleMetrics(v: unknown): LifecycleMetricsData | nul
 }
 
 // ── Update validators ─────────────────────────────────────────────────────────
+// Contract aligned with backend routes/update.ts doCheckForUpdates() response.
 
 export interface UpdateStatusData {
   currentVersion: string;
   latestVersion: string;
-  updateAvailable: boolean;
-  lastChecked: string;
+  hasUpdate: boolean;
+  error?: string;
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'currentVersion') || !isString(v.currentVersion)) return null;
   if (!Object.hasOwn(v, 'latestVersion') || !isString(v.latestVersion)) return null;
-  if (!Object.hasOwn(v, 'updateAvailable') || !isBoolean(v.updateAvailable)) return null;
-  if (!Object.hasOwn(v, 'lastChecked') || !isString(v.lastChecked)) return null;
-  return { currentVersion: v.currentVersion, latestVersion: v.latestVersion, updateAvailable: v.updateAvailable, lastChecked: v.lastChecked };
+  if (!Object.hasOwn(v, 'hasUpdate') || !isBoolean(v.hasUpdate)) return null;
+  const result: UpdateStatusData = {
+    currentVersion: v.currentVersion,
+    latestVersion: v.latestVersion,
+    hasUpdate: v.hasUpdate,
+  };
+  // Optional error field (present when registry check fails)
+  if (Object.hasOwn(v, 'error') && isString(v.error)) {
+    result.error = v.error;
+  }
+  return result;
 }
 
 export interface UpdateHistoryEntryData {
-  version: string;
-  appliedAt: string;
-  notes: string;
+  id: string;
+  timestamp: string;
+  fromVersion: string;
+  toVersion: string;
+  success: boolean;
 }
 
 function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData | null {
   if (!isObject(v)) return null;
-  if (!Object.hasOwn(v, 'version') || !isString(v.version)) return null;
-  if (!Object.hasOwn(v, 'appliedAt') || !isString(v.appliedAt)) return null;
-  if (!Object.hasOwn(v, 'notes') || !isString(v.notes)) return null;
-  return { version: v.version, appliedAt: v.appliedAt, notes: v.notes };
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'timestamp') || !isString(v.timestamp)) return null;
+  if (!Object.hasOwn(v, 'fromVersion') || !isString(v.fromVersion)) return null;
+  if (!Object.hasOwn(v, 'toVersion') || !isString(v.toVersion)) return null;
+  if (!Object.hasOwn(v, 'success') || !isBoolean(v.success)) return null;
+  return { id: v.id, timestamp: v.timestamp, fromVersion: v.fromVersion, toVersion: v.toVersion, success: v.success };
 }
 
 export interface UpdateHistoryData {
@@ -794,6 +813,13 @@ export interface UpdateHistoryData {
 }
 
 export function validateUpdateHistory(v: unknown): UpdateHistoryData | null {
+  // Backend returns a bare array; wrap it into { updates: [...] }.
+  if (Array.isArray(v)) {
+    const updates = validateArray(v, validateUpdateHistoryEntry);
+    if (updates === null) return null;
+    return { updates };
+  }
+  // Also accept { updates: [...] } shape for forward-compat.
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'updates') || !Array.isArray(v.updates)) return null;
   const updates = validateArray(v.updates, validateUpdateHistoryEntry);
@@ -1021,6 +1047,8 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
 export interface ApprovalGroupData {
   principleId: string;
   principleTitle: string;
+  /** Wave 7: human-readable principle text from artifact contentJson, if available */
+  candidateDescription?: string;
   status: string;
   records: ApprovalGroupRecordData[];
 }
@@ -1033,7 +1061,12 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   if (!Object.hasOwn(v, 'records') || !Array.isArray(v.records)) return null;
   const records = validateArray(v.records, validateApprovalGroupRecord);
   if (records === null) return null;
-  return { principleId: v.principleId, principleTitle: v.principleTitle, status: v.status, records };
+  const result: ApprovalGroupData = { principleId: v.principleId, principleTitle: v.principleTitle, status: v.status, records };
+  // Wave 7: optional candidateDescription from artifact contentJson
+  if (Object.hasOwn(v, 'candidateDescription') && isString(v.candidateDescription) && v.candidateDescription.length > 0) {
+    result.candidateDescription = v.candidateDescription;
+  }
+  return result;
 }
 
 export interface ApprovalsGroupedData {

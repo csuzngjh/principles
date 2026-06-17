@@ -19,10 +19,10 @@ import type {
 } from "../../api.js";
 import {
   computeOverallReadiness,
-  getReadinessLabel,
   groupAgentsByReadiness,
   redactDiagnosticsForCopy,
 } from "../../utils/control-center-helpers.js";
+import { enumLabel } from "../../utils/enum-labels.js";
 import type { ControlCenterDiagnostics } from "../../utils/control-center-helpers.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
@@ -371,7 +371,7 @@ function OverallStatusCard({
     <div className="bg-panel border border-line rounded-[6px] px-[18px] py-[14px]">
       <div className="flex items-center gap-3 mb-2">
         <span className={readinessTagClasses(readiness)}>
-          {getReadinessLabel(readiness)}
+          {enumLabel('readiness', readiness, t)}
         </span>
         <span className="text-ink-3 text-[13px]">
           {enabledCount}/{totalCount} {t("pages.controlCenter.agentEnabled").toLowerCase()}
@@ -412,7 +412,7 @@ function AgentRow({
       {/* Readiness tag */}
       <div className="min-w-[100px]">
         <span className={readinessTagClasses(agent.readiness)}>
-          {getReadinessLabel(agent.readiness)}
+          {enumLabel('readiness', agent.readiness, t)}
         </span>
       </div>
 
@@ -492,7 +492,7 @@ function DefaultRuntimeSelector({
       >
         {profiles.map((p) => (
           <option key={p.id} value={p.id}>
-            {p.label} — {getReadinessLabel(p.readiness)}
+            {p.label} — {enumLabel('readiness', p.readiness, t)}
           </option>
         ))}
       </select>
@@ -563,9 +563,9 @@ function AdvancedDiagnostics({
                     key={f.id}
                     className="flex items-center gap-2 text-[13px]"
                   >
-                    <span className="text-ink-2">{f.id}</span>
+                    <span className="text-ink-2">{enumLabel('featureId', f.id, t)}</span>
                     <span className="text-ink-4">·</span>
-                    <span className="text-ink-3">{f.category}</span>
+                    <span className="text-ink-3">{enumLabel('featureCategory', f.category, t)}</span>
                     <span className="text-ink-4">·</span>
                     <span
                       className={
@@ -602,7 +602,7 @@ function AdvancedDiagnostics({
                     <span className="text-ink-4">·</span>
                     <span className="text-ink-3">{p.type}</span>
                     <span className={readinessTagClasses(p.readiness)}>
-                      {getReadinessLabel(p.readiness)}
+                      {enumLabel('readiness', p.readiness, t)}
                     </span>
                   </div>
                 ))}
@@ -666,7 +666,7 @@ function AdvancedDiagnostics({
               return (
                 <div key={validatedStatus} className="flex items-center gap-2">
                   <span className={readinessTagClasses(validatedStatus)}>
-                    {getReadinessLabel(validatedStatus)}
+                    {enumLabel('readiness', validatedStatus, t)}
                   </span>
                   <span className="text-ink-3 text-[13px]">
                     {agentsInGroup.map((a) => a.name).join(", ")}

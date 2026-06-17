@@ -924,6 +924,47 @@ function installTargetDependencies() {
 }
 
 /**
+ * Verify injected workspace packages have their transitive dependencies installed.
+ * npm install --omit=dev in the target doesn't resolve deps of manually-copied packages,
+ * so transitive deps like @earendil-works/pi-agent-core may be missing after production install.
+ */
+function verifyInjectedWorkspaceDeps() {
+    const corePkgDir = join(INSTALL_DIR, 'node_modules', '@principles', 'core');
+    if (!existsSync(corePkgDir)) return;
+
+    const corePkgPath = join(corePkgDir, 'package.json');
+    if (!existsSync(corePkgPath)) return;
+
+    let corePkg;
+    try {
+        corePkg = JSON.parse(readFileSync(corePkgPath, 'utf-8'));
+    } catch {
+        return;
+    }
+
+    const deps = corePkg.dependencies || {};
+    const missing = [];
+    for (const [dep, version] of Object.entries(deps)) {
+        if (!existsSync(join(INSTALL_DIR, 'node_modules', dep))) {
+            missing.push(`${dep}@${version}`);
+        }
+    }
+
+    if (missing.length === 0) return;
+
+    console.log(`  ⚠️  ${missing.length} transitive dependenc${missing.length === 1 ? 'y' : 'ies'} of @principles/core missing, installing...`);
+    try {
+        execSync(`npm install ${missing.join(' ')} --no-audit --no-fund --prefer-offline`, {
+            cwd: INSTALL_DIR,
+            stdio: 'pipe'
+        });
+        console.log('  ✅ Transitive dependencies installed');
+    } catch (error) {
+        console.warn(`  ⚠️  Failed to install transitive dependencies: ${error.message}`);
+    }
+}
+
+/**
  * Clean stale backups.
  */
 function cleanStaleBackups() {
@@ -1269,6 +1310,7 @@ function main() {
 
     injectLocalWorkspacePackages();
     installTargetDependencies();
+    verifyInjectedWorkspaceDeps();
     verifyPdCliShim();
 
     console.log('\n🔍 Verifying installed plugin can load native dependencies...');

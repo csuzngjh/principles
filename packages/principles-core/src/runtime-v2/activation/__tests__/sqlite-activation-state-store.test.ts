@@ -104,6 +104,45 @@ describe('SqliteActivationStateStore', () => {
     });
   });
 
+  describe('listCodeToolHookActivations', () => {
+    it('SQL query filters by code_tool_hook channel and deactivated_at IS NULL', async () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      await store.listCodeToolHookActivations();
+
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("channel = 'code_tool_hook'"),
+      );
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('deactivated_at IS NULL'),
+      );
+    });
+
+    it('returns mapped ActivationStatusRecord for code_tool_hook rows', async () => {
+      const mockAll = vi.fn().mockReturnValue([{
+        activation_id: 'act_code_001',
+        idempotency_key: 'art-rule-001::code_tool_hook',
+        artifact_id: 'art-rule-001',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        target_ref: 'impl://rule-001',
+        activated_at: '2026-06-17T00:00:00.000Z',
+        deactivated_at: null,
+      }]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      const result = await store.listCodeToolHookActivations();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].channel).toBe('code_tool_hook');
+      expect(result[0].activationId).toBe('act_code_001');
+      expect(result[0].artifactId).toBe('art-rule-001');
+    });
+  });
+
   describe('recordActivation', () => {
     it('inserts activation record with INSERT OR REPLACE', async () => {
       const mockRun = vi.fn();

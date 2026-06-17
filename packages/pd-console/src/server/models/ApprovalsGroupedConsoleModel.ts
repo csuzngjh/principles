@@ -12,6 +12,10 @@ import * as path from 'node:path';
 export interface ApprovalGroup {
   principleId: string;
   principleTitle: string;
+  /** Human-readable description extracted from the first record's artifact contentJson.
+   *  Wave 7: replaces raw fake principleId as card title so Owner can actually
+   *  review the candidate content instead of staring at an internal ID. */
+  candidateDescription?: string;
   status: 'pending' | 'approved' | 'rejected';
   records: {
     id: string;
@@ -31,6 +35,76 @@ export interface ApprovalsGroupedResponse {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+/**
+ * Wave 7: Extract a human-readable description from a PIArtifact's contentJson.
+ *
+ * The artifact kinds have different contentJson shapes — this function unifies
+ * them into a single description string the Owner can actually read to make a
+ * review decision, instead of staring at a fabricated principleId.
+ *
+ * Supported shapes:
+ * - rule:           extract `// Principle: <text>` and `// Rule: <text>` from implementationCode
+ * - principle/demo: contentJson.text
+ * - scribe:         contentJson.principleDraft.title + .statement
+ * - philosopher:    contentJson.principleCandidate.title
+ * - dreamer:        contentJson.candidates[0].betterDecision
+ *
+ * Returns null if no readable description can be extracted.
+ */
+function extractCandidateDescription(contentJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+
+  // rule artifact: extract from implementationCode comments
+  if (typeof obj.implementationCode === 'string') {
+    const principleMatch = /\/\/\s*Principle:\s*(.+)/.exec(obj.implementationCode);
+    const ruleMatch = /\/\/\s*Rule:\s*(.+)/.exec(obj.implementationCode);
+    const principleText = principleMatch ? principleMatch[1].trim() : null;
+    const ruleText = ruleMatch ? ruleMatch[1].trim() : null;
+    if (principleText && ruleText) return `${principleText} — ${ruleText}`;
+    if (ruleText) return ruleText;
+    if (principleText) return principleText;
+  }
+
+  // principle artifact (demo shape): text field
+  if (typeof obj.text === 'string' && obj.text.trim().length > 0) return obj.text.trim();
+
+  // scribe artifact: principleDraft.title + .statement
+  if (obj.principleDraft && typeof obj.principleDraft === 'object' && obj.principleDraft !== null) {
+    const draft = obj.principleDraft as Record<string, unknown>;
+    const title = typeof draft.title === 'string' ? draft.title.trim() : '';
+    const statement = typeof draft.statement === 'string' ? draft.statement.trim() : '';
+    if (title && statement) return `${title} — ${statement}`;
+    if (title) return title;
+    if (statement) return statement;
+  }
+
+  // philosopher artifact: principleCandidate.title
+  if (obj.principleCandidate && typeof obj.principleCandidate === 'object' && obj.principleCandidate !== null) {
+    const cand = obj.principleCandidate as Record<string, unknown>;
+    if (typeof cand.title === 'string' && cand.title.trim().length > 0) return cand.title.trim();
+  }
+
+  // dreamer artifact: candidates[0].betterDecision
+  if (Array.isArray(obj.candidates) && obj.candidates.length > 0) {
+    const [first] = obj.candidates;
+    if (first && typeof first === 'object' && first !== null) {
+      const c = first as Record<string, unknown>;
+      if (typeof c.betterDecision === 'string' && c.betterDecision.trim().length > 0) {
+        return c.betterDecision.trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 export class ApprovalsGroupedConsoleModel {
@@ -69,16 +143,25 @@ export class ApprovalsGroupedConsoleModel {
       throw err;
     }
 
-    // Build artifactId → sourcePrincipleId map
+    // Build artifactId → sourcePrincipleId map AND artifactId → candidateDescription map.
+    // Wave 7: candidateDescription lets FocusPage show human-readable content
+    // instead of a fabricated principleId.
     const artifactPrincipleMap = new Map<string, string | null>();
+    const artifactDescriptionMap = new Map<string, string | null>();
     for (const approval of allApprovals) {
       if (!artifactPrincipleMap.has(approval.artifactId)) {
         try {
           const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
           artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
+          if (artifact?.contentJson) {
+            artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
+          } else {
+            artifactDescriptionMap.set(approval.artifactId, null);
+          }
         } catch (err) {
           if (isMissingTableError(err)) {
             artifactPrincipleMap.set(approval.artifactId, null);
+            artifactDescriptionMap.set(approval.artifactId, null);
           } else {
             throw err;
           }
@@ -140,9 +223,17 @@ export class ApprovalsGroupedConsoleModel {
 
       const principleTitle = principleTitles.get(principleId) ?? principleId;
 
+      // Wave 7: extract candidate description from the first record's artifact.
+      // This is the human-readable content the Owner needs to make a review decision.
+      const firstArtifactId = records[0]?.artifactId;
+      const candidateDescription = firstArtifactId
+        ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
+        : undefined;
+
       groups.push({
         principleId,
         principleTitle,
+        candidateDescription,
         status,
         records,
       });

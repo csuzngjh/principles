@@ -89,6 +89,8 @@ export interface GovernanceQueueResponse {
   degradedSignals?: DegradedSignal[];
   /** PRI-380: Number of pain events in trajectory.db (behavior evidence in progress) */
   evidenceInProgressCount?: number;
+  /** Wave 4: Number of gate blocks today (seconds-level auto-blocks by RuleHost) */
+  gateBlocksToday?: number;
   generatedAt: string;
   /** Present when data is degraded/missing rather than genuinely zero */
   note?: string;
@@ -365,6 +367,30 @@ export class GovernanceConsoleModel {
       }
     }
 
+    // Wave 4: Query gate_blocks for today's auto-block count (seconds-level feedback layer)
+    let gateBlocksToday = 0;
+    if (fs.existsSync(trajectoryDbPath)) {
+      try {
+        const Database = (await import('better-sqlite3')).default;
+        const trajDb = new Database(trajectoryDbPath, { readonly: true });
+        try {
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const row = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString()) as { c: number } | undefined;
+          if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+            gateBlocksToday = row.c;
+          }
+        } catch (err) {
+          // gate_blocks table may not exist in older workspaces — degrade silently to 0
+          if (!isMissingTableError(err)) throw err;
+        } finally {
+          trajDb.close();
+        }
+      } catch {
+        // trajectory.db open failed — already reported in evidenceInProgressCount block above
+      }
+    }
+
     const response: GovernanceQueueResponse = {
       pendingReviewCount,
       behaviorDeviationCount,
@@ -387,6 +413,10 @@ export class GovernanceConsoleModel {
 
     if (evidenceInProgressCount > 0) {
       response.evidenceInProgressCount = evidenceInProgressCount;
+    }
+
+    if (gateBlocksToday > 0) {
+      response.gateBlocksToday = gateBlocksToday;
     }
 
     return response;

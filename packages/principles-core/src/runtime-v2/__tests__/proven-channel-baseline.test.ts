@@ -18,7 +18,7 @@ import type { ChannelFixtureResult, MvpChannel } from '../proven-channel-baselin
 import { ActivationDispatcher } from '../activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from '../activation/low-risk-writers.js';
 import { RuleHostWriter } from '../activation/writers/rule-host-writer.js';
-import type { ApprovalQueueStore, ApprovalRecord, ApprovalEnqueueInput, ApprovalDecisionResult, ApprovalStats } from '../activation/activation-types.js';
+import type { ApprovalQueueStore, ApprovalRecord, ApprovalEnqueueInput, ApprovalStats } from '../activation/activation-types.js';
 
 function makeInMemoryApprovalQueueStoreForTest(): ApprovalQueueStore {
   const records = new Map<string, ApprovalRecord>();
@@ -50,17 +50,17 @@ function makeInMemoryApprovalQueueStoreForTest(): ApprovalQueueStore {
     },
     approve: async (id: string, decidedBy: string, note?: string) => {
       const r = records.get(id);
-      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
-      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      if (!r) return { ok: false, error: 'not_found' };
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status };
       r.status = 'approved'; r.decidedAt = new Date().toISOString(); r.decidedBy = decidedBy; r.decisionNote = note;
-      return { ok: true, record: r } as ApprovalDecisionResult;
+      return { ok: true, record: r };
     },
     reject: async (id: string, decidedBy: string, reason: string) => {
       const r = records.get(id);
-      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
-      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      if (!r) return { ok: false, error: 'not_found' };
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status };
       r.status = 'rejected'; r.decidedAt = new Date().toISOString(); r.decidedBy = decidedBy; r.rejectionReason = reason;
-      return { ok: true, record: r } as ApprovalDecisionResult;
+      return { ok: true, record: r };
     },
     resetToPending: async (id: string) => {
       const r = records.get(id);
@@ -130,7 +130,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       const approvalStore = makeInMemoryApprovalQueueStoreForTest();
       const dispatcher = new ActivationDispatcher(
         { getArtifactById: async (id: string) => id === artifact.artifactId ? artifact : null },
-        { getActivationStatus: async () => null, recordActivation: async () => { void 0; }, listPromptActivations: async () => [], listAllActivations: async () => [], deactivateActivation: async () => false },
+        { getActivationStatus: async () => null, recordActivation: async () => { void 0; }, listPromptActivations: async () => [], listCodeToolHookActivations: async () => [], listAllActivations: async () => [], deactivateActivation: async () => false },
         { writers, approvalQueueStore: approvalStore },
       );
       const decision = await dispatcher.dispatch({
