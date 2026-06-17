@@ -61,6 +61,37 @@ For CLI/operator changes under `packages/pd-cli/src/commands/**` or CLI registra
 - failed/degraded/refused JSON outputs include structured reason and nextAction
 - state mutation happens through the intended service path, not direct status flipping
 
+### Phase 3.5: Simplification & Over-engineering Check
+
+After the correctness/architecture review, examine every changed function/type for unnecessary complexity. This is a mandatory sub-step — the goal is to catch over-design before merge, not just bugs.
+
+Check each changed block against these questions:
+
+1. **Can any type/union be simplified?**
+   - Ad-hoc unions checked via `'property' in obj` or property-presence tests → prefer a discriminated union with an explicit `status`/`kind` field
+   - Inline object-literal types repeated 2+ times → extract a named interface
+   - `as unknown as T` double-assertions → document with a `RUNTIME_CONTRACT:` comment explaining why the literal can't satisfy the target type directly
+
+2. **Is there unnecessary nesting or abstraction?**
+   - Nested ternary operators → replace with if/else-if chains (simplify guideline: avoid nested ternaries)
+   - Deeply nested callbacks/closures that could be flat sequential code
+   - Helper functions extracted for a single call site that obscure rather than clarify
+   - BUT: do not flag closures that legitimately capture local scope (extracting them would require 8+ params and make things worse)
+
+3. **Is there duplicated logic?**
+   - The same pattern (error formatting, telemetry emission, field validation) appearing 3+ times in the diff → flag for consolidation
+   - Near-identical functions in different packages → flag for extraction to core (but weigh coupling cost; 2 sites is acceptable)
+
+4. **Is the code over-engineered for MVP scope?**
+   - Configurable options that have no consumer and no test exercising them
+   - Abstractions built "for future extensibility" (ADR-0014 anti-pattern trigger)
+   - Features gated behind flags that default off with no plan to ever turn them on
+
+**What to do with findings:**
+- **Simplification that preserves behavior** → apply directly in Phase 4 (it's a fix, not just a suggestion)
+- **Over-engineering** → flag in the Phase 7 report as a P3 finding; defer unless the maintainer approves removal
+- **Already simple** → state "no simplification opportunities found" explicitly
+
 ### Phase 4: Fix Real Issues
 
 Fix only real bugs and required changes:
@@ -122,6 +153,7 @@ Summarize:
 - Issues deferred, with reason and follow-up if needed
 - Tests and CI status
 - For CLI/operator PRs: JSON-only stdout, exit-path, flag-wiring, and failure no-mutation evidence
+- **Simplification result**: what was simplified (Phase 3.5), or "no simplification opportunities found"
 - Whether `record-error` was invoked, or "No real issues found — skipping record-error"
 - Remaining risk
 
@@ -141,6 +173,7 @@ When Phase 2 or 3 identifies an AI coding error:
 - [ ] Reviewer comments triaged
 - [ ] Deep diff review completed
 - [ ] CLI/operator gate applied when relevant
+- [ ] Simplification & over-engineering check completed (Phase 3.5)
 - [ ] Real issues fixed with regression tests
 - [ ] Build + lint + test pass locally
 - [ ] Changes pushed
