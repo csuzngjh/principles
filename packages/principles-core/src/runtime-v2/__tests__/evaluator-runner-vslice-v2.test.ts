@@ -44,6 +44,10 @@ import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.j
 import type { TaskRecord } from '../task-status.js';
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../internalization/refiner-rulehost-gate.js';
 import type { GoldenTrace } from '../golden-trace.js';
+// PRI-427: rule artifact assembly — verify the produced artifact satisfies
+// the downstream RuleHostWriter.canActivate field contract.
+import { RuleHostWriter } from '../activation/writers/rule-host-writer.js';
+import type { PIArtifactSnapshot } from '../activation/activation-types.js';
 
 const ARTIFICER_TASK_ID = 'artificer-001';
 const SCRIBE_TASK_ID = 'scribe-001';
@@ -619,5 +623,300 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     const replayEvent = events.find((e) => e.eventType === 'evaluator_adversarial_replay');
     expect(replayEvent).toBeDefined();
     expect(replayEvent?.payload?.gateDecision).toBe('accepted_shadow');
+  });
+});
+
+// ── PRI-427: rule artifact assembly tests ────────────────────────────────────
+
+/**
+ * Convert a PIArtifactRecord into the snapshot shape RuleHostWriter.canActivate
+ * reads. We don't activate (that needs the full ActivationContext); we only
+ * verify the artifact PASSES the canActivate field checks up to the gate.
+ */
+function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
+  return {
+    artifactId: record.artifactId,
+    artifactKind: record.artifactKind,
+    sourceTaskId: record.sourceTaskId,
+    sourceRuleId: record.sourceRuleId,
+    lineageArtifactIds: record.lineageArtifactIds,
+    validationStatus: record.validationStatus,
+    contentJson: record.contentJson,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+describe('EvaluatorRunner V2 — rule artifact assembly (PRI-427)', () => {
+  it('adversarialResult.passed=true → writes rule artifact with artifactKind=rule + validated', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Evaluator task produces: 1 principle artifact + 1 rule artifact.
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifacts = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(ruleArtifacts.length).toBe(1);
+    // length asserted above.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const ruleArtifact = ruleArtifacts[0]!;
+    expect(ruleArtifact.validationStatus).toBe('validated');
+  });
+
+  it('rule artifact contentJson carries implementationCode + goldenTrace + ruleHostGateDecision + affectedTools', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifact = artifacts.find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    // ruleArtifact is asserted defined above.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const parsed = JSON.parse(ruleArtifact!.contentJson) as Record<string, unknown>;
+
+    expect(typeof parsed.implementationCode).toBe('string');
+    expect((parsed.implementationCode as string).length).toBeGreaterThan(0);
+    expect(parsed.goldenTrace).toBeDefined();
+    expect(typeof (parsed.goldenTrace as { traceId: string }).traceId).toBe('string');
+    expect(Array.isArray((parsed.goldenTrace as { cases: unknown[] }).cases)).toBe(true);
+    expect((parsed.goldenTrace as { cases: unknown[] }).cases.length).toBeGreaterThan(0);
+    expect(parsed.ruleHostGateDecision).toBe('accepted_shadow');
+    expect(Array.isArray(parsed.affectedTools)).toBe(true);
+  });
+
+  it('rule artifact goldenTrace is the Artificer full trace (pos+neg), NOT the adversarial-only trace', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifact = artifacts.find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const parsed = JSON.parse(ruleArtifact!.contentJson) as { goldenTrace: { cases: { kind: string; caseId: string }[] } };
+
+    // The Artificer fixture has exactly: 1 positive + 1 negative case. The
+    // rule artifact must carry BOTH (the production trace for enforcement),
+    // not the adversarial replay trace (which had 3 negative cases).
+    const positives = parsed.goldenTrace.cases.filter((c) => c.kind === 'positive');
+    const negatives = parsed.goldenTrace.cases.filter((c) => c.kind === 'negative');
+    expect(positives.length).toBe(1);
+    expect(negatives.length).toBe(1);
+    // Should NOT contain adversarial caseIds.
+    const caseIds = parsed.goldenTrace.cases.map((c) => c.caseId);
+    expect(caseIds).not.toContain('adv-boundary-1');
+  });
+
+  it('adversarialResult.passed=false → does NOT write rule artifact (principle artifact only)', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const failingCaseIds = ['adv-boundary-1'];
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'rejected_validation_failed',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultValidationFailed(failingCaseIds),
+      reasons: ['validation failed'],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifacts = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(ruleArtifacts.length).toBe(0);
+    // Principle artifact is still present (prompt-channel fallback).
+    const principleArtifacts = artifacts.filter((a) => a.artifactKind === 'principle');
+    expect(principleArtifacts.length).toBe(1);
+  });
+
+  it('V1 output (no codeReview) → no rule artifact written', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV1ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps: RefinerRuleHostGateDeps = { evaluateInSandbox: vi.fn(() => sandboxResultSuccess()) };
+    const deps = createMockDeps({ artifactStore: store });
+
+    const v1Output: EvaluatorOutputV1 = {
+      taskId: EVALUATOR_TASK_ID,
+      sourceArtificerArtifactId: 'pi-art-artificer-001-run-001',
+      evaluation: {
+        decision: 'approved',
+        summary: 'V1 plan approved.',
+        score: 0.8,
+        strengths: [],
+        concerns: [],
+        requiredChanges: [],
+      },
+      sourceTrace: {
+        artificerArtifactId: 'pi-art-artificer-001-run-001',
+        scribeArtifactId: 'pi-art-scribe-001',
+      },
+      risks: [],
+      generatedAt: new Date().toISOString(),
+    };
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({ payload: v1Output });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifacts = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(ruleArtifacts.length).toBe(0);
+  });
+
+  it('rule artifact write failure does NOT crash the runner; principle artifact remains (degradation)', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    // Wrap the store: allow principle artifact upsert + the adversarial re-
+    // persist, but make the SECOND upsert for artifactKind='rule' throw.
+    const realStore = store;
+    let _upsertCallCount = 0;
+    const failingStore = {
+      ...realStore,
+      upsertArtifact: vi.fn(async (record: PIArtifactRecord) => {
+        _upsertCallCount += 1;
+        // The rule artifact is written AFTER the principle artifact + the
+        // adversarial re-persist. It carries artifactKind='rule'.
+        if (record.artifactKind === 'rule') {
+          throw new Error('simulated rule artifact write failure');
+        }
+        return realStore.upsertArtifact(record);
+      }),
+      getArtifactById: realStore.getArtifactById.bind(realStore),
+      listBySourceTaskId: realStore.listBySourceTaskId.bind(realStore),
+      updateValidationStatus: realStore.updateValidationStatus.bind(realStore),
+      createArtifact: realStore.createArtifact.bind(realStore),
+      listLineage: realStore.listLineage.bind(realStore),
+    } as unknown as MemoryPIArtifactStore;
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: failingStore });
+
+    const runner = makeRunner(deps, gateDeps);
+    const result = await runner.run(EVALUATOR_TASK_ID);
+
+    // PRD Decision 5 degradation: assembly failure → principle artifact still
+    // written, prompt channel usable. Runner does NOT crash.
+    expect(result.status).toBe('succeeded');
+
+    const artifacts = await realStore.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const principleArtifacts = artifacts.filter((a) => a.artifactKind === 'principle');
+    expect(principleArtifacts.length).toBe(1);
+    const ruleArtifacts = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(ruleArtifacts.length).toBe(0);
+
+    // Telemetry must record the assembly failure with a reason.
+    const events = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const asmFail = events.find((e) => e.eventType === 'evaluator_rule_assembly_failed');
+    expect(asmFail).toBeDefined();
+    expect(typeof asmFail?.payload?.reason).toBe('string');
+  });
+
+  it('produced rule artifact passes RuleHostWriter.canActivate field checks', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifact = artifacts.find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    // ruleArtifact is asserted defined above.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const ruleArtifactRecord = ruleArtifact!;
+
+    // RuleHostWriter.canActivate re-runs the gate; reuse the same gateDeps so
+    // the gate decision is consistent. The artifact must pass the kind/
+    // validationStatus/implementationCode/goldenTrace/ruleHostGateDecision
+    // checks AND the gate's own replay.
+    const writer = new RuleHostWriter({ gateDeps });
+    const snapshot = toSnapshot(ruleArtifactRecord);
+    const canActivateResult = await writer.canActivate(snapshot);
+    // canActivate returns { ok: true, riskLevel } when all field checks pass
+    // AND the gate re-replay accepts.
+    expect(canActivateResult.ok).toBe(true);
+  });
+
+  it('emits evaluator_rule_assembled telemetry on successful rule artifact write', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const events = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const assembled = events.find((e) => e.eventType === 'evaluator_rule_assembled');
+    expect(assembled).toBeDefined();
+    expect(typeof assembled?.payload?.artifactId).toBe('string');
   });
 });

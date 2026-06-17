@@ -460,6 +460,25 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // ── PRI-427: rule artifact assembly ──
+    // When the evaluator output is V2 AND the adversarial replay passed, write
+    // a second artifact with artifactKind='rule' carrying the executable code
+    // + golden trace + gate decision, then mark it 'validated' so the downstream
+    // RuleHostWriter.canActivate path accepts it.
+    //
+    // PRD Decision 5 contract:
+    //   - rule artifact goldenTrace = Artificer's FULL trace (buildGoldenTraceFromArtificer),
+    //     NOT the adversarial replay trace. The adversarial trace was only used
+    //     to TEST the code in PRI-426; enforcement uses the production trace.
+    //   - ruleHostGateDecision must be 'accepted_shadow' for RuleHostWriter to
+    //     accept (rule-host-writer.ts extractRuleHostGateDecision).
+    //   - Assembly failure is non-fatal: principle artifact is already written,
+    //     prompt-channel fallback remains available (PRD Decision 5 degradation).
+    let ruleArtifactId: string | null = null;
+    if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
+      ruleArtifactId = await this.assembleRuleArtifact(finalOutput, taskId, runId, context, lineageArtifactIds);
+    }
+
     // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
     // This is the critical business logic: approved evaluator must validate
     // the Scribe principle artifact, NOT the Artificer plan artifact.
@@ -508,6 +527,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       resultRef,
       evaluationDecision: finalOutput.evaluation.decision,
       evaluationScore: finalOutput.evaluation.score,
+      ruleArtifactId,
     });
 
     return {
@@ -735,7 +755,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private parseArtificerArtifact(
     contentJson: string,
-  ): { readonly implementationCode: unknown; readonly goldenTraceCases: unknown } | null {
+  ): { readonly implementationCode: unknown; readonly goldenTraceCases: unknown; readonly affectedTools: unknown } | null {
     let parsed: unknown;
     try {
       parsed = JSON.parse(contentJson);
@@ -746,6 +766,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     return {
       implementationCode: parsed.implementationCode,
       goldenTraceCases: parsed.goldenTraceCases,
+      affectedTools: parsed.affectedTools,
     };
   }
 
@@ -792,6 +813,160 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${fc.message}) — likely a code defect, not an adversarial gap`,
       };
     });
+  }
+
+  // ── PRI-427: rule artifact assembly ────────────────────────────────────────
+
+  /**
+   * Assemble and persist the rule artifact when adversarial replay passed
+   * (PRD Decision 5). The rule artifact carries implementationCode + the
+   * Artificer full golden trace + ruleHostGateDecision, with artifactKind='rule'.
+   * After a successful write, marks the artifact 'validated' so RuleHostWriter
+   * can activate it.
+   *
+   * Returns the rule artifactId on success, null on any degradation (missing
+   * code/trace, write failure, validation-update failure). Every null path
+   * emits structured telemetry with a reason (Runtime Rule 9, ERR-018).
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params
+  private async assembleRuleArtifact(
+    output: EvaluatorOutputV2,
+    taskId: string,
+    runId: string,
+    context: EvaluatorContext,
+    lineageArtifactIds: readonly string[],
+  ): Promise<string | null> {
+    if (!context.artificerArtifact) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: 'no_artificer_artifact_in_context',
+        nextAction: 'verify_buildContext_resolves_artificer_artifact',
+      });
+      return null;
+    }
+
+    const artificerParsed = this.parseArtificerArtifact(context.artificerArtifact);
+    if (!artificerParsed) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: 'artificer_artifact_unparseable',
+        nextAction: 'verify_artificer_artifact_contentJson',
+      });
+      return null;
+    }
+
+    const { implementationCode, goldenTraceCases, affectedTools } = artificerParsed;
+    if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: 'artificer_artifact_has_no_implementation_code',
+        nextAction: 'verify_artificer_l2_adapter_emitted_v2',
+      });
+      return null;
+    }
+
+    // Runtime Rule 4: validate the array shape before passing to the builder.
+    // buildGoldenTraceFromArtificer re-validates each element structurally, but
+    // the type signature requires an array — narrow with Array.isArray first.
+    if (!Array.isArray(goldenTraceCases)) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: 'artificer_golden_trace_cases_not_array',
+        nextAction: 'verify_artificer_emitted_goldenTraceCases_array',
+      });
+      return null;
+    }
+
+    // Build the production golden trace from the Artificer cases. This is the
+    // trace that gets ENFORCED at runtime — distinct from the adversarial
+    // replay trace used to TEST the code in PRI-426. buildGoldenTraceFromArtificer
+    // validates each case structurally (Runtime Rule 4) and requires ≥1 positive
+    // + ≥1 negative case.
+    const traceBuild = buildGoldenTraceFromArtificer({
+      cases: goldenTraceCases,
+      sourceArtifactId: context.sourceArtificerArtifactId ?? undefined,
+    });
+    if (!traceBuild.ok) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: `golden_trace_build_failed: ${traceBuild.reason}`,
+        nextAction: 'verify_artificer_emitted_valid_positive_plus_negative_cases',
+      });
+      return null;
+    }
+
+    // affectedTools: optional array. Validate element types (Runtime Rule 4) —
+    // do not trust the upstream shape. Default to [] when absent/malformed.
+    const validatedAffectedTools = Array.isArray(affectedTools)
+      ? affectedTools.filter((t): t is string => typeof t === 'string')
+      : [];
+
+    const ruleContent = {
+      implementationCode,
+      goldenTrace: traceBuild.trace,
+      goldenTraceCases,
+      affectedTools: validatedAffectedTools,
+      // adversarialResult.passed === true is the precondition for this method;
+      // the gate decision is therefore accepted_shadow.
+      ruleHostGateDecision: 'accepted_shadow',
+      sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
+      adversarialResult: output.adversarialResult,
+    };
+
+    const ruleArtifactId = `pi-rule-${taskId}-${runId}`;
+    const nowIso = new Date().toISOString();
+    try {
+      await this.artifactStore.upsertArtifact({
+        artifactId: ruleArtifactId,
+        artifactKind: 'rule',
+        sourceTaskId: taskId,
+        lineageArtifactIds: [...lineageArtifactIds],
+        validationStatus: 'pending',
+        contentJson: JSON.stringify(ruleContent),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+    } catch (writeErr) {
+      // PRD Decision 5 degradation: assembly write failure → principle artifact
+      // already written, prompt channel usable. Do NOT crash the runner.
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: `artifact_write_failed: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
+        nextAction: 'prompt_channel_fallback_available',
+      });
+      return null;
+    }
+
+    // Mark the rule artifact validated so RuleHostWriter.canActivate accepts it
+    // (canActivate checks validationStatus !== 'validated' at rule-host-writer.ts:82).
+    try {
+      const updated = await this.artifactStore.updateValidationStatus(ruleArtifactId, 'validated');
+      if (!updated) {
+        this.emitEvent('rule_assembly_failed', taskId, {
+          runId,
+          reason: 'updateValidationStatus_returned_false',
+          ruleArtifactId,
+          nextAction: 'verify_artifact_store_consistency',
+        });
+        return null;
+      }
+    } catch (updateErr) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: `updateValidationStatus_threw: ${updateErr instanceof Error ? updateErr.message : String(updateErr)}`,
+        ruleArtifactId,
+        nextAction: 'verify_artifact_store_consistency',
+      });
+      return null;
+    }
+
+    this.emitEvent('rule_assembled', taskId, {
+      runId,
+      artifactId: ruleArtifactId,
+      affectedTools: validatedAffectedTools,
+      traceCaseCount: traceBuild.trace.cases.length,
+    });
+    return ruleArtifactId;
   }
 
   // ── Evaluator-specific: principle bearer resolution ─────────────────────────
