@@ -248,7 +248,7 @@ describe('recordPainSignalObservability', () => {
       ).all(canonicalPainId) as { canonical_pain_id: string; runtime_task_id: string | null }[];
       expect(rows.length).toBe(1);
       // runtime_task_id should be updated to the new value
-      expect(rows[0]!.runtime_task_id).toBe('task_002');
+      expect(rows[0]?.runtime_task_id).toBe('task_002');
     } finally {
       db.close();
     }

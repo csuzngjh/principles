@@ -12,7 +12,7 @@ import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import type { MalformedRunError } from './run/sqlite-run-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
-import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import type { RunRecord } from '../runtime-protocol.js';
 
 function makeTaskInput(taskId: string) {
   return {
@@ -30,7 +30,7 @@ function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, 'creat
     runId: `run_${taskId}_${attemptNumber}`,
     taskId,
     runtimeKind: 'openclaw' as const,
-    executionStatus: 'queued' as RunExecutionStatus,
+    executionStatus: 'queued',
     startedAt: now,
     attemptNumber,
     

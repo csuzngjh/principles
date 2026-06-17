@@ -74,13 +74,13 @@ function makeMockRunner(): { run: (taskId: string) => Promise<RunnerResult> } {
 
 describe('PainSignalBridge.buildExistingResult', () => {
   it('P8: succeeded requires candidates — no candidates returns failed', async () => {
-    const stateManager = makeMockStateManager({ candidates: [], runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates: [], runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -93,13 +93,13 @@ describe('PainSignalBridge.buildExistingResult', () => {
 
   it('succeeded is allowed when candidates exist (autoIntakeEnabled=false, no ledger)', async () => {
     const candidates = [mockCandidate('c1', TASK_ID)];
-    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -113,13 +113,13 @@ describe('PainSignalBridge.buildExistingResult', () => {
 
   it('HG-4: autoIntakeEnabled=true requires ledger entries — none exist returns failed', async () => {
     const candidates = [mockCandidate('c1', TASK_ID)];
-    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: true,
@@ -133,13 +133,13 @@ describe('PainSignalBridge.buildExistingResult', () => {
   it('HG-4: autoIntakeEnabled=true with ledger entries returns succeeded', async () => {
     const candidates = [mockCandidate('c1', TASK_ID)];
     const entries = new Map<string, LedgerPrincipleEntry>([['c1', mockLedgerEntry('c1')]]);
-    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(entries);
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: true,
@@ -153,13 +153,13 @@ describe('PainSignalBridge.buildExistingResult', () => {
 
   it('multiple candidates — all returned correctly', async () => {
     const candidates = [mockCandidate('c1', TASK_ID), mockCandidate('c2', TASK_ID)];
-    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -172,13 +172,13 @@ describe('PainSignalBridge.buildExistingResult', () => {
 
   it('runId and artifactId are populated from state', async () => {
     const candidates = [mockCandidate('c1', TASK_ID)];
-    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-run-1', taskId: TASK_ID, status: 'succeeded' } as any] });
+    const stateManager = makeMockStateManager({ candidates, runs: [{ runId: 'run-run-1', taskId: TASK_ID, status: 'succeeded' }] });
     const ledgerAdapter = makeMockLedgerAdapter(new Map());
     const runner = makeMockRunner();
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as any,
+      runner: runner,
       intakeService: undefined as any,
       ledgerAdapter,
       autoIntakeEnabled: false,

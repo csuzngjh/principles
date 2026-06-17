@@ -14,6 +14,7 @@ import type {
   PrinciplesListData,
   ApprovalsGroupedData,
 } from "../../api.js";
+import { enumLabel } from "../../utils/enum-labels.js";
 
 // ── Status types for the review page ────────────────────────────────────────
 type ReviewStatus = "pending" | "approved" | "rejected" | "parked";
@@ -411,10 +412,8 @@ export function PrinciplesPage() {
                     key={ch}
                     className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
                   >
-                    {/* PRI-332: Use known label or display channel name directly — never raw i18n key */}
-                    {CHANNEL_LABELS[ch]
-                      ? t("principles." + CHANNEL_LABELS[ch])
-                      : ch}
+                    {/* Channel label via global enum resolver — never raw i18n key */}
+                    {enumLabel('channel', ch, t)}
                   </span>
                 ))}
                 {/* PRI-332: Language hint badge when principle language differs from UI language */}
@@ -426,7 +425,7 @@ export function PrinciplesPage() {
                   </span>
                 )}
                 <span className="font-mono text-[11px] text-ink-4">
-                  {t("principles.confidence")}: {card.confidence}
+                  {t("principles.confidence")}: {enumLabel('confidence', card.confidence, t)}
                 </span>
               </div>
 

@@ -69,9 +69,9 @@ async function seedTaskAndRun(f: WorkspaceFixture, taskId: string): Promise<void
 }
 
 describe('Workspace Isolation', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let wsA: WorkspaceFixture;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let wsB: WorkspaceFixture;
 
   beforeEach(() => {
@@ -138,7 +138,7 @@ describe('Workspace Isolation', () => {
     const diagTask: TaskRecord & Record<string, unknown> = {
       taskId: 'task-diag',
       taskKind: 'diagnostician',
-      status: 'pending' as PDTaskStatus,
+      status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       attemptCount: 0,

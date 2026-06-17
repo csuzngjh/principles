@@ -6,7 +6,7 @@ import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
-import type { DreamerOutput, DreamerValidationResult } from '../internalization/dreamer-output.js';
+import type { DreamerOutput } from '../internalization/dreamer-output.js';
 import { DefaultDreamerValidator } from '../internalization/dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
@@ -83,7 +83,7 @@ function createMockDeps(artifactStore: PIArtifactStore): DreamerRunnerDeps {
   } as unknown as StoreEventEmitter;
 
   const validator = {
-    validate: vi.fn().mockResolvedValue({ valid: true, errors: [] } as DreamerValidationResult),
+    validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
   };
 
   return { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore };

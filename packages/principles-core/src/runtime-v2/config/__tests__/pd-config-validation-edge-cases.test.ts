@@ -14,7 +14,7 @@ import {
   validatePdConfig,
   computeEffectivePdConfig,
 } from '../index.js';
-import type { PdConfig, RuntimeProfile } from '../index.js';
+import type { PdConfig } from '../index.js';
 
 function makeValidConfig(): PdConfig {
   return {
@@ -59,7 +59,7 @@ describe('Empty string validation in pi-ai profiles', () => {
       provider: '',
       model: 'test-model',
       apiKeyEnv: 'TEST_KEY',
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -76,7 +76,7 @@ describe('Empty string validation in pi-ai profiles', () => {
       provider: 'test-provider',
       model: '',
       apiKeyEnv: 'TEST_KEY',
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -93,7 +93,7 @@ describe('Empty string validation in pi-ai profiles', () => {
       provider: 'test-provider',
       model: 'test-model',
       apiKeyEnv: '',
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -110,7 +110,7 @@ describe('Empty string validation in pi-ai profiles', () => {
       provider: '   ',
       model: 'test-model',
       apiKeyEnv: 'TEST_KEY',
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     // Current validation only checks non-empty string, does not trim
     // Whitespace-only strings are technically non-empty
@@ -147,7 +147,7 @@ describe('Special characters in profile IDs', () => {
 
   it('accepts profile ID with underscores', () => {
     const raw = makeValidConfig();
-    raw.runtimeProfiles['pd_test_profile'] = {
+    raw.runtimeProfiles.pd_test_profile = {
       type: 'pi-ai',
       provider: 'test',
       model: 'test-model',
@@ -182,13 +182,13 @@ describe('Multiple concurrent errors collection', () => {
       provider: '',
       model: '',
       apiKeyEnv: '',
-    } as RuntimeProfile;
+    };
     raw.runtimeProfiles['pd.error2'] = {
       type: 'pi-ai',
       provider: 'valid',
       model: '',
       apiKeyEnv: '',
-    } as RuntimeProfile;
+    };
 
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
@@ -240,9 +240,9 @@ describe('Multiple concurrent errors collection', () => {
       provider: '',
       model: 'test',
       apiKeyEnv: 'TEST_KEY',
-    } as RuntimeProfile;
+    };
     // Third error: invalid internalAgents.defaultRuntime (empty string)
-    raw.internalAgents.defaultRuntime = '' as unknown as string;
+    raw.internalAgents.defaultRuntime = '';
 
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
@@ -304,7 +304,7 @@ describe('Boundary values and extreme inputs', () => {
       model: 'test-model',
       apiKeyEnv: 'TEST_KEY',
       timeoutMs: Infinity,
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -387,7 +387,7 @@ describe('Type coercion edge cases', () => {
       provider: 123 as unknown as string,
       model: 'test-model',
       apiKeyEnv: 'TEST_KEY',
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -404,7 +404,7 @@ describe('Type coercion edge cases', () => {
       provider: 'test',
       model: 'test-model',
       apiKeyEnv: true as unknown as string,
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
@@ -473,7 +473,7 @@ describe('OpenClaw profile edge cases', () => {
     raw.runtimeProfiles['openclaw.bad-source'] = {
       type: 'openclaw',
       source: 123 as unknown as string,
-    } as RuntimeProfile;
+    };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');

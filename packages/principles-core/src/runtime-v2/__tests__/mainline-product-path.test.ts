@@ -20,7 +20,6 @@ import type {
   PDRuntimeAdapter,
   StoreEventEmitter,
   PIArtifactStore,
-  PeerRunnerOptions,
   PIArtifactRecord,
 } from '../index.js';
 
@@ -272,7 +271,7 @@ describe('mainline product-path (load-bearing wall)', () => {
         artifactStore: mockArtifactStore,
         validator: new PassThroughDreamerValidator(),
       },
-      { owner: 'test', runtimeKind: 'test-double' } as PeerRunnerOptions,
+      { owner: 'test', runtimeKind: 'test-double' },
     );
 
     const context = await runner.buildContext(seed.taskId);
@@ -335,7 +334,7 @@ describe('mainline product-path (load-bearing wall)', () => {
         artifactStore: mockArtifactStore,
         validator: new PassThroughDreamerValidator(),
       },
-      { owner: 'test', runtimeKind: 'test-double' } as PeerRunnerOptions,
+      { owner: 'test', runtimeKind: 'test-double' },
     );
 
     const dreamerTaskId = seed.taskId;

@@ -261,8 +261,8 @@ describe('SqliteSourceTraceLocator', () => {
   it('returns storage_unavailable when TrajectoryLocator is not provided', async () => {
     const f = createFixture();
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const locator = new SqliteSourceTraceLocator(f.taskStore, undefined as any);
+       
+      const locator = new SqliteSourceTraceLocator(f.taskStore, undefined);
 
       const result = await locator.locate(q({
         sourcePainId: 'pain-no-traj',

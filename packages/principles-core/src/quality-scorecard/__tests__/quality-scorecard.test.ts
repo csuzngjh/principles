@@ -49,29 +49,29 @@ describe('meetsMvpThreshold', () => {
   });
 
   it('fails when G1 < 2', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G1: 1 as RubricScore };
+    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G1: 1 };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
   it('fails when G2 < 2', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G2: 1 as RubricScore };
+    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G2: 1 };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
   it('fails when G5 < 2', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G5: 1 as RubricScore };
+    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G5: 1 };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
   it('fails when G3 = 0 (must be >= 1)', () => {
-    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G3: 0 as RubricScore };
+    const scores: Record<RubricDimension, RubricScore> = { ...perfectScores, G3: 0 };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
 
   it('fails when total < 10', () => {
     const scores: Record<RubricDimension, RubricScore> = {
-      G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore,
-      G4: 0 as RubricScore, G5: 2 as RubricScore, G6: 0 as RubricScore, G7: 0 as RubricScore,
+      G1: 2, G2: 2, G3: 1,
+      G4: 0, G5: 2, G6: 0, G7: 0,
     };
     expect(meetsMvpThreshold(scores)).toBe(false);
   });
@@ -313,7 +313,7 @@ describe('needsAdjudication', () => {
 
   it('returns high when MVP not met', () => {
     const local = makeLocalEval({ mvpMet: false, totalScore: 5 });
-    local.dimensionScores = { G1: 0 as RubricScore, G2: 2 as RubricScore, G3: 0 as RubricScore, G4: 0 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 0 as RubricScore };
+    local.dimensionScores = { G1: 0, G2: 2, G3: 0, G4: 0, G5: 0, G6: 1, G7: 0 };
     const decision = needsAdjudication(makeEpisode(), local);
     expect(decision.shouldAdjudicate).toBe(true);
     expect(decision.priority).toBe('high');
@@ -334,7 +334,7 @@ describe('determineFinalLabel', () => {
 
   it('returns local-fail when very low score and no adjudication', () => {
     const local = makeLocalEval({ totalScore: 3, mvpMet: false });
-    local.dimensionScores = { G1: 0 as RubricScore, G2: 0 as RubricScore, G3: 0 as RubricScore, G4: 1 as RubricScore, G5: 0 as RubricScore, G6: 1 as RubricScore, G7: 1 as RubricScore };
+    local.dimensionScores = { G1: 0, G2: 0, G3: 0, G4: 1, G5: 0, G6: 1, G7: 1 };
     expect(determineFinalLabel(local, null)).toBe('local-fail');
   });
 });
@@ -598,7 +598,7 @@ describe('sanitize — additional boundary conditions', () => {
 describe('needsAdjudication — additional boundary conditions', () => {
   it('returns medium when zero-score dimensions exist', () => {
     const local = makeLocalEval({ totalScore: 10, mvpMet: true });
-    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 2 as RubricScore, G4: 0 as RubricScore, G5: 2 as RubricScore, G6: 2 as RubricScore, G7: 0 as RubricScore };
+    local.dimensionScores = { G1: 2, G2: 2, G3: 2, G4: 0, G5: 2, G6: 2, G7: 0 };
     const decision = needsAdjudication(makeEpisode(), local);
     expect(decision.shouldAdjudicate).toBe(true);
     expect(decision.priority).toBe('medium');
@@ -614,7 +614,7 @@ describe('needsAdjudication — additional boundary conditions', () => {
 
   it('returns medium for moderate scores (9-11)', () => {
     const local = makeLocalEval({ totalScore: 10, mvpMet: true });
-    local.dimensionScores = { G1: 2 as RubricScore, G2: 2 as RubricScore, G3: 1 as RubricScore, G4: 1 as RubricScore, G5: 2 as RubricScore, G6: 2 as RubricScore, G7: 0 as RubricScore };
+    local.dimensionScores = { G1: 2, G2: 2, G3: 1, G4: 1, G5: 2, G6: 2, G7: 0 };
     const decision = needsAdjudication(makeEpisode(), local);
     expect(decision.shouldAdjudicate).toBe(true);
     expect(decision.priority).toBe('medium');

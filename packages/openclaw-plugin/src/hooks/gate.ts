@@ -67,7 +67,7 @@ export function handleBeforeToolCall(
 
   // 3. Rule Host Evaluation — sole gate
   try {
-    const ruleHost = new RuleHost(wctx.stateDir, logger);
+    const ruleHost = new RuleHost(wctx.stateDir, logger, { workspaceDir: ctx.workspaceDir });
     const hostInput: RuleHostInput = {
       action: {
         toolName: event.toolName,

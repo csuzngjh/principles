@@ -41,7 +41,7 @@ function makeRunInput(options: RunInputOptions): Omit<RunRecord, 'createdAt' | '
     runId: `run_${options.taskId}_${attempt}`,
     taskId: options.taskId,
     runtimeKind: 'openclaw' as const,
-    executionStatus: options.status ?? ('queued' as RunExecutionStatus),
+    executionStatus: options.status ?? ('queued'),
     startedAt: now,
     attemptNumber: attempt,
     

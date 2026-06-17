@@ -1185,7 +1185,7 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
   });
 
   it('rejects null output', async () => {
-    const result = await validator.validate(null as unknown as EvaluatorOutputV1, EVALUATOR_TASK_ID);
+    const result = await validator.validate(null, EVALUATOR_TASK_ID);
     expect(result.valid).toBe(false);
   });
 
@@ -1288,7 +1288,7 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     // taskId is only on prototype, not own property
     expect(Object.hasOwn(output, 'taskId')).toBe(false);
 
-    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    const result = await validator.validate(output, EVALUATOR_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('taskId'))).toBe(true);
   });
@@ -1302,7 +1302,7 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     // sourceArtificerArtifactId is now only on prototype, not own property
     expect(Object.hasOwn(output, 'sourceArtificerArtifactId')).toBe(false);
 
-    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    const result = await validator.validate(output, EVALUATOR_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('sourceArtificerArtifactId'))).toBe(true);
   });
@@ -1317,7 +1317,7 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     // artificerArtifactId is now only on prototype, not own property
     expect(Object.hasOwn(sourceTrace, 'artificerArtifactId')).toBe(false);
 
-    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    const result = await validator.validate(output, EVALUATOR_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('sourceTrace.artificerArtifactId'))).toBe(true);
   });
@@ -1331,7 +1331,7 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     // decision is now only on prototype, not own property
     expect(Object.hasOwn(evaluation, 'decision')).toBe(false);
 
-    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    const result = await validator.validate(output, EVALUATOR_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('evaluation.decision'))).toBe(true);
   });

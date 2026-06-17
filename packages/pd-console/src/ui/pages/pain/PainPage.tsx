@@ -18,21 +18,12 @@ import { Button } from '../../components/ui/button.js';
 import { fetchEvidenceChain } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
 import { formatDate } from '../../utils/format.js';
-import { mapConfidenceLabel, buildCardLayers } from './pain-card-helpers.js';
+import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty } from './pain-card-helpers.js';
+import { enumLabel } from '../../utils/enum-labels.js';
 
 // ── State grouping ─────────────────────────────────────────────────────────────
 
 type StateGroup = 'active_chain' | 'evidence_only' | 'failed';
-
-/**
- * Translate with fallback — if the i18n key doesn't exist (returns the key itself),
- * return the fallback instead. Prevents raw keys like "pages.pain.source_unknown_value"
- * from being displayed to the user.
- */
-function tFallback(t: (key: string) => string, key: string, fallback: string): string {
-  const result = t(key);
-  return result === key ? fallback : result;
-}
 
 function groupForState(state: EvidenceChainStateData): StateGroup {
   switch (state) {
@@ -170,6 +161,7 @@ interface LoadedContentProps {
 }
 
 function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedContentProps) {
+  const [reviewQueueExpanded, setReviewQueueExpanded] = useState(false);
   // Show degraded banner if data sources are partially unavailable
   const hasDegraded = !!data.degradedReason;
 
@@ -212,6 +204,63 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
           {GROUP_ORDER.map((group) => {
             const records = grouped.get(group);
             if (!records || records.length === 0) return null;
+
+            // For active_chain group, fold owner-reviewable records into a count
+            // row when there are 2+ — they are already in the governance queue
+            // and repeating each as a full card here is noise. Single record
+            // stays expanded. Click the fold row to expand in-place.
+            if (group === 'active_chain') {
+              const inReview = records.filter((r) => r.state === 'owner-reviewable');
+              const others = records.filter((r) => r.state !== 'owner-reviewable');
+              const foldReviewQueue = inReview.length >= 2;
+              const reviewQueueLabel = t('pages.pain.inReviewQueueCount').replace('{{count}}', String(inReview.length));
+
+              return (
+                <div key={group}>
+                  <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-4 mb-3">
+                    {t(`pages.pain.group_${group}`)} ({records.length})
+                  </div>
+                  <div className="space-y-4">
+                    {others.map((record) => (
+                      <EvidenceChainCard
+                        key={record.id}
+                        record={record}
+                        expanded={expandedIds.has(record.id)}
+                        onToggle={() => onToggle(record.id)}
+                        t={t}
+                      />
+                    ))}
+                    {foldReviewQueue && !reviewQueueExpanded && (
+                      <button
+                        type="button"
+                        onClick={() => setReviewQueueExpanded(true)}
+                        className="w-full text-left p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-sm hover:bg-paper-2 transition-colors"
+                      >
+                        {reviewQueueLabel} · {t('pages.pain.goToGovernance')}
+                      </button>
+                    )}
+                    {(!foldReviewQueue || reviewQueueExpanded) && inReview.map((record) => (
+                      <EvidenceChainCard
+                        key={record.id}
+                        record={record}
+                        expanded={expandedIds.has(record.id)}
+                        onToggle={() => onToggle(record.id)}
+                        t={t}
+                      />
+                    ))}
+                    {foldReviewQueue && reviewQueueExpanded && (
+                      <button
+                        type="button"
+                        onClick={() => setReviewQueueExpanded(false)}
+                        className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors"
+                      >
+                        {reviewQueueLabel} ▲
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div key={group}>
@@ -270,18 +319,17 @@ interface EvidenceChainCardProps {
 }
 
 function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardProps) {
+  const [copied, setCopied] = useState(false);
+  const layer2Empty = isLayer2EffectivelyEmpty(record);
   const stateVariant = stateToVariant(record.state);
-  const stateLabel = tFallback(t, `pages.pain.state_${record.state}`, record.state);
-  const sourceLabel = tFallback(t, `pages.pain.source_${record.sourceKind}`, record.sourceKind);
+  const stateLabel = enumLabel('evidenceState', record.state, t);
+  const sourceLabel = enumLabel('sourceKind', record.sourceKind, t);
 
   const layers = buildCardLayers(record);
 
-  // Confidence i18n key
-  const confidenceI18nKey = layers.layer2.confidence
-    ? `pages.pain.confidence${layers.layer2.confidence.label.charAt(0).toUpperCase() + layers.layer2.confidence.label.slice(1)}`
-    : null;
-  const confidenceDisplay = confidenceI18nKey
-    ? `${tFallback(t, confidenceI18nKey, layers.layer2.confidence!.label)} (${layers.layer2.confidence!.raw.toFixed(2)})`
+  // Confidence label — resolve via enumLabel for consistent i18n
+  const confidenceDisplay = layers.layer2.confidence
+    ? `${enumLabel('confidence', layers.layer2.confidence.label, t)} (${layers.layer2.confidence.raw.toFixed(2)})`
     : null;
 
   return (
@@ -294,7 +342,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             <Badge variant="outline">{sourceLabel}</Badge>
             {record.admissionDecision && (
               <Badge variant="secondary">
-                {tFallback(t, `pages.pain.admission_${record.admissionDecision}`, record.admissionDecision)}
+                {enumLabel('admission', record.admissionDecision, t)}
               </Badge>
             )}
           </div>
@@ -312,7 +360,13 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
               {t('pages.pain.fieldTrigger')}
             </div>
-            <CardTitle className="text-[15px] leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
+            {layer2Empty ? (
+              <p className="text-ink-3 text-sm italic leading-relaxed">
+                {t('pages.pain.noHumanSummary')}
+              </p>
+            ) : (
+              <CardTitle className="text-[15px] leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
+            )}
           </div>
 
           {/* PD's conclusion (conditional: candidateTitle exists) */}
@@ -376,66 +430,92 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           )}
         </div>
 
-        {/* Layer 3: Technical details (collapsed by default) */}
-        <details open={expanded} onToggle={onToggle}>
-          <summary className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 cursor-pointer select-none hover:text-ink transition-colors">
-            {t('pages.pain.techDetails')}
-          </summary>
-          <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
-            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-              <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
-              <span className="font-mono text-ink-2">{layers.layer3.id}</span>
-
-              {layers.layer3.linkedTaskId && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskId}</span>
-                </>
-              )}
-
-              {layers.layer3.linkedTaskStatus && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.linkedTaskStatus}</span>
-                </>
-              )}
-
-              {layers.layer3.linkedCandidateId && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.linkedCandidateId}</span>
-                </>
-              )}
-
-              {layers.layer3.linkedPrincipleId && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.linkedPrincipleId}</span>
-                </>
-              )}
-
-              {layers.layer3.internalizationTaskId && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainInternalizationTask')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.internalizationTaskId}</span>
-                </>
-              )}
-
-              {layers.layer3.dreamerTaskStatus && (
-                <>
-                  <span className="font-mono text-ink-4">{t('pages.pain.chainDreamerStatus')}</span>
-                  <span className="font-mono text-ink-2">{layers.layer3.dreamerTaskStatus}</span>
-                </>
-              )}
-
-              <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
-              <span className="font-mono text-ink-2">{layers.layer3.sourceKind}</span>
-
-              <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
-              <span className="font-mono text-ink-2">{layers.layer3.state}</span>
-            </div>
+        {/* Layer 3: Debug IDs — hidden by default; copy button is primary action */}
+        <div className="mt-4 pt-3 border-t border-line">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(buildDebugIdSummary(record));
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch (error) {
+                  // clipboard unavailable — expand details as fallback
+                  console.warn("Debug ID copy failed; falling back to expanded details.", error);
+                  if (!expanded) onToggle();
+                }
+              }}
+              className="font-mono text-[11px] h-7"
+            >
+              {copied ? t('pages.pain.copied') : t('pages.pain.copyDebugId')}
+            </Button>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
+            >
+              {t('pages.pain.expandTechDetails')}
+            </button>
           </div>
-        </details>
+          {expanded && (
+            <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+                <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
+                <span className="font-mono text-ink-2">{layers.layer3.id}</span>
+
+                {layers.layer3.linkedTaskId && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainTaskId')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.linkedTaskId}</span>
+                  </>
+                )}
+
+                {layers.layer3.linkedTaskStatus && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainTaskStatus')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.linkedTaskStatus}</span>
+                  </>
+                )}
+
+                {layers.layer3.linkedCandidateId && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainCandidateId')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.linkedCandidateId}</span>
+                  </>
+                )}
+
+                {layers.layer3.linkedPrincipleId && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainPrincipleId')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.linkedPrincipleId}</span>
+                  </>
+                )}
+
+                {layers.layer3.internalizationTaskId && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainInternalizationTask')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.internalizationTaskId}</span>
+                  </>
+                )}
+
+                {layers.layer3.dreamerTaskStatus && (
+                  <>
+                    <span className="font-mono text-ink-4">{t('pages.pain.chainDreamerStatus')}</span>
+                    <span className="font-mono text-ink-2">{layers.layer3.dreamerTaskStatus}</span>
+                  </>
+                )}
+
+                <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
+                <span className="font-mono text-ink-2">{layers.layer3.sourceKind}</span>
+
+                <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
+                <span className="font-mono text-ink-2">{layers.layer3.state}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

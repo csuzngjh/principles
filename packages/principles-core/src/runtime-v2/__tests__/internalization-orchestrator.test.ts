@@ -79,7 +79,7 @@ function makeRawTask(overrides: {
     attemptCount,
     maxAttempts,
     diagnosticJson,
-  } as unknown as TaskRecord;
+  };
 }
 
 /**
@@ -125,11 +125,11 @@ function moduleHasNoForbiddenImports(modulePath: string): Promise<boolean> {
 // the source file is created.
 
 describe('InternalizationOrchestrator', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let mockStateManager: ReturnType<typeof createMockStateManager>;
    
    
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports,@typescript-eslint/init-declarations
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let OrchestratorClass: typeof import('../internalization/internalization-orchestrator.js').InternalizationOrchestrator;
 
   beforeEach(async () => {
@@ -660,7 +660,7 @@ describe('InternalizationOrchestrator', () => {
   // ── PRI-88: commitNextTaskProposal ──────────────────────────────────────────
 
   describe('commitNextTaskProposal (PRI-88)', () => {
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let createTaskFn: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
