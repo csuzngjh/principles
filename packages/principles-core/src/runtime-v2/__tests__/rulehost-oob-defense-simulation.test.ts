@@ -655,7 +655,7 @@ describe('PRI-210: RuleHost out-of-bounds write defense simulation', () => {
 
     it('Non-string path field via validateProposedPathBounds → invalid (not silently skipped)', () => {
       const result = validateProposedPathBounds(
-        { file_path: 123 as unknown as string, content: 'data' },
+        { file_path: 123, content: 'data' },
         WORKSPACE,
       );
       expect(result.valid).toBe(false);

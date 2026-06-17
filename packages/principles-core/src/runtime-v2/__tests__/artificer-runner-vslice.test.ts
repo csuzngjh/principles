@@ -479,7 +479,7 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
   });
 
   it('rejects null output', async () => {
-    const result = await validator.validate(null as unknown as ArtificerOutputV1, ARTIFICER_TASK_ID);
+    const result = await validator.validate(null, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
   });
 

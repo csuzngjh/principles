@@ -9,6 +9,7 @@ import {
   getFeedbackReport,
   deleteFeedbackReport,
 } from "../../api.js";
+import { enumLabel } from "../../utils/enum-labels.js";
 import {
   parseDraftRecord,
   parseDraftSummary,
@@ -269,7 +270,7 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
             <article key={draft.id} className="bg-panel border border-line rounded-[6px] px-4 py-3 flex items-center justify-between gap-4">
               <div className="min-w-0 flex-1">
                 <div className="font-mono text-[11px] text-ink-3 mb-1">
-                  {draft.type} · {draft.createdAt}
+                  {enumLabel('feedbackType', draft.type, t)} · {draft.createdAt}
                 </div>
                 <div className="text-ink text-sm truncate">{draft.title}</div>
               </div>

@@ -230,7 +230,7 @@ describe('PRI-140: verification readback failure', () => {
 
     Database.prototype.pragma = function (this: Database.Database, ...args: Parameters<Database.Database['pragma']>) {
       // Only intercept foreign_keys readback; let all other calls (including SET) pass through
-      if (typeof args[0] === 'string' && args[0] === 'foreign_keys' && typeof args[1] === 'object' && args[1] !== null && (args[1] as { simple?: boolean }).simple === true) {
+      if (typeof args[0] === 'string' && args[0] === 'foreign_keys' && typeof args[1] === 'object' && args[1] !== null && (args[1]).simple === true) {
         return 0;
       }
       return origPragma.apply(this, args);
@@ -252,7 +252,7 @@ describe('PRI-140: verification readback failure', () => {
 
     Database.prototype.pragma = function (this: Database.Database, ...args: Parameters<Database.Database['pragma']>) {
       // Only intercept journal_mode readback; let all other calls pass through
-      if (typeof args[0] === 'string' && args[0] === 'journal_mode' && typeof args[1] === 'object' && args[1] !== null && (args[1] as { simple?: boolean }).simple === true) {
+      if (typeof args[0] === 'string' && args[0] === 'journal_mode' && typeof args[1] === 'object' && args[1] !== null && (args[1]).simple === true) {
         return 'memory';
       }
       return origPragma.apply(this, args);

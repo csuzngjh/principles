@@ -308,52 +308,63 @@ describe("CR9: tool page components can be imported", () => {
 
 // ── Runtime validator tests (production imports, not re-implementations) ──────
 
-import { validateUpdateStatusData, validateUpdateHistoryEntry, validateUpdateHistoryData } from "../../src/ui/pages/settings/UpdatePage.js";
+import { validateUpdateStatus, validateUpdateHistoryEntry, validateUpdateHistory } from "../../src/ui/utils/validators.js";
 import { validateWorkspaceEntry, validateWorkspaceArray } from "../../src/ui/pages/settings/SettingsPage.js";
 import { parseDraftSummary, parseDraftRecord } from "../../src/ui/pages/ReportProblemValidators.js";
 
 describe("CR9: runtime validators for tool pages", () => {
 
-  describe("validateUpdateStatusData", () => {
+  describe("validateUpdateStatus", () => {
     it("accepts valid data", () => {
-      const result = validateUpdateStatusData({ currentVersion: "1.0.0", latestVersion: "1.1.0", updateAvailable: true, lastChecked: "2026-06-01T00:00:00Z" });
-      expect(result).toEqual({ currentVersion: "1.0.0", latestVersion: "1.1.0", updateAvailable: true, lastChecked: "2026-06-01T00:00:00Z" });
+      const result = validateUpdateStatus({ currentVersion: "1.0.0", latestVersion: "1.1.0", hasUpdate: true });
+      expect(result).toEqual({ currentVersion: "1.0.0", latestVersion: "1.1.0", hasUpdate: true });
     });
 
-    it("rejects null", () => expect(validateUpdateStatusData(null)).toBeNull());
-    it("rejects missing fields", () => expect(validateUpdateStatusData({ currentVersion: "1.0.0" })).toBeNull());
-    it("rejects wrong types", () => expect(validateUpdateStatusData({ currentVersion: 1, latestVersion: "1.1.0", updateAvailable: true, lastChecked: "2026" })).toBeNull());
+    it("accepts valid data with optional error", () => {
+      const result = validateUpdateStatus({ currentVersion: "1.0.0", latestVersion: "1.1.0", hasUpdate: false, error: "registry unreachable" });
+      expect(result).not.toBeNull();
+      expect(result!.error).toBe("registry unreachable");
+    });
+
+    it("rejects null", () => expect(validateUpdateStatus(null)).toBeNull());
+    it("rejects missing fields", () => expect(validateUpdateStatus({ currentVersion: "1.0.0" })).toBeNull());
+    it("rejects wrong types", () => expect(validateUpdateStatus({ currentVersion: 1, latestVersion: "1.1.0", hasUpdate: true })).toBeNull());
     it("rejects inherited property", () => {
       const obj = Object.create({ currentVersion: "1.0.0" });
       obj.latestVersion = "1.1.0";
-      obj.updateAvailable = true;
-      obj.lastChecked = "2026";
-      expect(validateUpdateStatusData(obj)).toBeNull();
+      obj.hasUpdate = true;
+      expect(validateUpdateStatus(obj)).toBeNull();
     });
   });
 
   describe("validateUpdateHistoryEntry", () => {
     it("accepts valid data", () => {
-      const result = validateUpdateHistoryEntry({ version: "1.0.0", appliedAt: "2026-06-01", notes: "Initial release" });
-      expect(result).toEqual({ version: "1.0.0", appliedAt: "2026-06-01", notes: "Initial release" });
+      const result = validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true });
+      expect(result).toEqual({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true });
     });
 
     it("rejects null", () => expect(validateUpdateHistoryEntry(null)).toBeNull());
-    it("rejects missing notes", () => expect(validateUpdateHistoryEntry({ version: "1.0.0", appliedAt: "2026" })).toBeNull());
-    it("rejects wrong types", () => expect(validateUpdateHistoryEntry({ version: 1, appliedAt: "2026", notes: "" })).toBeNull());
+    it("rejects missing fields", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026" })).toBeNull());
+    it("rejects wrong types", () => expect(validateUpdateHistoryEntry({ id: 1, timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: true })).toBeNull());
+    it("rejects non-boolean success", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: "yes" })).toBeNull());
   });
 
-  describe("validateUpdateHistoryData", () => {
-    it("accepts valid data", () => {
-      const result = validateUpdateHistoryData({ updates: [{ version: "1.0.0", appliedAt: "2026-06-01", notes: "Initial" }] });
+  describe("validateUpdateHistory", () => {
+    it("accepts valid { updates: [...] } shape", () => {
+      const result = validateUpdateHistory({ updates: [{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true }] });
       expect(result).not.toBeNull();
       expect(result!.updates).toHaveLength(1);
     });
 
-    it("rejects null", () => expect(validateUpdateHistoryData(null)).toBeNull());
-    it("rejects missing updates field", () => expect(validateUpdateHistoryData({})).toBeNull());
-    it("rejects non-array updates", () => expect(validateUpdateHistoryData({ updates: "not-array" })).toBeNull());
-    it("rejects invalid entry in updates array", () => expect(validateUpdateHistoryData({ updates: [{ version: 1 }] })).toBeNull());
+    it("accepts bare array shape (backend contract)", () => {
+      const result = validateUpdateHistory([{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true }]);
+      expect(result).not.toBeNull();
+      expect(result!.updates).toHaveLength(1);
+    });
+
+    it("rejects null", () => expect(validateUpdateHistory(null)).toBeNull());
+    it("rejects non-array updates field", () => expect(validateUpdateHistory({ updates: "not-array" })).toBeNull());
+    it("rejects invalid entry in updates array", () => expect(validateUpdateHistory({ updates: [{ id: 1 }] })).toBeNull());
   });
 
   describe("validateWorkspaceEntry", () => {

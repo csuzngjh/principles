@@ -1,3 +1,12 @@
+/**
+ * UpdatePage — PD self-update status and history.
+ *
+ * Contract aligned with backend routes/update.ts:
+ * - GET /api/update/check → { hasUpdate, currentVersion, latestVersion, error? }
+ * - GET /api/update/history → [{ id, timestamp, fromVersion, toVersion, success }, ...]
+ *
+ * Privacy boundary: version strings and timestamps only — no session/path data.
+ */
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -9,82 +18,9 @@ import {
 } from "../../api.js";
 import type {
   UpdateStatusData,
-  UpdateHistoryEntry,
   UpdateHistoryData,
 } from "../../api.js";
-
-// ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
-
-/** Type guard: is this a non-null object with own properties (not inherited)? */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function validateUpdateStatusData(raw: unknown): UpdateStatusData | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "currentVersion") ||
-    !Object.hasOwn(raw, "latestVersion") ||
-    !Object.hasOwn(raw, "updateAvailable") ||
-    !Object.hasOwn(raw, "lastChecked")
-  ) {
-    return null;
-  }
-  const currentVersion = raw.currentVersion;
-  const latestVersion = raw.latestVersion;
-  const updateAvailable = raw.updateAvailable;
-  const lastChecked = raw.lastChecked;
-  if (
-    typeof currentVersion !== "string" ||
-    typeof latestVersion !== "string" ||
-    typeof updateAvailable !== "boolean" ||
-    typeof lastChecked !== "string"
-  ) {
-    return null;
-  }
-  return { currentVersion, latestVersion, updateAvailable, lastChecked };
-}
-
-export function validateUpdateHistoryEntry(raw: unknown): UpdateHistoryEntry | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "version") ||
-    !Object.hasOwn(raw, "appliedAt") ||
-    !Object.hasOwn(raw, "notes")
-  ) {
-    return null;
-  }
-  const version = raw.version;
-  const appliedAt = raw.appliedAt;
-  const notes = raw.notes;
-  if (
-    typeof version !== "string" ||
-    typeof appliedAt !== "string" ||
-    typeof notes !== "string"
-  ) {
-    return null;
-  }
-  return { version, appliedAt, notes };
-}
-
-export function validateUpdateHistoryData(raw: unknown): UpdateHistoryData | null {
-  if (!isRecord(raw)) return null;
-  if (!Object.hasOwn(raw, "updates")) {
-    return null;
-  }
-  const updates = raw.updates;
-  if (!Array.isArray(updates)) {
-    return null;
-  }
-  // Fail loud: any invalid entry rejects the entire payload (ERR-009)
-  const validatedEntries: UpdateHistoryEntry[] = [];
-  for (const entry of updates) {
-    const validated = validateUpdateHistoryEntry(entry);
-    if (validated === null) return null;
-    validatedEntries.push(validated);
-  }
-  return { updates: validatedEntries };
-}
+import { validateUpdateStatus, validateUpdateHistory } from "../../utils/validators.js";
 
 // ── Helper: format ISO date string to locale-aware display ────────────────────
 
@@ -135,7 +71,7 @@ export function UpdatePage() {
       setErrorMessage(statusResult.error);
       return;
     }
-    const validatedStatus = validateUpdateStatusData(statusResult.data);
+    const validatedStatus = validateUpdateStatus(statusResult.data);
     if (validatedStatus === null) {
       setLoadingState("error");
       setErrorMessage("Update status data has unexpected shape");
@@ -148,7 +84,7 @@ export function UpdatePage() {
       setHistoryData(null);
       setHistoryErrorReason(historyResult.error ?? "Update history unavailable");
     } else {
-      const validatedHistory = validateUpdateHistoryData(historyResult.data);
+      const validatedHistory = validateUpdateHistory(historyResult.data);
       setHistoryData(validatedHistory);
       if (validatedHistory === null) {
         setHistoryErrorReason("Update history data has unexpected shape");
@@ -170,7 +106,7 @@ export function UpdatePage() {
       setChecking(false);
       return;
     }
-    const validated = validateUpdateStatusData(result.data);
+    const validated = validateUpdateStatus(result.data);
     if (validated === null) {
       toast.error(t("pages.update.checkFailed"));
       setChecking(false);
@@ -212,10 +148,7 @@ export function UpdatePage() {
   }
 
   // ── Loaded state ─────────────────────────────────────────────────────────
-  const isUpToDate = statusData ? !statusData.updateAvailable : true;
-  const lastCheckedDisplay = statusData
-    ? (statusData.lastChecked ? formatDate(statusData.lastChecked, locale) : t("pages.update.neverChecked"))
-    : t("pages.update.neverChecked");
+  const isUpToDate = statusData ? !statusData.hasUpdate : true;
 
   return (
     <PageShell>
@@ -265,13 +198,14 @@ export function UpdatePage() {
                 )}
               </div>
             </div>
-
-            {/* Last checked */}
-            <div className="flex items-center justify-between">
-              <span className="text-ink-3 text-[13px]">{t("pages.update.lastChecked")}</span>
-              <span className="text-ink-3 text-[13px]">{lastCheckedDisplay}</span>
-            </div>
           </div>
+
+          {/* Error notice when registry check failed but version is still shown */}
+          {statusData?.error && (
+            <div className="mt-4 pt-3 border-t border-line text-[12px] text-ink-4 font-mono">
+              {t("pages.update.checkError")}: {statusData.error}
+            </div>
+          )}
 
           {/* Check button — secondary style (tool page, lower visual weight) */}
           <div className="mt-5 pt-4 border-t border-line">
@@ -299,9 +233,9 @@ export function UpdatePage() {
           </div>
         ) : historyData && historyData.updates.length > 0 ? (
           <div className="space-y-[10px]">
-            {historyData.updates.map((entry, index) => (
+            {historyData.updates.map((entry) => (
               <article
-                key={`${entry.version}-${index}`}
+                key={entry.id}
                 className="bg-panel border border-line rounded-[6px] px-5 py-4"
               >
                 <div className="flex items-center justify-between mb-2">
@@ -309,17 +243,19 @@ export function UpdatePage() {
                     <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
                       {t("pages.update.version")}
                     </span>
-                    <span className="font-mono text-[13px] text-ink">{entry.version}</span>
+                    <span className="font-mono text-[13px] text-ink">
+                      {entry.fromVersion} → {entry.toVersion}
+                    </span>
+                    {!entry.success && (
+                      <span className="inline-flex items-center border border-red/35 text-red rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                        {t("pages.update.failed")}
+                      </span>
+                    )}
                   </div>
                   <span className="text-ink-3 text-[13px]">
-                    {formatDate(entry.appliedAt, locale)}
+                    {formatDate(entry.timestamp, locale)}
                   </span>
                 </div>
-                {entry.notes && (
-                  <div className="text-ink-2 text-[13px] leading-relaxed mt-1">
-                    {entry.notes}
-                  </div>
-                )}
               </article>
             ))}
           </div>

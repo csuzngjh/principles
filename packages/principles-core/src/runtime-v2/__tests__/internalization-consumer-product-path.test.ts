@@ -52,7 +52,7 @@ function makeRawTask(overrides: {
     attemptCount,
     maxAttempts: 3,
     diagnosticJson,
-  } as unknown as TaskRecord;
+  };
 }
 
 function makeDreamerOutput() {
@@ -113,7 +113,7 @@ function createMockStateManager(opts: {
       taskId: `philosopher-${TASK_ID}-prompt`,
       taskKind: 'philosopher',
       status: 'pending',
-    } as unknown as TaskRecord),
+    }),
   };
 }
 

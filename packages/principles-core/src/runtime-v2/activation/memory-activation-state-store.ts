@@ -21,6 +21,16 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
     return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
   }
 
+  async listCodeToolHookActivations(): Promise<ActivationStatusRecord[]> {
+    const result: ActivationStatusRecord[] = [];
+    for (const record of this.activations.values()) {
+      if (record.channel === 'code_tool_hook' && record.deactivatedAt === null) {
+        result.push(record);
+      }
+    }
+    return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
+  }
+
   async listAllActivations(): Promise<ActivationStatusRecord[]> {
     const result: ActivationStatusRecord[] = [];
     for (const record of this.activations.values()) {

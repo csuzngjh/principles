@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
+  approveApproval,
+  rejectApproval,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
@@ -53,10 +56,12 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       !Object.hasOwn(r, "artifactId") ||
       !Object.hasOwn(r, "channel") ||
       !Object.hasOwn(r, "createdAt") ||
+      !Object.hasOwn(r, "status") ||
       typeof r.id !== "string" ||
       typeof r.artifactId !== "string" ||
       typeof r.channel !== "string" ||
-      typeof r.createdAt !== "string"
+      typeof r.createdAt !== "string" ||
+      typeof r.status !== "string"
     ) {
       return null;
     }
@@ -65,11 +70,21 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       artifactId: r.artifactId,
       channel: r.channel,
       createdAt: r.createdAt,
+      status: r.status,
     });
+  }
+  // Wave 7: candidateDescription is optional — present when backend could
+  // extract human-readable content from the artifact contentJson.
+  // ERR-009: if field exists but is wrong type, fail loud (return null).
+  let candidateDescription: string | undefined;
+  if (Object.hasOwn(raw, "candidateDescription")) {
+    if (typeof raw.candidateDescription !== "string") return null;
+    candidateDescription = raw.candidateDescription;
   }
   return {
     principleId,
     principleTitle,
+    candidateDescription,
     status: status as "pending" | "approved" | "rejected",
     records: validRecords,
   };
@@ -202,18 +217,158 @@ function ProseSummary({
   );
 }
 
+// ── Wave 4: Feedback Stratification ──────────────────────────────────────────
+// Shows three feedback layers by timescale, so the Owner sees what the system
+// already handled vs. what actually needs their judgment. Implements the
+// "feedback latency stratification" principle from the co-evolution article.
+
+function FeedbackStratification({
+  gateBlocksToday,
+  inProgressCount,
+  pendingCount,
+}: {
+  gateBlocksToday: number;
+  inProgressCount: number;
+  pendingCount: number;
+}) {
+  const { t } = useTranslation();
+  // Hide entirely when all three are zero — no feedback to stratify.
+  if (gateBlocksToday === 0 && inProgressCount === 0 && pendingCount === 0) {
+    return null;
+  }
+  return (
+    <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-3">
+        {t("pages.focus.stratLabel")}
+      </div>
+      <div className="flex items-stretch gap-3 flex-wrap">
+        {/* Layer 1: seconds-level — auto-blocked, sink down */}
+        <div className="flex-1 min-w-[140px] px-3 py-2 bg-surface/60 border border-line rounded-[4px]">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono font-semibold text-[18px] text-ink-4 tabular-nums">{gateBlocksToday}</span>
+            <span className="text-[12px] text-ink-3">{t("pages.focus.stratGateBlocks")}</span>
+          </div>
+          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratGateBlocksHint")}</div>
+        </div>
+        {/* Layer 2: minutes/hours — system processing, neutral */}
+        <div className="flex-1 min-w-[140px] px-3 py-2 bg-surface/60 border border-line rounded-[4px]">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono font-semibold text-[18px] text-teal-600 tabular-nums">{inProgressCount}</span>
+            <span className="text-[12px] text-ink-3">{t("pages.focus.stratInProgress")}</span>
+          </div>
+          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratInProgressHint")}</div>
+        </div>
+        {/* Layer 3: hours/days — needs Owner judgment, lift up */}
+        <div className="flex-1 min-w-[140px] px-3 py-2 bg-gov/5 border border-gov/30 rounded-[4px] relative">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono font-semibold text-[18px] text-gov tabular-nums">{pendingCount}</span>
+            <span className="text-[12px] text-gov">{t("pages.focus.stratPendingReview")}</span>
+          </div>
+          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratPendingReviewHint")}</div>
+          <span className="absolute -top-2 right-2 inline-flex items-center border border-gov/40 text-gov bg-panel rounded-[2px] px-[6px] py-0.5 font-mono text-[9px] uppercase tracking-wider">
+            {t("pages.focus.stratYouAreHere")}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PendingReviewCard({
   group,
+  onDecisionApplied,
 }: {
   group: ApprovalGroup;
+  onDecisionApplied: () => void;
 }) {
   const { t } = useTranslation();
   const primaryChannel = group.records[0]?.channel ?? "prompt";
   const channelLabel = getChannelLabel(primaryChannel, t);
   const isReversible = primaryChannel === "prompt" || primaryChannel === "defer_archive";
 
+  // Inline review state (Wave 7: no more 404 jump to /principles/<fake-id>)
+  const [actionLoading, setActionLoading] = useState(false);
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+
+  // Display title: prefer candidateDescription (human-readable) over principleTitle
+  // (which falls back to a fabricated principleId when the principle isn't in ledger).
+  const displayTitle = group.candidateDescription
+    ?? group.principleTitle
+    ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
+
+  async function applyDecisionToAllRecords(
+    action: "approve" | "reject",
+    reason?: string,
+  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number }> {
+    // Only process pending records — skip already-approved/rejected to avoid
+    // stable partial failures on mixed-status groups.
+    const pendingRecords = group.records.filter((r) => r.status === "pending");
+    let failedCount = 0;
+    for (const record of pendingRecords) {
+      const result =
+        action === "approve"
+          ? await approveApproval(record.id)
+          : await rejectApproval(record.id, reason ?? "");
+      if (!result.success) failedCount++;
+    }
+    return { allSucceeded: failedCount === 0, failedCount, totalCount: pendingRecords.length };
+  }
+
+  const handleApprove = async () => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("approve");
+      if (allSucceeded) {
+        toast.success(t("pages.focus.approveSucceeded", { defaultValue: "已批准" }));
+        onDecisionApplied();
+      } else {
+        toast.error(
+          t("pages.focus.partialFailure", {
+            defaultValue: `批准完成，但 ${failedCount}/${totalCount} 条记录失败。`,
+            failedCount,
+            totalCount,
+          }),
+        );
+        onDecisionApplied();
+      }
+    } catch {
+      toast.error(t("pages.focus.approveFailed", { defaultValue: "批准失败，请稍后重试。" }));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (actionLoading || !rejectReason.trim()) return;
+    setActionLoading(true);
+    try {
+      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("reject", rejectReason.trim());
+      if (allSucceeded) {
+        toast.success(t("pages.focus.rejectSucceeded", { defaultValue: "已拒绝" }));
+        setShowRejectInput(false);
+        setRejectReason("");
+        onDecisionApplied();
+      } else {
+        toast.error(
+          t("pages.focus.partialFailure", {
+            defaultValue: `拒绝完成，但 ${failedCount}/${totalCount} 条记录失败。`,
+            failedCount,
+            totalCount,
+          }),
+        );
+        onDecisionApplied();
+      }
+    } catch {
+      toast.error(t("pages.focus.rejectFailed", { defaultValue: "拒绝失败，请稍后重试。" }));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
-    <article className="relative pl-[22px] py-[18px] pr-[18px] bg-panel border border-line rounded-[6px] cursor-pointer transition-colors hover:border-line-2">
+    <article className="relative pl-[22px] py-[18px] pr-[18px] bg-panel border border-line rounded-[6px] transition-colors">
       {/* Left border indicator */}
       <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-[6px] bg-gov" />
 
@@ -229,9 +384,9 @@ function PendingReviewCard({
         )}
       </div>
 
-      {/* Title */}
-      <div className="mt-[14px] mb-2 font-semibold text-ink">
-        {group.principleTitle}
+      {/* Title — human-readable candidate description, NOT the fabricated principleId */}
+      <div className="mt-[14px] mb-2 font-semibold text-ink leading-snug">
+        {displayTitle}
       </div>
 
       {/* Evidence summary (inset well) */}
@@ -239,22 +394,63 @@ function PendingReviewCard({
         {t("pages.focus.evidenceSummary", { count: group.records.length })}
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-2 mt-4">
-        <Link
-          to={`/principles/${group.principleId}`}
-          className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-          data-testid={`review-principle-${group.principleId}`}
+      {/* Inline review actions (Wave 7: no more 404 jump) */}
+      <div className="flex gap-2 mt-4 flex-wrap items-center">
+        <button
+          type="button"
+          onClick={handleApprove}
+          disabled={actionLoading}
+          className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
-          {t("pages.focus.reviewAction")}
-        </Link>
+          {actionLoading ? t("common.loading") + "…" : t("pages.focus.approveAction", { defaultValue: "批准" })}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowRejectInput((v) => !v)}
+          disabled={actionLoading}
+          className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        >
+          {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
+        </button>
         <Link
-          to={`/principles/${group.principleId}`}
-          className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          to="/evidence"
+          className="inline-flex items-center text-gov text-[12.5px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.viewFullChain")}
         </Link>
       </div>
+
+      {/* Rejection reason input (inline, not dialog) */}
+      {showRejectInput && (
+        <div className="mt-3 p-3 border border-danger/20 rounded-[var(--radius-md)]">
+          <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+            {t("pages.focus.rejectReasonLabel", { defaultValue: "拒绝原因（必填）" })}
+          </label>
+          <textarea
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder={t("pages.focus.rejectReasonPlaceholder", { defaultValue: "请说明拒绝原因" })}
+            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={!rejectReason.trim() || actionLoading}
+              className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {t("pages.focus.confirmReject", { defaultValue: "确认拒绝" })}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+            >
+              {t("pages.focus.cancelAction", { defaultValue: "取消" })}
+            </button>
+          </div>
+        </div>
+      )}
     </article>
   );
 }
@@ -513,6 +709,7 @@ export function FocusPage() {
   const inProgressSummary = queueData?.inProgressSummary;
   const degradedSignals = queueData?.degradedSignals;
   const evidenceCount = queueData?.evidenceInProgressCount ?? 0;
+  const gateBlocksToday = queueData?.gateBlocksToday ?? 0;
   const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
 
   // Map codes to i18n text
@@ -568,6 +765,13 @@ export function FocusPage() {
         evidenceCount={evidenceCount}
       />
 
+      {/* Wave 4: Feedback stratification — three timescale layers */}
+      <FeedbackStratification
+        gateBlocksToday={gateBlocksToday}
+        inProgressCount={evidenceCount}
+        pendingCount={pendingCount}
+      />
+
       {/* State-specific guides — PRI-332: distinguish healthy empty from degraded */}
       {governanceState === "none" && pendingCount === 0 && deviationCount === 0 && stagnationCount === 0 && (
         stateReasonCode === "state_db_missing" ? (
@@ -603,7 +807,7 @@ export function FocusPage() {
         {pendingGroups.length > 0 ? (
           <div className="space-y-[14px]">
             {pendingGroups.map((group) => (
-              <PendingReviewCard key={group.principleId} group={group} />
+              <PendingReviewCard key={group.principleId} group={group} onDecisionApplied={loadData} />
             ))}
           </div>
         ) : (

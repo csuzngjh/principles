@@ -344,7 +344,7 @@ async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<L
 // ── Updates (CR9) ─────────────────────────────────────────────────────────────
 
 async function fetchUpdateStatus(): Promise<ApiResponse<UpdateStatusData>> {
-  return request<UpdateStatusData>('/api/update', undefined, validateUpdateStatus);
+  return request<UpdateStatusData>('/api/update/check', undefined, validateUpdateStatus);
 }
 
 async function fetchUpdateHistory(): Promise<ApiResponse<UpdateHistoryData>> {

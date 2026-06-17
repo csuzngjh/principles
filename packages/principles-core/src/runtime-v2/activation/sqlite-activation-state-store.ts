@@ -103,6 +103,25 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
     return result;
   }
 
+  async listCodeToolHookActivations(): Promise<ActivationStatusRecord[]> {
+    const db = this.connection.getDb();
+    const rows = db.prepare(`
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
+      FROM activations
+      WHERE channel = 'code_tool_hook' AND deactivated_at IS NULL
+      ORDER BY activated_at ASC
+    `).all();
+
+    if (!Array.isArray(rows)) return [];
+
+    const result: ActivationStatusRecord[] = [];
+    for (const row of rows) {
+      const record = mapRowToRecord(row);
+      if (record) result.push(record);
+    }
+    return result;
+  }
+
   async listAllActivations(): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
     const rows = db.prepare(`

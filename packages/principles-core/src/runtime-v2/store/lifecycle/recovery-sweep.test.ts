@@ -27,13 +27,13 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('DefaultRecoverySweep', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
-  /* eslint-disable @typescript-eslint/init-declarations */
+   
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let leaseManager: DefaultLeaseManager;
   let retryPolicy: DefaultRetryPolicy;
   let recoverySweep: DefaultRecoverySweep;
-  /* eslint-enable @typescript-eslint/init-declarations */
+   
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
