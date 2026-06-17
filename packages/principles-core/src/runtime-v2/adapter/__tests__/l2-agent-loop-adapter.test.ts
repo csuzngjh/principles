@@ -49,17 +49,27 @@ vi.mock('@earendil-works/pi-agent-core', () => ({
 }));
 /* eslint-enable @typescript-eslint/max-params */
 
+// PRI-420: mock completeSimple for L1 fallback tests. getModel/getProviders are used by resolveL2Model
+// in all tests (via the custom baseUrl path), so provide stubs.
+vi.mock('@earendil-works/pi-ai', () => ({
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => ({ id: 'test', name: 'test', api: 'openai-completions', provider: 'test-provider' })),
+  getProviders: vi.fn(() => []),
+}));
+
 // Mock store/event-emitter to capture telemetry.
 vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
 import { storeEmitter } from '../../store/event-emitter.js';
+import { completeSimple } from '@earendil-works/pi-ai';
 import { L2AgentLoopAdapter } from '../l2-agent-loop-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 import type { PdL2ArtifactReader, PdL2PrincipleReader } from '../../tools/agent-tool-contract.js';
 
 const emitTelemetryMock = storeEmitter.emitTelemetry as unknown as ReturnType<typeof vi.fn>;
+const mockComplete = completeSimple as unknown as ReturnType<typeof vi.fn>;
 
 // Minimal fakes for the injected readers.
 const artifactReader: PdL2ArtifactReader = {
@@ -92,7 +102,7 @@ function makeStartRun(overrides: Partial<StartRunInput> = {}): StartRunInput {
   };
 }
 
-function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number } = {}): L2AgentLoopAdapter {
+function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number; maxEmptyRetries?: number; l2FallbackToL1?: boolean } = {}): L2AgentLoopAdapter {
   return new L2AgentLoopAdapter(
     {
       // Custom baseUrl so resolveL2Model builds the model inline (no getModel lookup).
@@ -101,6 +111,8 @@ function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number } = 
       apiKeyEnv: 'TEST_API_KEY',
       baseUrl: 'http://localhost:1234/v1',
       maxTurns: overrides.maxTurns,
+      maxEmptyRetries: overrides.maxEmptyRetries,
+      l2FallbackToL1: overrides.l2FallbackToL1,
       totalBudgetMs: overrides.totalBudgetMs ?? 60_000,
     },
     { artifactReader, principleReader },
@@ -340,6 +352,101 @@ describe('PRI-419 L2AgentLoopAdapter — timeout/abort path (P3-1)', () => {
     const completeCalls = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_complete');
     expect(completeCalls.length).toBe(1);
     expect(completeCalls[0]?.[0]?.payload?.timedOut).toBe(false);
+  });
+});
+
+describe('PRI-420 L2AgentLoopAdapter — empty-response auto-retry', () => {
+  it('retries on empty response and succeeds on the second attempt', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 2, totalBudgetMs: 60_000 });
+    let attempt = 0;
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      attempt += 1;
+      if (attempt === 1) {
+        // First attempt: empty response (no submit_output, no text).
+        return [{ role: 'assistant', content: '' }];
+      }
+      // Second attempt: call submit_output.
+      const submit = context.tools?.find(t => t.name === 'submit_output');
+      if (submit) await submit.execute('call-1', VALID_DREAMER_OUTPUT);
+      return [];
+    };
+
+    const handle = await adapter.startRun(makeStartRun());
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output).not.toBeNull();
+    expect(output?.payload).toEqual(VALID_DREAMER_OUTPUT);
+
+    // retryCount should be 1 in telemetry.
+    const completeCalls = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_complete');
+    expect(completeCalls[0]?.[0]?.payload?.retryCount).toBe(1);
+  });
+
+  it('emits empty_response_retry telemetry per retry', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 2, totalBudgetMs: 60_000 });
+    let attempt = 0;
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      attempt += 1;
+      if (attempt <= 2) {
+        return [{ role: 'assistant', content: '' }]; // empty
+      }
+      const submit = context.tools?.find(t => t.name === 'submit_output');
+      if (submit) await submit.execute('call-1', VALID_DREAMER_OUTPUT);
+      return [];
+    };
+
+    await adapter.startRun(makeStartRun());
+    const retryEvents = emitTelemetryMock.mock.calls.filter(
+      c => c[0]?.eventType === 'dreamer_l2_turn' && c[0]?.payload?.phase === 'empty_response_retry',
+    );
+    expect(retryEvents.length).toBe(2); // attempt 1 and attempt 2
+  });
+
+  it('does NOT retry when maxEmptyRetries is 0 (fails immediately to fallback)', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 0, l2FallbackToL1: false, totalBudgetMs: 60_000 });
+    hoisted.mockReturn = [{ role: 'assistant', content: '' }];
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/empty response on all attempts/);
+    const completeCalls = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_complete');
+    expect(completeCalls[0]?.[0]?.payload?.retryCount).toBe(0);
+  });
+});
+
+describe('PRI-420 L2AgentLoopAdapter — L2→L1 fallback', () => {
+  it('falls back to L1 completeSimple when all L2 attempts produce empty responses', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 1, l2FallbackToL1: true, totalBudgetMs: 60_000 });
+    hoisted.mockReturn = [{ role: 'assistant', content: '' }]; // always empty
+
+    // Mock completeSimple to return a valid JSON response.
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify(VALID_DREAMER_OUTPUT),
+    });
+
+    const handle = await adapter.startRun(makeStartRun());
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output?.payload).toEqual(VALID_DREAMER_OUTPUT);
+
+    // Fallback telemetry should fire.
+    const fallbackEvents = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_fallback_to_l1');
+    expect(fallbackEvents.length).toBe(1);
+    expect(fallbackEvents[0]?.[0]?.payload?.reason).toContain('empty response');
+  });
+
+  it('fails loud (R9) when both L2 and L1 fallback fail', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 1, l2FallbackToL1: true, totalBudgetMs: 60_000 });
+    hoisted.mockReturn = [{ role: 'assistant', content: '' }]; // L2 empty
+    mockComplete.mockResolvedValueOnce({ content: 'not json at all' }); // L1 no parseable JSON
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/L1 fallback also failed/);
+  });
+
+  it('fails loud without L1 fallback when l2FallbackToL1 is false', async () => {
+    const adapter = makeAdapter({ maxEmptyRetries: 1, l2FallbackToL1: false, totalBudgetMs: 60_000 });
+    hoisted.mockReturn = [{ role: 'assistant', content: '' }];
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/empty response on all attempts/);
+    // No fallback event should fire.
+    const fallbackEvents = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_fallback_to_l1');
+    expect(fallbackEvents.length).toBe(0);
   });
 });
 
