@@ -74,6 +74,7 @@ export interface ActivationStateReadModel {
   getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null>;
   recordActivation(record: ActivationStatusRecord): Promise<void>;
   listPromptActivations(): Promise<ActivationStatusRecord[]>;
+  listCodeToolHookActivations(): Promise<ActivationStatusRecord[]>;
   listAllActivations(): Promise<ActivationStatusRecord[]>;
   deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean>;
 }

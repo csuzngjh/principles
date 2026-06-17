@@ -18,13 +18,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../diag-rootcause-runner.js';
-import type { DiagRootCauseOutputV1, DiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
+import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { PIArtifactStore } from '../pi-artifact.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
+import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
-import type { ContextAssembler } from '../../store/context/context-assembler.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { RunnerPhase } from '../../runner/runner-phase.js';
@@ -131,11 +130,11 @@ function createMockDeps(overrides: Partial<DiagRootCauseRunnerDeps> = {}): DiagR
 
   return {
     stateManager: _stateManager as unknown as RuntimeStateManager,
-    runtimeAdapter: _runtimeAdapter as unknown as PDRuntimeAdapter,
+    runtimeAdapter: _runtimeAdapter,
     eventEmitter: mockEventEmitter as unknown as StoreEventEmitter,
     artifactStore: new MemoryPIArtifactStore(),
-    validator: _validator as unknown as DiagRootCauseValidator,
-    contextAssembler: _contextAssembler as unknown as ContextAssembler,
+    validator: _validator,
+    contextAssembler: _contextAssembler,
     _stateManager,
     _runtimeAdapter,
     _validator,

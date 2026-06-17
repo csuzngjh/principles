@@ -142,7 +142,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -172,7 +172,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -204,7 +204,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -236,7 +236,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -270,7 +270,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -300,7 +300,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -330,7 +330,7 @@ describe('PainSignalBridge admission gate integration', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -439,7 +439,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -474,7 +474,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,
@@ -509,7 +509,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
 
     const bridge = new PainSignalBridge({
       stateManager: deps.stateManager,
-      runner: deps.runner as any,
+      runner: deps.runner,
       intakeService: deps.intakeService,
       ledgerAdapter: deps.ledgerAdapter,
       eventEmitter: deps.eventEmitter,

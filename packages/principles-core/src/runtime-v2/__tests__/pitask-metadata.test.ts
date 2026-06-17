@@ -57,7 +57,7 @@ import type { PITaskMetadata } from '../internalization/pitask-metadata.js';
 function makeMetadata(overrides?: Partial<PITaskMetadata>) {
   return {
     dependencyTaskIds: overrides?.dependencyTaskIds ?? [],
-    channel: overrides?.channel ?? ('prompt' as InternalizationChannel),
+    channel: overrides?.channel ?? ('prompt'),
     timeoutMs: overrides?.timeoutMs ?? 300000,
     inputArtifactRefs: overrides?.inputArtifactRefs ?? ([] as ArtifactRef[]),
     outputArtifactRefs: overrides?.outputArtifactRefs ?? ([] as ArtifactRef[]),
@@ -371,7 +371,7 @@ describe('SqliteTaskStore roundtrip', () => {
       taskId: 'task-inline-diag',
       taskKind: 'evaluator',
       diagnosticJson: diagJson,
-    } as Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string });
+    });
 
     const created = await store.createTask(task);
     const retrieved = await store.getTask(created.taskId);

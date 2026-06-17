@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -125,6 +125,10 @@ export function PrincipleDetailPage() {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Evidence ID copy state (Wave 6: stop showing raw UUIDs as primary content)
+  const [evidenceCopied, setEvidenceCopied] = useState(false);
+  const [evidenceExpanded, setEvidenceExpanded] = useState(false);
 
   // Fetch data
   const loadData = useCallback(async () => {
@@ -392,19 +396,78 @@ export function PrincipleDetailPage() {
           </div>
         </div>
 
-        {/* Evidence list */}
+        {/* Evidence list — Wave 6: stop showing raw UUIDs as primary content.
+            Same pattern as PainPage Layer 3: count line + copy-debug-id button
+            is the primary action; raw IDs only appear in a collapsed tech-details
+            panel for developer troubleshooting. The Owner never reads UUIDs in
+            the main review flow. */}
         {principle.derivedFromPainIds.length > 0 && (
           <div>
             <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
               {t("principles.detail.evidence")}
             </span>
-            <ul className="mt-2 space-y-1">
-              {principle.derivedFromPainIds.map((painId, idx) => (
-                <li key={painId} className="text-ink-2 text-[13px] font-mono">
-                  {idx + 1}. {painId}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              <p className="text-ink-2 text-[14px] leading-relaxed">
+                {t("principles.detail.evidenceCount", {
+                  defaultValue: "已关联 {{count}} 条证据记录",
+                  count: principle.derivedFromPainIds.length,
+                })}
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const summary = principle.derivedFromPainIds
+                      .map((pid, i) => `pain_${i + 1}_id: ${pid}`)
+                      .join("\n");
+                    await navigator.clipboard.writeText(summary);
+                    setEvidenceCopied(true);
+                    setTimeout(() => setEvidenceCopied(false), 2000);
+                  } catch (error) {
+                    // clipboard unavailable — expand as fallback
+                    console.warn("Evidence ID copy failed; expanding technical details.", error);
+                    if (!evidenceExpanded) setEvidenceExpanded(true);
+                  }
+                }}
+                className="font-mono text-[11px] h-7"
+              >
+                {evidenceCopied
+                  ? t("principles.detail.evidenceCopied", { defaultValue: "已复制" })
+                  : t("principles.detail.copyEvidenceId", { defaultValue: "复制证据 ID" })}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setEvidenceExpanded((v) => !v)}
+                className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
+              >
+                {t("principles.detail.expandTechDetails", { defaultValue: "展开技术细节" })}
+              </button>
+              {/* Wave 7: link to evidence chain page so Owner knows where to use the copied ID */}
+              <Link
+                to="/evidence"
+                className="font-mono text-[11px] text-gov hover:underline transition-colors"
+              >
+                {t("principles.detail.viewEvidenceChain", { defaultValue: "在证据链页查看 →" })}
+              </Link>
+            </div>
+            {evidenceExpanded && (
+              <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+                  {principle.derivedFromPainIds.map((painId, idx) => (
+                    <div key={`${painId}-${idx}`} className="contents">
+                      <span className="font-mono text-ink-4">
+                        {t("principles.detail.evidenceIdLabel", {
+                          defaultValue: "证据 {{n}} ID",
+                          n: idx + 1,
+                        })}
+                      </span>
+                      <span className="font-mono text-ink-2 break-all">{painId}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>

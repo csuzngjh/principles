@@ -246,7 +246,7 @@ describe('validateTraceRefinerAgentOutput: blocked status', () => {
       blockedReason: undefined,
       evidenceMap: [],
       confidence: 0,
-    } as Partial<TraceRefinerAgentOutput>);
+    });
 
     const result = validateTraceRefinerAgentOutput(output, input);
 
@@ -740,7 +740,7 @@ describe('validateTraceRefinerAgentOutput: refinedTrace complete shape validatio
     const fullTrace = makeValidFullTrace();
     const refined = makeValidRefinedTrace(fullTrace);
     const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
-    const badRefinedTrace = { ...refined, sourceRunIds: [42 as unknown as string] } as unknown as RefinedTracePayload;
+    const badRefinedTrace = { ...refined, sourceRunIds: [42 as unknown as string] };
     const output = makeValidAgentOutput(badRefinedTrace);
 
     const result = validateTraceRefinerAgentOutput(output, input);

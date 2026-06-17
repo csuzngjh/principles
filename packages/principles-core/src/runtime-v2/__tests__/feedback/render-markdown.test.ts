@@ -105,7 +105,7 @@ describe('renderReportMarkdown', () => {
   it('BigInt values in diagnostics do not throw (ERR-017)', () => {
     const report = makeReport({
       diagnosticSummary: {
-        versions: { count: BigInt(9999999999999) as unknown as string },
+        versions: { count: BigInt(9999999999999) },
         platform: { os: 'linux' },
         featureFlags: {},
         canary: { status: 'unavailable', unavailableReason: 'offline' },

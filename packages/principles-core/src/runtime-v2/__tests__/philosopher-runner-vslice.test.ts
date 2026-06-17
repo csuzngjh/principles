@@ -397,7 +397,7 @@ describe('DefaultPhilosopherValidator (PRI-90)', () => {
   });
 
   it('rejects null output', async () => {
-    const result = await validator.validate(null as unknown as PhilosopherOutputV1, PHILOSOPHER_TASK_ID);
+    const result = await validator.validate(null, PHILOSOPHER_TASK_ID);
     expect(result.valid).toBe(false);
   });
 });

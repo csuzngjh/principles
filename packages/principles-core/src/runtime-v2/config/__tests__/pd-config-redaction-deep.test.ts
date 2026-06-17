@@ -137,7 +137,7 @@ describe('Array redaction', () => {
     const obj = asObject(result);
     expect(obj).not.toBeNull();
     if (obj) {
-      const keys = obj.keys;
+      const {keys} = obj;
       expect(Array.isArray(keys)).toBe(true);
       if (Array.isArray(keys)) {
         expect(keys[0]).toBe('[REDACTED]');
@@ -159,7 +159,7 @@ describe('Array redaction', () => {
     const obj = asObject(result);
     expect(obj).not.toBeNull();
     if (obj) {
-      const profiles = obj.profiles;
+      const {profiles} = obj;
       expect(Array.isArray(profiles)).toBe(true);
       if (Array.isArray(profiles)) {
         const p0 = asObject(profiles[0]);

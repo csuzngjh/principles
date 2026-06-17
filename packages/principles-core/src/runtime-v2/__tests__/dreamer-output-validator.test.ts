@@ -186,7 +186,7 @@ describe('DefaultDreamerValidator (PRI-87)', () => {
   });
 
   it('rejects null output', async () => {
-    const result = await validator.validate(null as unknown as DreamerOutput, TASK_ID);
+    const result = await validator.validate(null, TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toBe('Output is not an object');
   });

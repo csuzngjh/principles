@@ -631,7 +631,7 @@ describe('evaluateInRefinerSandbox', () => {
   });
 
   it('propose_correction with expectedProposedParams as ownKeys-throwing Proxy → validation_failed, no throw', () => {
-    const throwingProxy = new Proxy({} as Record<string, unknown>, {
+    const throwingProxy = new Proxy({}, {
       ownKeys() { throw new Error('ownKeys trapped'); },
     });
     const trace = makeTrace([{
@@ -662,7 +662,7 @@ describe('evaluateInRefinerSandbox', () => {
   });
 
   it('propose_correction with proposal.proposedParams as ownKeys-throwing Proxy → validation_failed, no throw', () => {
-    const throwingProxy = new Proxy({} as Record<string, unknown>, {
+    const throwingProxy = new Proxy({}, {
       ownKeys() { throw new Error('ownKeys trapped'); },
     });
     const trace = makeTrace([{
