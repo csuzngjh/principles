@@ -22,15 +22,15 @@
 | `bd709ad9` | ERR-069 | — | ERR-069 记录(Category 3)+ EP-01/EP-02 更新 | — |
 | `9a5b99dd` | Phase 5a | PRI-425 | Evaluator prompt builder V2 code review 指令 + buildContext scribe artifact 加载(PRD Decision 12)+ invokeRuntime 透传 | 9 新 |
 | `3efe09bf` | Phase 5b | PRI-426 | `EvaluatorRunner.succeedTask` 单轮对抗沙盒重放 + `gateDeps` 注入 + PRI-423 positive case 合并契约 + 遥测注册 | 8 新 |
+| `c0a11c5b` | Phase 6 | PRI-427 | Rule Artifact Assembly — `assembleRuleArtifact()` 双 artifact 写入 + `updateValidationStatus('validated')` + RuleHostWriter.canActivate 字段契约 + 遥测 | 8 新 |
 
-**累计 87 测试,零功能回归。** Linear: PRI-421/422/423/424/425/426 全部 In Review。
+**累计 95 测试,零功能回归。** Linear: PRI-421/422/423/424/425/426/427 全部 In Review。
 
 ## 3. 待完成 Phase
 
 | Phase | 工单 | 内容 | 依赖 |
 |-------|------|------|------|
-| **Phase 6** | **PRI-427** | Rule Artifact Assembly in `succeedTask`(双 artifact 写入 + `updateValidationStatus('validated')`) | PRI-426 ✅ |
-| Phase 7 | PRI-428 | Orchestrator 多轮对抗循环(最多 2 轮)+ 降级路径 + 集成测试 | PRI-427 |
+| **Phase 7** | **PRI-428** | Orchestrator 多轮对抗循环(最多 2 轮)+ 降级路径 + 集成测试 | PRI-427 ✅ |
 | Phase 8 | PRI-428 | 架构回归测试 + 全套测试 | PRI-428 |
 
 ## 4. 关键设计契约(context 压缩后必读)
@@ -69,36 +69,81 @@ ERR-069 已记录在 `docs/ERROR_EXPERIENCE_HANDBOOK.md` Category 3,EP-01/EP-02 
 - `RuleHostDecision`(evaluate() 运行时)= `'allow' | 'block' | 'requireApproval' | 'auto_correct'`
 - sandbox replay 比较逻辑(`refiner-sandbox-wrapper.ts:129-187`)映射:`block` 接受 `block` 或 `requireApproval`;`propose_correction` 接受 `auto_correct`(需带 correctionProposal)。
 
-## 5. PRI-427(下一步)实施要点
+## 5. PRI-428(下一步)实施要点
 
-**范围**:Rule Artifact Assembly — 在 `EvaluatorRunner.succeedTask()` 里基于 PRI-426 已填的 `adversarialResult` 写 rule artifact。
+**范围**:Orchestrator 多轮对抗循环(最多 2 轮)+ 降级路径 + 集成测试 + 架构回归测试。这是 RuleHost MVP 的最后一个 Phase。
 
-**succeedTask 当前结构**(evaluator-runner.ts,搜 `async succeedTask`):
+### 5.1 多轮对抗循环(PRD Decision 11 多轮部分)
+
+跨 runner 的 Artificer↔Evaluator 循环。**不在 `succeedTask` 里**(那是单 runner 内的事,已完成),在 orchestrator 层(pipeline-orchestrator 或 story-a-demo)。
+
+```typescript
+Orchestrator(伪代码):
+  let round = 1
+  let adversarialFeedback = undefined
+
+  while (round <= 2) {
+    // Artificer 运行(含 L2 write-test-fix,已在 ArtificerL2Adapter 内部)
+    const artificerOutput = await runArtificer(sourcePainId, adversarialFeedback)
+
+    // Artificer L2 降级为 V1(无 implementationCode)→ 直接走 prompt 通道
+    if (!artificerOutput.implementationCode) {
+      await runEvaluator(artificerOutput)  // 跳过代码审查
+      break
+    }
+
+    // Evaluator 运行(单轮对抗检查,已在 succeedTask 内,commit 3efe09bf)
+    const evaluatorResult = await runEvaluator(artificerOutput)
+
+    if (evaluatorResult.decision === 'approved') return  // rule artifact 已写
+    if (evaluatorResult.decision === 'rejected') return  // principle artifact 走 prompt
+
+    // needs_revision:把 adversarialResult.failedCases 注入下一轮 Artificer
+    adversarialFeedback = evaluatorResult.adversarialResult?.failedCases
+    round++
+  }
+  // Round 3:降级为 rejected,principle artifact 仍走 prompt 通道
+```
+
+**Orchestrator 职责**:
+- 维护 `round` 计数器(最多 2 轮)
+- `needs_revision` 时把 `adversarialResult.failedCases` 注入 Artificer prompt(通过 Artificer 的 retry 机制)
+- `rejected` 时确保 principle artifact 存在(prompt 通道可用)
+- Artificer L2 降级为 V1 → 跳过代码审查,直接走 prompt 通道
+
+### 5.2 已就绪的单 runner 链路(Phase 1-6 完成)
+
+`EvaluatorRunner.succeedTask()` 现在的完整结构:
 1. lineage 检查
 2. `updateRunOutput`
 3. `resolveLineageArtifactIds`
-4. 写 principle artifact(`artifactKind: 'principle'`)— 现有行为
-5. **PRI-426 新增**:V2 输出 + gateDeps → `runAdversarialReplay()` 填 `adversarialResult`,re-persist artifact(commit `3efe09bf`)
-6. **如果 decision === 'approved'**:调 `resolvePrincipleBearerArtifact` + `updateValidationStatus('validated')` — 现有行为
-7. `markTaskSucceeded`
+4. 写 principle artifact(`artifactKind: 'principle'`)
+5. **PRI-426**:V2 + gateDeps → `runAdversarialReplay()` 填 `adversarialResult`,re-persist(commit `3efe09bf`)
+6. **PRI-427**:V2 + adversarialResult.passed === true → `assembleRuleArtifact()` 写 rule artifact + `updateValidationStatus('validated')`(commit `c0a11c5b`)
+7. 如果 decision === 'approved' → `resolvePrincipleBearerArtifact` + `updateValidationStatus('validated')`(现有行为)
+8. `markTaskSucceeded`
 
-**PRI-427 要加的**(在步骤 5 之后,合并进/扩展步骤 6):
-- 仅当 `isEvaluatorOutputV2(output)` 且 `adversarialResult.passed === true` 时:
-  - 从 Artificer artifact 提取 `implementationCode` + `goldenTraceCases` + `affectedTools`(用 PRI-426 已有的 `parseArtificerArtifact`)
-  - 组装 rule artifact contentJson: `{ implementationCode, goldenTrace, goldenTraceCases, affectedTools, ruleHostGateDecision: 'accepted_shadow', sourceArtificerArtifactId }`(参考 `RuleHostWriter.canActivate` 期望的字段 — `rule-host-writer.ts:38-77`)
-  - `artifactKind: 'rule'` 写入(新 artifactId,与 principle artifact 分开)
-  - `updateValidationStatus('validated')` 在 rule artifact 上(不是 principle artifact)
-- `adversarialResult.passed === false` → 不写 rule artifact(principle artifact 仍在,走 prompt 通道降级)
+**Phase 7 只需在 orchestrator 层编排步骤 5-8 的循环,不需要改 EvaluatorRunner。**
 
-**关键契约**:
-- rule artifact 的字段必须与 `RuleHostWriter.canActivate()` 的读取契约对齐(否则 Phase 7/8 的激活链断裂)。读 `rule-host-writer.ts:80-130` 确认字段名(`implementationCode` / `goldenTrace` / `ruleHostGateDecision` / `affectedTools`)。
-- `gateDeps` 注入路径已就绪(PRI-426),PRI-427 复用。
+### 5.3 集成测试要点
 
-**测试**:扩展 `evaluator-runner-vslice-v2.test.ts`。覆盖:
-- adversarialResult.passed=true → rule artifact 写入 + validationStatus='validated'
-- adversarialResult.passed=false → 不写 rule artifact,principle artifact 仍 pending
-- rule artifact contentJson 通过 `RuleHostWriter.canActivate` 的解析(集成测试)
-- V1 输出 → 不写 rule artifact
+- Round 1 approved → rule artifact 写入,不进入 Round 2
+- Round 1 needs_revision + Round 2 approved → rule artifact 写入
+- Round 1+2 都 needs_revision → Round 3 降级 rejected,principle artifact 在,prompt 通道可用
+- Artificer L2 降级 V1(无 code)→ 跳过 Evaluator 代码审查,prompt 通道
+- adversarialFeedback 注入:断言 Round 2 的 Artificer prompt 含 Round 1 的 failedCases
+
+### 5.4 架构回归测试(Phase 8)
+
+- `packages/principles-core/tests/architecture-regression.test.ts` — 确认 V2 字段没破坏 core/plugin 边界
+- 全套 `npm run test` 通过(除已知的 8 个 pre-existing 失败)
+- `npm run verify:merge`(如有)
+
+### 5.5 关键约束
+
+- **不要在 succeedTask 里做循环**(违反执行模型,见 §4.3)
+- **不要改 BasePeerRunner 的线性执行模型**
+- Orchestrator 的 adversarialFeedback 注入走 Artificer 的 retry 机制(不是改 buildContext)
 
 ## 6. 环境与命令
 
@@ -129,13 +174,13 @@ ERR-069 已记录在 `docs/ERROR_EXPERIENCE_HANDBOOK.md` Category 3,EP-01/EP-02 
 | PRI-424 | Artificer L2 Write-Test-Fix 循环 | In Review(+ lesson-learned 标签) |
 | PRI-425 | Evaluator Passive Review(代码审查三维度) | In Review |
 | PRI-426 | Evaluator Adversarial Attack + Sandbox Replay | In Review |
-| PRI-427 | Rule Artifact Assembly(双 artifact 写入) | **Backlog(下一步)** |
-| PRI-428 | 多轮对抗循环 Orchestrator + 降级路径 + 架构回归测试 | Backlog |
+| PRI-427 | Rule Artifact Assembly(双 artifact 写入) | In Review |
+| PRI-428 | 多轮对抗循环 Orchestrator + 降级路径 + 架构回归测试 | **Backlog(下一步)** |
 
 ## 8. 恢复后的第一步
 
-1. 读本文件 + `docs/plans/rulehost-mvp-activation.md`(PRD)
-2. `git log --oneline feat/rulehost-mvp-activation` 确认 commit 历史(应到 `3efe09bf`)
-3. 读 `packages/principles-core/src/runtime-v2/activation/writers/rule-host-writer.ts` 的 `canActivate`(rule artifact 字段契约)
-4. 读 `packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts` 的 `runAdversarialReplay`(PRI-426 已实现的提取逻辑可复用)
-5. 按 §5 实施 PRI-427
+1. 读本文件 + `docs/plans/rulehost-mvp-activation.md`(PRD Decision 11 多轮部分)
+2. `git log --oneline feat/rulehost-mvp-activation` 确认 commit 历史(应到 `c0a11c5b`)
+3. 读 `packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts` 的 `succeedTask` + `assembleRuleArtifact`(Phase 6 已完成的单 runner 链路,Phase 7 不改它,只在 orchestrator 层编排循环)
+4. 找 orchestrator 入口:`pipeline-orchestrator` 或 `story-a-demo`(搜 `runArtificer` / `runEvaluator`)
+5. 按 §5 实施 PRI-428(Phase 7 多轮循环 + Phase 8 架构回归)
