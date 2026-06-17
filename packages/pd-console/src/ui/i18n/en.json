@@ -140,12 +140,14 @@
       "degradedReason": {
         "task_retry_wait": "Internalization task waiting for retry",
         "task_failed": "Internalization task failed",
-        "approval_table_missing": "Approval table does not exist"
+        "approval_table_missing": "Approval table does not exist",
+        "trajectory_db_unavailable": "Behavior evidence database (trajectory.db) is unavailable"
       },
       "degradedNextAction": {
         "check_task_status": "Check internalization pipeline status, or wait for automatic retry.",
         "fix_and_retry": "Check failure details, fix the issue and retry.",
-        "run_integrity_check": "Run pd runtime internalization integrity to check and repair table structure."
+        "run_integrity_check": "Run pd runtime internalization integrity to check and repair table structure.",
+        "check_trajectory_db": "Check trajectory.db file integrity in .state directory."
       },
       "zeroStateHealthy": "No items need your judgment right now. PD has checked behavior evidence, principle review queue, and system signals.",
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",

@@ -9,6 +9,11 @@ import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+/** Type guard: non-null object (not array). Replaces `as Record<string, unknown>` assertions. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export interface ApprovalGroup {
   principleId: string;
   principleTitle: string;
@@ -60,8 +65,8 @@ function extractCandidateDescription(contentJson: string): string | null {
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const obj = parsed as Record<string, unknown>;
+  if (!isRecord(parsed)) return null;
+  const obj = parsed;
 
   // rule artifact: extract from implementationCode comments
   if (typeof obj.implementationCode === 'string') {
@@ -78,8 +83,8 @@ function extractCandidateDescription(contentJson: string): string | null {
   if (typeof obj.text === 'string' && obj.text.trim().length > 0) return obj.text.trim();
 
   // scribe artifact: principleDraft.title + .statement
-  if (obj.principleDraft && typeof obj.principleDraft === 'object' && obj.principleDraft !== null) {
-    const draft = obj.principleDraft as Record<string, unknown>;
+  if (isRecord(obj.principleDraft)) {
+    const draft = obj.principleDraft;
     const title = typeof draft.title === 'string' ? draft.title.trim() : '';
     const statement = typeof draft.statement === 'string' ? draft.statement.trim() : '';
     if (title && statement) return `${title} — ${statement}`;
@@ -88,16 +93,16 @@ function extractCandidateDescription(contentJson: string): string | null {
   }
 
   // philosopher artifact: principleCandidate.title
-  if (obj.principleCandidate && typeof obj.principleCandidate === 'object' && obj.principleCandidate !== null) {
-    const cand = obj.principleCandidate as Record<string, unknown>;
+  if (isRecord(obj.principleCandidate)) {
+    const cand = obj.principleCandidate;
     if (typeof cand.title === 'string' && cand.title.trim().length > 0) return cand.title.trim();
   }
 
   // dreamer artifact: candidates[0].betterDecision
   if (Array.isArray(obj.candidates) && obj.candidates.length > 0) {
     const [first] = obj.candidates;
-    if (first && typeof first === 'object' && first !== null) {
-      const c = first as Record<string, unknown>;
+    if (isRecord(first)) {
+      const c = first;
       if (typeof c.betterDecision === 'string' && c.betterDecision.trim().length > 0) {
         return c.betterDecision.trim();
       }
@@ -191,7 +196,10 @@ export class ApprovalsGroupedConsoleModel {
     }[]>();
 
     for (const approval of allApprovals) {
-      const principleId = artifactPrincipleMap.get(approval.artifactId) ?? 'unlinked';
+      // Each unlinked artifact gets its own group key to avoid mismatched
+      // bulk actions across different artifacts sharing the 'unlinked' bucket.
+      const mappedPrincipleId = artifactPrincipleMap.get(approval.artifactId);
+      const principleId = mappedPrincipleId ?? `unlinked:${approval.artifactId}`;
 
       if (!groupMap.has(principleId)) {
         groupMap.set(principleId, []);

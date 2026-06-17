@@ -938,8 +938,9 @@ function verifyInjectedWorkspaceDeps() {
     let corePkg;
     try {
         corePkg = JSON.parse(readFileSync(corePkgPath, 'utf-8'));
-    } catch {
-        return;
+    } catch (error) {
+        console.error(`  ❌ Failed to parse @principles/core/package.json: ${error.message}`);
+        process.exit(1);
     }
 
     const deps = corePkg.dependencies || {};

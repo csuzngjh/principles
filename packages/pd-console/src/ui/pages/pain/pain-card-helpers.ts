@@ -159,9 +159,11 @@ export function buildDebugIdSummary(record: RecordData): string {
  * string, AND no conclusion/applicability/failureReason/degradedReason.
  */
 export function isLayer2EffectivelyEmpty(record: RecordData): boolean {
-  const hasConclusion = !!record.candidateTitle;
-  const hasApplicability = !!(record.candidateSummary ?? record.rootCauseSummary);
-  const hasFailure = !!(record.failureReason ?? record.degradedReason);
+  const hasText = (value?: string): boolean =>
+    typeof value === 'string' && value.trim().length > 0;
+  const hasConclusion = hasText(record.candidateTitle);
+  const hasApplicability = hasText(record.candidateSummary) || hasText(record.rootCauseSummary);
+  const hasFailure = hasText(record.failureReason) || hasText(record.degradedReason);
   if (hasConclusion || hasApplicability || hasFailure) return false;
   // triggerSummary is the only required field; if it's blank or a generic
   // placeholder, the card visually looks empty.

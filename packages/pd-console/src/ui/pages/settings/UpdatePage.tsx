@@ -18,89 +18,9 @@ import {
 } from "../../api.js";
 import type {
   UpdateStatusData,
-  UpdateHistoryEntry,
   UpdateHistoryData,
 } from "../../api.js";
-
-// ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
-
-/** Type guard: is this a non-null object with own properties (not inherited)? */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function validateUpdateStatusData(raw: unknown): UpdateStatusData | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "currentVersion") ||
-    !Object.hasOwn(raw, "latestVersion") ||
-    !Object.hasOwn(raw, "hasUpdate")
-  ) {
-    return null;
-  }
-  const currentVersion = raw.currentVersion;
-  const latestVersion = raw.latestVersion;
-  const hasUpdate = raw.hasUpdate;
-  if (
-    typeof currentVersion !== "string" ||
-    typeof latestVersion !== "string" ||
-    typeof hasUpdate !== "boolean"
-  ) {
-    return null;
-  }
-  const result: UpdateStatusData = { currentVersion, latestVersion, hasUpdate };
-  if (Object.hasOwn(raw, "error") && typeof raw.error === "string") {
-    result.error = raw.error;
-  }
-  return result;
-}
-
-export function validateUpdateHistoryEntry(raw: unknown): UpdateHistoryEntry | null {
-  if (!isRecord(raw)) return null;
-  if (
-    !Object.hasOwn(raw, "id") ||
-    !Object.hasOwn(raw, "timestamp") ||
-    !Object.hasOwn(raw, "fromVersion") ||
-    !Object.hasOwn(raw, "toVersion") ||
-    !Object.hasOwn(raw, "success")
-  ) {
-    return null;
-  }
-  const { id, timestamp, fromVersion, toVersion, success } = raw;
-  if (
-    typeof id !== "string" ||
-    typeof timestamp !== "string" ||
-    typeof fromVersion !== "string" ||
-    typeof toVersion !== "string" ||
-    typeof success !== "boolean"
-  ) {
-    return null;
-  }
-  return { id, timestamp, fromVersion, toVersion, success };
-}
-
-export function validateUpdateHistoryData(raw: unknown): UpdateHistoryData | null {
-  // Backend returns a bare array; accept both shapes.
-  if (Array.isArray(raw)) {
-    const validatedEntries: UpdateHistoryEntry[] = [];
-    for (const entry of raw) {
-      const validated = validateUpdateHistoryEntry(entry);
-      if (validated === null) return null;
-      validatedEntries.push(validated);
-    }
-    return { updates: validatedEntries };
-  }
-  if (!isRecord(raw) || !Object.hasOwn(raw, "updates") || !Array.isArray(raw.updates)) {
-    return null;
-  }
-  const validatedEntries: UpdateHistoryEntry[] = [];
-  for (const entry of raw.updates) {
-    const validated = validateUpdateHistoryEntry(entry);
-    if (validated === null) return null;
-    validatedEntries.push(validated);
-  }
-  return { updates: validatedEntries };
-}
+import { validateUpdateStatus, validateUpdateHistory } from "../../utils/validators.js";
 
 // ── Helper: format ISO date string to locale-aware display ────────────────────
 
@@ -151,7 +71,7 @@ export function UpdatePage() {
       setErrorMessage(statusResult.error);
       return;
     }
-    const validatedStatus = validateUpdateStatusData(statusResult.data);
+    const validatedStatus = validateUpdateStatus(statusResult.data);
     if (validatedStatus === null) {
       setLoadingState("error");
       setErrorMessage("Update status data has unexpected shape");
@@ -164,7 +84,7 @@ export function UpdatePage() {
       setHistoryData(null);
       setHistoryErrorReason(historyResult.error ?? "Update history unavailable");
     } else {
-      const validatedHistory = validateUpdateHistoryData(historyResult.data);
+      const validatedHistory = validateUpdateHistory(historyResult.data);
       setHistoryData(validatedHistory);
       if (validatedHistory === null) {
         setHistoryErrorReason("Update history data has unexpected shape");
@@ -186,7 +106,7 @@ export function UpdatePage() {
       setChecking(false);
       return;
     }
-    const validated = validateUpdateStatusData(result.data);
+    const validated = validateUpdateStatus(result.data);
     if (validated === null) {
       toast.error(t("pages.update.checkFailed"));
       setChecking(false);

@@ -56,10 +56,12 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       !Object.hasOwn(r, "artifactId") ||
       !Object.hasOwn(r, "channel") ||
       !Object.hasOwn(r, "createdAt") ||
+      !Object.hasOwn(r, "status") ||
       typeof r.id !== "string" ||
       typeof r.artifactId !== "string" ||
       typeof r.channel !== "string" ||
-      typeof r.createdAt !== "string"
+      typeof r.createdAt !== "string" ||
+      typeof r.status !== "string"
     ) {
       return null;
     }
@@ -68,14 +70,17 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
       artifactId: r.artifactId,
       channel: r.channel,
       createdAt: r.createdAt,
+      status: r.status,
     });
   }
   // Wave 7: candidateDescription is optional — present when backend could
   // extract human-readable content from the artifact contentJson.
-  const candidateDescription =
-    Object.hasOwn(raw, "candidateDescription") && typeof raw.candidateDescription === "string"
-      ? raw.candidateDescription
-      : undefined;
+  // ERR-009: if field exists but is wrong type, fail loud (return null).
+  let candidateDescription: string | undefined;
+  if (Object.hasOwn(raw, "candidateDescription")) {
+    if (typeof raw.candidateDescription !== "string") return null;
+    candidateDescription = raw.candidateDescription;
+  }
   return {
     principleId,
     principleTitle,
@@ -296,16 +301,18 @@ function PendingReviewCard({
     action: "approve" | "reject",
     reason?: string,
   ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number }> {
-    const records = group.records;
+    // Only process pending records — skip already-approved/rejected to avoid
+    // stable partial failures on mixed-status groups.
+    const pendingRecords = group.records.filter((r) => r.status === "pending");
     let failedCount = 0;
-    for (const record of records) {
+    for (const record of pendingRecords) {
       const result =
         action === "approve"
           ? await approveApproval(record.id)
           : await rejectApproval(record.id, reason ?? "");
       if (!result.success) failedCount++;
     }
-    return { allSucceeded: failedCount === 0, failedCount, totalCount: records.length };
+    return { allSucceeded: failedCount === 0, failedCount, totalCount: pendingRecords.length };
   }
 
   const handleApprove = async () => {

@@ -512,14 +512,13 @@ describe('validateUpdateStatus', () => {
   const validStatus = {
     currentVersion: '1.0.0',
     latestVersion: '1.1.0',
-    updateAvailable: true,
-    lastChecked: '2026-06-01',
+    hasUpdate: true,
   };
 
   it('accepts valid update status', () => {
     const result = validateUpdateStatus(validStatus);
     expect(result).not.toBeNull();
-    expect(result!.updateAvailable).toBe(true);
+    expect(result!.hasUpdate).toBe(true);
   });
 
   it('rejects null', () => {
@@ -531,7 +530,7 @@ describe('validateUpdateStatus', () => {
   });
 
   it('rejects wrong types', () => {
-    expect(validateUpdateStatus({ ...validStatus, updateAvailable: 'yes' })).toBeNull();
+    expect(validateUpdateStatus({ ...validStatus, hasUpdate: 'yes' })).toBeNull();
   });
 });
 
@@ -760,7 +759,7 @@ describe('validateApprovalsGrouped', () => {
   const validGrouped = {
     groups: [{
       principleId: 'p1', principleTitle: 'Test', status: 'pending',
-      records: [{ id: 'r1', artifactId: 'art1', channel: 'prompt', createdAt: '2026-06-01' }],
+      records: [{ id: 'r1', artifactId: 'art1', channel: 'prompt', createdAt: '2026-06-01', status: 'pending' }],
     }],
     generatedAt: '2026-06-01T00:00:00Z',
   };
@@ -1226,7 +1225,7 @@ describe('validateUpdateHistory', () => {
   it('accepts valid update history', () => {
     const result = validateUpdateHistory({
       updates: [
-        { version: '1.0.0', appliedAt: '2026-06-01', notes: 'Initial release' },
+        { id: 'upd-1', timestamp: '2026-06-01T00:00:00Z', fromVersion: '1.0.0', toVersion: '1.1.0', success: true },
       ],
     });
     expect(result).not.toBeNull();
@@ -1246,7 +1245,7 @@ describe('validateUpdateHistory', () => {
   });
 
   it('rejects invalid update entry', () => {
-    const result = validateUpdateHistory({ updates: [{ version: 1, appliedAt: '2026-06-01', notes: 'Note' }] });
+    const result = validateUpdateHistory({ updates: [{ id: 1, timestamp: '2026-06-01', fromVersion: '1.0.0', toVersion: '1.1.0', success: true }] });
     expect(result).toBeNull();
   });
 });

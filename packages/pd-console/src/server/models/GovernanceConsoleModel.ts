@@ -386,8 +386,18 @@ export class GovernanceConsoleModel {
         } finally {
           trajDb.close();
         }
-      } catch {
-        // trajectory.db open failed — already reported in evidenceInProgressCount block above
+      } catch (err) {
+        // trajectory.db open failed — record degradation for observability
+        // (may duplicate evidenceInProgressCount block's signal if both fail,
+        //  but gate_blocks is an independent source worth its own signal)
+        degradedSignals.push({
+          reasonCode: 'trajectory_db_unavailable',
+          nextActionCode: 'check_trajectory_db',
+          reason: 'gate_blocks source is unavailable — gate block count may be inaccurate.',
+          nextAction: 'Check trajectory.db file integrity in .state directory.',
+          source: 'source_unavailable',
+        });
+        console.warn('GovernanceConsoleModel: failed to read gate_blocks:', err);
       }
     }
 

@@ -441,8 +441,9 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
                   await navigator.clipboard.writeText(buildDebugIdSummary(record));
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
-                } catch {
+                } catch (error) {
                   // clipboard unavailable — expand details as fallback
+                  console.warn("Debug ID copy failed; falling back to expanded details.", error);
                   if (!expanded) onToggle();
                 }
               }}

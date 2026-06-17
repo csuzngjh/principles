@@ -140,12 +140,14 @@
       "degradedReason": {
         "task_retry_wait": "内化任务等待重试",
         "task_failed": "内化任务失败",
-        "approval_table_missing": "审批表不存在"
+        "approval_table_missing": "审批表不存在",
+        "trajectory_db_unavailable": "行为证据数据库 (trajectory.db) 不可用"
       },
       "degradedNextAction": {
         "check_task_status": "检查内化管线状态，或等待自动重试。",
         "fix_and_retry": "检查失败详情，修复问题后重试。",
-        "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。"
+        "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。",
+        "check_trajectory_db": "检查 .state 目录中 trajectory.db 文件完整性。"
       },
       "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",

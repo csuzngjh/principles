@@ -424,8 +424,9 @@ export function PrincipleDetailPage() {
                     await navigator.clipboard.writeText(summary);
                     setEvidenceCopied(true);
                     setTimeout(() => setEvidenceCopied(false), 2000);
-                  } catch {
+                  } catch (error) {
                     // clipboard unavailable — expand as fallback
+                    console.warn("Evidence ID copy failed; expanding technical details.", error);
                     if (!evidenceExpanded) setEvidenceExpanded(true);
                   }
                 }}
@@ -454,7 +455,7 @@ export function PrincipleDetailPage() {
               <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
                 <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
                   {principle.derivedFromPainIds.map((painId, idx) => (
-                    <div key={painId} className="contents">
+                    <div key={`${painId}-${idx}`} className="contents">
                       <span className="font-mono text-ink-4">
                         {t("principles.detail.evidenceIdLabel", {
                           defaultValue: "证据 {{n}} ID",

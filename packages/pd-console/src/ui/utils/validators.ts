@@ -541,8 +541,8 @@ const VALID_NEXT_ACTION_CODES = new Set([
   'check_degraded_signals', 'check_pipeline_status',
 ]);
 
-const VALID_DEGRADED_REASON_CODES = new Set(['task_retry_wait', 'task_failed', 'approval_table_missing']);
-const VALID_DEGRADED_NEXT_ACTION_CODES = new Set(['check_task_status', 'fix_and_retry', 'run_integrity_check']);
+const VALID_DEGRADED_REASON_CODES = new Set(['task_retry_wait', 'task_failed', 'approval_table_missing', 'trajectory_db_unavailable']);
+const VALID_DEGRADED_NEXT_ACTION_CODES = new Set(['check_task_status', 'fix_and_retry', 'run_integrity_check', 'check_trajectory_db']);
 
 export interface DegradedSignalData {
   reasonCode: string;
@@ -798,7 +798,7 @@ export interface UpdateHistoryEntryData {
   success: boolean;
 }
 
-function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData | null {
+export function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
   if (!Object.hasOwn(v, 'timestamp') || !isString(v.timestamp)) return null;
@@ -1033,6 +1033,7 @@ export interface ApprovalGroupRecordData {
   artifactId: string;
   channel: string;
   createdAt: string;
+  status: string;
 }
 
 function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null {
@@ -1041,7 +1042,8 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   if (!Object.hasOwn(v, 'artifactId') || !isString(v.artifactId)) return null;
   if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
-  return { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt };
+  if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
+  return { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
 }
 
 export interface ApprovalGroupData {
