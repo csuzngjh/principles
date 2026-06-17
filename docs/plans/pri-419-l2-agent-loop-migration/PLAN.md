@@ -68,6 +68,26 @@ outputCaptured? ──yes──► submit_output.details (DreamerOutputV1)
 - **resolveL2Model / resolveModel 合并**：当前 `L2AgentLoopAdapter.resolveL2Model` 与 `PiAiRuntimeAdapter.resolveModel` 的 custom-model 构造逻辑重复，因为 L1 import `@mariozechner/pi-ai`、L2 import `@earendil-works/pi-ai`（双 scope 不能交叉 import）。**当 L1 升级到 `@earendil-works` scope 后，应合并为一个共享 resolve 函数**，消除漂移风险。升级 pi-agent-core 后须重新验证 `resolveL2Model` 返回值与 live provider 路径一致（见代码中 RUNTIME_CONTRACT 注释）。
 - **principle reader 去重（P2-2 follow-up）**：`makeDreamerPrincipleReader`（pd-cli）与 plugin 内联实现几乎相同。若未来第三个消费方出现，提取到 `@principles/core` 的 `buildL2PrincipleReader(stateDir)` 共用；当前两处可接受。
 
+## L2 扩展决策框架（是否迁移其他 runner）
+
+dreamer L2 已验证成功（1.64→4.36，Grounding 1.00→4.00）。但**不是每个 runner 都需要 L2**——L2 解决的核心问题是"agent 需要在生成前主动查证证据，而非靠单次输入推断"。以下逐 runner 分析（2026-06-17，基于 dogfood 证据 + ADR-0014 MVP 分类）：
+
+| Runner | MVP 状态 | 质量瓶颈 | L2 能否解决？ | 决策 |
+|---|---|---|---|---|
+| **Dreamer** | Core | ~~null predecessor + 无 grounding~~ | ✅ 已解决 | **已完成**（PRI-419/420） |
+| **Scribe** | Core | 产出问题全部来自 dreamer 上游脱钩 | ❌ 不需要：做的是润色+格式化，上游质量好了它就好了 | **暂不迁** |
+| **Artificer** | Core | 原则草案→实现计划转换 | ❌ 不需要：输出结构化 JSON，不需多轮查证 | **暂不迁** |
+| **Philosopher** | Quiet | 候选打磨/多版本对比 | ⚠️ 可能受益但 MVP 不需要 | **等种子客户反馈**（重启条件：dreamer 候选审批拒绝率 >30%） |
+| **诊断链** (rootcause/distiller/router) | Core (split 已完成) | distiller 编造 T-XX ID（`pri-unknown`） | ⚠️ rootcause 可能受益 | **先观察诊断 split + `diagnostician_core_grounding` flag 的效果** |
+| **Evaluator / RolloutReviewer** | Quiet / standalone | 消费已有产出做评分 | ❌ 不需要：不生成新内容 | **不迁** |
+
+**扩展触发条件**（ADR-0014 纪律：按外部信号驱动，不按完整性焦虑驱动）：
+1. 种子客户反馈"原则质量仍不够好" → 评估 philosopher L2 化
+2. 诊断 split + grounding flag 上线后 `pri-unknown` 仍频发 → 评估诊断链 rootcause L2 化
+3. 每个 runner 迁移需**单独 ADR-0014 amendment + 单独 dogfood 验证**（照搬 dreamer 的 P1.0a-P1.4 流程）
+
+**当前结论**：dreamer L2 + 诊断 split + grounding 已覆盖 dogfood 暴露的主要质量问题。扩展决策推迟到种子客户使用后。
+
 ## 风险
 
 目标模型不支持原生 tool-use（高，spike 前置）；Agent 类不支持 shouldStopAfterTurn（高，改用 agentLoop）；terminate every() 语义（高，改用 shouldStopAfterTurn）；多轮放大延迟成本（中，总预算+turn cap+token cap）；typebox 类型墙+禁 as（中，typebox 重声明+Check）；升级 breaking（中，双 scope 并存退路）；复制 OpenClaw 能力（中，不做 search_codebase）；L1 baseline 未测（中，P1.3 前置）。
