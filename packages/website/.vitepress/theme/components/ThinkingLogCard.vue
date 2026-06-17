@@ -30,7 +30,7 @@
         </div>
         
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '智能的膨胀边界：巨塔、小艇与硅基阿米巴' : 'The Expanding Boundary of Intelligence: The Tower, the Boat, and the Silicon Amoeba' }}
+          {{ lang === 'zh-CN' ? '智能的膨胀边界：巨塔、小艇与硅基阿米巴' : 'The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba' }}
         </h3>
         
         <p class="journal-excerpt">
