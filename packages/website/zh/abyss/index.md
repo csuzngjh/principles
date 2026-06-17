@@ -10,6 +10,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #006 · 2026-06-17</div>
+  <a class="abyss-title" href="/zh/abyss/06-expanding-boundary">06 | 智能的膨胀边界：巨塔、小艇与硅基阿米巴</a>
+  <p class="abyss-desc">当智能系统从文本外扩到行动、组织、社会与意义，哪些旧容器会被重写？从 ExO 到 MVO，倒 T 型组织，以及人类永远不能外包的部分——目标、边界、责任、痛感、原则、爱、意义与最终裁决权。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #005 · 2026-06-08</div>
   <a class="abyss-title" href="/zh/abyss/05-co-evolution">05 | 协同进化：为什么 Owner 才是智能系统的关键变量？</a>
   <p class="abyss-desc">讨论 Owner-Agent 组合体的协同进化：为什么大模型时代最稀缺的是意图带宽，以及如何通过注意力保护层与判例法机制过滤噪音，帮助人类重新握住方向盘。</p>

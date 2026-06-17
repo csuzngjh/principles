@@ -58,6 +58,7 @@ export default defineConfig({
                 { text: '03 | Pain is the Signal: Forward Evolution', link: '/abyss/03-biological-forward-pass' },
                 { text: '04 | The Alchemy of Soft to Hard Rules', link: '/abyss/04-soft-to-hard-rules' },
                 { text: '05 | Co-evolution: Why the Owner is the Crucial Variable', link: '/abyss/05-co-evolution' },
+                { text: '06 | The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba', link: '/abyss/06-expanding-boundary' },
               ]
             }
           ]
@@ -96,6 +97,7 @@ export default defineConfig({
                 { text: '03 | 痛苦即信号：前向进化的生物学硬核启示', link: '/zh/abyss/03-biological-forward-pass' },
                 { text: '04 | 软硬转换炼金术：系统本能的内化之路', link: '/zh/abyss/04-soft-to-hard-rules' },
                 { text: '05 | 协同进化：为什么 Owner 才是智能系统的关键变量？', link: '/zh/abyss/05-co-evolution' },
+                { text: '06 | 智能的膨胀边界：巨塔、小艇与硅基阿米巴', link: '/zh/abyss/06-expanding-boundary' },
               ]
             }
           ]
