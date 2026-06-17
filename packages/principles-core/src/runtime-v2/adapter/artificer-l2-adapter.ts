@@ -47,6 +47,9 @@ import type { RefinerSandboxFailedCase } from '../internalization/refiner-sandbo
 import type { ArtificerValidator, ArtificerOutputV1, ArtificerOutputV2 } from '../internalization/artificer-output.js';
 import { isArtificerOutputV2 } from '../internalization/artificer-output.js';
 import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
+import { PDRuntimeError } from '../error-categories.js';
+import type { StoreEventEmitter } from '../store/event-emitter.js';
+import { storeEmitter } from '../store/event-emitter.js';
 
 /**
  * Mockable LLM call. Receives the assembled prompt (initial prompt + optional
@@ -64,6 +67,8 @@ export interface ArtificerL2AdapterConfig {
   readonly validator: ArtificerValidator;
   /** Max write-test-fix attempts (default 3). */
   readonly maxAttempts?: number;
+  /** Optional event emitter; defaults to the shared singleton. */
+  readonly eventEmitter?: StoreEventEmitter;
 }
 
 interface ArtificerL2RunState {
@@ -87,17 +92,18 @@ function safeStringify(value: unknown): string {
   }
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
 /**
  * Ensure the candidate carries the expected taskId (LLM may echo a stale or
  * example id). Only fills when absent via Object.hasOwn — present-but-wrong
  * values reach the validator and fail loud (Runtime Contract Rule 3).
  */
 function injectTaskId(candidate: unknown, taskId: string): unknown {
-  if (candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)) {
-    const rec = candidate as Record<string, unknown>;
-    if (!Object.hasOwn(rec, 'taskId')) {
-      rec.taskId = taskId;
-    }
+  if (isRecord(candidate) && !Object.hasOwn(candidate, 'taskId')) {
+    candidate.taskId = taskId;
   }
   return candidate;
 }
@@ -127,16 +133,18 @@ function degradeToV1(v2: ArtificerOutputV2): ArtificerOutputV1 {
 }
 
 export class ArtificerL2Adapter implements PDRuntimeAdapter {
-  private readonly config: Required<Omit<ArtificerL2AdapterConfig, 'generateCode' | 'gateDeps' | 'validator'>>;
+  private readonly config: Required<Omit<ArtificerL2AdapterConfig, 'generateCode' | 'gateDeps' | 'validator' | 'eventEmitter'>>;
   private readonly generateCode: ArtificerL2GenerateCodeFn;
   private readonly gateDeps: RefinerRuleHostGateDeps;
   private readonly validator: ArtificerValidator;
+  private readonly eventEmitter: StoreEventEmitter;
   private readonly runs = new Map<string, ArtificerL2RunState>();
 
   constructor(config: ArtificerL2AdapterConfig) {
     this.generateCode = config.generateCode;
     this.gateDeps = config.gateDeps;
     this.validator = config.validator;
+    this.eventEmitter = config.eventEmitter ?? storeEmitter;
     this.config = { maxAttempts: config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS };
   }
 
@@ -208,7 +216,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         candidateRaw = await this.generateCode(prompt);
       } catch (err) {
         // LLM call threw — record and continue to next attempt (or degrade).
-        lastFailureFeedback = `--- LLM call failed ---\n${err instanceof Error ? err.message : String(err)}`;
+        const llmError = err instanceof Error ? err.message : String(err);
+        lastFailureFeedback = `--- LLM call failed ---\n${llmError}`;
+        this.emitAttempt({ taskId, runId, attempt, decision: 'llm_error' });
         continue;
       }
 
@@ -217,16 +227,17 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       const validation = await this.validator.validate(candidateWithTaskId, taskId);
       if (!validation.valid) {
         // Malformed output (e.g. missing affectedTools). Feed the validator errors back.
+        // P2 fix: do NOT update lastValidV2 here — degradation must only trust candidates
+        // that PASSED validation, otherwise we'd emit an unvalidated V1 downstream.
         lastFailureFeedback = `--- Validator rejected previous output ---\n${validation.errors.join('\n')}`;
-        // If the candidate was structurally V2-shaped, keep it for potential V1 degradation.
-        if (isArtificerOutputV2(candidateWithTaskId)) {
-          lastValidV2 = candidateWithTaskId;
-        }
+        this.emitAttempt({ taskId, runId, attempt, decision: 'validator_rejected' });
         continue;
       }
 
       // V1 output (no code fields) — nothing to replay. Accept as-is (L1 equivalent).
       if (!isArtificerOutputV2(candidateWithTaskId)) {
+        this.emitAttempt({ taskId, runId, attempt, decision: 'v1_accepted' });
+        this.emitComplete({ taskId, runId, attempts: attempt, degraded: false, succeeded: true });
         this.completeRun(runId, 'succeeded', candidateWithTaskId);
         return this.runHandle(runId, startedAt);
       }
@@ -241,6 +252,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       });
       if (!traceResult.ok) {
         lastFailureFeedback = `--- Golden trace build failed ---\n${traceResult.reason}`;
+        this.emitAttempt({ taskId, runId, attempt, decision: 'trace_build_failed' });
         continue;
       }
 
@@ -252,29 +264,40 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
       if (gateResult.decision === 'accepted_shadow') {
         // Success — store the V2 output.
+        this.emitAttempt({ taskId, runId, attempt, decision: 'replay_passed' });
+        this.emitComplete({ taskId, runId, attempts: attempt, degraded: false, succeeded: true });
         this.completeRun(runId, 'succeeded', v2);
         return this.runHandle(runId, startedAt);
       }
 
       // Replay failed — capture THIS attempt's failures for the next prompt (EP-05).
-      const {failedCases} = gateResult.sandboxResult;
+      const { failedCases } = gateResult.sandboxResult;
       lastFailureFeedback = failedCases.length > 0
         ? formatSandboxFeedback(failedCases)
         : `--- Sandbox replay failed ---\n${gateResult.decision}: ${gateResult.reasons.join('; ')}`;
+      this.emitAttempt({ taskId, runId, attempt, decision: 'replay_failed' });
     }
 
-    // Exhaustion: degrade to V1 if we ever saw a valid V2 candidate, else fail.
+    // Exhaustion: degrade to V1 if we ever saw a VALIDATED V2 candidate, else fail.
     if (lastValidV2) {
       const v1 = degradeToV1(lastValidV2);
+      this.emitComplete({ taskId, runId, attempts: this.config.maxAttempts, degraded: true, succeeded: false });
       this.completeRun(runId, 'succeeded', v1);
       return this.runHandle(runId, startedAt);
     }
 
-    // No valid candidate ever produced — fail loud with a reason (Runtime Contract Rule 9).
+    // No validated candidate ever produced — fail loud (Runtime Contract Rule 9).
+    // Throw PDRuntimeError so BasePeerRunner's handlePostLeaseError handles it
+    // (aligns with Dreamer L2's failure pattern in L2AgentLoopAdapter).
     runState.status = 'failed';
     runState.endedAt = new Date().toISOString();
-    runState.reason = `Artificer L2 exhausted ${this.config.maxAttempts} attempts without a valid candidate`;
-    return this.runHandle(runId, startedAt);
+    runState.reason = `Artificer L2 exhausted ${this.config.maxAttempts} attempts without a validated candidate`;
+    this.emitComplete({ taskId, runId, attempts: this.config.maxAttempts, degraded: false, succeeded: false });
+    throw new PDRuntimeError(
+      'output_invalid',
+      runState.reason,
+      { nextAction: 'inspect artificer L2 feedback chain; verify LLM produces parseable ArtificerOutputV1/V2' },
+    );
   }
 
   async pollRun(runId: string): Promise<RunStatus> {
@@ -326,12 +349,51 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   }
 
   private runHandle(runId: string, startedAt: string): RunHandle {
+    // RunHandleSchema = { runId, runtimeKind, startedAt } — no status field.
+    // The run's terminal status is reported via pollRun(), not the handle.
     return {
       runId,
       runtimeKind: this.kind(),
       startedAt,
-      status: 'succeeded',
-    } as RunHandle;
+    };
+  }
+
+  private emitAttempt(opts: {
+    taskId: string;
+    runId: string;
+    attempt: number;
+    decision: string;
+  }): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'artificer_l2_attempt',
+      traceId: opts.taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'l2-adapter',
+      agentId: 'artificer-l2',
+      payload: { runId: opts.runId, attempt: opts.attempt, decision: opts.decision },
+    });
+  }
+
+  private emitComplete(opts: {
+    taskId: string;
+    runId: string;
+    attempts: number;
+    degraded: boolean;
+    succeeded: boolean;
+  }): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: 'artificer_l2_complete',
+      traceId: opts.taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'l2-adapter',
+      agentId: 'artificer-l2',
+      payload: {
+        runId: opts.runId,
+        attempts: opts.attempts,
+        degraded: opts.degraded,
+        succeeded: opts.succeeded,
+      },
+    });
   }
 
   private evictOldRuns(): void {

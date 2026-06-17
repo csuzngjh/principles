@@ -423,6 +423,62 @@ describe('ArtificerL2Adapter (RuleHost MVP Activation, PRI-424)', () => {
     expect(isArtificerOutputV2(output.payload)).toBe(true);
   });
 
+  // ── P1+P2 fixes: validator-rejected candidates never degrade, total failure throws ─
+
+  it('throws (does NOT degrade) when all 3 attempts fail validation — no validated V2 to degrade from', async () => {
+    // P2 fix: validator rejection must NOT set lastValidV2. Without a validated
+    // candidate, degradation is impossible (Runtime Contract Rule 1/3 — never
+    // emit an unvalidated object). The adapter throws PDRuntimeError instead,
+    // which BasePeerRunner.handlePostLeaseError catches → task fails.
+    const generateCode: ArtificerL2GenerateCodeFn = async () => {
+      // Every attempt returns malformed V2 (missing affectedTools).
+      const bad = makeV2Output() as unknown as Record<string, unknown>;
+      delete bad.affectedTools;
+      return bad;
+    };
+    const adapter = new ArtificerL2Adapter({
+      generateCode,
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+    });
+
+    await expect(adapter.startRun({
+      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+      taskRef: { taskId: TASK_ID },
+      inputPayload: 'initial prompt',
+      contextItems: [],
+      outputSchemaRef: 'artificer-output-v2',
+      timeoutMs: 300_000,
+    })).rejects.toThrow(/without a validated candidate/);
+  });
+
+  it('degrades to V1 only when a VALIDATED V2 candidate existed (replay failed, not validation)', async () => {
+    // Confirms the positive side of the P2 fix: a validated V2 that fails replay
+    // CAN degrade. This is the legitimate degradation path (plan is valid, only
+    // the code was wrong).
+    const generateCode: ArtificerL2GenerateCodeFn = async () => makeV2Output();
+    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME, FAILED_RUNTIME, FAILED_RUNTIME]);
+    const adapter = new ArtificerL2Adapter({
+      generateCode,
+      gateDeps: deps,
+      validator: new DefaultArtificerValidator(),
+    });
+
+    const handle = await adapter.startRun({
+      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+      taskRef: { taskId: TASK_ID },
+      inputPayload: 'initial prompt',
+      contextItems: [],
+      outputSchemaRef: 'artificer-output-v2',
+      timeoutMs: 300_000,
+    });
+
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output).not.toBeNull();
+    if (!output) return;
+    expect(isArtificerOutputV2(output.payload)).toBe(false);
+  });
+
   // ── runtime metadata ─────────────────────────────────────────────────────────
 
   it('pollRun returns terminal status after startRun completes', async () => {

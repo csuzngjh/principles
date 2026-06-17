@@ -223,6 +223,11 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_turn'),
   Type.Literal('dreamer_l2_complete'),
   Type.Literal('dreamer_l2_fallback_to_l1'),
+  // PRI-424: Artificer L2 write-test-fix loop telemetry.
+  // - artificer_l2_attempt: per LLM attempt (attempt number, decision, degraded flag)
+  // - artificer_l2_complete: when the loop finishes (attempts, degraded, succeeded)
+  Type.Literal('artificer_l2_attempt'),
+  Type.Literal('artificer_l2_complete'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
