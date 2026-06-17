@@ -264,9 +264,14 @@ Evaluator.succeedTask(taskId, runId, output: EvaluatorOutputV2, ...): Promise<Pe
      b. 如果 passive review 不通过 → needs_revision → 不写 rule artifact → 返回
      c. 如果 passive review 通过 → 读取 adversarialCases
      d. 调用 adversarialCasesToGoldenTrace() 转换（每个 case 设置 kind='negative'）
-     e. 调用 evaluateRefinerRuleHostGate(code, adversarialTrace) 执行单轮 sandbox replay
-     f. 如果对抗 replay 通过 → approved → 写 rule artifact + updateValidationStatus('validated')
-     g. 如果对抗 replay 失败 → needs_revision → 记录失败用例 → 不写 rule artifact
+     e. **合并 Artificer golden trace 的 positive case 进对抗 trace**
+        （`adversarialCasesToGoldenTrace()` 的输出故意不含 positive case ——
+        对抗用例全是 negative expectation，合成假 positive 会让对抗 replay
+        结果失真。转换后的 trace 单独不通过 `validateGoldenTrace()`，这是
+        设计契约，不是 bug。owner 2026-06-17 确认接受此偏差。）
+     f. 调用 evaluateRefinerRuleHostGate(code, mergedTrace) 执行单轮 sandbox replay
+     g. 如果对抗 replay 通过 → approved → 写 rule artifact + updateValidationStatus('validated')
+     h. 如果对抗 replay 失败 → needs_revision → 记录失败用例 → 不写 rule artifact
   3. 返回 EvaluatorRunnerResult（含 decision + adversarialResult）
 ```
 
