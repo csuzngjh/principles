@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter.
+ * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter + 2 PRI-419 L2 agent loop (dreamer_l2_turn, dreamer_l2_complete).
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
@@ -216,6 +216,11 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_output_extraction_failed'),
   Type.Literal('scribe_mark_failed_error'),
   Type.Literal('scribe_mark_retry_error'),
+  // PRI-419: Dreamer L2 multi-turn agent loop telemetry.
+  // - dreamer_l2_turn: emitted per tool-execution turn inside the L2 loop
+  // - dreamer_l2_complete: emitted when the loop finishes (turnCount, toolsInvoked, usedFallback)
+  Type.Literal('dreamer_l2_turn'),
+  Type.Literal('dreamer_l2_complete'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
