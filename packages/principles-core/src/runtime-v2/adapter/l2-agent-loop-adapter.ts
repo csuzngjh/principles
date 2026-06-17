@@ -163,6 +163,16 @@ interface L2RunState {
 const DEFAULT_MAX_TURNS = 5;
 const DEFAULT_TOTAL_BUDGET_MS = 300_000;
 const DEFAULT_MAX_EMPTY_RETRIES = 2;
+
+/**
+ * PRI-420: result of a single agentLoop attempt. The `status` field discriminates the
+ * three outcomes: 'ok' (output extracted), 'empty' (no output — retry or fallback),
+ * 'error' (loop threw — stop retrying).
+ */
+type L2AttemptResult =
+  | { status: 'ok'; output: unknown; usedTextFallback: boolean }
+  | { status: 'empty' }
+  | { status: 'error'; reason: string; timedOut: boolean };
 /**
  * Maximum number of completed run records retained in memory. The runs Map is bounded to
  * prevent unbounded growth in long-running services (e.g. the auto-consumer wakes every 120s).
@@ -327,10 +337,11 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
     /**
      * PRI-420: run a single agentLoop attempt with fresh state (EP-05: each retry uses fresh
-     * outputCapture/turnCount, never stale loop state). Returns the extracted output or null
-     * if the attempt produced nothing (empty response — triggers retry or fallback).
+     * outputCapture/turnCount, never stale loop state).
+     * Returns a result with a `status` discriminator: 'ok' (output extracted), 'empty'
+     * (no output — triggers retry/fallback), or 'error' (loop threw).
      */
-    const runSingleAttempt = async (): Promise<{ output: unknown; usedTextFallback: boolean; turnCount: number } | { output: null; error: string; timedOut: boolean }> => {
+    const runSingleAttempt = async (): Promise<L2AttemptResult> => {
       // Fresh capture + turn counter per attempt (EP-05 loop-state freshness).
       const outputCapture: L2OutputCapture = { output: null };
       let turnCount = 0;
@@ -391,21 +402,21 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
         );
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        return { output: null, error: reason, timedOut: abortController.signal.aborted };
+        return { status: 'error', reason, timedOut: abortController.signal.aborted };
       }
 
       totalTurnCount += turnCount;
 
       // Extract output: primary = submit_output capture; secondary = last text-bearing assistant message.
       if (outputCapture.output !== null) {
-        return { output: outputCapture.output, usedTextFallback: false, turnCount };
+        return { status: 'ok', output: outputCapture.output, usedTextFallback: false };
       }
       const fallbackText = extractLastAssistantText(transcript);
       const extracted = fallbackText ? extractJsonObject(fallbackText) : null;
       if (extracted) {
-        return { output: extracted, usedTextFallback: true, turnCount };
+        return { status: 'ok', output: extracted, usedTextFallback: true };
       }
-      return { output: null, usedTextFallback: false, turnCount };
+      return { status: 'empty' };
     };
 
     emitLoopStarted();
@@ -413,7 +424,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     // PRI-420: retry loop — attempt the agent loop up to 1 + maxEmptyRetries times.
     // Each retry uses fresh state (EP-05). Empty responses (no submit_output, no parseable
     // text) trigger a retry; the model API returns content=[] ~57% of the time on long prompts.
-    let l2Result: { output: unknown; usedTextFallback: boolean; turnCount: number } | { output: null; error: string; timedOut: boolean } | null = null;
+    let l2Result: L2AttemptResult | null = null;
     let lastError: { reason: string; timedOut: boolean } | null = null;
     const maxAttempts = 1 + maxEmptyRetries;
 
@@ -432,32 +443,27 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
       l2Result = await runSingleAttempt();
 
-      // Distinguish success from empty/error.
-      if ('error' in l2Result && l2Result.output === null) {
-        // The loop threw (timeout or execution error). Record and stop retrying —
-        // retrying a timeout is unlikely to help and wastes budget.
-        lastError = { reason: l2Result.error, timedOut: l2Result.timedOut };
+      if (l2Result.status === 'ok') {
+        break; // Success — output extracted.
+      }
+      if (l2Result.status === 'error') {
+        // Loop threw (timeout or execution error). Stop retrying — retrying a timeout wastes budget.
+        lastError = { reason: l2Result.reason, timedOut: l2Result.timedOut };
         break;
       }
-      if (l2Result.output !== null) {
-        // Success — output extracted.
-        break;
-      }
-      // output === null without error → empty response. Retry if attempts remain.
-      // (The loop continues to the next iteration.)
+      // status === 'empty' → retry if attempts remain (loop continues).
     }
 
     clearTimeout(budgetTimer);
     this.abortControllers.delete(runId);
 
     // Handle the L2 result.
-    if (l2Result && l2Result.output !== null) {
+    if (l2Result?.status === 'ok') {
       // L2 succeeded (possibly after retries).
-      const usedFallback = !('error' in l2Result) && l2Result.usedTextFallback;
       runState.status = 'succeeded';
       runState.endedAt = new Date().toISOString();
       runState.output = { runId, payload: l2Result.output };
-      this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback, timedOut: false, retryCount: totalRetryCount });
+      this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback: l2Result.usedTextFallback, timedOut: false, retryCount: totalRetryCount });
       return { runId, runtimeKind: 'pi-ai-l2', startedAt };
     }
 
@@ -521,11 +527,16 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     const context: Context = { messages: [userMessage] };
     const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000) });
     // Extract the text content from the response and parse JSON.
-    const text = typeof response.content === 'string'
-      ? response.content
-      : Array.isArray(response.content)
-        ? response.content.find((c): c is { type: 'text'; text: string } => typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text')?.text ?? null
-        : null;
+    let text: string | null = null;
+    if (typeof response.content === 'string') {
+      text = response.content;
+    } else if (Array.isArray(response.content)) {
+      const textPart = response.content.find(
+        (c): c is { type: 'text'; text: string } =>
+          typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text',
+      );
+      text = textPart?.text ?? null;
+    }
     if (!text) {
       throw new Error('L1 fallback response had no text content');
     }
