@@ -21,9 +21,9 @@ import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianCommitter, CommitResult } from '../../store/commit/diagnostician-committer.js';
+import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
+import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -208,10 +208,10 @@ function createMockDeps(overrides: Partial<DiagRouterRunnerDeps> = {}): DiagRout
 
   return {
     stateManager: _stateManager as unknown as RuntimeStateManager,
-    runtimeAdapter: _runtimeAdapter as unknown as PDRuntimeAdapter,
+    runtimeAdapter: _runtimeAdapter,
     eventEmitter: mockEventEmitter as unknown as StoreEventEmitter,
     artifactStore,
-    committer: _committer as unknown as DiagnosticianCommitter,
+    committer: _committer,
     _stateManager,
     _runtimeAdapter,
     _committer,

@@ -134,7 +134,7 @@ describe('extractMessageContent', () => {
   });
 
   it('returns empty string for non-object primitive', () => {
-    expect(extractMessageContent(123 as unknown)).toBe('');
+    expect(extractMessageContent(123)).toBe('');
   });
 });
 

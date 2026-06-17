@@ -92,7 +92,7 @@ const LEDGER_WITH_ENTRY = {
 };
 
 describe('PainChainReadModel', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let model: PainChainReadModel;
 
   beforeEach(() => {

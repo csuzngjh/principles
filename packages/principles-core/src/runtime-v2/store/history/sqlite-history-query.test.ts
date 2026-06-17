@@ -49,7 +49,7 @@ function makeRunInput(
     runId: `run_${taskId}_${attemptNumber}`,
     taskId,
     runtimeKind: 'openclaw' as const,
-    executionStatus: overrides?.executionStatus ?? ('succeeded' as RunExecutionStatus),
+    executionStatus: overrides?.executionStatus ?? ('succeeded'),
     startedAt,
     endedAt: overrides?.endedAt,
     attemptNumber,

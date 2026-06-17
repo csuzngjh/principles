@@ -29,10 +29,10 @@ function makeTaskInput(overrides: Partial<Omit<TaskRecord, 'createdAt' | 'update
 
 describe('SqliteTaskStore', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
-  /* eslint-disable @typescript-eslint/init-declarations */
+   
   let connection: SqliteConnection;
   let store: SqliteTaskStore;
-  /* eslint-enable @typescript-eslint/init-declarations */
+   
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

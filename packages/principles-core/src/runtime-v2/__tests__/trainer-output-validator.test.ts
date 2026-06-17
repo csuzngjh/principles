@@ -165,7 +165,7 @@ describe('DefaultTrainerValidator (vertical slice)', () => {
         rationale: 'Safe to auto-correct',
         confidence: 0.9,
       },
-    } as TrainerOutputV1);
+    });
     // TypeScript allows this structurally, but validator should reject
     const result = await validator.validate(output, TRAINER_TASK_ID);
     expect(result.valid).toBe(false);
@@ -185,7 +185,7 @@ describe('DefaultTrainerValidator (vertical slice)', () => {
         rationale: 'This should be invalid',
         confidence: 0.85,
       },
-    } as TrainerOutputV1);
+    });
     const result = await validator.validate(output, TRAINER_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('proposedCorrection'))).toBe(true);

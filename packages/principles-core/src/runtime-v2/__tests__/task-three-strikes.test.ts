@@ -271,13 +271,13 @@ describe('PRI-141: Task Three Strikes Out Mechanism', () => {
 
     it('record with negative rejectionCount fails validation', async () => {
       const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
-      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: -1 } as unknown as PITaskRecord;
+      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: -1 };
       expect(isValidPITaskRecord(task)).toBe(false);
     });
 
     it('record with NaN rejectionCount fails validation', async () => {
       const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
-      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: NaN } as unknown as PITaskRecord;
+      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: NaN };
       expect(isValidPITaskRecord(task)).toBe(false);
     });
   });

@@ -73,7 +73,7 @@ function makeTask(overrides: MakeTaskOptions & { taskId: string; taskKind: strin
     attemptCount,
     maxAttempts,
     diagnosticJson,
-  } as unknown as TaskRecord;
+  };
 }
 
 // ── Mock state manager ───────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ function createSm(
 
 describe('InternalizationQueueReadModel.getSnapshot', () => {
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let model: InternalizationQueueReadModel;
 
   beforeEach(() => {

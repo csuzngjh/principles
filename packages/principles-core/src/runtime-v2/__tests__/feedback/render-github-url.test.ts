@@ -60,7 +60,7 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns structured error for invalid type — does NOT throw or use `as` cast', () => {
-    const result = buildGitHubIssueDraftUrl('title', 'not-a-valid-type' as unknown as 'bug', 'summary');
+    const result = buildGitHubIssueDraftUrl('title', 'not-a-valid-type', 'summary');
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBeDefined();

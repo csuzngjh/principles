@@ -73,38 +73,38 @@ describe('DefaultSchemaPromptAdapter', () => {
 
 describe('DiagnosticianOutputV1Schema annotations', () => {
   it('rootCause has description annotation for category prefix', () => {
-    const rootCauseSchema = DiagnosticianOutputV1Schema.properties!.rootCause as TSchema;
+    const rootCauseSchema = DiagnosticianOutputV1Schema.properties.rootCause as TSchema;
     expect(rootCauseSchema.description).toMatch(/category prefix/i);
   });
 
   it('confidence has description annotation', () => {
-    const confidenceSchema = DiagnosticianOutputV1Schema.properties!.confidence as TSchema;
+    const confidenceSchema = DiagnosticianOutputV1Schema.properties.confidence as TSchema;
     expect(typeof confidenceSchema.description).toBe('string');
-    expect(confidenceSchema.description!.length).toBeGreaterThan(0);
+    expect((confidenceSchema.description as string).length).toBeGreaterThan(0);
   });
 
   it('abstractedPrinciple has description annotation', () => {
-    const recSchema = DiagnosticianOutputV1Schema.properties!.recommendations as TSchema;
+    const recSchema = DiagnosticianOutputV1Schema.properties.recommendations as TSchema;
     const items = recSchema.items as TSchema;
     const absPrinciple = (items.properties as Record<string, TSchema>).abstractedPrinciple;
     expect(absPrinciple).toBeDefined();
-    expect(typeof absPrinciple!.description).toBe('string');
+    expect(typeof absPrinciple?.description).toBe('string');
   });
 
   it('triggerPattern has description annotation', () => {
-    const recSchema = DiagnosticianOutputV1Schema.properties!.recommendations as TSchema;
+    const recSchema = DiagnosticianOutputV1Schema.properties.recommendations as TSchema;
     const items = recSchema.items as TSchema;
     const trigger = (items.properties as Record<string, TSchema>).triggerPattern;
     expect(trigger).toBeDefined();
-    expect(typeof trigger!.description).toBe('string');
+    expect(typeof trigger?.description).toBe('string');
   });
 
   it('action has description annotation', () => {
-    const recSchema = DiagnosticianOutputV1Schema.properties!.recommendations as TSchema;
+    const recSchema = DiagnosticianOutputV1Schema.properties.recommendations as TSchema;
     const items = recSchema.items as TSchema;
-    const action = (items.properties as Record<string, TSchema>).action;
+    const {action} = (items.properties as Record<string, TSchema>);
     expect(action).toBeDefined();
-    expect(typeof action!.description).toBe('string');
+    expect(typeof action?.description).toBe('string');
   });
 });
 
@@ -216,7 +216,7 @@ describe('runtime safety hardening', () => {
     it('does not stack overflow on deeply nested array items', () => {
       let deep: Record<string, unknown> = { type: 'string' };
       for (let i = 0; i < 20; i++) {
-        deep = { type: 'array', items: deep as TSchema };
+        deep = { type: 'array', items: deep };
       }
       const result = adapter.generateExample(deep as TSchema);
       expect(typeof result).toBe('string');

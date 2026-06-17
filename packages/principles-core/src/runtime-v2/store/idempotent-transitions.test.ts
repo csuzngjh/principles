@@ -11,15 +11,15 @@ import type { TaskRecord } from '../task-status.js';
 import type { LeaseManager } from './lifecycle/lease-manager.js';
 
 describe('IdempotentStateTransitions', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let tmpdir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let connection: SqliteConnection;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let taskStore: SqliteTaskStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let _runStore: SqliteRunStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let retryPolicy: DefaultRetryPolicy;
 
   beforeEach(() => {

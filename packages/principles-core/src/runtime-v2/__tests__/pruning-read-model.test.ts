@@ -40,7 +40,7 @@ const LEDGER_MIXED: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
       old_watch: {
         id: 'old_watch',
         status: 'active',
@@ -59,7 +59,7 @@ const LEDGER_MIXED: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
       old_review: {
         id: 'old_review',
         status: 'active',
@@ -78,7 +78,7 @@ const LEDGER_MIXED: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
       archived1: {
         id: 'archived1',
         status: 'archived',
@@ -97,7 +97,7 @@ const LEDGER_MIXED: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
     },
   },
 };
@@ -123,7 +123,7 @@ const LEDGER_PROBATION: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
     },
   },
 };
@@ -149,7 +149,7 @@ const LEDGER_DEPRECATED: LedgerStore = {
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
-      } as LedgerPrinciple,
+      },
     },
   },
 };
@@ -297,7 +297,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -343,7 +343,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -384,7 +384,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -464,7 +464,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -521,7 +521,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -565,7 +565,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -633,7 +633,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -677,7 +677,7 @@ describe('PruningReadModel', () => {
             valueScore: 0,
             adherenceRate: 0,
             painPreventedCount: 0,
-          } as LedgerPrinciple,
+          },
         },
       },
     };
@@ -718,7 +718,7 @@ describe('PruningReadModel', () => {
               valueScore: 0,
               adherenceRate: 0,
               painPreventedCount: 0,
-            } as LedgerPrinciple,
+            },
           },
         },
       };
@@ -760,7 +760,7 @@ describe('PruningReadModel', () => {
               valueScore: 0,
               adherenceRate: 0,
               painPreventedCount: 0,
-            } as LedgerPrinciple,
+            },
           },
         },
       };
@@ -813,7 +813,7 @@ describe('PruningReadModel', () => {
               valueScore: 0,
               adherenceRate: 0,
               painPreventedCount: 0,
-            } as LedgerPrinciple,
+            },
           },
         },
       };
@@ -851,7 +851,7 @@ describe('PruningReadModel', () => {
               valueScore: 0,
               adherenceRate: 0,
               painPreventedCount: 0,
-            } as LedgerPrinciple,
+            },
           },
         },
       };
