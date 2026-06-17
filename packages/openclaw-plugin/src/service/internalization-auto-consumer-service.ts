@@ -182,7 +182,7 @@ export async function runConsumerCycle(
               const ledger = loadLedger(stateDir);
               const principles = ledger.tree.principles ?? {};
               return Object.values(principles)
-                .filter(p => p.status === 'active')
+                .filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string')
                 .map(p => ({ id: p.id, statement: p.text }));
             } catch (error) {
               const reason = error instanceof Error ? error.message : String(error);

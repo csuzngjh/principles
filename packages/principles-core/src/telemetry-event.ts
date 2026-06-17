@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter.
+ * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter + 2 PRI-419 L2 agent loop (dreamer_l2_turn, dreamer_l2_complete).
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'

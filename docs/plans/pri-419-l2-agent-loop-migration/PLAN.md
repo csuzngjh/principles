@@ -62,6 +62,11 @@ outputCaptured? ──yes──► submit_output.details (DreamerOutputV1)
 
 时序纪律：P1.3 先于 P1.4——避免更贵架构掩盖 prompt/模型根因。
 
+## Follow-up notes
+
+- **resolveL2Model / resolveModel 合并**：当前 `L2AgentLoopAdapter.resolveL2Model` 与 `PiAiRuntimeAdapter.resolveModel` 的 custom-model 构造逻辑重复，因为 L1 import `@mariozechner/pi-ai`、L2 import `@earendil-works/pi-ai`（双 scope 不能交叉 import）。**当 L1 升级到 `@earendil-works` scope 后，应合并为一个共享 resolve 函数**，消除漂移风险。升级 pi-agent-core 后须重新验证 `resolveL2Model` 返回值与 live provider 路径一致（见代码中 RUNTIME_CONTRACT 注释）。
+- **principle reader 去重（P2-2 follow-up）**：`makeDreamerPrincipleReader`（pd-cli）与 plugin 内联实现几乎相同。若未来第三个消费方出现，提取到 `@principles/core` 的 `buildL2PrincipleReader(stateDir)` 共用；当前两处可接受。
+
 ## 风险
 
 目标模型不支持原生 tool-use（高，spike 前置）；Agent 类不支持 shouldStopAfterTurn（高，改用 agentLoop）；terminate every() 语义（高，改用 shouldStopAfterTurn）；多轮放大延迟成本（中，总预算+turn cap+token cap）；typebox 类型墙+禁 as（中，typebox 重声明+Check）；升级 breaking（中，双 scope 并存退路）；复制 OpenClaw 能力（中，不做 search_codebase）；L1 baseline 未测（中，P1.3 前置）。

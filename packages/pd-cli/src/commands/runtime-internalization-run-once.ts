@@ -229,7 +229,7 @@ function makeDreamerPrincipleReader(stateDir: string): PdL2PrincipleReader {
       try {
         const ledger = loadLedger(stateDir);
         const principles = ledger.tree.principles ?? {};
-        const active = Object.values(principles).filter(p => p.status === 'active');
+        const active = Object.values(principles).filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string');
         return active.map(p => ({ id: p.id, statement: p.text }));
       } catch (error) {
         // Graceful degradation WITH an observable reason (Runtime Contract R9): the L2

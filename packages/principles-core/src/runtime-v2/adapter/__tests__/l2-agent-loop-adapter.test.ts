@@ -157,11 +157,13 @@ describe('PRI-419 L2AgentLoopAdapter — submit_output capture (primary extracti
 });
 
 describe('PRI-419 L2AgentLoopAdapter — maxTurns cap', () => {
-  it('shouldStopAfterTurn stops within maxTurns when submit_output is never called', async () => {
+  it('shouldStopAfterTurn returns false below maxTurns and true at/above, WITHOUT submit_output', async () => {
     // Verifies the turn-cap path INDEPENDENTLY of output capture: submit_output is NOT
     // called, so stopping is driven purely by turnCount reaching maxTurns. Fallback
     // extraction (assistant message contains JSON) lets startRun succeed.
-    const adapter = makeAdapter({ maxTurns: 3 });
+    // The mocked runAgentLoop does NOT call shouldStopAfterTurn, so turnCount starts at 0.
+    // With maxTurns=5: calls 1-4 (turns 1-4, < 5) → false; call 5 (turn 5, >= 5) → true.
+    const adapter = makeAdapter({ maxTurns: 5 });
     hoisted.mockReturn = [
       { role: 'assistant', content: JSON.stringify(VALID_DREAMER_OUTPUT) },
     ];
@@ -169,13 +171,12 @@ describe('PRI-419 L2AgentLoopAdapter — maxTurns cap', () => {
     await adapter.startRun(makeStartRun());
     const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
     if (!stopFn) { expect.fail('shouldStopAfterTurn not wired'); return; }
-    // The real loop ran at least one turn (incrementing turnCount). Confirm that continued
-    // invocation stops within the maxTurns cap — i.e. the turn-cap clause fires.
-    let stopped = false;
-    for (let i = 0; i < 10; i++) {
-      if (stopFn()) { stopped = true; break; }
-    }
-    expect(stopped).toBe(true);
+    expect(stopFn()).toBe(false); // turn 1
+    expect(stopFn()).toBe(false); // turn 2
+    expect(stopFn()).toBe(false); // turn 3
+    expect(stopFn()).toBe(false); // turn 4
+    expect(stopFn()).toBe(true);  // turn 5 (>= maxTurns)
+    expect(stopFn()).toBe(true);  // turn 6 (still >= maxTurns)
   });
 });
 
@@ -285,4 +286,86 @@ describe('PRI-419 L2AgentLoopAdapter — error paths', () => {
     const caps = await adapter.getCapabilities();
     expect(caps.supportsToolUse).toBe(true);
   });
+});
+
+describe('PRI-419 L2AgentLoopAdapter — fallback edge cases (P2-3)', () => {
+  it('returns null (fail loud) when the last assistant message has content: null', async () => {
+    // content: null is neither string nor array; extraction must return null, and the
+    // adapter must then fail loud (no parseable JSON) rather than crash.
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [
+      { role: 'assistant', content: null },
+    ];
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/no parseable JSON|submit_output was not called/);
+  });
+
+  it('returns null when the transcript has no assistant message at all', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [
+      { role: 'user', content: 'hello' },
+    ];
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/no parseable JSON|submit_output was not called/);
+  });
+});
+
+describe('PRI-419 L2AgentLoopAdapter — timeout/abort path (P3-1)', () => {
+  it('reports timed_out when the wall-clock budget aborts the loop', async () => {
+    // Use a short real totalBudgetMs so the adapter's setTimeout fires and aborts the
+    // controller. The mock loop waits past the budget, then rejects (simulating an
+    // abort-driven failure). The catch block must classify it as timed_out.
+    const adapter = makeAdapter({ totalBudgetMs: 50 });
+    hoisted.impl = async (...args: unknown[]) => {
+      // Wait long enough for the budget timer to fire + abort. signal is the 5th arg.
+      const signal = args[4] as AbortSignal | undefined;
+      await new Promise(resolve => setTimeout(resolve, 120));
+      if (signal?.aborted) {
+        throw new Error('aborted by budget');
+      }
+      return [];
+    };
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/aborted by budget/);
+    const completeCalls = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_complete');
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0]?.[0]?.payload?.timedOut).toBe(true);
+  }, 10_000);
+
+  it('reports execution_failed (not timed_out) when the loop throws without abort', async () => {
+    const adapter = makeAdapter({ totalBudgetMs: 60_000 });
+    hoisted.impl = async () => {
+      throw new Error('model error');
+    };
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/model error/);
+    const completeCalls = emitTelemetryMock.mock.calls.filter(c => c[0]?.eventType === 'dreamer_l2_complete');
+    expect(completeCalls.length).toBe(1);
+    expect(completeCalls[0]?.[0]?.payload?.timedOut).toBe(false);
+  });
+});
+
+describe('PRI-419 L2AgentLoopAdapter — runs Map is bounded (P1-1)', () => {
+  it('does not grow without bound across many runs', async () => {
+    const adapter = makeAdapter();
+    // Run more than MAX_RETAINED_RUNS (100) times; the Map must stay bounded.
+    for (let i = 0; i < 105; i++) {
+      hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+        const submit = context.tools?.find(t => t.name === 'submit_output');
+        if (submit) await submit.execute('call-1', VALID_DREAMER_OUTPUT);
+        return [];
+      };
+      await adapter.startRun(makeStartRun());
+    }
+    // The internal runs Map is private; verify via fetchOutput that early runIds are evicted
+    // (not retained) while recent ones are. We can't read the Map directly, but pollRun on an
+    // early runId must report it as failed (evicted → unknown runId default).
+    // Collect the first runId via telemetry and assert it is no longer fetchable.
+    const firstComplete = emitTelemetryMock.mock.calls.find(c => c[0]?.eventType === 'dreamer_l2_complete');
+    const firstRunId = firstComplete?.[0]?.payload?.runId as string | undefined;
+    // The very first runId should have been evicted after 105 runs (>100 cap).
+    if (firstRunId) {
+      const output = await adapter.fetchOutput(firstRunId);
+      // Either null (evicted) or still present if the cap is generous — assert null to prove eviction.
+      expect(output).toBeNull();
+    }
+  }, 30_000);
 });

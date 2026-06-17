@@ -126,6 +126,10 @@ function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Mo
       supportsStrictMode: false,
     },
   };
+  // RUNTIME_CONTRACT: this double-assertion narrows a literal object to Model<string>'s
+  // discriminant union (the literal doesn't fully satisfy every union arm). If pi-agent-core
+  // changes Model's shape after an upgrade, this will NOT be caught at compile time — re-verify
+  // resolveL2Model's return against the live provider path after any @earendil-works/pi-ai bump.
   return customModel as unknown as Model<string>;
 }
 
@@ -146,6 +150,12 @@ interface L2RunState {
 
 const DEFAULT_MAX_TURNS = 5;
 const DEFAULT_TOTAL_BUDGET_MS = 300_000;
+/**
+ * Maximum number of completed run records retained in memory. The runs Map is bounded to
+ * prevent unbounded growth in long-running services (e.g. the auto-consumer wakes every 120s).
+ * When exceeded, the oldest entries are evicted. fetchOutput/pollRun only need recent runs.
+ */
+const MAX_RETAINED_RUNS = 100;
 
 /** Walk the transcript backwards to the last assistant message containing text content. */
 function extractLastAssistantText(messages: AgentMessage[]): string | null {
@@ -241,6 +251,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     const taskId = input.taskRef?.taskId ?? runId;
     const runState: L2RunState = { runId, startedAt, endedAt: startedAt, status: 'failed' };
     this.runs.set(runId, runState);
+    this.evictOldRuns();
 
     const totalBudgetMs = this.config.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS;
     const maxTurns = this.config.maxTurns ?? DEFAULT_MAX_TURNS;
@@ -453,6 +464,22 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
   async fetchArtifacts(_runId: string): Promise<RuntimeArtifactRef[]> {
     // L2 produces no separate runtime artifacts; output is in fetchOutput.
     return [];
+  }
+
+  /**
+   * Bound the runs Map to MAX_RETAINED_RUNS to prevent unbounded memory growth in
+   * long-running services (the auto-consumer wakes every 120s). Evicts the oldest
+   * entries by insertion order (Map preserves it). Called at the start of each run.
+   */
+  private evictOldRuns(): void {
+    if (this.runs.size <= MAX_RETAINED_RUNS) return;
+    const excess = this.runs.size - MAX_RETAINED_RUNS;
+    let evicted = 0;
+    for (const runId of this.runs.keys()) {
+      if (evicted >= excess) break;
+      this.runs.delete(runId);
+      evicted++;
+    }
   }
 
   private emitComplete(opts: {
