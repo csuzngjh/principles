@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #006 · 2026-06-17</div>
+  <a class="abyss-title" href="/abyss/06-expanding-boundary">06 | The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba</a>
+  <p class="abyss-desc">As intelligent systems expand from text to action, organization, society, and meaning, which old containers will be rewritten? From ExO to MVO, the inverted-T organization, and the question of what humans can never outsource — goals, boundaries, responsibility, pain, principles, love, meaning, and final adjudication power.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #005 · 2026-06-08</div>
   <a class="abyss-title" href="/abyss/05-co-evolution">05 | Co-evolution: Why the Owner is the Crucial Variable in Intelligent Systems</a>
   <p class="abyss-desc">Discusses the co-evolution of the Owner-Agent synthesis: why intention bandwidth is the scarcest resource in the LLM era, and how to protect human attention and filter noise using an Attention Protection Layer and a Common Law precedent mechanism.</p>
