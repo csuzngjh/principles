@@ -23,15 +23,13 @@
 | `9a5b99dd` | Phase 5a | PRI-425 | Evaluator prompt builder V2 code review 指令 + buildContext scribe artifact 加载(PRD Decision 12)+ invokeRuntime 透传 | 9 新 |
 | `3efe09bf` | Phase 5b | PRI-426 | `EvaluatorRunner.succeedTask` 单轮对抗沙盒重放 + `gateDeps` 注入 + PRI-423 positive case 合并契约 + 遥测注册 | 8 新 |
 | `c0a11c5b` | Phase 6 | PRI-427 | Rule Artifact Assembly — `assembleRuleArtifact()` 双 artifact 写入 + `updateValidationStatus('validated')` + RuleHostWriter.canActivate 字段契约 + 遥测 | 8 新 |
+| `6802cd2a` | Phase 7+8 | PRI-428 | 多轮对抗循环 `runAdversarialLoop()` + feedback 注入管线(PITaskMetadata→PromptBuilder→ArtificerRunner)+ `formatAdversarialFeedback` + 架构回归 | 11 新 |
 
-**累计 95 测试,零功能回归。** Linear: PRI-421/422/423/424/425/426/427 全部 In Review。
+**累计 106 测试,零功能回归。Linear: PRI-421..428 全部 In Review。RuleHost MVP Activation 切片完成。**
 
 ## 3. 待完成 Phase
 
-| Phase | 工单 | 内容 | 依赖 |
-|-------|------|------|------|
-| **Phase 7** | **PRI-428** | Orchestrator 多轮对抗循环(最多 2 轮)+ 降级路径 + 集成测试 | PRI-427 ✅ |
-| Phase 8 | PRI-428 | 架构回归测试 + 全套测试 | PRI-428 |
+**全部完成。** RuleHost MVP Activation 切片(PRI-421..428)落地。下一步:开 PR 统一 review。
 
 ## 4. 关键设计契约(context 压缩后必读)
 
@@ -175,7 +173,7 @@ Orchestrator(伪代码):
 | PRI-425 | Evaluator Passive Review(代码审查三维度) | In Review |
 | PRI-426 | Evaluator Adversarial Attack + Sandbox Replay | In Review |
 | PRI-427 | Rule Artifact Assembly(双 artifact 写入) | In Review |
-| PRI-428 | 多轮对抗循环 Orchestrator + 降级路径 + 架构回归测试 | **Backlog(下一步)** |
+| PRI-428 | 多轮对抗循环 Orchestrator + 降级路径 + 架构回归测试 | In Review |
 
 ## 8. 恢复后的第一步
 
