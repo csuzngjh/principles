@@ -20,9 +20,13 @@ import {
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
+  L2AgentLoopAdapter,
+  loadLedger,
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
+import type { PdL2ArtifactReader, PdL2PrincipleReader } from '@principles/core/runtime-v2';
+import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -209,6 +213,33 @@ interface ResolveAdapterOptions {
   workspaceDir: string;
   runnerKind: string;
   timeoutMs?: number;
+  /** PRI-419: stateManager for the L2 artifact reader (only used when l2_dreamer is on). */
+  l2ArtifactReader?: PdL2ArtifactReader;
+  /** PRI-419: workspace stateDir for the L2 principle reader (only used when l2_dreamer is on). */
+  l2StateDir?: string;
+}
+
+/**
+ * PRI-419: build a read-only principle reader from the workspace ledger.
+ * Returns active internalized principles (id + statement). Degrades to empty on missing ledger.
+ */
+function makeDreamerPrincipleReader(stateDir: string): PdL2PrincipleReader {
+  return {
+    listActivePrinciples: async () => {
+      try {
+        const ledger = loadLedger(stateDir);
+        const principles = ledger.tree.principles ?? {};
+        const active = Object.values(principles).filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string');
+        return active.map(p => ({ id: p.id, statement: p.text }));
+      } catch (error) {
+        // Graceful degradation WITH an observable reason (Runtime Contract R9): the L2
+        // dreamer proceeds with only core axioms; the degradation is logged for debugging.
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[l2_dreamer] listActivePrinciples degraded — no internalized principles loaded: ${reason}`);
+        return [];
+      }
+    },
+  };
 }
 
 function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
@@ -487,6 +518,32 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
     validateRuntimeConfig(configResult);
     // CLI --timeout-ms overrides config timeoutMs
     const adapterTimeoutMs = opts.timeoutMs ?? configResult.timeoutMs;
+
+    // PRI-419: when l2_dreamer flag is on AND this is the dreamer runner, route through the
+    // L2 multi-turn agent loop adapter. Other runners (philosopher/scribe/...) stay on L1.
+    if (opts.runnerKind === 'dreamer' && opts.l2ArtifactReader && opts.l2StateDir) {
+      const effectiveFlags = loadEffectiveFeatureFlags(opts.workspaceDir);
+      const l2Flag = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
+        ? effectiveFlags.flags.l2_dreamer.enabled
+        : false;
+      if (l2Flag) {
+        return new L2AgentLoopAdapter(
+          {
+            provider: String(configResult.provider),
+            model: String(configResult.model),
+            apiKeyEnv: String(configResult.apiKeyEnv),
+            baseUrl: configResult.baseUrl,
+            workspace: opts.workspaceDir,
+            totalBudgetMs: adapterTimeoutMs,
+          },
+          {
+            artifactReader: opts.l2ArtifactReader,
+            principleReader: makeDreamerPrincipleReader(opts.l2StateDir),
+          },
+        );
+      }
+    }
+
     return new PiAiRuntimeAdapter({
       provider: String(configResult.provider),
       model: String(configResult.model),
@@ -574,7 +631,17 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind, timeoutMs: cliTimeoutMs });
+      const runtimeAdapter = resolveRuntimeAdapter({
+        runtimeKind,
+        taskId: wakeResult.taskId,
+        workspaceDir,
+        runnerKind,
+        timeoutMs: cliTimeoutMs,
+        // PRI-419: pass the L2 readers so resolveRuntimeAdapter can build an L2AgentLoopAdapter
+        // when l2_dreamer is enabled. Only consumed for dreamer; harmless for other runners.
+        l2ArtifactReader: artifactStore,
+        l2StateDir: `${workspaceDir}/.state`,
+      });
 
       try {
         if (runnerKind === 'dreamer') {

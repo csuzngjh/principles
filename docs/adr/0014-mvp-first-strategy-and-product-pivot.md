@@ -295,3 +295,60 @@ All three must be wired through the production loader and exercised by a test be
 ### F. Reversibility & exit
 
 If the 3-arm comparison shows the split is not better, flip `diagnostician_split_pipeline` off and the system reverts to the single-agent runner with zero data migration (both paths write the same `DiagnosticianOutputV1` + `PIArtifact` shape). The split runners then become MVP-Quiet code pending deletion.
+
+---
+
+## Amendment (2026-06-16): Owner Exception — Dreamer L2 Agent Loop
+
+> **Status of amendment**: Accepted (maintainer-driven, owner exception)
+> **Scope**: `DreamerRunner` runtime-invocation path only. Adds a new `L2AgentLoopAdapter` that runs dreamer through a multi-turn agent loop with read-only tools, selected by a feature flag. `BasePeerRunner`, the dreamer's `buildContext`/`validateOutput`/`succeedTask`, and the `DreamerOutputV1` + `PIArtifact` output contract are unchanged.
+> **Does NOT authorize**: migration of any other runner (philosopher, scribe, artificer, evaluator, diag runners) to L2; any new activation channel; BALM / LRAS / GAP / MissionScheduler / Trainer / model_training / Attribution Pipeline. Each of those remains deferred under §6 and `post-mvp-conditional-roadmap.md`.
+
+### A. Context — why this is an explicit exception
+
+ADR-0014 §2.4 lists `Dreamer + Scribe + Artificer Runner` as MVP-Core, and the body of this ADR pauses architectural expansion. Under the default rule, introducing a multi-turn agent loop and a new runtime adapter would be "architectural expansion" and rejected.
+
+The maintainer (owner) is making a **scoped exception** for the dreamer runner because dogfooding surfaced a concrete quality defect, not a future-proofing wish, and the owner has judged the current single-turn design unacceptable:
+
+| # | Defect (observed) | Evidence |
+|---|-------------------|----------|
+| **L1** | Dreamer is single-turn in/out. It receives a compressed predecessor artifact and must emit the full `DreamerOutputV1` in one LLM call. It cannot actively query predecessor artifacts, the core-principle registry, or the pain→principle chain to verify its own output before committing. | `dreamer-runner.ts` `invokeRuntime` → single `runtimeAdapter.startRun`; `docs/plans/quality-dogfood-output/QUALITY-SUMMARY.md` — 6 of 7 dogfood principles detached from the original pain, root cause listed as "dreamer received null predecessor output" + missing grounding. |
+
+The owner has decided this single-turn forwarding is not acceptable for the dreamer: an agent that produces principle candidates must be able to read its predecessor artifact and the existing principle library before emitting a candidate, rather than hallucinate from a compressed context blob.
+
+This is **product-boundary-internal**: PD owns owner-reviewed, reversible behavior internalization, and the dreamer is the candidate-generation stage of that pipeline. Letting it actively read its own evidence chain (not modify anything) is core to Story A' quality, not scope creep.
+
+### B. Decision
+
+1. **Release the "no new runtime adapter / no multi-turn loop" constraint for the dreamer only.** A new `L2AgentLoopAdapter implements PDRuntimeAdapter` may run dreamer through a multi-turn agent loop (built on the low-level `agentLoop()` from `@earendil-works/pi-agent-core`) with a small set of **read-only** tools.
+2. **Read-only tools only.** The tools (`read_principles`, `read_artifact`, and a self-built `submit_output`) query in-process PD read-models (`loadLedger`, `PIArtifactStore`, `CORE_PRINCIPLES`). No tool writes, no shell-out, no `search_codebase` (that would duplicate the OpenClaw host's coding tools and cross the PRODUCT_IDENTITY "does not duplicate host capability" boundary). Tool executors are injected store interfaces that expose only `get*`/`list*` methods — read-only by construction.
+3. **Output extraction via a self-built `submit_output` tool**, NOT via `terminate` semantics. pi-agent-core has no built-in `submit_output`, and its `terminate` field uses an `.every()` over the whole tool batch that is unreliable when the model calls another tool in the same turn. Loop termination is controlled by the low-level `shouldStopAfterTurn` hook, which detects that `submit_output` captured the output. A fallback to the existing L1 three-path extraction (`json-extractor`) applies if the model never calls `submit_output`.
+4. **Old one-shot path is retained, flag-gated.** The existing `PiAiRuntimeAdapter` path runs unchanged when the flag is off. The L2 path must prove equal-or-better on a quality comparison (L1 baseline vs L2) before the flag is flipped on for anyone other than internal testing. This makes the change reversible.
+5. **Precondition gate: model tool-use spike.** Because a multi-turn loop multiplies LLM calls 3–5×, this is gated on a spike verifying the target model supports native function-calling. A model without native tool-use degrades the loop into prompt-induced JSON "tool calls" and is not a real agent loop. The spike runs before any L2 code ships.
+
+### C. MVP Three Questions (mandatory, answered)
+
+1. **What happens if we DON'T do this?** The dreamer stays a single-turn agent that cannot verify its output against the predecessor artifact or the principle library, producing candidates detached from the original pain. The owner has judged this unacceptable. It WILL be raised again within 30 days. Not rejected.
+2. **How is it observed?** (a) New telemetry `dreamer_l2_turn` (per tool-execution turn) and `dreamer_l2_complete` (final, carrying `turnCount`, `toolsInvoked`, `usedFallback`). (b) A quality comparison report scoring L1 vs L2 on 贴合度 / Grounding / 可执行性, reusing the `quality-dogfood-output/QUALITY-SUMMARY.md` dimensions. (c) The L1 baseline (PRI-407 dogfood) must be measured first, as the comparison's control arm.
+3. **How is it disabled?** One feature flag `l2_dreamer`, `quiet` category, default `false`. Flip the flag off and the dreamer reverts to `PiAiRuntimeAdapter` with zero data migration — both paths write the same `DreamerOutputV1` + `PIArtifact` shape. No PR revert required.
+
+### D. Feature flag (registered per PRI-239 contract)
+
+| Flag | Category | Default | Controls |
+|------|----------|---------|----------|
+| `l2_dreamer` | quiet | `false` | Route dreamer through `L2AgentLoopAdapter` (multi-turn loop + read-only tools). When off, the existing `PiAiRuntimeAdapter` one-shot path runs unchanged. |
+
+Must be wired through the production loader and exercised by a test before counting as registered. Until then the L2 code path stays dormant.
+
+### E. Scope guard (what this amendment does NOT authorize)
+
+- **No other runner migration.** This amendment authorizes L2 for `DreamerRunner` only. Each additional runner (philosopher, scribe, artificer, evaluator, the diag split runners) requires its own amendment with its own evidence and MVP-three-questions.
+- **No write tools, no shell-out, no codebase search.** Tools are read-only and in-process. `search_codebase` is explicitly excluded (duplicates the OpenClaw host's coding capability; violates PRODUCT_IDENTITY Q4).
+- **No new activation channels, no SkillFileWriter/TrainingExporter changes.**
+- **No reopening of any deferred ADR** (BALM/LRAS/GAP/MissionScheduler/Attribution). If the L2 design appears to need any of them, STOP and reassess.
+- **No change to the dreamer output contract** (`DreamerOutputV1`), `PIArtifact` shape, or downstream consumers.
+
+### F. Reversibility & exit
+
+If the quality comparison shows L2 is not better (specifically not better on the Grounding dimension), flip `l2_dreamer` off and the system reverts to the one-shot `PiAiRuntimeAdapter` with zero data migration. The `L2AgentLoopAdapter` and its tools then become MVP-Quiet code pending deletion.
+

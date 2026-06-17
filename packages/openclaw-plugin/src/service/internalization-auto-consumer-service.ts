@@ -5,6 +5,8 @@ import {
   DreamerRunner,
   DefaultDreamerValidator,
   PiAiRuntimeAdapter,
+  L2AgentLoopAdapter,
+  loadLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
   resolveRuntimeConfigFromPdConfig,
@@ -13,6 +15,7 @@ import {
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
+  type PdL2PrincipleReader,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -169,15 +172,61 @@ export async function runConsumerCycle(
 
     let adapter: PDRuntimeAdapter;
     if (runtimeKind === 'pi-ai') {
-      adapter = new PiAiRuntimeAdapter({
-        provider: runtimeConfigResult.provider ?? 'openai',
-        model: runtimeConfigResult.model ?? 'gpt-4o',
-        apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
-        maxRetries: runtimeConfigResult.maxRetries,
-        timeoutMs: runtimeConfigResult.timeoutMs,
-        baseUrl: runtimeConfigResult.baseUrl,
-        workspace: workspaceDir,
-      });
+      // PRI-419: when l2_dreamer flag is on, route through the L2 multi-turn agent loop.
+      const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
+      if (l2Flag.enabled) {
+        const stateDir = `${workspaceDir}/.state`;
+        const principleReader: PdL2PrincipleReader = {
+          listActivePrinciples: async () => {
+            try {
+              const ledger = loadLedger(stateDir);
+              const principles = ledger.tree.principles ?? {};
+              return Object.values(principles)
+                .filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string')
+                .map(p => ({ id: p.id, statement: p.text }));
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              logger.warn(`[PD:AutoConsumer] L2 dreamer principle reader degraded: ${reason}`);
+              return [];
+            }
+          },
+        };
+        adapter = new L2AgentLoopAdapter(
+          {
+            provider: runtimeConfigResult.provider ?? 'openai',
+            model: runtimeConfigResult.model ?? 'gpt-4o',
+            apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
+            baseUrl: runtimeConfigResult.baseUrl,
+            workspace: workspaceDir,
+            totalBudgetMs: runtimeConfigResult.timeoutMs,
+          },
+          {
+            artifactReader: {
+              // Explicit adapter: PIArtifactRecord → PdL2ArtifactReader. The store returns
+              // PIArtifactRecord (with PIArtifactKind enum); map to the ArtifactSummary shape.
+              getArtifactById: async (id: string) => {
+                const r = await stateManager.piArtifactStore.getArtifactById(id);
+                return r ? { artifactId: r.artifactId, artifactKind: String(r.artifactKind), sourceTaskId: r.sourceTaskId, contentJson: r.contentJson, createdAt: r.createdAt } : null;
+              },
+              listBySourceTaskId: async (taskId: string) => {
+                const records = await stateManager.piArtifactStore.listBySourceTaskId(taskId);
+                return records.map(r => ({ artifactId: r.artifactId, artifactKind: String(r.artifactKind), sourceTaskId: r.sourceTaskId, contentJson: r.contentJson, createdAt: r.createdAt }));
+              },
+            },
+            principleReader,
+          },
+        );
+      } else {
+        adapter = new PiAiRuntimeAdapter({
+          provider: runtimeConfigResult.provider ?? 'openai',
+          model: runtimeConfigResult.model ?? 'gpt-4o',
+          apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
+          maxRetries: runtimeConfigResult.maxRetries,
+          timeoutMs: runtimeConfigResult.timeoutMs,
+          baseUrl: runtimeConfigResult.baseUrl,
+          workspace: workspaceDir,
+        });
+      }
     } else if (runtimeKind === 'openclaw-cli') {
       adapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: runtimeConfigResult.openclawMode ?? 'default',
