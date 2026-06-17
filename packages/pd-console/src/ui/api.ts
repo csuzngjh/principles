@@ -10,11 +10,9 @@ import {
   validateWorkspaceList,
   validateRemovedEnvelope,
   validateSyncResult,
-  validateConfigReadiness,
   validateConfigSummary,
   validateConfigCatalog,
   validateAgentBindingUpdate,
-  validateReadinessCheck,
   validateDefaultRuntimeUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
@@ -23,7 +21,6 @@ import {
   validateLifecycleMetrics,
   validateUpdateStatus,
   validateUpdateHistory,
-  validateApprovalListResult,
   validateApprovalRecordDirect,
   validatePrinciplesList,
   validateApprovalsGrouped,
@@ -37,11 +34,9 @@ import type {
   WorkspaceEntryData,
   RemovedEnvelopeData,
   SyncResultData,
-  ConfigReadinessData,
   ConfigSummaryData,
   ConfigCatalogData,
   AgentBindingUpdateData,
-  ReadinessCheckData,
   DefaultRuntimeUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
@@ -51,7 +46,6 @@ import type {
   UpdateStatusData,
   UpdateHistoryData,
   ApprovalRecordData,
-  ApprovalListResultData,
   PrinciplesListData,
   ApprovalsGroupedData,
   EvidenceChainData,
@@ -179,12 +173,6 @@ async function checkAuth(): Promise<boolean> {
   return result.success;
 }
 
-// ── Config Readiness (renamed from fetchSystemHealth) ─────────────────────────
-
-async function fetchConfigReadiness(): Promise<ApiResponse<ConfigReadinessData>> {
-  return request<ConfigReadinessData>("/api/health", undefined, validateConfigReadiness);
-}
-
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
@@ -221,21 +209,6 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-
-async function fetchApprovals(params?: {
-  status?: string;
-  channel?: string;
-  page?: number;
-  pageSize?: number;
-}): Promise<ApiResponse<ApprovalListResultData>> {
-  const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set('status', params.status);
-  if (params?.channel) searchParams.set('channel', params.channel);
-  if (params?.page) searchParams.set('page', String(params.page));
-  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-  const qs = searchParams.toString() ? '?' + searchParams.toString() : '';
-  return request<ApprovalListResultData>('/api/v1/approvals' + qs, undefined, validateApprovalListResult);
-}
 
 async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalRecordDirect);
@@ -308,14 +281,6 @@ async function updateAgentBinding(
       body: JSON.stringify({ runtimeProfile, enabled }),
     },
     validateAgentBindingUpdate,
-  );
-}
-
-async function checkAgentReadiness(agentName: string): Promise<ApiResponse<ReadinessCheckData>> {
-  return request<ReadinessCheckData>(
-    `/api/v1/config/readiness/${encodeURIComponent(agentName)}`,
-    undefined,
-    validateReadinessCheck,
   );
 }
 
@@ -400,7 +365,6 @@ export {
   clearToken,
   checkAuth,
   request,
-  fetchApprovals,
   fetchApprovalDetail,
   approveApproval,
   rejectApproval,
@@ -413,7 +377,6 @@ export {
   fetchConfigSummary,
   fetchConfigCatalog,
   updateAgentBinding,
-  checkAgentReadiness,
   updateDefaultRuntime,
   fetchOutputLanguage,
   updateOutputLanguage,
@@ -421,7 +384,6 @@ export {
   addWorkspace,
   removeWorkspace,
   syncWorkspace,
-  fetchConfigReadiness,
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
   fetchAllActivations,
@@ -444,11 +406,9 @@ export type {
   WorkspaceEntryData,
   RemovedEnvelopeData,
   SyncResultData,
-  ConfigReadinessData,
   ConfigSummaryData,
   ConfigCatalogData,
   AgentBindingUpdateData,
-  ReadinessCheckData,
   DefaultRuntimeUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
@@ -458,7 +418,6 @@ export type {
   UpdateStatusData,
   UpdateHistoryData,
   ApprovalRecordData,
-  ApprovalListResultData,
   PrinciplesListData,
   ApprovalsGroupedData,
   EvidenceChainData,
