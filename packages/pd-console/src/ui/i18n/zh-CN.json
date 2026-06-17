@@ -76,6 +76,13 @@
       "deviationDisclaimer": "PD 暂按单条呈现，自动同类识别为 post-MVP。",
       "deviationDetailPending": "单条偏差证据将在后端提供行为偏差信号详情后显示（CR5）。",
       "footer": "这一页只回答一个问题：现在该做什么判断。",
+      "dailyThought": {
+        "eyebrow": "在判断之前",
+        "ariaLabel": "今日思考",
+        "next": "换一句",
+        "nextAriaLabel": "换一句",
+        "authorPrefix": "——"
+      },
       "reviewAction": "审查并决定",
       "parkAction": "暂存",
       "viewFullChain": "查看完整链路",

@@ -146,3 +146,46 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Daily thought card — subtle entrance + breathing dot */
+.daily-thought-entrance {
+  animation: daily-thought-fade-in 400ms ease-out forwards;
+}
+
+@keyframes daily-thought-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.breathing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: var(--color-gov);
+  animation: breathing-dot-pulse 4s ease-in-out infinite;
+}
+
+@keyframes breathing-dot-pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-thought-entrance {
+    animation: none;
+  }
+  .breathing-dot {
+    animation: none;
+    opacity: 0.7;
+  }
+}
