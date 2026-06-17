@@ -284,7 +284,7 @@ describe('sanitizeValue', () => {
   // ── Unsupported types ──
 
   it('returns <unsupported-type> for functions', () => {
-    expect(sanitizeValue(() => {})).toBe('<unsupported-type>');
+    expect(sanitizeValue(() => undefined)).toBe('<unsupported-type>');
   });
 
   it('returns <unsupported-type> for symbols', () => {
@@ -349,10 +349,11 @@ describe('sanitizeToolParams', () => {
         { oldText: token, newText: 'safe-value' },
       ],
     };
-    const result = sanitizeToolParams(params, '/repo') as Record<string, unknown>;
-    const edits = result.edits as Array<Record<string, unknown>>;
-    expect(edits[0]!.oldText).toContain('___REDACTED___');
-    expect(edits[0]!.newText).toBe('safe-value');
+    const result = sanitizeToolParams(params, '/repo');
+    const edits = result.edits as Record<string, unknown>[];
+    expect(edits[0]).toBeDefined();
+    expect(edits[0]?.oldText).toContain('___REDACTED___');
+    expect(edits[0]?.newText).toBe('safe-value');
     expect(result.file_path).toBe('src/config.ts');
   });
 

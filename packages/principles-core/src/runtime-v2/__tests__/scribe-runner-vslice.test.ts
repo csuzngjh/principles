@@ -531,7 +531,7 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     // Create a validator that returns an invalid errorCategory
     const badValidator: ScribeValidator = {
       validate: async (_output: unknown, _taskId: string): Promise<ScribeValidationResult> => {
-        return { valid: false, errors: ['test error'], errorCategory: 'not_a_real_category' as string };
+        return { valid: false, errors: ['test error'], errorCategory: 'not_a_real_category' };
       },
     };
 
@@ -759,7 +759,7 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const depsWithPermissiveValidator = { ...deps, validator: permissiveValidator };
 
-    const runner = new ScribeRunner(depsWithPermissiveValidator as ScribeRunnerDeps, {
+    const runner = new ScribeRunner(depsWithPermissiveValidator, {
       owner: 'test',
       runtimeKind: 'scribe',
       pollIntervalMs: 10,
@@ -911,7 +911,7 @@ describe('DefaultScribeValidator (PRI-109)', () => {
   });
 
   it('rejects null output', async () => {
-    const result = await validator.validate(null as unknown as ScribeOutputV1, SCRIBE_TASK_ID);
+    const result = await validator.validate(null, SCRIBE_TASK_ID);
     expect(result.valid).toBe(false);
   });
 

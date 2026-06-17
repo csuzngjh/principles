@@ -14,7 +14,7 @@ import {
   AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
   AUTO_PROMOTABLE_CHANNELS,
 } from '../index.js';
-import type { PIArtifactSnapshot, DispatchInput, ActivationArtifactReadModel, ChannelWriter } from '../index.js';
+import type { PIArtifactSnapshot, DispatchInput, ChannelWriter } from '../index.js';
 
 function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
   return {
@@ -193,7 +193,7 @@ describe('ActivationDispatcher', () => {
     (failingArtifactStore as unknown as Record<string, unknown>).getArtifactById = async () => { throw new Error('DB down'); };
     const stateStore = new MemoryActivationStateStore();
     const dispatcher = new ActivationDispatcher(
-      failingArtifactStore as ActivationArtifactReadModel,
+      failingArtifactStore,
       stateStore,
       { writers: [new PromptWriter(), new DeferArchiveWriter()] },
     );

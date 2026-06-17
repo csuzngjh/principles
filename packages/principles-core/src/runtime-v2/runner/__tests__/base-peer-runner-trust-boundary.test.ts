@@ -452,7 +452,7 @@ describe('BasePeerRunner timeout parity — final poll before cancel', () => {
 
   it('run still non-terminal after final poll IS cancelled', async () => {
     const pollRun = vi.fn()
-      .mockResolvedValue({ status: 'running', runId: 'run-timeout-001' } as RunStatus);
+      .mockResolvedValue({ status: 'running', runId: 'run-timeout-001' });
 
     const cancelRun = vi.fn();
 

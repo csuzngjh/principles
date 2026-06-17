@@ -12,13 +12,13 @@ import { TaskRecordSchema, type PDTaskStatus } from '../task-status.js';
 import { RunRecordSchema, type RunExecutionStatus } from '../runtime-protocol.js';
 
 describe('SchemaConformance', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let tmpdir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let connection: SqliteConnection;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let taskStore: SqliteTaskStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let runStore: SqliteRunStore;
 
   beforeEach(() => {
@@ -216,13 +216,13 @@ describe('SchemaConformance', () => {
 });
 
 describe('ArtifactRegistrySchema', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let tmpdir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let connection: SqliteConnection;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let taskStore: SqliteTaskStore;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let runStore: SqliteRunStore;
 
   beforeEach(() => {
@@ -622,9 +622,9 @@ describe('ArtifactRegistrySchema', () => {
 });
 
 describe('SchemaMigration', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let tmpdir: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let connection: SqliteConnection;
 
   beforeEach(() => {

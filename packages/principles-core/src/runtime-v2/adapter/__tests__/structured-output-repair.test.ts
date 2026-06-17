@@ -343,7 +343,7 @@ describe('attemptStructuredOutputRepair', () => {
       { llmCaller, schemaCheck },
       {
         schemaRef: 'diagnostician-output-v1',
-        originalOutput: originalWithLineage as Record<string, unknown>,
+        originalOutput: originalWithLineage,
       },
     );
 

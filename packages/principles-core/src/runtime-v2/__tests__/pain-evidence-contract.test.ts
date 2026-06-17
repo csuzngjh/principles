@@ -71,7 +71,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -109,7 +109,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -142,7 +142,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -175,7 +175,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -204,7 +204,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -234,7 +234,7 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -277,7 +277,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -318,7 +318,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,
@@ -358,7 +358,7 @@ describe('PainSignalBridge evidence field (PRI-277)', () => {
 
     const bridge = new PainSignalBridge({
       stateManager,
-      runner: runner as never,
+      runner: runner,
       intakeService: undefined as never,
       ledgerAdapter,
       autoIntakeEnabled: false,

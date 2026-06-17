@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/init-declarations */
+ 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MemoryApprovalQueueStore } from '../memory-approval-store.js';
 import { SqliteApprovalQueueStore } from '../sqlite-approval-store.js';

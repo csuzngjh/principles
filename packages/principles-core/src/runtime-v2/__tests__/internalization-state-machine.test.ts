@@ -42,7 +42,7 @@ function makePITask(overrides: Partial<PITaskRecord> = {}): PITaskRecord {
     inputArtifactRefs,
     outputArtifactRefs,
     rejectionCount,
-  } as PITaskRecord;
+  };
 }
 
 function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {

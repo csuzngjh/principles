@@ -11,6 +11,7 @@ export default defineConfig(
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/coverage/**',
       '**/*.d.ts',
       '**/vitest.config.ts',
       '**/vitest.config.mts',
