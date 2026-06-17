@@ -1,0 +1,64 @@
+{
+  "dogfoodId": "dogfood-04",
+  "painId": "manual_1781600291375_vp2ni6rm",
+  "taskId": "l2-dreamer-dogfood-04-1781657511750",
+  "generatedAt": "2026-06-17T00:52:20.565Z",
+  "turnCount": 3,
+  "elapsed": "28.8s",
+  "output": {
+    "candidates": [
+      {
+        "candidateIndex": 0,
+        "badDecision": "AI mechanically copied an existing graceful-degradation pattern from another module without validating whether the target module required retry semantics, assuming pattern equivalence based on superficial code structure similarity.",
+        "betterDecision": "Before reusing any degradation pattern, perform a semantic gap analysis: verify that the target module has the same retry-state lifecycle (current vs. next vs. recorded state per T-07), same fallback triggers, and same observability requirements as the source module. Only apply the pattern if the semantic contract matches.",
+        "rationale": "The root cause shows that copying a degradation pattern without semantic validation led to system inconsistency. T-07 (Distinguish current, next, and recorded state in retry loops) and T-09 (Graceful degradation must include an observable reason) together demand that any degradation logic be semantically matched to the module's retry behavior; otherwise, degraded states become untrackable or unrecoverable.",
+        "confidence": 0.85,
+        "riskLevel": "medium",
+        "strategicPerspective": "Semantic-first pattern adoption: treats pattern reuse as a design-contract verification step rather than a code clone operation, preventing silent behavioral mismatches across modules."
+      },
+      {
+        "candidateIndex": 1,
+        "badDecision": "The degradation pattern was applied with no explicit verification step to confirm that the new module's error-handling requirements (e.g., whether retry is idempotent, what constitutes a terminal failure) matched the source module's assumptions, leading to untracked state divergence.",
+        "betterDecision": "Introduce a mandatory 'pattern applicability checklist' when reusing degradation logic: (1) confirm retry idempotency semantics match, (2) confirm the observable reason (T-09) is meaningful for the new context, (3) run a behavioral comparison test that exercises the degradation path in the target module before merging.",
+        "rationale": "The original failure occurred because the AI assumed structural pattern match implied behavioral match. T-10 (Always verify changes match established patterns in the codebase) does not mean blindly mirroring structure—it means verifying that the behavioral effect of the pattern holds in the new context. A mandatory checklist enforces this verification.",
+        "confidence": 0.8,
+        "riskLevel": "medium",
+        "strategicPerspective": "Pre-flight verification gates: converts pattern reuse from an implicit assumption into an explicit, testable process, reducing integration risk without slowing development velocity."
+      },
+      {
+        "candidateIndex": 2,
+        "badDecision": "No explicit observability safeguard was added when the degradation pattern was applied to the new module — the degraded state could silently activate without leaving a traceable reason, violating the principle that degradation must be observable.",
+        "betterDecision": "Whenever a degradation pattern is applied to a new module, always pair it with an explicit 'observable reason' hook (per T-09) that logs why the degradation was triggered, which state transition occurred, and what the recovery path is. This hook must be validated in the target module's specific context.",
+        "rationale": "The predecessor diagnosis highlights context mismatch leading to system inconsistency. T-09 explicitly requires that graceful degradation include an observable reason. Mechanically copying a pattern often omits adapting the observability layer, making degradation silent and unrecoverable. Ensuring observability is adapted per-module prevents this.",
+        "confidence": 0.9,
+        "riskLevel": "low",
+        "strategicPerspective": "Observability-by-design in pattern reuse: treats logging/reason-generation as first-class components of any degradation pattern, not optional add-ons, ensuring system-level debuggability."
+      },
+      {
+        "candidateIndex": 3,
+        "badDecision": "The AI treated the degradation pattern as a one-size-fits-all solution without considering that the new module's retry lifecycle (current/next/recorded state per T-07) had different semantics than the original module — e.g., different retry count limits, different backoff strategies, or non-idempotent operations.",
+        "betterDecision": "Map the retry-state machine of the target module explicitly onto the degradation pattern before reuse: document how current-state, next-state, and recorded-state (T-07) map in the new context, and verify that the degradation transition logic is valid for those specific state types. If the state machines diverge, refactor the pattern or reject reuse.",
+        "rationale": "T-07 mandates distinguishing current, next, and recorded state in retry loops. The root cause shows the degradation pattern was applied without this mapping, causing state confusion. Explicitly mapping the retry state machine is a concrete, verifiable step that prevents mechanical copying of state-sensitive patterns.",
+        "confidence": 0.85,
+        "riskLevel": "medium",
+        "strategicPerspective": "State-machine-first reuse: treats retry-state mapping as a prerequisite for any degradation pattern adoption, aligning with T-07 and preventing the most common class of state-related integration bugs."
+      },
+      {
+        "candidateIndex": 4,
+        "badDecision": "The degradation pattern was mechanically replicated via AI code generation without any human review step that specifically checked for semantic alignment between source and target module degradation behaviors, assuming the AI would infer correctness from structural examples.",
+        "betterDecision": "Establish a two-phase review for AI-generated pattern reuse: Phase 1 (semantic validation by human or automated analyzer) checks that the target module's retry/degradation contract matches the source; Phase 2 (structural verification per T-10) confirms the implementation faithfully follows established codebase patterns. Both phases must pass before merge.",
+        "rationale": "T-10 requires verifying that changes match established patterns, but this verification must be semantic, not just syntactic. The predecessor diagnosis confirms the failure was a semantic mismatch. A two-phase review catches both structural consistency (T-10) and semantic correctness (abstracted principle), reducing risk of silent system inconsistency.",
+        "confidence": 0.75,
+        "riskLevel": "low",
+        "strategicPerspective": "Human-AI collaborative verification: leverages AI for efficient code generation while enforcing human/automated semantic gatekeeping, balancing velocity with correctness in pattern reuse scenarios."
+      }
+    ],
+    "contextRefs": [
+      "owner_reported:cli",
+      "diagnosis_manual_1781600291375_vp2ni6rm"
+    ],
+    "generatedAt": "2025-04-08T06:42:30.000Z",
+    "taskId": "l2-dreamer-dogfood-04-1781657511750",
+    "valid": true
+  }
+}

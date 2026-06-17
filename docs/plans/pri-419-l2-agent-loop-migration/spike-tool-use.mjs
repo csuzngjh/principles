@@ -51,7 +51,8 @@ if (!PROVIDER || !MODEL_ID) {
 const apiKey =
   process.env[`${PROVIDER.toUpperCase()}_API_KEY`] ??
   process.env.OPENAI_API_KEY ??
-  process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY ??
+  process.env.SENSENOVA_API_KEY;
 if (!apiKey) {
   console.error(`FAIL: no API key found for provider '${PROVIDER}'.`);
   process.exit(2);
@@ -90,8 +91,28 @@ const submitOutputTool = {
   },
 };
 
-// --- Run the loop with shouldStopAfterTurn controlling termination ---
-const model = BASE_URL ? getModel(PROVIDER, MODEL_ID, { baseUrl: BASE_URL }) : getModel(PROVIDER, MODEL_ID);
+// --- Build the model object ---
+// When a custom BASE_URL is provided (sensenova or similar proxy), getModel()
+// won't find the model under a non-standard provider. Create a model object
+// from scratch so it uses the correct baseUrl and apiKey.
+let model;
+if (BASE_URL) {
+  model = {
+    id: MODEL_ID,
+    name: MODEL_ID,
+    api: 'openai-completions',
+    provider: PROVIDER,
+    baseUrl: BASE_URL,
+    reasoning: false,
+    compat: {},
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
+} else {
+  model = getModel(PROVIDER, MODEL_ID);
+}
 
 let turnCount = 0;
 const toolsInvoked = {};

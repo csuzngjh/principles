@@ -59,6 +59,7 @@ outputCaptured? ──yes──► submit_output.details (DreamerOutputV1)
 | P1.2 | 工厂 flag 接线 + e2e | off(test-double) | e2e 合法输出；arch-regression 绿 |
 | P1.3 | PRI-407 L1 baseline | — | L1 质量基线 |
 | P1.4 | 3-arm 对比（L1 baseline vs L2） | 翻 on(内部) | grounding 显著优于 L1 才上线 |
+| **P1.4 ✅** | **L2 对比完成 (2026-06-17)** | **已验证** | **L2 平均总分 4.36 vs L1 1.64 (+2.71, +165%)，Grounding 从 1.00→4.00。7/7 狗粮场景全部通过。决策：上线 L2 内测 flag。详见 QUALITY-SUMMARY.md** |
 
 时序纪律：P1.3 先于 P1.4——避免更贵架构掩盖 prompt/模型根因。
 
