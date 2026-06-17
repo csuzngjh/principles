@@ -156,6 +156,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
 | ERR-052 | Cherry-pick from stacked feature branch cross-contaminates unrelated PR | PRI-299 |
 | ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
+| ERR-068 | Used `pnpm install` in an `npm ci` repo — package-lock.json not synced, all CI jobs fail | PRI-419 / PR #953 |
 
 ---
 
@@ -973,3 +974,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-16
 - **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring)
 [ERR-067]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
+
+**[ERR-068]** | Used the wrong package manager (pnpm) in a repo whose CI runs `npm ci`, leaving `package-lock.json` out of sync
+
+- **What happened**: Adding the `@earendil-works/pi-agent-core` / `@earendil-works/pi-ai` dependencies via `pnpm install` updated `pnpm-lock.yaml` only. The repo's CI workflows all run `npm ci` (which reads `package-lock.json`). Because `package-lock.json` was not updated, every CI job failed with `Missing: @earendil-works/pi-agent-core@0.79.4 from lock file` and `Invalid: lock file's typebox@1.1.34 does not satisfy typebox@1.1.38`. Local pre-push `verify:merge` passed because it does not re-resolve the lockfile.
+- **Root cause**: Did not check which package manager CI uses before installing dependencies. The repo root has both `package.json` (`packageManager: pnpm@11.1.1`) and `package-lock.json`, but CI workflows exclusively use `npm ci`. pnpm and npm maintain separate lockfiles; updating one does not sync the other.
+- **Fix**: `git checkout pnpm-lock.yaml` (revert the wrong lockfile), then `npm install --ignore-scripts` to regenerate `package-lock.json` with the new deps. Commit 3a7780e.
+- **Prevention**: Before adding/removing dependencies, check CI workflows (`grep -r "npm ci\|pnpm install" .github/workflows/`) to identify the canonical lockfile. Run the install command matching CI's package manager, then commit the lockfile CI reads. EP-06 "package runtime dependencies are declared in the package that imports them" extends to: the lockfile CI consumes must be the one updated.
+- **Recurrence**: 2026-06-16, PRI-419 / PR #953.

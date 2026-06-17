@@ -112,6 +112,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
+  // PRI-419: L2 multi-turn agent loop for the dreamer runner. Scoped single-runner exception
+  // per ADR-0014 amendment (mirrors the 2026-06-10 diagnostician-split owner exception).
+  // Default off; flips dreamer from one-shot completeSimple to a multi-turn agentLoop with
+  // read-only tools. Roll back = flip flag, reverts to PiAiRuntimeAdapter with zero migration.
+  { id: 'l2_dreamer', category: 'quiet', enabled: false, since: '2026-06-16', description: 'L2 multi-turn agent loop for the dreamer runner (PRI-419) — read-only tools + submit_output, scoped to dreamer only' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
