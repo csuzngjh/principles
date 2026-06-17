@@ -137,9 +137,13 @@ describe('SqliteActivationStateStore', () => {
       const result = await store.listCodeToolHookActivations();
 
       expect(result).toHaveLength(1);
-      expect(result[0].channel).toBe('code_tool_hook');
-      expect(result[0].activationId).toBe('act_code_001');
-      expect(result[0].artifactId).toBe('art-rule-001');
+      const [first] = result;
+      if (!first) {
+        throw new Error('Expected one code_tool_hook activation record');
+      }
+      expect(first.channel).toBe('code_tool_hook');
+      expect(first.activationId).toBe('act_code_001');
+      expect(first.artifactId).toBe('art-rule-001');
     });
   });
 

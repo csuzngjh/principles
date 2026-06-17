@@ -47,6 +47,23 @@ export interface RuleHostOptions {
   workspaceDir?: string;
 }
 
+/**
+ * Type guard for RuleHostMeta from untrusted module exports.
+ * Validates all four required string fields (EP-01: no `as` bypass at trust boundary).
+ */
+function isRuleHostMeta(value: unknown): value is RuleHostMeta {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v['name'] === 'string' &&
+    typeof v['version'] === 'string' &&
+    typeof v['ruleId'] === 'string' &&
+    typeof v['coversCondition'] === 'string'
+  );
+}
+
 export class RuleHost {
   private readonly stateDir: string;
   private readonly logger: RuleHostLogger;
@@ -130,7 +147,7 @@ export class RuleHost {
     // Source 2: activations table (code_tool_hook channel) — bridges BUG-001
     if (this.workspaceDir) {
       try {
-        const activationImpls = this._loadFromActivationsTable();
+        const activationImpls = this._loadFromActivationsTable(this.workspaceDir);
         for (const impl of activationImpls) {
           if (!seenImplIds.has(impl.implId)) {
             loaded.push(impl);
@@ -158,8 +175,8 @@ export class RuleHost {
    *
    * This mirrors the PromptActivationReader pattern for SQLite access.
    */
-  private _loadFromActivationsTable(): LoadedImplementation[] {
-    const sqliteConn = new SqliteConnection(this.workspaceDir!);
+  private _loadFromActivationsTable(workspaceDir: string): LoadedImplementation[] {
+    const sqliteConn = new SqliteConnection(workspaceDir);
     try {
       const db = sqliteConn.getDb();
       const rows = db.prepare(`
@@ -169,22 +186,38 @@ export class RuleHost {
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
-      `).all() as Array<{
-        activation_id: string;
-        artifact_id: string;
-        target_ref: string;
-        content_json: string;
-        source_rule_id: string | null;
-      }>;
+      `).all() as unknown;
+
+      if (!Array.isArray(rows)) {
+        this.logger.warn?.(
+          '[RuleHost] Activations table query returned non-array, skipping'
+        );
+        return [];
+      }
 
       const loaded: LoadedImplementation[] = [];
 
       for (const row of rows) {
+        if (!row || typeof row !== 'object') {
+          continue;
+        }
+        const r = row as Record<string, unknown>;
+        const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
+        const artifactId = typeof r['artifact_id'] === 'string' ? r['artifact_id'] : '';
+        const contentJson = typeof r['content_json'] === 'string' ? r['content_json'] : '';
+        const sourceRuleId = typeof r['source_rule_id'] === 'string' ? r['source_rule_id'] : null;
+
+        if (!activationId || !artifactId || !contentJson) {
+          this.logger.warn?.(
+            `[RuleHost] Activation row missing required fields, skipping`
+          );
+          continue;
+        }
         try {
-          const content = JSON.parse(row.content_json) as unknown;
+          const content = JSON.parse(contentJson) as unknown;
           if (!content || typeof content !== 'object' || Array.isArray(content)) {
             this.logger.warn?.(
-              `[RuleHost] Activation ${row.activation_id}: content_json is not an object, skipping`
+              `[RuleHost] Activation ${activationId}: content_json is not an object, skipping`
             );
             continue;
           }
@@ -193,21 +226,21 @@ export class RuleHost {
           const implementationCode = contentObj['implementationCode'];
           if (typeof implementationCode !== 'string' || implementationCode.length === 0) {
             this.logger.warn?.(
-              `[RuleHost] Activation ${row.activation_id}: no implementationCode in artifact, skipping`
+              `[RuleHost] Activation ${activationId}: no implementationCode in artifact, skipping`
             );
             continue;
           }
 
           const ruleId = typeof contentObj['ruleId'] === 'string'
-            ? (contentObj['ruleId'] as string)
-            : (row.source_rule_id ?? row.artifact_id);
+            ? contentObj['ruleId']
+            : (sourceRuleId ?? artifactId);
 
-          const implId = `act-impl-${row.activation_id}`;
+          const implId = `act-impl-${activationId}`;
           const moduleExports = loadRuleImplementationModule(implementationCode, implId);
 
           if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
             this.logger.warn?.(
-              `[RuleHost] Activation ${row.activation_id}: compiled module has no evaluate function, skipping`
+              `[RuleHost] Activation ${activationId}: compiled module has no evaluate function, skipping`
             );
             continue;
           }
@@ -218,10 +251,9 @@ export class RuleHost {
             ruleId,
             coversCondition: 'all',
           };
-          const meta: RuleHostMeta =
-            moduleExports.meta && typeof moduleExports.meta === 'object'
-              ? (moduleExports.meta as RuleHostMeta)
-              : fallbackMeta;
+          const meta: RuleHostMeta = isRuleHostMeta(moduleExports.meta)
+            ? moduleExports.meta
+            : fallbackMeta;
 
           const rawEvaluate = moduleExports.evaluate as (
             _input: RuleHostInput,
@@ -244,7 +276,7 @@ export class RuleHost {
           });
         } catch (loadError: unknown) {
           this.logger.warn?.(
-            `[RuleHost] Failed to load activation ${row.activation_id}: ${String(loadError)}`
+            `[RuleHost] Failed to load activation ${activationId}: ${String(loadError)}`
           );
         }
       }
