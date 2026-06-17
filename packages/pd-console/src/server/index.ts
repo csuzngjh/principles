@@ -4,21 +4,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  RuntimeStateManager,
-  CandidateIntakeService,
-  PrincipleTreeLedgerAdapter,
-  PainChainReadModel,
-  PruningReadModel,
-  OperatorHealthReadModel,
-} from '@principles/core/runtime-v2';
+  loadWorkspaceFeatureFlags,
+  buildFeedbackChannelFlags,
+} from './config/feature-flags.js';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
 import { handleFeedbackReportsRoute, disposeFeedbackReportModels } from './routes/feedback-reports.js';
-import {
-  loadWorkspaceFeatureFlags,
-  buildFeedbackChannelFlags,
-} from './config/feature-flags.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
@@ -30,7 +22,6 @@ import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/e
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
-import { handleStateRoute } from './routes/state.js';
 import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendNotFound, sendUnauthorized } from './utils/response.js';
 
@@ -222,11 +213,6 @@ function asyncHandler(fn: AsyncRouteHandler): (req: http.IncomingMessage, res: h
 // ── Application services ─────────────────────────────────────────────────
 
 interface AppServices {
-  stateManager: RuntimeStateManager;
-  healthReadModel: OperatorHealthReadModel;
-  painChainReadModel: PainChainReadModel;
-  pruningReadModel: PruningReadModel;
-  candidateIntakeService: CandidateIntakeService;
   workspaceDir: string;
   authConfig: AuthConfig;
   configStore: WorkspaceConfigStore;
@@ -235,24 +221,6 @@ interface AppServices {
 }
 
 async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
-  const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
-
-  const painChainReadModel = new PainChainReadModel({ workspaceDir, stateManager });
-  const pruningReadModel = new PruningReadModel({ workspaceDir });
-  const healthReadModel = new OperatorHealthReadModel({
-    workspaceDir,
-    painChainReadModel,
-    pruningReadModel,
-  });
-
-  const stateDir = path.join(workspaceDir, '.state');
-  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
-  const candidateIntakeService = new CandidateIntakeService({
-    stateManager,
-    ledgerAdapter,
-  });
-
   const configStore = new WorkspaceConfigStore();
   const workspaceService = new WorkspaceService(configStore);
 
@@ -264,11 +232,6 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   }
 
   return {
-    stateManager,
-    healthReadModel,
-    painChainReadModel,
-    pruningReadModel,
-    candidateIntakeService,
     workspaceDir,
     authConfig,
     configStore,
@@ -288,10 +251,6 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeGovernanceModels();
   disposeEvidenceChainModels();
   services.workspaceService.dispose();
-
-  try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
-  try { await services.painChainReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close pain chain read model', err); }
-  try { await services.stateManager.close(); } catch (err) { console.error('[pd-console] Failed to close state manager', err); }
 }
 
 // ── Route handler ───────────────────────────────────────────────────────────
@@ -378,13 +337,6 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         asyncHandler(() => handleUpdateRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
-      // GET /api/v1/state, /api/v1/state/:taskId
-      if (urlPath === '/api/v1/state' || urlPath.startsWith('/api/v1/state/')) {
-        const subPath = urlPath.slice('/api/v1/state'.length);
-        asyncHandler(() => handleStateRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
