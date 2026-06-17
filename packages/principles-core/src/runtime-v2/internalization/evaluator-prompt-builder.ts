@@ -3,6 +3,12 @@ export interface EvaluatorPromptBuilderInput {
   contextHash: string;
   sourceArtificerArtifactId: string;
   artificerArtifact: unknown;
+  /**
+   * Scribe principle artifact (RuleHost MVP Activation, PRD Decision 12).
+   * Present when code review applies (artificer output is V2). Carries the
+   * principle text the evaluator uses to judge intentConsistency / scopePrecision.
+   */
+  scribeArtifact?: unknown;
 }
 
 export interface EvaluatorPromptInput {
@@ -10,6 +16,7 @@ export interface EvaluatorPromptInput {
   contextHash: string;
   sourceArtificerArtifactId: string;
   artificerArtifact: unknown;
+  scribeArtifact?: unknown;
   evaluatorInstruction: string;
   promptContractVersion: string;
 }
@@ -29,6 +36,15 @@ PROTOCOL:
 5. List specific strengths, concerns, and required changes
 6. Preserve the lineage trace from artificer, scribe, philosopher, and dreamer artifacts
 7. Identify risks associated with this evaluation
+
+CODE REVIEW (Part A — Passive Review): When the artificerArtifact contains an "implementationCode" field (V2 output), you MUST additionally review the generated code across three dimensions and emit a "codeReview" object:
+- intentConsistency: { aligned: boolean, explanation: string } — Does the code logic match the constraint intent described in the scribe principle text? Read the principle text (scribeArtifact.principleDraft or painReasonSummary), then read the code, then judge whether the code precisely implements the described constraint.
+- scopePrecision: { verdict: "precise" | "too_broad" | "too_narrow", explanation: string } — Are the match conditions over-broad (false positive risk, e.g. using includes() substring matching) or over-narrow (false negative risk, e.g. hardcoded paths)?
+- traceCoverage: { sufficient: boolean, gaps: string[], explanation: string } — Do the goldenTraceCases cover the key scenarios described in the principle (both positive and negative)?
+
+If ANY of the three dimensions fails (aligned=false, OR verdict!=precise, OR sufficient=false), set evaluation.decision to "needs_revision" and describe the gap in concerns/requiredChanges.
+
+ADVERSARIAL CASES (Part B — only when Part A passes): If and only if all three passive-review dimensions pass (aligned=true AND verdict=precise AND sufficient=true), ALSO generate 3-5 "adversarialCases" — test inputs designed to expose gaps between the principle text and the code's actual behavior. Each case: { caseId, attackType: "boundary"|"omission"|"inversion", toolName, params, expectedDecision: "allow"|"block"|"propose_correction", rationale }. If Part A does NOT fully pass, do NOT generate adversarialCases (short-circuit: skip adversarial generation on passive-review failure to save tokens).
 
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
@@ -50,6 +66,8 @@ CONSTRAINTS:
 - sourceTrace.dreamerArtifactId is optional — include only if available from artificer artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
+- codeReview (when present) MUST contain intentConsistency, scopePrecision, and traceCoverage
+- adversarialCases (when present) MUST be an array of 3-5 objects; omit entirely when passive review fails
 `;
 
 export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v1';
@@ -62,6 +80,7 @@ export class EvaluatorPromptBuilder {
       contextHash: input.contextHash,
       sourceArtificerArtifactId: input.sourceArtificerArtifactId,
       artificerArtifact: input.artificerArtifact,
+      scribeArtifact: input.scribeArtifact,
       evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION,
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };

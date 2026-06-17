@@ -46,7 +46,52 @@ interface EvaluatorContext {
   readonly contextHash: string;
   readonly artificerArtifact: string | null;
   readonly sourceArtificerArtifactId: string | null;
+  /**
+   * Scribe principle artifact contentJson (RuleHost MVP Activation, PRD Decision 12).
+   * Loaded so the evaluator LLM can judge code intentConsistency/scopePrecision
+   * against the original principle text. Null when no scribe artifact is resolvable
+   * (V1 artificer output, or scribeArtifactId missing/malformed).
+   */
+  readonly scribeArtifact: string | null;
+  readonly sourceScribeArtifactId: string | null;
 }
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Extract scribeArtifactId from an artificer artifact's contentJson (PRD Decision 12).
+ * The contentJson is untrusted — parsed defensively with type guards, never as-cast
+ * (Runtime Contract Rule 1/2/5). Returns null when the field is absent or malformed;
+ * callers treat null as "code review degraded (no principle text)".
+ *
+ * Looks in two locations:
+ *   1. top-level sourceTrace.scribeArtifactId (ArtificerOutputV1/V2 contract)
+ *   2. top-level sourceScribeArtifactId (ArtificerOutputV1/V2 contract)
+ */
+function extractScribeArtifactId(artificerContentJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(artificerContentJson);
+  } catch {
+    return null;
+  }
+  if (!isRecordValue(parsed)) return null;
+
+  // sourceTrace.scribeArtifactId
+  const trace = parsed.sourceTrace;
+  if (isRecordValue(trace)) {
+    const fromTrace = trace.scribeArtifactId;
+    if (typeof fromTrace === 'string' && fromTrace.trim() !== '') return fromTrace;
+  }
+  // top-level sourceScribeArtifactId
+  const direct = parsed.sourceScribeArtifactId;
+  if (typeof direct === 'string' && direct.trim() !== '') return direct;
+
+  return null;
+}
+
 
 // ── Result Types (backward-compatible exports) ────────────────────────────────
 
@@ -159,10 +204,35 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           depTaskId: depId,
           artifactId: firstArtifact.artifactId,
         });
+
+        // PRD Decision 12: resolve the scribe artifact so the evaluator LLM can
+        // judge code intentConsistency/scopePrecision against the principle text.
+        // Extract scribeArtifactId from the artificer's sourceTrace (untrusted
+        // contentJson — validated via type guards, never as-cast; Runtime Rule 1/2).
+        const scribeRef = extractScribeArtifactId(firstArtifact.contentJson);
+        let scribeContent: string | null = null;
+        if (scribeRef) {
+          const scribeArtifact = await this.artifactStore.getArtifactById(scribeRef);
+          if (scribeArtifact && scribeArtifact.artifactKind === 'principle') {
+            scribeContent = scribeArtifact.contentJson;
+          } else {
+            this.emitEvent('scribe_artifact_unresolvable', taskId, {
+              scribeArtifactId: scribeRef,
+              reason: scribeArtifact ? `wrong kind: ${scribeArtifact.artifactKind}` : 'not found',
+              nextAction: 'code_review_degraded_without_principle_text',
+            });
+          }
+        }
+
+        const contextRefs: string[] = scribeContent && scribeRef
+          ? [artifactRef, scribeRef]
+          : [artifactRef];
         return {
-          contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
+          contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           artificerArtifact: firstArtifact.contentJson,
           sourceArtificerArtifactId: firstArtifact.artifactId,
+          scribeArtifact: scribeContent,
+          sourceScribeArtifactId: scribeRef,
         };
       }
     }
@@ -181,11 +251,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // PRD Decision 12: pass the scribe principle text so the LLM can judge
+    // code intentConsistency/scopePrecision. Null when unresolvable (V1 artificer
+    // output, or scribe artifact missing) — the prompt builder accepts undefined.
+    let parsedScribeArtifact: unknown = undefined;
+    if (context.scribeArtifact) {
+      try {
+        parsedScribeArtifact = JSON.parse(context.scribeArtifact);
+      } catch {
+        parsedScribeArtifact = context.scribeArtifact;
+      }
+    }
+
     const builder = new EvaluatorPromptBuilder();
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       artificerArtifact: parsedArtificerArtifact,
+      scribeArtifact: parsedScribeArtifact,
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
     });
 
