@@ -124,11 +124,14 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
     // Per PRD: skip code review, run evaluator on the V1 plan, degrade.
     if (!isArtificerOutputV2(artificerOutput)) {
       const v1EvaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
-      await createEvaluatorTask(input.stateManager, v1EvaluatorTaskId, artificerTaskId, channel);
       try {
+        await createEvaluatorTask(input.stateManager, v1EvaluatorTaskId, artificerTaskId, channel);
         await input.evaluatorRunner.run(v1EvaluatorTaskId);
-      } catch {
-        // Non-fatal: we're degrading anyway. Principle artifact may still be written.
+      } catch (v1Err) {
+        // Non-fatal: we're degrading anyway. Principle artifact may still be
+        // written by the evaluator; if not, principleArtifactId resolves null.
+        // Catching here preserves the loop's never-throws contract (ERR-018).
+        void v1Err;
       }
       const v1Principle = await resolvePrincipleArtifactId(input, v1EvaluatorTaskId);
       return {

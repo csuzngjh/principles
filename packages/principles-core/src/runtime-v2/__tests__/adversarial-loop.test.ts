@@ -414,4 +414,35 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(typeof meta?.adversarialFeedback).toBe('string');
     expect(meta!.adversarialFeedback!.length).toBeGreaterThan(0);
   });
+  it('P1 regression: V1 degradation path does not throw when evaluator task creation fails (ERR-018 never-throws)', async () => {
+    h.adapter.queueArtificer(makeArtificerV1);
+
+    // Wrap the stateManager so createTask throws ONLY for the V1 evaluator
+    // task (taskKind='evaluator'). This exercises the previously-unguarded
+    // createEvaluatorTask call in the V1 branch. The loop must catch it and
+    // return { decision: 'rejected' } rather than throwing.
+    const realCreate = h.stateManager.createTask.bind(h.stateManager);
+    const throwingSm = {
+      ...h.stateManager,
+      createTask: async (record: Parameters<typeof realCreate>[0]) => {
+        if (record.taskKind === 'evaluator') {
+          throw new Error('simulated V1 evaluator task create failure');
+        }
+        return realCreate(record);
+      },
+    } as unknown as typeof h.stateManager;
+
+    // Must NOT throw — resolve to rejected.
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: throwingSm,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result.decision).toBe('rejected');
+    expect(result.degradationReason).toContain('v1');
+    expect(result.ruleArtifactId).toBeNull();
+  });
 });
