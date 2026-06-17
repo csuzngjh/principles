@@ -1,0 +1,63 @@
+{
+  "dogfoodId": "dogfood-05",
+  "painId": "manual_1781600291804_6xxa1nx1",
+  "taskId": "l2-dreamer-dogfood-05-1781657447130",
+  "generatedAt": "2026-06-17T00:51:33.064Z",
+  "turnCount": 2,
+  "elapsed": "45.9s",
+  "output": {
+    "valid": true,
+    "taskId": "l2-dreamer-dogfood-05-1781657447130",
+    "candidates": [
+      {
+        "candidateIndex": 0,
+        "badDecision": "Relied solely on a prompt instruction telling the AI to 'prefer using existing dependencies' with no tool or validator to check whether it actually complied.",
+        "betterDecision": "Provide the AI with a pre-flight dependency resolution tool that, before introducing any new import or package reference, queries the existing dependency graph and returns the canonical existing dependency if one exists.",
+        "rationale": "A prompt is soft guidance that the AI may misinterpret, forget, or override when optimizing for other goals. A tool call forces a deterministic lookup — if the dependency exists, the AI must use it because the tool returns it as the answer. This moves the constraint from 'please do this' to 'this is the only path available.'",
+        "confidence": 0.85,
+        "riskLevel": "high",
+        "strategicPerspective": "System architecture — turning a behavioral norm into an architectural invariant. This is the highest-leverage change because it eliminates the failure mode at the design level rather than trying to correct it after the fact."
+      },
+      {
+        "candidateIndex": 1,
+        "badDecision": "No post-hoc validation was performed to detect when the AI introduced a duplicate or unnecessary new dependency despite the prompt.",
+        "betterDecision": "Implement a post-generation dependency audit step: after the AI outputs code, a validator scans all introduced dependencies and flags any that collide with or duplicate existing ones, blocking the output until resolved.",
+        "rationale": "Post-hoc validation acts as a safety net even if the AI fails to follow the prompt. It creates observability into compliance failures and forces correction before the output reaches production, turning a soft prompt into a hard gate.",
+        "confidence": 0.75,
+        "riskLevel": "medium",
+        "strategicPerspective": "Quality assurance — adding a verification layer catches failures of the primary mechanism. This is a pragmatic, lower-cost complement to the architectural fix, but it's reactive rather than preventive."
+      },
+      {
+        "candidateIndex": 2,
+        "badDecision": "The system assumed the AI had sufficient context about which dependencies already existed, relying on the model's training data and in-context prompt to recall them accurately.",
+        "betterDecision": "Inject a structured, queryable dependency registry into the AI's context, and require the AI to call a lookup API before making any dependency decision.",
+        "rationale": "Relying on the AI's parametric memory for dependency knowledge is unreliable — the model may hallucinate non-existent packages or miss existing ones. A structured registry with a query API externalizes this knowledge and makes it mechanically accessible, reducing the cognitive load on the prompt.",
+        "confidence": 0.7,
+        "riskLevel": "medium",
+        "strategicPerspective": "Information architecture — ensuring the AI has accurate, up-to-date, and programmatically accessible knowledge rather than depending on implicit recall. This reduces hallucination risk while also enabling better decision-making."
+      },
+      {
+        "candidateIndex": 3,
+        "badDecision": "The system allowed the AI to propose any dependency from a vast universe of packages, then tried to steer it back to existing ones via a prompt statement.",
+        "betterDecision": "Constrain the AI's action space by providing a curated allow-list of approved dependencies, so the model can only choose from what already exists or from a pre-vetted shortlist.",
+        "rationale": "If the action space itself is bounded to existing and pre-approved dependencies, the prompt constraint becomes redundant. The AI cannot choose a non-existent dependency because it's not in the available set. This is the strongest form of mechanism design — restricting the option set rather than guiding the choice.",
+        "confidence": 0.8,
+        "riskLevel": "high",
+        "strategicPerspective": "Constraint-based design — limiting the feasible action space eliminates entire categories of errors. This is architecturally invasive but provides the strongest guarantee. Best applied when the dependency set is known and stable."
+      },
+      {
+        "candidateIndex": 4,
+        "badDecision": "No feedback loop existed to measure whether the AI was complying with the 'prefer existing dependencies' prompt, so violations went undetected.",
+        "betterDecision": "Instrument the system with compliance telemetry — log every dependency resolution decision, compare it against the known dependency graph, and alert when a violation occurs, feeding data back into prompt improvement.",
+        "rationale": "Without measurement, compliance is unknowable. Telemetry creates a data-driven feedback loop: violations become visible, patterns emerge, and the prompt (or mechanism) can be iteratively improved. This turns a blind instruction into an observable, improvable process.",
+        "confidence": 0.65,
+        "riskLevel": "low",
+        "strategicPerspective": "Observability and iteration — making compliance measurable enables continuous improvement. This is the least invasive change but also the weakest in isolation; it detects but does not prevent failures. Best used in combination with other mechanisms."
+      }
+    ],
+    "contextRefs": [
+      "owner_reported:cli"
+    ],
+    "generatedAt": "2025-06-12T13:25:00.000Z"
+  }
+}
