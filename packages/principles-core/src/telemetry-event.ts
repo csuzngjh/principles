@@ -218,9 +218,11 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_mark_retry_error'),
   // PRI-419: Dreamer L2 multi-turn agent loop telemetry.
   // - dreamer_l2_turn: emitted per tool-execution turn inside the L2 loop
-  // - dreamer_l2_complete: emitted when the loop finishes (turnCount, toolsInvoked, usedFallback)
+  // - dreamer_l2_complete: emitted when the loop finishes (turnCount, toolsInvoked, usedFallback, retryCount)
+  // - dreamer_l2_fallback_to_l1: emitted when L2 exhausts retries and falls back to L1 one-shot (PRI-420)
   Type.Literal('dreamer_l2_turn'),
   Type.Literal('dreamer_l2_complete'),
+  Type.Literal('dreamer_l2_fallback_to_l1'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
