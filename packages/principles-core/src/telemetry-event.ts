@@ -228,6 +228,14 @@ export const TelemetryEventType = Type.Union([
   // - artificer_l2_complete: when the loop finishes (attempts, degraded, succeeded)
   Type.Literal('artificer_l2_attempt'),
   Type.Literal('artificer_l2_complete'),
+  // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
+  // - evaluator_adversarial_replay: emitted after each gate invocation with the
+  //   gate decision, case count, and failed-case count.
+  // - evaluator_adversarial_replay_skipped: emitted when replay is intentionally
+  //   skipped (passive review failed, no adversarial cases, no positive case to
+  //   merge, sandbox threw) with a structured reason.
+  Type.Literal('evaluator_adversarial_replay'),
+  Type.Literal('evaluator_adversarial_replay_skipped'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

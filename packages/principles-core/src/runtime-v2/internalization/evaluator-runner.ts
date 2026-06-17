@@ -25,7 +25,14 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
-import type { EvaluatorOutputV1, EvaluatorValidator } from './evaluator-output.js';
+import type {
+  EvaluatorOutputV1,
+  EvaluatorOutputV2,
+  EvaluatorValidator,
+  EvaluatorAdversarialResult,
+  AdversarialFailedCase,
+} from './evaluator-output.js';
+import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
@@ -38,6 +45,11 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
+// PRI-426: single-round adversarial sandbox replay in succeedTask.
+import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
+import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
+import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
+import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 
 // ── Evaluator-specific context ────────────────────────────────────────────────
 
@@ -112,7 +124,19 @@ export interface EvaluatorRunnerResult {
 
 // ── Constructor Options (backward-compatible exports) ─────────────────────────
 
-export type EvaluatorRunnerOptions = PeerRunnerOptions;
+/**
+ * EvaluatorRunner options. Extends PeerRunnerOptions with an optional
+ * RuleHost sandbox gate deps (PRI-426). When `gateDeps` is provided AND the
+ * evaluator output is V2 (code-bearing), succeedTask runs a single-round
+ * adversarial sandbox replay and populates `adversarialResult`.
+ *
+ * When `gateDeps` is absent, V2 outputs still validate but no replay runs —
+ * this preserves backward compatibility for callers not yet wired to the
+ * sandbox (e.g. V1-only test fixtures, pre-Phase-6 assembly).
+ */
+export interface EvaluatorRunnerOptions extends PeerRunnerOptions {
+  readonly gateDeps?: RefinerRuleHostGateDeps;
+}
 
 export interface ResolvedEvaluatorRunnerOptions {
   readonly pollIntervalMs: number;
@@ -151,8 +175,14 @@ export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
 
 export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorOutputV1> {
   private readonly validator: EvaluatorValidator;
+  /**
+   * Optional RuleHost sandbox gate deps (PRI-426). When present and the output
+   * is V2, succeedTask runs a single adversarial sandbox replay. Absent = no
+   * replay (backward compatible).
+   */
+  private readonly gateDeps: RefinerRuleHostGateDeps | null;
 
-  constructor(deps: EvaluatorRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
       runnerName: 'evaluator',
       expectedTaskKind: 'evaluator',
@@ -160,6 +190,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       resultRefPrefix: 'evaluator',
     });
     this.validator = deps.validator;
+    this.gateDeps = options.gateDeps ?? null;
   }
 
   // ── Abstract implementations ────────────────────────────────────────────────
@@ -386,6 +417,49 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
     }
 
+    // ── PRI-426: single-round adversarial sandbox replay ──
+    // Runs only when (a) the output is V2 (code-bearing), (b) gateDeps is
+    // injected, and (c) passive review passed (LLM short-circuits to
+    // needs_revision when any of the 3 dimensions fail, so by the time we get
+    // here with decision='approved' the passive review already passed).
+    //
+    // PRI-423 contract: adversarialCasesToGoldenTrace yields an all-negative
+    // trace. We MUST merge ≥1 positive case from the Artificer golden trace
+    // before replaying, otherwise the merged trace fails validateGoldenTrace.
+    //
+    // This block never throws into the caller — a sandbox/gate failure degrades
+    // to adversarialResult.passed=false with a structured reason (ERR-018).
+    // The principle artifact is already persisted, so prompt-channel fallback
+    // remains available regardless of replay outcome (PRD Decision 11d §h).
+    let finalOutput: EvaluatorOutputV1 = output;
+    if (isEvaluatorOutputV2(output) && this.gateDeps) {
+      const replayOutcome = await this.runAdversarialReplay(output, taskId, context);
+      if (replayOutcome.updatedOutput) {
+        finalOutput = replayOutcome.updatedOutput;
+        // Re-persist the artifact with the populated adversarialResult so
+        // downstream readers (Phase 6 assembly, orchestrator retry) see it.
+        try {
+          await this.artifactStore.upsertArtifact({
+            artifactId,
+            artifactKind: 'principle',
+            sourceTaskId: taskId,
+            lineageArtifactIds,
+            validationStatus: 'pending',
+            contentJson: JSON.stringify(finalOutput),
+            createdAt: now,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (replayPersistErr) {
+          // Non-fatal: the principle artifact is already written. Log and
+          // continue — adversarialResult is still on finalOutput in memory.
+          this.emitEvent('adversarial_result_persist_failed', taskId, {
+            runId,
+            errorMessage: replayPersistErr instanceof Error ? replayPersistErr.message : String(replayPersistErr),
+          });
+        }
+      }
+    }
+
     // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
     // This is the critical business logic: approved evaluator must validate
     // the Scribe principle artifact, NOT the Artificer plan artifact.
@@ -432,8 +506,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.emitEvent('task_succeeded', taskId, {
       attemptCount: task.attemptCount,
       resultRef,
-      evaluationDecision: output.evaluation.decision,
-      evaluationScore: output.evaluation.score,
+      evaluationDecision: finalOutput.evaluation.decision,
+      evaluationScore: finalOutput.evaluation.score,
     });
 
     return {
@@ -443,7 +517,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       artifactId,
       resultRef,
       contextHash,
-      output,
+      output: finalOutput,
       attemptCount: task.attemptCount,
     };
   }
@@ -489,6 +563,235 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'sourceArtificerArtifactId_and_sourceTrace_artificerArtifactId_mismatch',
       });
     }
+  }
+
+  // ── PRI-426: adversarial sandbox replay ─────────────────────────────────────
+
+  /**
+   * Run a single-round adversarial sandbox replay on the evaluator's V2 output
+   * (PRD Decision 11d). Pure orchestration of pure functions:
+   *   1. Skip if passive review failed (decision !== 'approved' is the LLM's
+   *      short-circuit signal — no code to defend).
+   *   2. Skip if no adversarialCases present (V2 with codeReview only).
+   *   3. Convert adversarialCases → GoldenTrace (all negative, PRI-423).
+   *   4. Merge ≥1 positive case from the Artificer golden trace. If the
+   *      artificer artifact has no goldenTraceCases (V1 mismatch), degrade:
+   *      skip replay with telemetry — do NOT crash.
+   *   5. Invoke evaluateRefinerRuleHostGate via injected gateDeps.
+   *   6. Populate adversarialResult from the gate result.
+   *
+   * Never throws — all failure modes degrade to a returned result with a
+   * structured reason (ERR-018). The caller persists the updated output.
+   */
+  private async runAdversarialReplay(
+    output: EvaluatorOutputV2,
+    taskId: string,
+    context: EvaluatorContext,
+  ): Promise<{ readonly updatedOutput: EvaluatorOutputV2 | null }> {
+    // gateDeps is non-null here — the caller only invokes this method when
+    // this.gateDeps is set. Bind to a local to avoid re-asserting.
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+    const gateDeps = this.gateDeps;
+    if (!gateDeps) {
+      return { updatedOutput: null };
+    }
+    const runId = output.taskId;
+
+    // (1) Passive review short-circuit: the LLM emits decision='needs_revision'
+    // when any of intentConsistency/scopePrecision/traceCoverage fails. Only
+    // replay when the LLM judged the code worth defending. This check is
+    // defensive — by PRD contract the prompt instructs the LLM to short-circuit,
+    // but we don't trust the LLM to be the sole gate (Runtime Contract Rule 3).
+    if (output.evaluation.decision !== 'approved') {
+      return { updatedOutput: null };
+    }
+
+    // (2) No adversarial cases → nothing to replay. codeReview may still be
+    // present (passive review only). Not an error condition.
+    if (!output.adversarialCases || output.adversarialCases.length === 0) {
+      return { updatedOutput: null };
+    }
+
+    // (3) Convert adversarial cases to an all-negative GoldenTrace.
+    const conversion = adversarialCasesToGoldenTrace(output.adversarialCases);
+    if (!conversion.ok) {
+      // Validator already accepted adversarialCases, so a conversion failure
+      // here is a contract drift between validator and converter. Degrade loud.
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: `adversarial_conversion_failed: ${conversion.reason}`,
+        nextAction: 'verify_adversarial_case_validator_alignment',
+      });
+      return { updatedOutput: null };
+    }
+
+    // (4) Resolve the Artificer artifact and extract code + positive cases.
+    // PRI-423: the converted adversarial trace has no positive case; we merge
+    // positive cases from the Artificer's goldenTraceCases before replaying.
+    if (!context.artificerArtifact) {
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: 'no_artificer_artifact_in_context',
+        nextAction: 'verify_buildContext_resolves_artificer_artifact',
+      });
+      return { updatedOutput: null };
+    }
+
+    const artificerParsed = this.parseArtificerArtifact(context.artificerArtifact);
+    if (!artificerParsed) {
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: 'artificer_artifact_unparseable',
+        nextAction: 'verify_artificer_artifact_contentJson',
+      });
+      return { updatedOutput: null };
+    }
+
+    const { implementationCode, goldenTraceCases } = artificerParsed;
+    if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
+      // Artificer output is V1 (no code) but the evaluator emitted V2. This is
+      // a mismatch — degrade rather than replay against missing code.
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: 'artificer_artifact_has_no_implementation_code',
+        nextAction: 'verify_artificer_l2_adapter_emitted_v2',
+      });
+      return { updatedOutput: null };
+    }
+
+    // Merge positive cases from the Artificer golden trace into the adversarial
+    // trace. buildGoldenTraceFromArtificer validates each case structurally
+    // (Runtime Contract Rule 4) and returns ok=false on any malformed entry.
+    const positiveCases = this.extractPositiveCases(goldenTraceCases);
+    if (positiveCases.length === 0) {
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: 'no_positive_case_in_artificer_golden_trace',
+        nextAction: 'verify_artificer_emitted_at_least_one_positive_case',
+      });
+      return { updatedOutput: null };
+    }
+
+    const mergedTrace: GoldenTrace = {
+      traceId: `golden-trace-evaluator-replay-${taskId}-${Date.now().toString(36)}`,
+      sourceArtifactId: context.sourceArtificerArtifactId ?? undefined,
+      version: 1,
+      createdAt: new Date().toISOString(),
+      cases: [...positiveCases, ...conversion.trace.cases],
+    };
+
+    // (5) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
+    // catches its own sandbox throws internally (rejected_runtime_error), so
+    // this await cannot throw on sandbox failure — but we guard anyway for
+    // defense-in-depth (ERR-018: trust boundary at injected deps).
+    let gateResult;
+    try {
+      gateResult = evaluateRefinerRuleHostGate(
+        { code: implementationCode, goldenTrace: mergedTrace },
+        gateDeps,
+      );
+    } catch (gateErr) {
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: `gate_invocation_threw: ${gateErr instanceof Error ? gateErr.message : String(gateErr)}`,
+        nextAction: 'verify_gate_deps_implementation',
+      });
+      const failedResult: EvaluatorAdversarialResult = {
+        passed: false,
+        failedCases: [],
+      };
+      return {
+        updatedOutput: { ...output, adversarialResult: failedResult },
+      };
+    }
+
+    this.emitEvent('adversarial_replay', taskId, {
+      runId,
+      gateDecision: gateResult.decision,
+      caseCount: mergedTrace.cases.length,
+      failedCaseCount: gateResult.sandboxResult.failedCases.length,
+    });
+
+    // (6) Populate adversarialResult from the gate result.
+    const accepted = gateResult.decision === 'accepted_shadow';
+    const failedCases: AdversarialFailedCase[] = accepted
+      ? []
+      : this.mapFailedCases(gateResult, output.adversarialCases);
+
+    const adversarialResult: EvaluatorAdversarialResult = {
+      passed: accepted,
+      failedCases,
+    };
+
+    return {
+      updatedOutput: { ...output, adversarialResult },
+    };
+  }
+
+  /**
+   * Parse the Artificer artifact contentJson defensively (Runtime Contract
+   * Rule 1/2/5). Returns null on any structural issue — the caller degrades.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private parseArtificerArtifact(
+    contentJson: string,
+  ): { readonly implementationCode: unknown; readonly goldenTraceCases: unknown } | null {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contentJson);
+    } catch {
+      return null;
+    }
+    if (!EvaluatorRunner.isRecord(parsed)) return null;
+    return {
+      implementationCode: parsed.implementationCode,
+      goldenTraceCases: parsed.goldenTraceCases,
+    };
+  }
+
+  /**
+   * Extract structurally-valid positive GoldenTraceCases from the Artificer
+   * goldenTraceCases array. Uses buildGoldenTraceFromArtificer (which re-
+   * validates each case) and filters for kind='positive'. Returns [] when
+   * the input is missing/malformed — the caller degrades to a skip (ERR-069:
+   * never trust unvalidated candidates).
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private extractPositiveCases(rawCases: unknown): GoldenTraceCase[] {
+    if (!Array.isArray(rawCases)) return [];
+    const buildResult = buildGoldenTraceFromArtificer({ cases: rawCases });
+    if (!buildResult.ok) return [];
+    return buildResult.trace.cases.filter((c) => c.kind === 'positive');
+  }
+
+  /**
+   * Map sandbox failed cases to EvaluatorAdversarialResult.failedCases.
+   *
+   * The sandbox reports failedCases by caseId; we enrich each with the
+   * adversarial case's attackType and expectedDecision. Cases not found in
+   * the adversarial set (e.g. the merged positive case failed — which would
+   * indicate a code bug, not an adversarial failure) are reported with
+   * attackType='boundary' as a safe default and a note in the rationale
+   * (Runtime Contract Rule 9: graceful degradation includes a reason).
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private mapFailedCases(
+    gateResult: { readonly sandboxResult: { readonly failedCases: readonly { readonly caseId: string; readonly errorType: string; readonly message: string }[] } },
+    adversarialCases: readonly { readonly caseId: string; readonly attackType: 'boundary' | 'omission' | 'inversion'; readonly expectedDecision: 'allow' | 'block' | 'propose_correction' }[],
+  ): AdversarialFailedCase[] {
+    const advById = new Map(adversarialCases.map((c) => [c.caseId, c]));
+    return gateResult.sandboxResult.failedCases.map((fc) => {
+      const adv = advById.get(fc.caseId);
+      return {
+        caseId: fc.caseId,
+        attackType: adv?.attackType ?? 'boundary',
+        actualDecision: fc.errorType,
+        expectedDecision: adv?.expectedDecision ?? 'block',
+        rationale: adv
+          ? `${fc.errorType}: ${fc.message}`
+          : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${fc.message}) — likely a code defect, not an adversarial gap`,
+      };
+    });
   }
 
   // ── Evaluator-specific: principle bearer resolution ─────────────────────────
