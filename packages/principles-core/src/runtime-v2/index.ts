@@ -408,6 +408,10 @@ export {
 } from './story-a-demo.js';
 export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';
 
+// RuleHost MVP Activation — multi-round adversarial loop (PRI-428)
+export { runAdversarialLoop, DEFAULT_MAX_ROUNDS } from './adversarial-loop.js';
+export type { AdversarialLoopInput, AdversarialLoopResult } from './adversarial-loop.js';
+
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,

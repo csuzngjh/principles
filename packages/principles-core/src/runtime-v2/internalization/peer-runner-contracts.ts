@@ -140,6 +140,8 @@ export interface PITaskRecord extends TaskRecord {
   inputArtifactRefs: ArtifactRef[];
   outputArtifactRefs: ArtifactRef[];
   rejectionCount: number;
+  /** Prior adversarial replay failures (PRI-428); present only on Round-2+ tasks. */
+  adversarialFeedback?: string;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

@@ -49,6 +49,13 @@ export interface PITaskMetadata {
   parentTaskId?: string;
   correlationId?: string;
   rejectionCount?: number;
+  /**
+   * Prior adversarial replay failures to inject into a Round-2+ Artificer
+   * prompt (RuleHost MVP, PRI-428). Set by runAdversarialLoop when a prior
+   * Evaluator round returned needs_revision. Treated as opaque text by the
+   * metadata layer; the ArtificerRunner forwards it to the prompt builder.
+   */
+  adversarialFeedback?: string;
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -68,6 +75,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       parentTaskId: metadata.parentTaskId,
       correlationId: metadata.correlationId,
       rejectionCount: metadata.rejectionCount,
+      adversarialFeedback: metadata.adversarialFeedback,
     },
   });
 }
@@ -155,6 +163,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     rejectionCount = Math.floor(m.rejectionCount);
   }
 
+  // adversarialFeedback (PRI-428): optional, non-empty string if present.
+  if (m.adversarialFeedback !== undefined) {
+    if (typeof m.adversarialFeedback !== 'string') return null;
+    if (m.adversarialFeedback.trim() === '') return null;
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -164,6 +178,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     parentTaskId: m.parentTaskId,
     correlationId: m.correlationId,
     rejectionCount,
+    adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
   };
 }
 
@@ -210,5 +225,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     parentTaskId: meta.parentTaskId,
     correlationId: meta.correlationId,
     rejectionCount: meta.rejectionCount ?? 0,
+    adversarialFeedback: meta.adversarialFeedback,
   } as unknown as PITaskRecord;
 }

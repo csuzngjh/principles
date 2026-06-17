@@ -440,6 +440,12 @@ export type {
   BridgeTaskStore,
 } from './intake-to-internalization-bridge.js';
 
+// RuleHost MVP Activation (PRI-421..428, ADR-0014 Amendment 2026-06-17)
+// Adversarial case → GoldenTrace conversion + feedback formatter.
+export type { AdversarialConversionResult } from './adversarial-case.js';
+export { adversarialCasesToGoldenTrace } from './adversarial-case.js';
+export { formatAdversarialFeedback } from './adversarial-feedback.js';
+
 export {
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,

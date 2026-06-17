@@ -3,6 +3,12 @@ export interface ArtificerPromptBuilderInput {
   contextHash: string;
   sourceScribeArtifactId: string;
   scribeArtifact: unknown;
+  /**
+   * Prior adversarial replay failures to address (RuleHost MVP, PRI-428).
+   * Present only on Round-2+ retries inside runAdversarialLoop. When absent,
+   * the prompt is the initial generation prompt (backward compatible).
+   */
+  adversarialFeedback?: string;
 }
 
 export interface ArtificerPromptInput {
@@ -12,6 +18,8 @@ export interface ArtificerPromptInput {
   scribeArtifact: unknown;
   artificerInstruction: string;
   promptContractVersion: string;
+  /** Present only when this is a retry with prior adversarial failures. */
+  adversarialFeedback?: string;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -63,6 +71,11 @@ CONSTRAINTS:
 - sourceTrace.dreamerArtifactId is optional — include only if available from scribe artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
+
+PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
+- This is a RETRY. A prior version of your generated code was reviewed and failed adversarial sandbox replay.
+- The \`adversarialFeedback\` field lists the specific cases that failed, each with the attack type, the expected vs actual decision, and a rationale.
+- You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
 `;
 
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v1.prompt.v1';
@@ -77,6 +90,11 @@ export class ArtificerPromptBuilder {
       scribeArtifact: input.scribeArtifact,
       artificerInstruction: ARTIFICER_PROTOCOL_INSTRUCTION,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
+      // Only include adversarialFeedback when present + non-empty, so
+      // Round-1 prompts stay backward-compatible (test asserts absence).
+      ...(typeof input.adversarialFeedback === 'string' && input.adversarialFeedback.trim() !== ''
+        ? { adversarialFeedback: input.adversarialFeedback }
+        : {}),
     };
 
     const message = JSON.stringify(promptInput);
