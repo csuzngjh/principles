@@ -34,8 +34,8 @@
  */
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
-import { getModel, getProviders } from '@earendil-works/pi-ai';
-import type { Model, Message, KnownProvider } from '@earendil-works/pi-ai';
+import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai';
+import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { PDRuntimeError } from '../error-categories.js';
@@ -79,6 +79,18 @@ export interface L2AgentLoopAdapterConfig {
   maxTurns?: number;
   /** Total wall-clock budget for the whole loop in ms (default 300_000). */
   totalBudgetMs?: number;
+  /**
+   * PRI-420: max auto-retries when the agent loop returns an empty response (no submit_output
+   * capture and no parseable text). The model API occasionally returns content=[] on long prompts;
+   * retrying with fresh state recovers ~100%. Default 2. Set to 0 to disable.
+   */
+  maxEmptyRetries?: number;
+  /**
+   * PRI-420: when true (default), if all L2 attempts fail, fall back to a one-shot completeSimple
+   * call (L1 equivalent) so the dreamer still produces output. Emits dreamer_l2_fallback_to_l1.
+   * Set to false to fail loud without fallback.
+   */
+  l2FallbackToL1?: boolean;
 }
 
 /**
@@ -150,6 +162,17 @@ interface L2RunState {
 
 const DEFAULT_MAX_TURNS = 5;
 const DEFAULT_TOTAL_BUDGET_MS = 300_000;
+const DEFAULT_MAX_EMPTY_RETRIES = 2;
+
+/**
+ * PRI-420: result of a single agentLoop attempt. The `status` field discriminates the
+ * three outcomes: 'ok' (output extracted), 'empty' (no output — retry or fallback),
+ * 'error' (loop threw — stop retrying).
+ */
+type L2AttemptResult =
+  | { status: 'ok'; output: unknown; usedTextFallback: boolean }
+  | { status: 'empty' }
+  | { status: 'error'; reason: string; timedOut: boolean };
 /**
  * Maximum number of completed run records retained in memory. The runs Map is bounded to
  * prevent unbounded growth in long-running services (e.g. the auto-consumer wakes every 120s).
@@ -255,6 +278,8 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
     const totalBudgetMs = this.config.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS;
     const maxTurns = this.config.maxTurns ?? DEFAULT_MAX_TURNS;
+    const maxEmptyRetries = this.config.maxEmptyRetries ?? DEFAULT_MAX_EMPTY_RETRIES;
+    const l2FallbackToL1 = this.config.l2FallbackToL1 ?? true;
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
     const budgetTimer = setTimeout(() => abortController.abort(), totalBudgetMs);
@@ -294,143 +319,232 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       { role: 'user', content: messageContent + toolInstruction, timestamp: Date.now() },
     ];
 
-    // Output capture + telemetry accumulator.
-    const outputCapture: L2OutputCapture = { output: null };
+    // Telemetry accumulator shared across all L2 attempts (PRI-420 retry loop).
     const toolsInvoked: Record<string, number> = {};
-    let turnCount = 0;
+    let totalRetryCount = 0;
+    let totalTurnCount = 0;
 
-    const toolContext: PdL2ToolContext = {
-      artifactReader: this.deps.artifactReader,
-      principleReader: this.deps.principleReader,
-      outputCapture,
-      onToolExecution: (info) => {
-        toolsInvoked[info.toolName] = (toolsInvoked[info.toolName] ?? 0) + 1;
+    const emitLoopStarted = (): void => {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'dreamer_l2_turn',
+        traceId: taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'l2-adapter',
+        agentId: 'dreamer-l2',
+        payload: { runId, phase: 'loop_started', maxTurns, totalBudgetMs, maxEmptyRetries },
+      });
+    };
+
+    /**
+     * PRI-420: run a single agentLoop attempt with fresh state (EP-05: each retry uses fresh
+     * outputCapture/turnCount, never stale loop state).
+     * Returns a result with a `status` discriminator: 'ok' (output extracted), 'empty'
+     * (no output — triggers retry/fallback), or 'error' (loop threw).
+     */
+    const runSingleAttempt = async (): Promise<L2AttemptResult> => {
+      // Fresh capture + turn counter per attempt (EP-05 loop-state freshness).
+      const outputCapture: L2OutputCapture = { output: null };
+      let turnCount = 0;
+
+      const toolContext: PdL2ToolContext = {
+        artifactReader: this.deps.artifactReader,
+        principleReader: this.deps.principleReader,
+        outputCapture,
+        onToolExecution: (info) => {
+          toolsInvoked[info.toolName] = (toolsInvoked[info.toolName] ?? 0) + 1;
+          this.eventEmitter.emitTelemetry({
+            eventType: 'dreamer_l2_turn',
+            traceId: taskId,
+            timestamp: new Date().toISOString(),
+            sessionId: 'l2-adapter',
+            agentId: 'dreamer-l2',
+            payload: { runId, toolName: info.toolName, ok: info.ok, error: info.error, turn: turnCount },
+          });
+        },
+      };
+
+      const tools = buildDreamerL2Tools(toolContext);
+      const agentContext = {
+        systemPrompt: '',
+        messages: prompts,
+        tools,
+      };
+
+      const loopConfig: AgentLoopConfig = {
+        model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
+        apiKey,
+        convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
+          if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
+            return m as Message;
+          }
+          throw new PDRuntimeError('output_invalid', `L2 convertToLlm encountered an unsupported message role: ${String((m as { role?: string }).role)}`);
+        }),
+        beforeToolCall: async (ctx) => {
+          if (!DREAMER_L2_TOOL_WHITELIST.has(ctx.toolCall.name)) {
+            return { block: true, reason: `tool '${ctx.toolCall.name}' is not in the dreamer L2 whitelist` };
+          }
+          return undefined;
+        },
+        shouldStopAfterTurn: () => {
+          turnCount += 1;
+          return outputCapture.output !== null || turnCount >= maxTurns;
+        },
+      };
+
+      let transcript: AgentMessage[];
+      try {
+        transcript = await runAgentLoop(
+          prompts,
+          agentContext,
+          loopConfig,
+          async (event: AgentEvent) => { void event; },
+          abortController.signal,
+        );
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { status: 'error', reason, timedOut: abortController.signal.aborted };
+      }
+
+      totalTurnCount += turnCount;
+
+      // Extract output: primary = submit_output capture; secondary = last text-bearing assistant message.
+      if (outputCapture.output !== null) {
+        return { status: 'ok', output: outputCapture.output, usedTextFallback: false };
+      }
+      const fallbackText = extractLastAssistantText(transcript);
+      const extracted = fallbackText ? extractJsonObject(fallbackText) : null;
+      if (extracted) {
+        return { status: 'ok', output: extracted, usedTextFallback: true };
+      }
+      return { status: 'empty' };
+    };
+
+    emitLoopStarted();
+
+    // PRI-420: retry loop — attempt the agent loop up to 1 + maxEmptyRetries times.
+    // Each retry uses fresh state (EP-05). Empty responses (no submit_output, no parseable
+    // text) trigger a retry; the model API returns content=[] ~57% of the time on long prompts.
+    let l2Result: L2AttemptResult | null = null;
+    let lastError: { reason: string; timedOut: boolean } | null = null;
+    const maxAttempts = 1 + maxEmptyRetries;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        totalRetryCount += 1;
         this.eventEmitter.emitTelemetry({
           eventType: 'dreamer_l2_turn',
           traceId: taskId,
           timestamp: new Date().toISOString(),
           sessionId: 'l2-adapter',
           agentId: 'dreamer-l2',
-          payload: {
-            runId,
-            toolName: info.toolName,
-            ok: info.ok,
-            error: info.error,
-            turn: turnCount,
-          },
+          payload: { runId, phase: 'empty_response_retry', attempt },
         });
-      },
-    };
+      }
 
-    const tools = buildDreamerL2Tools(toolContext);
+      l2Result = await runSingleAttempt();
 
-    const agentContext = {
-      systemPrompt: '', // dreamer prompt is already a complete instruction in the user message
-      messages: prompts,
-      tools,
-    };
-
-    const loopConfig: AgentLoopConfig = {
-      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
-      apiKey,
-      // AgentMessage is `Message | CustomAgentMessages`; for the dreamer's standard
-      // user/assistant/toolResult shape, the identity map is correct. Custom message
-      // kinds are not used here, so we assert each message is a standard Message via
-      // a narrowing check rather than a blind `as`.
-      convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
-        if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
-          return m as Message;
-        }
-        // Unknown custom message kind — should not occur for the dreamer; surface loudly.
-        throw new PDRuntimeError('output_invalid', `L2 convertToLlm encountered an unsupported message role: ${String((m as { role?: string }).role)}`);
-      }),
-      beforeToolCall: async (ctx) => {
-        // Defense-in-depth whitelist (primary boundary is read-only-by-construction readers).
-        if (!DREAMER_L2_TOOL_WHITELIST.has(ctx.toolCall.name)) {
-          return { block: true, reason: `tool '${ctx.toolCall.name}' is not in the dreamer L2 whitelist` };
-        }
-        return undefined;
-      },
-      shouldStopAfterTurn: () => {
-        turnCount += 1;
-        // Stop when submit_output captured output, or the turn cap is hit.
-        return outputCapture.output !== null || turnCount >= maxTurns;
-      },
-    };
-
-    this.eventEmitter.emitTelemetry({
-      eventType: 'dreamer_l2_turn',
-      traceId: taskId,
-      timestamp: startedAt,
-      sessionId: 'l2-adapter',
-      agentId: 'dreamer-l2',
-      payload: {
-        runId,
-        phase: 'loop_started',
-        maxTurns,
-        totalBudgetMs,
-        toolNames: tools.map(t => t.name),
-      },
-    });
-
-    let transcript: AgentMessage[];
-    try {
-      transcript = await runAgentLoop(
-        prompts,
-        agentContext,
-        loopConfig,
-        async (event: AgentEvent) => { void event; /* telemetry emitted via onToolExecution */ },
-        abortController.signal,
-      );
-    } catch (err) {
-      clearTimeout(budgetTimer);
-      this.abortControllers.delete(runId);
-      const {aborted} = abortController.signal;
-      const reason = err instanceof Error ? err.message : String(err);
-      runState.status = aborted ? 'timed_out' : 'failed';
-      runState.reason = reason;
-      runState.endedAt = new Date().toISOString();
-      this.emitComplete({ taskId, runId, turnCount, toolsInvoked, usedFallback: false, timedOut: aborted });
-      throw new PDRuntimeError(
-        aborted ? 'timeout' : 'execution_failed',
-        `L2 dreamer agent loop ${aborted ? 'timed out' : 'failed'}: ${reason}`,
-        { nextAction: aborted ? 'increase totalBudgetMs or use a faster model' : 'check model tool-use support (P1.0a spike)' },
-      );
+      if (l2Result.status === 'ok') {
+        break; // Success — output extracted.
+      }
+      if (l2Result.status === 'error') {
+        // Loop threw (timeout or execution error). Stop retrying — retrying a timeout wastes budget.
+        lastError = { reason: l2Result.reason, timedOut: l2Result.timedOut };
+        break;
+      }
+      // status === 'empty' → retry if attempts remain (loop continues).
     }
 
     clearTimeout(budgetTimer);
     this.abortControllers.delete(runId);
 
-    // Extract output: primary = submit_output capture; fallback = last text-bearing assistant message.
-    let validatedOutput: unknown;
-    let usedFallback = false;
-    if (outputCapture.output !== null) {
-      validatedOutput = outputCapture.output;
-    } else {
-      const fallbackText = extractLastAssistantText(transcript);
-      const extracted = fallbackText ? extractJsonObject(fallbackText) : null;
-      if (extracted) {
-        validatedOutput = extracted;
-        usedFallback = true;
-      } else {
-        runState.status = 'failed';
-        runState.reason = 'L2 loop ended without submit_output and no parseable JSON in final assistant message';
+    // Handle the L2 result.
+    if (l2Result?.status === 'ok') {
+      // L2 succeeded (possibly after retries).
+      runState.status = 'succeeded';
+      runState.endedAt = new Date().toISOString();
+      runState.output = { runId, payload: l2Result.output };
+      this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback: l2Result.usedTextFallback, timedOut: false, retryCount: totalRetryCount });
+      return { runId, runtimeKind: 'pi-ai-l2', startedAt };
+    }
+
+    // L2 failed (empty response on all attempts, or a throw). Try L1 fallback if enabled.
+    const failureReason = lastError ? lastError.reason : 'L2 loop produced empty response on all attempts (no submit_output, no parseable JSON)';
+    const failureTimedOut = lastError ? lastError.timedOut : false;
+
+    if (l2FallbackToL1) {
+      this.eventEmitter.emitTelemetry({
+        eventType: 'dreamer_l2_fallback_to_l1',
+        traceId: taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'l2-adapter',
+        agentId: 'dreamer-l2',
+        payload: { runId, reason: failureReason, retryCount: totalRetryCount, timedOut: failureTimedOut },
+      });
+
+      // L1 one-shot fallback: same prompt, single completeSimple call, JSON extraction.
+      try {
+        const l1Output = await this.runL1Fallback(messageContent, apiKey);
+        runState.status = 'succeeded';
         runState.endedAt = new Date().toISOString();
-        this.emitComplete({ taskId, runId, turnCount, toolsInvoked, usedFallback: false, timedOut: false });
+        runState.output = { runId, payload: l1Output };
+        this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback: true, timedOut: false, retryCount: totalRetryCount });
+        return { runId, runtimeKind: 'pi-ai-l2', startedAt };
+      } catch (l1Err) {
+        // Both L2 and L1 failed — fail loud with both reasons (R9: observable degradation).
+        const l1Reason = l1Err instanceof Error ? l1Err.message : String(l1Err);
+        runState.status = 'failed';
+        runState.reason = `L2 failed (${failureReason}); L1 fallback also failed (${l1Reason})`;
+        runState.endedAt = new Date().toISOString();
+        this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback: false, timedOut: failureTimedOut, retryCount: totalRetryCount });
         throw new PDRuntimeError(
-          'output_invalid',
-          'L2 dreamer loop completed but produced no output: submit_output was not called and the final assistant message had no parseable JSON.',
-          { nextAction: 'verify the model supports tool-calling and the prompt instructs submit_output' },
+          'execution_failed',
+          `L2 dreamer failed and L1 fallback also failed. L2: ${failureReason}. L1: ${l1Reason}`,
+          { nextAction: 'check model availability and API key; review telemetry for retry/fallback details' },
         );
       }
     }
 
-    runState.status = 'succeeded';
+    // No fallback — fail loud (R9).
+    runState.status = failureTimedOut ? 'timed_out' : 'failed';
+    runState.reason = failureReason;
     runState.endedAt = new Date().toISOString();
-    runState.output = { runId, payload: validatedOutput };
-    this.emitComplete({ taskId, runId, turnCount, toolsInvoked, usedFallback, timedOut: false });
+    this.emitComplete({ taskId, runId, turnCount: totalTurnCount, toolsInvoked, usedFallback: false, timedOut: failureTimedOut, retryCount: totalRetryCount });
+    throw new PDRuntimeError(
+      failureTimedOut ? 'timeout' : 'output_invalid',
+      `L2 dreamer failed after ${totalRetryCount} retries: ${failureReason}`,
+      { nextAction: failureTimedOut ? 'increase totalBudgetMs or use a faster model' : 'check model tool-use support or enable l2FallbackToL1' },
+    );
+  }
 
-    return { runId, runtimeKind: 'pi-ai-l2', startedAt };
+  /**
+   * PRI-420: L1 one-shot fallback. Runs a single completeSimple call with the same prompt
+   * (without tool instructions) and extracts JSON from the response. This is the safety net
+   * when all L2 attempts fail — it ensures the dreamer still produces output.
+   */
+  private async runL1Fallback(messageContent: string, apiKey: string): Promise<unknown> {
+    const model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl);
+    const userMessage = { role: 'user' as const, content: messageContent, timestamp: Date.now() };
+    const context: Context = { messages: [userMessage] };
+    const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000) });
+    // Extract the text content from the response and parse JSON.
+    let text: string | null = null;
+    if (typeof response.content === 'string') {
+      text = response.content;
+    } else if (Array.isArray(response.content)) {
+      const textPart = response.content.find(
+        (c): c is { type: 'text'; text: string } =>
+          typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text',
+      );
+      text = textPart?.text ?? null;
+    }
+    if (!text) {
+      throw new Error('L1 fallback response had no text content');
+    }
+    const extracted = extractJsonObject(text);
+    if (!extracted) {
+      throw new Error('L1 fallback response had no parseable JSON');
+    }
+    return extracted;
   }
 
   async pollRun(runId: string): Promise<RunStatus> {
@@ -489,6 +603,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     toolsInvoked: Record<string, number>;
     usedFallback: boolean;
     timedOut: boolean;
+    retryCount: number;
   }): void {
     this.eventEmitter.emitTelemetry({
       eventType: 'dreamer_l2_complete',
@@ -502,6 +617,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
         toolsInvoked: opts.toolsInvoked,
         usedFallback: opts.usedFallback,
         timedOut: opts.timedOut,
+        retryCount: opts.retryCount,
         outputPreview: safeStringifyPreview(this.runs.get(opts.runId)?.output?.payload, 300),
       },
     });
