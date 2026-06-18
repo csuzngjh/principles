@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
+import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -313,7 +314,7 @@ export function PrincipleDetailPage() {
   if (loading) {
     return (
       <PageShell>
-        <p className="text-ink-3 text-sm">{t("principles.loading", { defaultValue: "Loading…" })}</p>
+        <PageLoading cardCount={1} />
       </PageShell>
     );
   }
@@ -339,6 +340,7 @@ export function PrincipleDetailPage() {
 
   return (
     <PageShell>
+      <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Back link */}
       <Button variant="ghost" onClick={() => navigate("/principles")} className="mb-4 -ml-2">
         ← {t("principles.detail.backToList")}
@@ -645,6 +647,7 @@ export function PrincipleDetailPage() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </PageShell>
   );

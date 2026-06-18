@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
+import { Skeleton } from "../../components/ui/skeleton.js";
 import {
   fetchPrinciples,
   fetchApprovalsGrouped,
@@ -331,7 +332,25 @@ export function PrinciplesPage() {
 
       {/* Content */}
       {loading && (
-        <p className="text-ink-3 text-sm">{t("principles.loading", { defaultValue: "Loading…" })}</p>
+        <div className="grid gap-3 animate-[pdFadeIn_200ms_ease-out]">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-panel border border-line rounded-[var(--radius-md)] p-4 border-l-[3px] border-l-transparent"
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <Skeleton className="h-5 w-[55%] rounded-sm" />
+                <Skeleton className="h-5 w-16 rounded-[2px]" />
+              </div>
+              <Skeleton className="h-4 w-full rounded-sm mb-2" />
+              <Skeleton className="h-4 w-[80%] rounded-sm mb-4" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-3.5 w-20 rounded-sm" />
+                <Skeleton className="h-3.5 w-24 rounded-sm" />
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {error && (
@@ -373,7 +392,7 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="grid gap-3">
+        <div className="grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
           {filtered.map((card) => (
             <article
               key={card.principleId}
@@ -382,8 +401,8 @@ export function PrinciplesPage() {
                 "bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
                 "border-l-[3px] " +
                 STATUS_BORDER[card.status] + " " +
-                "transition-[border-color,background] duration-150 " +
-                "hover:border-line-2 hover:bg-surface " +
+                "transition-[border-color,background,transform] duration-150 " +
+                "hover:border-line-2 hover:bg-surface hover:-translate-y-px " +
                 "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
               }
               tabIndex={0}

@@ -101,10 +101,10 @@ export function AppSidebar() {
                 to={item.href}
                 data-testid={`nav-${item.id}`}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] text-[13px] transition-colors",
+                  "flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] text-[13px] transition-all duration-150",
                   active
                     ? "border-l-2 border-l-gov bg-paper-2 text-ink"
-                    : "text-ink-3 hover:text-ink hover:bg-paper-2"
+                    : "border-l-2 border-l-transparent text-ink-3 hover:text-ink hover:bg-paper-2"
                 )}
               >
                 <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
@@ -134,10 +134,10 @@ export function AppSidebar() {
                   to={item.href}
                   data-testid={`nav-${item.id}`}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] transition-colors",
+                    "flex items-center gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
                     active
                       ? "border-l-2 border-l-gov bg-paper-2 text-ink"
-                      : "text-ink-4 hover:text-ink-3 hover:bg-paper-2"
+                      : "border-l-2 border-l-transparent text-ink-4 hover:text-ink-3 hover:bg-paper-2"
                   )}
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
