@@ -71,6 +71,7 @@ function parseResponseBody<T>(res: ServerResponse): T {
 let workspaceDir: string;
 let pluginDir: string;
 let tmpDir: string;
+let savedOpenclawHome: string | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -85,9 +86,19 @@ beforeEach(() => {
 
   const packageJson = { name: 'principles-disciple', version: '1.0.0' };
   fs.writeFileSync(path.join(extensionsDir, 'package.json'), JSON.stringify(packageJson));
+
+  // Inject OPENCLAW_HOME so resolvePluginDir() finds the test's tmpDir/extensions
+  // instead of the real ~/.openclaw/extensions/principles-disciple installation.
+  // Without this, tests would hit (and damage) the real PD install.
+  savedOpenclawHome = process.env.OPENCLAW_HOME;
+  process.env.OPENCLAW_HOME = tmpDir;
 });
 
 afterEach(() => {
+  // Restore OPENCLAW_HOME
+  if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
+  else process.env.OPENCLAW_HOME = savedOpenclawHome;
+
   // Cleanup temp dir
   if (tmpDir && fs.existsSync(tmpDir)) {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -156,16 +167,24 @@ describe('handleUpdateRoute', () => {
       const emptyWorkspace = path.join(emptyTmpDir, 'workspace');
       fs.mkdirSync(emptyWorkspace, { recursive: true });
 
-      const req = createMockRequest('GET');
-      const res = createMockResponse();
+      // Point OPENCLAW_HOME to a dir with no extensions/principles-disciple,
+      // so resolvePluginDir() returns a non-existent path → version undefined.
+      const savedHome = process.env.OPENCLAW_HOME;
+      process.env.OPENCLAW_HOME = emptyTmpDir;
 
-      await handleUpdateRoute(req, res, emptyWorkspace, '/check');
+      try {
+        const req = createMockRequest('GET');
+        const res = createMockResponse();
 
-      expect(res.writeHead).toHaveBeenCalledWith(500, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; error: string }>(res);
-      expect(body.error).toBe('version_not_found');
+        await handleUpdateRoute(req, res, emptyWorkspace, '/check');
 
-      fs.rmSync(emptyTmpDir, { recursive: true, force: true });
+        expect(res.writeHead).toHaveBeenCalledWith(500, expect.any(Object));
+        const body = parseResponseBody<{ success: boolean; error: string }>(res);
+        expect(body.error).toBe('version_not_found');
+      } finally {
+        process.env.OPENCLAW_HOME = savedHome;
+        fs.rmSync(emptyTmpDir, { recursive: true, force: true });
+      }
     });
   });
 

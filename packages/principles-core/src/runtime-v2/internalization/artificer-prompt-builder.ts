@@ -1,8 +1,16 @@
+import { serializePromptInput } from './prompt-serializer.js';
+
 export interface ArtificerPromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
   scribeArtifact: unknown;
+  /**
+   * Prior adversarial replay failures to address (RuleHost MVP, PRI-428).
+   * Present only on Round-2+ retries inside runAdversarialLoop. When absent,
+   * the prompt is the initial generation prompt (backward compatible).
+   */
+  adversarialFeedback?: string;
 }
 
 export interface ArtificerPromptInput {
@@ -12,6 +20,8 @@ export interface ArtificerPromptInput {
   scribeArtifact: unknown;
   artificerInstruction: string;
   promptContractVersion: string;
+  /** Present only when this is a retry with prior adversarial failures. */
+  adversarialFeedback?: string;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -23,7 +33,7 @@ export const ARTIFICER_PROTOCOL_INSTRUCTION = `You are an Artificer agent in a p
 
 PROTOCOL:
 1. Review the scribeArtifact to understand the formal principle draft
-2. Transform the principle draft into an implementation plan with summary, target surface, specific changes, test requirements, and rollout notes
+2. Transform the principle draft into an implementation plan and executable RuleHost code
 3. Preserve the lineage trace from scribe, philosopher, and dreamer artifacts
 4. Identify risks associated with implementing this principle
 5. The implementation plan should be concrete enough to guide code changes, not just philosophical
@@ -46,6 +56,12 @@ OUTPUT FORMAT (pure JSON, no markdown):
     "dreamerArtifactId": "<from scribe artifact if available, or omit>"
   },
   "risks": ["<risk 1>", "<risk 2>"],
+  "implementationCode": "function evaluate(input, helpers) { ... }",
+  "goldenTraceCases": [
+    {"caseId":"negative-1","kind":"negative","toolName":"write_file","params":{"path":"/system/file"},"expectedDecision":"block"},
+    {"caseId":"positive-1","kind":"positive","toolName":"write_file","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
+  ],
+  "affectedTools": ["write_file"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -63,9 +79,20 @@ CONSTRAINTS:
 - sourceTrace.dreamerArtifactId is optional — include only if available from scribe artifact
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
+- implementationCode MUST define exactly function evaluate(input, helpers) and return { decision, matched, reason }
+- input.action contains toolName, normalizedPath, and paramsSummary; inspect only these RuleHost inputs
+- implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
+- goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block/propose_correction case
+- propose_correction cases MUST include expectedProposedParams and expectedApplicationMode (shadow or live)
+- affectedTools MUST contain the non-empty tool names the rule can match
+
+PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
+- This is a RETRY. A prior version of your generated code was reviewed and failed adversarial sandbox replay.
+- The \`adversarialFeedback\` field lists the specific cases that failed, each with the attack type, the expected vs actual decision, and a rationale.
+- You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
 `;
 
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v1.prompt.v1';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v1';
 
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -77,9 +104,14 @@ export class ArtificerPromptBuilder {
       scribeArtifact: input.scribeArtifact,
       artificerInstruction: ARTIFICER_PROTOCOL_INSTRUCTION,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
+      // Only include adversarialFeedback when present + non-empty, so
+      // Round-1 prompts stay backward-compatible (test asserts absence).
+      ...(typeof input.adversarialFeedback === 'string' && input.adversarialFeedback.trim() !== ''
+        ? { adversarialFeedback: input.adversarialFeedback }
+        : {}),
     };
 
-    const message = JSON.stringify(promptInput);
+    const message = serializePromptInput(promptInput);
 
     return { message, promptInput };
   }

@@ -223,6 +223,27 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_turn'),
   Type.Literal('dreamer_l2_complete'),
   Type.Literal('dreamer_l2_fallback_to_l1'),
+  // PRI-424: Artificer L2 write-test-fix loop telemetry.
+  // - artificer_l2_attempt: per LLM attempt (attempt number, decision, degraded flag)
+  // - artificer_l2_complete: when the loop finishes (attempts, degraded, succeeded)
+  Type.Literal('artificer_l2_attempt'),
+  Type.Literal('artificer_l2_complete'),
+  // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
+  // - evaluator_adversarial_replay: emitted after each gate invocation with the
+  //   gate decision, case count, and failed-case count.
+  // - evaluator_adversarial_replay_skipped: emitted when replay is intentionally
+  //   skipped (passive review failed, no adversarial cases, no positive case to
+  //   merge, sandbox threw) with a structured reason.
+  Type.Literal('evaluator_adversarial_replay'),
+  Type.Literal('evaluator_adversarial_replay_skipped'),
+  // PRI-427: Evaluator rule artifact assembly telemetry.
+  // - evaluator_rule_assembled: emitted after a rule artifact is written AND
+  //   marked validated (payload: artifactId, affectedTools, traceCaseCount).
+  // - evaluator_rule_assembly_failed: emitted when assembly degrades (missing
+  //   code/trace, write failure, validation-update failure) with a structured
+  //   reason. Non-fatal — principle artifact is already written.
+  Type.Literal('evaluator_rule_assembled'),
+  Type.Literal('evaluator_rule_assembly_failed'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

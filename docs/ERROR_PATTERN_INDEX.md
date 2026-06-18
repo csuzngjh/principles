@@ -8,27 +8,27 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-01 Trust Boundary Validation
 
-- **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors.
-- **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous.
-- **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; shape checks validate fields that actually exist in the target type.
-- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065.
-- **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, and casts near parse/adapter/DB/CLI boundaries.
+- **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors — including degradation/fallback/retry-exhausted paths.
+- **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous; degradation paths emit objects built from validator-rejected candidates.
+- **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; shape checks validate fields that actually exist in the target type; **every output-emitting path (happy, degraded, fallback, exhausted) emits only validated objects — degradation is a content transform, not a trust escape hatch**.
+- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069.
+- **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, and casts near parse/adapter/DB/CLI boundaries; grep degradation/fallback functions for emit-before-validate.
 
 ### EP-02 Production Path Wiring
 
-- **Use when**: adding validators, dispatchers, activation paths, CLI commands, baselines, guards, or helper APIs.
-- **Failure mode**: a component exists and has isolated tests, but the real user/operator path never calls it.
-- **Must check**: tests exercise the production entry point, not only leaf helpers; new CLI commands are registered in Commander; activation writes are read by the live prompt path.
-- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064, ERR-067.
-- **Automation target**: command-tree tests, production-path smoke tests, and fixture evidence that names the real dispatcher/facade.
+- **Use when**: adding validators, dispatchers, activation paths, CLI commands, baselines, guards, helper APIs, or PDRuntimeAdapter implementations.
+- **Failure mode**: a component exists and has isolated tests, but the real user/operator path never calls it; an adapter hand-builds a return object from a remembered schema instead of the real one, masked by `as`.
+- **Must check**: tests exercise the production entry point, not only leaf helpers; new CLI commands are registered in Commander; activation writes are read by the live prompt path; adapter return objects are built from the verbatim Typebox schema (RunHandleSchema/RunStatusSchema), not memory; new public types/functions are re-exported from barrel `index.ts` at every ancestor level.
+- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064, ERR-067, ERR-069, ERR-070.
+- **Automation target**: command-tree tests, production-path smoke tests, fixture evidence that names the real dispatcher/facade, and schema-field cross-checks for adapter return shapes.
 
 ### EP-03 Fail Loud and Observable Degradation
 
 - **Use when**: adding catch blocks, validators, degraded modes, installer results, JSON output, or fallback behavior.
 - **Failure mode**: invalid input, failed cleanup, malformed config, or incomplete delivery silently becomes success or an unexplained fallback.
-- **Must check**: every refusal/degradation includes a structured reason and next action; no `catch {}`; no `if (valid) { assert }` tests that pass when data is absent.
-- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046, ERR-062.
-- **Automation target**: grep/static guard for empty catch blocks and test assertions hidden behind truthy conditionals.
+- **Must check**: every refusal/degradation includes a structured reason and next action; no `catch {}`; no `if (valid) { assert }` tests that pass when data is absent; **every branch of a multi-path degradation (happy / V1-fallback / exhausted) applies the SAME failure guard — an alternate/degraded code path that skips the try/catch its siblings use will throw past a never-throws contract (PRI-428 recurrence: the V1 branch of runAdversarialLoop called createEvaluatorTask unguarded while the V2 branch wrapped it; the loop documented "never throws" but the V1 path could)**.
+- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046, ERR-062, ERR-070.
+- **Automation target**: grep/static guard for empty catch blocks and test assertions hidden behind truthy conditionals; for any function with a documented never-throws/degrades contract, diff-check that EVERY branch (including alternate-type/V1/early-exit branches) wraps the same external calls that the primary branch wraps.
 
 ### EP-04 CLI and Operator Contract
 

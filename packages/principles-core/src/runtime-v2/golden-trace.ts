@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import type { RuleHostInput } from './internalization/rule-host-contracts.js';
+import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
 const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
@@ -210,4 +211,79 @@ export function createGoldenTraceFixture(input: GoldenTraceFixtureInput): Golden
       },
     ],
   };
+}
+
+/**
+ * Input for buildGoldenTraceFromArtificer (RuleHost MVP Activation, PRD Decision 5).
+ */
+export interface BuildGoldenTraceFromArtificerInput {
+  readonly cases: readonly GoldenTraceCaseInput[];
+  readonly sourceArtifactId?: string;
+  /** Override for createdAt; defaults to current ISO-8601 UTC timestamp. */
+  readonly createdAt?: string;
+}
+
+export type BuildGoldenTraceResult =
+  | { readonly ok: true; readonly trace: GoldenTrace }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Wrap Artificer's 2-10 GoldenTraceCaseInput[] into a complete GoldenTrace with
+ * metadata (traceId / createdAt / version). Unlike createGoldenTraceFixture
+ * (fixed 2-case shape), this preserves an arbitrary number of cases.
+ *
+ * Returns a discriminated union rather than throwing: 0 cases, missing
+ * positive/negative partner, or malformed input yields `{ ok: false, reason }`
+ * so the caller (Evaluator assembly) can degrade gracefully without try/catch.
+ *
+ * The produced GoldenTrace is validated against validateGoldenTrace() before
+ * returning; a result with ok=true always passes structural validation.
+ */
+export function buildGoldenTraceFromArtificer(input: BuildGoldenTraceFromArtificerInput): BuildGoldenTraceResult {
+  if (!Array.isArray(input.cases)) {
+    return { ok: false, reason: 'cases must be an array' };
+  }
+  if (input.cases.length === 0) {
+    return { ok: false, reason: 'cases must contain at least 1 positive + 1 negative case, got 0' };
+  }
+
+  let hasPositive = false;
+  let hasNegative = false;
+  const mappedCases: GoldenTraceCase[] = [];
+  for (const entry of input.cases) {
+    // GoldenTraceCaseInput and GoldenTraceCase share the same structural shape;
+    // we re-validate each entry defensively (Runtime Contract Rule 4) rather
+    // than trust the upstream type, since this function may receive values
+    // read back from an artifact's contentJson.
+    const caseResult = validateGoldenTraceCase(entry);
+    if (!caseResult.valid) {
+      return { ok: false, reason: `invalid golden trace case: ${caseResult.errors.join('; ')}` };
+    }
+    if (entry.kind === 'positive') hasPositive = true;
+    else hasNegative = true;
+    mappedCases.push(entry as GoldenTraceCase);
+  }
+
+  if (!hasPositive || !hasNegative) {
+    const missing = !hasPositive && !hasNegative
+      ? 'positive and negative'
+      : !hasPositive ? 'positive' : 'negative';
+    return { ok: false, reason: `cases must include at least one ${missing} case` };
+  }
+
+  const trace: GoldenTrace = {
+    traceId: `golden-trace-artificer-${Date.now().toString(36)}`,
+    sourceArtifactId: input.sourceArtifactId,
+    version: 1,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    cases: mappedCases,
+  };
+
+  // Final structural guard: never return a GoldenTrace that fails validation.
+  const validation = validateGoldenTrace(trace);
+  if (!validation.valid) {
+    return { ok: false, reason: `produced trace failed validation: ${validation.errors.join('; ')}` };
+  }
+
+  return { ok: true, trace };
 }

@@ -616,9 +616,10 @@ describe("PRI-332: Principle Review readability", () => {
   it("PrinciplesPage never shows raw i18n key for unknown channels", () => {
     // Old pattern: t("principles." + (CHANNEL_LABELS[ch] ?? ch))
     // This would show "principles.model_training" as raw key for unknown channels
-    // New pattern: CHANNEL_LABELS[ch] ? t(...) : ch
+    // Current pattern: enumLabel('channel', ch, t) — centralized 3-tier fallback
+    // (i18n → local map → raw value) that never exposes a raw i18n key.
     expect(principlesPageSrc).not.toMatch(/CHANNEL_LABELS\[ch\] \?\? ch/);
-    expect(principlesPageSrc).toMatch(/CHANNEL_LABELS\[ch\]/);
+    expect(principlesPageSrc).toMatch(/enumLabel\(['"]channel['"]/);
   });
 
   it("language hint i18n keys exist in both languages", () => {
