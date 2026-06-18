@@ -99,7 +99,7 @@ export interface L2AgentLoopAdapterConfig {
  * while L1 uses @mariozechner; the two scopes must not cross-import). Built-in providers use
  * getModel(); custom OpenAI-compatible endpoints construct a Model object directly.
  */
-function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
+export function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
   const knownProviders = getProviders();
   if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
     // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
