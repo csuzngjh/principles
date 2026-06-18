@@ -34,6 +34,7 @@ import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
+import { handleRunRuleHost } from './commands/runtime-internalization-run-rulehost.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
@@ -534,6 +535,19 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
+  });
+
+internalizationCmd
+  .command('run-rulehost')
+  .description('Full-chain: drive a pain signal to a validated rule artifact (pain → dreamer → philosopher → scribe → adversarial loop)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .requiredOption('--pain-id <id>', 'Pain ID whose internalization chain to drive (run `pd pain record` first)')
+  .option('--channel <channel>', 'Activation channel: code_tool_hook, prompt, defer_archive (default: code_tool_hook)', 'code_tool_hook')
+  .option('--max-rounds <n>', 'Max adversarial rounds (PRD cap = 2)', parseInt)
+  .option('--timeout-ms <ms>', 'Per-LLM-call timeout in milliseconds (default: 300000)', parseInt)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRunRuleHost({ workspace: opts.workspace, painId: opts.painId, channel: opts.channel, maxRounds: opts.maxRounds, timeoutMs: opts.timeoutMs, json: opts.json });
   });
 
 internalizationCmd

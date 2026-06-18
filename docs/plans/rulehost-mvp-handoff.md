@@ -29,7 +29,23 @@
 
 ## 3. 待完成 Phase
 
-**全部完成。** RuleHost MVP Activation 切片(PRI-421..428)落地。下一步:开 PR 统一 review。
+**全部完成,已接入生产。** RuleHost MVP Activation 切片(PRI-421..428)+ 最后一公里接线(PRI-429)全部落地。
+
+### ✅ code_tool_hook 通道已接入生产
+
+`pd runtime internalization run-rulehost --pain-id <id> --workspace <dir>` 从痛苦信号驱动到 validated rule artifact,全链路打通:
+
+```
+pain → dreamer → philosopher → scribe → artificer↔evaluator adversarial loop → validated rule artifact
+```
+
+- **Service**: `packages/pd-cli/src/services/rulehost-pipeline-runner.ts` — `runRuleHostPipeline()`
+- **Command**: `packages/pd-cli/src/commands/runtime-internalization-run-rulehost.ts`
+- **gateDeps**: `createSandboxGateDeps()`(compileDemoRule + evaluateInRefinerSandbox,与生产 loadRuleImplementationModule 字节等价)
+- **Unit test**: 2 pass(mock LLM + 真实 sandbox 执行生成的代码)
+- **E2e smoke**: `tests/services/rulehost-pipeline-e2e.test.ts`(真实 LLM,无 API key 时条件跳过)
+
+种子用户可通过此命令把痛苦信号变成可激活的规则。
 
 ## 4. 关键设计契约(context 压缩后必读)
 
