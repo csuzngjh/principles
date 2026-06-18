@@ -42,6 +42,9 @@ dist/
 
 # Temp/Scripts
 update_readmes.py
+RERUN-SUMMARY.txt
+check-pd-db.js
+*.bak
 
 
 # OpenClaw Plugin Build & Links
