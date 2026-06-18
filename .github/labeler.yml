@@ -13,7 +13,6 @@ dependencies:
           - '**/package.json'
           - '**/package-lock.json'
           - '**/yarn.lock'
-          - '**/pnpm-lock.yaml'
 
 typescript:
   - changed-files:

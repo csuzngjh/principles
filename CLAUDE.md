@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Product boundary: PD does not own general task execution, general memory, tool-call repair, or autonomous value decisions. Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) when creating or planning issues, or when changing product scope, architecture, roadmaps, user journeys, surfaced functionality, activation channels, or public product copy. A narrow implementation, bug, test, or CI fix inside an approved issue may rely on this summary unless it changes those boundaries.
 
 **Main package:** `packages/openclaw-plugin/`
-**Package manager:** pnpm (monorepo with workspaces)
+**Package manager:** npm (monorepo with workspaces)
 
 ## Commands
 

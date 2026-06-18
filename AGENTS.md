@@ -95,7 +95,7 @@ After code review (if a real bug is found):
 
 ## Project Overview
 
-**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, pnpm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
+**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, npm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
 
 ## Critical Rules
 
