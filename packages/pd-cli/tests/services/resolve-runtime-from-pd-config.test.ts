@@ -421,4 +421,63 @@ describe('resolveRuntimeWithOverrides', () => {
       expect(result.runtimeProfileLabel).toBe('pi-ai: anthropic/claude-3-5-sonnet');
     } finally { rmTmpDir(tmp); }
   });
+
+  describe('empty-string normalization (PRI-402)', () => {
+    it('normalizes empty-string provider override to undefined', () => {
+      const tmp = mkTmpDir();
+      writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
+      try {
+        const result = resolveRuntimeWithOverrides(tmp, { provider: '' }, mockEnvWithKeys);
+        expect(result.mergedConfig).not.toBeNull();
+        if (!result.mergedConfig) throw new Error('Expected mergedConfig');
+        expect(result.mergedConfig.provider).toBe(undefined);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('normalizes empty-string model override to undefined', () => {
+      const tmp = mkTmpDir();
+      writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
+      try {
+        const result = resolveRuntimeWithOverrides(tmp, { model: '' }, mockEnvWithKeys);
+        expect(result.mergedConfig).not.toBeNull();
+        if (!result.mergedConfig) throw new Error('Expected mergedConfig');
+        expect(result.mergedConfig.model).toBe(undefined);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('normalizes empty-string apiKeyEnv override to undefined', () => {
+      const tmp = mkTmpDir();
+      writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
+      try {
+        const result = resolveRuntimeWithOverrides(tmp, { apiKeyEnv: '' }, mockEnvWithKeys);
+        expect(result.mergedConfig).not.toBeNull();
+        if (!result.mergedConfig) throw new Error('Expected mergedConfig');
+        expect(result.mergedConfig.apiKeyEnv).toBe(undefined);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('normalizes empty-string baseUrl override to undefined', () => {
+      const tmp = mkTmpDir();
+      writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
+      try {
+        const result = resolveRuntimeWithOverrides(tmp, { baseUrl: '' }, mockEnvWithKeys);
+        expect(result.mergedConfig).not.toBeNull();
+        if (!result.mergedConfig) throw new Error('Expected mergedConfig');
+        expect(result.mergedConfig.baseUrl).toBe(undefined);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('preserves non-empty string values', () => {
+      const tmp = mkTmpDir();
+      writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
+      try {
+        const result = resolveRuntimeWithOverrides(tmp, {}, mockEnvWithKeys);
+        expect(result.mergedConfig).not.toBeNull();
+        if (!result.mergedConfig) throw new Error('Expected mergedConfig');
+        expect(result.mergedConfig.provider).toBe('anthropic');
+        expect(result.mergedConfig.model).toBe('claude-3-5-sonnet');
+        expect(result.mergedConfig.apiKeyEnv).toBe('ANTHROPIC_API_KEY');
+      } finally { rmTmpDir(tmp); }
+    });
+  });
 });
