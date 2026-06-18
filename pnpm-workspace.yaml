@@ -1,7 +1,0 @@
-packages:
-  - 'packages/*'
-
-dangerouslyAllowAllBuilds: true
-
-overrides:
-  "@principles/core": "workspace:*"
