@@ -314,7 +314,7 @@ export function PrincipleDetailPage() {
   if (loading) {
     return (
       <PageShell>
-        <PageLoading cardCount={1} />
+        <PageLoading cardCount={1} label={t("principles.loading", { defaultValue: "Loading…" })} />
       </PageShell>
     );
   }

@@ -352,7 +352,7 @@ export function ActivationPage() {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <PageLoading cardCount={4} />
+        <PageLoading cardCount={4} label={t("common.loading")} />
       </PageShell>
     );
   }

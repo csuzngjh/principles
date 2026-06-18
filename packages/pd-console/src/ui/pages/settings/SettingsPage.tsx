@@ -255,7 +255,7 @@ export function SettingsPage() {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <PageLoading cardCount={3} />
+        <PageLoading cardCount={3} label={t("common.loading")} />
       </PageShell>
     );
   }

@@ -121,7 +121,7 @@ export function UpdatePage() {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <PageLoading cardCount={2} />
+        <PageLoading cardCount={2} label={t("common.loading")} />
       </PageShell>
     );
   }

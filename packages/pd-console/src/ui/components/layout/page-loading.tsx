@@ -4,10 +4,25 @@ import { Skeleton } from "../ui/skeleton.js";
  * Reusable loading skeleton for full-page loading states.
  * Shows a title skeleton + N card skeletons with a subtle fade-in.
  * Replaces plain "Loading…" text across all pages for consistent perceived performance.
+ *
+ * Accessibility: the root container is a live region (role="status" aria-live="polite")
+ * with a localized aria-label, so screen readers announce the loading state.
+ * Callers MUST pass a localized `label` (e.g. t("common.loading")).
  */
-export function PageLoading({ cardCount = 3 }: { cardCount?: number }) {
+export function PageLoading({
+  cardCount = 3,
+  label,
+}: {
+  cardCount?: number;
+  label: string;
+}) {
   return (
-    <div className="animate-[pdFadeIn_200ms_ease-out]">
+    <div
+      className="animate-[pdFadeIn_200ms_ease-out]"
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+    >
       {/* Title skeleton */}
       <Skeleton className="h-8 w-[60%] rounded-[4px] mb-3" />
       <Skeleton className="h-4 w-[80%] rounded-sm mb-2" />

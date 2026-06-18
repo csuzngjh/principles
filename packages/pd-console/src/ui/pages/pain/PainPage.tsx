@@ -124,7 +124,7 @@ export function PainPage() {
 
       {/* Content area */}
       {state.status === 'loading' && (
-        <PageLoading cardCount={4} />
+        <PageLoading cardCount={4} label={t('common.loading')} />
       )}
 
       {state.status === 'error' && (

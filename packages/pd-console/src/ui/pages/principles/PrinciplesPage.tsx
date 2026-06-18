@@ -332,7 +332,12 @@ export function PrinciplesPage() {
 
       {/* Content */}
       {loading && (
-        <div className="grid gap-3 animate-[pdFadeIn_200ms_ease-out]">
+        <div
+          className="grid gap-3 animate-[pdFadeIn_200ms_ease-out]"
+          role="status"
+          aria-live="polite"
+          aria-label={t("principles.loading", { defaultValue: "Loading…" })}
+        >
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
