@@ -13,7 +13,7 @@ export function SectionTitle({ children, className, ...props }: SectionTitleProp
   return (
     <h2
       className={cn(
-        "font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3",
+        "font-mono text-[11px] uppercase tracking-[var(--tracking-wide)] text-ink-3",
         "border-b border-line pb-2 mb-4",
         className
       )}
