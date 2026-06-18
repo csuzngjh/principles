@@ -97,6 +97,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
   { id: 'correction_observer', category: 'quiet', enabled: true, since: '2026-06-02', description: 'Independent correction observer service for keyword self-correction (MVP-Core per ADR-0014 amendment, PRI-293; quiet flag to allow runtime disable)' },
   { id: 'internalization_auto_consumer', category: 'quiet', enabled: true, since: '2026-06-13', description: 'Bounded auto-consumer for dreamer internalization tasks — prevents ready tasks from pending forever (PRI-381; quiet flag, default on, disableable via config)' },
+  // PRI-408: Story A approval-completion orchestrator. Replaces the demo direct-writer
+  // activation path with a formal ApprovalCompletionService that validates approval state,
+  // enforces idempotency, and dispatches via ActivationDispatcher with rolloutDecision='approved'.
+  // Registered as quiet (default on, disableable) so operators can turn off the new orchestrator
+  // without affecting already-activated data — falling back to manual dispatch.
+  { id: 'story_a_approval_completion', category: 'quiet', enabled: true, since: '2026-06-18', description: 'Story A approval-completion orchestrator (PRI-408) — formal service replacing demo direct-writer activation; quiet flag, default on, disableable via config' },
 
   // MVP-Quiet — opt-in or opt-out via config; enabled value varies per flag
   // Only flags with real consumption paths are registered (PRI-239 constraint)

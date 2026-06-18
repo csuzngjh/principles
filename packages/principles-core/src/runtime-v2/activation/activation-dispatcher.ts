@@ -114,6 +114,13 @@ export class ActivationDispatcher {
       return { decision: 'refused', reason: 'rollout_rejected', channel: input.channel };
     }
 
+    // 'approved' = approval already granted externally (ApprovalCompletionService).
+    // Bypass the approval queue check and activate directly. This is the
+    // post-approval dispatch path for high-risk channels (code_tool_hook).
+    if (input.rolloutDecision === 'approved') {
+      return this.activateArtifact(input, artifact, idempotencyKey);
+    }
+
     // Auto-promotion bypasses both channel-risk gating AND explicit require_approval from the rollout gate.
     // This is intentional: high-confidence skill artifacts are safe enough to activate without human review.
     const needsApproval = input.rolloutDecision === 'require_approval' || !isLowRiskChannel(input.channel);

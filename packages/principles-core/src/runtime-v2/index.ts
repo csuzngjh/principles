@@ -1088,11 +1088,15 @@ export {
   resolvePrincipleFromArtifact,
   trimToBudget,
   renderPrinciplesToDirectives,
+  createProductionGateDeps,
+  ApprovalCompletionService,
 } from './activation/index.js';
 
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  ApprovalCompletionInput,
+  ApprovalCompletionResult,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

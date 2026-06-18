@@ -15,11 +15,15 @@ import {
   ActivationDispatcher,
   PromptWriter,
   DeferArchiveWriter,
+  RuleHostWriter,
+  createProductionGateDeps,
+  ApprovalCompletionService,
   ApprovalQueue,
   mapConfidenceToLabel,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import { loadWorkspaceFeatureFlags } from '../config/feature-flags.js';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -165,6 +169,25 @@ export class ApprovalsConsoleModel {
     existing: ApprovalRecord,
     decidedBy: string,
   ): Promise<ActivationDecision | undefined> {
+    // Feature flag gate (Contract F): when story_a_approval_completion is disabled,
+    // the new orchestrator is deactivated without damaging existing data.
+    // The approval remains in 'approved' status; only activation is skipped.
+    const flagResult = loadWorkspaceFeatureFlags(this.workspaceDir);
+    if (!flagResult.ok) {
+      return {
+        decision: 'refused' as const,
+        reason: `feature_flag_load_failed: ${flagResult.reason}`,
+        channel: existing.channel,
+        riskLevel: 'low' as const,
+      };
+    }
+    const completionFlag = flagResult.flags.flags.story_a_approval_completion;
+    if (!completionFlag || !completionFlag.enabled) {
+      // Flag disabled — return undefined so the caller knows activation was skipped.
+      // The approval record itself is not rolled back (Contract F: no data damage).
+      return undefined;
+    }
+
     try {
       const conn = this.getWriteConnection();
       const piArtifactStore = new SqlitePIArtifactStore(conn);
@@ -188,19 +211,45 @@ export class ApprovalsConsoleModel {
       };
       const activationStateStore = new SqliteActivationStateStore(conn);
       const approvalQueueStore = new SqliteApprovalQueueStore(conn);
+      // Wire all three MVP-Core writers, including RuleHostWriter for code_tool_hook.
+      // This fixes the P0 breakpoint where code_tool_hook approvals could not activate.
       const dispatcher = new ActivationDispatcher(
         artifactReadModel,
         activationStateStore,
-        { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore },
+        {
+          writers: [
+            new PromptWriter(),
+            new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+            new DeferArchiveWriter(),
+          ],
+          approvalQueueStore,
+        },
       );
-      return await dispatcher.dispatch({
-        artifactId: existing.artifactId,
-        channel: existing.channel,
-        rolloutDecision: 'auto_activate',
+
+      // Use the formal ApprovalCompletionService (Contract B) instead of the
+      // demo "approve → direct writer" pattern. The service validates approval
+      // status, enforces idempotency, and dispatches with rolloutDecision='approved'.
+      const completionService = new ApprovalCompletionService(
+        approvalQueueStore,
+        dispatcher,
+        activationStateStore,
+      );
+      const completionResult = await completionService.completeApproval({
+        approvalId: existing.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
-        confirm: true,
       });
+
+      if (!completionResult.ok) {
+        return {
+          decision: 'refused' as const,
+          reason: `approval_completion_failed: ${completionResult.reason}`,
+          channel: existing.channel,
+          riskLevel: 'low' as const,
+        };
+      }
+
+      return completionResult.decision;
     } catch (dispatchErr) {
       const dispatchMsg = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
       return {

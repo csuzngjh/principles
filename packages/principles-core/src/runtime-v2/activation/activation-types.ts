@@ -21,7 +21,16 @@ export type ActivationActor =
   | { kind: 'agent'; agentId: string }
   | { kind: 'human'; userId: string };
 
-export type RolloutActivationDecision = 'auto_activate' | 'require_approval' | 'reject';
+/**
+ * Rollout activation decision from the rollout reviewer.
+ * - 'auto_activate': low-risk channel, activate directly
+ * - 'require_approval': enqueue for owner approval
+ * - 'reject': refuse activation
+ * - 'approved': approval already granted externally (ApprovalCompletionService).
+ *   Bypasses the approval queue check and activates directly. This is the
+ *   post-approval dispatch path for high-risk channels.
+ */
+export type RolloutActivationDecision = 'auto_activate' | 'require_approval' | 'reject' | 'approved';
 
 export interface DispatchInput {
   artifactId: string;
@@ -131,6 +140,12 @@ export interface ApprovalRecord {
   confidenceExplanation?: string;
   effectDescription?: string;
   rejectionEffect?: string;
+  /** Story A (PRI-408): Edit tracking — when owner edits the principle/rule before approving */
+  editedAt?: string;
+  editedBy?: string;
+  editReason?: string;
+  /** The previous artifactId before the edit (for lineage tracking) */
+  previousArtifactId?: string;
 }
 
 export type ConfidenceLabel = 'high' | 'medium' | 'low';
@@ -203,6 +218,22 @@ export interface ApprovalQueueStore {
   reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
   /** Roll back an approved approval to pending so it can be re-approved. Used when post-approval activation dispatch fails. */
   resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }>;
+  /**
+   * Story A (PRI-408): Edit a pending approval's artifact to a new version.
+   * Updates artifactId, records edit metadata, keeps status as pending.
+   * The caller is responsible for creating the new artifact and performing
+   * schema validation + sandbox replay BEFORE calling this method.
+   * Returns error if the approval is not in 'pending' status.
+   */
+  edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult>;
+}
+
+export interface ApprovalEditInput {
+  approvalId: string;
+  editedBy: string;
+  newArtifactId: string;
+  editReason: string;
+  now: string;
 }
 
 export function makeIdempotencyKey(artifactId: string, channel: InternalizationChannel): string {

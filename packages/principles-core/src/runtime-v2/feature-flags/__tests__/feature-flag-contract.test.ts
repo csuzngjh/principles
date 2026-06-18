@@ -216,6 +216,7 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'diagnostician_split_pipeline') continue;
       if (flag.id === 'internalization_core_grounding') continue;
       if (flag.id === 'internalization_auto_consumer') continue;
+      if (flag.id === 'story_a_approval_completion') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });

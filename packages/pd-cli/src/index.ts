@@ -47,6 +47,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
+import { handleRuntimeActivationDeactivate, handleRuntimeActivationList } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -590,6 +591,39 @@ activationCmd
       channel: opts.channel,
       dryRun: opts.dryRun,
       confirm: opts.confirm,
+      json: opts.json,
+    });
+  });
+
+// PRI-408 Contract E: Owner-initiated rollback/deactivate of an activation.
+// Idempotent — calling twice on the same ID is safe and returns ok=false with reason.
+activationCmd
+  .command('deactivate')
+  .description('Deactivate (rollback) an active activation — idempotent (PRI-408 Contract E)')
+  .requiredOption('-a, --activation-id <id>', 'Activation ID to deactivate')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationDeactivate({
+      workspace: opts.workspace,
+      activationId: opts.activationId,
+      json: opts.json,
+    });
+  });
+
+// PRI-408 Contract D: Owner observability — list current activations.
+activationCmd
+  .command('list')
+  .description('List activations (default: active only) — PRI-408 Contract D observability')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-c, --channel <channel>', 'Filter by channel (prompt|code_tool_hook)')
+  .option('--include-deactivated', 'Include deactivated records in output')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationList({
+      workspace: opts.workspace,
+      channel: opts.channel,
+      includeDeactivated: opts.includeDeactivated,
       json: opts.json,
     });
   });
