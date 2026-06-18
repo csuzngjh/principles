@@ -29,6 +29,8 @@
  *     blend of multiple attempts.
  */
 import { randomUUID } from 'node:crypto';
+import { completeSimple } from '@earendil-works/pi-ai';
+import type { Context } from '@earendil-works/pi-ai';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -51,6 +53,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
+import { resolveL2Model } from './l2-agent-loop-adapter.js';
 
 /**
  * Mockable LLM call. Receives the assembled prompt (initial prompt + optional
@@ -58,6 +61,97 @@ import { safeStringifyPreview, truncatePreview } from './output-repair-contract.
  * caller (adapter) validates it before use — never trust the shape here.
  */
 export type ArtificerL2GenerateCodeFn = (prompt: string) => Promise<unknown>;
+
+/**
+ * Factory: build a production `generateCode` function from LLM config.
+ *
+ * Uses `resolveL2Model` + `completeSimple` from @earendil-works/pi-ai. The
+ * returned function takes a prompt string, calls the LLM, extracts text content,
+ * parses JSON, and returns it as `unknown` (the adapter validates it).
+ *
+ * This factory lives in principles-core (not pd-cli) so the LLM wiring logic
+ * stays in one place and pd-cli doesn't need a direct @earendil-works/pi-ai
+ * dependency.
+ *
+ * ERR refs:
+ *   - ERR-001: returned value is `unknown` — caller must validate
+ *   - ERR-014: response content is safely extracted (no raw JSON.stringify on unknown)
+ */
+/**
+ * Extract the first JSON object from a text string. Mirrors the pattern in
+ * l2-agent-loop-adapter.ts. Returns null if no JSON object is found.
+ */
+function extractJsonObject(text: string): unknown | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = text.slice(start, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function buildArtificerL2GenerateCode(config: {
+  readonly provider: string;
+  readonly model: string;
+  readonly apiKey: string;
+  readonly baseUrl?: string;
+  readonly timeoutMs?: number;
+}): ArtificerL2GenerateCodeFn {
+  const model = resolveL2Model(config.provider, config.model, config.baseUrl);
+  const timeoutMs = config.timeoutMs ?? 120_000;
+
+  return async (prompt: string): Promise<unknown> => {
+    const context: Context = {
+      messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+    };
+    const response = await completeSimple(model, context, {
+      apiKey: config.apiKey,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    // Extract text content from the response (ERR-014: safe extraction).
+    let text: string | null = null;
+    if (typeof response.content === 'string') {
+      text = response.content;
+    } else if (Array.isArray(response.content)) {
+      const textPart = response.content.find(
+        (c): c is { type: 'text'; text: string } =>
+          typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text',
+      );
+      text = textPart?.text ?? null;
+    }
+    if (!text) {
+      throw new Error('ArtificerL2 generateCode: response had no text content');
+    }
+
+    // Parse JSON from the text. The adapter validates the shape — we just
+    // return the parsed value as unknown.
+    const extracted = extractJsonObject(text);
+    if (!extracted) {
+      throw new Error('ArtificerL2 generateCode: response had no parseable JSON');
+    }
+    return extracted;
+  };
+}
 
 export interface ArtificerL2AdapterConfig {
   /** Injected LLM call (mockable; production wires completeSimple). */

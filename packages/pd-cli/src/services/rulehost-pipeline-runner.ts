@@ -55,6 +55,33 @@ import { compileDemoRule } from './demo-rule-compiler.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * Code-rule capability (atomic: ArtificerL2 + Evaluator).
+ *
+ * Per the user correction (2026-06-18): ArtificerL2 and Evaluator are atomic —
+ * both must run or neither runs. When enabled, the adversarial loop runs with
+ * the artificerAdapter (L2 write-test-fix). When disabled or not provided, the
+ * pipeline degrades to text-principle-only.
+ *
+ * The caller (CLI handler) resolves per-agent config (enabled/runtimeProfile)
+ * and constructs the ArtificerL2Adapter when both artificer + evaluator are
+ * enabled. The pipeline runner branches on `enabled` — it does NOT do config
+ * resolution itself (separation of concerns: service vs I/O).
+ */
+export interface CodeRuleCapability {
+  /** Whether the capability is enabled (atomic: both artificer + evaluator enabled in config). */
+  readonly enabled: boolean;
+  /**
+   * The ArtificerL2Adapter (or test-double) for the artificer stage. Required
+   * when enabled. When enabled, this adapter replaces the base runtimeAdapter
+   * for the ArtificerRunner only; EvaluatorRunner still uses the base adapter.
+   * Ignored when disabled (may be omitted or set to the base adapter).
+   */
+  readonly artificerAdapter?: PDRuntimeAdapter;
+  /** Structured reason when disabled (for degradation reporting). Required when disabled. */
+  readonly disabledReason?: string;
+}
+
 export interface RuleHostPipelineOptions {
   /** Workspace directory containing .state/ (SQLite stores). */
   readonly workspaceDir: string;
@@ -63,8 +90,16 @@ export interface RuleHostPipelineOptions {
   /**
    * Runtime adapter (LLM). Caller constructs it (PiAi / test-double) so the
    * service stays runtime-agnostic. Mirrors full-chain-real-llm.test.ts.
+   *
+   * Used for: dreamer, philosopher, scribe, and evaluator (when capability ON).
+   * The artificer stage uses codeRuleCapability.artificerAdapter when enabled.
    */
   readonly runtimeAdapter: PDRuntimeAdapter;
+  /**
+   * Code-rule capability (atomic: ArtificerL2 + Evaluator). When omitted, the
+   * capability is treated as OFF with reason 'code_rule_capability not provided'.
+   */
+  readonly codeRuleCapability?: CodeRuleCapability;
   /** Internalization channel for created tasks (default 'code_tool_hook'). */
   readonly channel?: 'prompt' | 'code_tool_hook' | 'defer_archive';
   /** Max adversarial rounds (PRD cap = 2). */
@@ -73,10 +108,16 @@ export interface RuleHostPipelineOptions {
   readonly timeoutMs?: number;
   /** Runner poll interval (default 100). */
   readonly pollIntervalMs?: number;
+  /**
+   * Max stage retry attempts for transient `retried` status (default 2).
+   * Each retry gets fresh state from the state manager (Runtime Contract Rule 7).
+   * When exhausted, the stage is marked 'degraded' with a structured reason.
+   */
+  readonly maxStageRetries?: number;
   /** Correlation prefix for task IDs. */
   readonly correlationId?: string;
   /** Progress callback (stage start/complete). Optional. */
-  readonly onProgress?: (stage: string, status: 'start' | 'succeeded' | 'failed' | 'degraded', detail?: string) => void;
+  readonly onProgress?: (stage: string, status: 'start' | 'succeeded' | 'failed' | 'degraded' | 'skipped', detail?: string) => void;
   /**
    * Called once after the internal RuntimeStateManager + artifactStore are
    * constructed, so the caller (e.g. a test-double adapter) can wire the store
@@ -94,20 +135,31 @@ export interface RuleHostPipelineStage {
   readonly reason?: string;
 }
 
+/**
+ * Final pipeline decision.
+ *
+ * - `candidate_ready_for_owner_review`: adversarial loop approved. A validated
+ *   rule artifact exists and is WAITING for owner review. This is NOT owner
+ *   approval — it means the candidate is ready for the owner to review.
+ * - `text_principle_only`: code-rule capability OFF (artificer or evaluator
+ *   disabled). No rule artifact; a text principle artifact is produced for
+ *   prompt-channel fallback.
+ * - `generation_rejected`: pipeline failed (no dreamer task, stage failure, or
+ *   evaluator rejected the candidate). No rule artifact.
+ */
 export interface RuleHostPipelineResult {
-  /** Final outcome mirroring the adversarial loop decision. */
-  readonly decision: 'approved' | 'rejected';
+  readonly decision: 'candidate_ready_for_owner_review' | 'text_principle_only' | 'generation_rejected';
   readonly painId: string;
   readonly stages: RuleHostPipelineStage[];
-  /** Scribe task that fed the adversarial loop. */
+  /** Scribe task that fed the adversarial loop (or text-principle path). */
   readonly scribeTaskId: string | null;
   /** From the adversarial loop result, when reached. */
   readonly adversarialLoop?: AdversarialLoopResult;
-  /** Rule artifact ID when approved; null otherwise. */
+  /** Rule artifact ID when candidate_ready_for_owner_review; null otherwise. */
   readonly ruleArtifactId: string | null;
-  /** Principle artifact ID (prompt-channel fallback, always present when scribe ran). */
+  /** Principle artifact ID (always present when scribe ran). */
   readonly principleArtifactId: string | null;
-  /** Structured reason when decision === 'rejected'. */
+  /** Structured reason when decision is not candidate_ready_for_owner_review. */
   readonly degradationReason?: string;
 }
 
@@ -142,14 +194,26 @@ export function createSandboxGateDeps(): RefinerRuleHostGateDeps {
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_POLL_MS = 100;
+const DEFAULT_MAX_STAGE_RETRIES = 2;
 
 export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promise<RuleHostPipelineResult> {
   const channel = opts.channel ?? 'code_tool_hook';
   const maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_MS;
+  const maxStageRetries = opts.maxStageRetries ?? DEFAULT_MAX_STAGE_RETRIES;
   const correlation = opts.correlationId ?? `rulehost-${opts.painId}`;
   const onProgress = opts.onProgress ?? (() => { /* noop */ });
+
+  // ── Resolve code-rule capability (atomic: ArtificerL2 + Evaluator) ──
+  // Per user correction (2026-06-18): both must be enabled or neither runs.
+  // When OFF, degrade to text-principle-only after scribe. When ON, run the
+  // adversarial loop with the artificerAdapter (L2 write-test-fix).
+  const capability = opts.codeRuleCapability;
+  const capabilityEnabled = capability?.enabled === true;
+  const capabilityDisabledReason = capability?.enabled === false
+    ? (capability.disabledReason ?? 'code_rule_capability is disabled')
+    : 'code_rule_capability not provided — default OFF (set codeRuleCapability.enabled=true when both artificer + evaluator agents are enabled)';
 
   const stages: RuleHostPipelineStage[] = [];
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
@@ -170,6 +234,9 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // runs via `pd pain record` → PainSignalBridge.onPainDetected). We need the
     // dreamer task to start the chain. If none exists, the operator must run
     // `pd pain record` first — fail loud with guidance.
+    //
+    // D fix (PRI-429): exact sourcePainId match via Object.hasOwn on parsed
+    // diagnosticJson. No substring matching (pain-1 must NOT match pain-10).
     onProgress('pain_lookup', 'start', `painId=${opts.painId}`);
     const dreamerSeedTaskId = await findDreamerTaskForPain(stateManager, opts.painId);
     if (!dreamerSeedTaskId) {
@@ -186,7 +253,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
       runnerOpts,
     );
-    const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId);
+    const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('dreamer', dreamerSeedTaskId, dreamerResult));
     if (dreamerResult.status !== 'succeeded') {
       onProgress('dreamer', 'failed', dreamerResult.failureReason);
@@ -202,7 +269,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
       runnerOpts,
     );
-    const philosopherResult = await runStage(philosopherRunner, philosopherTaskId);
+    const philosopherResult = await runStage(philosopherRunner, philosopherTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('philosopher', philosopherTaskId, philosopherResult));
     if (philosopherResult.status !== 'succeeded') {
       onProgress('philosopher', 'failed', philosopherResult.failureReason);
@@ -218,7 +285,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultScribeValidator(), artifactStore },
       runnerOpts,
     );
-    const scribeResult = await runStage(scribeRunner, scribeTaskId);
+    const scribeResult = await runStage(scribeRunner, scribeTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('scribe', scribeTaskId, scribeResult));
     if (scribeResult.status !== 'succeeded') {
       onProgress('scribe', 'failed', scribeResult.failureReason);
@@ -226,10 +293,29 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     }
     onProgress('scribe', 'succeeded');
 
+    // ── Atomic capability branching ──
+    // Per user correction (2026-06-18): ArtificerL2 + Evaluator are atomic.
+    // When OFF (or not provided), skip the adversarial loop entirely and
+    // degrade to text-principle-only. The scribe's principle artifact remains
+    // for prompt-channel fallback.
+    if (!capabilityEnabled) {
+      stages.push({ name: 'adversarial_loop', status: 'skipped', reason: capabilityDisabledReason });
+      onProgress('adversarial_loop', 'skipped', capabilityDisabledReason);
+      return await textPrincipleOnlyResult({ painId: opts.painId, stages, scribeTaskId, disabledReason: capabilityDisabledReason, artifactStore });
+    }
+
     // ── Stage: adversarial loop (artificer↔evaluator) ──
+    // Capability ON: use the artificerAdapter (L2 write-test-fix) for the
+    // artificer stage, and the base runtimeAdapter for the evaluator stage.
+    if (!capability?.artificerAdapter) {
+      // Contract violation: enabled but no adapter provided. Fail loud.
+      stages.push({ name: 'adversarial_loop', status: 'failed', reason: 'artificerAdapter not provided' });
+      onProgress('adversarial_loop', 'failed', 'artificerAdapter not provided');
+      return rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided');
+    }
     onProgress('adversarial_loop', 'start');
     const artificerRunner = new ArtificerRunner(
-      { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore },
+      { stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore },
       runnerOpts,
     );
     const evaluatorRunner = new EvaluatorRunner(
@@ -252,8 +338,15 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     stages.push({ name: 'adversarial_loop', status: loopStatus, taskId: loopResult.finalEvaluatorTaskId, reason: loopResult.degradationReason });
     onProgress('adversarial_loop', loopResult.decision === 'approved' ? 'succeeded' : 'degraded', loopResult.degradationReason);
 
+    // Map adversarial loop decision to pipeline decision:
+    //   'approved' → candidate_ready_for_owner_review (NOT owner approval)
+    //   'rejected' → generation_rejected
+    const pipelineDecision = loopResult.decision === 'approved'
+      ? 'candidate_ready_for_owner_review' as const
+      : 'generation_rejected' as const;
+
     return {
-      decision: loopResult.decision,
+      decision: pipelineDecision,
       painId: opts.painId,
       stages,
       scribeTaskId,
@@ -269,17 +362,44 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Find the dreamer task seeded for a given pain ID.
+ *
+ * D fix (PRI-429): exact sourcePainId match via Object.hasOwn on parsed
+ * diagnosticJson. No substring matching — 'pain-1' must NOT match 'pain-10'.
+ *
+ * The sourcePainId is stored as a top-level key in diagnosticJson (outside the
+ * pi_metadata envelope), mirroring the pattern in source-trace-locator.test.ts
+ * and PainSignalBridge. Malformed JSON is skipped (not crashed). Missing
+ * sourcePainId is skipped (no match).
+ *
+ * ERR refs:
+ *   - ERR-001: parsed JSON treated as unknown
+ *   - ERR-005/007: no `as` bypass; type narrowing via typeof + Object.hasOwn
+ *   - ERR-013: Object.hasOwn for untrusted key checks
+ *   - ERR-009: missing sourcePainId = no match (fail loud, not silent skip)
+ */
 async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId: string): Promise<string | null> {
-  // The pain→dreamer bridge (PainSignalBridge.onDiagnosisComplete) seeds a
-  // dreamer task. The pain linkage may be in the taskId (when seeded with a
-  // pain-derived correlation id) or in diagnosticJson (correlationId field).
-  // Scan dreamer tasks for either.
   const tasks = await stateManager.listTasks();
   const dreamerTasks = tasks.filter((t) => t.taskKind === 'dreamer');
   for (const t of dreamerTasks) {
-    if (t.taskId.includes(painId)) return t.taskId;
-    const diag = typeof t.diagnosticJson === 'string' ? t.diagnosticJson : '';
-    if (diag.includes(painId)) return t.taskId;
+    if (typeof t.diagnosticJson !== 'string') continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(t.diagnosticJson);
+    } catch {
+      // Malformed JSON — skip this task, don't crash (Runtime Contract Rule 9:
+      // graceful degradation with observable behavior — the task is simply not
+      // a match, and the caller will report no_dreamer_task_seeded_for_pain).
+      continue;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const obj = parsed as Record<string, unknown>;
+    if (!Object.hasOwn(obj, 'sourcePainId')) continue;
+    const stored = obj.sourcePainId;
+    if (typeof stored === 'string' && stored === painId) {
+      return t.taskId;
+    }
   }
   return null;
 }
@@ -309,8 +429,42 @@ async function createInternalizationTask(
   });
 }
 
-async function runStage(runner: { run(id: string): Promise<PeerRunnerResult<unknown>> }, taskId: string) {
-  return runner.run(taskId);
+/**
+ * Run a single pipeline stage with bounded retry for transient `retried` status.
+ *
+ * Runtime Contract Rule 7: retry/repair loops must distinguish current, next,
+ * and recorded state. Each iteration calls `runner.run(taskId)` fresh — the
+ * runner reads from the state manager which has the updated task state
+ * (including any `retry_wait` → `pending` transition from the previous
+ * iteration). No stale state is carried across iterations.
+ *
+ * `retried` is NOT terminal — it means the runner hit a transient error and
+ * marked the task for retry. The pipeline retries up to `maxStageRetries`
+ * times (default 2). When exhausted, the stage is marked 'degraded' with a
+ * structured reason, and the caller treats it as a non-success outcome.
+ */
+interface RunStageOptions {
+  readonly maxStageRetries: number;
+  readonly pollIntervalMs: number;
+}
+
+async function runStage(
+  runner: { run(id: string): Promise<PeerRunnerResult<unknown>> },
+  taskId: string,
+  opts: RunStageOptions,
+): Promise<PeerRunnerResult<unknown>> {
+  let attempt = 0;
+  // First attempt is not a retry — it's the initial run.
+  let result = await runner.run(taskId);
+  while (result.status === 'retried' && attempt < opts.maxStageRetries) {
+    attempt++;
+    // Brief wait before retry to allow transient conditions to clear.
+    // The state manager has already marked the task as retry_wait; the runner
+    // will re-read it on the next .run() call (fresh state per iteration).
+    await new Promise<void>((resolve) => setTimeout(resolve, opts.pollIntervalMs));
+    result = await runner.run(taskId);
+  }
+  return result;
 }
 
 function stageFromResult(
@@ -318,22 +472,77 @@ function stageFromResult(
   taskId: string,
   result: PeerRunnerResult<unknown>,
 ): RuleHostPipelineStage {
+  // `retried` after exhausting retries is a transient-exhausted state, not a
+  // hard failure. Mark as 'degraded' so the caller can distinguish "stage
+  // failed permanently" from "stage exhausted transient retries".
+  if (result.status === 'succeeded') {
+    return { name, taskId, status: 'succeeded' };
+  }
+  if (result.status === 'retried') {
+    return {
+      name,
+      taskId,
+      status: 'degraded',
+      reason: `transient_retry_exhausted: ${result.failureReason ?? result.status}`,
+    };
+  }
   return {
     name,
     taskId,
-    status: result.status === 'succeeded' ? 'succeeded' : 'failed',
-    reason: result.status !== 'succeeded' ? (result.failureReason ?? result.status) : undefined,
+    status: 'failed',
+    reason: result.failureReason ?? result.status,
   };
 }
 
 function rejectedResult(painId: string, stages: RuleHostPipelineStage[], degradationReason: string): RuleHostPipelineResult {
   return {
-    decision: 'rejected',
+    decision: 'generation_rejected',
     painId,
     stages,
     scribeTaskId: null,
     ruleArtifactId: null,
     principleArtifactId: null,
     degradationReason,
+  };
+}
+
+/**
+ * Build a text-principle-only result when the code-rule capability is OFF.
+ *
+ * The scribe stage already produced a principle artifact (stored via the
+ * artifact store). We look it up by the scribe task ID so the caller can
+ * reference it for prompt-channel fallback.
+ */
+interface TextPrincipleOnlyParams {
+  readonly painId: string;
+  readonly stages: RuleHostPipelineStage[];
+  readonly scribeTaskId: string;
+  readonly disabledReason: string;
+  readonly artifactStore: PIArtifactStore;
+}
+
+async function textPrincipleOnlyResult(
+  params: TextPrincipleOnlyParams,
+): Promise<RuleHostPipelineResult> {
+  const { painId, stages, scribeTaskId, disabledReason, artifactStore } = params;
+  // Look up the principle artifact produced by the scribe stage.
+  let principleArtifactId: string | null = null;
+  try {
+    const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
+    const principleArt = arts.find((a) => a.artifactKind === 'principle');
+    principleArtifactId = principleArt?.artifactId ?? null;
+  } catch {
+    // Best-effort lookup — if the store query fails, principleArtifactId
+    // remains null and the degradationReason explains the situation.
+  }
+
+  return {
+    decision: 'text_principle_only',
+    painId,
+    stages,
+    scribeTaskId,
+    ruleArtifactId: null,
+    principleArtifactId,
+    degradationReason: `code_rule_capability_off: ${disabledReason}`,
   };
 }
