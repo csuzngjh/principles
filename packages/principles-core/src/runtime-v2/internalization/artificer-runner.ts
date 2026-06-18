@@ -54,6 +54,13 @@ interface ArtificerContext {
   readonly contextHash: string;
   readonly scribeArtifact: string | null;
   readonly sourceScribeArtifactId: string | null;
+  /**
+   * Prior adversarial replay failures (PRI-428). Non-null only on Round-2+
+   * retries inside runAdversarialLoop, read from the task's
+   * PITaskMetadata.adversarialFeedback. Forwarded to the prompt builder so the
+   * LLM can make targeted corrections.
+   */
+  readonly adversarialFeedback: string | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -148,9 +155,17 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
 
+    // PRI-428: carry prior adversarial replay failures into the prompt when
+    // this is a Round-2+ retry. Validated as non-empty string by the metadata
+    // parser; null when absent (Round 1 / non-loop invocations).
+    const adversarialFeedback = typeof piTask?.adversarialFeedback === 'string'
+      && piTask.adversarialFeedback.trim() !== ''
+      ? piTask.adversarialFeedback
+      : null;
+
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback };
     }
 
     for (const depId of deps) {
@@ -178,12 +193,13 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
           contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
+          adversarialFeedback,
         };
       }
     }
 
     this.emitEvent('no_scribe_artifact', taskId, {});
-    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null };
+    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback };
   }
 
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
@@ -204,6 +220,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
       contextHash: context.contextHash,
       scribeArtifact: scribeArtifactInput,
       sourceScribeArtifactId: context.sourceScribeArtifactId,
+      adversarialFeedback: context.adversarialFeedback ?? undefined,
     });
 
     return this.runtimeAdapter.startRun({

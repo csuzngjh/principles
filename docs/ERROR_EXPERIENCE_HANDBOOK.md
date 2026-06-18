@@ -104,6 +104,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
+| ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 
 ---
 
@@ -982,3 +983,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Fix**: `git checkout pnpm-lock.yaml` (revert the wrong lockfile), then `npm install --ignore-scripts` to regenerate `package-lock.json` with the new deps. Commit 3a7780e.
 - **Prevention**: Before adding/removing dependencies, check CI workflows (`grep -r "npm ci\|pnpm install" .github/workflows/`) to identify the canonical lockfile. Run the install command matching CI's package manager, then commit the lockfile CI reads. EP-06 "package runtime dependencies are declared in the package that imports them" extends to: the lockfile CI consumes must be the one updated.
 - **Recurrence**: 2026-06-16, PRI-419 / PR #953.
+
+**[ERR-069]** | Adapter `runHandle` hardcodes `status:'succeeded'` absent from `RunHandleSchema` (masked by `as RunHandle`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in `ArtificerL2Adapter`
+
+- **What happened**: Two defects found in a single self-review of `ArtificerL2Adapter` (PRI-424 Phase 4), both in the same file:
+  1. **P1 — phantom schema field**: `runHandle()` returned `{ runId, runtimeKind, startedAt, status: 'succeeded' }` cast via `as RunHandle`. But `RunHandleSchema` (runtime-protocol.ts:68-72) has **no `status` field** — it is `{ runId, runtimeKind, startedAt }`. The bogus field was invented from memory of `RunStatus` (which DOES have `status`) and silently accepted by TypeScript because the `as RunHandle` cast suppressed the shape check. The failure path (no validated candidate across all attempts) returned this handle claiming `succeeded` while `pollRun()` reported `failed` — a contradictory run state. It happened to not break production only because `BasePeerRunner.pollUntilTerminal` reads `pollRun().status`, not `handle.status`.
+  2. **P2 — degradation trusted unvalidated candidate**: On validator rejection (malformed V2), the code set `lastValidV2 = candidateWithTaskId` if the candidate was "structurally V2-shaped" (`isArtificerOutputV2` true). But that candidate had **failed validation** — its `implementationPlan`/`sourceTrace`/`generatedAt` were never checked. On exhaustion, `degradeToV1(lastValidV2)` would emit a V1 object built from an unvalidated candidate, relying on the downstream V1 validator to catch it. This violates Runtime Contract Rule 1/3: every emitted object must come from a validated source, including degraded/fallback outputs.
+- **Root cause (both)**: Writing the adapter against a *remembered* contract rather than the *actual* schema, and treating degradation as a separate trust zone from the happy path. P1 is the same class as ERR-061 ("guessed structure instead of verifying against actual type") + ERR-054 (`as` cast masking a shape mismatch). P2 is the same class as ERR-001/ERR-005/ERR-013 (EP-01 Trust Boundary) but in a new location: **the degradation/fallback path**, which is often written as an afterthought and skips the validation the happy path enforces.
+- **Fix** (commit c396ed92):
+  - P1: Removed the phantom `status` field from `runHandle()` (it is not in `RunHandleSchema`). The run's terminal status is reported solely via `pollRun()`. The failure path now `throw new PDRuntimeError('output_invalid', ...)` instead of returning a misleading handle — aligning with Dreamer L2's `L2AgentLoopAdapter` failure pattern, caught by `BasePeerRunner.handlePostLeaseError`.
+  - P2: Validator rejection no longer sets `lastValidV2`. Degradation to V1 now only happens when a **validated** V2 candidate existed but sandbox replay failed (legitimate: plan is valid, only the code was wrong). A candidate that never passed validation is never emitted, even degraded.
+  - Added 2 regression tests: (a) 3× validator-rejection → throws (no degradation); (b) validated V2 + replay failure → degrades to V1.
+- **Prevention**:
+  - When implementing a `PDRuntimeAdapter`, read `RunHandleSchema` / `RunStatusSchema` from `runtime-protocol.ts` and copy field names verbatim — do not rely on memory. The two objects differ only by `status`, which is easy to conflate.
+  - Treat every output-emitting path (happy, degraded, fallback, retry-exhausted) as a trust boundary: each must emit only objects that passed validation. Degradation is a *content* transformation (strip code fields), not a *trust* escape hatch.
+  - Prefer `throw PDRuntimeError` over returning a contradictory state object on total failure — it surfaces in `handlePostLeaseError` with a structured reason, rather than relying on the caller to cross-check handle vs pollRun.
+- **Recurrence**: First occurrence (EP-01 Trust Boundary + EP-02 Production Path Wiring). Found in self-review before external handoff; both fixed in commit c396ed92 before any PR.
