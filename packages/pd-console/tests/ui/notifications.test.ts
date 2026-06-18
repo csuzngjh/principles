@@ -97,3 +97,17 @@ describe('diffNotificationCounts', () => {
     expect(result).toEqual({ pendingIncreased: false, degradedIncreased: false });
   });
 });
+
+describe('Notification components can be imported', () => {
+  it('imports NotificationProvider', async () => {
+    const mod = await import('../../src/ui/components/notifications/NotificationProvider.js');
+    expect(mod.NotificationProvider).toBeDefined();
+    expect(typeof mod.NotificationProvider).toBe('function');
+  });
+
+  it('imports useNotifications', async () => {
+    const mod = await import('../../src/ui/components/notifications/useNotifications.js');
+    expect(mod.useNotifications).toBeDefined();
+    expect(typeof mod.useNotifications).toBe('function');
+  });
+});
