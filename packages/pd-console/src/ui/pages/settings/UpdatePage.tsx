@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
+import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchUpdateStatus,
@@ -120,9 +121,7 @@ export function UpdatePage() {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <div className="text-ink-3 text-sm" role="status" aria-live="polite">
-          {t("common.loading")}…
-        </div>
+        <PageLoading cardCount={2} label={t("common.loading")} />
       </PageShell>
     );
   }
@@ -152,6 +151,7 @@ export function UpdatePage() {
 
   return (
     <PageShell>
+      <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.update.eyebrow")}
@@ -265,6 +265,7 @@ export function UpdatePage() {
           </div>
         )}
       </section>
+      </div>
     </PageShell>
   );
 }
