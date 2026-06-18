@@ -399,7 +399,9 @@ describe('TrajectoryDatabase', () => {
       workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
       const db = new TrajectoryDatabase({ workspaceDir });
 
-      (db as any).db.exec('CREATE UNIQUE INDEX IF NOT EXISTS test_unique_source ON pain_events(source)');
+      // Temporary unique index to simulate a non-canonical_pain_id conflict.
+      // Each test uses a fresh temp DB, so cleanup is not needed.
+      (db as any).db.exec('CREATE UNIQUE INDEX test_unique_source ON pain_events(source)');
 
       db.recordPainEvent({
         sessionId: 's1',
