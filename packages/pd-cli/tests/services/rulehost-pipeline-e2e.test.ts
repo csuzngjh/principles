@@ -60,6 +60,7 @@ function makeCapabilityOnConfig(workspaceDir: string): object {
       prompt: { enabled: true, category: 'core' },
       code_tool_hook: { enabled: true, category: 'core' },
       defer_archive: { enabled: true, category: 'core' },
+      code_rule_capability: { enabled: true, category: 'quiet' },
     },
     workspace: { default: workspaceDir },
     runtimeProfiles: {
@@ -78,6 +79,7 @@ function makeCapabilityOnConfig(workspaceDir: string): object {
       agents: {
         diagnostician: { enabled: true, runtimeProfile: 'pi-ai.test' },
         dreamer: { enabled: true },
+        philosopher: { enabled: true },
         scribe: { enabled: true },
         artificer: { enabled: true, runtimeProfile: 'pi-ai.test' },
         evaluator: { enabled: true, runtimeProfile: 'pi-ai.test' },
@@ -188,6 +190,77 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('keeps code_rule_capability OFF when the quiet feature flag is omitted', async () => {
+    process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
+    const workspace = makeWorkspace((dir) => {
+      const config = makeCapabilityOnConfig(dir);
+      const features = Reflect.get(config, 'features');
+      if (features === null || typeof features !== 'object') throw new Error('features fixture missing');
+      Reflect.deleteProperty(features, 'code_rule_capability');
+      return config;
+    });
+
+    await handleRunRuleHost({ workspace, painId: 'pain-flag-off', dryRun: true, json: true });
+
+    const output = parseJsonOutput();
+    expect(output.status).toBe('dry_run');
+    expect(output.codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
+    expect(String(output.codeRuleCapability?.disabledReason)).toContain('feature flag');
+  });
+
+  it('reports the resolved runtime profile for every executed agent', async () => {
+    process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
+    const workspace = makeWorkspace(makeCapabilityOnConfig);
+
+    await handleRunRuleHost({ workspace, painId: 'pain-profiles', dryRun: true, json: true });
+
+    const output = parseJsonOutput();
+    expect(output.agentRuntimeProfiles).toEqual({
+      dreamer: 'pi-ai.test',
+      philosopher: 'pi-ai.test',
+      scribe: 'pi-ai.test',
+      artificer: 'pi-ai.test',
+      evaluator: 'pi-ai.test',
+    });
+  });
+
+  it('fails loud before mutation when philosopher is disabled', async () => {
+    process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
+    const workspace = makeWorkspace((dir) => {
+      const config = makeCapabilityOnConfig(dir);
+      const internalAgents = Reflect.get(config, 'internalAgents');
+      if (internalAgents === null || typeof internalAgents !== 'object') throw new Error('internalAgents fixture missing');
+      const agents = Reflect.get(internalAgents, 'agents');
+      if (agents === null || typeof agents !== 'object') throw new Error('agents fixture missing');
+      Reflect.set(agents, 'philosopher', { enabled: false });
+      return config;
+    });
+
+    await handleRunRuleHost({ workspace, painId: 'pain-disabled-philosopher', confirm: true, json: true });
+
+    const output = parseJsonOutput();
+    expect(output.status).toBe('failed');
+    expect(output.reason).toBe('agent_runtime_resolution_failed');
+    expect(String(output.message)).toContain('philosopher');
+    expect(process.exitCode).toBe(1);
+    expect(fs.existsSync(path.join(workspace, '.state', 'runtime-v2.sqlite'))).toBe(false);
+  });
+
+  it('rejects fractional numeric handler options as non-integers', async () => {
+    process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
+    await handleRunRuleHost({
+      workspace: makeWorkspace(makeCapabilityOnConfig),
+      painId: 'pain-fractional',
+      maxRounds: 1.5,
+      dryRun: true,
+      json: true,
+    });
+
+    const output = parseJsonOutput();
+    expect(output.status).toBe('failed');
+    expect(String(output.reason)).toContain('invalid --max-rounds');
+  });
+
   // ── Capability OFF: artificer disabled ───────────────────────────────────
 
   it('dry-run reports code_rule_capability: OFF when artificer disabled', async () => {
@@ -243,6 +316,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
         prompt: { enabled: true, category: 'core' },
         code_tool_hook: { enabled: true, category: 'core' },
         defer_archive: { enabled: true, category: 'core' },
+        code_rule_capability: { enabled: true, category: 'quiet' },
       },
       workspace: { default: dir },
       runtimeProfiles: {
@@ -270,6 +344,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
         agents: {
           diagnostician: { enabled: true, runtimeProfile: 'pi-ai.base' },
           dreamer: { enabled: true },
+          philosopher: { enabled: true },
           scribe: { enabled: true },
           artificer: { enabled: true, runtimeProfile: 'pi-ai.artificer' },
           evaluator: { enabled: true, runtimeProfile: 'pi-ai.base' },

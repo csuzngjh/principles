@@ -82,6 +82,13 @@ export interface CodeRuleCapability {
   readonly disabledReason?: string;
 }
 
+export interface RuleHostAgentAdapters {
+  readonly dreamer: PDRuntimeAdapter;
+  readonly philosopher: PDRuntimeAdapter;
+  readonly scribe: PDRuntimeAdapter;
+  readonly evaluator: PDRuntimeAdapter;
+}
+
 export interface RuleHostPipelineOptions {
   /** Workspace directory containing .state/ (SQLite stores). */
   readonly workspaceDir: string;
@@ -95,6 +102,8 @@ export interface RuleHostPipelineOptions {
    * The artificer stage uses codeRuleCapability.artificerAdapter when enabled.
    */
   readonly runtimeAdapter: PDRuntimeAdapter;
+  /** Production per-agent adapters. Tests may omit this to use runtimeAdapter for every stage. */
+  readonly agentAdapters?: RuleHostAgentAdapters;
   /**
    * Code-rule capability (atomic: ArtificerL2 + Evaluator). When omitted, the
    * capability is treated as OFF with reason 'code_rule_capability not provided'.
@@ -226,8 +235,13 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // test-double adapters whose scripted outputs must match store-assigned IDs).
     opts.onStoreReady?.(artifactStore);
     const owner = 'rulehost-pipeline';
-    const runtimeKind = opts.runtimeAdapter.kind();
-    const runnerOpts = { owner, runtimeKind, pollIntervalMs, timeoutMs };
+    const agentAdapters = opts.agentAdapters ?? {
+      dreamer: opts.runtimeAdapter,
+      philosopher: opts.runtimeAdapter,
+      scribe: opts.runtimeAdapter,
+      evaluator: opts.runtimeAdapter,
+    };
+    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs });
 
     // ── Stage: pain lookup ──
     // Find a dreamer task already seeded for this pain (the pain→dreamer bridge
@@ -238,20 +252,27 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // D fix (PRI-429): exact sourcePainId match via Object.hasOwn on parsed
     // diagnosticJson. No substring matching (pain-1 must NOT match pain-10).
     onProgress('pain_lookup', 'start', `painId=${opts.painId}`);
-    const dreamerSeedTaskId = await findDreamerTaskForPain(stateManager, opts.painId);
-    if (!dreamerSeedTaskId) {
+    const dreamerLookup = await findDreamerTaskForPain(stateManager, opts.painId);
+    if (dreamerLookup.status === 'ambiguous') {
+      const reason = `ambiguous_dreamer_tasks_for_pain: ${dreamerLookup.taskIds.join(',')}`;
+      stages.push({ name: 'pain_lookup', status: 'failed', reason });
+      onProgress('pain_lookup', 'failed', reason);
+      return rejectedResult(opts.painId, stages, reason);
+    }
+    if (dreamerLookup.status === 'not_found') {
       stages.push({ name: 'pain_lookup', status: 'failed', reason: 'no_dreamer_task_seeded_for_pain' });
       onProgress('pain_lookup', 'failed', 'no dreamer task seeded');
       return rejectedResult(opts.painId, stages, 'no_dreamer_task_seeded_for_pain: run `pd pain record` first');
     }
+    const dreamerSeedTaskId = dreamerLookup.taskId;
     stages.push({ name: 'pain_lookup', status: 'succeeded', taskId: dreamerSeedTaskId });
     onProgress('pain_lookup', 'succeeded', `dreamerTaskId=${dreamerSeedTaskId}`);
 
     // ── Stage: dreamer ──
     onProgress('dreamer', 'start');
     const dreamerRunner = new DreamerRunner(
-      { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
-      runnerOpts,
+      { stateManager, runtimeAdapter: agentAdapters.dreamer, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
+      runnerOptsFor(agentAdapters.dreamer),
     );
     const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('dreamer', dreamerSeedTaskId, dreamerResult));
@@ -266,8 +287,8 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const philosopherTaskId = `${correlation}-philosopher-${Date.now().toString(36)}`;
     await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs);
     const philosopherRunner = new PhilosopherRunner(
-      { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
-      runnerOpts,
+      { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
+      runnerOptsFor(agentAdapters.philosopher),
     );
     const philosopherResult = await runStage(philosopherRunner, philosopherTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('philosopher', philosopherTaskId, philosopherResult));
@@ -282,8 +303,8 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const scribeTaskId = `${correlation}-scribe-${Date.now().toString(36)}`;
     await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs);
     const scribeRunner = new ScribeRunner(
-      { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultScribeValidator(), artifactStore },
-      runnerOpts,
+      { stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator(), artifactStore },
+      runnerOptsFor(agentAdapters.scribe),
     );
     const scribeResult = await runStage(scribeRunner, scribeTaskId, { maxStageRetries, pollIntervalMs });
     stages.push(stageFromResult('scribe', scribeTaskId, scribeResult));
@@ -316,11 +337,11 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     onProgress('adversarial_loop', 'start');
     const artificerRunner = new ArtificerRunner(
       { stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore },
-      runnerOpts,
+      runnerOptsFor(capability.artificerAdapter),
     );
     const evaluatorRunner = new EvaluatorRunner(
-      { stateManager, runtimeAdapter: opts.runtimeAdapter, eventEmitter, validator: new DefaultEvaluatorValidator(), artifactStore },
-      { ...runnerOpts, gateDeps: createSandboxGateDeps() },
+      { stateManager, runtimeAdapter: agentAdapters.evaluator, eventEmitter, validator: new DefaultEvaluatorValidator(), artifactStore },
+      { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: createSandboxGateDeps() },
     );
 
     const loopResult = await runAdversarialLoop({
@@ -356,7 +377,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       degradationReason: loopResult.degradationReason,
     };
   } finally {
-    try { await stateManager.close(); } catch { /* best-effort cleanup */ }
+    await stateManager.close();
   }
 }
 
@@ -379,9 +400,17 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
  *   - ERR-013: Object.hasOwn for untrusted key checks
  *   - ERR-009: missing sourcePainId = no match (fail loud, not silent skip)
  */
-async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId: string): Promise<string | null> {
+type DreamerTaskLookup =
+  | { readonly status: 'found'; readonly taskId: string }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'ambiguous'; readonly taskIds: readonly string[] };
+
+async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId: string): Promise<DreamerTaskLookup> {
   const tasks = await stateManager.listTasks();
-  const dreamerTasks = tasks.filter((t) => t.taskKind === 'dreamer');
+  const dreamerTasks = tasks.filter((t) =>
+    t.taskKind === 'dreamer' && (t.status === 'pending' || t.status === 'retry_wait'),
+  );
+  const matches: string[] = [];
   for (const t of dreamerTasks) {
     if (typeof t.diagnosticJson !== 'string') continue;
     let parsed: unknown;
@@ -394,14 +423,16 @@ async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId:
       continue;
     }
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-    const obj = parsed as Record<string, unknown>;
-    if (!Object.hasOwn(obj, 'sourcePainId')) continue;
-    const stored = obj.sourcePainId;
+    if (!Object.hasOwn(parsed, 'sourcePainId')) continue;
+    const stored = Reflect.get(parsed, 'sourcePainId');
     if (typeof stored === 'string' && stored === painId) {
-      return t.taskId;
+      matches.push(t.taskId);
     }
   }
-  return null;
+  matches.sort();
+  if (matches.length === 0) return { status: 'not_found' };
+  if (matches.length > 1) return { status: 'ambiguous', taskIds: matches };
+  return { status: 'found', taskId: matches[0] };
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -526,23 +557,29 @@ async function textPrincipleOnlyResult(
 ): Promise<RuleHostPipelineResult> {
   const { painId, stages, scribeTaskId, disabledReason, artifactStore } = params;
   // Look up the principle artifact produced by the scribe stage.
-  let principleArtifactId: string | null = null;
   try {
     const arts = await artifactStore.listBySourceTaskId(scribeTaskId);
     const principleArt = arts.find((a) => a.artifactKind === 'principle');
-    principleArtifactId = principleArt?.artifactId ?? null;
-  } catch {
-    // Best-effort lookup — if the store query fails, principleArtifactId
-    // remains null and the degradationReason explains the situation.
+    return {
+      decision: 'text_principle_only',
+      painId,
+      stages,
+      scribeTaskId,
+      ruleArtifactId: null,
+      principleArtifactId: principleArt?.artifactId ?? null,
+      degradationReason: `code_rule_capability_off: ${disabledReason}`,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      decision: 'text_principle_only',
+      painId,
+      stages,
+      scribeTaskId,
+      ruleArtifactId: null,
+      principleArtifactId: null,
+      degradationReason: `code_rule_capability_off: ${disabledReason}; principle_artifact_lookup_failed: ${message}`,
+    };
   }
 
-  return {
-    decision: 'text_principle_only',
-    painId,
-    stages,
-    scribeTaskId,
-    ruleArtifactId: null,
-    principleArtifactId,
-    degradationReason: `code_rule_capability_off: ${disabledReason}`,
-  };
 }

@@ -26,7 +26,7 @@
 import * as path from 'path';
 import type { Command } from 'commander';
 import { runRuleHostPipeline } from '../services/rulehost-pipeline-runner.js';
-import type { RuleHostPipelineResult, CodeRuleCapability } from '../services/rulehost-pipeline-runner.js';
+import type { RuleHostPipelineResult, CodeRuleCapability, RuleHostAgentAdapters } from '../services/rulehost-pipeline-runner.js';
 import { createSandboxGateDeps } from '../services/rulehost-pipeline-runner.js';
 import {
   PiAiRuntimeAdapter,
@@ -34,9 +34,10 @@ import {
   buildArtificerL2GenerateCode,
   DefaultArtificerValidator,
   resolveAgentRuntimeBinding,
-  isRuntimeConfigError,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 
 export interface RunRuleHostOptions {
@@ -61,43 +62,40 @@ function resolveWorkspace(opts: RunRuleHostOptions): string {
   return opts.workspace ? path.resolve(opts.workspace) : DEFAULT_WORKSPACE;
 }
 
-function resolveRuntimeAdapter(workspaceDir: string, timeoutMs: number | undefined): PDRuntimeAdapter {
-  const resolved = resolveRuntimeFromPdConfig(workspaceDir);
-  const configResult = resolved.result;
+interface ResolvedRunRuleHostRuntime {
+  readonly agentAdapters: RuleHostAgentAdapters;
+  readonly agentRuntimeProfiles: Partial<Record<InternalAgentName, string>>;
+  readonly capability: CodeRuleCapability;
+  readonly capabilityStatus: string;
+}
 
-  if (isRuntimeConfigError(configResult)) {
-    throw new Error(
-      `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ` +
-      `${configResult.message}. nextAction: ${configResult.nextAction}`,
-    );
+function resolvePiAiAgentAdapter(
+  effective: EffectivePdConfig,
+  agentName: InternalAgentName,
+  options: { readonly workspaceDir: string; readonly timeoutMs: number | undefined },
+): { adapter: PDRuntimeAdapter; profileId: string } {
+  const binding = resolveAgentRuntimeBinding(effective, agentName);
+  if (!binding.ok) {
+    throw new Error(`${agentName}: ${binding.reason}. nextAction: ${binding.nextAction}`);
   }
-
-  const cfg = configResult;
-
-  if (cfg.runtimeKind !== 'pi-ai') {
-    throw new Error(
-      `run-rulehost requires runtimeKind=pi-ai (got '${cfg.runtimeKind}'). ` +
-      `nextAction: set runtime.kind=pi-ai in .pd/config.yaml`,
-    );
+  if (binding.profile.type !== 'pi-ai') {
+    throw new Error(`${agentName}: runtime profile '${binding.profileId}' must be pi-ai (got '${binding.profile.type}')`);
   }
-
-  if (!cfg.provider || !cfg.model || !cfg.apiKeyEnv) {
-    throw new Error(
-      `run-rulehost requires provider, model, and apiKeyEnv in .pd/config.yaml ` +
-      `(got provider='${cfg.provider ?? 'unset'}', model='${cfg.model ?? 'unset'}', apiKeyEnv='${cfg.apiKeyEnv ?? 'unset'}'). ` +
-      `nextAction: set runtime.provider, runtime.model, and runtime.apiKeyEnv in .pd/config.yaml`,
-    );
+  if (!process.env[binding.profile.apiKeyEnv]) {
+    throw new Error(`${agentName}: apiKeyEnv '${binding.profile.apiKeyEnv}' is not set`);
   }
-
-  return new PiAiRuntimeAdapter({
-    provider: cfg.provider,
-    model: cfg.model,
-    apiKeyEnv: cfg.apiKeyEnv,
-    maxRetries: cfg.maxRetries,
-    timeoutMs: timeoutMs ?? cfg.timeoutMs,
-    baseUrl: cfg.baseUrl,
-    workspace: workspaceDir,
-  });
+  return {
+    profileId: binding.profileId,
+    adapter: new PiAiRuntimeAdapter({
+      provider: binding.profile.provider,
+      model: binding.profile.model,
+      apiKeyEnv: binding.profile.apiKeyEnv,
+      maxRetries: binding.profile.maxRetries,
+      timeoutMs: options.timeoutMs ?? binding.profile.timeoutMs,
+      baseUrl: binding.profile.baseUrl,
+      workspace: options.workspaceDir,
+    }),
+  };
 }
 
 /**
@@ -109,34 +107,54 @@ function resolveRuntimeAdapter(workspaceDir: string, timeoutMs: number | undefin
  *
  * Returns the capability AND a human-readable status summary for dry-run output.
  */
-function resolveCodeRuleCapability(
+function resolveRunRuleHostRuntime(
   workspaceDir: string,
   timeoutMs: number | undefined,
-): { capability: CodeRuleCapability; statusSummary: string } {
+): ResolvedRunRuleHostRuntime {
   const { configLoadResult } = resolveRuntimeFromPdConfig(workspaceDir);
 
   if (!configLoadResult.ok) {
-    return {
-      capability: { enabled: false, disabledReason: 'config_malformed — cannot resolve agent bindings' },
-      statusSummary: 'code_rule_capability: OFF (config malformed)',
-    };
+    throw new Error('config_malformed — cannot resolve agent bindings');
   }
 
   const { effective } = configLoadResult;
+  const adapterOptions = { workspaceDir, timeoutMs };
+  const dreamer = resolvePiAiAgentAdapter(effective, 'dreamer', adapterOptions);
+  const philosopher = resolvePiAiAgentAdapter(effective, 'philosopher', adapterOptions);
+  const scribe = resolvePiAiAgentAdapter(effective, 'scribe', adapterOptions);
+  const agentRuntimeProfiles: Partial<Record<InternalAgentName, string>> = {
+    dreamer: dreamer.profileId,
+    philosopher: philosopher.profileId,
+    scribe: scribe.profileId,
+  };
+  const featureFlags = computeFeatureFlagsFromConfig(effective);
+  if (!isFeatureEnabled(featureFlags, 'code_rule_capability')) {
+    return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
+      capability: { enabled: false, disabledReason: 'code_rule_capability feature flag is disabled' },
+      capabilityStatus: 'code_rule_capability: OFF (feature flag disabled)',
+    };
+  }
+
   const artificerBinding = resolveAgentRuntimeBinding(effective, 'artificer');
   const evaluatorBinding = resolveAgentRuntimeBinding(effective, 'evaluator');
 
   // Both must be enabled (atomic capability).
   if (!artificerBinding.ok) {
     return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer agent disabled: ${artificerBinding.reason}` },
-      statusSummary: `code_rule_capability: OFF (artificer disabled — ${artificerBinding.reason})`,
+      capabilityStatus: `code_rule_capability: OFF (artificer disabled — ${artificerBinding.reason})`,
     };
   }
   if (!evaluatorBinding.ok) {
     return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `evaluator agent disabled: ${evaluatorBinding.reason}` },
-      statusSummary: `code_rule_capability: OFF (evaluator disabled — ${evaluatorBinding.reason})`,
+      capabilityStatus: `code_rule_capability: OFF (evaluator disabled — ${evaluatorBinding.reason})`,
     };
   }
 
@@ -145,18 +163,26 @@ function resolveCodeRuleCapability(
   const { profile: artificerProfile } = artificerBinding;
   if (artificerProfile.type !== 'pi-ai') {
     return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer runtime profile is not pi-ai (got '${artificerProfile.type}')` },
-      statusSummary: `code_rule_capability: OFF (artificer profile type='${artificerProfile.type}', expected pi-ai)`,
+      capabilityStatus: `code_rule_capability: OFF (artificer profile type='${artificerProfile.type}', expected pi-ai)`,
     };
   }
 
   const apiKey = process.env[artificerProfile.apiKeyEnv];
   if (!apiKey) {
     return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' is not set in environment` },
-      statusSummary: `code_rule_capability: OFF (artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' not set)`,
+      capabilityStatus: `code_rule_capability: OFF (artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' not set)`,
     };
   }
+
+  const evaluator = resolvePiAiAgentAdapter(effective, 'evaluator', adapterOptions);
+  agentRuntimeProfiles.artificer = artificerBinding.profileId;
+  agentRuntimeProfiles.evaluator = evaluator.profileId;
 
   const generateCode = buildArtificerL2GenerateCode({
     provider: artificerProfile.provider,
@@ -173,8 +199,10 @@ function resolveCodeRuleCapability(
   });
 
   return {
+    agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: evaluator.adapter },
+    agentRuntimeProfiles,
     capability: { enabled: true, artificerAdapter },
-    statusSummary: `code_rule_capability: ON (artificer profile='${artificerBinding.profileId}', evaluator profile='${evaluatorBinding.profileId}')`,
+    capabilityStatus: `code_rule_capability: ON (artificer profile='${artificerBinding.profileId}', evaluator profile='${evaluatorBinding.profileId}')`,
   };
 }
 
@@ -259,7 +287,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   }
 
   // Validate numeric opts (Commander parseInt can yield NaN for non-numeric input).
-  if (opts.maxRounds !== undefined && (!Number.isFinite(opts.maxRounds) || opts.maxRounds <= 0)) {
+  if (opts.maxRounds !== undefined && (!Number.isInteger(opts.maxRounds) || opts.maxRounds <= 0)) {
     if (opts.json) {
       process.stdout.write(JSON.stringify({ status: 'failed', reason: `invalid --max-rounds: ${opts.maxRounds}`, nextAction: 'pass a positive integer (PRD cap = 2)' }) + '\n');
     } else {
@@ -268,7 +296,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     process.exitCode = 1;
     return;
   }
-  if (opts.timeoutMs !== undefined && (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0)) {
+  if (opts.timeoutMs !== undefined && (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs <= 0)) {
     if (opts.json) {
       process.stdout.write(JSON.stringify({ status: 'failed', reason: `invalid --timeout-ms: ${opts.timeoutMs}`, nextAction: 'pass a positive integer (default 300000)' }) + '\n');
     } else {
@@ -280,32 +308,14 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
 
   const workspaceDir = resolveWorkspace(opts);
 
-  // ── Resolve runtime adapter from config ──
-  let runtimeAdapter: PDRuntimeAdapter;
+  // ── Resolve each executed agent from canonical config ──
+  let resolvedRuntime: ResolvedRunRuleHostRuntime;
   try {
-    runtimeAdapter = resolveRuntimeAdapter(workspaceDir, opts.timeoutMs);
+    resolvedRuntime = resolveRunRuleHostRuntime(workspaceDir, opts.timeoutMs);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ status: 'failed', reason: 'runtime_config_resolution_failed', message, nextAction: 'run pd config doctor' }) + '\n');
-    } else {
-      console.error(`Error: ${message}`);
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  // ── Resolve code-rule capability (atomic: ArtificerL2 + Evaluator) ──
-  let capability: CodeRuleCapability;
-  let capabilityStatus: string;
-  try {
-    const { capability: resolvedCap, statusSummary: resolvedStatus } = resolveCodeRuleCapability(workspaceDir, opts.timeoutMs);
-    capability = resolvedCap;
-    capabilityStatus = resolvedStatus;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (opts.json) {
-      process.stdout.write(JSON.stringify({ status: 'failed', reason: 'code_rule_capability_resolution_failed', message, nextAction: 'check artificer/evaluator agent config in .pd/config.yaml' }) + '\n');
+      process.stdout.write(JSON.stringify({ status: 'failed', reason: 'agent_runtime_resolution_failed', message, nextAction: 'check internalAgents and runtimeProfiles in .pd/config.yaml; run pd config doctor' }) + '\n');
     } else {
       console.error(`Error: ${message}`);
     }
@@ -323,12 +333,13 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         painId: opts.painId,
         workspace: workspaceDir,
         channel,
-        capabilityStatus,
-        codeRuleCapability: { enabled: capability.enabled, disabledReason: capability.disabledReason },
+        capabilityStatus: resolvedRuntime.capabilityStatus,
+        agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
+        codeRuleCapability: { enabled: resolvedRuntime.capability.enabled, disabledReason: resolvedRuntime.capability.disabledReason },
         nextAction: 'pass --confirm to actually run the pipeline',
       }) + '\n');
     } else {
-      process.stdout.write(formatDryRunOutput(opts, capabilityStatus, workspaceDir) + '\n');
+      process.stdout.write(formatDryRunOutput(opts, resolvedRuntime.capabilityStatus, workspaceDir) + '\n');
     }
     return;
   }
@@ -339,8 +350,9 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     result = await runRuleHostPipeline({
       workspaceDir,
       painId: opts.painId,
-      runtimeAdapter,
-      codeRuleCapability: capability,
+      runtimeAdapter: resolvedRuntime.agentAdapters.dreamer,
+      agentAdapters: resolvedRuntime.agentAdapters,
+      codeRuleCapability: resolvedRuntime.capability,
       channel: channel as RuleHostChannel,
       maxRounds: opts.maxRounds,
       timeoutMs: opts.timeoutMs,

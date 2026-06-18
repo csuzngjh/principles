@@ -12,20 +12,21 @@
  *   - ERR-013: Object.hasOwn for untrusted key checks
  */
 /* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/class-methods-use-this, @typescript-eslint/require-await */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
+import { createSandboxGateDeps, runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput } from '@principles/core/runtime-v2';
-import { RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
+import { ArtificerL2Adapter, DefaultArtificerValidator, RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
 type EvaluatorFactory = (taskId: string, artificerArtifactId: string) => unknown;
 
 class ScriptedAdapter implements PDRuntimeAdapter {
   readonly startRunCalls: { taskId: string }[] = [];
+  readonly startRunInputs = new Map<string, StartRunInput>();
   artifactStore: PIArtifactStore | null = null;
   constructor(private readonly factories: { dreamer: StageFactory; philosopher: StageFactory; scribe: StageFactory; artificer: StageFactory; evaluator: EvaluatorFactory }) {}
 
@@ -45,9 +46,11 @@ class ScriptedAdapter implements PDRuntimeAdapter {
     return arts[0]?.artifactId;
   }
 
-  async startRun(input: { taskRef: { taskId: string } }): Promise<RunHandle> {
+  async startRun(input: StartRunInput): Promise<RunHandle> {
     this.startRunCalls.push({ taskId: input.taskRef.taskId });
-    return { runId: `run-${input.taskRef.taskId}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+    const runId = `run-${input.taskRef.taskId}`;
+    this.startRunInputs.set(runId, input);
+    return { runId, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   }
   async pollRun(_runId: string): Promise<RunStatus> { return { status: 'succeeded', runId: 'run-x' }; }
   async fetchOutput(runId: string): Promise<StructuredRunOutput | null> {
@@ -58,7 +61,20 @@ class ScriptedAdapter implements PDRuntimeAdapter {
     else if (kind === 'philosopher') payload = this.factories.philosopher(taskId, await this.priorArtifactId('dreamer'));
     else if (kind === 'scribe') payload = this.factories.scribe(taskId, await this.priorArtifactId('philosopher'));
     else if (kind === 'artificer') payload = this.factories.artificer(taskId, await this.priorArtifactId('scribe'));
-    else payload = this.factories.evaluator(taskId, (await this.priorArtifactId('artificer'))!);
+    else {
+      let artificerArtifactId = await this.priorArtifactId('artificer');
+      if (!artificerArtifactId) {
+        const inputPayload = this.startRunInputs.get(runId)?.inputPayload;
+        if (typeof inputPayload === 'string') {
+          const parsed: unknown = JSON.parse(inputPayload);
+          if (parsed !== null && typeof parsed === 'object' && Object.hasOwn(parsed, 'sourceArtificerArtifactId')) {
+            const candidate = Reflect.get(parsed, 'sourceArtificerArtifactId');
+            if (typeof candidate === 'string') artificerArtifactId = candidate;
+          }
+        }
+      }
+      payload = this.factories.evaluator(taskId, requireLineage(artificerArtifactId, 'sourceArtificerArtifactId'));
+    }
     return { runId, payload };
   }
   async cancelRun(_runId: string): Promise<void> { /* noop */ }
@@ -198,6 +214,7 @@ async function seedDreamerRaw(sm: RuntimeStateManager, taskId: string, diagnosti
 
 describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
   });
 
@@ -218,9 +235,58 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
-    expect(result.decision).toBe('candidate_ready_for_owner_review');
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.stages.map((s) => s.name)).toEqual(['pain_lookup', 'dreamer', 'philosopher', 'scribe', 'adversarial_loop']);
     expect(result.ruleArtifactId).not.toBeNull();
+  }, 60_000);
+
+  it('runs the real ArtificerL2Adapter through fail-feedback-fix before creating a candidate', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-l2-001', 'pain-l2-001');
+    await sm.close();
+
+    const baseAdapter = makeAdapter();
+    const prompts: string[] = [];
+    let sourceScribeArtifactId: string | null = null;
+    const l2Adapter = new ArtificerL2Adapter({
+      validator: new DefaultArtificerValidator(),
+      gateDeps: createSandboxGateDeps(),
+      generateCode: async (prompt) => {
+        prompts.push(prompt);
+        if (sourceScribeArtifactId === null) {
+          const parsed: unknown = JSON.parse(prompt);
+          if (parsed === null || typeof parsed !== 'object') throw new Error('Artificer prompt must be an object');
+          const sourceId = Reflect.get(parsed, 'sourceScribeArtifactId');
+          if (typeof sourceId !== 'string') throw new Error('sourceScribeArtifactId missing from prompt');
+          sourceScribeArtifactId = sourceId;
+        }
+        const candidate = artificerV2('', sourceScribeArtifactId);
+        if (candidate === null || typeof candidate !== 'object') throw new Error('candidate fixture invalid');
+        Reflect.deleteProperty(candidate, 'taskId');
+        if (prompts.length === 1) {
+          Reflect.set(candidate, 'implementationCode', 'function evaluate() { return { decision: "allow", matched: false, reason: "bug" }; }');
+        }
+        return candidate;
+      },
+    });
+
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-l2-001',
+      runtimeAdapter: baseAdapter,
+      codeRuleCapability: { enabled: true, artificerAdapter: l2Adapter },
+      channel: 'code_tool_hook',
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+      onStoreReady: (store) => { baseAdapter.artifactStore = store; },
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Previous sandbox replay failures');
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+    expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
@@ -350,6 +416,27 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.degradationReason).toContain('no_dreamer_task_seeded');
   }, 60_000);
 
+  it('rejects ambiguous lineage when multiple runnable Dreamer tasks have the same sourcePainId', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-ambiguous-a', 'pain-ambiguous');
+    await seedDreamerWithId(sm, 'dreamer-ambiguous-b', 'pain-ambiguous');
+    await sm.close();
+
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-ambiguous',
+      runtimeAdapter: makeAdapter(),
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+    });
+
+    expect(result.decision).toBe('generation_rejected');
+    expect(result.degradationReason).toContain('ambiguous_dreamer_tasks_for_pain');
+    expect(result.stages[0]?.status).toBe('failed');
+  }, 60_000);
+
   // ── Test 8 (E fix): retried status is NOT terminal — bounded retry succeeds ──
   it('retried status triggers bounded retry and eventually succeeds (E fix)', async () => {
     tmpDir = makeTmpDir();
@@ -386,15 +473,12 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
-    // The dreamer stage should have been retried. The pipeline should either
-    // succeed (if the retry worked) or degrade gracefully (if the runner
-    // marked the task as failed after the throw). Either way, it must NOT
-    // crash or hang, and the dreamer stage status must reflect the retry.
+    // The retry contract is exact: one transient failure, one fresh successful
+    // attempt, then the full pipeline succeeds.
     const dreamerStage = result.stages.find((s) => s.name === 'dreamer');
-    expect(dreamerStage).toBeDefined();
-    // The stage should be 'succeeded' (retry worked) or 'degraded'/'failed'
-    // (retry exhausted). It must NOT be left in an inconsistent state.
-    expect(['succeeded', 'degraded', 'failed']).toContain(dreamerStage?.status);
+    expect(dreamerCallCount).toBe(2);
+    expect(dreamerStage?.status).toBe('succeeded');
+    expect(result.decision).toBe('candidate_ready_for_owner_review');
   }, 60_000);
 
   // ── Test 9 (E fix): retried status exhausted → stage marked 'degraded' ──
@@ -425,10 +509,10 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     // Pipeline must reject — dreamer never succeeded.
     expect(result.decision).toBe('generation_rejected');
     expect(result.degradationReason).toContain('dreamer_failed');
-    // The dreamer stage must be marked as 'failed' or 'degraded' (not 'succeeded').
+    // The stage must be precisely degraded after the initial attempt + one retry.
     const dreamerStage = result.stages.find((s) => s.name === 'dreamer');
-    expect(dreamerStage).toBeDefined();
-    expect(['failed', 'degraded']).toContain(dreamerStage?.status);
+    expect(adapter.startRunCalls.filter((call) => call.taskId === 'dreamer-exhaust-001')).toHaveLength(2);
+    expect(dreamerStage?.status).toBe('degraded');
     // The reason must be present (Runtime Contract Rule 9: no silent degradation).
     expect(dreamerStage?.reason).toBeTruthy();
   }, 60_000);
