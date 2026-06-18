@@ -408,6 +408,14 @@ export {
 } from './story-a-demo.js';
 export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';
 
+// RuleHost MVP Activation — multi-round adversarial loop (PRI-428)
+export { runAdversarialLoop, DEFAULT_MAX_ROUNDS } from './adversarial-loop.js';
+export type { AdversarialLoopInput, AdversarialLoopResult } from './adversarial-loop.js';
+
+// RuleHost MVP Activation — Artificer L2 Adapter (PRI-424)
+export { ArtificerL2Adapter } from './adapter/artificer-l2-adapter.js';
+export type { ArtificerL2AdapterConfig, ArtificerL2GenerateCodeFn } from './adapter/artificer-l2-adapter.js';
+
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
@@ -762,10 +770,12 @@ export {
 
 export type {
   ArtificerOutputV1,
+  ArtificerOutputV2,
   ArtificerImplementationPlan,
   ArtificerSourceTrace,
   ArtificerValidationResult,
   ArtificerValidator,
+  GoldenTraceCaseInput,
 } from './internalization/artificer-output.js';
 
 export {
@@ -773,6 +783,7 @@ export {
   ArtificerOutputV1Schema,
   ArtificerImplementationPlanSchema,
   ArtificerSourceTraceSchema,
+  isArtificerOutputV2,
 } from './internalization/artificer-output.js';
 
 export type {
@@ -795,8 +806,14 @@ export type {
   EvaluatorEvaluation,
   EvaluatorSourceTrace,
   EvaluatorOutputV1,
+  EvaluatorOutputV2,
   EvaluatorValidationResult,
   EvaluatorValidator,
+  EvaluatorCodeReview,
+  EvaluatorAdversarialResult,
+  AdversarialCase,
+  AdversarialFailedCase,
+  AdversarialAttackType,
 } from './internalization/evaluator-output.js';
 
 export {
@@ -805,6 +822,7 @@ export {
   EvaluatorEvaluationSchema,
   EvaluatorSourceTraceSchema,
   EVALUATOR_DECISIONS,
+  isEvaluatorOutputV2,
 } from './internalization/evaluator-output.js';
 
 export type {
@@ -1164,6 +1182,7 @@ export {
   validateGoldenTrace,
   createSyntheticRuleHostInput,
   createGoldenTraceFixture,
+  buildGoldenTraceFromArtificer,
 } from './golden-trace.js';
 
 export type {
@@ -1176,6 +1195,8 @@ export type {
   ToolCallSnapshot,
   SyntheticRuleHostInputOverrides,
   GoldenTraceFixtureInput,
+  BuildGoldenTraceFromArtificerInput,
+  BuildGoldenTraceResult,
 } from './golden-trace.js';
 // ── GoldenTrace Replay Validator (PRI-115) ────────────────────────────────
 
