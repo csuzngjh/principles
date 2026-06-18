@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../theme-provider.js";
 import { useTranslation } from "react-i18next";
+import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
 
@@ -55,6 +56,7 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useTranslation();
+  const { pendingCount, degradedCount } = useNotifications();
 
   const isActive = (href: string) => {
     if (href === "/") return location.pathname === "/";
@@ -109,6 +111,11 @@ export function AppSidebar() {
               >
                 <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                 <span className="flex-1">{t(item.labelKey)}</span>
+                {item.id === "focus" && pendingCount > 0 && (
+                  <span className="ml-auto bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                    {pendingCount}
+                  </span>
+                )}
                 {item.shortcut && (
                   <span className="text-ink-4 font-mono text-[11px]">
                     {item.shortcut}
@@ -142,6 +149,11 @@ export function AppSidebar() {
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                   <span className="flex-1">{t(item.labelKey)}</span>
+                  {item.id === "control-center" && degradedCount > 0 && (
+                    <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                      {degradedCount}
+                    </span>
+                  )}
                   {item.shortcut && (
                     <span className="text-ink-4 font-mono text-[11px]">
                       {item.shortcut}
