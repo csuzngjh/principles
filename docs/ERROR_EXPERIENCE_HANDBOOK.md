@@ -98,6 +98,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
 | ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
 | ERR-057 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
+| ERR-072 | React component duplicates hook state as local state — desync causes silent feature failure | PR-971 |
 | ERR-054 | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data | PRI-302 |
 | ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
 | ERR-061 | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type | PR #823 |
@@ -710,9 +711,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-072]** | React component duplicates hook state as local state — desync causes silent feature failure
+
+- **What happened**: `NotificationProvider` maintained its own `audioUnlocked` state in `useState` while also consuming `audioUnlocked` from `useNotificationSound()` hook. The Provider's `handleInteraction` callback called `unlockAudio()` (which sets the hook's internal state) AND `setState({ audioUnlocked: true })` (setting the Provider's local copy). Since `unlockAudio()` is async (calls `ctx.resume()`), the Provider could mark audio as unlocked before the hook's internal state updated, causing `playSound()` to still return early due to its own `audioUnlocked` being `false`.
+- **Why it's wrong**: When a hook exposes derived state, the consuming component must use the hook's state as the single source of truth. Duplicating it as local state creates a race condition where the two states can desync, causing silent feature failures (sound not playing despite UI showing it as enabled).
+- **Correct approach**: Remove the duplicate `audioUnlocked` from the Provider's `useState`. Use the `audioUnlocked` returned by `useNotificationSound()` directly in effects and pass it through context. The hook owns the state lifecycle; the Provider only consumes it.
+- **How to prevent**: When a React hook returns state, never copy it into a parent component's `useState`. If the parent needs to expose it, pass the hook's value directly through context or props. Check: does any `useState` field duplicate a value already returned by a consumed hook?
+- **Source**: PR #971
+- **Date**: 2026-06-18
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 71 |
+| Total lessons | 72 |
 | Last updated | 2026-06-18 |
 | Top category | Schema & Type |
 | Recurring errors | 27 |
