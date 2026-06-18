@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
+import { DailyThoughtCard } from "../../components/focus/daily-thought-card.js";
 import {
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
@@ -764,6 +765,9 @@ export function FocusPage() {
         stagnationCount={stagnationCount}
         evidenceCount={evidenceCount}
       />
+
+      {/* Daily thought — pause before judgment */}
+      <DailyThoughtCard />
 
       {/* Wave 4: Feedback stratification — three timescale layers */}
       <FeedbackStratification

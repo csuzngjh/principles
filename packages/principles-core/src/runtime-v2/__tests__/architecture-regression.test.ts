@@ -95,6 +95,11 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/refiner-sandbox-wrapper.ts',
   // PRI-173
   'internalization/refiner-rulehost-gate.ts',
+  // RuleHost MVP Activation (PRI-421..428, ADR-0014 Amendment 2026-06-17)
+  'internalization/adversarial-case.ts',
+  'internalization/adversarial-feedback.ts',
+  'internalization/artificer-prompt-builder.ts',
+  'adversarial-loop.ts',
   // Phase 2 migration: evolution types
   'evolution/evolution-types.ts',
   'evolution/index.ts',
