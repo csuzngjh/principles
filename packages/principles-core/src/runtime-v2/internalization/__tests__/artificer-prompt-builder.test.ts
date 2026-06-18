@@ -48,8 +48,8 @@ describe('ArtificerPromptBuilder', () => {
     expect(promptInput.promptContractVersion).toBe(ARTIFICER_PROMPT_CONTRACT_VERSION);
   });
 
-  it('promptContractVersion value is artificer-output-v1.prompt.v1', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v1.prompt.v1');
+  it('promptContractVersion identifies the executable V2 contract', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v1');
   });
 
   it('confidence instruction says number not string/percentage', () => {

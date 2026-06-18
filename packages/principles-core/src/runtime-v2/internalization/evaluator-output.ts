@@ -272,9 +272,13 @@ function validateAdversarialResult(raw: unknown): string[] {
  */
 export function isEvaluatorOutputV2(output: unknown): output is EvaluatorOutputV2 {
   if (!isRecord(output)) return false;
-  return Object.hasOwn(output, 'codeReview')
-    || Object.hasOwn(output, 'adversarialCases')
-    || Object.hasOwn(output, 'adversarialResult');
+  const hasCodeReview = Object.hasOwn(output, 'codeReview');
+  const hasCases = Object.hasOwn(output, 'adversarialCases');
+  const hasResult = Object.hasOwn(output, 'adversarialResult');
+  if (!hasCodeReview && !hasCases && !hasResult) return false;
+  return (!hasCodeReview || validateCodeReview(output.codeReview).length === 0)
+    && (!hasCases || validateAdversarialCases(output.adversarialCases).length === 0)
+    && (!hasResult || validateAdversarialResult(output.adversarialResult).length === 0);
 }
 
 export interface EvaluatorValidator {
@@ -375,4 +379,3 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
       : { valid: true, errors: [] };
   }
 }
-

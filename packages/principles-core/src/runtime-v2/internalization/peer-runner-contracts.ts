@@ -253,17 +253,27 @@ export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord 
     return false;
   }
 
-  // Structural check for internalization fields
-  const pi = record as unknown as PITaskRecord;
+  const dependencyTaskIds = Reflect.get(record, 'dependencyTaskIds');
+  const channel = Reflect.get(record, 'channel');
+  const timeoutMs = Reflect.get(record, 'timeoutMs');
+  const inputArtifactRefs = Reflect.get(record, 'inputArtifactRefs');
+  const outputArtifactRefs = Reflect.get(record, 'outputArtifactRefs');
+  const rejectionCount = Reflect.get(record, 'rejectionCount');
+  const adversarialFeedback = Reflect.get(record, 'adversarialFeedback');
 
   return (
-    Array.isArray(pi.dependencyTaskIds) &&
-    typeof pi.channel === 'string' &&
-    isInternalizationChannel(pi.channel) &&
-    typeof pi.timeoutMs === 'number' &&
-    Array.isArray(pi.inputArtifactRefs) &&
-    Array.isArray(pi.outputArtifactRefs) &&
-    (typeof pi.rejectionCount === 'number' && Number.isFinite(pi.rejectionCount) && pi.rejectionCount >= 0)
+    Array.isArray(dependencyTaskIds) &&
+    typeof channel === 'string' &&
+    isInternalizationChannel(channel) &&
+    typeof timeoutMs === 'number' &&
+    Array.isArray(inputArtifactRefs) &&
+    Array.isArray(outputArtifactRefs) &&
+    typeof rejectionCount === 'number' &&
+    Number.isFinite(rejectionCount) &&
+    rejectionCount >= 0 &&
+    (!Object.hasOwn(record, 'adversarialFeedback') ||
+      adversarialFeedback === undefined ||
+      (typeof adversarialFeedback === 'string' && adversarialFeedback.trim() !== ''))
   );
 }
 

@@ -124,6 +124,22 @@ describe('DefaultArtificerValidator — V2 (RuleHost MVP Activation)', () => {
     expect(result.errors.some((e) => e.includes('implementationCode'))).toBe(true);
   });
 
+  it('rejects propose_correction without expectedApplicationMode', async () => {
+    const output = mutable(makeV2Output());
+    const cases = Array.isArray(output.goldenTraceCases) ? output.goldenTraceCases : [];
+    const [first, ...remainingCases] = cases;
+    if (typeof first !== 'object' || first === null || Array.isArray(first)) throw new Error('invalid fixture');
+    output.goldenTraceCases = [{
+      ...first,
+      expectedDecision: 'propose_correction',
+      expectedProposedParams: { path: '/safe/path' },
+    }, ...remainingCases];
+
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('expectedapplicationmode'))).toBe(true);
+  });
+
   // ── goldenTraceCases ──────────────────────────────────────────────────────
 
   it('rejects V2 output with fewer than 2 goldenTraceCases', async () => {
@@ -210,6 +226,14 @@ describe('DefaultArtificerValidator — V2 (RuleHost MVP Activation)', () => {
   it('rejects V2 output with empty affectedTools', async () => {
     const output = mutable(makeV2Output());
     output.affectedTools = [];
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('affectedtools'))).toBe(true);
+  });
+
+  it('rejects blank affectedTools entries', async () => {
+    const output = mutable(makeV2Output());
+    output.affectedTools = ['edit', '   '];
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.toLowerCase().includes('affectedtools'))).toBe(true);

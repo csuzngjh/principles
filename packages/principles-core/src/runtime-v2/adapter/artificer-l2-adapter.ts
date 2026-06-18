@@ -50,6 +50,7 @@ import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
 import { PDRuntimeError } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
+import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
 
 /**
  * Mockable LLM call. Receives the assembled prompt (initial prompt + optional
@@ -84,14 +85,6 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_RETAINED_RUNS = 100;
 
 /** Build the feedback string injected into the next LLM attempt. */
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
@@ -141,16 +134,20 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   private readonly runs = new Map<string, ArtificerL2RunState>();
 
   constructor(config: ArtificerL2AdapterConfig) {
+    const maxAttempts = config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
+      throw new RangeError('maxAttempts must be a positive integer');
+    }
     this.generateCode = config.generateCode;
     this.gateDeps = config.gateDeps;
     this.validator = config.validator;
     this.eventEmitter = config.eventEmitter ?? storeEmitter;
-    this.config = { maxAttempts: config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS };
+    this.config = { maxAttempts };
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- required by interface
   kind(): RuntimeKind {
-    return 'pi-ai-l2-artificer' as RuntimeKind;
+    return 'pi-ai-l2';
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- required by interface
@@ -187,8 +184,8 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     const startedAt = new Date().toISOString();
     const taskId = input.taskRef?.taskId ?? runId;
     const initialPrompt = typeof input.inputPayload === 'string'
-      ? input.inputPayload
-      : safeStringify(input.inputPayload);
+      ? truncatePreview(input.inputPayload, 50_000)
+      : safeStringifyPreview(input.inputPayload, 50_000);
 
     const runState: ArtificerL2RunState = {
       runId,
@@ -405,4 +402,3 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     }
   }
 }
-

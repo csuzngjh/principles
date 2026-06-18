@@ -80,6 +80,11 @@ describe('EvaluatorPromptBuilder — V2 code review (PRI-425)', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('too_narrow');
   });
 
+  it('V2 example includes codeReview and adversarialCases so the model cannot copy a V1 response', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toMatch(/COMPLETE EXAMPLE OUTPUT[\s\S]*"codeReview"/);
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toMatch(/COMPLETE EXAMPLE OUTPUT[\s\S]*"adversarialCases"/);
+  });
+
   // ── short-circuit: skip adversarial when passive review fails ──────────────
 
   it('instruction tells LLM to skip adversarial cases when passive review fails', () => {

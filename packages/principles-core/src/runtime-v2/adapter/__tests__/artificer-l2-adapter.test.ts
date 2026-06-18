@@ -33,6 +33,8 @@ import type { RefinerSandboxResult } from '../../internalization/refiner-sandbox
 import type { ArtificerOutputV2 } from '../../internalization/artificer-output.js';
 import { isArtificerOutputV2, DefaultArtificerValidator } from '../../internalization/artificer-output.js';
 import { validateGoldenTrace } from '../../golden-trace.js';
+import { Value } from '@sinclair/typebox/value';
+import { RunHandleSchema, RuntimeKindSchema } from '../../runtime-protocol.js';
 
 const TASK_ID = 'task-artificer-l2-001';
 
@@ -509,7 +511,60 @@ describe('ArtificerL2Adapter (RuleHost MVP Activation, PRI-424)', () => {
       gateDeps: makeAlwaysPassGateDeps(),
       validator: new DefaultArtificerValidator(),
     });
-    expect(typeof adapter.kind()).toBe('string');
-    expect(adapter.kind().length).toBeGreaterThan(0);
+    expect(Value.Check(RuntimeKindSchema, adapter.kind())).toBe(true);
+    expect(adapter.kind()).toBe('pi-ai-l2');
+  });
+
+  it('returns a RunHandle that satisfies the runtime protocol schema', async () => {
+    const adapter = new ArtificerL2Adapter({
+      generateCode: async () => makeV2Output(),
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+    });
+
+    const handle = await adapter.startRun({
+      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+      taskRef: { taskId: TASK_ID },
+      inputPayload: '{}',
+      contextItems: [],
+      outputSchemaRef: 'artificer-output-v2',
+      timeoutMs: 30_000,
+    });
+
+    expect(Value.Check(RunHandleSchema, handle)).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, Number.POSITIVE_INFINITY])('rejects invalid maxAttempts=%s', (maxAttempts) => {
+    expect(() => new ArtificerL2Adapter({
+      generateCode: async () => makeV2Output(),
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+      maxAttempts,
+    })).toThrow(/maxAttempts/);
+  });
+
+  it('bounds and safely serializes an unknown prompt payload', async () => {
+    const circular: Record<string, unknown> = { text: 'x'.repeat(60_000) };
+    circular.self = circular;
+    let receivedPrompt = '';
+    const adapter = new ArtificerL2Adapter({
+      generateCode: async (prompt) => {
+        receivedPrompt = prompt;
+        return makeV2Output();
+      },
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+    });
+
+    await adapter.startRun({
+      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+      taskRef: { taskId: TASK_ID },
+      inputPayload: circular,
+      contextItems: [],
+      outputSchemaRef: 'artificer-output-v2',
+      timeoutMs: 30_000,
+    });
+
+    expect(receivedPrompt.length).toBeLessThanOrEqual(50_003);
   });
 });

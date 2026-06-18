@@ -148,23 +148,23 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   }
 
   // Optional fields: if present, must be non-empty strings (null is not accepted)
-  if (m.parentTaskId !== undefined) {
+  if (Object.hasOwn(m, 'parentTaskId') && m.parentTaskId !== undefined) {
     if (typeof m.parentTaskId !== 'string') return null;
     if (m.parentTaskId.trim() === '') return null;
   }
-  if (m.correlationId !== undefined) {
+  if (Object.hasOwn(m, 'correlationId') && m.correlationId !== undefined) {
     if (typeof m.correlationId !== 'string') return null;
     if (m.correlationId.trim() === '') return null;
   }
 
   let rejectionCount = 0;
-  if (m.rejectionCount !== undefined) {
+  if (Object.hasOwn(m, 'rejectionCount') && m.rejectionCount !== undefined) {
     if (typeof m.rejectionCount !== 'number' || !Number.isFinite(m.rejectionCount) || m.rejectionCount < 0) return null;
     rejectionCount = Math.floor(m.rejectionCount);
   }
 
   // adversarialFeedback (PRI-428): optional, non-empty string if present.
-  if (m.adversarialFeedback !== undefined) {
+  if (Object.hasOwn(m, 'adversarialFeedback') && m.adversarialFeedback !== undefined) {
     if (typeof m.adversarialFeedback !== 'string') return null;
     if (m.adversarialFeedback.trim() === '') return null;
   }
@@ -175,8 +175,8 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     timeoutMs: m.timeoutMs,
     inputArtifactRefs: m.inputArtifactRefs as ArtifactRef[],
     outputArtifactRefs: m.outputArtifactRefs as ArtifactRef[],
-    parentTaskId: m.parentTaskId,
-    correlationId: m.correlationId,
+    parentTaskId: typeof m.parentTaskId === 'string' ? m.parentTaskId : undefined,
+    correlationId: typeof m.correlationId === 'string' ? m.correlationId : undefined,
     rejectionCount,
     adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
   };

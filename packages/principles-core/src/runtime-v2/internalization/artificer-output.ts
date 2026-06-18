@@ -165,6 +165,10 @@ function validateGoldenTraceCasesInput(raw: unknown): string[] {
       if (!Object.hasOwn(entry, 'expectedProposedParams') || !isRecord(entry.expectedProposedParams)) {
         errors.push(`${prefix}.expectedProposedParams is required when expectedDecision is propose_correction`);
       }
+      if (!Object.hasOwn(entry, 'expectedApplicationMode')
+        || (entry.expectedApplicationMode !== 'shadow' && entry.expectedApplicationMode !== 'live')) {
+        errors.push(`${prefix}.expectedApplicationMode must be shadow or live when expectedDecision is propose_correction`);
+      }
     }
   });
 
@@ -188,8 +192,8 @@ function validateAffectedTools(raw: unknown): string[] {
     errors.push('affectedTools must be a non-empty array');
   }
   raw.forEach((entry, index) => {
-    if (typeof entry !== 'string') {
-      errors.push(`affectedTools[${index}] must be a string, got ${typeof entry}`);
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      errors.push(`affectedTools[${index}] must be a non-empty string`);
     }
   });
   return errors;
@@ -324,4 +328,3 @@ export class DefaultArtificerValidator implements ArtificerValidator {
       : { valid: true, errors: [] };
   }
 }
-

@@ -153,6 +153,16 @@ describe('Peer Runner Contracts', () => {
 
       expect(isValidPITaskRecord(invalidChannelRecord)).toBe(false);
     });
+
+    it('rejects malformed adversarial feedback at the runtime boundary', async () => {
+      const { isValidPITaskRecord, createMinimalPITaskRecord } = await import(
+        '../internalization/peer-runner-contracts.js'
+      );
+      const record = createMinimalPITaskRecord('task-invalid-feedback', 'artificer', 'prompt');
+      const malformed = { ...record, adversarialFeedback: 42 };
+
+      expect(isValidPITaskRecord(malformed as unknown as TaskRecord)).toBe(false);
+    });
   });
 
   // ── createMinimalPITaskRecord ─────────────────────────────────────────────

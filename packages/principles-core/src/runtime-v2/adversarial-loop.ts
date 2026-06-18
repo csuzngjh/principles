@@ -71,7 +71,10 @@ export interface AdversarialLoopResult {
  * return { decision: 'rejected', degradationReason }.
  */
 export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<AdversarialLoopResult> {
-  const maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
+  const requestedRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
+  const maxRounds = Number.isFinite(requestedRounds)
+    ? Math.max(1, Math.min(DEFAULT_MAX_ROUNDS, Math.floor(requestedRounds)))
+    : DEFAULT_MAX_ROUNDS;
   const correlation = input.correlationId ?? 'adversarial-loop';
   const channel = input.channel ?? 'prompt';
 
@@ -178,6 +181,10 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
       // Rule artifact written by EvaluatorRunner.succeedTask (PRI-427) when
       // adversarialResult.passed === true. Resolve it from the store.
       const ruleArtifactId = await resolveRuleArtifactId(input, evaluatorTaskId);
+      if (!ruleArtifactId) {
+        return rejected(round, evaluatorTaskId, lastPrincipleArtifactId, lastAdversarialResult,
+          'evaluator_approved_without_rule_artifact');
+      }
       return {
         decision: 'approved',
         rounds: round,

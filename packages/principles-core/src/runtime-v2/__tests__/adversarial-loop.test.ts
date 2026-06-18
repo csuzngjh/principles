@@ -282,6 +282,49 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(result.ruleArtifactId).not.toBeNull();
   });
 
+  it('does not report approved when the evaluator produced no rule artifact', async () => {
+    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
+      taskId,
+      sourceArtificerArtifactId: artificerArtifactId,
+      evaluation: { decision: 'approved', summary: 'plan only', score: 0.9, strengths: [], concerns: [], requiredChanges: [] },
+      sourceTrace: { artificerArtifactId },
+      risks: [],
+      generatedAt: new Date().toISOString(),
+    }));
+
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+    });
+
+    expect(result.decision).toBe('rejected');
+    expect(result.ruleArtifactId).toBeNull();
+    expect(result.degradationReason).toContain('rule_artifact');
+  });
+
+  it('enforces the two-round hard cap when callers request more rounds', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      h.adapter.queueArtificer(makeArtificerV2);
+      h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
+    }
+
+    const result = await runAdversarialLoop({
+      artificerRunner: h.artificerRunner,
+      artifactStore: h.artifactStore,
+      evaluatorRunner: h.evaluatorRunner,
+      stateManager: h.stateManager,
+      scribeTaskId: SCRIBE_TASK_ID,
+      maxRounds: 3,
+    });
+
+    expect(result.rounds).toBe(2);
+    expect(h.adapter.startRunCalls).toHaveLength(4);
+  });
+
   it('Round 1 needs_revision + Round 2 approved → 2 rounds, rule artifact written', async () => {
     h.adapter.queueArtificer(makeArtificerV2);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);

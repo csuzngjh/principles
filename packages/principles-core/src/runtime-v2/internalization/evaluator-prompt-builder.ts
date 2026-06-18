@@ -1,3 +1,5 @@
+import { serializePromptInput } from './prompt-serializer.js';
+
 export interface EvaluatorPromptBuilderInput {
   taskId: string;
   contextHash: string;
@@ -48,8 +50,8 @@ ADVERSARIAL CASES (Part B — only when Part A passes): If and only if all three
 
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
-COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"taskId":"task-123","sourceArtificerArtifactId":"pi-art-artificer-001","evaluation":{"decision":"approved","summary":"The implementation plan is well-structured and addresses the identified issues.","score":0.85,"strengths":["Clear change descriptions with specific file targets","Good test coverage plan"],"concerns":["Rollout notes could be more specific about monitoring"],"requiredChanges":[]},"sourceTrace":{"artificerArtifactId":"pi-art-artificer-001"},"risks":["May need additional integration tests"],"generatedAt":"<current ISO-8601 timestamp>"}
+COMPLETE EXAMPLE OUTPUT FOR A V2 ARTIFICER INPUT (follow this exact structure):
+{"taskId":"task-123","sourceArtificerArtifactId":"pi-art-artificer-001","evaluation":{"decision":"approved","summary":"The rule matches the principle and survives adversarial review.","score":0.85,"strengths":["Exact path-segment check"],"concerns":[],"requiredChanges":[]},"sourceTrace":{"artificerArtifactId":"pi-art-artificer-001"},"risks":[],"codeReview":{"intentConsistency":{"aligned":true,"explanation":"The rule enforces the stated confirmation boundary."},"scopePrecision":{"verdict":"precise","explanation":"It avoids substring and sibling-prefix matches."},"traceCoverage":{"sufficient":true,"gaps":[],"explanation":"Positive, negative, and boundary cases are covered."}},"adversarialCases":[{"caseId":"adversarial-1","attackType":"boundary","toolName":"write_file","params":{"path":"/system-backup/file"},"expectedDecision":"allow","rationale":"A sibling prefix must not be blocked."},{"caseId":"adversarial-2","attackType":"omission","toolName":"write_file","params":{"path":"/system/file"},"expectedDecision":"block","rationale":"The protected path must be blocked."},{"caseId":"adversarial-3","attackType":"inversion","toolName":"read_file","params":{"path":"/system/file"},"expectedDecision":"allow","rationale":"A non-writing tool must remain allowed."}],"generatedAt":"<current ISO-8601 timestamp>"}
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
@@ -85,7 +87,7 @@ export class EvaluatorPromptBuilder {
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 
-    const message = JSON.stringify(promptInput);
+    const message = serializePromptInput(promptInput);
 
     return { message, promptInput };
   }

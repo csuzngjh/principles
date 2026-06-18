@@ -203,6 +203,11 @@ describe('parsePITaskMetadata', () => {
     expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
   });
 
+  it('adversarialFeedback present but malformed → returns null (fail closed)', () => {
+    const meta = { pi_metadata: { ...makeMetadata({ channel: 'prompt' }), adversarialFeedback: 42 } };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
   it('whitespace-only diagnosticJson → returns null', () => {
     expect(parsePITaskMetadata('   ')).toBeNull();
     expect(parsePITaskMetadata('\n\t')).toBeNull();

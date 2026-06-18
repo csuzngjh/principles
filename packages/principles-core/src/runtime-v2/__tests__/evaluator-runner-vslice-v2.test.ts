@@ -493,6 +493,30 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     expect(v2.adversarialResult).toBeDefined();
     expect(v2.adversarialResult?.passed).toBe(true);
     expect(v2.adversarialResult?.failedCases).toHaveLength(0);
+    const persistedOutputs = (deps.stateManager.updateRunOutput as ReturnType<typeof vi.fn>).mock.calls;
+    expect(persistedOutputs).toHaveLength(2);
+    expect(JSON.parse(persistedOutputs[1]?.[1] as string)).toMatchObject({
+      adversarialResult: { passed: true, failedCases: [] },
+    });
+  });
+
+  it('adversarial replay telemetry uses the actual runtime runId', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV1ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    await makeRunner(deps, makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    })).run(EVALUATOR_TASK_ID);
+
+    const skipped = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls
+      .map((call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((event) => event.eventType === 'evaluator_adversarial_replay_skipped');
+    expect(skipped?.payload.runId).toBe('run-evaluator-001');
   });
 
   it('PRI-423 contract: merged trace sent to gate contains ≥1 positive case from Artificer', async () => {

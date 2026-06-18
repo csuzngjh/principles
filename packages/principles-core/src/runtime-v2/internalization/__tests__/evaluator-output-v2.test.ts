@@ -14,7 +14,7 @@
  * field-by-field with runtime guards, never `as`-cast.
  */
 import { describe, it, expect } from 'vitest';
-import { DefaultEvaluatorValidator } from '../evaluator-output.js';
+import { DefaultEvaluatorValidator, isEvaluatorOutputV2 } from '../evaluator-output.js';
 import type { EvaluatorOutputV1, EvaluatorOutputV2 } from '../evaluator-output.js';
 
 const EVALUATOR_TASK_ID = 'task-evaluator-001';
@@ -87,6 +87,10 @@ describe('DefaultEvaluatorValidator — V2 (RuleHost MVP Activation)', () => {
     const result = await validator.validate(makeV2Output(), EVALUATOR_TASK_ID);
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it('does not narrow malformed V2-shaped output', () => {
+    expect(isEvaluatorOutputV2({ ...makeV1Output(), codeReview: null })).toBe(false);
   });
 
   it('accepts V2 output with codeReview but no adversarial fields (short-circuit case)', async () => {

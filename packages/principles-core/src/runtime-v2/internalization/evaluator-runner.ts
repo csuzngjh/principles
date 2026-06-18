@@ -92,13 +92,13 @@ function extractScribeArtifactId(artificerContentJson: string): string | null {
   if (!isRecordValue(parsed)) return null;
 
   // sourceTrace.scribeArtifactId
-  const trace = parsed.sourceTrace;
+  const trace = Object.hasOwn(parsed, 'sourceTrace') ? parsed.sourceTrace : undefined;
   if (isRecordValue(trace)) {
-    const fromTrace = trace.scribeArtifactId;
+    const fromTrace = Object.hasOwn(trace, 'scribeArtifactId') ? trace.scribeArtifactId : undefined;
     if (typeof fromTrace === 'string' && fromTrace.trim() !== '') return fromTrace;
   }
   // top-level sourceScribeArtifactId
-  const direct = parsed.sourceScribeArtifactId;
+  const direct = Object.hasOwn(parsed, 'sourceScribeArtifactId') ? parsed.sourceScribeArtifactId : undefined;
   if (typeof direct === 'string' && direct.trim() !== '') return direct;
 
   return null;
@@ -433,9 +433,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // remains available regardless of replay outcome (PRD Decision 11d §h).
     let finalOutput: EvaluatorOutputV1 = output;
     if (isEvaluatorOutputV2(output) && this.gateDeps) {
-      const replayOutcome = await this.runAdversarialReplay(output, taskId, context);
+      const replayOutcome = await this.runAdversarialReplay(output, taskId, runId, context);
       if (replayOutcome.updatedOutput) {
         finalOutput = replayOutcome.updatedOutput;
+        await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
         // Re-persist the artifact with the populated adversarialResult so
         // downstream readers (Phase 6 assembly, orchestrator retry) see it.
         try {
@@ -603,9 +604,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Never throws — all failure modes degrade to a returned result with a
    * structured reason (ERR-018). The caller persists the updated output.
    */
+  // eslint-disable-next-line @typescript-eslint/max-params
   private async runAdversarialReplay(
     output: EvaluatorOutputV2,
     taskId: string,
+    runId: string,
     context: EvaluatorContext,
   ): Promise<{ readonly updatedOutput: EvaluatorOutputV2 | null }> {
     // gateDeps is non-null here — the caller only invokes this method when
@@ -615,8 +618,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     if (!gateDeps) {
       return { updatedOutput: null };
     }
-    const runId = output.taskId;
-
     // (1) Passive review short-circuit: the LLM emits decision='needs_revision'
     // when any of intentConsistency/scopePrecision/traceCoverage fails. Only
     // replay when the LLM judged the code worth defending. This check is
