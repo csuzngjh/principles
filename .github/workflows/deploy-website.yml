@@ -14,20 +14,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Build website
-        run: pnpm --filter @principles/website docs:build
+        run: npm run docs:build -w @principles/website
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
