@@ -1,4 +1,3 @@
-/* eslint-env browser */
 const ORIGINAL_TITLE = 'PD Console';
 const CANVAS_SIZE = 32;
 
@@ -23,6 +22,7 @@ function drawRedDot(ctx: CanvasRenderingContext2D): void {
 export function renderFaviconDataUrl(totalCount: number): string {
   if (typeof document === 'undefined') return '';
 
+  // eslint-disable-next-line no-undef
   const canvas = document.createElement('canvas');
   canvas.width = CANVAS_SIZE;
   canvas.height = CANVAS_SIZE;
@@ -42,17 +42,21 @@ export function updateFaviconAndTitle(pendingCount: number, degradedCount: numbe
 
   const totalCount = pendingCount + degradedCount;
 
+  // eslint-disable-next-line no-undef
   document.title = totalCount > 0
     ? `(${totalCount}) PD Governance Workspace`
     : ORIGINAL_TITLE;
 
   const linkId = 'pd-dynamic-favicon';
+  // eslint-disable-next-line no-undef
   let link = document.getElementById(linkId) as HTMLLinkElement | null;
   if (!link) {
+    // eslint-disable-next-line no-undef
     link = document.createElement('link');
     link.id = linkId;
     link.rel = 'icon';
     link.type = 'image/png';
+    // eslint-disable-next-line no-undef
     document.head.appendChild(link);
   }
 

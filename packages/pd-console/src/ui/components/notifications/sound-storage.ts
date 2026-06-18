@@ -1,8 +1,8 @@
-/* eslint-env browser */
 export const SOUND_ENABLED_KEY = 'pd-sound-enabled';
 
 function getStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
+  // eslint-disable-next-line no-undef
   return window.localStorage;
 }
 
