@@ -84,7 +84,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 This is the **Principles Disciple** project — an OpenClaw plugin for cognitive governance of coding agents.
 
 Key technical details:
-- **Monorepo** with pnpm workspaces: `packages/openclaw-plugin`, `packages/principles-core`, `packages/pd-cli`, `packages/create-principles-disciple`
+- **Monorepo** with npm workspaces: `packages/openclaw-plugin`, `packages/principles-core`, `packages/pd-cli`, `packages/create-principles-disciple`
 - **TypeScript** throughout, built with esbuild
 - **Testing**: Vitest with coverage-v8
 - **Build**: `npm run build` (builds core then plugin)

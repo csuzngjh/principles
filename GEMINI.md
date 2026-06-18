@@ -8,7 +8,7 @@ If a code review catches your error, record it in the handbook and tag the Linea
 
 ## Project Overview
 
-**Principles Disciple** — evolutionary agent framework (Node.js/TypeScript monorepo, pnpm).
+**Principles Disciple** — evolutionary agent framework (Node.js/TypeScript monorepo, npm).
 
 ## Critical Rules
 
