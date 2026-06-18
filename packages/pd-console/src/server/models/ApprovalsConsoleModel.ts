@@ -177,14 +177,16 @@ export class ApprovalsConsoleModel {
       return {
         decision: 'refused' as const,
         reason: `feature_flag_load_failed: ${flagResult.reason}`,
+        nextAction: 'fix feature flag config or manually dispatch via pd runtime activation dispatch',
         channel: existing.channel,
-        riskLevel: 'low' as const,
+        riskLevel: existing.riskLevel,
       };
     }
     const completionFlag = flagResult.flags.flags.story_a_approval_completion;
     if (!completionFlag || !completionFlag.enabled) {
       // Flag disabled — return undefined so the caller knows activation was skipped.
       // The approval record itself is not rolled back (Contract F: no data damage).
+      // The skip is observable via `pd runtime activation list` (no activation record).
       return undefined;
     }
 
@@ -244,8 +246,9 @@ export class ApprovalsConsoleModel {
         return {
           decision: 'refused' as const,
           reason: `approval_completion_failed: ${completionResult.reason}`,
+          nextAction: completionResult.nextAction,
           channel: existing.channel,
-          riskLevel: 'low' as const,
+          riskLevel: existing.riskLevel,
         };
       }
 
@@ -255,8 +258,9 @@ export class ApprovalsConsoleModel {
       return {
         decision: 'refused' as const,
         reason: `activation_dispatch_failed: ${dispatchMsg}`,
+        nextAction: 'check dispatcher writers and artifact store, then retry approval',
         channel: existing.channel,
-        riskLevel: 'low' as const,
+        riskLevel: existing.riskLevel,
       };
     }
   }

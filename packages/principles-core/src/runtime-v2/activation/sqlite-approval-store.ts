@@ -184,14 +184,16 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
 
   async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
-    const existing = db.prepare('SELECT status, artifact_id FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string; artifact_id: string } | undefined;
+    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
     }
+    // Atomic UPDATE: derive previous_artifact_id from the current DB value
+    // to prevent lineage drift during concurrent edits (ERR-004/ERR-008).
     const updateResult = db.prepare(
-      "UPDATE approvals SET artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ?, previous_artifact_id = ? WHERE approval_id = ? AND status = 'pending'"
-    ).run(input.newArtifactId, input.now, input.editedBy, input.editReason, existing.artifact_id, input.approvalId);
+      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending'"
+    ).run(input.newArtifactId, input.now, input.editedBy, input.editReason, input.approvalId);
     if (updateResult.changes === 0) {
       const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
       if (!fresh) return { ok: false, error: 'not_found' };

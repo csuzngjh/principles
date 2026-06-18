@@ -61,10 +61,12 @@ describe('ApprovalQueue edit-then-approve', () => {
       riskLevel: 'high',
     }, '2026-06-18T00:00:00.000Z');
 
-    await queue.edit({ approvalId: created.approvalId, editedBy: 'owner-001', newArtifactId: 'art-v2', editReason: 'Fixed rule logic', now: '2026-06-18T01:00:00.000Z' });
+    const editResult = await queue.edit({ approvalId: created.approvalId, editedBy: 'owner-001', newArtifactId: 'art-v2', editReason: 'Fixed rule logic', now: '2026-06-18T01:00:00.000Z' });
+    expect(editResult.ok).toBe(true);
 
     const found = await queue.getById(created.approvalId);
     expect(found?.status).toBe('pending');
+    expect(found?.artifactId).toBe('art-v2');
     expect(found?.decidedAt).toBeUndefined();
     expect(found?.decidedBy).toBeUndefined();
   });

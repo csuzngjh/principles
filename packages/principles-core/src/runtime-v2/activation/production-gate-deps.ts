@@ -54,6 +54,14 @@ interface CompiledModuleExports {
 }
 
 /**
+ * Type guard: validate that a value from the untrusted vm sandbox has the
+ * expected CompiledModuleExports shape. Treats all sandbox output as unknown.
+ */
+function isCompiledModuleExports(value: unknown): value is CompiledModuleExports {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
  * Compile rule implementation code in a node:vm sandbox and return a typed
  * evaluate function. Mirrors the compilation logic used by the production
  * openclaw-plugin RuleHost (rule-implementation-runtime.ts).
@@ -70,28 +78,35 @@ function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
 
   script.runInContext(context, { timeout: 1000, displayErrors: true });
 
-  const moduleExports = (context as { __pdRuleModule?: CompiledModuleExports }).__pdRuleModule;
-  delete (context as { __pdRuleModule?: unknown }).__pdRuleModule;
+  // Treat sandbox output as untrusted — use Reflect.get + type guard, not `as`.
+  const moduleExportsUnknown = Reflect.get(context, '__pdRuleModule');
+  Reflect.deleteProperty(context, '__pdRuleModule');
 
-  if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
+  if (!isCompiledModuleExports(moduleExportsUnknown)) {
+    throw new Error(`[${sourceLabel}] compiled module export shape is invalid`);
+  }
+
+  const evaluateFn = moduleExportsUnknown.evaluate;
+  if (typeof evaluateFn !== 'function') {
     throw new Error(
       `[${sourceLabel}] compiled module has no evaluate function`,
     );
   }
 
-  const evaluateFn = moduleExports.evaluate as (
-    input: RuleHostInput,
-    helpers: RuleHostHelpers,
-  ) => RuleHostResult;
-
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
-    const result = evaluateFn(input, helpers);
+    const result = Reflect.apply(evaluateFn, undefined, [input, helpers]) as unknown;
     if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'decision')) {
       throw new Error(
         `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)})`,
       );
     }
-    return result;
+    const decision = Reflect.get(result, 'decision');
+    if (typeof decision !== 'string') {
+      throw new Error(
+        `[${sourceLabel}]: evaluate returned invalid decision field (got ${typeof decision})`,
+      );
+    }
+    return result as RuleHostResult;
   };
 }
 

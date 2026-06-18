@@ -100,14 +100,37 @@ export class ApprovalCompletionService {
       };
     }
 
+    // 2b. Validate required fields before generating idempotency key (EP-01)
+    if (!record.artifactId || typeof record.artifactId !== 'string') {
+      return {
+        ok: false,
+        error: 'not_approved',
+        reason: 'approval record has missing or invalid artifactId',
+        nextAction: 'check_artifact_store_integrity',
+        approvalId: input.approvalId,
+      };
+    }
+    if (!record.channel || typeof record.channel !== 'string') {
+      return {
+        ok: false,
+        error: 'not_approved',
+        reason: 'approval record has missing or invalid channel',
+        nextAction: 'check_approval_store_integrity',
+        approvalId: input.approvalId,
+      };
+    }
+
     // 3. Check idempotency — has this already been activated?
     const idempotencyKey = makeIdempotencyKey(record.artifactId, record.channel);
     let existingActivation;
     try {
       existingActivation = await this.stateReadModel.getActivationStatus(idempotencyKey);
-    } catch {
+    } catch (err: unknown) {
       // If state read fails, proceed to dispatch — the dispatcher will
-      // also check idempotency and handle errors.
+      // also check idempotency and handle errors. Log the failure for
+      // observability (ERR-002: graceful degradation must include a reason).
+      const readErr = err instanceof Error ? err.message : String(err);
+      console.warn(`[ApprovalCompletionService] idempotency state read failed for key ${idempotencyKey}: ${readErr}; proceeding to dispatch`);
       existingActivation = null;
     }
 
