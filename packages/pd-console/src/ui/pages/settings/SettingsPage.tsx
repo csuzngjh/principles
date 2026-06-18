@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { useNotifications } from "../../components/notifications/useNotifications.js";
+import { cn } from "../../../lib/utils.js";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -102,6 +104,7 @@ type LoadingState = "loading" | "loaded" | "error";
 
 export function SettingsPage() {
   const { t } = useTranslation();
+  const { soundEnabled, setSoundEnabled } = useNotifications();
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -358,6 +361,47 @@ export function SettingsPage() {
               <option value="zh-CN">{t("pages.settings.languageZhCN")}</option>
               <option value="en">{t("pages.settings.languageEn")}</option>
             </select>
+          </div>
+        </div>
+      </section>
+
+      {/* Section: Sound alerts */}
+      <section className="mb-8" aria-labelledby="section-sound-alerts">
+        <SectionTitle id="section-sound-alerts">
+          {t("pages.settings.notifications")}
+        </SectionTitle>
+
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <label
+                htmlFor="sound-alerts-toggle"
+                className="block text-sm font-medium text-ink"
+              >
+                {t("pages.settings.soundAlerts")}
+              </label>
+              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+                {t("pages.settings.soundAlertsDescription")}
+              </p>
+            </div>
+            <button
+              id="sound-alerts-toggle"
+              type="button"
+              role="switch"
+              aria-checked={soundEnabled}
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className={cn(
+                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2",
+                soundEnabled ? "bg-gov" : "bg-line"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-paper transition-transform",
+                  soundEnabled ? "translate-x-6" : "translate-x-1"
+                )}
+              />
+            </button>
           </div>
         </div>
       </section>

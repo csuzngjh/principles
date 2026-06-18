@@ -537,7 +537,10 @@
       "languageZhCN": "中文 (Chinese)",
       "languageEn": "English",
       "languageSaved": "Language preference saved",
-      "languageLoadError": "Failed to load language preference"
+      "languageLoadError": "Failed to load language preference",
+      "notifications": "Notifications",
+      "soundAlerts": "Sound alerts",
+      "soundAlertsDescription": "Play a sound when new approvals or degraded signals arrive"
     },
     "controlCenter": {
       "eyebrow": "Control Center",
