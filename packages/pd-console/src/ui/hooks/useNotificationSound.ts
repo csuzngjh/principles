@@ -45,7 +45,7 @@ export function useNotificationSound() {
       const ctx = audioContextRef.current ?? new AudioContext();
       audioContextRef.current = ctx;
       if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
+        ctx.resume().catch(() => { /* autoplay policy blocked */ });
         return;
       }
 

@@ -1,3 +1,4 @@
+/* eslint-env browser */
 const ORIGINAL_TITLE = 'PD Console';
 const CANVAS_SIZE = 32;
 
