@@ -49,8 +49,10 @@ export function updateFaviconAndTitle(pendingCount: number, degradedCount: numbe
     : ORIGINAL_TITLE;
 
   // eslint-disable-next-line no-undef
-  let link = document.getElementById(DYNAMIC_FAVICON_ID) as HTMLLinkElement | null;
+  const existing = document.getElementById(DYNAMIC_FAVICON_ID);
+  let link = existing instanceof HTMLLinkElement ? existing : null;
   if (!link) {
+    existing?.remove();
     // eslint-disable-next-line no-undef
     link = document.createElement('link');
     link.id = DYNAMIC_FAVICON_ID;

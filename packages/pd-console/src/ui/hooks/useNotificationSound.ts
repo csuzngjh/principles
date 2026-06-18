@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type NotificationSoundType = 'pending' | 'degraded';
 
@@ -15,6 +15,18 @@ export const SOUND_CONFIG: Record<NotificationSoundType, {
 export function useNotificationSound() {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    const ctx = audioContextRef.current;
+    audioContextRef.current = null;
+    if (ctx && ctx.state !== 'closed') {
+      void ctx.close().catch((error: unknown) => {
+        console.warn('Failed to close notification audio context:', error);
+      });
+    }
+  }, []);
 
   const unlockAudio = useCallback(() => {
     if (audioUnlocked) return;
@@ -25,12 +37,12 @@ export function useNotificationSound() {
       audioContextRef.current = ctx;
       if (ctx.state === 'suspended') {
         ctx.resume().then(() => {
-          setAudioUnlocked(true);
+          if (mountedRef.current) setAudioUnlocked(true);
         }).catch(() => {
           // Autoplay policy blocked; remain locked.
         });
       } else {
-        setAudioUnlocked(true);
+        if (mountedRef.current) setAudioUnlocked(true);
       }
     } catch (err) {
       console.warn('Failed to unlock audio:', err);
