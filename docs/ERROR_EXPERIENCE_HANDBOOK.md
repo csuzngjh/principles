@@ -67,6 +67,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
 | ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
 | ERR-066 | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw | PRI-397 |
+| ERR-070 | New public types/classes not exported from barrel index.ts — module consumers cannot import the new API surface | PRI-424 |
 
 ---
 
@@ -709,8 +710,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 65 |
-| Last updated | 2026-06-15 |
+| Total lessons | 66 |
+| Last updated | 2026-06-18 |
 | Top category | Schema & Type |
 | Recurring errors | 27 |
 
@@ -999,3 +1000,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Treat every output-emitting path (happy, degraded, fallback, retry-exhausted) as a trust boundary: each must emit only objects that passed validation. Degradation is a *content* transformation (strip code fields), not a *trust* escape hatch.
   - Prefer `throw PDRuntimeError` over returning a contradictory state object on total failure — it surfaces in `handlePostLeaseError` with a structured reason, rather than relying on the caller to cross-check handle vs pollRun.
 - **Recurrence**: First occurrence (EP-01 Trust Boundary + EP-02 Production Path Wiring). Found in self-review before external handoff; both fixed in commit c396ed92 before any PR.
+
+**[ERR-070]** | New public types/classes not exported from barrel `index.ts` — module consumers cannot import the new API surface
+
+- **What happened**: In PR #963 (PRI-424 RuleHost MVP Activation), multiple new V2 types (`ArtificerOutputV2`, `EvaluatorOutputV2`, `AdversarialCase`, `AdversarialFailedCase`, `EvaluatorCodeReview`, `EvaluatorAdversarialResult`, `GoldenTraceCaseInput`) and the `ArtificerL2Adapter` class were added to internal module files (`artificer-output.ts`, `evaluator-output.ts`, `artificer-l2-adapter.ts`, `golden-trace.ts`) but were not re-exported from the barrel `index.ts` files (`runtime-v2/internalization/index.ts` and `runtime-v2/index.ts`). Downstream consumers importing from the package's public API would get "module has no exported member" errors.
+- **Why it's wrong**: TypeScript barrel exports (`index.ts`) define the module's public API surface. Adding new types to internal files without updating the barrel means the types exist but are unreachable from outside the module. This is the module-level equivalent of ERR-060 (capability added but not registered in the proper surface).
+- **Generalized failure mode**: When adding new public types, functions, or classes to internal module files, assistants must update the corresponding barrel `index.ts` exports, otherwise downstream consumers cannot access the new API surface.
+- **Correct approach**: After adding any new export to an internal file, immediately verify whether the barrel `index.ts` at each level (sub-module root, package root) needs a corresponding re-export. Use `grep -r "export.*from" index.ts` to see current exports and add any missing ones.
+- **How to prevent**: During PR review, for every new `export` keyword added to a non-index file: (1) check if the nearest ancestor `index.ts` re-exports it; (2) check if the package-level `index.ts` re-exports it; (3) if the type is used in tests but not barrel-exported, the test may pass via direct path import while external consumers fail.
+- **Regression guard**: A TypeScript consumer-import test that does `import { NewType } from '@principles/core'` (package root) and asserts the type is defined.
+- **Related ERRs**: ERR-060 (capability not registered in proper surface)
+- **Source**: PRI-424 / PR #963
+- **Date**: 2026-06-18
+- **Recurrence**: First occurrence.
