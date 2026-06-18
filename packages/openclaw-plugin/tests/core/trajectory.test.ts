@@ -262,4 +262,164 @@ describe('TrajectoryDatabase', () => {
     expect(secondStats.painEvents).toBe(1);
     reopened.dispose();
   });
+
+  describe('recordPainEvent with canonical_pain_id (PRI-406)', () => {
+    it('inserts pain event without canonical_pain_id successfully', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const id = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'test reason',
+        origin: 'test',
+      });
+
+      expect(id).toBeGreaterThan(0);
+      db.dispose();
+    });
+
+    it('inserts pain event with canonical_pain_id successfully', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const id = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'test reason',
+        origin: 'test',
+        canonicalPainId: 'pain-canonical-001',
+      });
+
+      expect(id).toBeGreaterThan(0);
+      db.dispose();
+    });
+
+    it('handles UNIQUE constraint violation on canonical_pain_id by updating instead of throwing', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-duplicate';
+
+      const id1 = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'first',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+      expect(id1).toBeGreaterThan(0);
+
+      const id2 = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 60,
+        reason: 'second',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+
+      expect(id2).toBe(id1);
+
+      db.dispose();
+    });
+
+    it('updates runtime_task_id when canonical_pain_id conflict occurs', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-update-rtid';
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'no runtime task',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 60,
+        reason: 'with runtime task',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: 'task-123',
+      });
+
+      const queryResult = (db as any).db.prepare(
+        'SELECT runtime_task_id FROM pain_events WHERE canonical_pain_id = ?'
+      ).get(canonicalId);
+
+      expect(queryResult.runtime_task_id).toBe('task-123');
+
+      db.dispose();
+    });
+
+    it('does not overwrite existing runtime_task_id when new one is null', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-coalesce';
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'with runtime task',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: 'original-task',
+      });
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 60,
+        reason: 'without runtime task',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+
+      const queryResult = (db as any).db.prepare(
+        'SELECT runtime_task_id FROM pain_events WHERE canonical_pain_id = ?'
+      ).get(canonicalId);
+
+      expect(queryResult.runtime_task_id).toBe('original-task');
+
+      db.dispose();
+    });
+
+    it('throws for non-canonical_pain_id UNIQUE constraint violations', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      (db as any).db.exec('CREATE UNIQUE INDEX IF NOT EXISTS test_unique_source ON pain_events(source)');
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'unique-source',
+        score: 50,
+        reason: 'first',
+        origin: 'test',
+      });
+
+      expect(() => {
+        db.recordPainEvent({
+          sessionId: 's1',
+          source: 'unique-source',
+          score: 60,
+          reason: 'second',
+          origin: 'test',
+        });
+      }).toThrow();
+
+      db.dispose();
+    });
+  });
 });
