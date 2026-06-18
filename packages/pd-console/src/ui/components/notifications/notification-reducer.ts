@@ -10,8 +10,11 @@ export type NotificationDiff = {
 
 export function diffNotificationCounts(
   current: NotificationCounts,
-  previous: NotificationCounts,
+  previous: NotificationCounts | null,
 ): NotificationDiff {
+  if (previous === null) {
+    return { pendingIncreased: false, degradedIncreased: false };
+  }
   return {
     pendingIncreased: current.pendingCount > previous.pendingCount,
     degradedIncreased: current.degradedCount > previous.degradedCount,

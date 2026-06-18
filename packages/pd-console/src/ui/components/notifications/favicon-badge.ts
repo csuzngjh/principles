@@ -1,5 +1,6 @@
 const ORIGINAL_TITLE = 'PD Console';
 const CANVAS_SIZE = 32;
+const DYNAMIC_FAVICON_ID = 'pd-dynamic-favicon';
 
 function drawBaseFavicon(ctx: CanvasRenderingContext2D): void {
   ctx.fillStyle = '#1a1a1a';
@@ -47,13 +48,12 @@ export function updateFaviconAndTitle(pendingCount: number, degradedCount: numbe
     ? `(${totalCount}) PD Governance Workspace`
     : ORIGINAL_TITLE;
 
-  const linkId = 'pd-dynamic-favicon';
   // eslint-disable-next-line no-undef
-  let link = document.getElementById(linkId) as HTMLLinkElement | null;
+  let link = document.getElementById(DYNAMIC_FAVICON_ID) as HTMLLinkElement | null;
   if (!link) {
     // eslint-disable-next-line no-undef
     link = document.createElement('link');
-    link.id = linkId;
+    link.id = DYNAMIC_FAVICON_ID;
     link.rel = 'icon';
     link.type = 'image/png';
     // eslint-disable-next-line no-undef
@@ -64,4 +64,12 @@ export function updateFaviconAndTitle(pendingCount: number, degradedCount: numbe
   if (dataUrl) {
     link.href = dataUrl;
   }
+}
+
+export function resetFaviconAndTitle(): void {
+  if (typeof document === 'undefined') return;
+  // eslint-disable-next-line no-undef
+  document.title = ORIGINAL_TITLE;
+  // eslint-disable-next-line no-undef
+  document.getElementById(DYNAMIC_FAVICON_ID)?.remove();
 }

@@ -10,7 +10,7 @@ import { fetchGovernanceQueue } from '../../api.js';
 import { useNotificationSound } from '../../hooks/useNotificationSound.js';
 import { diffNotificationCounts } from './notification-reducer.js';
 import { loadSoundEnabled, saveSoundEnabled } from './sound-storage.js';
-import { updateFaviconAndTitle } from './favicon-badge.js';
+import { resetFaviconAndTitle, updateFaviconAndTitle } from './favicon-badge.js';
 
 export type NotificationState = {
   pendingCount: number;
@@ -35,7 +35,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   });
 
   const { playSound, unlockAudio, audioUnlocked } = useNotificationSound();
-  const prevCountsRef = useRef({ pendingCount: 0, degradedCount: 0 });
+  const prevCountsRef = useRef<{ pendingCount: number; degradedCount: number } | null>(null);
+  const hasSuccessfulPollRef = useRef(false);
+  const pollInFlightRef = useRef(false);
   const pendingAlertWhileHiddenRef = useRef(false);
   const degradedAlertWhileHiddenRef = useRef(false);
 
@@ -45,20 +47,27 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const poll = useCallback(async () => {
-    const result = await fetchGovernanceQueue();
-    if (!result.success) {
-      console.warn('Notification poll failed:', result.error);
-      return;
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    try {
+      const result = await fetchGovernanceQueue();
+      if (!result.success) {
+        console.warn('Notification poll failed:', result.error);
+        return;
+      }
+
+      const pendingCount = result.data.pendingReviewCount;
+      const degradedCount = result.data.degradedSignals?.length ?? 0;
+
+      hasSuccessfulPollRef.current = true;
+      setState((prev) => ({
+        ...prev,
+        pendingCount,
+        degradedCount,
+      }));
+    } finally {
+      pollInFlightRef.current = false;
     }
-
-    const pendingCount = result.data.pendingReviewCount;
-    const degradedCount = result.data.degradedSignals?.length ?? 0;
-
-    setState((prev) => ({
-      ...prev,
-      pendingCount,
-      degradedCount,
-    }));
   }, []);
 
   // Initial poll + interval
@@ -70,10 +79,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   // Play sounds when counts increase (respect hidden state)
   useEffect(() => {
+    if (!hasSuccessfulPollRef.current) return;
+
     if (typeof document !== 'undefined' && document.hidden) {
       const diff = diffNotificationCounts(state, prevCountsRef.current);
-      if (diff.pendingIncreased) pendingAlertWhileHiddenRef.current = true;
-      if (diff.degradedIncreased) degradedAlertWhileHiddenRef.current = true;
+      if (state.soundEnabled && diff.pendingIncreased) pendingAlertWhileHiddenRef.current = true;
+      if (state.soundEnabled && diff.degradedIncreased) degradedAlertWhileHiddenRef.current = true;
       prevCountsRef.current = {
         pendingCount: state.pendingCount,
         degradedCount: state.degradedCount,
@@ -82,6 +93,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
 
     if (!state.soundEnabled || !audioUnlocked) {
+      if (!state.soundEnabled) {
+        pendingAlertWhileHiddenRef.current = false;
+        degradedAlertWhileHiddenRef.current = false;
+      }
       prevCountsRef.current = {
         pendingCount: state.pendingCount,
         degradedCount: state.degradedCount,
@@ -110,6 +125,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     updateFaviconAndTitle(state.pendingCount, state.degradedCount);
   }, [state.pendingCount, state.degradedCount]);
+
+  useEffect(() => () => {
+    resetFaviconAndTitle();
+  }, []);
 
   // Unlock audio on first user interaction
   useEffect(() => {

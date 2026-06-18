@@ -727,7 +727,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 72 |
 | Last updated | 2026-06-18 |
 | Top category | Schema & Type |
-| Recurring errors | 27 |
+| Recurring errors | 28 |
 
 ---
 
@@ -846,7 +846,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Before cherry-picking, inspect the source branch's full commit list (`git log main..source-branch`). If it contains commits unrelated to the target, create the needed changes manually instead. Add a pre-cherry-pick checklist: (1) list source commits, (2) verify all are relevant, (3) if not, create fresh.
 - **Source**: PRI-299 / PR #800
 - **Date**: 2026-06-03
-- **Recurrence**: None
+- **Recurrence**: 2026-06-18 PR #971 — the notification-sound branch was based on a stacked history and its PR diff included already-merged RuleHost work plus unrelated website assets. Fixed by rebuilding the branch from current `main` and replaying only the seven notification commits. The review guard was strengthened in practice by comparing both `git log origin/main..source-branch` and `gh pr diff --name-only` before resolving conflicts.
 
 ---
 

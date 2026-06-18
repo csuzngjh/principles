@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SOUND_CONFIG } from '../../src/ui/hooks/useNotificationSound.js';
 import { diffNotificationCounts } from '../../src/ui/components/notifications/notification-reducer.js';
 import { loadSoundEnabled, saveSoundEnabled, SOUND_ENABLED_KEY } from '../../src/ui/components/notifications/sound-storage.js';
+import { resetFaviconAndTitle } from '../../src/ui/components/notifications/favicon-badge.js';
 
 describe('SOUND_CONFIG', () => {
   it('pending sound uses sine wave at 880 Hz for 150 ms', () => {
@@ -62,9 +63,26 @@ describe('sound-storage', () => {
     expect(loadSoundEnabled()).toBe(true);
     expect(mockStorage.getItem(SOUND_ENABLED_KEY)).toBe('true');
   });
+
+  it('falls back safely when browser storage access is blocked', () => {
+    vi.stubGlobal('window', {
+      get localStorage() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+
+    expect(loadSoundEnabled()).toBe(true);
+    expect(() => saveSoundEnabled(false)).not.toThrow();
+  });
 });
 
 describe('diffNotificationCounts', () => {
+  it('treats the first successful poll as a baseline, not a new alert', () => {
+    expect(diffNotificationCounts(
+      { pendingCount: 3, degradedCount: 2 },
+      null,
+    )).toEqual({ pendingIncreased: false, degradedIncreased: false });
+  });
   it('detects pending increase', () => {
     const result = diffNotificationCounts(
       { pendingCount: 3, degradedCount: 0 },
@@ -95,6 +113,21 @@ describe('diffNotificationCounts', () => {
       { pendingCount: 3, degradedCount: 2 },
     );
     expect(result).toEqual({ pendingIncreased: false, degradedIncreased: false });
+  });
+});
+
+describe('favicon cleanup', () => {
+  it('restores the base title and removes the dynamic favicon', () => {
+    const remove = vi.fn();
+    vi.stubGlobal('document', {
+      title: '(4) PD Governance Workspace',
+      getElementById: vi.fn(() => ({ remove })),
+    });
+
+    resetFaviconAndTitle();
+
+    expect(document.title).toBe('PD Console');
+    expect(remove).toHaveBeenCalledOnce();
   });
 });
 
