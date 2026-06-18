@@ -413,7 +413,7 @@ export { runAdversarialLoop, DEFAULT_MAX_ROUNDS } from './adversarial-loop.js';
 export type { AdversarialLoopInput, AdversarialLoopResult } from './adversarial-loop.js';
 
 // RuleHost MVP Activation — Artificer L2 Adapter (PRI-424)
-export { ArtificerL2Adapter } from './adapter/artificer-l2-adapter.js';
+export { ArtificerL2Adapter, buildArtificerL2GenerateCode } from './adapter/artificer-l2-adapter.js';
 export type { ArtificerL2AdapterConfig, ArtificerL2GenerateCodeFn } from './adapter/artificer-l2-adapter.js';
 
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli

@@ -117,6 +117,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Default off; flips dreamer from one-shot completeSimple to a multi-turn agentLoop with
   // read-only tools. Roll back = flip flag, reverts to PiAiRuntimeAdapter with zero migration.
   { id: 'l2_dreamer', category: 'quiet', enabled: false, since: '2026-06-16', description: 'L2 multi-turn agent loop for the dreamer runner (PRI-419) — read-only tools + submit_output, scoped to dreamer only' },
+  // PRI-429: Code-rule capability (atomic: ArtificerL2 + Evaluator). When enabled, the
+  // RuleHost pipeline runs the adversarial loop with the ArtificerL2Adapter (write-test-fix).
+  // When disabled (default), the pipeline degrades to text-principle-only after scribe.
+  // The CLI handler checks per-agent config (artificer + evaluator enabled) before enabling.
+  { id: 'code_rule_capability', category: 'quiet', enabled: false, since: '2026-06-18', description: 'Code-rule capability (atomic: ArtificerL2 + Evaluator) for RuleHost pipeline — default OFF, degrades to text-principle-only when disabled (PRI-429)' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
