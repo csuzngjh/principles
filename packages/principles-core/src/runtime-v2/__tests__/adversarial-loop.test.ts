@@ -38,6 +38,17 @@ import { parsePITaskMetadata } from '../internalization/pitask-metadata.js';
 
 const SCRIBE_TASK_ID = 'scribe-loop-001';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error('expected record fixture');
+  }
+  return value;
+}
+
 // ── Scripted adapter with per-round factories ────────────────────────────────
 
 type ArtificerFactory = (taskId: string) => ArtificerOutputV1;
@@ -420,14 +431,14 @@ describe('runAdversarialLoop (PRI-428)', () => {
     // by name; check the parsed JSON field, not the raw substring.)
     const round1ArtificerCall = h.adapter.startRunCalls[0];
     const round1Payload = round1ArtificerCall!.inputPayload;
-    const round1Parsed: Record<string, unknown> = typeof round1Payload === 'string'
-      ? JSON.parse(round1Payload) as Record<string, unknown>
-      : round1Payload as Record<string, unknown>;
+    const round1Parsed = requireRecord(typeof round1Payload === 'string'
+      ? JSON.parse(round1Payload)
+      : round1Payload);
     expect(Object.hasOwn(round1Parsed, 'adversarialFeedback')).toBe(false);
     // Round-2 artificer MUST carry the structured field.
-    const round2Parsed: Record<string, unknown> = typeof round2Payload === 'string'
-      ? JSON.parse(round2Payload) as Record<string, unknown>
-      : round2Payload as Record<string, unknown>;
+    const round2Parsed = requireRecord(typeof round2Payload === 'string'
+      ? JSON.parse(round2Payload)
+      : round2Payload);
     expect(Object.hasOwn(round2Parsed, 'adversarialFeedback')).toBe(true);
   });
 
