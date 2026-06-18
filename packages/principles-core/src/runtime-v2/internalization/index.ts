@@ -244,10 +244,12 @@ export {
 
 export type {
   ArtificerOutputV1,
+  ArtificerOutputV2,
   ArtificerImplementationPlan,
   ArtificerSourceTrace,
   ArtificerValidationResult,
   ArtificerValidator,
+  GoldenTraceCaseInput,
 } from './artificer-output.js';
 
 export {
@@ -255,6 +257,7 @@ export {
   ArtificerOutputV1Schema,
   ArtificerImplementationPlanSchema,
   ArtificerSourceTraceSchema,
+  isArtificerOutputV2,
 } from './artificer-output.js';
 
 export type {
@@ -277,8 +280,14 @@ export type {
   EvaluatorEvaluation,
   EvaluatorSourceTrace,
   EvaluatorOutputV1,
+  EvaluatorOutputV2,
   EvaluatorValidationResult,
   EvaluatorValidator,
+  EvaluatorCodeReview,
+  EvaluatorAdversarialResult,
+  AdversarialCase,
+  AdversarialFailedCase,
+  AdversarialAttackType,
 } from './evaluator-output.js';
 
 export {
@@ -287,6 +296,7 @@ export {
   EvaluatorEvaluationSchema,
   EvaluatorSourceTraceSchema,
   EVALUATOR_DECISIONS,
+  isEvaluatorOutputV2,
 } from './evaluator-output.js';
 
 export type {
@@ -445,6 +455,10 @@ export type {
 export type { AdversarialConversionResult } from './adversarial-case.js';
 export { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 export { formatAdversarialFeedback } from './adversarial-feedback.js';
+
+// ── Artificer L2 Adapter (PRI-424) ─────────────────────────────────────────
+export { ArtificerL2Adapter } from '../adapter/artificer-l2-adapter.js';
+export type { ArtificerL2AdapterConfig, ArtificerL2GenerateCodeFn } from '../adapter/artificer-l2-adapter.js';
 
 export {
   ROUTE_CHANNEL_MAP,
