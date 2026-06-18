@@ -16,11 +16,11 @@ export type NotificationState = {
   pendingCount: number;
   degradedCount: number;
   soundEnabled: boolean;
-  audioUnlocked: boolean;
 };
 
 export type NotificationContextValue = NotificationState & {
   setSoundEnabled: (enabled: boolean) => void;
+  audioUnlocked: boolean;
 };
 
 const POLL_INTERVAL_MS = 30000;
@@ -32,10 +32,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     pendingCount: 0,
     degradedCount: 0,
     soundEnabled: loadSoundEnabled(),
-    audioUnlocked: false,
   });
 
-  const { playSound, unlockAudio } = useNotificationSound();
+  const { playSound, unlockAudio, audioUnlocked } = useNotificationSound();
   const prevCountsRef = useRef({ pendingCount: 0, degradedCount: 0 });
   const pendingAlertWhileHiddenRef = useRef(false);
   const degradedAlertWhileHiddenRef = useRef(false);
@@ -82,7 +81,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!state.soundEnabled || !state.audioUnlocked) {
+    if (!state.soundEnabled || !audioUnlocked) {
       prevCountsRef.current = {
         pendingCount: state.pendingCount,
         degradedCount: state.degradedCount,
@@ -105,7 +104,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       pendingCount: state.pendingCount,
       degradedCount: state.degradedCount,
     };
-  }, [state, playSound]);
+  }, [state, playSound, audioUnlocked]);
 
   // Update favicon + title
   useEffect(() => {
@@ -118,7 +117,6 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     const handleInteraction = () => {
       unlockAudio();
-      setState((prev) => ({ ...prev, audioUnlocked: true }));
     };
 
     window.addEventListener('click', handleInteraction, { once: true });
@@ -145,7 +143,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, [poll]);
 
   return (
-    <NotificationContext.Provider value={{ ...state, setSoundEnabled }}>
+    <NotificationContext.Provider value={{ ...state, setSoundEnabled, audioUnlocked }}>
       {children}
     </NotificationContext.Provider>
   );
