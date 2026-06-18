@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageShell } from '../../components/layout/page-shell.js';
+import { PageLoading } from '../../components/layout/page-loading.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
@@ -123,7 +124,7 @@ export function PainPage() {
 
       {/* Content area */}
       {state.status === 'loading' && (
-        <div className="text-ink-3 text-sm py-8">{t('common.loading')}…</div>
+        <PageLoading cardCount={4} label={t('common.loading')} />
       )}
 
       {state.status === 'error' && (
@@ -138,13 +139,15 @@ export function PainPage() {
       )}
 
       {state.status === 'loaded' && (
-        <LoadedContent
-          data={state.data}
-          expandedIds={expandedIds}
-          onToggle={toggleExpanded}
-          onRefresh={loadData}
-          t={t}
-        />
+        <div className="animate-[pdFadeIn_400ms_ease-out]">
+          <LoadedContent
+            data={state.data}
+            expandedIds={expandedIds}
+            onToggle={toggleExpanded}
+            onRefresh={loadData}
+            t={t}
+          />
+        </div>
       )}
     </PageShell>
   );
