@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { Command } from 'commander';
 
 const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus } = vi.hoisted(() => {
@@ -20,6 +20,11 @@ const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateS
     connection = {} as Record<string, unknown>;
     taskStore = {};
     runStore = {};
+    piArtifactStore = {};
+    getRetryPolicy = vi.fn().mockReturnValue({
+      shouldRetry: () => true,
+      calculateBackoff: () => 10,
+    });
   }
   return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus };
 }, { validateType: true });
@@ -160,6 +165,16 @@ const SUCCEEDED_RESULT = {
   },
   attemptCount: 1,
 };
+
+// ERR-067: reset the mocked run() to a clean successful default after each test
+// so later tests don't see leftover mockResolvedValueOnce() chains or call counts.
+const DEFAULT_SUCCEEDED_RUN_RESULT = {
+  status: 'succeeded' as const,
+  taskId: 'test-task-1',
+  output: SUCCEEDED_RESULT.output,
+};
+
+
 
 describe('pd diagnose run --runtime routing', () => {
   let mockResolveRuntimeConfig: ReturnType<typeof vi.fn>;
@@ -926,5 +941,167 @@ describe('pd status stalled-threshold validation', () => {
 
     exitSpy.mockRestore();
     consoleSpy.mockRestore();
+  });
+});
+
+// ERR-067: 1 initial run + maxRetryLoops(10) before the safety limit converts retried to failed.
+const EXPECTED_MAX_RETRY_CALLS = 11;
+
+describe('ERR-067: pd diagnose run retry loop for retried status', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  afterEach(async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  it('ERR-067-01: retried status triggers retry loop, succeeds on second attempt', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    const runMock = vi.mocked(run);
+    runMock
+      .mockResolvedValueOnce({
+        status: 'retried' as const,
+        taskId: 'test-task-1',
+        attemptCount: 1,
+      })
+      .mockResolvedValueOnce(SUCCEEDED_RESULT);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(runMock).toHaveBeenCalledTimes(2);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+    runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  it('ERR-067-02: retried status loops until maxRetryLoops, then converts to failed (P0-1 fix)', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    const runMock = vi.mocked(run);
+    runMock.mockResolvedValue({
+      status: 'retried' as const,
+      taskId: 'test-task-1',
+      attemptCount: 1,
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(runMock).toHaveBeenCalledTimes(EXPECTED_MAX_RETRY_CALLS);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+    runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  it('ERR-067-03: retried with failureReason propagates to failed status (P0-1 fix)', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    const runMock = vi.mocked(run);
+    runMock.mockResolvedValue({
+      status: 'retried' as const,
+      taskId: 'test-task-1',
+      attemptCount: 1,
+      failureReason: 'Schema validation failed',
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(runMock).toHaveBeenCalledTimes(EXPECTED_MAX_RETRY_CALLS);
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.status === 'failed';
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    expect(parsed.status).toBe('failed');
+    expect(parsed.failureReason).toContain('Max retry loops');
+    expect(parsed.failureReason).toContain('Schema validation failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+    runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  it('ERR-067-04: succeeded status does NOT trigger retry loop', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    const runMock = vi.mocked(run);
+    runMock.mockResolvedValue(SUCCEEDED_RESULT);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(runMock).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+    runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+
+  it('ERR-067-05: failed status does NOT trigger retry loop', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    const runMock = vi.mocked(run);
+    runMock.mockResolvedValue({
+      status: 'failed' as const,
+      taskId: 'test-task-1',
+      attemptCount: 3,
+      failureReason: 'Max attempts exceeded',
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(runMock).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+    runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
   });
 });
