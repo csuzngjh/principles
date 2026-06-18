@@ -8,6 +8,7 @@ import { SplashScreen } from "./components/auth/splash-screen.js";
 import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { checkAuth, getToken } from "./api.js";
+import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
 
 // New page imports (CR2 directory structure)
 import { FocusPage } from "./pages/focus/FocusPage.js";
@@ -149,6 +150,7 @@ function AuthRoutes() {
               </div>
             </div>
           ) : authed ? (
+            <NotificationProvider>
             <div className="min-h-screen bg-paper text-ink">
               <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-paper focus:text-ink">
                 Skip to main content
@@ -178,6 +180,7 @@ function AuthRoutes() {
                 </ErrorBoundary>
               </main>
             </div>
+            </NotificationProvider>
           ) : (
             <Navigate to="/login" replace />
           )

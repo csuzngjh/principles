@@ -537,7 +537,10 @@
       "languageZhCN": "中文",
       "languageEn": "英文 (English)",
       "languageSaved": "语言偏好已保存",
-      "languageLoadError": "加载语言偏好失败"
+      "languageLoadError": "加载语言偏好失败",
+      "notifications": "通知",
+      "soundAlerts": "声音提醒",
+      "soundAlertsDescription": "当有新审批或系统降级时播放提示音"
     },
     "controlCenter": {
       "eyebrow": "控制中心",
