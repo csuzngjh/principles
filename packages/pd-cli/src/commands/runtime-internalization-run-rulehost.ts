@@ -18,6 +18,7 @@ import { runRuleHostPipeline } from '../services/rulehost-pipeline-runner.js';
 import type { RuleHostPipelineResult } from '../services/rulehost-pipeline-runner.js';
 import { PiAiRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import { isRuntimeConfigError } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 
 export interface RunRuleHostOptions {
@@ -32,6 +33,8 @@ export interface RunRuleHostOptions {
 const DEFAULT_WORKSPACE = process.cwd();
 const SUPPORTED_CHANNELS = new Set(['prompt', 'code_tool_hook', 'defer_archive']);
 
+type RuleHostChannel = 'prompt' | 'code_tool_hook' | 'defer_archive';
+
 function resolveWorkspace(opts: RunRuleHostOptions): string {
   return opts.workspace ? path.resolve(opts.workspace) : DEFAULT_WORKSPACE;
 }
@@ -40,25 +43,27 @@ function resolveRuntimeAdapter(workspaceDir: string, timeoutMs: number | undefin
   const resolved = resolveRuntimeFromPdConfig(workspaceDir);
   const configResult = resolved.result;
 
-  // Type guard for the error variant (RuntimeConfigError has a 'reason' field).
-  const isError = typeof (configResult as { reason?: unknown }).reason === 'string';
-  if (isError) {
-    const err = configResult as { reason: string; message?: string; nextAction?: string };
+  if (isRuntimeConfigError(configResult)) {
     throw new Error(
-      `Config resolution from .pd/config.yaml failed: ${err.reason}. ` +
-      `${err.message ?? ''}. nextAction: ${err.nextAction ?? 'run pd config doctor'}`,
+      `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ` +
+      `${configResult.message}. nextAction: ${configResult.nextAction}`,
     );
   }
 
-  const cfg = configResult as {
-    runtimeKind: string; provider: string; model: string; apiKeyEnv: string;
-    timeoutMs: number; maxRetries?: number; baseUrl?: string;
-  };
+  const cfg = configResult;
 
   if (cfg.runtimeKind !== 'pi-ai') {
     throw new Error(
       `run-rulehost requires runtimeKind=pi-ai (got '${cfg.runtimeKind}'). ` +
       `nextAction: set runtime.kind=pi-ai in .pd/config.yaml`,
+    );
+  }
+
+  if (!cfg.provider || !cfg.model || !cfg.apiKeyEnv) {
+    throw new Error(
+      `run-rulehost requires provider, model, and apiKeyEnv in .pd/config.yaml ` +
+      `(got provider='${cfg.provider ?? 'unset'}', model='${cfg.model ?? 'unset'}', apiKeyEnv='${cfg.apiKeyEnv ?? 'unset'}'). ` +
+      `nextAction: set runtime.provider, runtime.model, and runtime.apiKeyEnv in .pd/config.yaml`,
     );
   }
 
@@ -125,6 +130,26 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     return;
   }
 
+  // Validate numeric opts (Commander parseInt can yield NaN for non-numeric input).
+  if (opts.maxRounds !== undefined && (!Number.isFinite(opts.maxRounds) || opts.maxRounds <= 0)) {
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ status: 'failed', reason: `invalid --max-rounds: ${opts.maxRounds}`, nextAction: 'pass a positive integer (PRD cap = 2)' }) + '\n');
+    } else {
+      console.error(`Error: --max-rounds must be a positive integer (got ${opts.maxRounds}).`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+  if (opts.timeoutMs !== undefined && (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0)) {
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ status: 'failed', reason: `invalid --timeout-ms: ${opts.timeoutMs}`, nextAction: 'pass a positive integer (default 300000)' }) + '\n');
+    } else {
+      console.error(`Error: --timeout-ms must be a positive integer (got ${opts.timeoutMs}).`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   const workspaceDir = resolveWorkspace(opts);
 
   // ── Resolve runtime adapter from config ──
@@ -149,7 +174,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
       workspaceDir,
       painId: opts.painId,
       runtimeAdapter,
-      channel: channel as 'prompt' | 'code_tool_hook' | 'defer_archive',
+      channel: channel as RuleHostChannel,
       maxRounds: opts.maxRounds,
       timeoutMs: opts.timeoutMs,
     });
@@ -167,7 +192,15 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   // ── Output ──
   if (opts.json) {
     // Exactly one parseable JSON object on stdout (CLI gate rule 1).
-    process.stdout.write(JSON.stringify(result) + '\n');
+    // CLI gate rule 6: degraded/refused results include structured reason + nextAction.
+    const output = result.decision === 'approved'
+      ? { status: 'approved', ...result }
+      : {
+          status: 'rejected',
+          ...result,
+          nextAction: 'Check degradationReason; principle artifact remains for prompt-channel fallback.',
+        };
+    process.stdout.write(JSON.stringify(output) + '\n');
   } else {
     process.stdout.write(formatTextOutput(result) + '\n');
   }

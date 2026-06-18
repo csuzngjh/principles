@@ -18,6 +18,7 @@ import * as vm from 'node:vm';
 import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
 import type { RuleHostHelpers } from '@principles/core/runtime-v2';
 import type { ReplayEvaluateFn } from '@principles/core/runtime-v2';
+import { safeStringifyPreview } from '@principles/core/runtime-v2';
 
 function normalizeSource(sourceCode: string): string {
   const withoutExports = sourceCode
@@ -62,7 +63,7 @@ export function compileDemoRule(code: string, sourceLabel: string): ReplayEvalua
     const result = evaluateFn(input, helpers);
     if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'decision')) {
       throw new Error(
-        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${typeof result === 'object' && result !== null ? JSON.stringify(result).slice(0, 100) : String(result)})`,
+        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)})`,
       );
     }
     return result;

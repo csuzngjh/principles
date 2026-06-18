@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef } from '@principles/core/runtime-v2';
 import { RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
 
 const PAIN_ID = 'pain-test-001';
@@ -40,7 +40,7 @@ class ScriptedAdapter implements PDRuntimeAdapter {
     this.startRunCalls.push({ taskId: input.taskRef.taskId });
     return { runId: `run-${input.taskRef.taskId}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   }
-  async pollRun(): Promise<RunStatus> { return { status: 'succeeded', runId: 'run-x' }; }
+  async pollRun(_runId: string): Promise<RunStatus> { return { status: 'succeeded', runId: 'run-x' }; }
   async fetchOutput(runId: string): Promise<{ payload: unknown }> {
     const taskId = runId.replace(/^run-/, '');
     const kind = this.kindFor(taskId);
@@ -50,7 +50,24 @@ class ScriptedAdapter implements PDRuntimeAdapter {
     if (kind === 'artificer') return { payload: this.factories.artificer(taskId, await this.priorArtifactId('scribe')) };
     return { payload: this.factories.evaluator(taskId, (await this.priorArtifactId('artificer'))!) };
   }
-  async cancelRun(): Promise<void> { /* noop */ }
+  async cancelRun(_runId: string): Promise<void> { /* noop */ }
+  async getCapabilities(): Promise<RuntimeCapabilities> {
+    return {
+      supportsStructuredJsonOutput: false,
+      supportsToolUse: false,
+      supportsWorkingDirectory: false,
+      supportsModelSelection: false,
+      supportsLongRunningSessions: false,
+      supportsCancellation: false,
+      supportsArtifactWriteBack: false,
+      supportsConcurrentRuns: false,
+      supportsStreaming: false,
+    };
+  }
+  async healthCheck(): Promise<RuntimeHealth> {
+    return { healthy: true, degraded: false, warnings: [], lastCheckedAt: new Date().toISOString() };
+  }
+  async fetchArtifacts(_runId: string): Promise<RuntimeArtifactRef[]> { return []; }
   kind(): 'test-double' { return 'test-double'; }
 }
 
@@ -60,22 +77,27 @@ const dreamerOut = (taskId: string) => ({
   sourcePainId: PAIN_ID, contextRefs: [], generatedAt: new Date().toISOString(),
 });
 
+function requireLineage(id: string | undefined, field: string): string {
+  if (!id) throw new Error(`missing required lineage field: ${field}`);
+  return id;
+}
+
 const philosopherOut = (taskId: string, priorId?: string) => ({
-  taskId, sourceDreamerArtifactId: priorId ?? 'fallback',
+  taskId, sourceDreamerArtifactId: requireLineage(priorId, 'sourceDreamerArtifactId'),
   thesis: 'System path writes must be blocked',
   principleCandidate: { title: 'Block system path writes', rationale: 'OS corruption risk', scope: 'write ops', confidence: 0.9 },
   risks: [], generatedAt: new Date().toISOString(),
 });
 
 const scribeOut = (taskId: string, priorId?: string) => ({
-  taskId, sourcePhilosopherArtifactId: priorId ?? 'fallback',
+  taskId, sourcePhilosopherArtifactId: requireLineage(priorId, 'sourcePhilosopherArtifactId'),
   principleDraft: { title: 'Block system path writes', statement: 'Writes to /etc, /boot, /sys must be blocked.', rationale: 'OS corruption risk', applicability: ['write_file'], antiPatterns: ['Hardcoded allow'], confidence: 0.9 },
-  sourceTrace: { philosopherArtifactId: priorId ?? 'fallback' },
+  sourceTrace: { philosopherArtifactId: requireLineage(priorId, 'sourceTrace.philosopherArtifactId') },
   risks: [], generatedAt: new Date().toISOString(),
 });
 
 const artificerV2 = (taskId: string, priorId?: string) => ({
-  taskId, sourceScribeArtifactId: priorId ?? 'fallback',
+  taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
   implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
   implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); return p.startsWith("/etc") ? { decision: "block", matched: true, reason: "system path" } : { decision: "allow", matched: false, reason: "ok" }; }',
   goldenTraceCases: [
@@ -83,7 +105,7 @@ const artificerV2 = (taskId: string, priorId?: string) => ({
     { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
   ],
   affectedTools: ['write_file'],
-  sourceTrace: { scribeArtifactId: priorId ?? 'fallback' },
+  sourceTrace: { scribeArtifactId: requireLineage(priorId, 'sourceTrace.scribeArtifactId') },
   risks: [], generatedAt: new Date().toISOString(),
 });
 

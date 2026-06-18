@@ -44,7 +44,10 @@ function getE2eConfig(): E2eConfig | null {
 const config = getE2eConfig();
 
 // PiAiRuntimeAdapter reads the key from process.env[apiKeyEnv], so set it.
+// Track original values to restore in afterEach (avoid test pollution).
+const envRestore: Record<string, string | undefined> = {};
 if (config) {
+  envRestore[config.apiKeyEnv] = process.env[config.apiKeyEnv];
   process.env[config.apiKeyEnv] = config.apiKey;
 }
 
@@ -65,6 +68,10 @@ describe.skipIf(!config)('runRuleHostPipeline e2e (REAL LLM, PRI-429)', () => {
 
   afterEach(() => {
     if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+    // Restore env vars modified at module load.
+    for (const [key, val] of Object.entries(envRestore)) {
+      if (val === undefined) { delete process.env[key]; } else { process.env[key] = val; }
+    }
   });
 
   it('drives pain → validated rule artifact with a real LLM', async () => {
@@ -113,12 +120,15 @@ describe.skipIf(!config)('runRuleHostPipeline e2e (REAL LLM, PRI-429)', () => {
       expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
       // Verify the artifact is actually in the store and validated.
       const sm2 = new RuntimeStateManager({ workspaceDir: tmpDir });
-      await sm2.initialize();
-      const arts = await sm2.piArtifactStore.listBySourceTaskId(result.adversarialLoop?.finalEvaluatorTaskId ?? '');
-      const ruleArt = arts.find((a) => a.artifactKind === 'rule');
-      expect(ruleArt).toBeDefined();
-      expect(ruleArt?.validationStatus).toBe('validated');
-      await sm2.close();
+      try {
+        await sm2.initialize();
+        const arts = await sm2.piArtifactStore.listBySourceTaskId(result.adversarialLoop?.finalEvaluatorTaskId ?? '');
+        const ruleArt = arts.find((a) => a.artifactKind === 'rule');
+        expect(ruleArt).toBeDefined();
+        expect(ruleArt?.validationStatus).toBe('validated');
+      } finally {
+        await sm2.close();
+      }
     } else {
       // Degraded path: principle artifact should still exist for prompt fallback.
       expect(result.degradationReason).toBeDefined();

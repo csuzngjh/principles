@@ -125,10 +125,13 @@ export interface RuleHostPipelineResult {
 export function createSandboxGateDeps(): RefinerRuleHostGateDeps {
   return {
     evaluateInSandbox: (code, goldenTrace, opts) => {
-      // compileDemoRule throws on bad code; evaluateInRefinerSandbox catches
-      // its own runtime throws and classifies them as validation_failed /
-      // runtime_error. So a throwing compile surfaces as a sandbox failure,
-      // not an uncaught exception to the gate.
+      // compileDemoRule throws on bad code. The throw propagates out of
+      // evaluateInSandbox; EvaluatorRunner (and runAdversarialLoop's
+      // evaluator_run_threw catch) classifies it as a sandbox failure, so it
+      // surfaces as a rejected round rather than an uncaught exception.
+      // evaluateInRefinerSandbox separately catches its own runtime throws
+      // (from executing the evaluate function) and classifies them as
+      // validation_failed / runtime_error.
       const evaluateCode = compileDemoRule(code, 'rulehost-pipeline');
       return evaluateInRefinerSandbox(code, goldenTrace, { evaluateCode, ...opts });
     },
@@ -260,7 +263,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       degradationReason: loopResult.degradationReason,
     };
   } finally {
-    try { stateManager.close(); } catch { /* best-effort cleanup */ }
+    try { await stateManager.close(); } catch { /* best-effort cleanup */ }
   }
 }
 
@@ -306,16 +309,14 @@ async function createInternalizationTask(
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function runStage(runner: { run(id: string): Promise<PeerRunnerResult<any>> }, taskId: string) {
+async function runStage(runner: { run(id: string): Promise<PeerRunnerResult<unknown>> }, taskId: string) {
   return runner.run(taskId);
 }
 
 function stageFromResult(
   name: RuleHostPipelineStage['name'],
   taskId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  result: PeerRunnerResult<any>,
+  result: PeerRunnerResult<unknown>,
 ): RuleHostPipelineStage {
   return {
     name,
