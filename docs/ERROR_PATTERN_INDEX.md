@@ -27,7 +27,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: adding catch blocks, validators, degraded modes, installer results, JSON output, or fallback behavior.
 - **Failure mode**: invalid input, failed cleanup, malformed config, or incomplete delivery silently becomes success or an unexplained fallback.
 - **Must check**: every refusal/degradation includes a structured reason and next action; no `catch {}`; no `if (valid) { assert }` tests that pass when data is absent; **every branch of a multi-path degradation (happy / V1-fallback / exhausted) applies the SAME failure guard — an alternate/degraded code path that skips the try/catch its siblings use will throw past a never-throws contract (PRI-428 recurrence: the V1 branch of runAdversarialLoop called createEvaluatorTask unguarded while the V2 branch wrapped it; the loop documented "never throws" but the V1 path could)**.
-- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046, ERR-062, ERR-070, ERR-071, ERR-072.
+- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046, ERR-062, ERR-070, ERR-071, ERR-072, ERR-074.
 - **Automation target**: grep/static guard for empty catch blocks and test assertions hidden behind truthy conditionals; for any function with a documented never-throws/degrades contract, diff-check that EVERY branch (including alternate-type/V1/early-exit branches) wraps the same external calls that the primary branch wraps.
 
 ### EP-04 CLI and Operator Contract
