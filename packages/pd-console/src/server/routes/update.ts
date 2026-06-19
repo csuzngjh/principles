@@ -210,6 +210,36 @@ async function doCheckForUpdates(currentVersion: string) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Network resilience
+// ---------------------------------------------------------------------------
+
+const FETCH_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+async function fetchWithRetry(url: string, label: string): Promise<Response> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`${label}: HTTP ${response.status}`);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw new Error(`${label} failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message ?? 'unknown'}`);
+}
+
 async function doApplyUpdate(
   options: {
     targetDir: string;
@@ -219,13 +249,14 @@ async function doApplyUpdate(
   workspaceDir: string,
 ) {
   const { targetDir, mergeStrategy, createBackup } = options;
+  let backupPath: string | undefined = undefined;
+  let appliedChanges = false;
   try {
     // 0. Save current version BEFORE any changes
     const fromVersion = readCurrentVersion(targetDir) ?? 'unknown';
 
-    // 1. Fetch latest package info
-    const response = await fetch(NPM_REGISTRY_LATEST);
-    if (!response.ok) return { success: false, message: `Failed to fetch package info: HTTP ${response.status}` };
+    // 1. Fetch latest package info (with timeout + retry)
+    const response = await fetchWithRetry(NPM_REGISTRY_LATEST, 'Registry check');
     const rawData: unknown = await response.json();
     if (typeof rawData !== 'object' || rawData === null) return { success: false, message: 'Invalid registry response' };
     const data = rawData as Record<string, unknown>;
@@ -236,19 +267,17 @@ async function doApplyUpdate(
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
 
     // 2. Create backup if requested
-    let backupPath: string | undefined = undefined;
     if (createBackup) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       backupPath = path.join(path.dirname(targetDir), `.pd-backup-${timestamp}`);
       copyDirRecursive(targetDir, backupPath);
     }
 
-    // 3. Download and extract new version
+    // 3. Download and extract new version (with timeout + retry)
     const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
     fs.mkdirSync(tempDir, { recursive: true });
     try {
-      const dlResponse = await fetch(tarball);
-      if (!dlResponse.ok) throw new Error(`Download failed: HTTP ${dlResponse.status}`);
+      const dlResponse = await fetchWithRetry(tarball, 'Download');
       const buffer = Buffer.from(await dlResponse.arrayBuffer());
       const tarballPath = path.join(tempDir, 'package.tgz');
       fs.writeFileSync(tarballPath, buffer);
@@ -261,6 +290,7 @@ async function doApplyUpdate(
     }
 
     // 4. Compute diff and apply
+    appliedChanges = true;
     const diff = computeDiffLocal(targetDir, tempDir);
     const updatedFiles: string[] = [];
 
@@ -329,6 +359,10 @@ async function doApplyUpdate(
       newVersion: toVersion,
     };
   } catch (error) {
+    // Clean up backup only if we failed before applying any file changes
+    if (!appliedChanges && backupPath && fs.existsSync(backupPath)) {
+      try { fs.rmSync(backupPath, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
     return {
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error',
