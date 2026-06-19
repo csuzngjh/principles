@@ -217,11 +217,12 @@ describe('buildL2PrincipleReader (PRI-431)', () => {
 
   it('buildL2PrincipleReaderFromLedger warns on malformed principles', async () => {
     const warnings: string[] = [];
+    // Simulate a ledger where a principle has a non-string id (e.g., corrupted data)
     const ledger = {
       tree: {
         principles: {
           'p-ok': { status: 'active', id: 'p-ok', text: 'OK' },
-          'p-bad': { status: 'active', id: 123, text: 'Bad id' },
+          'p-bad': { status: 'active', id: 123 as unknown as string, text: 'Bad id' },
         },
       },
     };
