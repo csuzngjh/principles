@@ -5,10 +5,10 @@ import * as os from 'os';
 
 // Mock loadLedger with a controllable implementation (default: real behavior)
 vi.mock('../../principle-tree-ledger.js', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    loadLedger: vi.fn(actual.loadLedger),
+    loadLedger: vi.fn(actual.loadLedger as (...args: unknown[]) => unknown),
   };
 });
 
