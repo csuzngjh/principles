@@ -42,8 +42,8 @@ export function buildL2PrincipleReaderFromLedger(
         const principles = ledger.tree.principles ?? {};
         const active = Object.values(principles).filter((p): p is { status: string; id: string; text: string } => {
           if (p.status !== 'active') return false;
-          if (typeof p.id !== 'string' || typeof p.text !== 'string') {
-            warn(`[l2_dreamer] skipping active principle with missing id or text: ${JSON.stringify(p).slice(0, 120)}`);
+          if (typeof p.id !== 'string' || typeof p.text !== 'string' || p.text.length === 0) {
+            warn(`[l2_dreamer] skipping active principle with missing id or empty text: ${JSON.stringify(p).slice(0, 120)}`);
             return false;
           }
           return true;

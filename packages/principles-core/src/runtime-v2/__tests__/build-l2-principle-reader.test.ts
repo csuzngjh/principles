@@ -183,22 +183,22 @@ describe('buildL2PrincipleReader (PRI-431)', () => {
     expect(typeof reader.listActivePrinciples).toBe('function');
   });
 
-  it('filters out principles missing id or text', async () => {
-    // Edge case: principles with status 'active' but missing id/text fields
-    // The existing filter checks `typeof p.id === 'string' && typeof p.text === 'string'`
+  it('filters out active principles with empty text', async () => {
+    // Edge case: empty string text should be rejected as an invalid principle statement.
+    // The filter checks `typeof p.text === 'string'` and `p.text.length > 0`.
     writeLedger(tmpDir, {
       principles: {
         'p-good': makePrinciple({ id: 'p-good', text: 'Good principle', status: 'active' }),
-        'p-no-id': makePrinciple({ id: 'p-no-id', text: '', status: 'active' }),
+        'p-empty-text': makePrinciple({ id: 'p-empty-text', text: '', status: 'active' }),
       },
     });
 
     const reader = buildL2PrincipleReader(tmpDir);
     const result = await reader.listActivePrinciples();
 
-    // p-no-id has empty text (typeof '' === 'string' is true, so it passes the filter).
-    // This test documents the current behavior: empty string text is included.
-    expect(result).toHaveLength(2);
+    // p-empty-text is skipped because empty text is not a valid principle statement.
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('p-good');
   });
 
   it('buildL2PrincipleReaderFromLedger works without file I/O', async () => {

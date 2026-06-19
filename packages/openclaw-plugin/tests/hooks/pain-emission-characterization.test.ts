@@ -52,6 +52,28 @@ function read(relativePath: string): string {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
+/**
+ * Extract the gate-block pain event object from source code.
+ * Uses brace-depth tracking so template-string braces inside the object
+ * do not prematurely terminate the match (ERR-009 false-positive guard).
+ */
+function extractGateBlockObject(source: string): string | null {
+  const marker = /painId:\s*`gate_[^`]+`/.exec(source);
+  if (!marker) return null;
+  const start = source.lastIndexOf('{', marker.index);
+  if (start === -1) return null;
+  let depth = 1;
+  let i = start + 1;
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+  if (depth !== 0) return null;
+  return source.slice(start, i);
+}
+
 // ── Source file paths ─────────────────────────────────────────────────────
 
 const AFTER_TOOL_CALL_HELPERS = 'packages/openclaw-plugin/src/hooks/after-tool-call-helpers.ts';
@@ -263,21 +285,21 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include provenance field (known inconsistency)', () => {
-      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      const gateBlock = extractGateBlockObject(source);
       expect(gateBlock).not.toBeNull();
-      expect(gateBlock![0]).not.toMatch(/provenance/);
+      expect(gateBlock).not.toMatch(/provenance/);
     });
 
     it('does NOT include evidence field (known inconsistency)', () => {
-      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      const gateBlock = extractGateBlockObject(source);
       expect(gateBlock).not.toBeNull();
-      expect(gateBlock![0]).not.toMatch(/evidence/);
+      expect(gateBlock).not.toMatch(/evidence/);
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      const gateBlock = extractGateBlockObject(source);
       expect(gateBlock).not.toBeNull();
-      expect(gateBlock![0]).not.toMatch(/traceId/);
+      expect(gateBlock).not.toMatch(/traceId/);
     });
 
     it('uses evaluatePainDiagnosticGate as gate', () => {

@@ -44,7 +44,7 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
     // PRI-432: Bug fix — flag conflict now emits JSON when --json is set
     // (previously always used console.error, violating CLI Operator Gate rule #1)
     const exitCode = emitFlagConflict({ json: opts.json ?? false });
-    process.exitCode = exitCode;
+    process.exit(exitCode);
     return;
   }
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
