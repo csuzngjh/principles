@@ -75,7 +75,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: changing tests, fixtures, baselines, smoke tests, database schemas, package installs, or UI route/action state.
 - **Failure mode**: tests prove strings, helper behavior, or hand-written schemas instead of the real behavior users rely on.
 - **Must check**: fixtures match production schema; tests fail if expected output is absent; package tests are run when package code changes; UI tests verify route/action contracts, not just source substrings.
-- **Representative ERRs**: ERR-025, ERR-026, ERR-037, ERR-038, ERR-039, ERR-040.
+- **Representative ERRs**: ERR-025, ERR-026, ERR-037, ERR-038, ERR-039, ERR-040, ERR-073.
 - **Automation target**: production schema fixtures and real-path smoke tests.
 
 ### EP-10 Workflow and Branch Hygiene
