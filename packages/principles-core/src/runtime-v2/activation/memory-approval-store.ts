@@ -1,5 +1,6 @@
 import type {
   ApprovalDecisionResult,
+  ApprovalEditInput,
   ApprovalEnqueueInput,
   ApprovalFilter,
   ApprovalListFilter,
@@ -124,5 +125,23 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     };
     this.records.set(approvalId, reset);
     return { ok: true };
+  }
+
+  async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
+    const existing = this.records.get(input.approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'pending') {
+      return { ok: false, error: 'already_decided', status: existing.status };
+    }
+    const updated: ApprovalRecord = {
+      ...existing,
+      artifactId: input.newArtifactId,
+      editedAt: input.now,
+      editedBy: input.editedBy,
+      editReason: input.editReason,
+      previousArtifactId: existing.artifactId,
+    };
+    this.records.set(input.approvalId, updated);
+    return { ok: true, record: updated };
   }
 }

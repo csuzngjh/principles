@@ -69,6 +69,17 @@ function makeInMemoryApprovalQueueStoreForTest(): ApprovalQueueStore {
       r.status = 'pending'; r.decidedAt = undefined; r.decidedBy = undefined; r.decisionNote = undefined;
       return { ok: true };
     },
+    edit: async (input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string; now: string }) => {
+      const r = records.get(input.approvalId);
+      if (!r) return { ok: false, error: 'not_found' as const };
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status };
+      r.previousArtifactId = r.artifactId;
+      r.artifactId = input.newArtifactId;
+      r.editedAt = input.now;
+      r.editedBy = input.editedBy;
+      r.editReason = input.editReason;
+      return { ok: true, record: r };
+    },
   };
 }
 

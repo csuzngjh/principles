@@ -84,14 +84,12 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
     );
   }
 
-  async listPromptActivations(): Promise<ActivationStatusRecord[]> {
+  async listPromptActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
-    const rows = db.prepare(`
-      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
-      FROM activations
-      WHERE channel = 'prompt' AND deactivated_at IS NULL
-      ORDER BY activated_at ASC
-    `).all();
+    const sql = includeDeactivated
+      ? `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at FROM activations WHERE channel = 'prompt' ORDER BY activated_at ASC`
+      : `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at FROM activations WHERE channel = 'prompt' AND deactivated_at IS NULL ORDER BY activated_at ASC`;
+    const rows = db.prepare(sql).all();
 
     if (!Array.isArray(rows)) return [];
 
@@ -103,14 +101,12 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
     return result;
   }
 
-  async listCodeToolHookActivations(): Promise<ActivationStatusRecord[]> {
+  async listCodeToolHookActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
-    const rows = db.prepare(`
-      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
-      FROM activations
-      WHERE channel = 'code_tool_hook' AND deactivated_at IS NULL
-      ORDER BY activated_at ASC
-    `).all();
+    const sql = includeDeactivated
+      ? `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at FROM activations WHERE channel = 'code_tool_hook' ORDER BY activated_at ASC`
+      : `SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at FROM activations WHERE channel = 'code_tool_hook' AND deactivated_at IS NULL ORDER BY activated_at ASC`;
+    const rows = db.prepare(sql).all();
 
     if (!Array.isArray(rows)) return [];
 

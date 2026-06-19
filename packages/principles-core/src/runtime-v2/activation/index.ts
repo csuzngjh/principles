@@ -24,11 +24,13 @@ export type {
   ConfidenceLabel,
   ApprovalWithContext,
   ApprovalListFilter,
+  ArtifactLineageIdentity,
   ApprovalStats,
   ApprovalListResult,
 } from './activation-types.js';
 
 export {
+  isArtifactRevisionOf,
   LOW_RISK_CHANNELS,
   HIGH_RISK_CHANNEL_MAP,
   makeIdempotencyKey,
@@ -63,6 +65,16 @@ export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
 
 export { RuleHostWriter } from './writers/rule-host-writer.js';
 export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
+
+// Story A (PRI-408): Production gate deps factory — canonical vm-based rule
+// compilation for RuleHostWriter gateDeps. Available to all packages that
+// depend on @principles/core (pd-cli, pd-console, plugin).
+export { createProductionGateDeps } from './production-gate-deps.js';
+
+// Story A (PRI-408): Formal approval-completion production service.
+// Replaces demo "approve → direct writer" with structured, idempotent path.
+export { ApprovalCompletionService } from './approval-completion-service.js';
+export type { ApprovalCompletionInput, ApprovalCompletionResult } from './approval-completion-service.js';
 
 export {
   RUNTIME_V2_PRINCIPLE_BUDGET,
