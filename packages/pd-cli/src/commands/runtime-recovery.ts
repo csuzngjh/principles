@@ -3,6 +3,7 @@ import { createRecoverySweepService } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
+import { emitResult, emitFlagConflict } from '../services/cli-output.js';
 
 interface RecoverySweepOptions {
   workspace?: string;
@@ -40,8 +41,10 @@ function formatTextOutput(output: RemediationResult): string {
 
 export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Promise<void> {
   if (opts.dryRun && opts.confirm) {
-    console.error('Error: --dry-run and --confirm are mutually exclusive');
-    process.exitCode = 1;
+    // PRI-432: Bug fix — flag conflict now emits JSON when --json is set
+    // (previously always used console.error, violating CLI Operator Gate rule #1)
+    const exitCode = emitFlagConflict({ json: opts.json ?? false });
+    process.exit(exitCode);
     return;
   }
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
@@ -92,11 +95,10 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
       safeToConfirm: isDryRun && expiredLeaseTaskIds.length > 0,
     });
 
-    if (opts.json) {
-      console.log(JSON.stringify(output, null, 2));
-    } else {
-      console.log(formatTextOutput(output));
-    }
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: formatTextOutput,
+    });
 
     if (expiredLeaseTaskIds.length > 0 && isDryRun) {
       process.exitCode = 1;

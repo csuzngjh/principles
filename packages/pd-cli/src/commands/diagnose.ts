@@ -23,8 +23,6 @@ import {
   DisabledDiagnosticianRunner,
   type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
-  OpenClawCliRuntimeAdapter,
-  PiAiRuntimeAdapter,
   PDRuntimeError,
   isRuntimeConfigError,
   CandidateIntakeService,
@@ -32,12 +30,12 @@ import {
   status as diagnoseStatus,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
-import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
+import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
 import * as path from 'path';
 
 function validateStalledThreshold(val: unknown): number | undefined {
@@ -154,6 +152,38 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
 }
 
 /**
+ * PRI-431 Step 1d: Build diagnostician-specific test-double payload.
+ * Extracted from inline resolution in handleDiagnoseRun to use with shared resolver.
+ */
+function buildDiagnosticianTestDouble(taskId: string): PDRuntimeAdapter {
+  return new TestDoubleRuntimeAdapter({
+    onPollRun: (_runId: string) => ({
+      runId: _runId,
+      status: 'succeeded',
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+    }),
+    onFetchOutput: (_runId: string) => ({
+      runId: _runId,
+      payload: {
+        valid: true,
+        diagnosisId: `diag-cli-${Date.now()}`,
+        taskId,
+        summary: 'CLI test diagnosis — validate tool arguments before execution',
+        rootCause: 'Test root cause — missing argument validation',
+        violatedPrinciples: [],
+        evidence: [],
+        recommendations: [
+          { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
+          { kind: 'rule', description: 'Use schema validation for external inputs' },
+        ],
+        confidence: 0.9,
+      },
+    }),
+  });
+}
+
+/**
  * pd diagnose run --task-id <taskId> [--workspace <path>] [--json]
  *
  * Executes the diagnostician runner for a task.
@@ -165,6 +195,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
   if (opts.openclawLocal && opts.openclawGateway) {
     console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
     process.exit(1);
+    return;
   }
 
   const runtimeKind = opts.runtime ?? 'test-double';
@@ -184,153 +215,130 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
     // Select runtime adapter based on --runtime flag (CLI-02)
-     
+    // PRI-431: migrated to shared resolveRuntimeAdapterFromConfig
     let runtimeAdapter: PDRuntimeAdapter;
-    if (runtimeKind === 'openclaw-cli') {
-      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
-      const configResult = resolved.result;
-      if (isRuntimeConfigError(configResult)) {
-        if (opts.json) {
-          console.log(JSON.stringify({ ok: false, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction }));
-        } else {
-          console.error(`error: ${configResult.message}`);
-          console.error(`nextAction: ${configResult.nextAction}`);
-        }
-        process.exit(1);
-        return;
-      }
-      const { openclawMode } = configResult;
-      // CLI flags override config (PRI-393)
-      const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
-      const effectiveMode = flagMode ?? openclawMode;
-      if (!effectiveMode) {
-        if (opts.json) {
-          console.log(JSON.stringify({ ok: false, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml' }));
-        } else {
-          console.error('error: runtimeKind is openclaw-cli but no mode resolved');
-          console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml');
-        }
-        process.exit(1);
-        return;
-      }
-
-      runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: effectiveMode,
-        workspaceDir,
-        agentId: opts.agent ?? 'main',
-      });
-
-      // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
-      storeEmitter.emitTelemetry({
-        eventType: 'runtime_adapter_selected',
-        traceId: opts.taskId,
-        timestamp: new Date().toISOString(),
-        sessionId: 'pd-cli-diagnose',
-        agentId: 'openclaw-cli-adapter',
-        payload: {
-          runtimeKind: 'openclaw-cli',
-          runtimeMode: effectiveMode,
-        },
-      });
-    } else if (runtimeKind === 'test-double') {
-      runtimeAdapter = new TestDoubleRuntimeAdapter({
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            valid: true,
-            diagnosisId: `diag-cli-${Date.now()}`,
-            taskId: opts.taskId,
-            summary: 'CLI test diagnosis — validate tool arguments before execution',
-            rootCause: 'Test root cause — missing argument validation',
-            violatedPrinciples: [],
-            evidence: [],
-            recommendations: [
-              { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
-              { kind: 'rule', description: 'Use schema validation for external inputs' },
-            ],
-            confidence: 0.9,
+    // Capture config info for telemetry (resolver consumes config internally)
+    let telemetryConfig: { provider?: string; model?: string; openclawMode?: string } = {};
+    try {
+      if (runtimeKind === 'test-double') {
+        runtimeAdapter = resolveRuntimeAdapterFromConfig({
+          runtimeKind,
+          workspaceDir,
+          allowTestDouble: true,
+          testDoublePayloadBuilder: () => buildDiagnosticianTestDouble(opts.taskId),
+        });
+      } else if (runtimeKind === 'openclaw-cli') {
+        const flagMode: 'local' | 'gateway' | undefined = opts.openclawLocal
+          ? 'local'
+          : opts.openclawGateway
+            ? 'gateway'
+            : undefined;
+        runtimeAdapter = resolveRuntimeAdapterFromConfig({
+          runtimeKind,
+          workspaceDir,
+          openclawMode: flagMode,
+          agentId: opts.agent ?? 'main',
+          onConfigResolved: (resolved) => {
+            if (!isRuntimeConfigError(resolved.result)) {
+              telemetryConfig.openclawMode = flagMode ?? resolved.result.openclawMode;
+            } else {
+              telemetryConfig.openclawMode = flagMode;
+            }
           },
-        }),
-      });
-    } else if (runtimeKind === 'pi-ai') {
-      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
-      for (const w of resolved.legacyWarnings) console.warn(`[pd diagnose] ${w}`);
-
-      let policyConfig: RuntimeConfig | null = null;
-      if (!isRuntimeConfigError(resolved.result)) {
-        policyConfig = resolved.result;
+        });
+        // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
+        storeEmitter.emitTelemetry({
+          eventType: 'runtime_adapter_selected',
+          traceId: opts.taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pd-cli-diagnose',
+          agentId: 'openclaw-cli-adapter',
+          payload: {
+            runtimeKind: 'openclaw-cli',
+            runtimeMode: telemetryConfig.openclawMode ?? 'local',
+          },
+        });
+      } else if (runtimeKind === 'pi-ai') {
+        runtimeAdapter = resolveRuntimeAdapterFromConfig({
+          runtimeKind,
+          workspaceDir,
+          configOptional: true,
+          validateApiKeyEnv: true,
+          piAiOverrides: {
+            provider: opts.provider,
+            model: opts.model,
+            apiKeyEnv: opts.apiKeyEnv,
+            baseUrl: opts.baseUrl,
+            maxRetries: opts.maxRetries,
+          },
+          timeoutMs: opts.timeoutMs,
+          onConfigResolved: (resolved) => {
+            for (const w of resolved.legacyWarnings) console.warn(`[pd diagnose] ${w}`);
+            if (isRuntimeConfigError(resolved.result)) {
+              console.warn(`[pd diagnose] .pd/config.yaml resolution failed: ${resolved.result.message}. Using CLI flags if provided.`);
+            } else {
+              telemetryConfig.provider = resolved.result.provider;
+              telemetryConfig.model = resolved.result.model;
+            }
+          },
+        });
+        // TELE: runtime_adapter_selected telemetry
+        const telemetryProvider = opts.provider ?? telemetryConfig.provider;
+        const telemetryModel = opts.model ?? telemetryConfig.model;
+        storeEmitter.emitTelemetry({
+          eventType: 'runtime_adapter_selected',
+          traceId: opts.taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pd-cli-diagnose',
+          agentId: 'pi-ai-adapter',
+          payload: { runtimeKind: 'pi-ai', provider: telemetryProvider, model: telemetryModel, baseUrlPresent: !!opts.baseUrl },
+        });
       } else {
-        console.warn(`[pd diagnose] .pd/config.yaml resolution failed: ${resolved.result.message}. Using CLI flags if provided.`);
-      }
-
-      const provider = opts.provider ?? policyConfig?.provider;
-      const model = opts.model ?? policyConfig?.model;
-      const apiKeyEnv = opts.apiKeyEnv ?? policyConfig?.apiKeyEnv;
-      const baseUrl = opts.baseUrl ?? policyConfig?.baseUrl;
-      const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
-      const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
-
-      // D-11: validate config — missing fields + fix suggestion
-      const missing: string[] = [];
-      if (!provider) missing.push('provider');
-      if (!model) missing.push('model');
-      if (!apiKeyEnv) missing.push('apiKeyEnv');
-      if (missing.length > 0) {
-        console.error(
-          `error: missing required pi-ai config: ${missing.join(', ')}.\n` +
-          `Pass via --flag or add to .pd/config.yaml runtime profile.\n` +
-          `Example:\n` +
-          `  pd diagnose run --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY\n` +
-          `  Or add to .pd/config.yaml:\n` +
-          `    runtimeProfiles:\n` +
-          `      - id: openrouter\n` +
-          `        type: pi-ai\n` +
-          `        provider: openrouter\n` +
-          `        model: anthropic/claude-sonnet-4\n` +
-          `        apiKeyEnv: OPENROUTER_API_KEY`,
-        );
+        const unsupportedResult = {
+          ok: false,
+          reason: `unsupported_runtime_kind: ${runtimeKind}`,
+          nextAction: 'Use one of: openclaw-cli, test-double, pi-ai',
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(unsupportedResult, null, 2));
+        } else {
+          console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
+          console.error(`Next action: ${unsupportedResult.nextAction}`);
+        }
         process.exit(1);
+        return;
       }
-
-      // After validation: all fields are confirmed non-null
-      const validProvider: string = provider as string;
-      const validModel: string = model as string;
-      const validApiKeyEnv: string = apiKeyEnv as string;
-
-      // D-09: validate env var exists
-      if (!process.env[validApiKeyEnv]) {
-        console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
+    } catch (err) {
+      if (err instanceof ConfigResolutionError) {
+        // Preserve original error format for openclaw-cli missing mode (backward compat)
+        if (err.kind === 'missing-fields' && err.missing?.includes('openclawMode')) {
+          if (opts.json) {
+            console.log(JSON.stringify({
+              ok: false,
+              reason: 'missing_openclaw_mode',
+              message: 'runtimeKind is openclaw-cli but no mode resolved',
+              nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml',
+            }));
+          } else {
+            console.error('error: runtimeKind is openclaw-cli but no mode resolved');
+            console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml');
+          }
+          process.exit(1);
+          return;
+        }
+        // Default error formatting for other config resolution errors
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing, nextAction: err.nextAction ?? 'Check .pd/config.yaml and retry' }));
+        } else {
+          console.error(`error: ${err.message}`);
+          if (err.nextAction) {
+            console.error(`nextAction: ${err.nextAction}`);
+          }
+        }
         process.exit(1);
+        return;
       }
-
-      runtimeAdapter = new PiAiRuntimeAdapter({
-        provider: validProvider,
-        model: validModel,
-        apiKeyEnv: validApiKeyEnv,
-        baseUrl,
-        maxRetries,
-        timeoutMs: effectiveTimeoutMs,
-        workspace: workspaceDir,
-      });
-
-      // TELE: runtime_adapter_selected telemetry
-      storeEmitter.emitTelemetry({
-        eventType: 'runtime_adapter_selected',
-        traceId: opts.taskId,
-        timestamp: new Date().toISOString(),
-        sessionId: 'pd-cli-diagnose',
-        agentId: 'pi-ai-adapter',
-        payload: { runtimeKind: 'pi-ai', provider: validProvider, model: validModel, baseUrlPresent: !!baseUrl },
-      });
-    } else {
-      console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
-      process.exit(1);
+      throw err;
     }
 
     const eventEmitter = new StoreEventEmitter();

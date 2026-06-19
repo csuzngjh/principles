@@ -52,7 +52,7 @@ describe('pd runtime recovery sweep remediation contract', () => {
 
     await handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, json: true });
 
-    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    const output = JSON.parse(String(consoleLogSpy.mock.calls[0][0]));
     expect(output).toMatchObject({
       mode: 'dry_run',
       status: 'would_change',
@@ -71,7 +71,7 @@ describe('pd runtime recovery sweep remediation contract', () => {
 
     await handleRuntimeRecoverySweep({ workspace: '/fake/workspace', confirm: true, json: true });
 
-    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    const output = JSON.parse(String(consoleLogSpy.mock.calls[0][0]));
     expect(output.mode).toBe('confirm');
     expect(output.status).toBe('changed');
     expect(output.repairedCount).toBe(1);
@@ -80,12 +80,35 @@ describe('pd runtime recovery sweep remediation contract', () => {
   });
 
   it('rejects --dry-run and --confirm together before writing (no service created)', async () => {
-    await handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: true });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
+
+    await expect(
+      handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: true }),
+    ).rejects.toThrow('process.exit:1');
 
     expect(mockRecoverTask).not.toHaveBeenCalled();
     expect(mockServiceClose).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+    // PRI-432: JSON mode emits structured error to stdout (CLI Operator Gate rule #1).
+    const output = JSON.parse(String(consoleLogSpy.mock.calls[0][0]));
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('mutually exclusive');
+    expect(output.nextAction).toBeTruthy();
+
+    exitSpy.mockRestore();
+  });
+
+  it('rejects --dry-run and --confirm together in text mode via stderr', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
+
+    await expect(
+      handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: false }),
+    ).rejects.toThrow('process.exit:1');
+
+    expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockServiceClose).not.toHaveBeenCalled();
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+
+    exitSpy.mockRestore();
   });
 
   it('uses createRecoverySweepService (no RuntimeStateManager)', async () => {
