@@ -6,6 +6,7 @@ import {
   DefaultDreamerValidator,
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
+  buildL2PrincipleReaderFromLedger,
   loadLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
@@ -15,7 +16,6 @@ import {
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
-  type PdL2PrincipleReader,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -176,21 +176,9 @@ export async function runConsumerCycle(
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
       if (l2Flag.enabled) {
         const stateDir = `${workspaceDir}/.state`;
-        const principleReader: PdL2PrincipleReader = {
-          listActivePrinciples: async () => {
-            try {
-              const ledger = loadLedger(stateDir);
-              const principles = ledger.tree.principles ?? {};
-              return Object.values(principles)
-                .filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string')
-                .map(p => ({ id: p.id, statement: p.text }));
-            } catch (error) {
-              const reason = error instanceof Error ? error.message : String(error);
-              logger.warn(`[PD:AutoConsumer] L2 dreamer principle reader degraded: ${reason}`);
-              return [];
-            }
-          },
-        };
+        const principleReader = buildL2PrincipleReaderFromLedger(loadLedger(stateDir), {
+          logger: { warn: (msg) => logger.warn(msg) },
+        });
         adapter = new L2AgentLoopAdapter(
           {
             provider: runtimeConfigResult.provider ?? 'openai',
