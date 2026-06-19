@@ -252,7 +252,22 @@ async function main(): Promise<void> {
 
   // ── Step 4: Owner approves the candidate ─────────────────────────────────
   log('STEP-4', 'Owner approving candidate');
-  const approvalId = pipelineResult.approvalId!;
+  const approvalId = pipelineResult.approvalId;
+  if (!approvalId) {
+    log('STEP-4', 'No approvalId — candidate was not auto-enqueued', {
+      degradationReason: pipelineResult.degradationReason,
+    });
+    const partialOutput = {
+      pain: DOGFOOD_PAIN,
+      pipelineResult,
+      timestamp: new Date().toISOString(),
+      error: 'auto_enqueue_failed',
+    };
+    fs.writeFileSync(path.join(outputDir, 'dogfood-partial.json'), JSON.stringify(partialOutput, null, 2));
+    console.log(`\nPartial results saved (enqueue failed)`);
+    await sm2.close();
+    return;
+  }
   const approveResult = await approvalStore.approve(approvalId, 'owner-dogfood', 'Dogfood approval');
   log('STEP-4', `Approval result: ok=${approveResult.ok}`);
 

@@ -399,7 +399,7 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
     const result: EditApprovalResult = {
       ok: false,
       reason: 'approval_id_required',
-      nextAction: 'Provide --approval-id <id> from `pd runtime activation list` or Console approvals page',
+      nextAction: 'Provide --approval-id <id> from Console approvals page',
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -461,7 +461,7 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
         ok: false,
         approvalId: opts.approvalId,
         reason: 'not_found',
-        nextAction: 'Check the approval ID with `pd runtime activation list` or Console',
+        nextAction: 'Check the approval ID on Console approvals page',
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -580,7 +580,7 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
         approvalId: opts.approvalId,
         reason: editResult.error,
         nextAction: editResult.error === 'not_found'
-          ? 'Check the approval ID with `pd runtime activation list` or Console'
+          ? 'Check the approval ID on Console approvals page'
           : `Approval is already decided (status: ${editResult.status ?? 'unknown'}). Only pending approvals can be edited.`,
       };
       if (opts.json) {
