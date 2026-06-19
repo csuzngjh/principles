@@ -20,6 +20,7 @@ import {
   ApprovalCompletionService,
   ApprovalQueue,
   mapConfidenceToLabel,
+  isArtifactRevisionOf,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
@@ -188,7 +189,8 @@ export class ApprovalsConsoleModel {
    *
    * P1 #2 (adversarial review): validates the new artifact exists, has
    * passed validation (validationStatus === 'validated'), and has lineage
-   * consistent with the original approval (same sourceTaskId). Previously
+   * consistent with the original approval (same task, explicit artifact
+   * lineage, or shared source principle). Previously
    * the method accepted any newArtifactId without checking existence,
    * validation status, or lineage — allowing an owner to point an approval
    * at an arbitrary, unvalidated, or lineage-mismatched artifact.
@@ -219,15 +221,21 @@ export class ApprovalsConsoleModel {
     if (newArtifact.validationStatus !== 'validated') {
       return { ok: false, error: 'artifact_not_validated', reason: `Artifact ${newArtifactId} has validationStatus '${newArtifact.validationStatus}', must be 'validated'` };
     }
-    // Lineage consistency: the new artifact must belong to the same source task
-    // as the original approval's artifact. This prevents swapping in an artifact
-    // from an unrelated task/pipeline run.
+    // A revision may be produced by a new task, but it must reference the
+    // original artifact or its source principle.
     const originalArtifact = await piArtifactStore.getArtifactById(existing.artifactId);
-    if (originalArtifact && newArtifact.sourceTaskId !== originalArtifact.sourceTaskId) {
+    if (!originalArtifact) {
       return {
         ok: false,
         error: 'artifact_lineage_mismatch',
-        reason: `New artifact sourceTaskId '${newArtifact.sourceTaskId}' does not match original artifact sourceTaskId '${originalArtifact.sourceTaskId}'`,
+        reason: `Original artifact ${existing.artifactId} does not exist; revision lineage cannot be verified`,
+      };
+    }
+    if (!isArtifactRevisionOf(newArtifact, originalArtifact)) {
+      return {
+        ok: false,
+        error: 'artifact_lineage_mismatch',
+        reason: `Artifact ${newArtifactId} does not reference ${originalArtifact.artifactId} or its source principle`,
       };
     }
 

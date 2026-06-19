@@ -36,7 +36,7 @@ import {
   runRuleHostPipeline,
   createSandboxGateDeps,
 } from '../../src/services/rulehost-pipeline-runner.js';
-import { compileDemoRule } from '../../src/services/demo-rule-compiler.js';
+import { RuleHost } from '../../../openclaw-plugin/src/core/rule-host.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
 import {
@@ -53,7 +53,7 @@ import {
   makeIdempotencyKey,
   createPITaskDiagnosticJson,
 } from '@principles/core/runtime-v2';
-import type { PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime-v2';
 
 // ── Scripted adapter (same pattern as rulehost-pipeline-runner.test.ts) ──────
 
@@ -410,24 +410,24 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // 2. Compile the rule code in the production vm sandbox
     // 3. Call evaluate() with system-path and normal-path inputs
     // 4. Verify the rule blocks system paths and allows normal paths
-    const revisedArtifactFull = await artifactStore.getArtifactById(revisedArtifactId);
-    expect(revisedArtifactFull).not.toBeNull();
-    const revisedContent = JSON.parse(revisedArtifactFull!.contentJson) as { implementationCode?: string };
-    expect(revisedContent.implementationCode).toBeDefined();
 
-    const evaluateFn = compileDemoRule(revisedContent.implementationCode!, 'cross-package-gate-test');
-
-    // Before deactivation: rule is active → system path blocked, normal path allowed
-    const systemPathInput = { action: { paramsSummary: { path: '/etc/passwd' } } };
-    const normalPathInput = { action: { paramsSummary: { path: '/project/src/main.ts' } } };
-
-    const blockResult = evaluateFn(systemPathInput as never, {} as never);
+    const makeRuleHostInput = (targetPath: string): RuleHostInput => ({
+      action: { toolName: 'write_file', normalizedPath: targetPath, paramsSummary: { path: targetPath } },
+      workspace: { isRiskPath: targetPath.startsWith('/etc'), planStatus: 'NONE', hasPlanFile: false },
+      session: { currentGfi: 0, recentThinking: false },
+      evolution: { epTier: 0 },
+      derived: { estimatedLineChanges: 1, bashRisk: 'safe' },
+    });
+    const ruleHost = new RuleHost(
+      path.join(tmpDir, '.state'),
+      { warn: () => {} },
+      { workspaceDir: tmpDir },
+    );
+    const blockResult = ruleHost.evaluate(makeRuleHostInput('/etc/passwd'));
+    expect(blockResult).toBeDefined();
     expect(blockResult.decision).toBe('block');
     expect(blockResult.matched).toBe(true);
-
-    const allowResult = evaluateFn(normalPathInput as never, {} as never);
-    expect(allowResult.decision).toBe('allow');
-    expect(allowResult.matched).toBe(false);
+    expect(ruleHost.evaluate(makeRuleHostInput('/project/src/main.ts'))).toBeUndefined();
 
     // ── Step 8: Owner deactivates (rollback) ───────────────────────────────
     const activationId = activationRecord!.activationId;
@@ -447,8 +447,12 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // (The gate iterates active rules; with zero active rules, no rule can block.)
     const gateActiveRules = activeAfterDeactivate.filter(a => a.deactivatedAt === null);
     expect(gateActiveRules).toHaveLength(0);
-    // With zero active rules, the gate's default decision for any input is 'allow'
-    // (no rule matched → no block). This is the behavior restoration proof.
+    const ruleHostAfterRollback = new RuleHost(
+      path.join(tmpDir, '.state'),
+      { warn: () => {} },
+      { workspaceDir: tmpDir },
+    );
+    expect(ruleHostAfterRollback.evaluate(makeRuleHostInput('/etc/passwd'))).toBeUndefined();
 
     // P2 #5 fix: with includeDeactivated=true, the record IS returned
     const allAfterDeactivate = await stateStore.listCodeToolHookActivations(true);

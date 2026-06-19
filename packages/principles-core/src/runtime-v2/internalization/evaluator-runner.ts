@@ -973,13 +973,22 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         }
       }
     } catch (resolveErr) {
-      // Non-fatal: rule artifact can still be created without sourcePrincipleId,
-      // but activation will fail later. Emit telemetry (ERR-002, ERR-009).
+      // Fail this optional rule path explicitly below while preserving the
+      // already-written principle artifact and prompt-channel fallback.
       this.emitEvent('rule_principle_id_resolve_failed', taskId, {
         runId,
         reason: resolveErr instanceof Error ? resolveErr.message : String(resolveErr),
         nextAction: 'verify_scribe_artifact_lineage',
       });
+    }
+
+    if (!resolvedSourcePrincipleId) {
+      this.emitEvent('rule_assembly_failed', taskId, {
+        runId,
+        reason: 'sourcePrincipleId_unresolved',
+        nextAction: 'verify_scribe_artifact_lineage_before_enqueuing_rule_approval',
+      });
+      return null;
     }
 
     const ruleArtifactId = `pi-rule-${taskId}-${runId}`;
@@ -1009,28 +1018,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
-    // Mark the rule artifact validated so RuleHostWriter.canActivate accepts it
-    // (canActivate checks validationStatus !== 'validated' at rule-host-writer.ts:82).
-    //
-    // P1 #3 fix: A rule artifact WITHOUT sourcePrincipleId cannot be traced
-    // back to the owner-approved principle. Per the user's P1 #3 requirement
-    // ("缺失 sourcePrincipleId 时仍生成 validated rule...会产生无法追溯到原则
-    // 的可激活规则"), such artifacts MUST NOT be marked validated — otherwise
-    // they could enter the approval queue and be activated as untraceable
-    // behavior changes. Leave validationStatus as 'pending' and emit telemetry.
-    if (!resolvedSourcePrincipleId) {
-      this.emitEvent('rule_assembled_without_principle_id', taskId, {
-        runId,
-        artifactId: ruleArtifactId,
-        reason: 'sourcePrincipleId unresolved — rule artifact left in pending validation',
-        nextAction: 'verify_scribe_artifact_lineage_or_resolve_principle_bearer_manually',
-      });
-      // Return the artifact ID so the adversarial loop can continue, but the
-      // artifact will NOT be activatable (validationStatus='pending' blocks
-      // RuleHostWriter.canActivate).
-      return ruleArtifactId;
-    }
-
+    // Mark the fully traceable rule validated so RuleHostWriter can activate it.
     try {
       const updated = await this.artifactStore.updateValidationStatus(ruleArtifactId, 'validated');
       if (!updated) {

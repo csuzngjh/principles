@@ -24,11 +24,13 @@ export type {
   ConfidenceLabel,
   ApprovalWithContext,
   ApprovalListFilter,
+  ArtifactLineageIdentity,
   ApprovalStats,
   ApprovalListResult,
 } from './activation-types.js';
 
 export {
+  isArtifactRevisionOf,
   LOW_RISK_CHANNELS,
   HIGH_RISK_CHANNEL_MAP,
   makeIdempotencyKey,

@@ -243,6 +243,19 @@ export interface ApprovalEditInput {
   now: string;
 }
 
+export interface ArtifactLineageIdentity {
+  artifactId: string;
+  sourceTaskId: string;
+  sourcePrincipleId?: string;
+  lineageArtifactIds: string[];
+}
+
+export function isArtifactRevisionOf(candidate: ArtifactLineageIdentity, original: ArtifactLineageIdentity): boolean {
+  const referencesOriginal = candidate.lineageArtifactIds.includes(original.artifactId);
+  const samePrinciple = Boolean(candidate.sourcePrincipleId)
+    && candidate.sourcePrincipleId === original.sourcePrincipleId;
+  return candidate.sourceTaskId === original.sourceTaskId || referencesOriginal || samePrinciple;
+}
 export function makeIdempotencyKey(artifactId: string, channel: InternalizationChannel): string {
   return `${artifactId}::${channel}`;
 }

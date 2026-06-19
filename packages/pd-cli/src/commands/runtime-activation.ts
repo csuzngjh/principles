@@ -9,6 +9,7 @@ import {
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
+  isArtifactRevisionOf,
 } from '@principles/core/runtime-v2';
 import type { ActivationDecision, PIArtifactSnapshot, RolloutActivationDecision } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord } from '@principles/core/runtime-v2';
@@ -526,12 +527,14 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
       return;
     }
     const originalArtifact = await artifactStore.getArtifactById(existingApproval.artifactId);
-    if (originalArtifact && newArtifact.sourceTaskId !== originalArtifact.sourceTaskId) {
+    if (!originalArtifact || !isArtifactRevisionOf(newArtifact, originalArtifact)) {
       const result: EditApprovalResult = {
         ok: false,
         approvalId: opts.approvalId,
         reason: 'artifact_lineage_mismatch',
-        nextAction: `New artifact sourceTaskId '${newArtifact.sourceTaskId}' does not match original '${originalArtifact.sourceTaskId}'. Use an artifact from the same task.`,
+        nextAction: originalArtifact
+          ? `Artifact ${opts.newArtifactId} must reference ${originalArtifact.artifactId} or its source principle.`
+          : `Original artifact ${existingApproval.artifactId} is missing; restore it before editing this approval.`,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));

@@ -532,6 +532,9 @@ describe('EvaluatorRunner (vertical slice)', () => {
     const noBearerEvent = events.find((e) => e.eventType === 'evaluator_no_principle_bearer_found');
     expect(noBearerEvent).toBeDefined();
     expect(noBearerEvent?.payload?.scribeArtifactId).toBe('pi-art-nonexistent');
+
+    const evaluatorArtifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    expect(evaluatorArtifacts.filter((artifact) => artifact.artifactKind === 'rule')).toHaveLength(0);
   });
 
   it('updateValidationStatus returning false emits evaluator_source_validation_update_not_found', async () => {

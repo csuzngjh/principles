@@ -475,10 +475,10 @@ describe('handleRuntimeActivationEdit', () => {
     });
     mockGetArtifactById.mockImplementation(async (id: string) => {
       if (id === 'art-new') {
-        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-new', sourceTaskId: 'task-001' });
       }
       if (id === 'art-old') {
-        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-old', sourceTaskId: 'task-001' });
       }
       return null;
     });
@@ -568,10 +568,10 @@ describe('handleRuntimeActivationEdit', () => {
     });
     mockGetArtifactById.mockImplementation(async (id: string) => {
       if (id === 'art-new') {
-        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-new', sourceTaskId: 'task-001' });
       }
       if (id === 'art-old') {
-        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-old', sourceTaskId: 'task-001' });
       }
       return null;
     });
@@ -601,10 +601,10 @@ describe('handleRuntimeActivationEdit', () => {
     });
     mockGetArtifactById.mockImplementation(async (id: string) => {
       if (id === 'art-new') {
-        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-new', sourceTaskId: 'task-001' });
       }
       if (id === 'art-old') {
-        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return makeArtifact({ artifactId: 'art-old', sourceTaskId: 'task-001' });
       }
       return null;
     });
@@ -692,10 +692,10 @@ describe('handleRuntimeActivationEdit', () => {
     });
     mockGetArtifactById.mockImplementation(async (id: string) => {
       if (id === 'art-new') {
-        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-002' };
+        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-002', lineageArtifactIds: [] };
       }
       if (id === 'art-old') {
-        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001', sourcePrincipleId: 'principle-old', lineageArtifactIds: [] };
       }
       return null;
     });
@@ -711,7 +711,43 @@ describe('handleRuntimeActivationEdit', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.ok).toBe(false);
     expect(output.reason).toBe('artifact_lineage_mismatch');
-    expect(output.nextAction).toContain('same task');
+    expect(output.nextAction).toContain('must reference art-old');
     expect(process.exitCode).toBe(1);
   });
+
+  it('allows a validated revision from a new task when lineage references the approved artifact', async () => {
+    mockApprovalGetById.mockResolvedValue({ approvalId: 'appr-001', artifactId: 'art-old', status: 'pending' });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return {
+          artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'owner-edit-task',
+          sourcePrincipleId: 'principle-old', lineageArtifactIds: ['art-old'],
+        };
+      }
+      if (id === 'art-old') {
+        return {
+          artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'generation-task',
+          sourcePrincipleId: 'principle-old', lineageArtifactIds: [],
+        };
+      }
+      return null;
+    });
+    mockApprovalEdit.mockResolvedValue({
+      ok: true,
+      record: { approvalId: 'appr-001', artifactId: 'art-new', previousArtifactId: 'art-old', status: 'pending' },
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'owner revision',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(mockApprovalEdit).toHaveBeenCalledOnce();
+  });
+
 });

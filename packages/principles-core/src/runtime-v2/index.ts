@@ -1057,12 +1057,14 @@ export type {
   ApprovalListFilter,
   ApprovalStats,
   ApprovalListResult,
+  ArtifactLineageIdentity,
   ApprovalWithContext,
   ConfidenceLabel,
 } from './activation/index.js';
 
 export {
   LOW_RISK_CHANNELS,
+  isArtifactRevisionOf,
   HIGH_RISK_CHANNEL_MAP,
   makeIdempotencyKey,
   isLowRiskChannel,
