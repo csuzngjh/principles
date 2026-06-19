@@ -163,9 +163,15 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   }
 
   // ── pi-ai branch ────────────────────────────────────────────────────────
+  // When runtimeKind === 'config', configResult must be a valid RuntimeConfig
+  // (if it were an error and !configOptional, we threw above; if configOptional,
+  // the caller passes an explicit runtimeKind, never 'config'). The type guard
+  // also narrows for TypeScript.
   const isPiAi =
     opts.runtimeKind === 'pi-ai' ||
-    (opts.runtimeKind === 'config' && configResult.runtimeKind === 'pi-ai');
+    (opts.runtimeKind === 'config' &&
+      !isRuntimeConfigError(configResult) &&
+      configResult.runtimeKind === 'pi-ai');
   if (isPiAi) {
     // PRI-431 Step 1d: When config is valid (not error), validate it;
     // when configOptional and config failed, skip validation (use manual missing-field check below)
@@ -256,7 +262,9 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   // ── openclaw-cli branch ─────────────────────────────────────────────────
   const isOpenClawCli =
     opts.runtimeKind === 'openclaw-cli' ||
-    (opts.runtimeKind === 'config' && configResult.runtimeKind === 'openclaw-cli');
+    (opts.runtimeKind === 'config' &&
+      !isRuntimeConfigError(configResult) &&
+      configResult.runtimeKind === 'openclaw-cli');
   if (isOpenClawCli) {
     // PRI-431 Step 1d: handle configOptional — when config failed, configFields is empty
     const openclawConfigFields: Partial<RuntimeConfig> = isRuntimeConfigError(configResult)

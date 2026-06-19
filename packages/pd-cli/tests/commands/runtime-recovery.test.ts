@@ -85,6 +85,19 @@ describe('pd runtime recovery sweep remediation contract', () => {
     expect(mockRecoverTask).not.toHaveBeenCalled();
     expect(mockServiceClose).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+    // PRI-432: JSON mode emits structured error to stdout (CLI Operator Gate rule #1).
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('mutually exclusive');
+    expect(output.nextAction).toBeTruthy();
+  });
+
+  it('rejects --dry-run and --confirm together in text mode via stderr', async () => {
+    await handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: false });
+
+    expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockServiceClose).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
   });
 

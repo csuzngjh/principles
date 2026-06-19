@@ -2,6 +2,7 @@ import * as path from 'path';
 import { InternalizationIntegrityRemediation } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import type { RemediationResult } from './remediation-output.js';
+import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 
 interface InternalizationIntegrityRepairOptions {
   workspace?: string;
@@ -43,16 +44,8 @@ function formatTextOutput(result: RemediationResult): string {
 
 export async function handleRuntimeInternalizationIntegrityRepair(opts: InternalizationIntegrityRepairOptions): Promise<void> {
   if (opts.dryRun && opts.confirm) {
-    if (opts.json) {
-      console.log(JSON.stringify({
-        ok: false,
-        reason: 'Error: --dry-run and --confirm are mutually exclusive',
-        nextAction: 'Specify only one of --dry-run or --confirm',
-      }, null, 2));
-    } else {
-      console.error('Error: --dry-run and --confirm are mutually exclusive. Specify one or the other.');
-    }
-    process.exit(1);
+    const exitCode = emitFlagConflict({ json: opts.json ?? false });
+    process.exit(exitCode);
     return;
   }
 
@@ -66,26 +59,21 @@ export async function handleRuntimeInternalizationIntegrityRepair(opts: Internal
     const remediation = new InternalizationIntegrityRemediation({ workspaceDir });
     const result = remediation.repair({ dryRun: isDryRun });
 
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log(formatTextOutput(result));
-      if (!isDryRun && result.repairedCount === 0 && result.actions.length > 0) {
-        console.error('');
-        console.error('NOTE: No repairs were made. All issues were already resolved or skipped.');
-      }
+    emitResult(result, {
+      json: opts.json ?? false,
+      formatText: formatTextOutput,
+    });
+
+    if (!isDryRun && result.repairedCount === 0 && result.actions.length > 0 && !opts.json) {
+      console.error('');
+      console.error('NOTE: No repairs were made. All issues were already resolved or skipped.');
     }
   } catch (err: unknown) {
-    if (opts.json) {
-      console.log(JSON.stringify({
-        ok: false,
-        reason: err instanceof Error ? err.message : String(err),
-        nextAction: 'Check workspace path and DB connectivity',
-      }, null, 2));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    process.exit(1);
+    const exitCode = emitError(err, {
+      json: opts.json ?? false,
+      nextAction: 'Check workspace path and DB connectivity',
+    });
+    process.exit(exitCode);
     return;
   }
 }
