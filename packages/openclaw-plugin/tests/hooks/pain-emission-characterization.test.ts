@@ -1,0 +1,395 @@
+/**
+ * PRI-433: PainAdmissionEmitter characterization tests (safety net).
+ *
+ * These tests capture the CURRENT behavior of the 4 hook sites that emit
+ * pain_detected events via emitPainDetectedEvent. They act as a safety net
+ * for a future extraction refactor (consolidating into a PainAdmissionEmitter).
+ *
+ * Scope: static source code analysis only. No runtime mocking needed.
+ * This follows the pattern established by runtime-v2-pain-guard.test.ts.
+ *
+ * Each section captures:
+ * - Pain ID format (regex)
+ * - Provenance field value
+ * - Required fields present/missing (documents inconsistencies)
+ * - Gate function used before emit
+ * - Emit conditions (what must be true for emit to proceed)
+ *
+ * Known inconsistencies (to be resolved by future extraction):
+ * | Site                     | painId format                    | provenance                | evidence | traceId |
+ * |--------------------------|----------------------------------|---------------------------|----------|---------|
+ * | after-tool-call-helpers  | pain_${ts}_${hash.slice(0,8)}    | 'automatic_hook'          | yes      | yes     |
+ * | prompt.ts (GFI)          | empathy_gfi_${ts}                | 'openclaw_context_bound'  | yes      | no      |
+ * | prompt.ts (observer)     | empathy_gfi_${ts}                | 'openclaw_context_bound'  | yes      | no      |
+ * | llm.ts                   | llm_${ts}                        | 'openclaw_context_bound'  | yes      | no      |
+ * | gate-block-helper        | gate_${ts}_${random}             | MISSING                   | MISSING  | MISSING |
+ *
+ * ERR refs:
+ * - ERR-009 (fail-loud): tests fail if emit pattern changes without update
+ * - ERR-006 (lineage consistency): documents traceId presence/absence per site
+ */
+
+import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function findRepoRoot(cwd: string): string {
+  let dir = cwd;
+  while (dir !== path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  return cwd;
+}
+
+const repoRoot = findRepoRoot(process.cwd());
+
+function read(relativePath: string): string {
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+}
+
+// ── Source file paths ─────────────────────────────────────────────────────
+
+const AFTER_TOOL_CALL_HELPERS = 'packages/openclaw-plugin/src/hooks/after-tool-call-helpers.ts';
+const PROMPT = 'packages/openclaw-plugin/src/hooks/prompt.ts';
+const LLM = 'packages/openclaw-plugin/src/hooks/llm.ts';
+const GATE_BLOCK_HELPER = 'packages/openclaw-plugin/src/hooks/gate-block-helper.ts';
+
+// ── Tests ─────────────────────────────────────────────────────────────────
+
+describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 1: after-tool-call-helpers.ts — tool failure path
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('after-tool-call-helpers.ts emit site', () => {
+    const source = read(AFTER_TOOL_CALL_HELPERS);
+
+    it('uses painId format: pain_${Date.now()}_${errorHash.slice(0,8)}', () => {
+      expect(source).toMatch(/painId\s*=\s*`pain_\$\{Date\.now\(\)\}_\$\{observation\.errorHash\.slice\(0,\s*8\)\}`/);
+    });
+
+    it('sets provenance to "automatic_hook"', () => {
+      expect(source).toMatch(/provenance:\s*'automatic_hook'/);
+    });
+
+    it('includes evidence field via buildTrajectoryEvidence', () => {
+      expect(source).toMatch(/evidence:\s*buildTrajectoryEvidence\(wctx,\s*sessionId\)/);
+    });
+
+    it('includes traceId from observation', () => {
+      expect(source).toMatch(/traceId:\s*observation\.traceId/);
+    });
+
+    it('sets painType to failureSource variable (tool_failure or dispatch_error)', () => {
+      expect(source).toMatch(/painType:\s*failureSource/);
+    });
+
+    it('sets agentId from context variable', () => {
+      expect(source).toMatch(/agentId,/);
+    });
+
+    it('uses evaluateTriggerController as gate (PRI-363 single gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('calls emitPainDetectedEvent (not legacy writePainFlag)', () => {
+      expect(source).toMatch(/emitPainDetectedEvent\(wctx,/);
+      expect(source).not.toMatch(/\bwritePainFlag\b/);
+    });
+
+    it('early-returns when admission.admitted is false', () => {
+      expect(source).toMatch(/if\s*\(!admission\.admitted\)\s*return/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 2: prompt.ts — empathy GFI path (2 instances)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('prompt.ts emit sites (2 empathy GFI instances)', () => {
+    const source = read(PROMPT);
+
+    it('uses painId format: empathy_gfi_${Date.now()} (both instances)', () => {
+      const matches = source.match(/painId:\s*`empathy_gfi_\$\{Date\.now\(\)\}`/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBe(2);
+    });
+
+    it('sets provenance to "openclaw_context_bound" (both instances)', () => {
+      const matches = source.match(/provenance:\s*'openclaw_context_bound'/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('sets painType to "user_frustration" (both instances)', () => {
+      const matches = source.match(/painType:\s*'user_frustration'/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('sets source to "user_empathy" (both instances)', () => {
+      const matches = source.match(/source:\s*'user_empathy'/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('hardcodes agentId to "main" (both instances)', () => {
+      const matches = source.match(/agentId:\s*'main'/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('includes evidence field via buildTrajectoryEvidence (both instances)', () => {
+      const matches = source.match(/evidence,\s*\n\s*}/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does NOT include traceId field (known inconsistency)', () => {
+      // Extract the data blocks for empathy emit and verify no traceId
+      const empathyBlocks = source.match(/painId:\s*`empathy_gfi_[^}]+}/g);
+      expect(empathyBlocks).not.toBeNull();
+      for (const block of empathyBlocks!) {
+        expect(block).not.toMatch(/traceId/);
+      }
+    });
+
+    it('uses evaluatePainDiagnosticGate as gate (not evaluateTriggerController)', () => {
+      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+      expect(source).not.toMatch(/evaluateTriggerController/);
+    });
+
+    it('gates emit on gate.shouldDiagnose being true', () => {
+      expect(source).toMatch(/if\s*\(gate\.shouldDiagnose\)/);
+    });
+
+    it('calls emitPainDetectedEvent with await (not fire-and-forget)', () => {
+      expect(source).toMatch(/await\s+emitPainDetectedEvent/);
+    });
+
+    it('wraps emit in try/catch for error handling', () => {
+      expect(source).toMatch(/try\s*\{[\s\S]*?await\s+emitPainDetectedEvent[\s\S]*?\}\s*catch\s*\(emitErr\)/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 3: llm.ts — semantic pain detection
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('llm.ts emit site', () => {
+    const source = read(LLM);
+
+    it('uses painId format: llm_${Date.now()}', () => {
+      expect(source).toMatch(/painId:\s*`llm_\$\{Date\.now\(\)\}`/);
+    });
+
+    it('sets provenance to "openclaw_context_bound"', () => {
+      expect(source).toMatch(/provenance:\s*'openclaw_context_bound'/);
+    });
+
+    it('sets painType to "user_frustration" (as const)', () => {
+      expect(source).toMatch(/painType:\s*'user_frustration'\s+as\s+const/);
+    });
+
+    it('includes evidence field via buildTrajectoryEvidence', () => {
+      expect(source).toMatch(/evidence,\s*\n\s*}/);
+    });
+
+    it('does NOT include traceId field (known inconsistency)', () => {
+      const llmBlock = source.match(/painId:\s*`llm_\$\{Date\.now\(\)\}`[^}]+}/);
+      expect(llmBlock).not.toBeNull();
+      expect(llmBlock![0]).not.toMatch(/traceId/);
+    });
+
+    it('sets agentId from ctx.agentId (not hardcoded)', () => {
+      expect(source).toMatch(/agentId:\s*ctx\.agentId/);
+    });
+
+    it('uses evaluatePainDiagnosticGate as gate', () => {
+      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('gates emit on gate.shouldDiagnose being true', () => {
+      expect(source).toMatch(/if\s*\(gate\.shouldDiagnose\)/);
+    });
+
+    it('calls emitPainDetectedEvent WITHOUT await (fire-and-forget)', () => {
+      // llm.ts calls emitPainDetectedEvent without await — known inconsistency
+      expect(source).toMatch(/[^a]\s*emitPainDetectedEvent\(wctx,/);
+      expect(source).not.toMatch(/await\s+emitPainDetectedEvent/);
+    });
+
+    it('uses PEAT-B1 evidence triage (feature-flagged)', () => {
+      expect(source).toMatch(/evaluateEvidenceTriage/);
+      expect(source).toMatch(/loadFeatureFlagFromConfig/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 4: gate-block-helper.ts — gate block persistence
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('gate-block-helper.ts emit site', () => {
+    const source = read(GATE_BLOCK_HELPER);
+
+    it('uses painId format: gate_${Date.now()}_${random}', () => {
+      expect(source).toMatch(/painId:\s*`gate_\$\{Date\.now\(\)\}_\$\{Math\.random\(\)\.toString\(36\)\.slice\(2,\s*10\)\}`/);
+    });
+
+    it('sets painType to "user_frustration"', () => {
+      expect(source).toMatch(/painType:\s*'user_frustration'/);
+    });
+
+    it('sets source to "gate_blocked"', () => {
+      expect(source).toMatch(/source:\s*'gate_blocked'/);
+    });
+
+    it('hardcodes agentId to "main"', () => {
+      expect(source).toMatch(/agentId:\s*'main'/);
+    });
+
+    it('uses GATE_BLOCK_PAIN_SCORE constant (45)', () => {
+      expect(source).toMatch(/GATE_BLOCK_PAIN_SCORE\s*=\s*45/);
+      expect(source).toMatch(/score:\s*GATE_BLOCK_PAIN_SCORE/);
+    });
+
+    it('does NOT include provenance field (known inconsistency)', () => {
+      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      expect(gateBlock).not.toBeNull();
+      expect(gateBlock![0]).not.toMatch(/provenance/);
+    });
+
+    it('does NOT include evidence field (known inconsistency)', () => {
+      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      expect(gateBlock).not.toBeNull();
+      expect(gateBlock![0]).not.toMatch(/evidence/);
+    });
+
+    it('does NOT include traceId field (known inconsistency)', () => {
+      const gateBlock = source.match(/painId:\s*`gate_[^}]+}/);
+      expect(gateBlock).not.toBeNull();
+      expect(gateBlock![0]).not.toMatch(/traceId/);
+    });
+
+    it('uses evaluatePainDiagnosticGate as gate', () => {
+      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('gates emit on gate.shouldDiagnose being true', () => {
+      expect(source).toMatch(/if\s*\(gate\.shouldDiagnose\)/);
+    });
+
+    it('uses PEAT-B1 evidence triage (feature-flagged)', () => {
+      expect(source).toMatch(/evaluateEvidenceTriage/);
+      expect(source).toMatch(/loadFeatureFlagFromConfig/);
+    });
+
+    it('calls emitPainDetectedEvent with void + .catch() (fire-and-forget with error handler)', () => {
+      expect(source).toMatch(/void\s+emitPainDetectedEvent/);
+      expect(source).toMatch(/\.catch\(\(emitErr\)/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 5: Cross-site consistency documentation
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('cross-site consistency (documents known inconsistencies)', () => {
+    it('all 4 sites call emitPainDetectedEvent (not legacy APIs)', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/emitPainDetectedEvent/);
+        expect(src).not.toMatch(/\bwritePainFlag\b/);
+        expect(src).not.toMatch(/\bcreatePainSignalBridge\b/);
+      }
+    });
+
+    it('all 4 sites emit type: "pain_detected"', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/type:\s*'pain_detected'/);
+      }
+    });
+
+    it('all 4 sites include ts: new Date().toISOString()', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/ts:\s*new Date\(\)\.toISOString\(\)/);
+      }
+    });
+
+    it('all 4 sites include sessionId field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/sessionId,/);
+      }
+    });
+
+    it('all 4 sites include score field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/score:/);
+      }
+    });
+
+    it('all 4 sites include reason field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/reason:/);
+      }
+    });
+
+    it('all 4 sites include source field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/source:/);
+      }
+    });
+
+    it('all 4 sites include painId field', () => {
+      // after-tool-call-helpers uses shorthand `painId,`; others use `painId:`
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      for (const file of files) {
+        const src = read(file);
+        expect(src).toMatch(/painId[,:]/);
+      }
+    });
+
+    it('documents: only after-tool-call-helpers uses evaluateTriggerController', () => {
+      const atc = read(AFTER_TOOL_CALL_HELPERS);
+      const prompt = read(PROMPT);
+      const llm = read(LLM);
+      const gate = read(GATE_BLOCK_HELPER);
+
+      expect(atc).toMatch(/evaluateTriggerController/);
+      expect(prompt).not.toMatch(/evaluateTriggerController/);
+      expect(llm).not.toMatch(/evaluateTriggerController/);
+      expect(gate).not.toMatch(/evaluateTriggerController/);
+    });
+
+    it('documents: 3 of 4 sites use evaluatePainDiagnosticGate (not after-tool-call-helpers)', () => {
+      const atc = read(AFTER_TOOL_CALL_HELPERS);
+      const prompt = read(PROMPT);
+      const llm = read(LLM);
+      const gate = read(GATE_BLOCK_HELPER);
+
+      expect(atc).not.toMatch(/evaluatePainDiagnosticGate/);
+      expect(prompt).toMatch(/evaluatePainDiagnosticGate/);
+      expect(llm).toMatch(/evaluatePainDiagnosticGate/);
+      expect(gate).toMatch(/evaluatePainDiagnosticGate/);
+    });
+  });
+});
