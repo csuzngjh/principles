@@ -6,7 +6,8 @@ import {
   DefaultDreamerValidator,
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
-  buildL2PrincipleReader,
+  buildL2PrincipleReaderFromLedger,
+  loadLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
   resolveRuntimeConfigFromPdConfig,
@@ -175,7 +176,7 @@ export async function runConsumerCycle(
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
       if (l2Flag.enabled) {
         const stateDir = `${workspaceDir}/.state`;
-        const principleReader = buildL2PrincipleReader(stateDir, {
+        const principleReader = buildL2PrincipleReaderFromLedger(loadLedger(stateDir), {
           logger: { warn: (msg) => logger.warn(msg) },
         });
         adapter = new L2AgentLoopAdapter(

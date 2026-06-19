@@ -967,8 +967,11 @@ export type {
 export { DreamerOutputV1Typebox, DreamerCandidateTypebox } from './tools/dreamer-output-typebox.js';
 
 // ── L2 Principle Reader (PRI-431) ─────────────────────────────────────────────
+// Only export the pure-logic entry point from the core barrel.
+// buildL2PrincipleReader() performs file I/O and is imported directly
+// from the module by pd-cli/openclaw-plugin — NOT re-exported here.
 
-export { buildL2PrincipleReader } from './build-l2-principle-reader.js';
+export { buildL2PrincipleReaderFromLedger } from './build-l2-principle-reader.js';
 export type { BuildL2PrincipleReaderOptions } from './build-l2-principle-reader.js';
 
 // ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────

@@ -294,7 +294,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           payload: { runtimeKind: 'pi-ai', provider: telemetryProvider, model: telemetryModel, baseUrlPresent: !!opts.baseUrl },
         });
       } else {
-        console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
+        const unsupportedResult = {
+          ok: false,
+          reason: `unsupported_runtime_kind: ${runtimeKind}`,
+          nextAction: 'Use one of: openclaw-cli, test-double, pi-ai',
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(unsupportedResult, null, 2));
+        } else {
+          console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
+          console.error(`Next action: ${unsupportedResult.nextAction}`);
+        }
         process.exit(1);
         return;
       }
@@ -318,7 +328,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }
         // Default error formatting for other config resolution errors
         if (opts.json) {
-          console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing, nextAction: err.nextAction }));
+          console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing, nextAction: err.nextAction ?? 'Check .pd/config.yaml and retry' }));
         } else {
           console.error(`error: ${err.message}`);
           if (err.nextAction) {

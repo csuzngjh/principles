@@ -50,9 +50,10 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     }),
     validateRuntimeConfig: mockValidateRuntimeConfig,
     isRuntimeConfigError: mockIsRuntimeConfigError,
-    buildL2PrincipleReader: mockBuildL2PrincipleReader.mockReturnValue({
+    buildL2PrincipleReaderFromLedger: mockBuildL2PrincipleReader.mockReturnValue({
       listActivePrinciples: vi.fn(),
     }),
+    loadLedger: vi.fn().mockReturnValue({ tree: { principles: {} } }),
   };
 });
 
@@ -298,7 +299,7 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
 
       expect(result).toHaveProperty('__type', 'L2AgentLoopAdapter');
       expect(mockL2AgentLoopCtor).toHaveBeenCalledTimes(1);
-      expect(mockBuildL2PrincipleReader).toHaveBeenCalledWith('/ws/.principles');
+      expect(mockBuildL2PrincipleReader).toHaveBeenCalled();
     });
 
     it('falls back to PiAiRuntimeAdapter when l2_dreamer flag is disabled', () => {

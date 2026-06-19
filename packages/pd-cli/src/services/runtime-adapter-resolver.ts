@@ -28,7 +28,8 @@ import {
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   L2AgentLoopAdapter,
-  buildL2PrincipleReader,
+  buildL2PrincipleReaderFromLedger,
+  loadLedger,
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
@@ -270,7 +271,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
           },
           {
             artifactReader: opts.l2ArtifactReader,
-            principleReader: buildL2PrincipleReader(opts.l2StateDir),
+            principleReader: buildL2PrincipleReaderFromLedger(loadLedger(opts.l2StateDir)),
           },
         );
       }

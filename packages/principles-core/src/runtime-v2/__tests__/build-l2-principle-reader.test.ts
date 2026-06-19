@@ -13,7 +13,7 @@ vi.mock('../../principle-tree-ledger.js', async (importOriginal) => {
 });
 
 import { loadLedger } from '../../principle-tree-ledger.js';
-import { buildL2PrincipleReader } from '../index.js';
+import { buildL2PrincipleReader, buildL2PrincipleReaderFromLedger } from '../build-l2-principle-reader.js';
 
 // ── Helpers (declared before describe to satisfy no-use-before-define) ───────
 
@@ -199,5 +199,38 @@ describe('buildL2PrincipleReader (PRI-431)', () => {
     // p-no-id has empty text (typeof '' === 'string' is true, so it passes the filter).
     // This test documents the current behavior: empty string text is included.
     expect(result).toHaveLength(2);
+  });
+
+  it('buildL2PrincipleReaderFromLedger works without file I/O', async () => {
+    const ledger = {
+      tree: {
+        principles: {
+          'p-1': { status: 'active', id: 'p-1', text: 'Test principle' },
+          'p-2': { status: 'draft', id: 'p-2', text: 'Draft principle' },
+        },
+      },
+    };
+    const reader = buildL2PrincipleReaderFromLedger(ledger);
+    const result = await reader.listActivePrinciples();
+    expect(result).toEqual([{ id: 'p-1', statement: 'Test principle' }]);
+  });
+
+  it('buildL2PrincipleReaderFromLedger warns on malformed principles', async () => {
+    const warnings: string[] = [];
+    const ledger = {
+      tree: {
+        principles: {
+          'p-ok': { status: 'active', id: 'p-ok', text: 'OK' },
+          'p-bad': { status: 'active', id: 123, text: 'Bad id' },
+        },
+      },
+    };
+    const reader = buildL2PrincipleReaderFromLedger(ledger, {
+      logger: { warn: (msg) => warnings.push(msg) },
+    });
+    const result = await reader.listActivePrinciples();
+    expect(result).toEqual([{ id: 'p-ok', statement: 'OK' }]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('skipping active principle');
   });
 });

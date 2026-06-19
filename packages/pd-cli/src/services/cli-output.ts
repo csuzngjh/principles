@@ -49,7 +49,7 @@ export interface EmitFlagConflictOptions {
  * Emit a result object as JSON (stdout) or text (stdout via formatText).
  * Does NOT set exit code — caller decides based on result status.
  */
-export function emitResult<T>(output: T, opts: EmitResultOptions<T>): void {
+export function emitResult<T extends object>(output: T, opts: EmitResultOptions<T>): void {
   if (opts.json) {
     console.log(JSON.stringify(output, null, 2));
   } else {

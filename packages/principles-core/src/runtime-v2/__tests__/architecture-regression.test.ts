@@ -522,7 +522,7 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'trimToBudget',
     'renderPrinciplesToDirectives',
     // PRI-431
-    'buildL2PrincipleReader',
+    'buildL2PrincipleReaderFromLedger',
   ];
 
   for (const name of REQUIRED_EXPORTS) {

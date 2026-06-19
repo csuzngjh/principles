@@ -43,7 +43,7 @@ function findRepoRoot(cwd: string): string {
     }
     dir = path.dirname(dir);
   }
-  return cwd;
+  throw new Error(`Could not find repo root from ${cwd} — .git directory not found in any parent`);
 }
 
 const repoRoot = findRepoRoot(process.cwd());
@@ -152,8 +152,9 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      // Extract the data blocks for empathy emit and verify no traceId
-      const empathyBlocks = source.match(/painId:\s*`empathy_gfi_[^}]+}/g);
+      // Extract the data blocks for empathy emit and verify no traceId.
+      // Use a non-greedy dot-all match to avoid truncation at template literal braces like ${Date.now()}
+      const empathyBlocks = source.match(/painId:\s*`empathy_gfi_[^`]*`[\s\S]*?^\s{8}\},?/gm);
       expect(empathyBlocks).not.toBeNull();
       for (const block of empathyBlocks!) {
         expect(block).not.toMatch(/traceId/);
@@ -202,7 +203,9 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      const llmBlock = source.match(/painId:\s*`llm_\$\{Date\.now\(\)\}`[^}]+}/);
+      // Match the entire data block from painId to the closing brace of the data object.
+      // Use a non-greedy dot-all match to avoid truncation at template literal braces like ${Date.now()}
+      const llmBlock = source.match(/painId:\s*`llm_\$\{Date\.now\(\)\}`[\s\S]*?^\s{8}\},?/m);
       expect(llmBlock).not.toBeNull();
       expect(llmBlock![0]).not.toMatch(/traceId/);
     });
