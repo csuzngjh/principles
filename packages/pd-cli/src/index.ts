@@ -578,7 +578,7 @@ const activationCmd = runtimeCmd
 activationCmd
   .command('dispatch')
   .description('Dispatch an activation for a rollout-reviewed artifact')
-  .requiredOption('-a, --artifact-id <id>', 'PIArtifact ID to activate')
+  .option('-a, --artifact-id <id>', 'PIArtifact ID to activate')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
   .option('--dry-run', 'Dry-run mode (default, no writes)')
@@ -600,7 +600,7 @@ activationCmd
 activationCmd
   .command('deactivate')
   .description('Deactivate (rollback) an active activation — idempotent (PRI-408 Contract E)')
-  .requiredOption('-a, --activation-id <id>', 'Activation ID to deactivate')
+  .option('-a, --activation-id <id>', 'Activation ID to deactivate')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
@@ -630,12 +630,14 @@ activationCmd
 
 // P1 #2 fix: Owner edit entry point — swap a pending approval's artifact.
 // Required because ApprovalQueue.edit() was dead code with no CLI/OpenClaw entry.
+// P2 #5: use .option() instead of .requiredOption() so missing-flag errors
+// produce structured JSON output via the handler, not Commander's pre-handler exit.
 activationCmd
   .command('edit')
   .description('Edit a pending approval to swap its artifact — P1 #2 owner edit entry point')
-  .requiredOption('-a, --approval-id <id>', 'Approval ID to edit (must be pending)')
-  .requiredOption('-n, --new-artifact-id <id>', 'New PIArtifact ID to swap to')
-  .requiredOption('-r, --edit-reason <text>', 'Reason for the edit')
+  .option('-a, --approval-id <id>', 'Approval ID to edit (must be pending)')
+  .option('-n, --new-artifact-id <id>', 'New PIArtifact ID to swap to')
+  .option('-r, --edit-reason <text>', 'Reason for the edit')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {

@@ -186,14 +186,18 @@ export class ApprovalsConsoleModel {
    * or reject, not edit. This method makes the edit capability reachable
    * from the Console route and CLI command.
    *
-   * The caller is responsible for creating the new artifact and performing
-   * schema validation + sandbox replay BEFORE calling this method.
+   * P1 #2 (adversarial review): validates the new artifact exists, has
+   * passed validation (validationStatus === 'validated'), and has lineage
+   * consistent with the original approval (same sourceTaskId). Previously
+   * the method accepted any newArtifactId without checking existence,
+   * validation status, or lineage — allowing an owner to point an approval
+   * at an arbitrary, unvalidated, or lineage-mismatched artifact.
    */
   async editApproval(
     input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string },
   ): Promise<
     | { ok: true; record: ApprovalRecord }
-    | { ok: false; error: 'not_found' | 'already_decided'; status?: ApprovalStatus }
+    | { ok: false; error: 'not_found' | 'already_decided' | 'artifact_not_found' | 'artifact_not_validated' | 'artifact_lineage_mismatch'; status?: ApprovalStatus; reason?: string }
   > {
     const { approvalId, editedBy, newArtifactId, editReason } = input;
     if (!stateDbExists(this.workspaceDir)) {
@@ -204,6 +208,29 @@ export class ApprovalsConsoleModel {
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
+
+    // P1 #2: validate the new artifact before swapping the approval pointer.
+    const conn = this.getWriteConnection();
+    const piArtifactStore = new SqlitePIArtifactStore(conn);
+    const newArtifact = await piArtifactStore.getArtifactById(newArtifactId);
+    if (!newArtifact) {
+      return { ok: false, error: 'artifact_not_found', reason: `Artifact ${newArtifactId} does not exist in the artifact store` };
+    }
+    if (newArtifact.validationStatus !== 'validated') {
+      return { ok: false, error: 'artifact_not_validated', reason: `Artifact ${newArtifactId} has validationStatus '${newArtifact.validationStatus}', must be 'validated'` };
+    }
+    // Lineage consistency: the new artifact must belong to the same source task
+    // as the original approval's artifact. This prevents swapping in an artifact
+    // from an unrelated task/pipeline run.
+    const originalArtifact = await piArtifactStore.getArtifactById(existing.artifactId);
+    if (originalArtifact && newArtifact.sourceTaskId !== originalArtifact.sourceTaskId) {
+      return {
+        ok: false,
+        error: 'artifact_lineage_mismatch',
+        reason: `New artifact sourceTaskId '${newArtifact.sourceTaskId}' does not match original artifact sourceTaskId '${originalArtifact.sourceTaskId}'`,
+      };
+    }
+
     const editResult = await this.getWriteQueue().edit({
       approvalId,
       editedBy,

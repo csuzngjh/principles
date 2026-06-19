@@ -235,8 +235,16 @@ export async function handleApprovalsRoute(
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
-        } else {
+        } else if (result.error === 'already_decided') {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));
+        } else if (result.error === 'artifact_not_found') {
+          sendBadRequest(res, result.reason ?? 'Artifact not found');
+        } else if (result.error === 'artifact_not_validated') {
+          sendBadRequest(res, result.reason ?? 'Artifact not validated');
+        } else if (result.error === 'artifact_lineage_mismatch') {
+          sendBadRequest(res, result.reason ?? 'Artifact lineage mismatch');
+        } else {
+          sendError(res, 500, 'edit_error', 'Unexpected error');
         }
         return;
       }

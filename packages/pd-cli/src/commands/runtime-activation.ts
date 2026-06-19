@@ -8,6 +8,7 @@ import {
   createProductionGateDeps,
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
+  SqlitePIArtifactStore,
 } from '@principles/core/runtime-v2';
 import type { ActivationDecision, PIArtifactSnapshot, RolloutActivationDecision } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord } from '@principles/core/runtime-v2';
@@ -258,6 +259,22 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
     if (!success) {
       process.exitCode = 1;
     }
+  } catch (err: unknown) {
+    // P2 #5: initialize/DB exceptions must not break --json contract.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const result: DeactivateResult = {
+      ok: false,
+      activationId: opts.activationId,
+      reason: `initialize_failed: ${errMsg}`,
+      nextAction: 'Check workspace directory and DB integrity. Try `pd runtime diagnostics`.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: ${result.reason}`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }
@@ -336,6 +353,21 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
         }
       }
     }
+  } catch (err: unknown) {
+    // P2 #5: initialize/DB exceptions must not break --json contract.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const result = {
+      ok: false,
+      reason: `initialize_failed: ${errMsg}`,
+      nextAction: 'Check workspace directory and DB integrity. Try `pd runtime diagnostics`.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: ${result.reason}`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }
@@ -416,7 +448,101 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
   try {
     await stateManager.initialize();
     const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
+    const artifactStore = new SqlitePIArtifactStore(stateManager.connection);
     const now = new Date().toISOString();
+
+    // P1 #2: validate the new artifact before swapping the approval pointer.
+    // The new artifact must exist, be validated, and have lineage consistent
+    // with the original approval's artifact (same sourceTaskId).
+    const existingApproval = await approvalStore.getById(opts.approvalId);
+    if (!existingApproval) {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: 'not_found',
+        nextAction: 'Check the approval ID with `pd runtime activation list` or Console',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      await stateManager.close();
+      return;
+    }
+    if (existingApproval.status !== 'pending') {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: 'already_decided',
+        nextAction: `Approval is already decided (status: ${existingApproval.status}). Only pending approvals can be edited.`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      await stateManager.close();
+      return;
+    }
+
+    const newArtifact = await artifactStore.getArtifactById(opts.newArtifactId);
+    if (!newArtifact) {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: 'artifact_not_found',
+        nextAction: `Artifact ${opts.newArtifactId} does not exist. Create it first via pd candidate intake.`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      await stateManager.close();
+      return;
+    }
+    if (newArtifact.validationStatus !== 'validated') {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: `artifact_not_validated: ${newArtifact.validationStatus}`,
+        nextAction: `Artifact ${opts.newArtifactId} has validationStatus '${newArtifact.validationStatus}'. Run the production gate to validate it first.`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      await stateManager.close();
+      return;
+    }
+    const originalArtifact = await artifactStore.getArtifactById(existingApproval.artifactId);
+    if (originalArtifact && newArtifact.sourceTaskId !== originalArtifact.sourceTaskId) {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: 'artifact_lineage_mismatch',
+        nextAction: `New artifact sourceTaskId '${newArtifact.sourceTaskId}' does not match original '${originalArtifact.sourceTaskId}'. Use an artifact from the same task.`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      await stateManager.close();
+      return;
+    }
 
     let editResult;
     try {
@@ -483,6 +609,22 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
       console.log(`  editedAt: ${result.editedAt}`);
       console.log('Next action: review the new artifact, then approve via Console or `pd runtime activation dispatch`');
     }
+  } catch (err: unknown) {
+    // P2 #5: initialize/DB exceptions must not break --json contract.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const result: EditApprovalResult = {
+      ok: false,
+      approvalId: opts.approvalId,
+      reason: `initialize_failed: ${errMsg}`,
+      nextAction: 'Check workspace directory and DB integrity. Try `pd runtime diagnostics`.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: ${result.reason}`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }

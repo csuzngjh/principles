@@ -43,6 +43,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime-v2';
 import { runRuleHostPipeline, createSandboxGateDeps } from '../src/services/rulehost-pipeline-runner.js';
+import { compileDemoRule } from '../src/services/demo-rule-compiler.js';
 import type { CodeRuleCapability } from '../src/services/rulehost-pipeline-runner.js';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -304,23 +305,36 @@ async function main(): Promise<void> {
 
   let behaviorResults: Array<{ name: string; expected: string; actual: string; passed: boolean }> = [];
   if (ruleCode) {
-    // Execute the rule code in a sandbox
+    // P1 #1 fix: use the production vm sandbox (compileDemoRule) instead of
+    // `new Function` which bypasses the sandbox and has no timeout protection.
+    // Also, `new Function('input', 'helpers', ruleCode)` would define `evaluate`
+    // inside the function body but not call it, returning undefined — making
+    // the behavior comparison unreliable.
     try {
-      const fn = new Function('input', 'helpers', ruleCode);
+      const evaluateFn = compileDemoRule(ruleCode, 'dogfood-behavior-test');
       behaviorResults = testCases.map((tc) => {
-        const result = fn(tc.input, {});
-        const actual = typeof result === 'object' && result !== null && 'decision' in result
-          ? String((result as Record<string, unknown>).decision)
-          : 'unknown';
-        return {
-          name: tc.name,
-          expected: tc.expected,
-          actual,
-          passed: actual === tc.expected,
-        };
+        try {
+          const result = evaluateFn(tc.input as never, {} as never);
+          const actual = typeof result === 'object' && result !== null && 'decision' in result
+            ? String((result as Record<string, unknown>).decision)
+            : 'unknown';
+          return {
+            name: tc.name,
+            expected: tc.expected,
+            actual,
+            passed: actual === tc.expected,
+          };
+        } catch (err) {
+          return {
+            name: tc.name,
+            expected: tc.expected,
+            actual: `error: ${err instanceof Error ? err.message : String(err)}`,
+            passed: false,
+          };
+        }
       });
     } catch (err) {
-      log('STEP-6', 'Rule code execution failed', { error: err instanceof Error ? err.message : String(err) });
+      log('STEP-6', 'Rule code compilation failed (vm sandbox)', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 

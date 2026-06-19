@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockGetArtifactById = vi.fn();
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockApprovalEdit = vi.fn();
+const mockApprovalGetById = vi.fn();
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -50,6 +51,12 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
       return {
         enqueue: vi.fn().mockResolvedValue(undefined),
         edit: mockApprovalEdit,
+        getById: mockApprovalGetById,
+      };
+    }),
+    SqlitePIArtifactStore: vi.fn().mockImplementation(function () {
+      return {
+        getArtifactById: mockGetArtifactById,
       };
     }),
     ActivationDispatcher: vi.fn().mockImplementation(function () {
@@ -461,6 +468,20 @@ describe('handleRuntimeActivationEdit', () => {
   });
 
   it('successful edit returns ok with newArtifactId and previousArtifactId (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      if (id === 'art-old') {
+        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      return null;
+    });
     mockApprovalEdit.mockResolvedValue({
       ok: true,
       record: {
@@ -490,6 +511,7 @@ describe('handleRuntimeActivationEdit', () => {
   });
 
   it('not_found approval returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue(null);
     mockApprovalEdit.mockResolvedValue({
       ok: false,
       error: 'not_found',
@@ -511,6 +533,11 @@ describe('handleRuntimeActivationEdit', () => {
   });
 
   it('already_decided approval returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'approved',
+    });
     mockApprovalEdit.mockResolvedValue({
       ok: false,
       error: 'already_decided',
@@ -534,6 +561,20 @@ describe('handleRuntimeActivationEdit', () => {
   });
 
   it('edit store throw returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      if (id === 'art-old') {
+        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      return null;
+    });
     mockApprovalEdit.mockRejectedValue(new Error('SQLITE_BUSY'));
 
     await handleRuntimeActivationEdit({
@@ -553,6 +594,20 @@ describe('handleRuntimeActivationEdit', () => {
   });
 
   it('text output is human-readable with next action hint', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      if (id === 'art-old') {
+        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      return null;
+    });
     mockApprovalEdit.mockResolvedValue({
       ok: true,
       record: {
@@ -576,5 +631,87 @@ describe('handleRuntimeActivationEdit', () => {
     expect(text).toContain('newArtifactId: art-new');
     expect(text).toContain('previousArtifactId: art-old');
     expect(text).toContain('Next action');
+  });
+
+  it('artifact_not_found returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockResolvedValue(null);
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-nonexistent',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('artifact_not_found');
+    expect(output.nextAction).toContain('does not exist');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('artifact_not_validated returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return { artifactId: 'art-new', validationStatus: 'pending', sourceTaskId: 'task-001' };
+      }
+      return null;
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('artifact_not_validated');
+    expect(output.nextAction).toContain('production gate');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('artifact_lineage_mismatch returns structured error with nextAction (JSON)', async () => {
+    mockApprovalGetById.mockResolvedValue({
+      approvalId: 'appr-001',
+      artifactId: 'art-old',
+      status: 'pending',
+    });
+    mockGetArtifactById.mockImplementation(async (id: string) => {
+      if (id === 'art-new') {
+        return { artifactId: 'art-new', validationStatus: 'validated', sourceTaskId: 'task-002' };
+      }
+      if (id === 'art-old') {
+        return { artifactId: 'art-old', validationStatus: 'validated', sourceTaskId: 'task-001' };
+      }
+      return null;
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('artifact_lineage_mismatch');
+    expect(output.nextAction).toContain('same task');
+    expect(process.exitCode).toBe(1);
   });
 });

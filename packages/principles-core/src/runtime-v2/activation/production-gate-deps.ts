@@ -30,6 +30,8 @@ import type {
 } from '../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult, RefinerSandboxOptions } from '../internalization/refiner-sandbox-wrapper.js';
 import { evaluateInRefinerSandbox } from '../internalization/refiner-sandbox-wrapper.js';
+import { checkForbiddenPatterns } from '../internalization/rule-code-validator.js';
+import { validateCorrectionProposal } from '../internalization/correction-proposal.js';
 import { safeStringifyPreview } from '../feedback/safe-stringify.js';
 
 /**
@@ -64,13 +66,17 @@ function isValidRuleHostResult(value: unknown): value is RuleHostResult {
   if (typeof reason !== 'string') return false;
 
   // When decision is 'auto_correct', correctionProposal must be present
-  // (basic presence check — full validation is done by validateCorrectionProposal)
+  // AND pass full structural validation (P2 #6 fix: previously only checked
+  // presence + typeof object, allowing malformed proposals with missing
+  // required fields like proposedParams, correctedFields, applicationMode,
+  // confidence, ruleId, notifyAgent to flow into the activation path).
   if (decision === 'auto_correct') {
     const correctionProposal = Reflect.get(value, 'correctionProposal');
     if (correctionProposal === undefined || correctionProposal === null) {
       return false;
     }
-    if (typeof correctionProposal !== 'object') {
+    const proposalValidation = validateCorrectionProposal(correctionProposal);
+    if (!proposalValidation.valid) {
       return false;
     }
   }
@@ -167,6 +173,24 @@ export function createProductionGateDeps(): RefinerRuleHostGateDeps {
       goldenTrace: GoldenTrace,
       opts?: RefinerSandboxOptions,
     ): RefinerSandboxResult => {
+      const startTime = Date.now();
+
+      // P2 #6 fix: check forbidden patterns BEFORE compilation/execution.
+      // Previously, compileRuleCode() executed the code via script.runInContext()
+      // and only then did evaluateInRefinerSandbox() check forbidden patterns —
+      // meaning malicious code (e.g. require('child_process')) would execute
+      // before being rejected. The check must happen on the source string
+      // before any vm execution.
+      const forbiddenViolations = checkForbiddenPatterns(code);
+      if (forbiddenViolations.length > 0) {
+        return {
+          success: false,
+          failedCases: [],
+          executionTimeMs: Date.now() - startTime,
+          forbiddenPatternViolations: forbiddenViolations,
+        };
+      }
+
       let evaluateCode: ReplayEvaluateFn;
       try {
         evaluateCode = compileRuleCode(code, 'production-gate-deps');
@@ -179,7 +203,7 @@ export function createProductionGateDeps(): RefinerRuleHostGateDeps {
             errorType: 'syntax_error',
             message,
           }],
-          executionTimeMs: 0,
+          executionTimeMs: Date.now() - startTime,
           forbiddenPatternViolations: [],
         };
       }

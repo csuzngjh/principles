@@ -267,23 +267,14 @@ export class ActivationDispatcher {
   }
 
   private async activateArtifact(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
-    // Resolve the identifier for WriterInput.principleId. For principle artifacts
-    // (prompt/defer_archive channels), extractPrincipleId() is required. For rule
-    // artifacts (code_tool_hook channel), the RuleHostWriter uses sourceRuleId
-    // first and only falls back to principleId — so we accept sourceRuleId or
-    // artifactId as a fallback to avoid breaking the production chain when a
-    // rule artifact doesn't carry sourcePrincipleId (P1 #7 fix).
-    let principleId = extractPrincipleId(artifact);
+    // Resolve the principle ID for WriterInput.principleId. Rule artifacts
+    // (code_tool_hook channel) MUST carry sourcePrincipleId — without it,
+    // the activated rule cannot be traced back to the owner-approved principle,
+    // producing an untraceable behavior change (P1 #3 fix: removed the
+    // sourceRuleId/artifactId fallback that allowed untraceable activation).
+    const principleId = extractPrincipleId(artifact);
     if (!principleId) {
-      if (input.channel === 'code_tool_hook') {
-        if (typeof artifact.sourceRuleId === 'string' && artifact.sourceRuleId.trim() !== '') {
-          principleId = artifact.sourceRuleId.trim();
-        } else {
-          principleId = artifact.artifactId;
-        }
-      } else {
-        return { decision: 'invalid_artifact', reason: 'no_principle_id' };
-      }
+      return { decision: 'invalid_artifact', reason: 'no_principle_id' };
     }
 
     const writer = this.writers.get(input.channel);

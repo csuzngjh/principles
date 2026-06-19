@@ -1011,6 +1011,26 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     // Mark the rule artifact validated so RuleHostWriter.canActivate accepts it
     // (canActivate checks validationStatus !== 'validated' at rule-host-writer.ts:82).
+    //
+    // P1 #3 fix: A rule artifact WITHOUT sourcePrincipleId cannot be traced
+    // back to the owner-approved principle. Per the user's P1 #3 requirement
+    // ("缺失 sourcePrincipleId 时仍生成 validated rule...会产生无法追溯到原则
+    // 的可激活规则"), such artifacts MUST NOT be marked validated — otherwise
+    // they could enter the approval queue and be activated as untraceable
+    // behavior changes. Leave validationStatus as 'pending' and emit telemetry.
+    if (!resolvedSourcePrincipleId) {
+      this.emitEvent('rule_assembled_without_principle_id', taskId, {
+        runId,
+        artifactId: ruleArtifactId,
+        reason: 'sourcePrincipleId unresolved — rule artifact left in pending validation',
+        nextAction: 'verify_scribe_artifact_lineage_or_resolve_principle_bearer_manually',
+      });
+      // Return the artifact ID so the adversarial loop can continue, but the
+      // artifact will NOT be activatable (validationStatus='pending' blocks
+      // RuleHostWriter.canActivate).
+      return ruleArtifactId;
+    }
+
     try {
       const updated = await this.artifactStore.updateValidationStatus(ruleArtifactId, 'validated');
       if (!updated) {
@@ -1084,6 +1104,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // Strategy 2b: Transitive lineage search. The evaluator's direct dependency
+    // is the artificer task; the scribe task (which carries the principleDraft)
+    // is a transitive dependency (evaluator → artificer → scribe). When direct
+    // lineage has no principle-bearing artifact, traverse one level deeper by
+    // resolving each direct-lineage artifact's source task and searching ITS
+    // dependencies. This is bounded to depth 2 to prevent unbounded traversal.
+    if (candidates.length === 0 && lineageArtifactIds.length > 0) {
+      const transitiveCandidates = await this.resolveTransitivePrincipleCandidates(taskId, lineageArtifactIds);
+      candidates.push(...transitiveCandidates);
+    }
+
     if (candidates.length === 1) {
       const [only] = candidates;
       return only ?? null;
@@ -1141,5 +1172,49 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
   private static isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  /**
+   * Resolve principle-bearing artifacts from transitive lineage (depth 2).
+   *
+   * For each direct-lineage artifact, resolve its source task's dependencies
+   * and search those artifacts for principle-kind artifacts with principleDraft
+   * content. This handles the common case where the evaluator's direct
+   * dependency is the artificer, and the scribe (principle-bearer) is a
+   * transitive dependency (evaluator → artificer → scribe).
+   *
+   * Bounded to depth 2 to prevent unbounded traversal. Cycle-safe via the
+   * visited set.
+   */
+  private async resolveTransitivePrincipleCandidates(
+    evaluatorTaskId: string,
+    directLineageArtifactIds: string[],
+  ): Promise<string[]> {
+    const candidates: string[] = [];
+    const visited = new Set<string>([evaluatorTaskId]);
+
+    for (const artifactId of directLineageArtifactIds) {
+      if (visited.has(artifactId)) continue;
+      visited.add(artifactId);
+
+      const artifact = await this.artifactStore.getArtifactById(artifactId);
+      if (!artifact) continue;
+
+      // Resolve the source task's dependencies (one level deeper)
+      const { ids: deeperLineageIds } = await this.resolveLineageArtifactIds(artifact.sourceTaskId);
+      for (const deeperId of deeperLineageIds) {
+        if (visited.has(deeperId)) continue;
+        visited.add(deeperId);
+
+        const deeperArtifact = await this.artifactStore.getArtifactById(deeperId);
+        if (!deeperArtifact) continue;
+        if (deeperArtifact.artifactKind !== 'principle') continue;
+        if (this.hasPrincipleDraftContent(deeperArtifact.contentJson)) {
+          candidates.push(deeperId);
+        }
+      }
+    }
+
+    return candidates;
   }
 }
