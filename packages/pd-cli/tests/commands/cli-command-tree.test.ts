@@ -62,4 +62,18 @@ describe('CLI command tree structure', () => {
     const output = runPdHelp(['runtime', '--help']);
     expect(output).toMatch(/health\s/);
   });
+
+  it('activation edit command exists under runtime activation (pd runtime activation edit --help)', () => {
+    const output = runPdHelp(['runtime', 'activation', 'edit', '--help']);
+    expect(output).toContain('--approval-id');
+    expect(output).toContain('--new-artifact-id');
+    expect(output).toContain('--edit-reason');
+    expect(output).toContain('--workspace');
+    expect(output).toContain('--json');
+  });
+
+  it('activation subcommand list includes edit (pd runtime activation --help)', () => {
+    const output = runPdHelp(['runtime', 'activation', '--help']);
+    expect(output).toMatch(/edit\s/);
+  });
 });

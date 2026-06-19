@@ -91,7 +91,7 @@ describe('SqliteActivationStateStore', () => {
   });
 
   describe('listPromptActivations', () => {
-    it('SQL query includes deactivated_at IS NULL filter', async () => {
+    it('SQL query includes deactivated_at IS NULL filter by default', async () => {
       const mockAll = vi.fn().mockReturnValue([]);
       mockDb.prepare.mockReturnValue({ all: mockAll });
 
@@ -102,10 +102,23 @@ describe('SqliteActivationStateStore', () => {
         expect.stringContaining('deactivated_at IS NULL'),
       );
     });
+
+    it('includeDeactivated=true omits the deactivated_at IS NULL filter (P2 #5 fix)', async () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      await store.listPromptActivations(true);
+
+      const [sqlCall] = mockDb.prepare.mock.calls;
+      const sql = sqlCall ? String(sqlCall) : '';
+      expect(sql).toContain("channel = 'prompt'");
+      expect(sql).not.toContain('deactivated_at IS NULL');
+    });
   });
 
   describe('listCodeToolHookActivations', () => {
-    it('SQL query filters by code_tool_hook channel and deactivated_at IS NULL', async () => {
+    it('SQL query filters by code_tool_hook channel and deactivated_at IS NULL by default', async () => {
       const mockAll = vi.fn().mockReturnValue([]);
       mockDb.prepare.mockReturnValue({ all: mockAll });
 
@@ -118,6 +131,19 @@ describe('SqliteActivationStateStore', () => {
       expect(mockDb.prepare).toHaveBeenCalledWith(
         expect.stringContaining('deactivated_at IS NULL'),
       );
+    });
+
+    it('includeDeactivated=true omits the deactivated_at IS NULL filter (P2 #5 fix)', async () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      await store.listCodeToolHookActivations(true);
+
+      const [sqlCall] = mockDb.prepare.mock.calls;
+      const sql = sqlCall ? String(sqlCall) : '';
+      expect(sql).toContain("channel = 'code_tool_hook'");
+      expect(sql).not.toContain('deactivated_at IS NULL');
     });
 
     it('returns mapped ActivationStatusRecord for code_tool_hook rows', async () => {

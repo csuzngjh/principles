@@ -1057,12 +1057,14 @@ export type {
   ApprovalListFilter,
   ApprovalStats,
   ApprovalListResult,
+  ArtifactLineageIdentity,
   ApprovalWithContext,
   ConfidenceLabel,
 } from './activation/index.js';
 
 export {
   LOW_RISK_CHANNELS,
+  isArtifactRevisionOf,
   HIGH_RISK_CHANNEL_MAP,
   makeIdempotencyKey,
   isLowRiskChannel,
@@ -1088,11 +1090,15 @@ export {
   resolvePrincipleFromArtifact,
   trimToBudget,
   renderPrinciplesToDirectives,
+  createProductionGateDeps,
+  ApprovalCompletionService,
 } from './activation/index.js';
 
 export type {
   ActivatedPrinciple,
   PromptActivationReaderResult,
+  ApprovalCompletionInput,
+  ApprovalCompletionResult,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

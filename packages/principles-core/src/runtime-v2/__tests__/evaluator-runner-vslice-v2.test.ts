@@ -699,6 +699,24 @@ describe('EvaluatorRunner V2 — rule artifact assembly (PRI-427)', () => {
     expect(ruleArtifact.validationStatus).toBe('validated');
   });
 
+
+  it('approved V2 output without principle lineage does not produce a rule artifact', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV2ArtificerArtifact());
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+    const runner = makeRunner(deps, gateDeps);
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    expect(artifacts.filter((artifact) => artifact.artifactKind === 'rule')).toHaveLength(0);
+  });
   it('rule artifact contentJson carries implementationCode + goldenTrace + ruleHostGateDecision + affectedTools', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeV2ArtificerArtifact());

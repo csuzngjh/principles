@@ -238,6 +238,8 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.stages.map((s) => s.name)).toEqual(['pain_lookup', 'dreamer', 'philosopher', 'scribe', 'adversarial_loop']);
     expect(result.ruleArtifactId).not.toBeNull();
+    // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
+    expect(result.approvalId).not.toBeNull();
   }, 60_000);
 
   it('runs the real ArtificerL2Adapter through fail-feedback-fix before creating a candidate', async () => {
@@ -287,6 +289,8 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(prompts[1]).toContain('Previous sandbox replay failures');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
+    // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
+    expect(result.approvalId).not.toBeNull();
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
@@ -479,6 +483,8 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(dreamerCallCount).toBe(2);
     expect(dreamerStage?.status).toBe('succeeded');
     expect(result.decision).toBe('candidate_ready_for_owner_review');
+    // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
+    expect(result.approvalId).not.toBeNull();
   }, 60_000);
 
   // ── Test 9 (E fix): retried status exhausted → stage marked 'degraded' ──

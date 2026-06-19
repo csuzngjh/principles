@@ -42,6 +42,8 @@ import {
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
+  SqliteApprovalQueueStore,
+  getChannelRiskLevel,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -49,6 +51,7 @@ import type {
   PeerRunnerResult,
   RefinerRuleHostGateDeps,
   PIArtifactStore,
+  ApprovalRecord,
 } from '@principles/core/runtime-v2';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
@@ -168,6 +171,14 @@ export interface RuleHostPipelineResult {
   readonly ruleArtifactId: string | null;
   /** Principle artifact ID (always present when scribe ran). */
   readonly principleArtifactId: string | null;
+  /**
+   * Approval ID when the candidate was auto-enqueued into the ApprovalQueue.
+   * Present when decision='candidate_ready_for_owner_review' and the pipeline
+   * successfully enqueued the candidate for owner review (P1 #1 fix).
+   * Null when the candidate was not enqueued (text_principle_only, rejected,
+   * or enqueue failed — check degradationReason for details).
+   */
+  readonly approvalId: string | null;
   /** Structured reason when decision is not candidate_ready_for_owner_review. */
   readonly degradationReason?: string;
 }
@@ -366,6 +377,44 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       ? 'candidate_ready_for_owner_review' as const
       : 'generation_rejected' as const;
 
+    // P1 #1 fix: auto-enqueue the candidate into the ApprovalQueue so the
+    // owner can review it. Without this, the pipeline produces a candidate
+    // artifact but it never enters the approval queue — the production chain
+    // is broken at step 2→3. Tests manually called enqueue(); production did not.
+    let approvalId: string | null = null;
+    if (pipelineDecision === 'candidate_ready_for_owner_review' && loopResult.ruleArtifactId) {
+      try {
+        const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
+        const riskLevel = getChannelRiskLevel(channel);
+        const enqueuedRecord: ApprovalRecord = await approvalStore.enqueue({
+          artifactId: loopResult.ruleArtifactId,
+          channel,
+          riskLevel,
+          summary: `RuleHost pipeline candidate for pain ${opts.painId}`,
+          triggerReason: `adversarial_loop_approved: pain=${opts.painId}, rule=${loopResult.ruleArtifactId}`,
+        }, new Date().toISOString());
+        const { approvalId: enqueuedApprovalId } = enqueuedRecord;
+        approvalId = enqueuedApprovalId;
+        onProgress('adversarial_loop', 'succeeded', `auto-enqueued as approval ${approvalId}`);
+      } catch (err: unknown) {
+        // Enqueue failed — the candidate artifact exists but is not in the
+        // approval queue. Degrade gracefully with a structured reason (ERR-002).
+        const enqueueErr = err instanceof Error ? err.message : String(err);
+        const degradeReason = `candidate_approved_but_enqueue_failed: ${enqueueErr}. Manual enqueue required: pd runtime activation dispatch --artifact-id ${loopResult.ruleArtifactId} --channel ${channel}`;
+        return {
+          decision: pipelineDecision,
+          painId: opts.painId,
+          stages,
+          scribeTaskId,
+          adversarialLoop: loopResult,
+          ruleArtifactId: loopResult.ruleArtifactId,
+          principleArtifactId: loopResult.principleArtifactId,
+          approvalId: null,
+          degradationReason: degradeReason,
+        };
+      }
+    }
+
     return {
       decision: pipelineDecision,
       painId: opts.painId,
@@ -374,6 +423,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       adversarialLoop: loopResult,
       ruleArtifactId: loopResult.ruleArtifactId,
       principleArtifactId: loopResult.principleArtifactId,
+      approvalId,
       degradationReason: loopResult.degradationReason,
     };
   } finally {
@@ -533,6 +583,7 @@ function rejectedResult(painId: string, stages: RuleHostPipelineStage[], degrada
     scribeTaskId: null,
     ruleArtifactId: null,
     principleArtifactId: null,
+    approvalId: null,
     degradationReason,
   };
 }
@@ -567,6 +618,7 @@ async function textPrincipleOnlyResult(
       scribeTaskId,
       ruleArtifactId: null,
       principleArtifactId: principleArt?.artifactId ?? null,
+      approvalId: null,
       degradationReason: `code_rule_capability_off: ${disabledReason}`,
     };
   } catch (error: unknown) {
@@ -578,6 +630,7 @@ async function textPrincipleOnlyResult(
       scribeTaskId,
       ruleArtifactId: null,
       principleArtifactId: null,
+      approvalId: null,
       degradationReason: `code_rule_capability_off: ${disabledReason}; principle_artifact_lookup_failed: ${message}`,
     };
   }
