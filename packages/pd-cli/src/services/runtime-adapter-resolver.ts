@@ -45,15 +45,28 @@ export type ConfigResolutionErrorKind =
   | 'unsupported-runtime'
   | 'test-double-refused';
 
+export interface ConfigResolutionErrorDetails {
+  /** Required fields that are missing (for 'missing-fields' kind). */
+  missing?: string[];
+  /** Structured next action for the operator (CLI Operator Gate rule #6). */
+  nextAction?: string;
+}
+
 export class ConfigResolutionError extends Error {
   readonly kind: ConfigResolutionErrorKind;
   readonly missing?: string[];
+  readonly nextAction?: string;
 
-  constructor(message: string, kind: ConfigResolutionErrorKind, missing?: string[]) {
+  constructor(
+    message: string,
+    kind: ConfigResolutionErrorKind,
+    details?: ConfigResolutionErrorDetails,
+  ) {
     super(message);
     this.name = 'ConfigResolutionError';
     this.kind = kind;
-    this.missing = missing;
+    this.missing = details?.missing;
+    this.nextAction = details?.nextAction;
   }
 }
 
@@ -128,17 +141,20 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   if (opts.runtimeKind === 'test-double') {
     if (!opts.allowTestDouble) {
       throw new ConfigResolutionError(
-        'runtimeKind "test-double" requires allowTestDouble=true. ' +
-          'nextAction: Pass --allow-test-double or use a production runtime kind.',
+        'runtimeKind "test-double" requires allowTestDouble=true.',
         'test-double-refused',
+        { nextAction: 'Pass --allow-test-double or use a production runtime kind.' },
       );
     }
     if (!opts.testDoublePayloadBuilder) {
       throw new ConfigResolutionError(
-        'runtimeKind "test-double" requires testDoublePayloadBuilder callback. ' +
-          'nextAction: Provide a testDoublePayloadBuilder function that constructs the test-double adapter.',
+        'runtimeKind "test-double" requires testDoublePayloadBuilder callback.',
         'missing-fields',
-        ['testDoublePayloadBuilder'],
+        {
+          missing: ['testDoublePayloadBuilder'],
+          nextAction:
+            'Provide a testDoublePayloadBuilder function that constructs the test-double adapter.',
+        },
       );
     }
     return opts.testDoublePayloadBuilder(opts);
@@ -154,9 +170,9 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   if (isRuntimeConfigError(configResult)) {
     if (!opts.configOptional) {
       throw new ConfigResolutionError(
-        `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ` +
-          `${configResult.message}. nextAction: ${configResult.nextAction}`,
+        `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ${configResult.message}`,
         'invalid-config',
+        { nextAction: configResult.nextAction },
       );
     }
     // configOptional=true: proceed with CLI overrides alone (pi-ai branch handles missing fields)
@@ -173,9 +189,13 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       !isRuntimeConfigError(configResult) &&
       configResult.runtimeKind === 'pi-ai');
   if (isPiAi) {
-    // PRI-431 Step 1d: When config is valid (not error), validate it;
-    // when configOptional and config failed, skip validation (use manual missing-field check below)
-    if (!isRuntimeConfigError(configResult)) {
+    // PRI-431 Step 1d + PR review fix: validateRuntimeConfig is only called when
+    // config is valid AND configOptional is false. When configOptional=true (diagnose.ts),
+    // skip validateRuntimeConfig to match the original diagnose.ts behavior (which never
+    // called it — only did a manual missing-field check on merged values). This avoids
+    // a behavior change where validateRuntimeConfig would reject configs missing baseUrl
+    // for non-built-in providers, even when the user passes --baseUrl on the CLI.
+    if (!opts.configOptional && !isRuntimeConfigError(configResult)) {
       try {
         validateRuntimeConfig(configResult);
       } catch (err) {
@@ -196,19 +216,24 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const maxRetries = opts.piAiOverrides?.maxRetries ?? configFields.maxRetries;
     const adapterTimeoutMs = opts.timeoutMs ?? configFields.timeoutMs;
 
-    // PRI-431 Step 1d: manual missing-field check when configOptional=true and config failed
-    if (opts.configOptional && isRuntimeConfigError(configResult)) {
+    // PRI-431 Step 1d + PR review fix: manual missing-field check on MERGED values
+    // when configOptional=true. The original diagnose.ts always did this check on merged
+    // values (not just when config failed), so we replicate that here. This covers both
+    // the "config failed" case and the "config valid but missing fields not in config" case.
+    if (opts.configOptional) {
       const missing: string[] = [];
       if (!provider) missing.push('provider');
       if (!model) missing.push('model');
       if (!apiKeyEnv) missing.push('apiKeyEnv');
       if (missing.length > 0) {
         throw new ConfigResolutionError(
-          `Missing required pi-ai config: ${missing.join(', ')}. ` +
-            'Provide via --flag or add to .pd/config.yaml runtime profile. ' +
-            'nextAction: Pass --provider, --model, --apiKeyEnv flags or configure .pd/config.yaml.',
+          `Missing required pi-ai config: ${missing.join(', ')}.`,
           'missing-fields',
-          missing,
+          {
+            missing,
+            nextAction:
+              'Pass --provider, --model, --apiKeyEnv flags or configure .pd/config.yaml runtime profile.',
+          },
         );
       }
     }
@@ -216,9 +241,12 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     // PRI-431 Step 1d: validate API key env var when requested
     if (opts.validateApiKeyEnv && apiKeyEnv && !process.env[apiKeyEnv]) {
       throw new ConfigResolutionError(
-        `Environment variable '${apiKeyEnv}' is not set. ` +
-          'nextAction: Set the env var (e.g., export OPENAI_API_KEY=...) or choose a different apiKeyEnv.',
+        `Environment variable '${apiKeyEnv}' is not set.`,
         'invalid-config',
+        {
+          nextAction:
+            'Set the env var (e.g., export OPENAI_API_KEY=...) or choose a different apiKeyEnv.',
+        },
       );
     }
 
@@ -274,11 +302,13 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const openclawMode = opts.openclawMode ?? openclawConfigFields.openclawMode;
     if (!openclawMode) {
       throw new ConfigResolutionError(
-        `runtimeKind 'openclaw-cli' requires openclawMode. ` +
-          'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml. ' +
-          'nextAction: Add openclawMode: local|gateway to your .pd/config.yaml runtime profile or use CLI flags.',
+        "runtimeKind 'openclaw-cli' requires openclawMode.",
         'missing-fields',
-        ['openclawMode'],
+        {
+          missing: ['openclawMode'],
+          nextAction:
+            'Add openclawMode: local|gateway to your .pd/config.yaml runtime profile or use --openclaw-local/--openclaw-gateway flags.',
+        },
       );
     }
     // PRI-431 Step 1d: only pass agentId when explicitly provided (backward compat with run-once.ts)

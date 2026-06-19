@@ -139,18 +139,23 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
   // ── ConfigResolutionError class ──────────────────────────────────────────
 
   describe('ConfigResolutionError', () => {
-    it('has name "ConfigResolutionError" and preserves message + kind + missing', () => {
-      const err = new ConfigResolutionError('boom', 'missing-fields', ['provider', 'model']);
+    it('has name "ConfigResolutionError" and preserves message + kind + missing + nextAction', () => {
+      const err = new ConfigResolutionError('boom', 'missing-fields', {
+        missing: ['provider', 'model'],
+        nextAction: 'Set provider and model flags.',
+      });
       expect(err).toBeInstanceOf(Error);
       expect(err.name).toBe('ConfigResolutionError');
       expect(err.message).toBe('boom');
       expect(err.kind).toBe('missing-fields');
       expect(err.missing).toEqual(['provider', 'model']);
+      expect(err.nextAction).toBe('Set provider and model flags.');
     });
 
-    it('allows missing field to be undefined', () => {
+    it('allows missing and nextAction fields to be undefined', () => {
       const err = new ConfigResolutionError('boom', 'invalid-config');
       expect(err.missing).toBeUndefined();
+      expect(err.nextAction).toBeUndefined();
     });
   });
 
@@ -566,6 +571,62 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
       });
 
       expect(mockValidateRuntimeConfig).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call validateRuntimeConfig when configOptional is true and config is valid (PR review fix)', () => {
+      // PR review P1 fix: original diagnose.ts never called validateRuntimeConfig.
+      // When configOptional=true, skip it entirely to avoid behavior change where
+      // validateRuntimeConfig would reject configs missing baseUrl for non-built-in
+      // providers, even when the user passes --baseUrl on the CLI.
+      const config = makeValidPiAiConfig({ baseUrl: undefined });
+      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
+      mockIsRuntimeConfigError.mockReturnValue(false);
+
+      resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'pi-ai',
+        workspaceDir: '/ws',
+        configOptional: true,
+        piAiOverrides: {
+          provider: 'openrouter',
+          model: 'anthropic/claude-sonnet-4',
+          apiKeyEnv: 'OPENROUTER_API_KEY',
+          baseUrl: 'https://openrouter.ai/api/v1',
+        },
+      });
+
+      expect(mockValidateRuntimeConfig).not.toHaveBeenCalled();
+      expect(mockPiAiCtor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+        }),
+      );
+    });
+
+    it('does manual missing-field check on merged values when configOptional is true and config is valid', () => {
+      // PR review P1 fix: original diagnose.ts always did the manual missing-field check
+      // on merged values (not just when config failed). When configOptional=true, replicate
+      // that behavior — check merged provider/model/apiKeyEnv even when config is valid.
+      const config = makeValidPiAiConfig({ provider: undefined, model: undefined, apiKeyEnv: undefined });
+      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
+      mockIsRuntimeConfigError.mockReturnValue(false);
+
+      let caught: unknown = null;
+      try {
+        resolveRuntimeAdapterFromConfig({
+          runtimeKind: 'pi-ai',
+          workspaceDir: '/ws',
+          configOptional: true,
+          // No overrides — config has undefined provider/model/apiKeyEnv
+        });
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(ConfigResolutionError);
+      const err = caught as InstanceType<typeof ConfigResolutionError>;
+      expect(err.kind).toBe('missing-fields');
+      expect(err.missing).toEqual(expect.arrayContaining(['provider', 'model', 'apiKeyEnv']));
     });
   });
 
