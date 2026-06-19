@@ -12,6 +12,7 @@
 import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { emitResult } from '../services/cli-output.js';
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
@@ -144,12 +145,7 @@ export async function handleRuntimeFeaturesStatus(opts: FeaturesOptions): Promis
 
   const output = buildRuntimeFeaturesStatus(workspaceDir);
 
-  if (opts.json) {
-    // JSON mode: single parseable object on stdout
-    console.log(JSON.stringify(output, null, 2));
-  } else {
-    console.log(formatTextOutput(output));
-  }
+  emitResult(output, { json: opts.json ?? false, formatText: formatTextOutput });
 
   if (output.status === 'failed') {
     process.exitCode = 1;
