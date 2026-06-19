@@ -16,12 +16,26 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchUpdateStatus,
   fetchUpdateHistory,
+  applyUpdate,
+  rollbackUpdate,
 } from "../../api.js";
 import type {
   UpdateStatusData,
   UpdateHistoryData,
+  ApplyUpdateResultData,
 } from "../../api.js";
 import { validateUpdateStatus, validateUpdateHistory } from "../../utils/validators.js";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "../../components/ui/alert-dialog.js";
+import { Loader2, RotateCcw, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 
 // ── Helper: format ISO date string to locale-aware display ────────────────────
 
@@ -53,6 +67,18 @@ export function UpdatePage() {
   const [checking, setChecking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [historyErrorReason, setHistoryErrorReason] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateResult, setUpdateResult] = useState<{
+    success: boolean;
+    message: string;
+    newVersion?: string;
+    updatedFiles?: string[];
+    fromVersion?: string;
+  } | null>(null);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [showRollbackDialog, setShowRollbackDialog] = useState<string | null>(null);
+  const [rollingBack, setRollingBack] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const locale = i18n.language === "zh-CN" ? "zh-CN" : "en-US";
 
@@ -116,6 +142,55 @@ export function UpdatePage() {
     setStatusData(validated);
     setChecking(false);
   }, [t]);
+
+  const handleApplyUpdate = useCallback(async () => {
+    setShowUpdateDialog(false);
+    setUpdating(true);
+    setUpdateResult(null);
+    const result = await applyUpdate();
+    setUpdating(false);
+    if (!result.success) {
+      setUpdateResult({ success: false, message: result.error ?? 'Unknown error' });
+      toast.error(t('pages.update.updateFailed', { message: result.error ?? 'Unknown error' }));
+      return;
+    }
+    const data = result.data as ApplyUpdateResultData;
+    if (data.success) {
+      setUpdateResult({
+        success: true,
+        message: data.message,
+        newVersion: data.newVersion,
+        updatedFiles: data.updatedFiles,
+        fromVersion: statusData?.currentVersion,
+      });
+      toast.success(t('pages.update.updateSuccess', { version: data.newVersion ?? 'latest' }));
+      await loadData();
+    } else {
+      setUpdateResult({ success: false, message: data.message });
+      toast.error(t('pages.update.updateFailed', { message: data.message }));
+    }
+  }, [t, loadData]);
+
+  const handleRollback = useCallback(async (backupDir: string) => {
+    setShowRollbackDialog(null);
+    setRollingBack(true);
+    setRollbackResult(null);
+    const result = await rollbackUpdate(backupDir);
+    setRollingBack(false);
+    if (!result.success) {
+      setRollbackResult({ success: false, message: result.error ?? 'Unknown error' });
+      toast.error(t('pages.update.rollbackFailed', { message: result.error ?? 'Unknown error' }));
+      return;
+    }
+    if (result.data.success) {
+      setRollbackResult({ success: true, message: result.data.message });
+      toast.success(t('pages.update.rollbackSuccess'));
+      await loadData();
+    } else {
+      setRollbackResult({ success: false, message: result.data.message });
+      toast.error(t('pages.update.rollbackFailed', { message: result.data.message }));
+    }
+  }, [t, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -208,16 +283,87 @@ export function UpdatePage() {
           )}
 
           {/* Check button — secondary style (tool page, lower visual weight) */}
-          <div className="mt-5 pt-4 border-t border-line">
+          <div className="mt-5 pt-4 border-t border-line flex items-center gap-3">
             <button
               type="button"
               onClick={handleCheckForUpdates}
-              disabled={checking}
+              disabled={checking || updating}
               className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
             </button>
+            {!isUpToDate && (
+              <button
+                type="button"
+                onClick={() => setShowUpdateDialog(true)}
+                disabled={updating || checking}
+                className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {updating ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t("pages.update.updating")}
+                  </span>
+                ) : (
+                  t("pages.update.applyUpdate")
+                )}
+              </button>
+            )}
           </div>
+
+          {/* Update result message — enhanced card */}
+          {updateResult && (
+            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : 'bg-red/5 border-red/20'}`}>
+              <div className="flex items-start gap-3">
+                {/* Status icon with animation */}
+                {updateResult.success ? (
+                  <CheckCircle2 className="h-6 w-6 text-green shrink-0 mt-0.5 animate-[pdFadeIn_600ms_ease-out]" style={{ transform: 'scale(1)', animationFillMode: 'both' }} />
+                ) : (
+                  <XCircle className="h-6 w-6 text-red shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1 min-w-0">
+                  {/* Version comparison (success only) */}
+                  {updateResult.success && updateResult.fromVersion && updateResult.newVersion && (
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="font-mono text-[13px] text-ink-3 line-through">{updateResult.fromVersion}</span>
+                      <ArrowRight className="h-3.5 w-3.5 text-green" />
+                      <span className="font-mono text-[13px] text-green font-medium">{updateResult.newVersion}</span>
+                    </div>
+                  )}
+                  {/* Message */}
+                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : 'text-red'}`}>
+                    {updateResult.message}
+                  </p>
+                  {/* File count (success only) */}
+                  {updateResult.success && updateResult.updatedFiles && updateResult.updatedFiles.length > 0 && (
+                    <p className="mt-1 text-[12px] text-ink-4 font-mono">
+                      {t("pages.update.filesUpdated", { count: updateResult.updatedFiles.length })}
+                    </p>
+                  )}
+                  {/* Restart hint (success only) */}
+                  {updateResult.success && (
+                    <p className="mt-2 text-[12px] font-mono text-ink-4">{t("pages.update.restartHint")}</p>
+                  )}
+                  {/* Network error hint + retry (failure only) */}
+                  {!updateResult.success && (
+                    <div className="mt-2 flex items-center gap-2">
+                      {/network|fetch|timeout|ECONNREFUSED|ENOTFOUND/i.test(updateResult.message) && (
+                        <p className="text-[12px] text-ink-4 font-mono">{t("pages.update.networkErrorHint")}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleApplyUpdate}
+                        disabled={updating}
+                        className="text-[12px] text-red underline hover:text-red/80 disabled:opacity-50"
+                      >
+                        {t("pages.update.retry")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -238,7 +384,7 @@ export function UpdatePage() {
                 key={entry.id}
                 className="bg-panel border border-line rounded-[6px] px-5 py-4"
               >
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
                       {t("pages.update.version")}
@@ -252,9 +398,23 @@ export function UpdatePage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-ink-3 text-[13px]">
-                    {formatDate(entry.timestamp, locale)}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-ink-3 text-[13px]">
+                      {formatDate(entry.timestamp, locale)}
+                    </span>
+                    {entry.backupPath && (
+                      <button
+                        type="button"
+                        onClick={() => setShowRollbackDialog(entry.backupPath!)}
+                        disabled={rollingBack || updating}
+                        className="flex items-center gap-1 border border-line bg-surface text-ink-3 rounded-[3px] px-[8px] py-[4px] text-[11px] hover:text-ink hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={t("pages.update.rollback")}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        {t("pages.update.rollback")}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </article>
             ))}
@@ -266,6 +426,52 @@ export function UpdatePage() {
         )}
       </section>
       </div>
+
+      {/* Update confirmation dialog */}
+      <AlertDialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("pages.update.confirmUpdateTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("pages.update.confirmUpdateDesc", { version: statusData?.latestVersion ?? "latest" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleApplyUpdate}>
+              {t("pages.update.applyUpdate")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Rollback confirmation dialog */}
+      <AlertDialog open={showRollbackDialog !== null} onOpenChange={(open) => { if (!open) setShowRollbackDialog(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("pages.update.confirmRollbackTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("pages.update.confirmRollbackDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (showRollbackDialog) handleRollback(showRollbackDialog); }}>
+              {t("pages.update.rollback")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Rollback result message */}
+      {rollbackResult && (
+        <div className={`fixed bottom-4 right-4 max-w-md p-3 rounded-[4px] text-[13px] z-50 ${rollbackResult.success ? 'bg-green/10 border border-green/20 text-green' : 'bg-red/10 border border-red/20 text-red'}`}>
+          <p>{rollbackResult.message}</p>
+          {rollbackResult.success && (
+            <p className="mt-1 text-[12px] font-mono opacity-80">{t("pages.update.restartHintAfterRollback")}</p>
+          )}
+        </div>
+      )}
     </PageShell>
   );
 }

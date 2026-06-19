@@ -162,6 +162,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-052 | Cherry-pick from stacked feature branch cross-contaminates unrelated PR | PRI-299 |
 | ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
 | ERR-068 | Used `pnpm install` in an `npm ci` repo — package-lock.json not synced, all CI jobs fail | PRI-419 / PR #953 |
+| ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
 
 ---
 
@@ -726,7 +727,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 73 |
+| Total lessons | 74 |
 | Last updated | 2026-06-19 |
 | Top category | Schema & Type |
 | Recurring errors | 30 |
@@ -1057,5 +1058,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Correct approach**: When `configOptional=true` (diagnose.ts's behavior), skip `validateRuntimeConfig` entirely and always do the manual missing-field check on merged values — matching the original diagnose.ts behavior. The `configOptional` flag signals "be lenient like diagnose.ts", so validation should match diagnose.ts's original leniency.
 - **How to prevent**: For each call-site-specific option in a shared resolver, add a characterization test that verifies the shared logic matches the original call-site behavior when that option is set. Specifically: (1) list all call-site-specific options, (2) for each option, document the original call-site behavior, (3) add a test that verifies the shared logic reproduces that behavior. The test must assert behavior equivalence, not just "the shared logic doesn't crash."
 - **Source**: PRI-431 / PR #975
+- **Date**: 2026-06-19
+- **Recurrence**: None
+
+---
+
+**[ERR-074]** | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources
+
+- **What happened**: In `doApplyUpdate()` (packages/pd-console/src/server/routes/update.ts, PR #977), an inner `try/catch` was added around the download step (step 3) to clean up `tempDir` on download failure. However, the outer `try` block had early `return` statements for invalid registry data/version/tarball (steps 1) that occurred AFTER backup creation (step 2) but BEFORE the file-copy stage (step 4). These early returns bypassed the outer `catch` block's backup cleanup logic (gated by `!appliedChanges`), leaving orphaned `.pd-backup-*` directories on disk.
+- **Why it's wrong**: In JavaScript, early `return` statements skip the `catch` block entirely — `catch` only runs for thrown exceptions. When a function has a stage-dependent cleanup strategy (`appliedChanges` flag) with cleanup only in `catch`, any early return after resource creation but before the stage flag is set leaks those resources silently. The inner `try/catch` created a "tunnel" where only thrown errors reached the outer catch, not early returns.
+- **Correct approach**: Remove the inner `try/catch` around the download step. Let all download failures propagate to the outer `catch`, which already handles both `tempDir` and backup cleanup uniformly via the `appliedChanges` flag. The outer catch's `if (fs.existsSync(tempDir))` guard makes tempDir cleanup safe regardless of whether it was created.
+- **How to prevent**: When adding error handling (inner `try/catch`) in a multi-step function with stage-dependent cleanup, audit ALL exit paths (early returns, not just thrown errors) to verify they reach the appropriate cleanup. If cleanup is only in `catch`, early returns will bypass it. Prefer a single `catch` with stage flags over nested `try/catch` blocks for resource cleanup. If inner `try/catch` is needed for specific cleanup, ensure the outer `catch` still covers early returns — or use `try/finally` to guarantee cleanup regardless of exit path.
+- **Regression guard**: Static check: grep for functions with both (a) inner `try/catch` blocks and (b) early `return` statements in the outer `try` block. Verify each early return reaches appropriate cleanup.
+- **Related ERRs**: ERR-071 (async cleanup not awaited in finally — resource leaks), ERR-022 (process.exit without return allows fallthrough)
+- **Source**: PR #977 (self-review during pr-review)
 - **Date**: 2026-06-19
 - **Recurrence**: None

@@ -184,17 +184,18 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 // ── Async handler wrapper ──────────────────────────────────────────────────────────────
 
 const REQUEST_TIMEOUT_MS = 10000;
+const UPDATE_APPLY_TIMEOUT_MS = 120000;
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
-function asyncHandler(fn: AsyncRouteHandler): (req: http.IncomingMessage, res: http.ServerResponse) => void {
+function asyncHandler(fn: AsyncRouteHandler, timeoutMs: number = REQUEST_TIMEOUT_MS): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   return (innerReq, innerRes) => {
     const timeoutId = setTimeout(() => {
       if (!innerRes.headersSent) {
         sendJson(innerRes, 504, { success: false, error: 'Request timeout' });
         innerRes.end();
       }
-    }, REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
 
     fn(innerReq, innerRes)
       .finally(() => clearTimeout(timeoutId))
@@ -336,7 +337,11 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // Update routes: GET /api/update/check, POST /api/update/apply, GET /api/update/status, POST /api/update/rollback
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
-        asyncHandler(() => handleUpdateRoute(req, res, services.workspaceDir, subPath))(req, res);
+        const isApply = subPath === '/apply';
+        asyncHandler(
+          () => handleUpdateRoute(req, res, services.workspaceDir, subPath),
+          isApply ? UPDATE_APPLY_TIMEOUT_MS : undefined,
+        )(req, res);
         return;
       }
 
