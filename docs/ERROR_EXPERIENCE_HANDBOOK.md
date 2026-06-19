@@ -54,6 +54,9 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
+| ERR-073 | Production chain broken at handoff — pipeline auto-enqueue and owner-edit entry points existed in tests but were never wired into the production path | PRI-408 |
+| ERR-074 | ActivationDispatcher accepts rolloutDecision='approved' without verifying an approval record exists — owner approval bypassable | PRI-408 |
+| ERR-075 | Feature-flag disabled path returns ok:true while silently skipping activation — Console claims success while doing nothing | PRI-408 |
 
 ---
 
@@ -108,6 +111,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
+| ERR-076 | Rule artifact missing sourcePrincipleId — activation fails with invalid_artifact because lineage field was never carried forward from scribe principle artifact | PRI-408 |
+| ERR-077 | vm evaluator output bypassed via `as RuleHostResult` — weak cast skips validation of decision enum, matched boolean, reason string, and correctionProposal presence | PRI-408 |
 
 ---
 
@@ -130,6 +135,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
+| ERR-078 | CLI `--include-deactivated` flag silently ignored; invalid channel value degrades to listing all instead of failing loud | PRI-408 |
 
 ---
 
@@ -723,10 +729,104 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-073]** | Production chain broken at handoff — pipeline auto-enqueue and owner-edit entry points existed in tests but were never wired into the production path
+
+- **What happened**: Two related production-path wiring defects in PR #972 (PRI-408 Story A production closed loop):
+  1. **P1 #1 — auto-enqueue missing**: `ApprovalQueue.enqueue()` was called by tests to move candidates into the approval queue, but the real `RuleHostPipelineRunner` never called it after the adversarial loop approved a candidate. The production chain was broken at step 2→3 (compress → owner approve): candidates were generated and validated but never reached the approval queue.
+  2. **P1 #2 — owner-edit entry point missing**: `ApprovalQueue.edit()` existed as a method and had unit tests, but no CLI command or Console route invoked it. Owners could not edit candidate artifacts before approving — the capability existed in code but was unreachable by any user.
+- **Why it's wrong**: Both are the same root cause as ERR-048 (activation write path disconnected from live prompt read path) and ERR-053 (CLI subcommand never registered): a component exists and passes isolated tests, but the real user/operator path never calls it. The six-step value chain (capture → compress → owner approve/edit/reject → reversible activation → real consumption → observability) is only valid if every handoff is wired in production, not just in tests.
+- **Generalized failure mode**: When a multi-step production chain is implemented step-by-step, each step may have isolated tests that manually invoke the next step. But if the production code never performs the handoff, the chain is broken and the tests prove nothing about real user value. This is invisible to unit tests because each step passes in isolation.
+- **Correct approach**: (1) For auto-enqueue: `RuleHostPipelineRunner` must call `ApprovalQueue.enqueue()` after the adversarial loop approves a candidate — the test must NOT call enqueue() manually. (2) For owner-edit: add a CLI command (`pd runtime activation edit`) AND a Console route (`POST /api/v1/approvals/:id/edit`) that invoke `ApprovalQueue.edit()`. (3) Add a cross-package acceptance test that exercises the full chain from pain → candidate → auto-enqueue → edit → approve → activate → observe → deactivate → restore, with NO manual step invocations.
+- **How to prevent**: For any multi-step production chain, add an end-to-end acceptance test that crosses package boundaries and exercises every handoff through production code paths (not test-only invocations). If the test must manually invoke a step that production should perform automatically, that's a bug, not a test convenience.
+- **Regression guard**: Cross-package acceptance test in `packages/pd-cli/tests/e2e/cross-package-acceptance.test.ts` that fails if auto-enqueue or owner-edit is unwired.
+- **Related ERRs**: ERR-048 (activation write path disconnected from read path), ERR-053 (CLI subcommand never registered), ERR-028 (baseline fixture bypasses production dispatcher)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence of the combined handoff pattern. Same class as ERR-048 and ERR-053.
+
+---
+
+**[ERR-074]** | ActivationDispatcher accepts rolloutDecision='approved' without verifying an approval record exists — owner approval bypassable
+
+- **What happened**: `ActivationDispatcher.activateArtifact()` accepted a `DispatchInput` with `rolloutDecision: 'approved'` and proceeded to activate the artifact, but never checked that a corresponding approval record existed in the approval store, that its status was `'approved'`, or that the `artifactId` and `channel` matched the dispatch input. Any caller could bypass owner approval by simply passing `rolloutDecision: 'approved'`.
+- **Why it's wrong**: The owner-approval gate is the core security boundary of the PD product (owner-governed behavior internalization). If the dispatcher trusts the caller's claim of approval without verifying the approval record, the gate is illusory — same class as ERR-024 (security validator exists but is not wired into enforcement path) and ERR-049 (unconditional taskId reinjection bypasses validator mismatch check).
+- **Generalized failure mode**: When a security/authorization check is performed by the caller asserting "I'm authorized" rather than the enforcement point verifying the authorization record, any caller can bypass the check. The enforcement point must independently verify the authorization, not trust the caller's claim.
+- **Correct approach**: `activateArtifact()` must: (1) require a non-empty `approvalId` when `rolloutDecision === 'approved'`; (2) independently fetch the approval record from the approval store; (3) verify `status === 'approved'`; (4) verify `artifactId` and `channel` match the dispatch input; (5) refuse activation with a structured reason (`approval_not_found` / `approval_status_not_approved` / `approval_artifact_mismatch`) if any check fails.
+- **How to prevent**: For any enforcement point that gates on an authorization decision, add a test that calls the enforcement point WITHOUT a valid authorization record and asserts it is refused. If the test passes, the enforcement point is bypassable.
+- **Regression guard**: Cross-package acceptance test includes a "P1 #3 security boundary" case that dispatches without an approvalId and asserts the dispatcher returns `refused` with reason `approval_required`.
+- **Related ERRs**: ERR-024 (security validator not wired into enforcement), ERR-049 (unconditional reinjection bypasses validator), ERR-051 (redaction inserted at wrong layer)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence. Same class as ERR-024.
+
+---
+
+**[ERR-075]** | Feature-flag disabled path returns ok:true while silently skipping activation — Console claims success while doing nothing
+
+- **What happened**: When the `story_a_approval_completion` feature flag was disabled, the Console `POST /api/v1/approvals/:id/approve` route returned `{ ok: true }` to the caller while silently skipping the activation dispatch. The owner saw a success response and believed the approval was processed, but no activation occurred.
+- **Why it's wrong**: This is the same class as ERR-002 (catch-and-degrade silently swallows failure reasons) and ERR-041 (install success reported when delivered components are incomplete). A disabled feature flag is a degraded mode, not a success. The caller must be informed that activation was skipped so they can take a different action (e.g., enable the flag, or manually activate).
+- **Generalized failure mode**: When a feature flag gates a side effect, the disabled path must NOT report the same success shape as the enabled path. Silent skip = silent failure. The response must include a `warning` or `skipped` field explaining what was NOT done and why.
+- **Correct approach**: When the feature flag is disabled, the Console route must return `{ ok: true, warning: 'activation_skipped_feature_flag_disabled', nextAction: 'enable story_a_approval_completion flag to activate' }` — or, if the contract is stricter, return `{ ok: false, reason: 'feature_flag_disabled' }`. Never return bare `{ ok: true }` while skipping the core side effect.
+- **How to prevent**: For any feature-flag-gated side effect, add a test that disables the flag, invokes the endpoint, and asserts the response includes a `warning`/`skipped`/`reason` field — NOT a bare success. Grep for feature-flag checks that return success without a warning field.
+- **Regression guard**: Console route test that disables `story_a_approval_completion` and asserts the response includes a `warning` field.
+- **Related ERRs**: ERR-002 (silent degradation), ERR-041 (success reported when incomplete), ERR-047 (non-boolean enabled field silently disabled)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence. Same class as ERR-002 and ERR-041.
+
+---
+
+**[ERR-076]** | Rule artifact missing sourcePrincipleId — activation fails with invalid_artifact because lineage field was never carried forward from scribe principle artifact
+
+- **What happened**: `EvaluatorRunner.assembleRuleArtifact()` created a rule artifact with `sourcePrincipleId: undefined` because it never resolved the upstream scribe principle artifact to carry forward its principle ID. When `ActivationDispatcher.activateArtifact()` called `extractPrincipleId(artifact)`, it returned `undefined` (the rule artifact's `contentJson` only contained `implementationCode`, `goldenTrace`, etc. — no principle ID fields). The dispatcher then returned `{ decision: 'invalid_artifact', reason: 'no_principle_id' }`, breaking the production chain at step 3→4 (owner approve → reversible activation). This was discovered by the cross-package acceptance test, not by isolated unit tests.
+- **Why it's wrong**: Lineage fields (`sourcePrincipleId`, `sourceRuleId`, `sourceTaskId`) must be internally consistent and carried forward across the artifact chain (scribe principle artifact → evaluator rule artifact). This is the same class as ERR-004 (`sourceTaskId` set to wrong task ID) and ERR-008 (missing lineage field validation). The rule artifact is a derivative of the principle artifact; if it doesn't carry forward the principle ID, the activation chain cannot trace the rule back to its owning principle.
+- **Generalized failure mode**: When an artifact is assembled from upstream artifacts, lineage fields must be explicitly carried forward. Isolated unit tests that mock the artifact store miss this because they don't exercise the real `resolvePrincipleBearerArtifact()` → `getArtifactById()` → `sourcePrincipleId` chain. Only a cross-package acceptance test that runs the full pipeline catches it.
+- **Correct approach**: (1) `assembleRuleArtifact()` must resolve the scribe principle artifact via `resolvePrincipleBearerArtifact()` and carry forward its principle ID as `sourcePrincipleId` on the rule artifact. (2) Set `sourceRuleId` to a stable rule ID (`rule-${taskId}`). (3) For the `code_tool_hook` channel, `RuleHostWriter` uses `sourceRuleId` first and falls back to `principleId` — so if `sourcePrincipleId` is still missing, the dispatcher should fall back to `sourceRuleId` or `artifactId` rather than hard-failing. (4) Emit a `rule_principle_id_resolve_failed` telemetry event if the resolve fails, with `nextAction: 'verify_scribe_artifact_lineage'`.
+- **How to prevent**: For any artifact assembly, add a cross-package acceptance test that runs the full pipeline (pain → dreamer → philosopher → scribe → evaluator → activation) and asserts the rule artifact's `sourcePrincipleId` matches the scribe principle artifact's ID. Isolated unit tests are insufficient.
+- **Regression guard**: Cross-package acceptance test in `packages/pd-cli/tests/e2e/cross-package-acceptance.test.ts` — Test 1 asserts the activation decision is `activated`, not `invalid_artifact`.
+- **Related ERRs**: ERR-004 (sourceTaskId wrong), ERR-008 (missing lineage validation), ERR-048 (activation write path disconnected)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence. Same class as ERR-004 and ERR-008. Discovered by cross-package acceptance test, not isolated unit tests — reinforcing the lesson of ERR-025 (tests prove isolated behavior, not real production defense).
+
+---
+
+**[ERR-077]** | vm evaluator output bypassed via `as RuleHostResult` — weak cast skips validation of decision enum, matched boolean, reason string, and correctionProposal presence
+
+- **What happened**: `production-gate-deps.ts` ran the artificer's `implementationCode` in a vm sandbox and cast the result with `as RuleHostResult` without runtime validation. The cast assumed the vm output had a valid `decision` enum (`auto_correct` | `block` | `warn`), a boolean `matched`, a string `reason`, and (for `auto_correct`) a `correctionProposal` object. If the vm threw or returned a malformed object, the cast let the malformed value flow into the activation decision logic.
+- **Why it's wrong**: This is the canonical ERR-001/ERR-005/ERR-054 pattern: `as` cast on untrusted runtime output (vm sandbox result) bypasses runtime validation. The vm output is untrusted — it's user/LLM-generated code executing in a sandbox. Treating it as a validated `RuleHostResult` without a type guard is a trust-boundary violation.
+- **Generalized failure mode**: When executing untrusted code (vm sandbox, LLM output, parsed JSON) and casting the result with `as`, the cast provides zero runtime safety. The result may be missing required fields, have wrong types, or have invalid enum values. Every field must be runtime-validated before the value is treated as the target type.
+- **Correct approach**: Replace `as RuleHostResult` with a proper type guard that validates: (1) `decision` is one of the allowed enum values; (2) `matched` is a boolean; (3) `reason` is a string; (4) for `decision === 'auto_correct'`, `correctionProposal` is present and is an object with the required fields. If validation fails, return a structured error with `reason: 'vm_output_invalid'` and the specific field that failed.
+- **How to prevent**: Grep for `as RuleHostResult`, `as TOutput`, or any `as <Type>` near vm/LLM/parse boundaries. Each must be replaced with a runtime type guard. Add a test that feeds malformed vm output (missing fields, wrong types, invalid enum) and asserts the validator rejects it.
+- **Regression guard**: `production-gate-deps.test.ts` includes cases for malformed vm output (missing decision, invalid enum, missing correctionProposal for auto_correct).
+- **Related ERRs**: ERR-001 (`as` cast on untrusted JSON), ERR-005 (invalid arrays bypass type contract), ERR-054 (`as TOutput` before validation), ERR-069 (adapter hardcodes status masked by `as`)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence in the vm evaluator path. Same class as ERR-001, ERR-005, ERR-054.
+
+---
+
+**[ERR-078]** | CLI `--include-deactivated` flag silently ignored; invalid channel value degrades to listing all instead of failing loud
+
+- **What happened**: Two CLI contract defects in `pd runtime activation list`:
+  1. **`--include-deactivated` silently ignored**: The Commander flag was registered and parsed, but the handler never passed it to `SqliteActivationStateStore.listPromptActivations()` / `listCodeToolHookActivations()`. The store's `includeDeactivated` parameter existed but was always called with the default (`false`), so deactivated activations were never listed regardless of the flag.
+  2. **Invalid channel value degraded to listing all**: If the user passed `--channel invalid`, the handler treated any unrecognized channel as "list all channels" instead of failing loud with a structured error. This is the same class as ERR-029 (CLI unknown input silently dropped instead of failing loud).
+- **Why it's wrong**: (1) A flag that is registered, parsed, and documented but never wired into the handler is a silent contract violation — the user believes they're seeing deactivated activations but aren't. (2) Degrading an invalid input to a broader query hides the user's mistake and returns unexpected results. Both violate the CLI/operator contract: flags must affect behavior, and invalid inputs must fail loud.
+- **Generalized failure mode**: When adding a CLI flag, the flag value must be threaded from Commander → handler → store/query. A flag that stops at the handler layer is invisible to the user. When accepting an enum-like `--channel` value, unrecognized values must be rejected, not treated as a wildcard.
+- **Correct approach**: (1) Thread `includeDeactivated` from the handler into `listPromptActivations(includeDeactivated)` / `listCodeToolHookActivations(includeDeactivated)`. (2) Validate `channel` against the allowed set (`prompt` | `code_tool_hook` | `defer_archive`); reject unrecognized values with `process.exit(1)` and a structured JSON error (`{ error: 'invalid_channel', reason: '...', validChannels: [...] }`).
+- **How to prevent**: (1) For any new CLI flag, add a parser-level test that verifies the flag value reaches the store/query layer (not just the handler). (2) For enum-like flags, add a test that passes an invalid value and asserts the CLI exits non-zero with a structured error.
+- **Regression guard**: `sqlite-activation-state-store.test.ts` includes `includeDeactivated=true omits the deactivated_at IS NULL filter` tests. `runtime-activation.test.ts` includes invalid-channel fail-loud tests.
+- **Related ERRs**: ERR-029 (CLI unknown input silently dropped), ERR-063 (Commander `--no-<flag>` accessed via wrong name), ERR-064 (CLI subcommand option regressions)
+- **Source**: PRI-408 / PR #972
+- **Date**: 2026-06-19
+- **Recurrence**: First occurrence. Same class as ERR-029 and ERR-063.
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 72 |
-| Last updated | 2026-06-18 |
+| Total lessons | 78 |
+| Last updated | 2026-06-19 |
 | Top category | Schema & Type |
 | Recurring errors | 28 |
 
