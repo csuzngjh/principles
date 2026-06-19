@@ -796,6 +796,7 @@ export interface UpdateHistoryEntryData {
   fromVersion: string;
   toVersion: string;
   success: boolean;
+  backupPath?: string;
 }
 
 export function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData | null {
@@ -805,7 +806,11 @@ export function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData |
   if (!Object.hasOwn(v, 'fromVersion') || !isString(v.fromVersion)) return null;
   if (!Object.hasOwn(v, 'toVersion') || !isString(v.toVersion)) return null;
   if (!Object.hasOwn(v, 'success') || !isBoolean(v.success)) return null;
-  return { id: v.id, timestamp: v.timestamp, fromVersion: v.fromVersion, toVersion: v.toVersion, success: v.success };
+  const entry: UpdateHistoryEntryData = { id: v.id, timestamp: v.timestamp, fromVersion: v.fromVersion, toVersion: v.toVersion, success: v.success };
+  if (Object.hasOwn(v, 'backupPath') && isString(v.backupPath)) {
+    entry.backupPath = v.backupPath;
+  }
+  return entry;
 }
 
 export interface UpdateHistoryData {
@@ -1296,4 +1301,48 @@ export function validateOutputLanguage(v: unknown): OutputLanguageData | null {
   if (!(VALID_OUTPUT_LANGUAGE_VALUES as readonly string[]).includes(v.outputLanguage)) return null;
   if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
   return { outputLanguage: v.outputLanguage, source: v.source };
+}
+
+// ── Apply Update Result ──────────────────────────────────────────────────────
+
+export interface ApplyUpdateResultData {
+  success: boolean;
+  message: string;
+  updatedFiles?: string[];
+  backupPath?: string;
+  newVersion?: string;
+}
+
+export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'success') || typeof v.success !== 'boolean') return null;
+  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
+  const result: ApplyUpdateResultData = {
+    success: v.success,
+    message: v.message,
+  };
+  if (Object.hasOwn(v, 'updatedFiles') && Array.isArray(v.updatedFiles)) {
+    result.updatedFiles = v.updatedFiles.filter((f: unknown): f is string => typeof f === 'string');
+  }
+  if (Object.hasOwn(v, 'backupPath') && isString(v.backupPath)) {
+    result.backupPath = v.backupPath;
+  }
+  if (Object.hasOwn(v, 'newVersion') && isString(v.newVersion)) {
+    result.newVersion = v.newVersion;
+  }
+  return result;
+}
+
+// ── Rollback Result ──────────────────────────────────────────────────────────
+
+export interface RollbackResultData {
+  success: boolean;
+  message: string;
+}
+
+export function validateRollbackResult(v: unknown): RollbackResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'success') || typeof v.success !== 'boolean') return null;
+  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
+  return { success: v.success, message: v.message };
 }
