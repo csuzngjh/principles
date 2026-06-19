@@ -276,18 +276,12 @@ async function doApplyUpdate(
     // 3. Download and extract new version (with timeout + retry)
     const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
     fs.mkdirSync(tempDir, { recursive: true });
-    try {
-      const dlResponse = await fetchWithRetry(tarball, 'Download');
-      const buffer = Buffer.from(await dlResponse.arrayBuffer());
-      const tarballPath = path.join(tempDir, 'package.tgz');
-      fs.writeFileSync(tarballPath, buffer);
-      execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
-      fs.unlinkSync(tarballPath);
-    } catch (dlError) {
-      // Clean up temp dir on download failure
-      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
-      throw dlError;
-    }
+    const dlResponse = await fetchWithRetry(tarball, 'Download');
+    const buffer = Buffer.from(await dlResponse.arrayBuffer());
+    const tarballPath = path.join(tempDir, 'package.tgz');
+    fs.writeFileSync(tarballPath, buffer);
+    execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+    fs.unlinkSync(tarballPath);
 
     // 4. Compute diff and apply
     appliedChanges = true;
