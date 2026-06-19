@@ -41,6 +41,13 @@ export interface DispatchInput {
   now: string;
   confirm: boolean;
   confidence?: number;
+  /**
+   * Required when rolloutDecision === 'approved'.
+   * The dispatcher independently verifies this approval record exists,
+   * is in 'approved' status, and matches the artifactId + channel.
+   * This prevents callers from bypassing the owner approval boundary.
+   */
+  approvalId?: string;
 }
 
 export type ActivationDecision =
@@ -82,8 +89,8 @@ export interface ActivationStatusRecord {
 export interface ActivationStateReadModel {
   getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null>;
   recordActivation(record: ActivationStatusRecord): Promise<void>;
-  listPromptActivations(): Promise<ActivationStatusRecord[]>;
-  listCodeToolHookActivations(): Promise<ActivationStatusRecord[]>;
+  listPromptActivations(includeDeactivated?: boolean): Promise<ActivationStatusRecord[]>;
+  listCodeToolHookActivations(includeDeactivated?: boolean): Promise<ActivationStatusRecord[]>;
   listAllActivations(): Promise<ActivationStatusRecord[]>;
   deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean>;
 }

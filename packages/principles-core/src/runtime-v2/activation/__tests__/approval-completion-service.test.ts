@@ -26,6 +26,7 @@ import { MemoryActivationStateStore, MemoryArtifactReadModel } from '../memory-a
 import { PromptWriter, DeferArchiveWriter } from '../low-risk-writers.js';
 import type {
   PIArtifactSnapshot,
+  ApprovalQueueStore,
 } from '../activation-types.js';
 import type { ChannelWriter } from '../activation-types.js';
 
@@ -49,6 +50,7 @@ function createTestArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArti
 function createTestDispatcher(
   artifact: PIArtifactSnapshot,
   writers: ChannelWriter[] = [new PromptWriter(), new DeferArchiveWriter()],
+  approvalQueueStore?: ApprovalQueueStore,
 ): {
   dispatcher: ActivationDispatcher;
   stateStore: MemoryActivationStateStore;
@@ -57,7 +59,10 @@ function createTestDispatcher(
   const artifactReadModel = new MemoryArtifactReadModel();
   artifactReadModel.addArtifact(artifact);
   const stateStore = new MemoryActivationStateStore();
-  const dispatcher = new ActivationDispatcher(artifactReadModel, stateStore, { writers });
+  const dispatcher = new ActivationDispatcher(artifactReadModel, stateStore, {
+    writers,
+    approvalQueueStore,
+  });
   return { dispatcher, stateStore, artifactReadModel };
 }
 
@@ -66,8 +71,8 @@ function createTestDispatcher(
 describe('ApprovalCompletionService', () => {
   it('activates an approved prompt-channel approval record', async () => {
     const artifact = createTestArtifact();
-    const { dispatcher, stateStore } = createTestDispatcher(artifact);
     const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher, stateStore } = createTestDispatcher(artifact, undefined, approvalStore);
 
     // Enqueue and approve
     const record = await approvalStore.enqueue({
@@ -178,8 +183,8 @@ describe('ApprovalCompletionService', () => {
 
   it('is idempotent: duplicate completion calls do not produce duplicate activations', async () => {
     const artifact = createTestArtifact();
-    const { dispatcher, stateStore } = createTestDispatcher(artifact);
     const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher, stateStore } = createTestDispatcher(artifact, undefined, approvalStore);
 
     const record = await approvalStore.enqueue({
       artifactId: 'art-test-001',
@@ -221,11 +226,11 @@ describe('ApprovalCompletionService', () => {
       artifactKind: 'principle',
       sourcePrincipleId: 'principle-001',
     });
+    const approvalStore = new MemoryApprovalQueueStore();
     const { dispatcher, stateStore } = createTestDispatcher(artifact, [
       new PromptWriter(),
       new DeferArchiveWriter(),
-    ]);
-    const approvalStore = new MemoryApprovalQueueStore();
+    ], approvalStore);
 
     const record = await approvalStore.enqueue({
       artifactId: 'art-test-001',
@@ -253,14 +258,15 @@ describe('ApprovalCompletionService', () => {
 
   it('returns structured reason and nextAction on dispatch failure', async () => {
     const artifact = createTestArtifact();
+    const approvalStore = new MemoryApprovalQueueStore();
     // Use a dispatcher with NO writers for the channel
     const artifactReadModel = new MemoryArtifactReadModel();
     artifactReadModel.addArtifact(artifact);
     const stateStore = new MemoryActivationStateStore();
     const dispatcher = new ActivationDispatcher(artifactReadModel, stateStore, {
       writers: [], // No writers at all
+      approvalQueueStore: approvalStore,
     });
-    const approvalStore = new MemoryApprovalQueueStore();
 
     const record = await approvalStore.enqueue({
       artifactId: 'art-test-001',
@@ -282,6 +288,144 @@ describe('ApprovalCompletionService', () => {
       if (result.decision.decision === 'refused') {
         expect(result.decision.reason).toBeDefined();
       }
+    }
+  });
+});
+
+// ── Security Boundary Tests (P1 #3: approval binding) ──────────────────────
+
+describe('ActivationDispatcher security boundary: rolloutDecision=approved requires verified approvalId', () => {
+  it('refuses dispatch with approved but no approvalId', async () => {
+    const artifact = createTestArtifact();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher } = createTestDispatcher(artifact, undefined, approvalStore);
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      rolloutDecision: 'approved',
+      actor: { kind: 'human', userId: 'attacker' },
+      now: '2026-06-19T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('approved_dispatch_requires_approval_id');
+      expect(result.nextAction).toBeDefined();
+    }
+  });
+
+  it('refuses dispatch with approved and non-existent approvalId', async () => {
+    const artifact = createTestArtifact();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher } = createTestDispatcher(artifact, undefined, approvalStore);
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      rolloutDecision: 'approved',
+      approvalId: 'apr_fake_nonexistent',
+      actor: { kind: 'human', userId: 'attacker' },
+      now: '2026-06-19T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('approval_record_not_found');
+    }
+  });
+
+  it('refuses dispatch with approved and pending (not yet approved) approvalId', async () => {
+    const artifact = createTestArtifact();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher } = createTestDispatcher(artifact, undefined, approvalStore);
+
+    const record = await approvalStore.enqueue({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      riskLevel: 'low',
+    }, '2026-06-19T00:00:00.000Z');
+    // Do NOT approve — leave as pending
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      rolloutDecision: 'approved',
+      approvalId: record.approvalId,
+      actor: { kind: 'human', userId: 'attacker' },
+      now: '2026-06-19T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('pending');
+    }
+  });
+
+  it('refuses dispatch with approved but artifactId mismatch', async () => {
+    const artifact = createTestArtifact();
+    const artifact2 = createTestArtifact({ artifactId: 'art-DIFFERENT' });
+    const approvalStore = new MemoryApprovalQueueStore();
+    const artifactReadModel = new MemoryArtifactReadModel();
+    artifactReadModel.addArtifact(artifact);
+    artifactReadModel.addArtifact(artifact2);
+    const stateStore = new MemoryActivationStateStore();
+    const dispatcher = new ActivationDispatcher(artifactReadModel, stateStore, {
+      writers: [new PromptWriter(), new DeferArchiveWriter()],
+      approvalQueueStore: approvalStore,
+    });
+
+    const record = await approvalStore.enqueue({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      riskLevel: 'low',
+    }, '2026-06-19T00:00:00.000Z');
+    await approvalStore.approve(record.approvalId, 'owner-001');
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-DIFFERENT', // mismatch
+      channel: 'prompt',
+      rolloutDecision: 'approved',
+      approvalId: record.approvalId,
+      actor: { kind: 'human', userId: 'attacker' },
+      now: '2026-06-19T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('approval_artifact_mismatch');
+    }
+  });
+
+  it('refuses dispatch with approved but channel mismatch', async () => {
+    const artifact = createTestArtifact();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const { dispatcher } = createTestDispatcher(artifact, undefined, approvalStore);
+
+    const record = await approvalStore.enqueue({
+      artifactId: 'art-test-001',
+      channel: 'prompt',
+      riskLevel: 'low',
+    }, '2026-06-19T00:00:00.000Z');
+    await approvalStore.approve(record.approvalId, 'owner-001');
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-test-001',
+      channel: 'code_tool_hook', // mismatch — approval was for prompt
+      rolloutDecision: 'approved',
+      approvalId: record.approvalId,
+      actor: { kind: 'human', userId: 'attacker' },
+      now: '2026-06-19T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('approval_channel_mismatch');
     }
   });
 });

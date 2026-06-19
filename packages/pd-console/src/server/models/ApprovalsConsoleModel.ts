@@ -42,7 +42,7 @@ type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; chann
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
 export type ApproveWithActivationResult =
-  | { ok: true; record: ApprovalRecord; activation?: ActivationDecision }
+  | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
   | { ok: false; error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
@@ -162,7 +162,62 @@ export class ApprovalsConsoleModel {
       return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack };
     }
 
+    // P1 #4 fix: when activation is skipped (feature flag disabled), surface
+    // a clear warning so the owner knows behavior did NOT change. The approval
+    // record remains 'approved' (Contract F: no data damage), but the owner
+    // is explicitly informed that activation was skipped.
+    if (activation === undefined) {
+      return {
+        ok: true,
+        record: approvalResult.record,
+        activation: undefined,
+        warning: 'activation_skipped_feature_flag_disabled: approval is recorded but activation was not dispatched. Enable story_a_approval_completion flag or manually run "pd runtime activation dispatch" to activate.',
+      };
+    }
+
     return { ok: true, record: approvalResult.record, activation };
+  }
+
+  /**
+   * Edit a pending approval's artifact to a new version (P1 #2 fix).
+   *
+   * Before this method existed, ApprovalQueue.edit() was dead code — no
+   * Console/CLI/OpenClaw entry point called it. Owners could only approve
+   * or reject, not edit. This method makes the edit capability reachable
+   * from the Console route and CLI command.
+   *
+   * The caller is responsible for creating the new artifact and performing
+   * schema validation + sandbox replay BEFORE calling this method.
+   */
+  async editApproval(
+    input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string },
+  ): Promise<
+    | { ok: true; record: ApprovalRecord }
+    | { ok: false; error: 'not_found' | 'already_decided'; status?: ApprovalStatus }
+  > {
+    const { approvalId, editedBy, newArtifactId, editReason } = input;
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
+    const existing = await this.readSafeGetById(approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'pending') {
+      return { ok: false, error: 'already_decided', status: existing.status };
+    }
+    const editResult = await this.getWriteQueue().edit({
+      approvalId,
+      editedBy,
+      newArtifactId,
+      editReason,
+      now: new Date().toISOString(),
+    });
+    if (!editResult.ok) {
+      if (editResult.error === 'already_decided') {
+        return { ok: false, error: 'already_decided', status: editResult.status };
+      }
+      return { ok: false, error: 'not_found' };
+    }
+    return { ok: true, record: editResult.record };
   }
 
   private async dispatchActivationAfterApproval(

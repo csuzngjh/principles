@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGetArtifactById = vi.fn();
 const mockClose = vi.fn().mockResolvedValue(undefined);
+const mockApprovalEdit = vi.fn();
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -48,6 +49,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     SqliteApprovalQueueStore: vi.fn().mockImplementation(function () {
       return {
         enqueue: vi.fn().mockResolvedValue(undefined),
+        edit: mockApprovalEdit,
       };
     }),
     ActivationDispatcher: vi.fn().mockImplementation(function () {
@@ -67,7 +69,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   };
 });
 
-import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList } from '../../src/commands/runtime-activation.js';
+import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from '../../src/commands/runtime-activation.js';
 
 const WS = '/fake/workspace';
 
@@ -307,14 +309,17 @@ describe('handleRuntimeActivationDeactivate', () => {
 // PRI-408 Contract D: List activations (observability) command tests
 describe('handleRuntimeActivationList', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     process.exitCode = 0;
   });
 
@@ -364,5 +369,212 @@ describe('handleRuntimeActivationList', () => {
     expect(text).toContain('[ACTIVE]');
     expect(text).toContain('act-prompt-1');
     expect(text).toContain('channel: prompt');
+  });
+
+  it('invalid channel returns structured error with nextAction (P2 #5 fix)', async () => {
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'invalid_channel',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('invalid_channel');
+    expect(output.nextAction).toContain('prompt');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('invalid channel in text mode prints error and nextAction (P2 #5 fix)', async () => {
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'bogus',
+    });
+
+    const errorText = consoleErrorSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(errorText).toContain('invalid channel');
+    expect(errorText).toContain('Next action');
+    expect(process.exitCode).toBe(1);
+  });
+});
+
+// P1 #2 fix: Edit pending approval command tests
+describe('handleRuntimeActivationEdit', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('missing --approval-id returns structured error with nextAction (JSON)', async () => {
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('approval_id_required');
+    expect(output.nextAction).toContain('--approval-id');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('missing --new-artifact-id returns structured error with nextAction (JSON)', async () => {
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('new_artifact_id_required');
+    expect(output.nextAction).toContain('--new-artifact-id');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('missing --edit-reason returns structured error with nextAction (JSON)', async () => {
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('edit_reason_required');
+    expect(output.nextAction).toContain('--edit-reason');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('successful edit returns ok with newArtifactId and previousArtifactId (JSON)', async () => {
+    mockApprovalEdit.mockResolvedValue({
+      ok: true,
+      record: {
+        approvalId: 'appr-001',
+        artifactId: 'art-new',
+        previousArtifactId: 'art-old',
+        editedAt: '2026-06-19T00:00:00.000Z',
+        status: 'pending',
+      },
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo in principle text',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.approvalId).toBe('appr-001');
+    expect(output.newArtifactId).toBe('art-new');
+    expect(output.previousArtifactId).toBe('art-old');
+    expect(output.editedAt).toBe('2026-06-19T00:00:00.000Z');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('not_found approval returns structured error with nextAction (JSON)', async () => {
+    mockApprovalEdit.mockResolvedValue({
+      ok: false,
+      error: 'not_found',
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-nonexistent',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('not_found');
+    expect(output.nextAction).toContain('Check the approval ID');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('already_decided approval returns structured error with nextAction (JSON)', async () => {
+    mockApprovalEdit.mockResolvedValue({
+      ok: false,
+      error: 'already_decided',
+      status: 'approved',
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('already_decided');
+    expect(output.nextAction).toContain('already decided');
+    expect(output.nextAction).toContain('approved');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('edit store throw returns structured error with nextAction (JSON)', async () => {
+    mockApprovalEdit.mockRejectedValue(new Error('SQLITE_BUSY'));
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('edit_failed');
+    expect(output.reason).toContain('SQLITE_BUSY');
+    expect(output.nextAction).toContain('DB integrity');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('text output is human-readable with next action hint', async () => {
+    mockApprovalEdit.mockResolvedValue({
+      ok: true,
+      record: {
+        approvalId: 'appr-001',
+        artifactId: 'art-new',
+        previousArtifactId: 'art-old',
+        editedAt: '2026-06-19T00:00:00.000Z',
+        status: 'pending',
+      },
+    });
+
+    await handleRuntimeActivationEdit({
+      workspace: WS,
+      approvalId: 'appr-001',
+      newArtifactId: 'art-new',
+      editReason: 'fix typo',
+    });
+
+    const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(text).toContain('Approval edited: appr-001');
+    expect(text).toContain('newArtifactId: art-new');
+    expect(text).toContain('previousArtifactId: art-old');
+    expect(text).toContain('Next action');
   });
 });

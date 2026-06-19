@@ -273,6 +273,24 @@ interface ActivationListOptions {
 }
 
 export async function handleRuntimeActivationList(opts: ActivationListOptions): Promise<void> {
+  // P2 #5 fix: fail loud on invalid channel instead of silently listing all.
+  const VALID_CHANNELS = new Set(['prompt', 'code_tool_hook', undefined]);
+  if (opts.channel !== undefined && !VALID_CHANNELS.has(opts.channel)) {
+    const result = {
+      ok: false,
+      reason: `invalid_channel: ${opts.channel}`,
+      nextAction: 'Use one of: prompt, code_tool_hook, or omit --channel to list all',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: invalid channel "${opts.channel}"`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
@@ -280,16 +298,21 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
     await stateManager.initialize();
     const activationStateStore = new SqliteActivationStateStore(stateManager.connection);
 
+    // P2 #5 fix: pass includeDeactivated to the store so channel-specific queries
+    // also return deactivated records when requested. Previously the SQL hardcoded
+    // `WHERE deactivated_at IS NULL`, making --include-deactivated a no-op for
+    // channel-filtered queries.
     let records;
     if (opts.channel === 'prompt') {
-      records = await activationStateStore.listPromptActivations();
+      records = await activationStateStore.listPromptActivations(opts.includeDeactivated ?? false);
     } else if (opts.channel === 'code_tool_hook') {
-      records = await activationStateStore.listCodeToolHookActivations();
+      records = await activationStateStore.listCodeToolHookActivations(opts.includeDeactivated ?? false);
     } else {
       records = await activationStateStore.listAllActivations();
     }
 
-    // By default, hide deactivated records unless explicitly requested
+    // For listAllActivations, still apply the includeDeactivated filter at the
+    // caller level since listAllActivations() does not take the parameter.
     const filtered = opts.includeDeactivated
       ? records
       : records.filter(r => r.deactivatedAt === null);
@@ -312,6 +335,153 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
           console.log('');
         }
       }
+    }
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Edit Pending Approval Command (P1 #2 fix — Owner edit entry point) ──────
+
+interface ActivationEditOptions {
+  workspace?: string;
+  approvalId?: string;
+  newArtifactId?: string;
+  editReason?: string;
+  json?: boolean;
+}
+
+export interface EditApprovalResult {
+  ok: boolean;
+  approvalId?: string;
+  newArtifactId?: string;
+  previousArtifactId?: string;
+  editedAt?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): Promise<void> {
+  if (!opts.approvalId) {
+    const result: EditApprovalResult = {
+      ok: false,
+      reason: 'approval_id_required',
+      nextAction: 'Provide --approval-id <id> from `pd runtime activation list` or Console approvals page',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('Error: --approval-id is required');
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!opts.newArtifactId) {
+    const result: EditApprovalResult = {
+      ok: false,
+      reason: 'new_artifact_id_required',
+      nextAction: 'Create a new artifact first (e.g. via pd candidate intake), then pass its ID with --new-artifact-id',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('Error: --new-artifact-id is required');
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!opts.editReason) {
+    const result: EditApprovalResult = {
+      ok: false,
+      reason: 'edit_reason_required',
+      nextAction: 'Provide --edit-reason explaining why the artifact is being revised',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('Error: --edit-reason is required');
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+    const approvalStore = new SqliteApprovalQueueStore(stateManager.connection);
+    const now = new Date().toISOString();
+
+    let editResult;
+    try {
+      editResult = await approvalStore.edit({
+        approvalId: opts.approvalId,
+        editedBy: 'operator',
+        newArtifactId: opts.newArtifactId,
+        editReason: opts.editReason,
+        now,
+      });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: `edit_failed: ${errMsg}`,
+        nextAction: 'Check workspace DB integrity and that the approval + new artifact exist',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit failed: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!editResult.ok) {
+      const result: EditApprovalResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: editResult.error,
+        nextAction: editResult.error === 'not_found'
+          ? 'Check the approval ID with `pd runtime activation list` or Console'
+          : `Approval is already decided (status: ${editResult.status ?? 'unknown'}). Only pending approvals can be edited.`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Edit refused: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    const result: EditApprovalResult = {
+      ok: true,
+      approvalId: editResult.record.approvalId,
+      newArtifactId: editResult.record.artifactId,
+      previousArtifactId: editResult.record.previousArtifactId ?? undefined,
+      editedAt: editResult.record.editedAt ?? now,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`Approval edited: ${result.approvalId}`);
+      console.log(`  newArtifactId: ${result.newArtifactId}`);
+      if (result.previousArtifactId) {
+        console.log(`  previousArtifactId: ${result.previousArtifactId}`);
+      }
+      console.log(`  editedAt: ${result.editedAt}`);
+      console.log('Next action: review the new artifact, then approve via Console or `pd runtime activation dispatch`');
     }
   } finally {
     await stateManager.close();

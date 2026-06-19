@@ -149,4 +149,157 @@ export function evaluate(input, helpers) {
     expect(result.success).toBe(true);
     expect(result.failedCases).toHaveLength(0);
   });
+
+  // P2 #6 fix: vm evaluator output validation tests
+  describe('P2 #6: vm evaluator output validation', () => {
+    it('rejects invalid decision enum value (not one of allow|block|requireApproval|auto_correct)', () => {
+      const deps = createProductionGateDeps();
+
+      const invalidDecisionCode = `
+function evaluate(input, helpers) {
+  return { decision: 'invalid_decision', matched: true, reason: 'bad decision' };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(invalidDecisionCode, goldenTrace);
+
+      expect(result.success).toBe(false);
+      expect(result.failedCases.length).toBeGreaterThan(0);
+      // The invalid decision may surface as either a compile-time error or a
+      // per-case validation error, depending on whether the rule is evaluated
+      // during compilation. Either way, the result must be failure.
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects result with missing matched field', () => {
+      const deps = createProductionGateDeps();
+
+      const missingMatchedCode = `
+function evaluate(input, helpers) {
+  return { decision: 'allow', reason: 'missing matched' };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(missingMatchedCode, goldenTrace);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects result with missing reason field', () => {
+      const deps = createProductionGateDeps();
+
+      const missingReasonCode = `
+function evaluate(input, helpers) {
+  return { decision: 'allow', matched: false };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(missingReasonCode, goldenTrace);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects auto_correct decision without correctionProposal', () => {
+      const deps = createProductionGateDeps();
+
+      const autoCorrectWithoutProposalCode = `
+function evaluate(input, helpers) {
+  return { decision: 'auto_correct', matched: true, reason: 'auto correct without proposal' };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(autoCorrectWithoutProposalCode, goldenTrace);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('accepts auto_correct decision with correctionProposal present', () => {
+      const deps = createProductionGateDeps();
+
+      const autoCorrectWithProposalCode = `
+function evaluate(input, helpers) {
+  return {
+    decision: 'auto_correct',
+    matched: true,
+    reason: 'auto correct with proposal',
+    correctionProposal: {
+      proposedParams: { filePath: '/safe/path.ts' },
+      correctedFields: [{ field: 'filePath', original: '/etc/passwd', proposed: '/safe/path.ts', reason: 'redirected' }],
+      applicationMode: 'shadow',
+      confidence: 0.9,
+      ruleId: 'rule-001',
+      notifyAgent: true
+    }
+  };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(autoCorrectWithProposalCode, goldenTrace);
+
+      // The rule returns auto_correct which doesn't match expectedDecision 'block',
+      // so the golden trace validation will fail — but the RuleHostResult shape
+      // validation itself should pass (no compile error about invalid shape).
+      // The failure should be a validation_failed, not a compile/shape error.
+      expect(result.success).toBe(false);
+      // Verify the failure is due to decision mismatch, not invalid shape
+      const shapeError = result.failedCases.find(c => c.caseId === '__compile__' && c.message?.includes('invalid RuleHostResult'));
+      expect(shapeError).toBeUndefined();
+    });
+
+    it('rejects result where matched is not a boolean', () => {
+      const deps = createProductionGateDeps();
+
+      const wrongTypeMatchedCode = `
+function evaluate(input, helpers) {
+  return { decision: 'allow', matched: 'yes', reason: 'matched is string not boolean' };
+}
+`;
+
+      const goldenTrace = createGoldenTraceFixture({
+        toolName: 'edit',
+        negativeParams: { filePath: '/etc/passwd' },
+        positiveParams: { filePath: '/src/index.ts' },
+        expectedDecision: 'block',
+      });
+
+      const result = deps.evaluateInSandbox(wrongTypeMatchedCode, goldenTrace);
+
+      expect(result.success).toBe(false);
+    });
+  });
 });

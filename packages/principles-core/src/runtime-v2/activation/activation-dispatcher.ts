@@ -4,6 +4,7 @@ import type {
   ActivationDecision,
   ActivationStateReadModel,
   ApprovalQueueStore,
+  ApprovalRecord,
   CanActivateResult,
   ChannelWriter,
   DispatchInput,
@@ -117,7 +118,74 @@ export class ActivationDispatcher {
     // 'approved' = approval already granted externally (ApprovalCompletionService).
     // Bypass the approval queue check and activate directly. This is the
     // post-approval dispatch path for high-risk channels (code_tool_hook).
+    //
+    // Security boundary (P1 fix): the dispatcher independently verifies the
+    // approval record — it does NOT trust the caller's rolloutDecision alone.
+    // Any caller passing rolloutDecision='approved' must also supply an
+    // approvalId that resolves to an approved record matching the artifact
+    // and channel. This prevents bypassing the owner approval boundary.
     if (input.rolloutDecision === 'approved') {
+      if (!input.approvalId) {
+        return {
+          decision: 'refused',
+          reason: 'approved_dispatch_requires_approval_id',
+          nextAction: 'provide approvalId from a verified owner approval record',
+          channel: input.channel,
+        };
+      }
+      if (!this.approvalQueueStore) {
+        return {
+          decision: 'refused',
+          reason: 'approved_dispatch_without_approval_store',
+          nextAction: 'configure dispatcher with approvalQueueStore to verify approvals',
+          channel: input.channel,
+        };
+      }
+      let approvalRecord: ApprovalRecord | null;
+      try {
+        approvalRecord = await this.approvalQueueStore.getById(input.approvalId);
+      } catch {
+        return {
+          decision: 'refused',
+          reason: 'approval_record_read_failed',
+          nextAction: 'check_approval_store_availability',
+          channel: input.channel,
+        };
+      }
+      if (!approvalRecord) {
+        return {
+          decision: 'refused',
+          reason: `approval_record_not_found: ${input.approvalId}`,
+          nextAction: 'verify_approval_id',
+          channel: input.channel,
+        };
+      }
+      if (approvalRecord.status !== 'approved') {
+        return {
+          decision: 'refused',
+          reason: `approval_status_is_${approvalRecord.status}_expected_approved`,
+          nextAction: approvalRecord.status === 'pending'
+            ? 'owner_must_approve_before_dispatch'
+            : 'rejected_or_expired_approvals_cannot_be_activated',
+          channel: input.channel,
+        };
+      }
+      if (approvalRecord.artifactId !== input.artifactId) {
+        return {
+          decision: 'refused',
+          reason: `approval_artifact_mismatch: approval=${approvalRecord.artifactId} dispatch=${input.artifactId}`,
+          nextAction: 'ensure_dispatch_artifact_matches_approved_artifact',
+          channel: input.channel,
+        };
+      }
+      if (approvalRecord.channel !== input.channel) {
+        return {
+          decision: 'refused',
+          reason: `approval_channel_mismatch: approval=${approvalRecord.channel} dispatch=${input.channel}`,
+          nextAction: 'ensure_dispatch_channel_matches_approved_channel',
+          channel: input.channel,
+        };
+      }
       return this.activateArtifact(input, artifact, idempotencyKey);
     }
 
@@ -199,9 +267,23 @@ export class ActivationDispatcher {
   }
 
   private async activateArtifact(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
-    const principleId = extractPrincipleId(artifact);
+    // Resolve the identifier for WriterInput.principleId. For principle artifacts
+    // (prompt/defer_archive channels), extractPrincipleId() is required. For rule
+    // artifacts (code_tool_hook channel), the RuleHostWriter uses sourceRuleId
+    // first and only falls back to principleId — so we accept sourceRuleId or
+    // artifactId as a fallback to avoid breaking the production chain when a
+    // rule artifact doesn't carry sourcePrincipleId (P1 #7 fix).
+    let principleId = extractPrincipleId(artifact);
     if (!principleId) {
-      return { decision: 'invalid_artifact', reason: 'no_principle_id' };
+      if (input.channel === 'code_tool_hook') {
+        if (typeof artifact.sourceRuleId === 'string' && artifact.sourceRuleId.trim() !== '') {
+          principleId = artifact.sourceRuleId.trim();
+        } else {
+          principleId = artifact.artifactId;
+        }
+      } else {
+        return { decision: 'invalid_artifact', reason: 'no_principle_id' };
+      }
     }
 
     const writer = this.writers.get(input.channel);

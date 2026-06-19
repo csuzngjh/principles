@@ -148,13 +148,15 @@ export class ApprovalCompletionService {
       };
     }
 
-    // 4. Dispatch with 'approved' to bypass the approval queue check
+    // 4. Dispatch with 'approved' — the dispatcher independently verifies
+    // the approval record via approvalId (security boundary, P1 #3 fix).
     let dispatchDecision: ActivationDecision;
     try {
       dispatchDecision = await this.dispatcher.dispatch({
         artifactId: record.artifactId,
         channel: record.channel,
         rolloutDecision: 'approved',
+        approvalId: input.approvalId,
         actor: input.actor,
         now: input.now,
         confirm: true,

@@ -47,7 +47,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
-import { handleRuntimeActivationDeactivate, handleRuntimeActivationList } from './commands/runtime-activation.js';
+import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -624,6 +624,26 @@ activationCmd
       workspace: opts.workspace,
       channel: opts.channel,
       includeDeactivated: opts.includeDeactivated,
+      json: opts.json,
+    });
+  });
+
+// P1 #2 fix: Owner edit entry point — swap a pending approval's artifact.
+// Required because ApprovalQueue.edit() was dead code with no CLI/OpenClaw entry.
+activationCmd
+  .command('edit')
+  .description('Edit a pending approval to swap its artifact — P1 #2 owner edit entry point')
+  .requiredOption('-a, --approval-id <id>', 'Approval ID to edit (must be pending)')
+  .requiredOption('-n, --new-artifact-id <id>', 'New PIArtifact ID to swap to')
+  .requiredOption('-r, --edit-reason <text>', 'Reason for the edit')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationEdit({
+      workspace: opts.workspace,
+      approvalId: opts.approvalId,
+      newArtifactId: opts.newArtifactId,
+      editReason: opts.editReason,
       json: opts.json,
     });
   });
