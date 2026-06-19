@@ -604,7 +604,20 @@
       "failed": "Failed",
       "checkError": "Check error",
       "loadError": "Unable to load update data. You can try refreshing the page.",
-      "checkFailed": "Update check failed. Please try again later."
+      "checkFailed": "Update check failed. Please try again later.",
+      "applyUpdate": "Update Now",
+      "confirmUpdateTitle": "Confirm Update",
+      "confirmUpdateDesc": "This will update PD to version {{version}}. A backup will be created automatically. The console will need to be restarted after the update.",
+      "updating": "Updating…",
+      "updateSuccess": "Updated to {{version}} successfully.",
+      "updateFailed": "Update failed: {{message}}",
+      "restartHint": "Please restart pd-console to load the new version.",
+      "rollback": "Rollback",
+      "confirmRollbackTitle": "Confirm Rollback",
+      "confirmRollbackDesc": "This will restore PD to the state before this update. The console will need to be restarted after rollback.",
+      "rollbackSuccess": "Rollback completed successfully.",
+      "rollbackFailed": "Rollback failed: {{message}}",
+      "restartHintAfterRollback": "Please restart pd-console to load the rolled-back version."
     }
   },
   "components": {
