@@ -181,6 +181,18 @@ describe('handleRunRuleHost — input validation gates', () => {
       handleRunRuleHost({ painId: 'pain-1', timeoutMs: -100, dryRun: true }));
     expect(exitCode).toBe(1);
   });
+
+  it.each([
+    ['NaN maxRounds', { maxRounds: Number.NaN }],
+    ['fractional maxRounds', { maxRounds: 1.5 }],
+    ['NaN timeoutMs', { timeoutMs: Number.NaN }],
+    ['fractional timeoutMs', { timeoutMs: 1.5 }],
+  ])('sets exitCode=1 for %s', async (_label, invalidOption) => {
+    const { exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, ...invalidOption }),
+    );
+    expect(exitCode).toBe(1);
+  });
 });
 
 describe('handleRunRuleHost — dry-run mode output shape (with minimal pd-config.yaml', () => {
