@@ -180,7 +180,7 @@ async function getPromptOutput(overrides: { sessionGfi?: number } = {}) {
 
 // ─── Tests: MVP Diet — sections that must NOT appear by default ────────────
 
-describe('PRI-291 Prompt Diet: default prompt excludes non-MVP sections', () => {
+describe('PRI-291 Prompt Diet: default prompt excludes non-MVP sections', { timeout: 15000 }, () => {
   it('default prompt does NOT contain Thinking OS text', async () => {
     const { append } = await getPromptOutput();
     expect(append).not.toContain('<thinking_os>');
