@@ -617,7 +617,10 @@
       "confirmRollbackDesc": "This will restore PD to the state before this update. The console will need to be restarted after rollback.",
       "rollbackSuccess": "Rollback completed successfully.",
       "rollbackFailed": "Rollback failed: {{message}}",
-      "restartHintAfterRollback": "Please restart pd-console to load the rolled-back version."
+      "restartHintAfterRollback": "Please restart pd-console to load the rolled-back version.",
+      "filesUpdated": "Updated {{count}} files",
+      "networkErrorHint": "Please check your network connection and try again.",
+      "retry": "Retry"
     }
   },
   "components": {

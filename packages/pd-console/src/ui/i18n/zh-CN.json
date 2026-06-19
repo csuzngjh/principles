@@ -617,7 +617,10 @@
       "confirmRollbackDesc": "将把 PD 恢复到此次更新前的状态。回滚完成后需要重启控制台。",
       "rollbackSuccess": "回滚成功。",
       "rollbackFailed": "回滚失败：{{message}}",
-      "restartHintAfterRollback": "请重启 pd-console 以加载回滚后的版本。"
+      "restartHintAfterRollback": "请重启 pd-console 以加载回滚后的版本。",
+      "filesUpdated": "更新了 {{count}} 个文件",
+      "networkErrorHint": "请检查网络连接后重试。",
+      "retry": "重试"
     }
   },
   "components": {

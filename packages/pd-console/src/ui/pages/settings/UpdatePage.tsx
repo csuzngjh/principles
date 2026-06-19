@@ -35,7 +35,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "../../components/ui/alert-dialog.js";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2, RotateCcw, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 
 // ── Helper: format ISO date string to locale-aware display ────────────────────
 
@@ -68,7 +68,13 @@ export function UpdatePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [historyErrorReason, setHistoryErrorReason] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
-  const [updateResult, setUpdateResult] = useState<{ success: boolean; message: string; newVersion?: string } | null>(null);
+  const [updateResult, setUpdateResult] = useState<{
+    success: boolean;
+    message: string;
+    newVersion?: string;
+    updatedFiles?: string[];
+    fromVersion?: string;
+  } | null>(null);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [showRollbackDialog, setShowRollbackDialog] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
@@ -150,7 +156,13 @@ export function UpdatePage() {
     }
     const data = result.data as ApplyUpdateResultData;
     if (data.success) {
-      setUpdateResult({ success: true, message: data.message, newVersion: data.newVersion });
+      setUpdateResult({
+        success: true,
+        message: data.message,
+        newVersion: data.newVersion,
+        updatedFiles: data.updatedFiles,
+        fromVersion: statusData?.currentVersion,
+      });
       toast.success(t('pages.update.updateSuccess', { version: data.newVersion ?? 'latest' }));
       await loadData();
     } else {
@@ -299,13 +311,57 @@ export function UpdatePage() {
             )}
           </div>
 
-          {/* Update result message */}
+          {/* Update result message — enhanced card */}
           {updateResult && (
-            <div className={`mt-4 p-3 rounded-[4px] text-[13px] ${updateResult.success ? 'bg-green/10 border border-green/20 text-green' : 'bg-red/10 border border-red/20 text-red'}`}>
-              <p>{updateResult.message}</p>
-              {updateResult.success && (
-                <p className="mt-1 text-[12px] font-mono opacity-80">{t("pages.update.restartHint")}</p>
-              )}
+            <div className={`mt-4 p-4 rounded-[6px] border animate-[pdFadeIn_400ms_ease-out] ${updateResult.success ? 'bg-green/5 border-green/20' : 'bg-red/5 border-red/20'}`}>
+              <div className="flex items-start gap-3">
+                {/* Status icon with animation */}
+                {updateResult.success ? (
+                  <CheckCircle2 className="h-6 w-6 text-green shrink-0 mt-0.5 animate-[pdFadeIn_600ms_ease-out]" style={{ transform: 'scale(1)', animationFillMode: 'both' }} />
+                ) : (
+                  <XCircle className="h-6 w-6 text-red shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1 min-w-0">
+                  {/* Version comparison (success only) */}
+                  {updateResult.success && updateResult.fromVersion && updateResult.newVersion && (
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="font-mono text-[13px] text-ink-3 line-through">{updateResult.fromVersion}</span>
+                      <ArrowRight className="h-3.5 w-3.5 text-green" />
+                      <span className="font-mono text-[13px] text-green font-medium">{updateResult.newVersion}</span>
+                    </div>
+                  )}
+                  {/* Message */}
+                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : 'text-red'}`}>
+                    {updateResult.message}
+                  </p>
+                  {/* File count (success only) */}
+                  {updateResult.success && updateResult.updatedFiles && updateResult.updatedFiles.length > 0 && (
+                    <p className="mt-1 text-[12px] text-ink-4 font-mono">
+                      {t("pages.update.filesUpdated", { count: updateResult.updatedFiles.length })}
+                    </p>
+                  )}
+                  {/* Restart hint (success only) */}
+                  {updateResult.success && (
+                    <p className="mt-2 text-[12px] font-mono text-ink-4">{t("pages.update.restartHint")}</p>
+                  )}
+                  {/* Network error hint + retry (failure only) */}
+                  {!updateResult.success && (
+                    <div className="mt-2 flex items-center gap-2">
+                      {/network|fetch|timeout|ECONNREFUSED|ENOTFOUND/i.test(updateResult.message) && (
+                        <p className="text-[12px] text-ink-4 font-mono">{t("pages.update.networkErrorHint")}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleApplyUpdate}
+                        disabled={updating}
+                        className="text-[12px] text-red underline hover:text-red/80 disabled:opacity-50"
+                      >
+                        {t("pages.update.retry")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
