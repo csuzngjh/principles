@@ -604,7 +604,23 @@
       "failed": "失败",
       "checkError": "检查出错",
       "loadError": "无法加载更新数据。你可以尝试刷新页面。",
-      "checkFailed": "更新检查失败，请稍后重试。"
+      "checkFailed": "更新检查失败，请稍后重试。",
+      "applyUpdate": "立即更新",
+      "confirmUpdateTitle": "确认更新",
+      "confirmUpdateDesc": "将把 PD 更新到版本 {{version}}。更新前会自动创建备份。更新完成后需要重启控制台。",
+      "updating": "更新中…",
+      "updateSuccess": "已成功更新到 {{version}}。",
+      "updateFailed": "更新失败：{{message}}",
+      "restartHint": "请重启 pd-console 以加载新版本。",
+      "rollback": "回滚",
+      "confirmRollbackTitle": "确认回滚",
+      "confirmRollbackDesc": "将把 PD 恢复到此次更新前的状态。回滚完成后需要重启控制台。",
+      "rollbackSuccess": "回滚成功。",
+      "rollbackFailed": "回滚失败：{{message}}",
+      "restartHintAfterRollback": "请重启 pd-console 以加载回滚后的版本。",
+      "filesUpdated": "更新了 {{count}} 个文件",
+      "networkErrorHint": "请检查网络连接后重试。",
+      "retry": "重试"
     }
   },
   "components": {
