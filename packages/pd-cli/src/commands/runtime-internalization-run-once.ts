@@ -18,19 +18,14 @@ import {
   DefaultRolloutReviewerValidator,
   DefaultTrainerValidator,
   TestDoubleRuntimeAdapter,
-  PiAiRuntimeAdapter,
-  OpenClawCliRuntimeAdapter,
-  L2AgentLoopAdapter,
-  buildL2PrincipleReader,
-  isRuntimeConfigError,
-  validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { PdL2ArtifactReader } from '@principles/core/runtime-v2';
-import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
-import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
+import {
+  resolveRuntimeAdapterFromConfig,
+  ConfigResolutionError,
+} from '../services/runtime-adapter-resolver.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -44,13 +39,6 @@ interface RunOnceOptions {
 
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
-
-class ConfigResolutionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ConfigResolutionError';
-  }
-}
 
 const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer']);
 
@@ -207,251 +195,13 @@ function formatTextOutput(output: RunOnceOutput): string {
   return lines.join('\n');
 }
 
-interface ResolveAdapterOptions {
-  runtimeKind: string;
-  taskId: string;
-  workspaceDir: string;
-  runnerKind: string;
-  timeoutMs?: number;
-  /** PRI-419: stateManager for the L2 artifact reader (only used when l2_dreamer is on). */
-  l2ArtifactReader?: PdL2ArtifactReader;
-  /** PRI-419: workspace stateDir for the L2 principle reader (only used when l2_dreamer is on). */
-  l2StateDir?: string;
-}
-
-function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
-  if (opts.runtimeKind === 'test-double') {
-    if (opts.runnerKind === 'philosopher') {
-      return new TestDoubleRuntimeAdapter({
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourceDreamerArtifactId: 'pi-art-test-dreamer',
-            thesis: 'Test thesis from test-double',
-            principleCandidate: {
-              title: 'Test Principle',
-              rationale: 'Test rationale',
-              scope: 'Test scope',
-              confidence: 0.8,
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
-    if (opts.runnerKind === 'scribe') {
-      return new TestDoubleRuntimeAdapter({
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourcePhilosopherArtifactId: 'pi-art-test-philosopher',
-            principleDraft: {
-              title: 'Test Principle Draft',
-              statement: 'Test principle statement',
-              rationale: 'Test rationale',
-              applicability: ['All operations'],
-              antiPatterns: ['Ignoring validation'],
-              confidence: 0.8,
-            },
-            sourceTrace: {
-              philosopherArtifactId: 'pi-art-test-philosopher',
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
-    if (opts.runnerKind === 'artificer') {
-      let capturedSourceScribeArtifactId = 'pi-art-test-scribe';
-      return new TestDoubleRuntimeAdapter({
-        onStartRun: (input) => {
-          try {
-            const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
-            const parsed = JSON.parse(payloadStr);
-            if (typeof parsed.sourceScribeArtifactId === 'string' && parsed.sourceScribeArtifactId.trim() !== '') {
-              capturedSourceScribeArtifactId = parsed.sourceScribeArtifactId;
-            }
-          } catch { /* use default */ }
-          return { runId: `td-artificer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
-        },
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourceScribeArtifactId: capturedSourceScribeArtifactId,
-            implementationPlan: {
-              summary: 'Test implementation summary',
-              targetSurface: 'src/test/*.ts',
-              changes: ['Add validation to test module'],
-              tests: ['Unit test for validation'],
-              rolloutNotes: ['Deploy behind feature flag'],
-              confidence: 0.8,
-            },
-            sourceTrace: {
-              scribeArtifactId: capturedSourceScribeArtifactId,
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
-    if (opts.runnerKind === 'evaluator') {
-      let capturedSourceArtificerArtifactId = 'pi-art-test-artificer';
-      return new TestDoubleRuntimeAdapter({
-        onStartRun: (input) => {
-          try {
-            const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
-            const parsed = JSON.parse(payloadStr);
-            if (typeof parsed.sourceArtificerArtifactId === 'string' && parsed.sourceArtificerArtifactId.trim() !== '') {
-              capturedSourceArtificerArtifactId = parsed.sourceArtificerArtifactId;
-            }
-          } catch { /* use default */ }
-          return { runId: `td-evaluator-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
-        },
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourceArtificerArtifactId: capturedSourceArtificerArtifactId,
-            evaluation: {
-              decision: 'approved',
-              summary: 'Test evaluation summary',
-              score: 0.85,
-              strengths: ['Well-structured plan'],
-              concerns: [],
-              requiredChanges: [],
-            },
-            sourceTrace: {
-              artificerArtifactId: capturedSourceArtificerArtifactId,
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
-    if (opts.runnerKind === 'rollout_reviewer') {
-      let capturedSourceEvaluatorArtifactId = 'pi-art-test-evaluator';
-      return new TestDoubleRuntimeAdapter({
-        onStartRun: (input) => {
-          try {
-            const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
-            const parsed = JSON.parse(payloadStr);
-            if (typeof parsed.sourceEvaluatorArtifactId === 'string' && parsed.sourceEvaluatorArtifactId.trim() !== '') {
-              capturedSourceEvaluatorArtifactId = parsed.sourceEvaluatorArtifactId;
-            }
-          } catch { /* use default */ }
-          return { runId: `td-rollout-reviewer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
-        },
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourceEvaluatorArtifactId: capturedSourceEvaluatorArtifactId,
-            review: {
-              decision: 'approve_rollout',
-              summary: 'Test rollout review summary',
-              confidence: 0.9,
-              requiredChanges: [],
-              rolloutRisks: [],
-              safetyChecks: ['Verify feature flag is properly configured'],
-            },
-            sourceTrace: {
-              evaluatorArtifactId: capturedSourceEvaluatorArtifactId,
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
-    if (opts.runnerKind === 'trainer') {
-      let capturedSourceRolloutReviewerArtifactId = 'pi-art-test-rollout-reviewer';
-      return new TestDoubleRuntimeAdapter({
-        onStartRun: (input) => {
-          try {
-            const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
-            const parsed = JSON.parse(payloadStr);
-            if (typeof parsed.sourceRolloutReviewerArtifactId === 'string' && parsed.sourceRolloutReviewerArtifactId.trim() !== '') {
-              capturedSourceRolloutReviewerArtifactId = parsed.sourceRolloutReviewerArtifactId;
-            }
-          } catch { /* use default */ }
-          return { runId: `td-trainer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
-        },
-        onPollRun: (_runId: string) => ({
-          runId: _runId,
-          status: 'succeeded',
-          startedAt: new Date().toISOString(),
-          endedAt: new Date().toISOString(),
-        }),
-        onFetchOutput: (_runId: string) => ({
-          runId: _runId,
-          payload: {
-            taskId: opts.taskId,
-            sourceRolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
-            ruleCandidate: {
-              toolScope: 'src/**/*.ts',
-              triggerCondition: 'TypeScript file edit with schema mismatch',
-              proposedDecision: 'auto_correct',
-              proposedCorrection: {
-                description: 'Auto-correct by adding input validation before processing',
-                proposedParams: {
-                  strategy: 'prepend',
-                  snippet: 'const validated = schema.parse(input); if (!validated.success) throw new ValidationError(validated.error);',
-                },
-              },
-              rationale: 'Auto-correct validates input before processing to prevent downstream errors',
-              confidence: 0.88,
-            },
-            safety: {
-              limitations: ['Requires schema definition for all input types', 'May not handle complex nested structures'],
-              falsePositiveRisks: ['Could over-correct on intentional dynamic patterns'],
-              requiredReplayCases: ['Schema validation edge case', 'Nested object validation'],
-            },
-            sourceTrace: {
-              rolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
-            },
-            risks: [],
-            generatedAt: new Date().toISOString(),
-          },
-        }),
-      });
-    }
+/**
+ * PRI-431: Local test-double payload builder.
+ * The 7 runner-specific payloads are unique to run-once.ts; the shared resolver
+ * calls this via `testDoublePayloadBuilder` callback.
+ */
+function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAdapter {
+  if (runnerKind === 'philosopher') {
     return new TestDoubleRuntimeAdapter({
       onPollRun: (_runId: string) => ({
         runId: _runId,
@@ -462,92 +212,253 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
       onFetchOutput: (_runId: string) => ({
         runId: _runId,
         payload: {
-          valid: true,
-          taskId: opts.taskId,
-          candidates: [{
-            candidateIndex: 0,
-            badDecision: 'Ignored input validation requirement',
-            betterDecision: 'Validate all inputs against schema before processing',
-            rationale: 'Input validation prevents downstream errors and data corruption',
-            confidence: 0.85,
-            riskLevel: 'low',
-            strategicPerspective: 'defensive-programming',
-          }],
-          contextRefs: [],
+          taskId,
+          sourceDreamerArtifactId: 'pi-art-test-dreamer',
+          thesis: 'Test thesis from test-double',
+          principleCandidate: {
+            title: 'Test Principle',
+            rationale: 'Test rationale',
+            scope: 'Test scope',
+            confidence: 0.8,
+          },
+          risks: [],
           generatedAt: new Date().toISOString(),
         },
       }),
     });
   }
-
-  // PRI-393: resolve runtime from .pd/config.yaml (not .state/workflows.yaml)
-  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir);
-  const configResult = resolved.result;
-
-  if (isRuntimeConfigError(configResult)) {
-    throw new ConfigResolutionError(
-      `Config resolution from .pd/config.yaml failed: ${configResult.reason}. ` +
-      `${configResult.message}. nextAction: ${configResult.nextAction}`,
-    );
-  }
-
-  if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'pi-ai')) {
-    validateRuntimeConfig(configResult);
-    // CLI --timeout-ms overrides config timeoutMs
-    const adapterTimeoutMs = opts.timeoutMs ?? configResult.timeoutMs;
-
-    // PRI-419: when l2_dreamer flag is on AND this is the dreamer runner, route through the
-    // L2 multi-turn agent loop adapter. Other runners (philosopher/scribe/...) stay on L1.
-    if (opts.runnerKind === 'dreamer' && opts.l2ArtifactReader && opts.l2StateDir) {
-      const effectiveFlags = loadEffectiveFeatureFlags(opts.workspaceDir);
-      const l2Flag = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
-        ? effectiveFlags.flags.l2_dreamer.enabled
-        : false;
-      if (l2Flag) {
-        return new L2AgentLoopAdapter(
-          {
-            provider: String(configResult.provider),
-            model: String(configResult.model),
-            apiKeyEnv: String(configResult.apiKeyEnv),
-            baseUrl: configResult.baseUrl,
-            workspace: opts.workspaceDir,
-            totalBudgetMs: adapterTimeoutMs,
+  if (runnerKind === 'scribe') {
+    return new TestDoubleRuntimeAdapter({
+      onPollRun: (_runId: string) => ({
+        runId: _runId,
+        status: 'succeeded',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+      onFetchOutput: (_runId: string) => ({
+        runId: _runId,
+        payload: {
+          taskId,
+          sourcePhilosopherArtifactId: 'pi-art-test-philosopher',
+          principleDraft: {
+            title: 'Test Principle Draft',
+            statement: 'Test principle statement',
+            rationale: 'Test rationale',
+            applicability: ['All operations'],
+            antiPatterns: ['Ignoring validation'],
+            confidence: 0.8,
           },
-          {
-            artifactReader: opts.l2ArtifactReader,
-            principleReader: buildL2PrincipleReader(opts.l2StateDir),
+          sourceTrace: {
+            philosopherArtifactId: 'pi-art-test-philosopher',
           },
-        );
-      }
-    }
-
-    return new PiAiRuntimeAdapter({
-      provider: String(configResult.provider),
-      model: String(configResult.model),
-      apiKeyEnv: String(configResult.apiKeyEnv),
-      maxRetries: configResult.maxRetries,
-      timeoutMs: adapterTimeoutMs,
-      baseUrl: configResult.baseUrl,
-      workspace: opts.workspaceDir,
+          risks: [],
+          generatedAt: new Date().toISOString(),
+        },
+      }),
     });
   }
-
-  if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'openclaw-cli')) {
-    const { openclawMode } = configResult;
-    if (!openclawMode) {
-      throw new ConfigResolutionError(
-        `runtimeKind 'openclaw-cli' requires openclawMode. ` +
-        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml. ` +
-        `nextAction: Add openclawMode: local|gateway to your .pd/config.yaml runtime profile or use CLI flags.`,
-      );
-    }
-    return new OpenClawCliRuntimeAdapter({
-      runtimeMode: openclawMode,
-      workspaceDir: opts.workspaceDir,
+  if (runnerKind === 'artificer') {
+    let capturedSourceScribeArtifactId = 'pi-art-test-scribe';
+    return new TestDoubleRuntimeAdapter({
+      onStartRun: (input) => {
+        try {
+          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+          const parsed = JSON.parse(payloadStr);
+          if (typeof parsed.sourceScribeArtifactId === 'string' && parsed.sourceScribeArtifactId.trim() !== '') {
+            capturedSourceScribeArtifactId = parsed.sourceScribeArtifactId;
+          }
+        } catch { /* use default */ }
+        return { runId: `td-artificer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+      },
+      onPollRun: (_runId: string) => ({
+        runId: _runId,
+        status: 'succeeded',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+      onFetchOutput: (_runId: string) => ({
+        runId: _runId,
+        payload: {
+          taskId,
+          sourceScribeArtifactId: capturedSourceScribeArtifactId,
+          implementationPlan: {
+            summary: 'Test implementation summary',
+            targetSurface: 'src/test/*.ts',
+            changes: ['Add validation to test module'],
+            tests: ['Unit test for validation'],
+            rolloutNotes: ['Deploy behind feature flag'],
+            confidence: 0.8,
+          },
+          sourceTrace: {
+            scribeArtifactId: capturedSourceScribeArtifactId,
+          },
+          risks: [],
+          generatedAt: new Date().toISOString(),
+        },
+      }),
     });
   }
-
-  throw new Error(`Unsupported runtime kind: ${opts.runtimeKind}. Supported: test-double, pi-ai, openclaw-cli, config`);
+  if (runnerKind === 'evaluator') {
+    let capturedSourceArtificerArtifactId = 'pi-art-test-artificer';
+    return new TestDoubleRuntimeAdapter({
+      onStartRun: (input) => {
+        try {
+          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+          const parsed = JSON.parse(payloadStr);
+          if (typeof parsed.sourceArtificerArtifactId === 'string' && parsed.sourceArtificerArtifactId.trim() !== '') {
+            capturedSourceArtificerArtifactId = parsed.sourceArtificerArtifactId;
+          }
+        } catch { /* use default */ }
+        return { runId: `td-evaluator-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+      },
+      onPollRun: (_runId: string) => ({
+        runId: _runId,
+        status: 'succeeded',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+      onFetchOutput: (_runId: string) => ({
+        runId: _runId,
+        payload: {
+          taskId,
+          sourceArtificerArtifactId: capturedSourceArtificerArtifactId,
+          evaluation: {
+            decision: 'approved',
+            summary: 'Test evaluation summary',
+            score: 0.85,
+            strengths: ['Well-structured plan'],
+            concerns: [],
+            requiredChanges: [],
+          },
+          sourceTrace: {
+            artificerArtifactId: capturedSourceArtificerArtifactId,
+          },
+          risks: [],
+          generatedAt: new Date().toISOString(),
+        },
+      }),
+    });
+  }
+  if (runnerKind === 'rollout_reviewer') {
+    let capturedSourceEvaluatorArtifactId = 'pi-art-test-evaluator';
+    return new TestDoubleRuntimeAdapter({
+      onStartRun: (input) => {
+        try {
+          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+          const parsed = JSON.parse(payloadStr);
+          if (typeof parsed.sourceEvaluatorArtifactId === 'string' && parsed.sourceEvaluatorArtifactId.trim() !== '') {
+            capturedSourceEvaluatorArtifactId = parsed.sourceEvaluatorArtifactId;
+          }
+        } catch { /* use default */ }
+        return { runId: `td-rollout-reviewer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+      },
+      onPollRun: (_runId: string) => ({
+        runId: _runId,
+        status: 'succeeded',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+      onFetchOutput: (_runId: string) => ({
+        runId: _runId,
+        payload: {
+          taskId,
+          sourceEvaluatorArtifactId: capturedSourceEvaluatorArtifactId,
+          review: {
+            decision: 'approve_rollout',
+            summary: 'Test rollout review summary',
+            confidence: 0.9,
+            requiredChanges: [],
+            rolloutRisks: [],
+            safetyChecks: ['Verify feature flag is properly configured'],
+          },
+          sourceTrace: {
+            evaluatorArtifactId: capturedSourceEvaluatorArtifactId,
+          },
+          risks: [],
+          generatedAt: new Date().toISOString(),
+        },
+      }),
+    });
+  }
+  if (runnerKind === 'trainer') {
+    let capturedSourceRolloutReviewerArtifactId = 'pi-art-test-rollout-reviewer';
+    return new TestDoubleRuntimeAdapter({
+      onStartRun: (input) => {
+        try {
+          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+          const parsed = JSON.parse(payloadStr);
+          if (typeof parsed.sourceRolloutReviewerArtifactId === 'string' && parsed.sourceRolloutReviewerArtifactId.trim() !== '') {
+            capturedSourceRolloutReviewerArtifactId = parsed.sourceRolloutReviewerArtifactId;
+          }
+        } catch { /* use default */ }
+        return { runId: `td-trainer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+      },
+      onPollRun: (_runId: string) => ({
+        runId: _runId,
+        status: 'succeeded',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+      onFetchOutput: (_runId: string) => ({
+        runId: _runId,
+        payload: {
+          taskId,
+          sourceRolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
+          ruleCandidate: {
+            toolScope: 'src/**/*.ts',
+            triggerCondition: 'TypeScript file edit with schema mismatch',
+            proposedDecision: 'auto_correct',
+            proposedCorrection: {
+              description: 'Auto-correct by adding input validation before processing',
+              proposedParams: {
+                strategy: 'prepend',
+                snippet: 'const validated = schema.parse(input); if (!validated.success) throw new ValidationError(validated.error);',
+              },
+            },
+            rationale: 'Auto-correct validates input before processing to prevent downstream errors',
+            confidence: 0.88,
+          },
+          safety: {
+            limitations: ['Requires schema definition for all input types', 'May not handle complex nested structures'],
+            falsePositiveRisks: ['Could over-correct on intentional dynamic patterns'],
+            requiredReplayCases: ['Schema validation edge case', 'Nested object validation'],
+          },
+          sourceTrace: {
+            rolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
+          },
+          risks: [],
+          generatedAt: new Date().toISOString(),
+        },
+      }),
+    });
+  }
+  // dreamer / default
+  return new TestDoubleRuntimeAdapter({
+    onPollRun: (_runId: string) => ({
+      runId: _runId,
+      status: 'succeeded',
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+    }),
+    onFetchOutput: (_runId: string) => ({
+      runId: _runId,
+      payload: {
+        valid: true,
+        taskId,
+        candidates: [{
+          candidateIndex: 0,
+          badDecision: 'Ignored input validation requirement',
+          betterDecision: 'Validate all inputs against schema before processing',
+          rationale: 'Input validation prevents downstream errors and data corruption',
+          confidence: 0.85,
+          riskLevel: 'low',
+          strategicPerspective: 'defensive-programming',
+        }],
+        contextRefs: [],
+        generatedAt: new Date().toISOString(),
+      },
+    }),
+  });
 }
 
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
@@ -608,13 +519,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const runtimeAdapter = resolveRuntimeAdapter({
+      const runtimeAdapter = resolveRuntimeAdapterFromConfig({
         runtimeKind,
-        taskId: wakeResult.taskId,
         workspaceDir,
         runnerKind,
         timeoutMs: cliTimeoutMs,
-        // PRI-419: pass the L2 readers so resolveRuntimeAdapter can build an L2AgentLoopAdapter
+        allowTestDouble: true,
+        testDoublePayloadBuilder: () => buildTestDoubleAdapter(runnerKind, wakeResult.taskId),
+        // PRI-419: pass the L2 readers so the resolver can build an L2AgentLoopAdapter
         // when l2_dreamer is enabled. Only consumed for dreamer; harmless for other runners.
         l2ArtifactReader: artifactStore,
         l2StateDir: `${workspaceDir}/.state`,
