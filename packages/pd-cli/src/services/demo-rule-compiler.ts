@@ -18,7 +18,7 @@ import * as vm from 'node:vm';
 import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
 import type { RuleHostHelpers } from '@principles/core/runtime-v2';
 import type { ReplayEvaluateFn } from '@principles/core/runtime-v2';
-import { safeStringifyPreview } from '@principles/core/runtime-v2';
+import { safeStringifyPreview, validateCorrectionProposal } from '@principles/core/runtime-v2';
 
 function normalizeSource(sourceCode: string): string {
   const withoutExports = sourceCode
@@ -32,6 +32,29 @@ globalThis.__pdRuleModule = {
 };`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRuleEvaluator(value: unknown): value is (input: RuleHostInput, helpers: RuleHostHelpers) => unknown {
+  return typeof value === 'function';
+}
+
+function isRuleHostResult(value: unknown): value is RuleHostResult {
+  if (!isRecord(value)) return false;
+  const decision = Object.hasOwn(value, 'decision') ? value.decision : undefined;
+  const matched = Object.hasOwn(value, 'matched') ? value.matched : undefined;
+  const reason = Object.hasOwn(value, 'reason') ? value.reason : undefined;
+  if (decision !== 'allow' && decision !== 'block' && decision !== 'requireApproval' && decision !== 'auto_correct') {
+    return false;
+  }
+  if (typeof matched !== 'boolean' || typeof reason !== 'string') return false;
+  if (decision === 'auto_correct') {
+    const proposal = Object.hasOwn(value, 'correctionProposal') ? value.correctionProposal : undefined;
+    return validateCorrectionProposal(proposal).valid;
+  }
+  return true;
+}
 /**
  * Compile rule implementation code and return a typed evaluate function.
  * Mirrors `createReplayEvaluateFromCode` in openclaw-plugin.
@@ -40,30 +63,27 @@ globalThis.__pdRuleModule = {
  */
 export function compileDemoRule(code: string, sourceLabel: string): ReplayEvaluateFn {
   const context = vm.createContext(Object.create(null));
-  const script = new vm.Script(normalizeSource(code), { filename: sourceLabel });
+  const script = new vm.Script(normalizeSource(code), {
+    filename: sourceLabel,
+  });
 
   script.runInContext(context, { timeout: 1000, displayErrors: true });
 
-  const moduleExports = (context as { __pdRuleModule?: { meta?: unknown; evaluate?: unknown } })
-    .__pdRuleModule;
+  const moduleExports = (context as { __pdRuleModule?: { meta?: unknown; evaluate?: unknown } }).__pdRuleModule;
   delete (context as { __pdRuleModule?: unknown }).__pdRuleModule;
 
-  if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
-    throw new Error(
-      `[compileDemoRule] ${sourceLabel}: compiled module has no evaluate function`,
-    );
+  if (!moduleExports || !isRuleEvaluator(moduleExports.evaluate)) {
+    throw new Error(`[compileDemoRule] ${sourceLabel}: compiled module has no evaluate function`);
   }
 
-  const evaluateFn = moduleExports.evaluate as (
-    input: RuleHostInput,
-    helpers: RuleHostHelpers,
-  ) => RuleHostResult;
-
+  const evaluateFn = moduleExports.evaluate;
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
     const result = evaluateFn(input, helpers);
-    if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'decision')) {
+    if (!isRuleHostResult(result)) {
       throw new Error(
-        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)})`,
+        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${
+          typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)
+        })`,
       );
     }
     return result;
