@@ -966,6 +966,11 @@ export type {
 } from './tools/agent-tool-contract.js';
 export { DreamerOutputV1Typebox, DreamerCandidateTypebox } from './tools/dreamer-output-typebox.js';
 
+// ── L2 Principle Reader (PRI-431) ─────────────────────────────────────────────
+
+export { buildL2PrincipleReader } from './build-l2-principle-reader.js';
+export type { BuildL2PrincipleReaderOptions } from './build-l2-principle-reader.js';
+
 // ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
 
 export type {

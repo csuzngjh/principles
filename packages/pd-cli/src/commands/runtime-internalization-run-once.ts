@@ -21,11 +21,11 @@ import {
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   L2AgentLoopAdapter,
-  loadLedger,
+  buildL2PrincipleReader,
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { PdL2ArtifactReader, PdL2PrincipleReader } from '@principles/core/runtime-v2';
+import type { PdL2ArtifactReader } from '@principles/core/runtime-v2';
 import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -217,29 +217,6 @@ interface ResolveAdapterOptions {
   l2ArtifactReader?: PdL2ArtifactReader;
   /** PRI-419: workspace stateDir for the L2 principle reader (only used when l2_dreamer is on). */
   l2StateDir?: string;
-}
-
-/**
- * PRI-419: build a read-only principle reader from the workspace ledger.
- * Returns active internalized principles (id + statement). Degrades to empty on missing ledger.
- */
-function makeDreamerPrincipleReader(stateDir: string): PdL2PrincipleReader {
-  return {
-    listActivePrinciples: async () => {
-      try {
-        const ledger = loadLedger(stateDir);
-        const principles = ledger.tree.principles ?? {};
-        const active = Object.values(principles).filter(p => p.status === 'active' && typeof p.id === 'string' && typeof p.text === 'string');
-        return active.map(p => ({ id: p.id, statement: p.text }));
-      } catch (error) {
-        // Graceful degradation WITH an observable reason (Runtime Contract R9): the L2
-        // dreamer proceeds with only core axioms; the degradation is logged for debugging.
-        const reason = error instanceof Error ? error.message : String(error);
-        console.warn(`[l2_dreamer] listActivePrinciples degraded — no internalized principles loaded: ${reason}`);
-        return [];
-      }
-    },
-  };
 }
 
 function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
@@ -538,7 +515,7 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
           },
           {
             artifactReader: opts.l2ArtifactReader,
-            principleReader: makeDreamerPrincipleReader(opts.l2StateDir),
+            principleReader: buildL2PrincipleReader(opts.l2StateDir),
           },
         );
       }
