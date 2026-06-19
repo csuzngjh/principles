@@ -47,6 +47,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
+import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -577,7 +578,7 @@ const activationCmd = runtimeCmd
 activationCmd
   .command('dispatch')
   .description('Dispatch an activation for a rollout-reviewed artifact')
-  .requiredOption('-a, --artifact-id <id>', 'PIArtifact ID to activate')
+  .option('-a, --artifact-id <id>', 'PIArtifact ID to activate')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
   .option('--dry-run', 'Dry-run mode (default, no writes)')
@@ -590,6 +591,61 @@ activationCmd
       channel: opts.channel,
       dryRun: opts.dryRun,
       confirm: opts.confirm,
+      json: opts.json,
+    });
+  });
+
+// PRI-408 Contract E: Owner-initiated rollback/deactivate of an activation.
+// Idempotent — calling twice on the same ID is safe and returns ok=false with reason.
+activationCmd
+  .command('deactivate')
+  .description('Deactivate (rollback) an active activation — idempotent (PRI-408 Contract E)')
+  .option('-a, --activation-id <id>', 'Activation ID to deactivate')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationDeactivate({
+      workspace: opts.workspace,
+      activationId: opts.activationId,
+      json: opts.json,
+    });
+  });
+
+// PRI-408 Contract D: Owner observability — list current activations.
+activationCmd
+  .command('list')
+  .description('List activations (default: active only) — PRI-408 Contract D observability')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-c, --channel <channel>', 'Filter by channel (prompt|code_tool_hook)')
+  .option('--include-deactivated', 'Include deactivated records in output')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationList({
+      workspace: opts.workspace,
+      channel: opts.channel,
+      includeDeactivated: opts.includeDeactivated,
+      json: opts.json,
+    });
+  });
+
+// P1 #2 fix: Owner edit entry point — swap a pending approval's artifact.
+// Required because ApprovalQueue.edit() was dead code with no CLI/OpenClaw entry.
+// P2 #5: use .option() instead of .requiredOption() so missing-flag errors
+// produce structured JSON output via the handler, not Commander's pre-handler exit.
+activationCmd
+  .command('edit')
+  .description('Edit a pending approval to swap its artifact — P1 #2 owner edit entry point')
+  .option('-a, --approval-id <id>', 'Approval ID to edit (must be pending)')
+  .option('-n, --new-artifact-id <id>', 'New PIArtifact ID to swap to')
+  .option('-r, --edit-reason <text>', 'Reason for the edit')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationEdit({
+      workspace: opts.workspace,
+      approvalId: opts.approvalId,
+      newArtifactId: opts.newArtifactId,
+      editReason: opts.editReason,
       json: opts.json,
     });
   });

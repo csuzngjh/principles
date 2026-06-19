@@ -21,7 +21,16 @@ export type ActivationActor =
   | { kind: 'agent'; agentId: string }
   | { kind: 'human'; userId: string };
 
-export type RolloutActivationDecision = 'auto_activate' | 'require_approval' | 'reject';
+/**
+ * Rollout activation decision from the rollout reviewer.
+ * - 'auto_activate': low-risk channel, activate directly
+ * - 'require_approval': enqueue for owner approval
+ * - 'reject': refuse activation
+ * - 'approved': approval already granted externally (ApprovalCompletionService).
+ *   Bypasses the approval queue check and activates directly. This is the
+ *   post-approval dispatch path for high-risk channels.
+ */
+export type RolloutActivationDecision = 'auto_activate' | 'require_approval' | 'reject' | 'approved';
 
 export interface DispatchInput {
   artifactId: string;
@@ -32,6 +41,13 @@ export interface DispatchInput {
   now: string;
   confirm: boolean;
   confidence?: number;
+  /**
+   * Required when rolloutDecision === 'approved'.
+   * The dispatcher independently verifies this approval record exists,
+   * is in 'approved' status, and matches the artifactId + channel.
+   * This prevents callers from bypassing the owner approval boundary.
+   */
+  approvalId?: string;
 }
 
 export type ActivationDecision =
@@ -39,7 +55,7 @@ export type ActivationDecision =
   | { decision: 'activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
-  | { decision: 'refused'; reason: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel }
+  | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel }
   | { decision: 'invalid_artifact'; reason: string; nextAction?: string };
 
 export interface PIArtifactSnapshot {
@@ -73,8 +89,8 @@ export interface ActivationStatusRecord {
 export interface ActivationStateReadModel {
   getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null>;
   recordActivation(record: ActivationStatusRecord): Promise<void>;
-  listPromptActivations(): Promise<ActivationStatusRecord[]>;
-  listCodeToolHookActivations(): Promise<ActivationStatusRecord[]>;
+  listPromptActivations(includeDeactivated?: boolean): Promise<ActivationStatusRecord[]>;
+  listCodeToolHookActivations(includeDeactivated?: boolean): Promise<ActivationStatusRecord[]>;
   listAllActivations(): Promise<ActivationStatusRecord[]>;
   deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean>;
 }
@@ -131,6 +147,12 @@ export interface ApprovalRecord {
   confidenceExplanation?: string;
   effectDescription?: string;
   rejectionEffect?: string;
+  /** Story A (PRI-408): Edit tracking — when owner edits the principle/rule before approving */
+  editedAt?: string;
+  editedBy?: string;
+  editReason?: string;
+  /** The previous artifactId before the edit (for lineage tracking) */
+  previousArtifactId?: string;
 }
 
 export type ConfidenceLabel = 'high' | 'medium' | 'low';
@@ -203,8 +225,37 @@ export interface ApprovalQueueStore {
   reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
   /** Roll back an approved approval to pending so it can be re-approved. Used when post-approval activation dispatch fails. */
   resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }>;
+  /**
+   * Story A (PRI-408): Edit a pending approval's artifact to a new version.
+   * Updates artifactId, records edit metadata, keeps status as pending.
+   * The caller is responsible for creating the new artifact and performing
+   * schema validation + sandbox replay BEFORE calling this method.
+   * Returns error if the approval is not in 'pending' status.
+   */
+  edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult>;
 }
 
+export interface ApprovalEditInput {
+  approvalId: string;
+  editedBy: string;
+  newArtifactId: string;
+  editReason: string;
+  now: string;
+}
+
+export interface ArtifactLineageIdentity {
+  artifactId: string;
+  sourceTaskId: string;
+  sourcePrincipleId?: string;
+  lineageArtifactIds: string[];
+}
+
+export function isArtifactRevisionOf(candidate: ArtifactLineageIdentity, original: ArtifactLineageIdentity): boolean {
+  const referencesOriginal = candidate.lineageArtifactIds.includes(original.artifactId);
+  const samePrinciple = Boolean(candidate.sourcePrincipleId)
+    && candidate.sourcePrincipleId === original.sourcePrincipleId;
+  return candidate.sourceTaskId === original.sourceTaskId || referencesOriginal || samePrinciple;
+}
 export function makeIdempotencyKey(artifactId: string, channel: InternalizationChannel): string {
   return `${artifactId}::${channel}`;
 }

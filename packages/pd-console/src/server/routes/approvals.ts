@@ -146,7 +146,7 @@ export async function handleApprovalsRoute(
         }
         return;
       }
-      sendSuccess(res, { ...result.record, activation: result.activation });
+      sendSuccess(res, { ...result.record, activation: result.activation, warning: result.warning });
     } catch (err: unknown) {
       const message = getErrorMessage(err);
       if (message === 'Request body too large') {
@@ -199,6 +199,62 @@ export async function handleApprovalsRoute(
         sendError(res, 413, 'payload_too_large', message);
       } else {
         sendError(res, 500, 'reject_error', message);
+      }
+    }
+    return;
+  }
+
+  // POST /api/v1/approvals/:id/edit — edit a pending approval's artifact (P1 #2 fix)
+  const editMatch = /^[/]([^/]+)[/]edit$/.exec(subPath);
+  if (req.method === 'POST' && editMatch) {
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(editMatch[1]);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
+      return;
+    }
+    try {
+      const body = await readBody(req);
+      const parsed = parseJsonBody(body, res);
+      if (!parsed) return;
+      if (!Object.hasOwn(parsed, 'newArtifactId') || typeof parsed.newArtifactId !== 'string') {
+        sendBadRequest(res, 'newArtifactId is required and must be a string');
+        return;
+      }
+      if (!Object.hasOwn(parsed, 'editReason') || typeof parsed.editReason !== 'string') {
+        sendBadRequest(res, 'editReason is required and must be a string');
+        return;
+      }
+      if (parsed.editReason === '') {
+        sendBadRequest(res, 'editReason must not be empty');
+        return;
+      }
+
+      const result = await model.editApproval({ approvalId, editedBy: 'operator', newArtifactId: parsed.newArtifactId, editReason: parsed.editReason });
+      if (!result.ok) {
+        if (result.error === 'not_found') {
+          sendNotFound(res, 'Approval ' + approvalId + ' not found');
+        } else if (result.error === 'already_decided') {
+          sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));
+        } else if (result.error === 'artifact_not_found') {
+          sendBadRequest(res, result.reason ?? 'Artifact not found');
+        } else if (result.error === 'artifact_not_validated') {
+          sendBadRequest(res, result.reason ?? 'Artifact not validated');
+        } else if (result.error === 'artifact_lineage_mismatch') {
+          sendBadRequest(res, result.reason ?? 'Artifact lineage mismatch');
+        } else {
+          sendError(res, 500, 'edit_error', 'Unexpected error');
+        }
+        return;
+      }
+      sendSuccess(res, result.record);
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      if (message === 'Request body too large') {
+        sendError(res, 413, 'payload_too_large', message);
+      } else {
+        sendError(res, 500, 'edit_error', message);
       }
     }
     return;

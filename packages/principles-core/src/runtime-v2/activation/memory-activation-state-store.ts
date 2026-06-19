@@ -11,20 +11,20 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
     this.activations.set(record.idempotencyKey, record);
   }
 
-  async listPromptActivations(): Promise<ActivationStatusRecord[]> {
+  async listPromptActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {
     const result: ActivationStatusRecord[] = [];
     for (const record of this.activations.values()) {
-      if (record.channel === 'prompt' && record.deactivatedAt === null) {
+      if (record.channel === 'prompt' && (includeDeactivated || record.deactivatedAt === null)) {
         result.push(record);
       }
     }
     return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
   }
 
-  async listCodeToolHookActivations(): Promise<ActivationStatusRecord[]> {
+  async listCodeToolHookActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {
     const result: ActivationStatusRecord[] = [];
     for (const record of this.activations.values()) {
-      if (record.channel === 'code_tool_hook' && record.deactivatedAt === null) {
+      if (record.channel === 'code_tool_hook' && (includeDeactivated || record.deactivatedAt === null)) {
         result.push(record);
       }
     }

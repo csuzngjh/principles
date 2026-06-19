@@ -218,6 +218,18 @@ function createMockStore(): ApprovalQueueStore {
       record.decidedBy = undefined;
       return { ok: true };
     }),
+
+    edit: vi.fn(async (input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string; now: string }): Promise<ApprovalDecisionResult> => {
+      const record = records.get(input.approvalId);
+      if (!record) return { ok: false, error: 'not_found' };
+      if (record.status !== 'pending') return { ok: false, error: 'already_decided', status: record.status };
+      record.previousArtifactId = record.artifactId;
+      record.artifactId = input.newArtifactId;
+      record.editedAt = input.now;
+      record.editedBy = input.editedBy;
+      record.editReason = input.editReason;
+      return { ok: true, record };
+    }),
   };
 }
 

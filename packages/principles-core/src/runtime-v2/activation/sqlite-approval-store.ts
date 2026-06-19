@@ -1,5 +1,6 @@
 import type {
   ApprovalDecisionResult,
+  ApprovalEditInput,
   ApprovalEnqueueInput,
   ApprovalFilter,
   ApprovalListFilter,
@@ -29,6 +30,10 @@ interface ApprovalRow {
   confidence_explanation: string | null;
   effect_description: string | null;
   rejection_effect: string | null;
+  edited_at: string | null;
+  edited_by: string | null;
+  edit_reason: string | null;
+  previous_artifact_id: string | null;
 }
 
 function rowToRecord(row: ApprovalRow): ApprovalRecord {
@@ -49,6 +54,10 @@ function rowToRecord(row: ApprovalRow): ApprovalRecord {
     confidenceExplanation: row.confidence_explanation ?? undefined,
     effectDescription: row.effect_description ?? undefined,
     rejectionEffect: row.rejection_effect ?? undefined,
+    editedAt: row.edited_at ?? undefined,
+    editedBy: row.edited_by ?? undefined,
+    editReason: row.edit_reason ?? undefined,
+    previousArtifactId: row.previous_artifact_id ?? undefined,
   };
 }
 
@@ -171,5 +180,26 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     if (existing.status !== 'approved') return { ok: false, error: 'not_approved' };
     db.prepare("UPDATE approvals SET status = 'pending', decided_at = NULL, decided_by = NULL, decision_note = NULL WHERE approval_id = ? AND status = 'approved'").run(approvalId);
     return { ok: true };
+  }
+
+  async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
+    const db = this.connection.getDb();
+    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'pending') {
+      return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
+    }
+    // Atomic UPDATE: derive previous_artifact_id from the current DB value
+    // to prevent lineage drift during concurrent edits (ERR-004/ERR-008).
+    const updateResult = db.prepare(
+      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending'"
+    ).run(input.newArtifactId, input.now, input.editedBy, input.editReason, input.approvalId);
+    if (updateResult.changes === 0) {
+      const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
+      if (!fresh) return { ok: false, error: 'not_found' };
+      return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
+    }
+    const row = db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(input.approvalId) as ApprovalRow;
+    return { ok: true, record: rowToRecord(row) };
   }
 }
