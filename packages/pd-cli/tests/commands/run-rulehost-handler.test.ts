@@ -63,6 +63,14 @@ interface StdIoState {
   exitCode: number | undefined;
 }
 
+function parseJsonObject(text: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('stdout is not a JSON object');
+  }
+  return parsed;
+}
+
 function captureStdio(fn: () => Promise<void>): Promise<StdIoState> {
   return new Promise((resolve, reject) => {
     const origExitCode = process.exitCode;
@@ -116,7 +124,7 @@ describe('handleRunRuleHost — input validation gates', () => {
       handleRunRuleHost({ painId: 'pain-1', dryRun: true, confirm: true, json: true }),
     );
     expect(exitCode).toBe(1);
-    const payload = JSON.parse(stdout.trim());
+    const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('failed');
     expect(payload.nextAction).toBeDefined();
     expect(typeof payload.reason).toBe('string');
@@ -145,7 +153,7 @@ describe('handleRunRuleHost — input validation gates', () => {
       handleRunRuleHost({ painId: 'pain-1', channel: 'wizard', json: true }),
     );
     expect(exitCode).toBe(1);
-    const payload = JSON.parse(stdout.trim());
+    const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('failed');
     expect(payload.reason).toMatch(/wizard/);
   });
@@ -195,7 +203,7 @@ describe('handleRunRuleHost — dry-run mode output shape (with minimal pd-confi
     const { stdout, exitCode } = await captureStdio(() =>
       handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
     );
-    const payload = JSON.parse(stdout.trim());
+    const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('dry_run');
     expect(typeof payload.capabilityStatus).toBe('string');
     expect(typeof payload.nextAction).toBe('string');
@@ -217,7 +225,7 @@ describe('handleRunRuleHost — dry-run mode output shape (with minimal pd-confi
     const { stdout } = await captureStdio(() =>
       handleRunRuleHost({ painId: 'pain-1', json: true, workspace: workspaceDir }),
     );
-    const payload = JSON.parse(stdout.trim());
+    const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('dry_run');
   });
 

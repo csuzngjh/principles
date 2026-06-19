@@ -16,7 +16,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { compileDemoRule } from '../../src/services/demo-rule-compiler.js';
-import type { RuleHostInput, RuleHostHelpers, RuleHostResult } from '@principles/core/runtime-v2';
+import { createRuleHostHelpers } from '@principles/core/runtime-v2';
+import type { ReplayEvaluateFn, RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
 
 const VALID_RULE = `
 export const meta = {
@@ -25,7 +26,7 @@ export const meta = {
   purpose: 'unit test',
 };
 export function evaluate(input, helpers) {
-  return { decision: 'accepted', reason: 'ok', evidence: [] };
+  return { decision: 'allow', matched: false, reason: 'ok' };
 }
 `;
 
@@ -36,6 +37,18 @@ export const meta = { id: 'r1' };
 const THROWING_EVALUATE = `
 export function evaluate(input, helpers) {
   throw new Error('boom');
+}
+`;
+
+const INVALID_RETURN_WRONG_DECISION = `
+export function evaluate() {
+  return { decision: 'accepted', matched: false, reason: 'wrong decision enum' };
+}
+`;
+
+const INVALID_RETURN_NO_MATCHED = `
+export function evaluate() {
+  return { decision: 'allow', reason: 'missing matched' };
 }
 `;
 
@@ -72,20 +85,39 @@ export function evaluate(input, helpers) {
 const RULE_WITH_EVIDENCE = `
 export const meta = { id: 'r-evidence' };
 export function evaluate(input, helpers) {
-  const count = Array.isArray(input.context) ? input.context.length : 0;
-  return { decision: count > 0 ? 'accepted' : 'rejected', reason: 'based on count', evidence: [{ count }] };
+  const count = input.derived.estimatedLineChanges;
+  const matched = count > 0;
+  return { decision: matched ? 'block' : 'allow', matched, reason: 'based on changes', diagnostics: { count } };
 }
 `;
 
 const RULE_WITH_HASOWN_POISON_PAYLOAD = `
 export function evaluate(input, helpers) {
   const poisoned = Object.create(null);
-  poisoned.decision = 'accepted';
+  poisoned.decision = 'allow';
+  poisoned.matched = false;
   poisoned.reason = 'ok';
-  poisoned.evidence = [];
   return poisoned;
 }
 `;
+
+function makeRuleHostInput(estimatedLineChanges = 0): RuleHostInput {
+  return {
+    action: {
+      toolName: 'write_file',
+      normalizedPath: '/workspace/a.ts',
+      paramsSummary: {},
+    },
+    workspace: { isRiskPath: false, planStatus: 'READY', hasPlanFile: true },
+    session: { currentGfi: 0, recentThinking: true },
+    evolution: { epTier: 0 },
+    derived: { estimatedLineChanges, bashRisk: 'safe' },
+  };
+}
+
+function evaluateRule(evaluate: ReplayEvaluateFn, input: RuleHostInput = makeRuleHostInput()): RuleHostResult {
+  return evaluate(input, createRuleHostHelpers(input));
+}
 
 describe('compileDemoRule', () => {
   describe('source normalization', () => {
@@ -104,64 +136,70 @@ describe('compileDemoRule', () => {
   });
 
   describe('evaluate output shape validation', () => {
-    it('returns a RuleHostResult with decision="accepted"', () => {
+    it('returns a fully validated RuleHostResult', () => {
       const fn = compileDemoRule(VALID_RULE, 'valid-rule.ts');
-      const input = { task: 'x', context: [] } as unknown as RuleHostInput;
-      const helpers = {} as RuleHostHelpers;
-      const result = fn(input, helpers);
-      expect(result).toEqual({ decision: 'accepted', reason: 'ok', evidence: [] });
+      const result = evaluateRule(fn);
+      expect(result).toEqual({
+        decision: 'allow',
+        matched: false,
+        reason: 'ok',
+      });
     });
 
     it('throws when evaluate returns an object without a decision field (ERR-037)', () => {
       const fn = compileDemoRule(INVALID_RETURN_NO_DECISION, 'no-decision.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
+    });
+
+    it('rejects objects using a non-RuleHost decision enum', () => {
+      const fn = compileDemoRule(INVALID_RETURN_WRONG_DECISION, 'wrong-decision.ts');
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
+    });
+
+    it('rejects objects missing the required matched flag', () => {
+      const fn = compileDemoRule(INVALID_RETURN_NO_MATCHED, 'missing-matched.ts');
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
     });
 
     it('throws when evaluate returns a number (non-object)', () => {
       const fn = compileDemoRule(INVALID_RETURN_PRIMITIVE, 'primitive.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
     });
 
     it('throws when evaluate returns null', () => {
       const fn = compileDemoRule(INVALID_RETURN_NULL, 'null-return.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
     });
 
     it('throws when evaluate returns undefined', () => {
       const fn = compileDemoRule(INVALID_RETURN_UNDEF, 'undef-return.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
     });
 
     it('throws when evaluate returns a string', () => {
       const fn = compileDemoRule(INVALID_RETURN_STRING, 'string-return.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/invalid RuleHostResult/);
+      expect(() => evaluateRule(fn)).toThrow(/invalid RuleHostResult/);
     });
 
     it('handles Object.create(null) output (no prototype) via Object.hasOwn (ERR-025)', () => {
       const fn = compileDemoRule(RULE_WITH_HASOWN_POISON_PAYLOAD, 'hasown-poison.ts');
-      const result = fn({} as RuleHostInput, {} as RuleHostHelpers);
-      expect(result.decision).toBe('accepted');
+      const result = evaluateRule(fn);
+      expect(result.decision).toBe('allow');
     });
   });
 
   describe('evaluate behaviour', () => {
     it('propagates evaluate() exceptions to the caller (fail loud)', () => {
       const fn = compileDemoRule(THROWING_EVALUATE, 'throwing.ts');
-      expect(() => fn({} as RuleHostInput, {} as RuleHostHelpers)).toThrow(/boom/);
+      expect(() => evaluateRule(fn)).toThrow(/boom/);
     });
 
-    it('reads inputs and returns different results based on context', () => {
+    it('reads real RuleHostInput fields and returns different decisions', () => {
       const fn = compileDemoRule(RULE_WITH_EVIDENCE, 'evidence-rule.ts');
-      const withContext = fn(
-        { task: 'x', context: [1, 2, 3] } as unknown as RuleHostInput,
-        {} as RuleHostHelpers,
-      );
-      const without = fn(
-        { task: 'x', context: [] } as unknown as RuleHostInput,
-        {} as RuleHostHelpers,
-      );
-      expect(withContext.decision).toBe('accepted');
-      expect(without.decision).toBe('rejected');
+      const withChanges = evaluateRule(fn, makeRuleHostInput(3));
+      const withoutChanges = evaluateRule(fn);
+      expect(withChanges.decision).toBe('block');
+      expect(withoutChanges.decision).toBe('allow');
     });
   });
 
@@ -170,17 +208,16 @@ describe('compileDemoRule', () => {
       const polluter = `
       export function evaluate() {
         globalThis.__pd_leaked_test = 1;
-        return { decision: 'rejected', reason: 'polluting', evidence: [] };
+        return { decision: 'block', matched: true, reason: 'polluting' };
       }
       `;
-      const before = (globalThis as { __pd_leaked_test?: unknown }).__pd_leaked_test;
+      expect(Reflect.get(globalThis, '__pd_leaked_test')).toBeUndefined();
       const fn = compileDemoRule(polluter, 'polluter.ts');
-      fn({} as RuleHostInput, {} as RuleHostHelpers);
-      const after = (globalThis as { __pd_leaked_test?: unknown }).__pd_leaked_test;
+      evaluateRule(fn);
+      const leakedValue = Reflect.get(globalThis, '__pd_leaked_test');
       // The sandboxed __pdRuleModule temporary assignment must not leak
       // arbitrary user-defined globals.
-      expect(before).toBeUndefined();
-      expect(after).toBeUndefined();
+      expect(leakedValue).toBeUndefined();
     });
 
     it('removes the __pdRuleModule helper from the sandbox after compilation', () => {
@@ -195,25 +232,11 @@ describe('compileDemoRule', () => {
   describe('sourceLabel is threaded into error messages', () => {
     it('includes sourceLabel when evaluate() returns invalid output', () => {
       const fn = compileDemoRule(INVALID_RETURN_PRIMITIVE, 'labeled-42.ts');
-      let caught: Error | null = null;
-      try {
-        fn({} as RuleHostInput, {} as RuleHostHelpers);
-      } catch (err) {
-        caught = err as Error;
-      }
-      expect(caught).not.toBeNull();
-      expect(caught!.message).toMatch(/labeled-42\.ts/);
+      expect(() => evaluateRule(fn)).toThrow(/labeled-42\.ts/);
     });
 
     it('includes sourceLabel when evaluate export is missing', () => {
-      let caught: Error | null = null;
-      try {
-        compileDemoRule(NO_EVALUATE, 'no-eval-source-label.ts');
-      } catch (err) {
-        caught = err as Error;
-      }
-      expect(caught).not.toBeNull();
-      expect(caught!.message).toMatch(/no-eval-source-label\.ts/);
+      expect(() => compileDemoRule(NO_EVALUATE, 'no-eval-source-label.ts')).toThrow(/no-eval-source-label\.ts/);
     });
   });
 });
