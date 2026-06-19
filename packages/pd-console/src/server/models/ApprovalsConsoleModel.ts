@@ -15,11 +15,16 @@ import {
   ActivationDispatcher,
   PromptWriter,
   DeferArchiveWriter,
+  RuleHostWriter,
+  createProductionGateDeps,
+  ApprovalCompletionService,
   ApprovalQueue,
   mapConfidenceToLabel,
+  isArtifactRevisionOf,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import { loadWorkspaceFeatureFlags } from '../config/feature-flags.js';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -38,7 +43,7 @@ type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; chann
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
 export type ApproveWithActivationResult =
-  | { ok: true; record: ApprovalRecord; activation?: ActivationDecision }
+  | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
   | { ok: false; error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
   | { ok: false; error: 'unsupported_channel'; channel: string }
@@ -158,13 +163,123 @@ export class ApprovalsConsoleModel {
       return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack };
     }
 
+    // P1 #4 fix: when activation is skipped (feature flag disabled), surface
+    // a clear warning so the owner knows behavior did NOT change. The approval
+    // record remains 'approved' (Contract F: no data damage), but the owner
+    // is explicitly informed that activation was skipped.
+    if (activation === undefined) {
+      return {
+        ok: true,
+        record: approvalResult.record,
+        activation: undefined,
+        warning: 'activation_skipped_feature_flag_disabled: approval is recorded but activation was not dispatched. Enable story_a_approval_completion flag or manually run "pd runtime activation dispatch" to activate.',
+      };
+    }
+
     return { ok: true, record: approvalResult.record, activation };
+  }
+
+  /**
+   * Edit a pending approval's artifact to a new version (P1 #2 fix).
+   *
+   * Before this method existed, ApprovalQueue.edit() was dead code — no
+   * Console/CLI/OpenClaw entry point called it. Owners could only approve
+   * or reject, not edit. This method makes the edit capability reachable
+   * from the Console route and CLI command.
+   *
+   * P1 #2 (adversarial review): validates the new artifact exists, has
+   * passed validation (validationStatus === 'validated'), and has lineage
+   * consistent with the original approval (same task, explicit artifact
+   * lineage, or shared source principle). Previously
+   * the method accepted any newArtifactId without checking existence,
+   * validation status, or lineage — allowing an owner to point an approval
+   * at an arbitrary, unvalidated, or lineage-mismatched artifact.
+   */
+  async editApproval(
+    input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string },
+  ): Promise<
+    | { ok: true; record: ApprovalRecord }
+    | { ok: false; error: 'not_found' | 'already_decided' | 'artifact_not_found' | 'artifact_not_validated' | 'artifact_lineage_mismatch'; status?: ApprovalStatus; reason?: string }
+  > {
+    const { approvalId, editedBy, newArtifactId, editReason } = input;
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
+    const existing = await this.readSafeGetById(approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'pending') {
+      return { ok: false, error: 'already_decided', status: existing.status };
+    }
+
+    // P1 #2: validate the new artifact before swapping the approval pointer.
+    const conn = this.getWriteConnection();
+    const piArtifactStore = new SqlitePIArtifactStore(conn);
+    const newArtifact = await piArtifactStore.getArtifactById(newArtifactId);
+    if (!newArtifact) {
+      return { ok: false, error: 'artifact_not_found', reason: `Artifact ${newArtifactId} does not exist in the artifact store` };
+    }
+    if (newArtifact.validationStatus !== 'validated') {
+      return { ok: false, error: 'artifact_not_validated', reason: `Artifact ${newArtifactId} has validationStatus '${newArtifact.validationStatus}', must be 'validated'` };
+    }
+    // A revision may be produced by a new task, but it must reference the
+    // original artifact or its source principle.
+    const originalArtifact = await piArtifactStore.getArtifactById(existing.artifactId);
+    if (!originalArtifact) {
+      return {
+        ok: false,
+        error: 'artifact_lineage_mismatch',
+        reason: `Original artifact ${existing.artifactId} does not exist; revision lineage cannot be verified`,
+      };
+    }
+    if (!isArtifactRevisionOf(newArtifact, originalArtifact)) {
+      return {
+        ok: false,
+        error: 'artifact_lineage_mismatch',
+        reason: `Artifact ${newArtifactId} does not reference ${originalArtifact.artifactId} or its source principle`,
+      };
+    }
+
+    const editResult = await this.getWriteQueue().edit({
+      approvalId,
+      editedBy,
+      newArtifactId,
+      editReason,
+      now: new Date().toISOString(),
+    });
+    if (!editResult.ok) {
+      if (editResult.error === 'already_decided') {
+        return { ok: false, error: 'already_decided', status: editResult.status };
+      }
+      return { ok: false, error: 'not_found' };
+    }
+    return { ok: true, record: editResult.record };
   }
 
   private async dispatchActivationAfterApproval(
     existing: ApprovalRecord,
     decidedBy: string,
   ): Promise<ActivationDecision | undefined> {
+    // Feature flag gate (Contract F): when story_a_approval_completion is disabled,
+    // the new orchestrator is deactivated without damaging existing data.
+    // The approval remains in 'approved' status; only activation is skipped.
+    const flagResult = loadWorkspaceFeatureFlags(this.workspaceDir);
+    if (!flagResult.ok) {
+      return {
+        decision: 'refused' as const,
+        reason: `feature_flag_load_failed: ${flagResult.reason}`,
+        nextAction: 'fix feature flag config or manually dispatch via pd runtime activation dispatch',
+        channel: existing.channel,
+        riskLevel: existing.riskLevel,
+      };
+    }
+    const completionFlag = flagResult.flags.flags.story_a_approval_completion;
+    if (!completionFlag || !completionFlag.enabled) {
+      // Flag disabled — return undefined so the caller knows activation was skipped.
+      // The approval record itself is not rolled back (Contract F: no data damage).
+      // The skip is observable via `pd runtime activation list` (no activation record).
+      return undefined;
+    }
+
     try {
       const conn = this.getWriteConnection();
       const piArtifactStore = new SqlitePIArtifactStore(conn);
@@ -188,26 +303,54 @@ export class ApprovalsConsoleModel {
       };
       const activationStateStore = new SqliteActivationStateStore(conn);
       const approvalQueueStore = new SqliteApprovalQueueStore(conn);
+      // Wire all three MVP-Core writers, including RuleHostWriter for code_tool_hook.
+      // This fixes the P0 breakpoint where code_tool_hook approvals could not activate.
       const dispatcher = new ActivationDispatcher(
         artifactReadModel,
         activationStateStore,
-        { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore },
+        {
+          writers: [
+            new PromptWriter(),
+            new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+            new DeferArchiveWriter(),
+          ],
+          approvalQueueStore,
+        },
       );
-      return await dispatcher.dispatch({
-        artifactId: existing.artifactId,
-        channel: existing.channel,
-        rolloutDecision: 'auto_activate',
+
+      // Use the formal ApprovalCompletionService (Contract B) instead of the
+      // demo "approve → direct writer" pattern. The service validates approval
+      // status, enforces idempotency, and dispatches with rolloutDecision='approved'.
+      const completionService = new ApprovalCompletionService(
+        approvalQueueStore,
+        dispatcher,
+        activationStateStore,
+      );
+      const completionResult = await completionService.completeApproval({
+        approvalId: existing.approvalId,
         actor: { kind: 'human', userId: decidedBy },
         now: new Date().toISOString(),
-        confirm: true,
       });
+
+      if (!completionResult.ok) {
+        return {
+          decision: 'refused' as const,
+          reason: `approval_completion_failed: ${completionResult.reason}`,
+          nextAction: completionResult.nextAction,
+          channel: existing.channel,
+          riskLevel: existing.riskLevel,
+        };
+      }
+
+      return completionResult.decision;
     } catch (dispatchErr) {
       const dispatchMsg = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
       return {
         decision: 'refused' as const,
         reason: `activation_dispatch_failed: ${dispatchMsg}`,
+        nextAction: 'check dispatcher writers and artifact store, then retry approval',
         channel: existing.channel,
-        riskLevel: 'low' as const,
+        riskLevel: existing.riskLevel,
       };
     }
   }

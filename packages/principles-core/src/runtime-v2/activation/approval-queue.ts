@@ -1,6 +1,7 @@
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
 import type {
   ApprovalDecisionResult,
+  ApprovalEditInput,
   ApprovalEnqueueInput,
   ApprovalFilter,
   ApprovalListFilter,
@@ -63,5 +64,19 @@ export class ApprovalQueue {
 
   async resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }> {
     return this.store.resetToPending(approvalId);
+  }
+
+  /**
+   * Story A (PRI-408): Edit a pending approval's artifact to a new version.
+   * The caller must create the new artifact and perform schema validation +
+   * sandbox replay BEFORE calling this method.
+   */
+  async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
+    const existing = await this.store.getById(input.approvalId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    if (existing.status !== 'pending') {
+      return { ok: false, error: 'already_decided', status: existing.status };
+    }
+    return this.store.edit(input);
   }
 }

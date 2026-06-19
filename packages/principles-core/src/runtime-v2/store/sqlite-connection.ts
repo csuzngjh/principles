@@ -326,6 +326,19 @@ export class SqliteConnection {
       }
     }
 
+    // Story A (PRI-408): Add edit tracking columns for edit-then-approve flow
+    const editColumns = [
+      'edited_at',
+      'edited_by',
+      'edit_reason',
+      'previous_artifact_id',
+    ];
+    for (const col of editColumns) {
+      if (!existingApprovalCols.has(col)) {
+        db.exec('ALTER TABLE approvals ADD COLUMN ' + col + ' TEXT');
+      }
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS activations (
         activation_id TEXT NOT NULL,
