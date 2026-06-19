@@ -195,6 +195,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
   if (opts.openclawLocal && opts.openclawGateway) {
     console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
     process.exit(1);
+    return;
   }
 
   const runtimeKind = opts.runtime ?? 'test-double';
@@ -317,9 +318,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }
         // Default error formatting for other config resolution errors
         if (opts.json) {
-          console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing }));
+          console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing, nextAction: err.nextAction }));
         } else {
           console.error(`error: ${err.message}`);
+          if (err.nextAction) {
+            console.error(`nextAction: ${err.nextAction}`);
+          }
         }
         process.exit(1);
         return;
