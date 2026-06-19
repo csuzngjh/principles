@@ -361,7 +361,7 @@ describe('pd diagnose run --runtime routing', () => {
   });
 
   it('CLI-04: unknown runtime kind exits with error and exit code 1', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -371,10 +371,14 @@ describe('pd diagnose run --runtime routing', () => {
       json: true,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith("error: unknown runtime kind 'invalid-runtime' (supported: openclaw-cli, test-double, pi-ai)");
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.ok).toBe(false);
+    expect(jsonOutput.reason).toBe('unsupported_runtime_kind: invalid-runtime');
+    expect(jsonOutput.nextAction).toContain('openclaw-cli');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleErrorSpy.mockRestore();
+    consoleLogSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
