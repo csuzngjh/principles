@@ -11,7 +11,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors — including degradation/fallback/retry-exhausted paths.
 - **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous; degradation paths emit objects built from validator-rejected candidates.
 - **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; shape checks validate fields that actually exist in the target type; **every output-emitting path (happy, degraded, fallback, exhausted) emits only validated objects — degradation is a content transform, not a trust escape hatch**.
-- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069.
+- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069, ERR-076.
 - **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, and casts near parse/adapter/DB/CLI boundaries; grep degradation/fallback functions for emit-before-validate.
 
 ### EP-02 Production Path Wiring
