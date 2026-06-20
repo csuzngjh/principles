@@ -11,6 +11,12 @@ import type { LedgerPrinciple } from '../../principle-tree-ledger.js';
 
 const WORKSPACE = '/tmp/ws';
 
+// Relative date helpers — tests must not use hardcoded dates that age out
+const MS_PER_DAY = 86_400_000;
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * MS_PER_DAY).toISOString();
+}
+
 interface LedgerStore {
   tree: {
     principles: Record<string, LedgerPrinciple>;
@@ -44,8 +50,8 @@ const LEDGER_MIXED: LedgerStore = {
       old_watch: {
         id: 'old_watch',
         status: 'active',
-        createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2025-12-01T00:00:00.000Z',
+        createdAt: daysAgo(45),
+        updatedAt: daysAgo(180),
         derivedFromPainIds: [],
         ruleIds: [],
         conflictsWithPrincipleIds: [],
@@ -63,8 +69,8 @@ const LEDGER_MIXED: LedgerStore = {
       old_review: {
         id: 'old_review',
         status: 'active',
-        createdAt: '2026-01-02T00:00:00.000Z',
-        updatedAt: '2025-01-01T00:00:00.000Z',
+        createdAt: daysAgo(120),
+        updatedAt: daysAgo(500),
         derivedFromPainIds: [],
         ruleIds: [],
         conflictsWithPrincipleIds: [],
@@ -506,8 +512,8 @@ describe('PruningReadModel', () => {
           mid_age: {
             id: 'mid_age',
             status: 'active',
-            createdAt: '2026-03-18T00:00:00.000Z',
-            updatedAt: '2025-12-01T00:00:00.000Z',
+            createdAt: daysAgo(45),
+            updatedAt: daysAgo(180),
             derivedFromPainIds: [],
             ruleIds: [],
             conflictsWithPrincipleIds: [],

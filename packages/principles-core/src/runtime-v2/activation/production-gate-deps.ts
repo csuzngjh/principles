@@ -30,7 +30,7 @@ import type {
 } from '../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult, RefinerSandboxOptions } from '../internalization/refiner-sandbox-wrapper.js';
 import { evaluateInRefinerSandbox } from '../internalization/refiner-sandbox-wrapper.js';
-import { checkForbiddenPatterns } from '../internalization/rule-code-validator.js';
+import { checkForbiddenPatterns, checkReturnStatementsMissingFields } from '../internalization/rule-code-validator.js';
 import { validateCorrectionProposal } from '../internalization/correction-proposal.js';
 import { safeStringifyPreview } from '../feedback/safe-stringify.js';
 
@@ -188,6 +188,24 @@ export function createProductionGateDeps(): RefinerRuleHostGateDeps {
           failedCases: [],
           executionTimeMs: Date.now() - startTime,
           forbiddenPatternViolations: forbiddenViolations,
+        };
+      }
+
+      // Static check: catch return statements missing required RuleHostResult
+      // fields (decision, matched, reason) before VM execution. This catches
+      // the most common LLM mistake (e.g. `return { matched: false }`) and
+      // feeds a specific error message back into the write-test-fix loop.
+      const returnShapeViolations = checkReturnStatementsMissingFields(code);
+      if (returnShapeViolations.length > 0) {
+        return {
+          success: false,
+          failedCases: returnShapeViolations.map((msg) => ({
+            caseId: '__return_shape__',
+            errorType: 'validation_failed' as const,
+            message: msg,
+          })),
+          executionTimeMs: Date.now() - startTime,
+          forbiddenPatternViolations: [],
         };
       }
 

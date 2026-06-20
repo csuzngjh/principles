@@ -160,14 +160,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    *
    * Base implementation overrides `generatedAt` with the actual current timestamp,
    * because LLM may echo the prompt's example date instead of generating the real time.
+   * Unconditionally sets `generatedAt` — if the LLM omitted it, we add it; if the LLM
+   * echoed a stale date, we replace it. Subclasses should call `super.postFetchTransform()`
+   * to inherit this behavior instead of duplicating the override.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected postFetchTransform(_taskId: string, untrustedOutput: unknown, _context: TContext): void {
     // Override generatedAt with actual timestamp — LLM may echo prompt example date
     if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
-      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
-        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
-      }
+      Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
     }
   }
 

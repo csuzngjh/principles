@@ -509,6 +509,7 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-44
     'generateFromTemplate',
     'checkForbiddenPatterns',
+    'checkReturnStatementsMissingFields',
     // PRI-45
     'mergeDecisions',
     // PRI-149 Tier 2
@@ -523,6 +524,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'renderPrinciplesToDirectives',
     // PRI-431
     'buildL2PrincipleReaderFromLedger',
+    // LLM output hardening — shared utility
+    'stripFabricatedCorePrincipleIds',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
