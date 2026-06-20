@@ -128,17 +128,25 @@ export async function handlePrinciplesRoute({
   // GET /api/principles/:id/trajectory
   const trajectoryMatch = /^\/([^/]+)\/trajectory$/.exec(subPath);
   if (trajectoryMatch) {
-    const [, principleId] = trajectoryMatch;
+    const [, rawPrincipleId] = trajectoryMatch;
+    let decodedPrincipleId: string;
+    try {
+      decodedPrincipleId = decodeURIComponent(rawPrincipleId);
+    } catch {
+      sendError(res, 400, 'invalid_principle_id', 'Invalid URL encoding in principle id');
+      return;
+    }
     try {
       let trajModel = trajectoryModels.get(workspaceDir);
       if (!trajModel) {
         trajModel = new PrincipleTrajectoryModel(workspaceDir);
         trajectoryModels.set(workspaceDir, trajModel);
       }
-      const result = await trajModel.getTrajectory(decodeURIComponent(principleId));
+      const result = await trajModel.getTrajectory(decodedPrincipleId);
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principle_trajectory_error', (err as Error).message);
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(res, 500, 'principle_trajectory_error', message);
     }
     return;
   }
