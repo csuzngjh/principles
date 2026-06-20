@@ -54,6 +54,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
 import { resolveL2Model } from './l2-agent-loop-adapter.js';
+import { extractJsonObject } from './json-extractor.js';
 
 /**
  * Mockable LLM call. Receives the assembled prompt (initial prompt + optional
@@ -77,37 +78,6 @@ export type ArtificerL2GenerateCodeFn = (prompt: string) => Promise<unknown>;
  *   - ERR-001: returned value is `unknown` — caller must validate
  *   - ERR-014: response content is safely extracted (no raw JSON.stringify on unknown)
  */
-/**
- * Extract the first JSON object from a text string. Mirrors the pattern in
- * l2-agent-loop-adapter.ts. Returns null if no JSON object is found.
- */
-function extractJsonObject(text: string): unknown | null {
-  const start = text.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < text.length; i += 1) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === '\\') { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth += 1;
-    else if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        const candidate = text.slice(start, i + 1);
-        try {
-          return JSON.parse(candidate);
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
 
 export function buildArtificerL2GenerateCode(config: {
   readonly provider: string;

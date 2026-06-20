@@ -117,14 +117,14 @@ function readLedgerPrinciple(workspaceDir: string, principleId: string): LedgerP
   if (!isRecord(parsed)) return null;
 
   const treeValue: unknown = Object.hasOwn(parsed, '_tree')
-    ? parsed['_tree']
+    ? parsed._tree
     : Object.hasOwn(parsed, 'tree')
-      ? parsed['tree']
+      ? parsed.tree
       : parsed;
 
   if (!isRecord(treeValue)) return null;
 
-  const principlesValue = treeValue['principles'];
+  const principlesValue = treeValue.principles;
   if (!isRecord(principlesValue)) return null;
 
   const entry = principlesValue[principleId];
@@ -198,13 +198,13 @@ export class PrincipleTrajectoryModel {
     let candidateRecord: unknown = null;
 
     if (stateDbAvailable && db && principle.derivedFromPainIds.length > 0) {
-      const candidateId = principle.derivedFromPainIds[0];
+      const [candidateId] = principle.derivedFromPainIds;
       try {
         const rows = db.prepare(
           'SELECT candidate_id, task_id, recommendation_kind, status, title, abstracted_principle, confidence FROM principle_candidates WHERE candidate_id = ?'
         ).all(candidateId);
         if (rows.length > 0) {
-          candidateRecord = rows[0];
+          [candidateRecord] = rows;
           taskId = getOwnString(rows[0], 'task_id') ?? null;
         }
       } catch (err) {
@@ -228,7 +228,7 @@ export class PrincipleTrajectoryModel {
           'SELECT task_id, task_kind, status, created_at FROM tasks WHERE task_id = ?'
         ).all(taskId);
         if (taskRows.length > 0) {
-          taskRecord = taskRows[0];
+          [taskRecord] = taskRows;
         }
       } catch (err) {
         if (!isMissingTableError(err) && !isMissingColumnError(err)) {
@@ -241,7 +241,7 @@ export class PrincipleTrajectoryModel {
           "SELECT artifact_id, artifact_kind, created_at FROM artifacts WHERE task_id = ? AND artifact_kind = 'diagnostician_output' LIMIT 1"
         ).all(taskId);
         if (artRows.length > 0) {
-          diagnosticArtifact = artRows[0];
+          [diagnosticArtifact] = artRows;
         }
       } catch (err) {
         if (!isMissingTableError(err) && !isMissingColumnError(err)) {
@@ -333,6 +333,7 @@ export class PrincipleTrajectoryModel {
 
   // ── Stage assemblers ─────────────────────────────────────────────────────
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleEvidenceStage(
     principle: LedgerPrinciple,
     candidateRecord: unknown,
@@ -365,6 +366,7 @@ export class PrincipleTrajectoryModel {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleDiagnosisStage(
     taskRecord: unknown,
     diagnosticArtifact: unknown,
@@ -397,6 +399,7 @@ export class PrincipleTrajectoryModel {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleProposalStage(candidateRecord: unknown): TrajectoryStage {
     if (!candidateRecord) {
       return {
@@ -426,6 +429,7 @@ export class PrincipleTrajectoryModel {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleReviewStage(
     approvalRecords: unknown[],
     piArtifactCount: number,
@@ -477,6 +481,7 @@ export class PrincipleTrajectoryModel {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleDeployStage(
     activationRecords: unknown[],
     piArtifactCount: number,
@@ -527,6 +532,7 @@ export class PrincipleTrajectoryModel {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private assembleBehaviorStage(
     principle: LedgerPrinciple,
     activationRecords: unknown[],
@@ -561,6 +567,7 @@ export class PrincipleTrajectoryModel {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private createAllUnavailable(reason: string): TrajectoryStage[] {
     const keys: TrajectoryStage['key'][] = ['evidence', 'diagnosis', 'proposal', 'review', 'deploy', 'behavior'];
     return keys.map(key => ({

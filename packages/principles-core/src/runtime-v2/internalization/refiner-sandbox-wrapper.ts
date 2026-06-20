@@ -1,7 +1,7 @@
 import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 import type { ReplayEvaluateFn } from '../golden-trace-replay-validator.js';
 import { diffParams } from '../golden-trace-replay-validator.js';
-import { checkForbiddenPatterns } from './rule-code-validator.js';
+import { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './rule-code-validator.js';
 import { createSyntheticRuleHostInput } from '../golden-trace.js';
 import type { RuleHostHelpers } from './rule-host-helpers.js';
 import type { RuleHostResult } from './rule-host-contracts.js';
@@ -211,6 +211,22 @@ export function evaluateInRefinerSandbox(
       failedCases: [],
       executionTimeMs: Date.now() - startTime,
       forbiddenPatternViolations: forbiddenViolations,
+    };
+  }
+
+  // Static check: catch return statements missing required RuleHostResult
+  // fields before execution. Mirrors the check in production-gate-deps.ts.
+  const returnShapeViolations = checkReturnStatementsMissingFields(code);
+  if (returnShapeViolations.length > 0) {
+    return {
+      success: false,
+      failedCases: returnShapeViolations.map((msg) => ({
+        caseId: '__return_shape__',
+        errorType: 'validation_failed' as const,
+        message: msg,
+      })),
+      executionTimeMs: Date.now() - startTime,
+      forbiddenPatternViolations: [],
     };
   }
 

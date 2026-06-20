@@ -14,3 +14,5 @@ export {
 } from './core-axiom-block.js';
 
 export type { CoreAxiomBlockOptions } from './core-axiom-block.js';
+
+export { stripFabricatedCorePrincipleIds } from './strip-fabricated-ids.js';

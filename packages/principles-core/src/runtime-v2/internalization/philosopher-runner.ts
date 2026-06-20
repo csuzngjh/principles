@@ -341,19 +341,12 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
    * Only fill when absent via Object.hasOwn — present-but-falsy values
    * must reach validation and fail loud (Runtime Contract Rule 3).
    *
-   * Also overrides generatedAt with the actual current timestamp (LLM may
-   * echo the prompt's example date).
+   * The generatedAt override is handled by the base class via
+   * super.postFetchTransform().
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: PhilosopherContext): void {
+    super.postFetchTransform(taskId, untrustedOutput, _context);
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
-
-    if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
-      // Override generatedAt with actual timestamp — LLM may echo prompt example date
-      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
-        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
-      }
-    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: PhilosopherOutputV1): void {
