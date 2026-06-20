@@ -115,7 +115,7 @@ export function AppSidebar() {
                   <span
                     className="ml-auto h-2 w-2 rotate-45 rounded-[1px] border border-rose-400/50 bg-rose-400/15 shadow-[0_0_3px_rgba(251,113,133,0.35)]"
                     role="status"
-                    aria-label={`${pendingCount} pending approvals`}
+                    aria-label={t("components.sidebar.pendingApprovalsAria", { count: pendingCount })}
                   />
                 ) : item.shortcut ? (
                   <span className="text-ink-4 font-mono text-[11px]">
@@ -154,7 +154,7 @@ export function AppSidebar() {
                     <span
                       className="ml-auto h-[7px] w-[7px] rotate-45 rounded-[1px] border border-amber-400/50 bg-amber-400/15 shadow-[0_0_3px_rgba(251,191,36,0.35)]"
                       role="status"
-                      aria-label={`${degradedCount} degraded signals`}
+                      aria-label={t("components.sidebar.degradedSignalsAria", { count: degradedCount })}
                     />
                   ) : item.shortcut ? (
                     <span className="text-ink-4 font-mono text-[11px]">
