@@ -123,11 +123,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Default off; flips dreamer from one-shot completeSimple to a multi-turn agentLoop with
   // read-only tools. Roll back = flip flag, reverts to PiAiRuntimeAdapter with zero migration.
   { id: 'l2_dreamer', category: 'quiet', enabled: false, since: '2026-06-16', description: 'L2 multi-turn agent loop for the dreamer runner (PRI-419) — read-only tools + submit_output, scoped to dreamer only' },
-  // PRI-429: Code-rule capability (atomic: ArtificerL2 + Evaluator). When enabled, the
-  // RuleHost pipeline runs the adversarial loop with the ArtificerL2Adapter (write-test-fix).
-  // When disabled (default), the pipeline degrades to text-principle-only after scribe.
-  // The CLI handler checks per-agent config (artificer + evaluator enabled) before enabling.
-  { id: 'code_rule_capability', category: 'quiet', enabled: false, since: '2026-06-18', description: 'Code-rule capability (atomic: ArtificerL2 + Evaluator) for RuleHost pipeline — default OFF, degrades to text-principle-only when disabled (PRI-429)' },
+  // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
+  // Atomic: ArtificerL2 + Evaluator. The RuleHost pipeline runs the adversarial
+  // write-test-fix loop with the ArtificerL2Adapter when enabled. As a core flag
+  // it cannot be disabled via config — operators must keep the capability on.
+  // The CLI handler still checks per-agent config (artificer + evaluator enabled)
+  // before invoking the pipeline; misconfigured agents fail the readiness gate.
+  { id: 'code_rule_capability', category: 'core', enabled: true, since: '2026-06-18', description: 'Code-rule capability (atomic: ArtificerL2 + Evaluator) for RuleHost pipeline — MVP-Core, default ON (PRI-435)' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
@@ -180,11 +182,17 @@ export function computeEffectiveFlags(
       continue;
     }
 
-    // Core flags can never be disabled
+    // PRI-435: Core flags default ON and cannot be disabled by omission.
+    // However, operators may explicitly set `enabled: false` for emergency disable
+    // (e.g. `code_rule_capability.enabled: false` to halt the RuleHost pipeline).
+    // This deliberate override is honored with a warning so the disable is observable
+    // in logs/telemetry. Per-rule rollback remains `deactivate`.
     if (def.category === 'core') {
-      flags[def.id] = { ...def };
-      if (!enabledValue) {
-        warnings.push(`flag '${def.id}': core flag cannot be disabled`);
+      if (enabledValue) {
+        flags[def.id] = { ...def };
+      } else {
+        flags[def.id] = { ...def, enabled: false };
+        warnings.push(`flag '${def.id}': core flag explicitly disabled via config (emergency disable)`);
       }
       continue;
     }

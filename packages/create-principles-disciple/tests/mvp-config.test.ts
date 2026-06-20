@@ -1780,6 +1780,15 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
+  it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    expect(Object.hasOwn(features, 'code_rule_capability')).toBe(true);
+    const flag = features.code_rule_capability as Record<string, unknown>;
+    expect(flag.enabled).toBe(true);
+    expect(flag.category).toBe('core');
+  });
+
   it('quiet features are disabled', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
@@ -1802,7 +1811,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
-  it('only MVP core channels and feedback_channel are enabled by default', () => {
+  it('only MVP core channels, code_rule_capability, and feedback_channel are enabled by default', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     const enabledFlags: string[] = [];
@@ -1812,7 +1821,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
   });
 
   it('written to temp workspace is loadable', () => {

@@ -62,7 +62,21 @@ describe('handleCandidateInternalize (PRI-89)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStateManager.getCandidate.mockResolvedValue(null);
-    mockStateManager.getTask.mockResolvedValue(null);
+    // PRI-435: getTask must return different values based on taskId:
+    // - candidate.taskId ('task-*') → diagnostician task with sourcePainId in diagnosticJson
+    // - dreamer task ID ('dreamer-*') → null (no existing dreamer task)
+    mockStateManager.getTask.mockImplementation((taskId: string) => {
+      if (taskId.startsWith('task-')) {
+        return Promise.resolve({
+          taskId,
+          taskKind: 'diagnostician',
+          status: 'completed',
+          diagnosticJson: JSON.stringify({ sourcePainId: 'pain-001' }),
+        });
+      }
+      // Dreamer task lookup → null (no existing dreamer task)
+      return Promise.resolve(null);
+    });
     mockStateManager.createTask.mockResolvedValue({
       taskId: 'dreamer-cand-001-prompt',
       taskKind: 'dreamer',
@@ -111,10 +125,22 @@ describe('handleCandidateInternalize (PRI-89)', () => {
       reason: 'Ready',
       nextAction: 'Proceed',
     });
-    mockStateManager.getTask.mockResolvedValue({
-      taskId: 'dreamer-cand-001-prompt',
-      taskKind: 'dreamer',
-      status: 'pending',
+    // PRI-435: getTask returns diagnostician task for 'task-*' (lineage resolution),
+    // and existing dreamer task for 'dreamer-*' (idempotency check).
+    mockStateManager.getTask.mockImplementation((taskId: string) => {
+      if (taskId.startsWith('task-')) {
+        return Promise.resolve({
+          taskId,
+          taskKind: 'diagnostician',
+          status: 'completed',
+          diagnosticJson: JSON.stringify({ sourcePainId: 'pain-001' }),
+        });
+      }
+      return Promise.resolve({
+        taskId: 'dreamer-cand-001-prompt',
+        taskKind: 'dreamer',
+        status: 'pending',
+      });
     });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

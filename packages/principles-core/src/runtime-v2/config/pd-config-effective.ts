@@ -59,10 +59,14 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
         featuresChangedFromDefault.push(flagId);
         continue;
       }
-      // Core flags can never be disabled
+      // PRI-435: Core flags default ON and cannot be disabled by omission.
+      // However, operators may explicitly set `enabled: false` for emergency disable
+      // (e.g. `code_rule_capability.enabled: false` to halt the RuleHost pipeline).
+      // This deliberate override is honored with a warning so the disable is observable
+      // in logs/telemetry. Per-rule rollback remains `deactivate`.
       if (defaultEntry.category === 'core' && !userEntry.enabled) {
-        features[flagId] = { ...defaultEntry };
-        warnings.push(`feature '${flagId}': core flag cannot be disabled`);
+        features[flagId] = { category: userEntry.category, enabled: false };
+        warnings.push(`feature '${flagId}': core flag explicitly disabled via config (emergency disable)`);
         featuresChangedFromDefault.push(flagId);
         continue;
       }

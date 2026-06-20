@@ -123,6 +123,53 @@ interface ResolvedRecommendation {
   usedFallback: boolean;
 }
 
+/**
+ * Resolve `sourcePainId` from the canonical diagnostician task chain.
+ *
+ * The `CandidateRecord` does not carry `sourcePainId` — it must be resolved by
+ * looking up the diagnostician task (`candidate.taskId`) and parsing its
+ * `diagnosticJson`, which contains `sourcePainId` as a top-level key (set by
+ * `PainSignalBridge.buildDiagnosticJson`).
+ *
+ * Runtime Contract:
+ *   - Rule 1: parsed JSON treated as `unknown`
+ *   - Rule 2: no `as` bypass; type narrowing via `typeof` + `Object.hasOwn`
+ *   - Rule 5: `Object.hasOwn` for untrusted key checks
+ *
+ * ERR-004: `sourcePainId` resolved from canonical chain, never invented.
+ *
+ * @returns The validated `sourcePainId`, or `null` when it cannot be resolved
+ *          (task missing, JSON malformed, field absent, wrong type, or blank).
+ *          Callers at the production boundary must fail loud on `null`.
+ */
+export async function resolveSourcePainIdFromDiagnostician(
+  stateManager: RuntimeStateManager,
+  candidate: { taskId?: string },
+): Promise<string | null> {
+  const diagTaskId = candidate.taskId?.trim();
+  if (!diagTaskId) return null;
+
+  const diagTask = await stateManager.getTask(diagTaskId);
+  if (!diagTask) return null;
+
+  if (typeof diagTask.diagnosticJson !== 'string') return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagTask.diagnosticJson);
+  } catch {
+    return null;
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
+
+  const sourcePainId = Reflect.get(parsed, 'sourcePainId');
+  if (typeof sourcePainId !== 'string' || sourcePainId.trim() === '') return null;
+
+  return sourcePainId.trim();
+}
+
 function resolveCandidateRecommendation(
   candidate: { sourceRecommendationJson?: string; description?: string },
   stateManager: RuntimeStateManager,
@@ -258,7 +305,30 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
     const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-    const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+    // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
+    // The CandidateRecord does not carry sourcePainId — it must be looked up
+    // from the diagnostician task's diagnosticJson via candidate.taskId.
+    // Missing/malformed sourcePainId must fail loud with no side effects.
+    const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, candidate);
+    if (sourcePainId === null) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        status: 'no_task_created',
+        reason: `Cannot resolve sourcePainId from diagnostician task chain for candidate ${opts.candidateId}`,
+        nextAction: 'Verify the diagnostician task diagnosticJson contains a valid top-level sourcePainId; re-run diagnosis if the pain signal is missing',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Cannot resolve sourcePainId for candidate ${opts.candidateId}`);
+        console.error(`Next: ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
+
+    const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
     if ('decision' in seed) {
       const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
       const reason = decisionResult.decision === 'already_exists'
@@ -828,7 +898,15 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
       const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+      // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
+      // Missing/malformed sourcePainId must fail loud per-candidate with no side effects.
+      const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, candidate);
+      if (sourcePainId === null) {
+        output.errors++;
+        output.results.push({ candidateId, route: decision.route, status: 'error', reason: `Cannot resolve sourcePainId from diagnostician task chain for candidate ${candidateId}`, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'Verify the diagnostician task diagnosticJson contains a valid top-level sourcePainId; re-run diagnosis if the pain signal is missing' });
+        continue;
+      }
+      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
       if ('decision' in seed) {
         output.deferred++;
         const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
@@ -899,7 +977,15 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
       const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready });
+      // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
+      // Missing/malformed sourcePainId must fail loud per-candidate with no side effects.
+      const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, candidate);
+      if (sourcePainId === null) {
+        output.errors++;
+        output.results.push({ candidateId, route: decision.route, status: 'error', reason: `Cannot resolve sourcePainId from diagnostician task chain for candidate ${candidateId}`, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'Verify the diagnostician task diagnosticJson contains a valid top-level sourcePainId; re-run diagnosis if the pain signal is missing' });
+        continue;
+      }
+      const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
       if ('decision' in seed) {
         output.deferred++;
         const decisionResult = seed as { decision: string; reason?: string; taskId?: string };

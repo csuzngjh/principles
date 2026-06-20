@@ -317,6 +317,8 @@ export function generateConfigYamlContent(): string {
       prompt:             { category: 'core',  enabled: true },
       code_tool_hook:     { category: 'core',  enabled: true },
       defer_archive:      { category: 'core',  enabled: true },
+      // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
+      code_rule_capability: { category: 'core', enabled: true },
       // MVP-Quiet (ADR-0014 §2.5)
       correction_observer:{ category: 'quiet', enabled: false },
       feedback_channel:   { category: 'quiet', enabled: true },

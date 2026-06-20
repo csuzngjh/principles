@@ -60,7 +60,7 @@ function makeCapabilityOnConfig(workspaceDir: string): object {
       prompt: { enabled: true, category: 'core' },
       code_tool_hook: { enabled: true, category: 'core' },
       defer_archive: { enabled: true, category: 'core' },
-      code_rule_capability: { enabled: true, category: 'quiet' },
+      code_rule_capability: { enabled: true, category: 'core' },
     },
     workspace: { default: workspaceDir },
     runtimeProfiles: {
@@ -190,7 +190,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     expect(process.exitCode).toBeUndefined();
   });
 
-  it('keeps code_rule_capability OFF when the quiet feature flag is omitted', async () => {
+  it('keeps code_rule_capability ON even when the feature flag is omitted (PRI-435: core flag)', async () => {
     process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
     const workspace = makeWorkspace((dir) => {
       const config = makeCapabilityOnConfig(dir);
@@ -200,12 +200,37 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
       return config;
     });
 
-    await handleRunRuleHost({ workspace, painId: 'pain-flag-off', dryRun: true, json: true });
+    await handleRunRuleHost({ workspace, painId: 'pain-flag-default', dryRun: true, json: true });
 
     const output = parseJsonOutput();
     expect(output.status).toBe('dry_run');
+    // PRI-435: code_rule_capability is now a core flag — defaults ON even when omitted from config.
+    // It cannot be disabled via config. The capability is ON when artificer+evaluator are configured.
+    expect(output.codeRuleCapability).toEqual(expect.objectContaining({ enabled: true }));
+    expect(output.codeRuleCapability?.disabledReason).toBeUndefined();
+    expect(String(output.capabilityStatus)).toContain('ON');
+  });
+
+  it('PRI-435: explicit emergency disable via code_rule_capability.enabled=false is observable', async () => {
+    process.env.TEST_RULEHOST_API_KEY = 'sk-test-key-12345';
+    const workspace = makeWorkspace((dir) => {
+      const config = makeCapabilityOnConfig(dir);
+      const features = Reflect.get(config, 'features');
+      if (features === null || typeof features !== 'object') throw new Error('features fixture missing');
+      // Explicitly disable the flag for emergency disable
+      Reflect.set(features, 'code_rule_capability', { enabled: false, category: 'core' });
+      return config;
+    });
+
+    await handleRunRuleHost({ workspace, painId: 'pain-emergency-disable', dryRun: true, json: true });
+
+    const output = parseJsonOutput();
+    expect(output.status).toBe('dry_run');
+    // PRI-435: Emergency disable via code_rule_capability.enabled=false is preserved.
+    // The capability is OFF with a structured reason.
     expect(output.codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
     expect(String(output.codeRuleCapability?.disabledReason)).toContain('feature flag');
+    expect(String(output.capabilityStatus)).toContain('OFF');
   });
 
   it('reports the resolved runtime profile for every executed agent', async () => {
@@ -316,7 +341,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
         prompt: { enabled: true, category: 'core' },
         code_tool_hook: { enabled: true, category: 'core' },
         defer_archive: { enabled: true, category: 'core' },
-        code_rule_capability: { enabled: true, category: 'quiet' },
+        code_rule_capability: { enabled: true, category: 'core' },
       },
       workspace: { default: dir },
       runtimeProfiles: {
