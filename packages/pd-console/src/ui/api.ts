@@ -55,7 +55,6 @@ import type {
   ApprovalsGroupedData,
   EvidenceChainData,
   TrajectoryData,
-  TrajectoryStageData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
