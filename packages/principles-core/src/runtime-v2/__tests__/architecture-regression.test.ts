@@ -524,6 +524,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'renderPrinciplesToDirectives',
     // PRI-431
     'buildL2PrincipleReaderFromLedger',
+    // LLM output hardening — shared utility
+    'stripFabricatedCorePrincipleIds',
   ];
 
   for (const name of REQUIRED_EXPORTS) {

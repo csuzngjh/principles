@@ -350,6 +350,7 @@ export {
   isCorePrincipleId,
   getCorePrinciple,
   CorePrincipleSchema,
+  stripFabricatedCorePrincipleIds,
 } from './core-principles/index.js';
 
 export type { CorePrinciple } from './core-principles/index.js';
