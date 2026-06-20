@@ -2,9 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as path from 'path';
 import * as fs from 'fs';
 import { PrinciplesConsoleModel, type PrincipleFilter } from '../models/PrinciplesConsoleModel.js';
+import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, PrinciplesConsoleModel>();
+const trajectoryModels = new Map<string, PrincipleTrajectoryModel>();
 
 function getModel(workspaceDir: string): PrinciplesConsoleModel {
   let model = models.get(workspaceDir);
@@ -123,6 +125,32 @@ export async function handlePrinciplesRoute({
     return;
   }
 
+  // GET /api/principles/:id/trajectory
+  const trajectoryMatch = /^\/([^/]+)\/trajectory$/.exec(subPath);
+  if (trajectoryMatch) {
+    const [, rawPrincipleId] = trajectoryMatch;
+    let decodedPrincipleId: string;
+    try {
+      decodedPrincipleId = decodeURIComponent(rawPrincipleId);
+    } catch {
+      sendError(res, 400, 'invalid_principle_id', 'Invalid URL encoding in principle id');
+      return;
+    }
+    try {
+      let trajModel = trajectoryModels.get(workspaceDir);
+      if (!trajModel) {
+        trajModel = new PrincipleTrajectoryModel(workspaceDir);
+        trajectoryModels.set(workspaceDir, trajModel);
+      }
+      const result = await trajModel.getTrajectory(decodedPrincipleId);
+      sendSuccess(res, result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(res, 500, 'principle_trajectory_error', message);
+    }
+    return;
+  }
+
   const detailMatch = /^\/([^/]+)$/.exec(subPath);
   if (detailMatch) {
     const [, principleId] = detailMatch;
@@ -144,4 +172,8 @@ export async function handlePrinciplesRoute({
 
 export function disposePrinciplesModels(): void {
   models.clear();
+  for (const m of trajectoryModels.values()) {
+    m.dispose();
+  }
+  trajectoryModels.clear();
 }
