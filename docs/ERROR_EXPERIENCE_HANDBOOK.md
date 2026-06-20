@@ -163,6 +163,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
 | ERR-068 | Used `pnpm install` in an `npm ci` repo — package-lock.json not synced, all CI jobs fail | PRI-419 / PR #953 |
 | ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
+| ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
 
 ---
 
@@ -727,8 +728,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 74 |
-| Last updated | 2026-06-19 |
+| Total lessons | 75 |
+| Last updated | 2026-06-20 |
 | Top category | Schema & Type |
 | Recurring errors | 30 |
 
@@ -1073,4 +1074,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-071 (async cleanup not awaited in finally — resource leaks), ERR-022 (process.exit without return allows fallthrough)
 - **Source**: PR #977 (self-review during pr-review)
 - **Date**: 2026-06-19
+- **Recurrence**: None
+
+
+---
+
+**[ERR-075]** | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI
+
+- **What happened**: In `app-sidebar.tsx` (PR #979), the assistant added `aria-label={`${pendingCount} pending approvals`}` and `aria-label={`${degradedCount} degraded signals`}` as hardcoded English strings. The file already imported `useTranslation` and used `t()` for visible text (e.g., `t(item.labelKey)`), but the assistant failed to apply the same i18n convention to the new accessibility attributes.
+- **Why it is wrong**: In a bilingual (zh-CN/en) application, all user-facing strings — including accessibility attributes like `aria-label`, `title`, and `placeholder` — must go through the i18n translation function. Hardcoding English strings causes screen readers to read in English while the visual UI displays in Chinese, creating a mixed-language accessibility barrier for non-English users.
+- **Generalized failure mode**: When adding any user-facing string (visible text, aria-label, title, placeholder) in a component that already uses i18n, assistants must use `t()` for the new string, otherwise assistive technologies will read in the wrong language.
+- **Correct approach**: Use `t("components.sidebar.pendingApprovalsAria", { count: pendingCount })` and `t("components.sidebar.degradedSignalsAria", { count: degradedCount })`, with corresponding keys added to both `en.json` and `zh-CN.json`.
+- **How to prevent**: When adding any string attribute (aria-label, title, placeholder, alt) to a JSX element in a file that imports `useTranslation`/`t()`, verify the new string uses `t()` with a translation key. Grep for `aria-label={` and `aria-label="` in i18n-enabled components to find hardcoded strings.
+- **Regression guard**: Static check: grep for `aria-label=\{?\` or `aria-label="` in `.tsx` files under `packages/pd-console/src/ui/` that also import `useTranslation`. Any match that does not use `t(...)` is a finding.
+- **Related ERRs**: None
+- **Source**: PR #979 (CodeRabbit review)
+- **Date**: 2026-06-20
 - **Recurrence**: None
