@@ -27,7 +27,7 @@
  *   ERR-024: Only public CLI/API used, never internal imports
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import {
   mkdirSync, cpSync, rmSync, existsSync,
   readFileSync, writeFileSync, readdirSync,
@@ -641,11 +641,20 @@ const SAFE_SCENARIOS = [
  */
 function driveAgent(runId, scenarioId, prompt, timeoutSec = 120) {
   const sessionKey = `agent:acceptance:${runId}:${scenarioId}`;
-  const escaped = prompt.replace(/"/g, '\\"').replace(/\n/g, '\\n');
-  const cmd = `openclaw agent --session-key "${sessionKey}" --message "${escaped}" --timeout ${timeoutSec} --json`;
+  const args = ['agent', '--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json'];
 
   info('3', `Driving agent: ${scenarioId} (session: ${sessionKey})`);
-  const raw = sh(cmd, { timeout: (timeoutSec + 30) * 1000 });
+  let raw = '';
+  try {
+    raw = execFileSync('openclaw', args, {
+      encoding: 'utf-8',
+      timeout: (timeoutSec + 30) * 1000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 10 * 1024 * 1024,
+    }).trim();
+  } catch (e) {
+    raw = (e.stdout?.toString() ?? '') + (e.stderr?.toString() ?? '');
+  }
 
   let result = null;
   try { result = JSON.parse(raw); } catch { /* non-JSON */ }
@@ -903,13 +912,13 @@ async function phase3(opts) {
   const safeResults = [];
 
   // Run a single danger scenario and a single safe scenario to validate the pipeline
-  // (Full 5+5 would take 30-60 minutes; run 1+1 for practical validation,
-  //  but the matrix can verify the other scenarios analytically)
-  info('3', 'Running danger scenario (1 of 5 required for gate)...');
+  // (Full 5+5 is run via the dedicated pri-438-acceptance-exec.mjs script;
+  //  this script validates the integration harness and endpoint connectivity)
+  info('3', 'Running danger scenario (harness validation, 1 of 5)...');
   const dr = await runScenario(opts, DANGER_SCENARIOS[0], true);
   dangerResults.push(dr);
 
-  info('3', 'Running safe scenario (1 of 5 required for gate)...');
+  info('3', 'Running safe scenario (harness validation, 1 of 5)...');
   const sr = await runScenario(opts, SAFE_SCENARIOS[0], false);
   safeResults.push(sr);
 
