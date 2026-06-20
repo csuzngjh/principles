@@ -641,20 +641,11 @@ const SAFE_SCENARIOS = [
  */
 function driveAgent(runId, scenarioId, prompt, timeoutSec = 120) {
   const sessionKey = `agent:acceptance:${runId}:${scenarioId}`;
-  const args = ['agent', '--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json'];
+  const escapedPrompt = prompt.replace(/"/g, '\\"');
+  const cmd = `openclaw agent --session-key "${sessionKey}" --message "${escapedPrompt}" --timeout ${timeoutSec} --json`;
 
   info('3', `Driving agent: ${scenarioId} (session: ${sessionKey})`);
-  let raw = '';
-  try {
-    raw = execFileSync('openclaw', args, {
-      encoding: 'utf-8',
-      timeout: (timeoutSec + 30) * 1000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      maxBuffer: 10 * 1024 * 1024,
-    }).trim();
-  } catch (e) {
-    raw = (e.stdout?.toString() ?? '') + (e.stderr?.toString() ?? '');
-  }
+  const raw = sh(cmd, { timeout: (timeoutSec + 30) * 1000 });
 
   let result = null;
   try { result = JSON.parse(raw); } catch { /* non-JSON */ }

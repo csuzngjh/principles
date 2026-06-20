@@ -277,20 +277,16 @@ console.log('OK');
  */
 function driveAgent(scenarioId, prompt, timeoutSec = 120) {
   const sessionKey = `agent:accept:${RUN_ID}:${scenarioId}`;
-  const args = ['agent', '--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json'];
+  // On Windows, openclaw is installed as a .cmd wrapper; execFileSync needs shell:true
+  // to resolve .cmd files, but this breaks argument passing with special chars.
+  // Use execSync with proper escaping instead for reliability.
+  const escapedPrompt = prompt.replace(/"/g, '\\"');
+  const cmd = process.platform === 'win32'
+    ? `openclaw agent --session-key "${sessionKey}" --message "${escapedPrompt}" --timeout ${timeoutSec} --json`
+    : `openclaw agent --session-key "${sessionKey}" --message "${escapedPrompt}" --timeout ${timeoutSec} --json`;
 
   log('INFO', `[${scenarioId}] Driving agent...`);
-  let raw = '';
-  try {
-    raw = execFileSync('openclaw', args, {
-      encoding: 'utf-8',
-      timeout: (timeoutSec + 30) * 1000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      maxBuffer: 10 * 1024 * 1024,
-    }).trim();
-  } catch (e) {
-    raw = (e.stdout?.toString() ?? '') + (e.stderr?.toString() ?? '');
-  }
+  const raw = sh(cmd, { timeout: (timeoutSec + 30) * 1000 });
 
   let result = null;
   try { result = JSON.parse(raw); } catch { /* non-JSON */ }
