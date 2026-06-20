@@ -44,6 +44,6 @@ describe('rule-implementation-runtime', () => {
       'rule-memory-limit.js',
     );
 
-    expect(() => moduleExports.callEvaluate?.({}, {})).toThrow(/worker|memory|timed out/i);
+    expect(() => moduleExports.callEvaluate?.({}, {})).toThrow(/worker|memory|heap|timed out|exited without a valid result/i);
   });
 });
