@@ -66,6 +66,7 @@ export class RuleHost {
   private readonly stateDir: string;
   private readonly logger: RuleHostLogger;
   private readonly workspaceDir: string | null;
+  private readonly implementationSources = new Map<string, { activationId: string; artifactId: string; ruleId: string }>();
 
   constructor(stateDir: string, logger: RuleHostLogger = console, options?: RuleHostOptions) {
     this.stateDir = stateDir;
@@ -85,7 +86,20 @@ export class RuleHost {
   evaluate(input: RuleHostInput): RuleHostResult | undefined {
     try {
       const activeImpls = this._loadActiveCodeImplementations();
-      return mergeDecisions(activeImpls, input, this.logger);
+      return mergeDecisions(activeImpls, input, {
+        warn: this.logger.warn,
+        onImplementationUnhealthy: (impl, reason) => {
+          const source = this.implementationSources.get(impl.implId);
+          if (!source) return;
+          this._recordUnhealthy(
+            source.activationId,
+            source.artifactId,
+            source.ruleId,
+            reason,
+            'Fix the RuleCode runtime error or return shape, then re-activate the rule',
+          );
+        },
+      });
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
@@ -136,6 +150,7 @@ export class RuleHost {
    * All data from SQLite is treated as unknown and validated before use.
    */
   private _loadFromActivationsTable(workspaceDir: string): LoadedImplementation[] {
+    this.implementationSources.clear();
     const sqliteConn = new SqliteConnection(workspaceDir);
     try {
       const db = sqliteConn.getDb();
@@ -199,6 +214,19 @@ export class RuleHost {
             `reason=at most one active activation per rule is allowed ` +
             `nextAction=deactivate all but one activation for this target_ref`
           );
+          for (const r of group) {
+            const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
+            const artifactId = typeof r['artifact_id'] === 'string' ? r['artifact_id'] : '';
+            if (activationId && artifactId) {
+              this._recordUnhealthy(
+                activationId,
+                artifactId,
+                targetRef,
+                `duplicate active activation for target_ref ${targetRef}`,
+                'Deactivate all but one activation for this target_ref',
+              );
+            }
+          }
         } else {
           validRows.push(group[0]);
         }
@@ -267,6 +295,7 @@ export class RuleHost {
           // callEvaluate runs the invocation INSIDE the vm context with a time
           // boundary, terminating infinite loops and excessive computation.
           const boundedCallEvaluate = moduleExports.callEvaluate;
+          this.implementationSources.set(implId, { activationId, artifactId, ruleId });
 
           loaded.push({
             implId,

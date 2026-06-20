@@ -231,4 +231,31 @@ var meta = { name: 'valid-rule', version: '1', ruleId: '${RULE_ID_BROKEN}', cove
     const eventsContent = readTodayEvents(tempStateDir);
     expect(eventsContent).not.toContain('rulehost_unhealthy');
   });
+
+  it('runtime-invalid result is persisted as rulehost_unhealthy and never executes', async () => {
+    const invalidResultCode = `
+function evaluate() {
+  return { decision: 'block', matched: 'yes', reason: 'invalid matched type' };
+}
+var meta = { name: 'invalid-result-rule', version: '1', ruleId: '${RULE_ID_BROKEN}', coversCondition: 'all' };
+`;
+    const now = new Date().toISOString();
+    sqliteConn.getDb().prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      ARTIFACT_ID_BROKEN, 'rule', 'task-invalid-result', 'P_TEST_INVALID_RESULT', RULE_ID_BROKEN,
+      '[]', 'validated', JSON.stringify({ ruleId: RULE_ID_BROKEN, implementationCode: invalidResultCode }), now, now,
+    );
+    await insertActivation();
+
+    const ruleHost = new RuleHost(tempStateDir, { warn: () => {} }, { workspaceDir: tempWorkspaceDir });
+    expect(ruleHost.evaluate(makeInput())).toBeUndefined();
+    EventLogService.get(tempStateDir).flush();
+
+    const events = readTodayEvents(tempStateDir);
+    expect(events).toContain('rulehost_unhealthy');
+    expect(events).toContain('invalid RuleHostResult');
+    expect(events).toContain(ACTIVATION_ID_BROKEN);
+  });
 });

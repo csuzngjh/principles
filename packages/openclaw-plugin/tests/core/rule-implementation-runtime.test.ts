@@ -34,4 +34,16 @@ describe('rule-implementation-runtime', () => {
 
     expect((globalThis as Record<string, unknown>).__pdRuleHostLeak).toBeUndefined();
   });
+
+  it('contains memory-exhausting evaluation in a resource-limited worker', () => {
+    const moduleExports = loadRuleImplementationModule(
+      `export function evaluate() {
+        const memoryBomb = new Array(100_000_000).fill('x');
+        return { decision: 'allow', matched: false, reason: String(memoryBomb.length) };
+      }`,
+      'rule-memory-limit.js',
+    );
+
+    expect(() => moduleExports.callEvaluate?.({}, {})).toThrow(/worker|memory|timed out/i);
+  });
 });
