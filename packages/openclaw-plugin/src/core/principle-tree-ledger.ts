@@ -702,19 +702,6 @@ export function transitionImplementationState(
 }
 
 /**
- * Get all implementations for a specific lifecycle state across all rules.
- */
-export function listImplementationsByLifecycleState(
-  stateDir: string,
-  state: ImplementationLifecycleState
-): Implementation[] {
-  const ledger = loadLedger(stateDir);
-  return Object.values(ledger.tree.implementations).filter(
-    (impl) => impl.lifecycleState === state
-  );
-}
-
-/**
  * Get implementations in a specific lifecycle state for a given rule.
  */
 export function listRuleImplementationsByState(

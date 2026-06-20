@@ -53,7 +53,6 @@ vi.mock('../../src/core/rule-host.js', () => ({
 
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(),
-  listImplementationsByLifecycleState: vi.fn(() => []),
 }));
 
 describe('Gate Rule Host Only Pipeline', () => {
