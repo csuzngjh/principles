@@ -191,7 +191,11 @@ function evaluate(input, helpers) {
     const violations = checkReturnStatementsMissingFields(code);
     expect(violations).toHaveLength(1);
     // The "missing required field(s): reason" part should only list 'reason'
-    const [missingPart] = violations[0].split('—');
+    const [firstViolation] = violations;
+    if (firstViolation === undefined) {
+      throw new Error('expected violation to exist');
+    }
+    const [missingPart] = firstViolation.split('—');
     expect(missingPart).toContain('reason');
     expect(missingPart).not.toContain('decision');
   });

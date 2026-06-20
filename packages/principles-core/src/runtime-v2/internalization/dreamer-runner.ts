@@ -311,19 +311,15 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
    * Only fill when absent via Object.hasOwn — present-but-falsy values
    * must reach validation and fail loud (Runtime Contract Rule 3).
    *
-   * Also overrides generatedAt with the actual current timestamp (LLM may
-   * echo the prompt's example date) and strips fabricated sourcePrincipleId
-   * values (LLM invents placeholders like "pri-unknown", "pri-000", etc.).
+   * Also strips fabricated sourcePrincipleId values (LLM invents placeholders
+   * like "pri-unknown", "pri-000", etc.). The generatedAt override is handled
+   * by the base class via super.postFetchTransform().
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: DreamerContext): void {
+    super.postFetchTransform(taskId, untrustedOutput, _context);
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
 
     if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
-      // Override generatedAt with actual timestamp — LLM may echo prompt example date
-      if (Object.hasOwn(untrustedOutput, 'generatedAt')) {
-        Reflect.set(untrustedOutput, 'generatedAt', new Date().toISOString());
-      }
       // Strip fabricated sourcePrincipleId — LLM invents placeholders like pri-unknown, pri-000, pri-999
       if (Object.hasOwn(untrustedOutput, 'sourcePrincipleId') && typeof (untrustedOutput as Record<string, unknown>).sourcePrincipleId === 'string') {
         const val = (untrustedOutput as Record<string, unknown>).sourcePrincipleId as string;
