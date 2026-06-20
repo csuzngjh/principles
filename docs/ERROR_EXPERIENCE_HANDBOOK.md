@@ -109,6 +109,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
+| ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 
 ---
 
@@ -728,7 +729,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 75 |
+| Total lessons | 76 |
 | Last updated | 2026-06-20 |
 | Top category | Schema & Type |
 | Recurring errors | 30 |
@@ -1089,5 +1090,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: Static check: grep for `aria-label=\{?\` or `aria-label="` in `.tsx` files under `packages/pd-console/src/ui/` that also import `useTranslation`. Any match that does not use `t(...)` is a finding.
 - **Related ERRs**: None
 - **Source**: PR #979 (CodeRabbit review)
+- **Date**: 2026-06-20
+- **Recurrence**: None
+
+---
+
+**[ERR-076]** | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken
+
+- **What happened**: In `correction-proposal.ts` (PRI-437), `isPlainObject()` used `Object.getPrototypeOf(value) === Object.prototype` to validate correction proposals from VM-executed RuleCode. Objects created inside `vm.createContext(Object.create(null))` have prototypes from the VM realm, not the host realm, so `isPlainObject` returned `false` and `validateCorrectionProposal` rejected all valid `auto_correct` proposals with "proposal must be a plain object". This made the entire `auto_correct` decision path silently non-functional in production. Additionally, `_recordUnhealthy()` in `rule-host.ts` used `this.logger as never` to bypass a type mismatch between `RuleHostLogger` (only `warn`) and `PluginLogger` (has `error`, `info`, `warn`), which would cause a `TypeError` if `EventLog` called `this.logger.error()`.
+- **Why it is wrong**: `node:vm` creates a separate V8 realm. Objects created inside the VM context have `[[Prototype]]` pointing to the VM's `Object.prototype`, not the host's. `Object.getPrototypeOf() === Object.prototype` is a host-realm assumption that fails for cross-realm objects. Using `as never` to bypass type incompatibility hides the real issue (interface mismatch) and creates a latent runtime crash risk.
+- **Generalized failure mode**: When validating objects created inside `node:vm` contexts, type narrowing that checks `Object.getPrototypeOf()` against host-realm prototypes will reject all valid VM-created objects. When interfaces don't match, using `as never` or `as any` to bypass the type error creates a latent crash risk instead of fixing the interface.
+- **Correct approach**: Use `isRecordLike` (typeof object + non-null + non-array) without prototype checks for VM-crossing validation. Add explicit `Object.hasOwn()` checks for prototype pollution keys (`__proto__`, `constructor`, `prototype`). When passing a logger with a narrower interface, either pass `undefined` (if the target accepts optional logger) or create an adapter that maps the available methods.
+- **How to prevent**: (1) Any validator that runs on VM output must NOT use `Object.getPrototypeOf()` or `instanceof` against host-realm types. Use structural checks (`typeof`, `Object.hasOwn()`, `Array.isArray()`) instead. (2) Never use `as never` or `as any` to bypass type mismatches — fix the interface or pass `undefined`. (3) Test validators with objects created inside `vm.createContext()` to verify cross-realm compatibility.
+- **Regression guard**: `rule-host-autocorrect-vm.test.ts` — creates a valid auto_correct proposal inside VM context and verifies it is accepted by the validator. `rule-host-adversarial-output.test.ts` — verifies prototype pollution is rejected.
+- **Related ERRs**: ERR-001 (as cast on untrusted), ERR-013 (Object.hasOwn for untrusted keys), ERR-024 (validator not wired into production)
+- **Source**: PRI-437 / PR #986 (adversarial self-review)
 - **Date**: 2026-06-20
 - **Recurrence**: None

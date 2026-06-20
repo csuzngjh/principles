@@ -18,6 +18,7 @@ import type {
   LoadedImplementation,
 } from './rule-host-contracts.js';
 import { validateCorrectionProposal } from './correction-proposal.js';
+import { validateRuleHostResult } from './rule-host-validator.js';
 
 export interface DecisionMergeLogger {
   warn?: (_message: string) => void;
@@ -59,6 +60,18 @@ export function mergeDecisions(
     for (const impl of implementations) {
       try {
         const result = impl.evaluate(input);
+
+        // PRI-437: Defense-in-depth — validate result before accessing fields.
+        // The primary validation is in rule-host.ts at the VM trust boundary,
+        // but this guard protects against any implementation provider that
+        // bypasses the production RuleHost validation path.
+        const validation = validateRuleHostResult(result);
+        if (!validation.valid) {
+          logger?.warn?.(
+            `[RuleHost] Implementation ${impl.implId} returned invalid result: ${validation.errors.join('; ')}`
+          );
+          continue;
+        }
 
         if (!result.matched) {
           continue;

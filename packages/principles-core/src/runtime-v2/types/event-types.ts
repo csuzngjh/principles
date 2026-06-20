@@ -34,7 +34,9 @@ export type EventType =
       | 'rulehost_requireApproval'
       | 'rulehost_auto_correct_proposed'
       | 'rulehost_auto_correct_applied'
-      | 'runtime_v2_prompt_activations_injected';
+      | 'runtime_v2_prompt_activations_injected'
+      // PRI-437: RuleHost health — approved rule failed to compile/load
+      | 'rulehost_unhealthy';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -63,6 +65,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_auto_correct_proposed'),
   Type.Literal('rulehost_auto_correct_applied'),
   Type.Literal('runtime_v2_prompt_activations_injected'),
+  Type.Literal('rulehost_unhealthy'),
 ]);
 
 export type EventCategory =
@@ -615,6 +618,39 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   nextAction: Type.Optional(Type.String()),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
+
+// ============== RuleHost Health (PRI-437) ==============
+
+/**
+ * rulehost_unhealthy — An approved rule failed to compile or load.
+ *
+ * PRI-437: When an activation exists in SQLite but the RuleCode cannot be
+ * compiled or loaded, the failure MUST be recorded in EventLog (not just
+ * logger.warn). This makes the unhealthy state visible to CLI and Console.
+ *
+ * Emitted from rule-host.ts when:
+ *   - Compilation throws (syntax error, etc.)
+ *   - Module has no evaluate function
+ *   - content_json is missing implementationCode
+ */
+export interface RuleHostUnhealthyEventData {
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  /** What went wrong (compilation error, missing export, etc.) */
+  reason: string;
+  /** What the operator should do to fix it */
+  nextAction: string;
+}
+
+export const RuleHostUnhealthyEventDataSchema = Type.Object({
+  activationId: Type.String(),
+  artifactId: Type.String(),
+  ruleId: Type.String(),
+  reason: Type.String(),
+  nextAction: Type.String(),
+});
+export type RuleHostUnhealthyEventDataStatic = Static<typeof RuleHostUnhealthyEventDataSchema>;
 
 // ============== Daily Statistics ==============
 
