@@ -212,6 +212,29 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
+// ── Principle Trajectory ──────────────────────────────────────────────────────
+
+export interface TrajectoryStageData {
+  key: 'evidence' | 'diagnosis' | 'proposal' | 'review' | 'deploy' | 'behavior';
+  status: 'available' | 'unavailable' | 'not_applicable';
+  summary: string;
+  detail?: string;
+  timestamp?: string;
+  unavailableReason?: string;
+  nextAction?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface TrajectoryData {
+  principleId: string;
+  stages: TrajectoryStageData[];
+  degraded?: { reason: string; nextAction: string };
+}
+
+async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
+  return request<TrajectoryData>(`/api/principles/${encodeURIComponent(principleId)}/trajectory`);
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
@@ -388,6 +411,7 @@ export {
   rejectApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
+  fetchPrincipleTrajectory,
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,

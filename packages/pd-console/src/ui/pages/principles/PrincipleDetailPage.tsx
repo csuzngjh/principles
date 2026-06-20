@@ -10,6 +10,7 @@ import {
   fetchPrincipleDetail,
   fetchApprovalsGrouped,
   fetchLifecycleMetrics,
+  fetchPrincipleTrajectory,
   approveApproval,
   rejectApproval,
 } from "../../api.js";
@@ -19,6 +20,8 @@ import type {
   ApprovalGroup,
   ApprovalsGroupedData,
   LifecycleMetricsData,
+  TrajectoryData,
+  TrajectoryStageData,
 } from "../../api.js";
 
 // ── Runtime validation (H section) ──────────────────────────────────────────
@@ -99,15 +102,15 @@ function validateLifecycleMetrics(data: unknown): LifecycleMetricsData | null {
   return data as unknown as LifecycleMetricsData;
 }
 
-// ── Trajectory stages for Layer 3 ───────────────────────────────────────────
-const TRAJECTORY_STAGES = [
-  { key: "evidence", label: "evidence" },
-  { key: "diagnosis", label: "diagnosis" },
-  { key: "proposal", label: "proposal" },
-  { key: "review", label: "review" },
-  { key: "deploy", label: "deploy" },
-  { key: "behavior", label: "behavior" },
-];
+// ── Trajectory stage labels (i18n key mapping) ─────────────────────────────
+const STAGE_LABEL_KEYS: Record<string, string> = {
+  evidence: "principles.detail.stageEvidence",
+  diagnosis: "principles.detail.stageDiagnosis",
+  proposal: "principles.detail.stageProposal",
+  review: "principles.detail.stageReview",
+  deploy: "principles.detail.stageDeploy",
+  behavior: "principles.detail.stageBehavior",
+};
 
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrincipleDetailPage() {
@@ -118,6 +121,7 @@ export function PrincipleDetailPage() {
   const [principle, setPrinciple] = useState<PrincipleDetail | null>(null);
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleMetricsData | null>(null);
+  const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,10 +142,11 @@ export function PrincipleDetailPage() {
     setError(null);
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
     try {
-      const [pResult, aResult, lResult] = await Promise.all([
+      const [pResult, aResult, lResult, tResult] = await Promise.all([
         fetchPrincipleDetail(id),
         fetchApprovalsGrouped(),
         fetchLifecycleMetrics(id),
+        fetchPrincipleTrajectory(id),
       ]);
 
       if (!pResult.success) {
@@ -166,6 +171,18 @@ export function PrincipleDetailPage() {
 
       const lData = lResult.success ? validateLifecycleMetrics(lResult.data) : null;
       setLifecycle(lData);
+
+      // Trajectory — no validation needed, backend returns structured data
+      if (tResult.success && tResult.data) {
+        const tData = tResult.data as TrajectoryData;
+        if (tData.stages && Array.isArray(tData.stages)) {
+          setTrajectory(tData);
+        } else {
+          setTrajectory(null);
+        }
+      } else {
+        setTrajectory(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setApprovalGroup(null);
@@ -496,20 +513,68 @@ export function PrincipleDetailPage() {
           {t("principles.detail.trajectory")}
         </summary>
         <div className="px-4 pb-4 border-t border-line pt-4">
-          {/* Trajectory timeline */}
+          {/* Trajectory timeline — render from real data if available */}
+          {trajectory?.degraded && (
+            <div className="mb-4 p-3 bg-amber/5 border border-amber/20 rounded-[var(--radius-sm)]">
+              <p className="text-amber text-[12px] font-mono">
+                {trajectory.degraded.reason}
+              </p>
+              <p className="text-ink-4 text-[11px] mt-1">
+                {trajectory.degraded.nextAction}
+              </p>
+            </div>
+          )}
+
           <div className="space-y-4">
-            {TRAJECTORY_STAGES.map((stage) => (
-              <div key={stage.key} className="flex gap-4">
-                <span className="font-mono text-[12px] text-ink-3 min-w-[80px]">
-                  {t("principles.detail.stage" + stage.key.charAt(0).toUpperCase() + stage.key.slice(1), { defaultValue: stage.label })}
-                </span>
-                <div className="flex-1">
-                  <p className="text-ink-3 text-[13px]">
-                    {t("principles.detail.stage" + stage.key.charAt(0).toUpperCase() + stage.key.slice(1) + "Desc", { defaultValue: "—" })}
-                  </p>
+            {(trajectory?.stages ?? []).length > 0 ? (
+              trajectory!.stages.map((stage: TrajectoryStageData) => (
+                <div key={stage.key} className="flex gap-4">
+                  <span className="font-mono text-[12px] text-ink-3 min-w-[80px]">
+                    {t(STAGE_LABEL_KEYS[stage.key] ?? `principles.detail.stage${stage.key}`, { defaultValue: stage.key })}
+                  </span>
+                  <div className="flex-1">
+                    {stage.status === 'available' ? (
+                      <>
+                        <p className="text-ink-2 text-[13px]">{stage.summary}</p>
+                        {stage.detail && (
+                          <p className="text-ink-3 text-[12px] mt-0.5">{stage.detail}</p>
+                        )}
+                        {stage.timestamp && (
+                          <p className="text-ink-4 text-[11px] mt-0.5 font-mono">{stage.timestamp}</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-ink-4 text-[13px]">
+                        {stage.status === 'not_applicable'
+                          ? (stage.unavailableReason ?? '—')
+                          : (stage.unavailableReason ?? '—')}
+                        {stage.nextAction && (
+                          <span className="block text-ink-4 text-[11px] mt-0.5">
+                            {stage.nextAction}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              // Fallback: show loading state or no-data message
+              ['evidence', 'diagnosis', 'proposal', 'review', 'deploy', 'behavior'].map((key) => (
+                <div key={key} className="flex gap-4">
+                  <span className="font-mono text-[12px] text-ink-3 min-w-[80px]">
+                    {t(STAGE_LABEL_KEYS[key] ?? `principles.detail.stage${key}`, { defaultValue: key })}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-ink-4 text-[13px]">
+                      {trajectory === null
+                        ? t("principles.detail.trajectoryLoadFailed", { defaultValue: "无法加载轨迹数据" })
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           {/* Lifecycle metrics — only when principle has rules (F.1) */}
