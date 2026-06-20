@@ -134,11 +134,25 @@ function setupDefaultMocks(): void {
   mockGetCandidate.mockImplementation((id: string) =>
     Promise.resolve({
       candidateId: id,
+      taskId: `diag-task-${id}`,
       description: `candidate ${id}`,
       sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: `candidate ${id}` }),
     }),
   );
-  mockGetTask.mockResolvedValue(null);
+  // PRI-435: getTask must return a diagnostician task with sourcePainId when called
+  // with candidate.taskId (diag-task-*), and null for dreamer task lookups.
+  mockGetTask.mockImplementation((taskId: string) => {
+    if (taskId.startsWith('diag-task-')) {
+      return Promise.resolve({
+        taskId,
+        taskKind: 'diagnostician',
+        status: 'completed',
+        diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+      });
+    }
+    // Dreamer task lookup → null (no existing dreamer task)
+    return Promise.resolve(null);
+  });
   mockCreateTask.mockImplementation((input: { taskId: string }) =>
     Promise.resolve({ taskId: input.taskId }),
   );
@@ -260,7 +274,20 @@ describe('pd candidate internalization backfill', () => {
       if (sql.includes("'pending'")) return [{ candidate_id: 'cand-pending-1' }];
       return [];
     });
-    mockGetTask.mockResolvedValue({ taskId: 'dreamer-cand-pending-1-prompt' });
+    // PRI-435: getTask returns diagnostician task for diag-task-* lookups,
+    // and dreamer task for dreamer-cand-* lookups (testing idempotency).
+    mockGetTask.mockImplementation((taskId: string) => {
+      if (taskId.startsWith('diag-task-')) {
+        return Promise.resolve({
+          taskId,
+          taskKind: 'diagnostician',
+          status: 'completed',
+          diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+        });
+      }
+      // Dreamer task already exists → idempotency check
+      return Promise.resolve({ taskId: 'dreamer-cand-pending-1-prompt' });
+    });
 
     await handleCandidateInternalizationBackfill({ workspace: WS, includePending: true, confirm: true, json: true });
 
@@ -396,11 +423,24 @@ describe('Commander wiring for backfill --include-pending', () => {
     mockGetCandidate.mockImplementation((id: string) =>
       Promise.resolve({
         candidateId: id,
+        taskId: `diag-task-${id}`,
         description: `candidate ${id}`,
         sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: `candidate ${id}` }),
       }),
     );
-    mockGetTask.mockResolvedValue(null);
+    // PRI-435: getTask returns diagnostician task with sourcePainId for diag-task-* lookups,
+    // null for dreamer task lookups (no existing dreamer task).
+    mockGetTask.mockImplementation((taskId: string) => {
+      if (taskId.startsWith('diag-task-')) {
+        return Promise.resolve({
+          taskId,
+          taskKind: 'diagnostician',
+          status: 'completed',
+          diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+        });
+      }
+      return Promise.resolve(null);
+    });
   });
 
   afterEach(() => {
