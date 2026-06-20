@@ -326,9 +326,13 @@ describe('PRI-435: candidate internalize fails loud when sourcePainId is missing
       .map((c) => String(c[0]))
       .find((s) => s.includes('"candidateId"') && s.includes('"reason"'));
     expect(jsonOutput, 'JSON error result must be printed').toBeDefined();
-    const parsed: unknown = JSON.parse(jsonOutput as string);
-    expect(parsed).not.toBeNull();
-    expect(typeof parsed).toBe('object');
+    // PRI-435 (CodeRabbit P2): no `as` bypass; strict null check before Object.hasOwn
+    expect(typeof jsonOutput).toBe('string');
+    if (typeof jsonOutput !== 'string') throw new Error('JSON error result must be a string');
+    const parsed: unknown = JSON.parse(jsonOutput);
+    const isRecord = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+    expect(isRecord, 'JSON error result must be an object').toBe(true);
+    if (!isRecord) throw new Error('Malformed JSON error result');
     expect(Object.hasOwn(parsed, 'reason'), 'reason field must be present').toBe(true);
     expect(Object.hasOwn(parsed, 'nextAction'), 'nextAction field must be present').toBe(true);
     const reason = Reflect.get(parsed, 'reason');
@@ -390,9 +394,13 @@ describe('PRI-435: backfill fails loud per-candidate when sourcePainId is missin
       .map((c) => String(c[0]))
       .find((s) => s.includes('"results"') && s.includes('"errors"'));
     expect(jsonOutput, 'backfill JSON result must be printed').toBeDefined();
-    const parsed: unknown = JSON.parse(jsonOutput as string);
-    expect(parsed).not.toBeNull();
-    expect(typeof parsed).toBe('object');
+    // PRI-435 (CodeRabbit P2): no `as` bypass; strict null check before Object.hasOwn
+    expect(typeof jsonOutput).toBe('string');
+    if (typeof jsonOutput !== 'string') throw new Error('backfill JSON result must be a string');
+    const parsed: unknown = JSON.parse(jsonOutput);
+    const isRecord = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+    expect(isRecord, 'backfill JSON result must be an object').toBe(true);
+    if (!isRecord) throw new Error('Malformed backfill JSON result');
     // The backfill JSON shape is { ...remediation, details: { errors, created, results, ... } }
     expect(Object.hasOwn(parsed, 'details'), 'details field must be present').toBe(true);
     const details = Reflect.get(parsed, 'details');
@@ -500,8 +508,13 @@ describe('PRI-435: candidate internalize rejects non-diagnostician task for line
       .map((c) => String(c[0]))
       .find((s) => s.includes('"candidateId"') && s.includes('"reason"'));
     expect(jsonOutput, 'JSON error result must be printed').toBeDefined();
-    const parsed: unknown = JSON.parse(jsonOutput as string);
-    expect(typeof parsed).toBe('object');
+    // PRI-435 (CodeRabbit P2): no `as` bypass; strict null check before Object.hasOwn
+    expect(typeof jsonOutput).toBe('string');
+    if (typeof jsonOutput !== 'string') throw new Error('JSON error result must be a string');
+    const parsed: unknown = JSON.parse(jsonOutput);
+    const isRecord = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+    expect(isRecord, 'JSON error result must be an object').toBe(true);
+    if (!isRecord) throw new Error('Malformed JSON error result');
     expect(Object.hasOwn(parsed, 'reason'), 'reason field must be present').toBe(true);
     expect(Object.hasOwn(parsed, 'nextAction'), 'nextAction field must be present').toBe(true);
   });
