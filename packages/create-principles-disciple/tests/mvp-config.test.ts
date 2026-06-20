@@ -1781,12 +1781,23 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
   });
 
   it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
-    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
-    const features = parsed.features as Record<string, unknown>;
+    // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
+    const parsed: unknown = yaml.load(generateConfigYamlContent());
+    expect(parsed).toBeTruthy();
+    expect(typeof parsed === 'object' && !Array.isArray(parsed)).toBe(true);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+    expect(Object.hasOwn(parsed, 'features')).toBe(true);
+    const features = (parsed as Record<string, unknown>).features;
+    expect(typeof features === 'object' && features !== null && !Array.isArray(features)).toBe(true);
+    if (typeof features !== 'object' || features === null) return;
     expect(Object.hasOwn(features, 'code_rule_capability')).toBe(true);
-    const flag = features.code_rule_capability as Record<string, unknown>;
-    expect(flag.enabled).toBe(true);
-    expect(flag.category).toBe('core');
+    const flag = (features as Record<string, unknown>).code_rule_capability;
+    expect(typeof flag === 'object' && flag !== null).toBe(true);
+    if (typeof flag !== 'object' || flag === null) return;
+    expect(Object.hasOwn(flag, 'enabled')).toBe(true);
+    expect((flag as Record<string, unknown>).enabled).toBe(true);
+    expect(Object.hasOwn(flag, 'category')).toBe(true);
+    expect((flag as Record<string, unknown>).category).toBe('core');
   });
 
   it('quiet features are disabled', () => {

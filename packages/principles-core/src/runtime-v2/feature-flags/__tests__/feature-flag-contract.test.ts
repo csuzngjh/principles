@@ -181,15 +181,16 @@ describe('computeEffectiveFlags', () => {
 
   it('PRI-435: honors explicit emergency disable of core flag when deliberately configured', () => {
     const promptDefault = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'prompt');
-    if (!promptDefault) return;
+    // PRI-435 (CodeRabbit P2): fail loud if the prompt flag is missing from defaults
+    expect(promptDefault).toBeDefined();
     const userFlags = {
       prompt: { enabled: false, since: '2026-01-01' },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const promptFlag = result.flags.prompt;
-    if (promptFlag) {
-      expect(promptFlag.enabled).toBe(false);
-    }
+    // PRI-435 (CodeRabbit P2): fail loud if computeEffectiveFlags drops the flag
+    expect(promptFlag).toBeDefined();
+    expect(promptFlag?.enabled).toBe(false);
     expect(result.warnings.some(w => w.includes('core') && w.includes('prompt'))).toBe(true);
   });
 
@@ -199,9 +200,9 @@ describe('computeEffectiveFlags', () => {
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const promptFlag = result.flags.prompt;
-    if (promptFlag) {
-      expect(promptFlag.enabled).toBe(true);
-    }
+    // PRI-435 (CodeRabbit P2): fail loud if the flag is missing
+    expect(promptFlag).toBeDefined();
+    expect(promptFlag?.enabled).toBe(true);
   });
 
   it('allows explicit enable of quiet flag with valid input', () => {

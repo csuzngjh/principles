@@ -150,7 +150,10 @@ export async function resolveSourcePainIdFromDiagnostician(
   if (!diagTaskId) return null;
 
   const diagTask = await stateManager.getTask(diagTaskId);
-  if (!diagTask) return null;
+  // PRI-435 (CodeRabbit P1): Verify taskKind is 'diagnostician' to prevent
+  // cross-task-chain lineage contamination. If candidate.taskId points to a
+  // non-diagnostician task, sourcePainId must not be trusted.
+  if (!diagTask || diagTask.taskKind !== 'diagnostician') return null;
 
   if (typeof diagTask.diagnosticJson !== 'string') return null;
 

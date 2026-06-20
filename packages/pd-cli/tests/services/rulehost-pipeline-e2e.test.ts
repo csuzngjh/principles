@@ -203,12 +203,16 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({ workspace, painId: 'pain-flag-default', dryRun: true, json: true });
 
     const output = parseJsonOutput();
-    expect(output.status).toBe('dry_run');
+    // PRI-435 (CodeRabbit P3): narrow unknown before property access
+    expect(typeof output).toBe('object');
+    expect(output).not.toBeNull();
+    const obj = output as { status: string; codeRuleCapability?: { enabled: boolean; disabledReason?: string }; capabilityStatus?: string };
+    expect(obj.status).toBe('dry_run');
     // PRI-435: code_rule_capability is now a core flag — defaults ON even when omitted from config.
-    // It cannot be disabled via config. The capability is ON when artificer+evaluator are configured.
-    expect(output.codeRuleCapability).toEqual(expect.objectContaining({ enabled: true }));
-    expect(output.codeRuleCapability?.disabledReason).toBeUndefined();
-    expect(String(output.capabilityStatus)).toContain('ON');
+    // It cannot be disabled by config. The capability is ON when artificer+evaluator are configured.
+    expect(obj.codeRuleCapability).toEqual(expect.objectContaining({ enabled: true }));
+    expect(obj.codeRuleCapability?.disabledReason).toBeUndefined();
+    expect(String(obj.capabilityStatus)).toContain('ON');
   });
 
   it('PRI-435: explicit emergency disable via code_rule_capability.enabled=false is observable', async () => {
@@ -225,12 +229,16 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({ workspace, painId: 'pain-emergency-disable', dryRun: true, json: true });
 
     const output = parseJsonOutput();
-    expect(output.status).toBe('dry_run');
+    // PRI-435 (CodeRabbit P3): narrow unknown before property access
+    expect(typeof output).toBe('object');
+    expect(output).not.toBeNull();
+    const obj = output as { status: string; codeRuleCapability?: { enabled: boolean; disabledReason?: string }; capabilityStatus?: string };
+    expect(obj.status).toBe('dry_run');
     // PRI-435: Emergency disable via code_rule_capability.enabled=false is preserved.
     // The capability is OFF with a structured reason.
-    expect(output.codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
-    expect(String(output.codeRuleCapability?.disabledReason)).toContain('feature flag');
-    expect(String(output.capabilityStatus)).toContain('OFF');
+    expect(obj.codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
+    expect(String(obj.codeRuleCapability?.disabledReason)).toContain('feature flag');
+    expect(String(obj.capabilityStatus)).toContain('OFF');
   });
 
   it('reports the resolved runtime profile for every executed agent', async () => {

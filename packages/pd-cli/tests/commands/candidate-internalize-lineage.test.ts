@@ -423,3 +423,86 @@ describe('PRI-435: backfill fails loud per-candidate when sourcePainId is missin
     await sm2.close();
   });
 });
+
+/**
+ * PRI-435 (CodeRabbit P1 regression): Verify that resolveSourcePainIdFromDiagnostician
+ * rejects tasks whose taskKind is not 'diagnostician'. This prevents cross-task-chain
+ * lineage contamination when candidate.taskId points to a non-diagnostician task.
+ */
+describe('PRI-435: candidate internalize rejects non-diagnostician task for lineage resolution', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+  });
+
+  afterEach(async () => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+    if (tmpDir) {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      tmpDir = '';
+    }
+  });
+
+  it('does not create a dreamer task when candidate.taskId points to a non-diagnostician task', async () => {
+    const painId = 'pain-pri435-wrong-taskkind-001';
+    let candidateId = '';
+
+    {
+      const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+      await sm.initialize();
+
+      // Seed through the normal diagnostician path (creates diagnostician task + candidate)
+      const seeded = await seedDiagnosisToCandidate(sm, painId);
+      candidateId = seeded.candidateId;
+
+      // Corrupt the task's task_kind to simulate cross-task-chain pollution.
+      // The resolver must reject this even though diagnosticJson has sourcePainId.
+      sm.connection
+        .getDb()
+        .prepare('UPDATE tasks SET task_kind = ? WHERE task_id = ?')
+        .run('dreamer', seeded.taskId);
+
+      await sm.close();
+    }
+
+    // Act: run the real CLI handler
+    await handleCandidateInternalize({
+      candidateId,
+      workspace: tmpDir,
+      json: true,
+    });
+
+    // Assert: process.exit(1) called (fail loud)
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    // Assert: NO dreamer task created (no side effects)
+    const sm2 = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm2.initialize();
+    const allTasks = await sm2.listTasks();
+    // The original diagnostician task was corrupted to 'dreamer' kind, but no NEW
+    // dreamer task should be created by the internalize handler.
+    const newDreamerTasks = allTasks.filter(
+      (t) => t.taskKind === 'dreamer' && !t.taskId.startsWith('diagnostician-'),
+    );
+    expect(newDreamerTasks.length, 'no new dreamer task should be created when taskKind is wrong').toBe(0);
+    await sm2.close();
+
+    // Assert: JSON output contains reason and nextAction
+    const jsonOutput = consoleLogSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"candidateId"') && s.includes('"reason"'));
+    expect(jsonOutput, 'JSON error result must be printed').toBeDefined();
+    const parsed: unknown = JSON.parse(jsonOutput as string);
+    expect(typeof parsed).toBe('object');
+    expect(Object.hasOwn(parsed, 'reason'), 'reason field must be present').toBe(true);
+    expect(Object.hasOwn(parsed, 'nextAction'), 'nextAction field must be present').toBe(true);
+  });
+});

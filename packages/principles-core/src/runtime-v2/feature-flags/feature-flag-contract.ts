@@ -126,7 +126,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
   // Atomic: ArtificerL2 + Evaluator. The RuleHost pipeline runs the adversarial
   // write-test-fix loop with the ArtificerL2Adapter when enabled. As a core flag
-  // it cannot be disabled via config — operators must keep the capability on.
+  // it defaults ON and cannot be disabled by omission; explicit emergency disable
+  // via `enabled: false` is honored with a warning (see computeEffectiveFlags).
   // The CLI handler still checks per-agent config (artificer + evaluator enabled)
   // before invoking the pipeline; misconfigured agents fail the readiness gate.
   { id: 'code_rule_capability', category: 'core', enabled: true, since: '2026-06-18', description: 'Code-rule capability (atomic: ArtificerL2 + Evaluator) for RuleHost pipeline — MVP-Core, default ON (PRI-435)' },
