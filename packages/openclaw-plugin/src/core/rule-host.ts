@@ -90,7 +90,10 @@ export class RuleHost {
         warn: this.logger.warn,
         onImplementationUnhealthy: (impl, reason) => {
           const source = this.implementationSources.get(impl.implId);
-          if (!source) return;
+          if (!source) {
+            this.logger.warn?.(`[RuleHost] No source mapping for implId=${impl.implId}, cannot record unhealthy event`);
+            return;
+          }
           this._recordUnhealthy(
             source.activationId,
             source.artifactId,

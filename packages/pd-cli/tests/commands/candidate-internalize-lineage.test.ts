@@ -545,8 +545,11 @@ describe('candidate internalize resolves the production diag_router candidate ch
     await sm.close();
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await handleCandidateInternalize({ candidateId: seeded.candidateId, workspace: tmpDir, json: true });
-    logSpy.mockRestore();
+    try {
+      await handleCandidateInternalize({ candidateId: seeded.candidateId, workspace: tmpDir, json: true });
+    } finally {
+      logSpy.mockRestore();
+    }
 
     const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
     await verify.initialize();
