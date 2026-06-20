@@ -678,7 +678,9 @@
       "controlCenter": "控制中心",
       "reportProblem": "产品反馈",
       "settings": "设置",
-      "update": "更新"
+      "update": "更新",
+      "pendingApprovalsAria": "{{count}} 条待审批原则",
+      "degradedSignalsAria": "{{count}} 个系统降级信号"
     },
     "approvalCard": {
       "confidence": {
