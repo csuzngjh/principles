@@ -172,14 +172,9 @@ export function PrincipleDetailPage() {
       const lData = lResult.success ? validateLifecycleMetrics(lResult.data) : null;
       setLifecycle(lData);
 
-      // Trajectory — no validation needed, backend returns structured data
+      // Trajectory — validated at request layer via validateTrajectoryData
       if (tResult.success && tResult.data) {
-        const tData = tResult.data as TrajectoryData;
-        if (tData.stages && Array.isArray(tData.stages)) {
-          setTrajectory(tData);
-        } else {
-          setTrajectory(null);
-        }
+        setTrajectory(tResult.data);
       } else {
         setTrajectory(null);
       }
@@ -545,9 +540,7 @@ export function PrincipleDetailPage() {
                       </>
                     ) : (
                       <p className="text-ink-4 text-[13px]">
-                        {stage.status === 'not_applicable'
-                          ? (stage.unavailableReason ?? '—')
-                          : (stage.unavailableReason ?? '—')}
+                        {stage.unavailableReason ?? '—'}
                         {stage.nextAction && (
                           <span className="block text-ink-4 text-[11px] mt-0.5">
                             {stage.nextAction}

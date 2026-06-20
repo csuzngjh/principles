@@ -27,6 +27,7 @@ import {
   validatePrinciplesList,
   validateApprovalsGrouped,
   validateEvidenceChain,
+  validateTrajectoryData,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -53,6 +54,8 @@ import type {
   PrinciplesListData,
   ApprovalsGroupedData,
   EvidenceChainData,
+  TrajectoryData,
+  TrajectoryStageData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -214,25 +217,8 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
 
 // ── Principle Trajectory ──────────────────────────────────────────────────────
 
-export interface TrajectoryStageData {
-  key: 'evidence' | 'diagnosis' | 'proposal' | 'review' | 'deploy' | 'behavior';
-  status: 'available' | 'unavailable' | 'not_applicable';
-  summary: string;
-  detail?: string;
-  timestamp?: string;
-  unavailableReason?: string;
-  nextAction?: string;
-  meta?: Record<string, unknown>;
-}
-
-export interface TrajectoryData {
-  principleId: string;
-  stages: TrajectoryStageData[];
-  degraded?: { reason: string; nextAction: string };
-}
-
 async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
-  return request<TrajectoryData>(`/api/principles/${encodeURIComponent(principleId)}/trajectory`);
+  return request<TrajectoryData>(`/api/principles/${encodeURIComponent(principleId)}/trajectory`, undefined, validateTrajectoryData);
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
@@ -469,6 +455,8 @@ export type {
   EvidenceChainData,
   EvidenceChainRecordData,
   EvidenceChainStateData,
+  TrajectoryData,
+  TrajectoryStageData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)
