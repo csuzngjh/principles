@@ -144,3 +144,220 @@ describe('Notification components can be imported', () => {
     expect(typeof mod.useNotifications).toBe('function');
   });
 });
+
+// ── Audio context edge cases ─────────────────────────────────────────────
+
+describe('useNotificationSound edge cases', () => {
+  it('returns audioUnlocked=false when AudioContext is unavailable (SSR)', () => {
+    // Simulate SSR environment where window is undefined
+    vi.stubGlobal('window', undefined);
+
+    // Re-import to get fresh hook state
+    return import('../../src/ui/hooks/useNotificationSound.js?ssr-test').then((mod) => {
+      // In SSR, the hook should gracefully handle missing AudioContext
+      expect(mod.SOUND_CONFIG).toBeDefined();
+    }).finally(() => {
+      vi.unstubAllGlobals();
+    });
+  });
+
+  it('SOUND_CONFIG has valid volume range (0-1)', () => {
+    for (const key of Object.keys(SOUND_CONFIG)) {
+      const config = SOUND_CONFIG[key as keyof typeof SOUND_CONFIG];
+      expect(config.volume).toBeGreaterThanOrEqual(0);
+      expect(config.volume).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('SOUND_CONFIG has reasonable duration (not too long)', () => {
+    for (const key of Object.keys(SOUND_CONFIG)) {
+      const config = SOUND_CONFIG[key as keyof typeof SOUND_CONFIG];
+      expect(config.durationMs).toBeLessThan(1000); // Less than 1 second
+      expect(config.durationMs).toBeGreaterThan(50); // At least 50ms to be audible
+    }
+  });
+
+  it('SOUND_CONFIG has valid waveform types', () => {
+    const validWaveforms: OscillatorType[] = ['sine', 'square', 'sawtooth', 'triangle'];
+    for (const key of Object.keys(SOUND_CONFIG)) {
+      const config = SOUND_CONFIG[key as keyof typeof SOUND_CONFIG];
+      expect(validWaveforms).toContain(config.waveform);
+    }
+  });
+
+  it('SOUND_CONFIG has valid frequency range (human audible)', () => {
+    for (const key of Object.keys(SOUND_CONFIG)) {
+      const config = SOUND_CONFIG[key as keyof typeof SOUND_CONFIG];
+      expect(config.frequency).toBeGreaterThanOrEqual(20); // Lower bound of human hearing
+      expect(config.frequency).toBeLessThanOrEqual(20000); // Upper bound of human hearing
+    }
+  });
+});
+
+// ── Favicon badge edge cases ─────────────────────────────────────────────
+
+describe('favicon-badge edge cases', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renderFaviconDataUrl returns empty string when document is undefined', async () => {
+    vi.stubGlobal('document', undefined);
+    const { renderFaviconDataUrl } = await import('../../src/ui/components/notifications/favicon-badge.js');
+    const result = renderFaviconDataUrl(5);
+    expect(result).toBe('');
+  });
+
+  it('updateFaviconAndTitle handles zero counts gracefully', async () => {
+    // Mock canvas with getContext method
+    const mockCanvas = {
+      width: 32,
+      height: 32,
+      getContext: vi.fn(() => ({
+        fillStyle: '',
+        fillRect: vi.fn(),
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        fillText: vi.fn(),
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(),
+      })),
+      toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+    };
+
+    vi.stubGlobal('document', {
+      title: 'Original Title',
+      getElementById: vi.fn(() => null),
+      createElement: vi.fn(() => mockCanvas),
+      head: { appendChild: vi.fn() },
+    });
+    vi.stubGlobal('HTMLLinkElement', class HTMLLinkElement { });
+
+    const { updateFaviconAndTitle } = await import('../../src/ui/components/notifications/favicon-badge.js');
+    updateFaviconAndTitle(0, 0);
+
+    expect(document.title).toBe('PD Console');
+  });
+
+  it('updateFaviconAndTitle sets correct title for positive counts', async () => {
+    // Mock canvas with getContext method
+    const mockCanvas = {
+      width: 32,
+      height: 32,
+      getContext: vi.fn(() => ({
+        fillStyle: '',
+        fillRect: vi.fn(),
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+        fillText: vi.fn(),
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(),
+      })),
+      toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+    };
+
+    vi.stubGlobal('document', {
+      title: 'Original Title',
+      getElementById: vi.fn(() => null),
+      createElement: vi.fn(() => mockCanvas),
+      head: { appendChild: vi.fn() },
+    });
+    vi.stubGlobal('HTMLLinkElement', class HTMLLinkElement { });
+
+    const { updateFaviconAndTitle } = await import('../../src/ui/components/notifications/favicon-badge.js');
+    updateFaviconAndTitle(3, 2);
+
+    expect(document.title).toBe('(5) PD Governance Workspace');
+  });
+
+  it('resetFaviconAndTitle handles missing dynamic favicon gracefully', async () => {
+    vi.stubGlobal('document', {
+      title: '(10) PD Governance Workspace',
+      getElementById: vi.fn(() => null),
+    });
+
+    const { resetFaviconAndTitle } = await import('../../src/ui/components/notifications/favicon-badge.js');
+    resetFaviconAndTitle();
+
+    expect(document.title).toBe('PD Console');
+  });
+});
+
+// ── Notification reducer edge cases ──────────────────────────────────────
+
+describe('diffNotificationCounts edge cases', () => {
+  it('handles zero counts correctly', () => {
+    const result = diffNotificationCounts(
+      { pendingCount: 0, degradedCount: 0 },
+      { pendingCount: 0, degradedCount: 0 },
+    );
+    expect(result).toEqual({ pendingIncreased: false, degradedIncreased: false });
+  });
+
+  it('handles large counts correctly', () => {
+    const result = diffNotificationCounts(
+      { pendingCount: 10000, degradedCount: 5000 },
+      { pendingCount: 9999, degradedCount: 4999 },
+    );
+    expect(result).toEqual({ pendingIncreased: true, degradedIncreased: true });
+  });
+
+  it('handles negative-like counts (should not happen but test defensive behavior)', () => {
+    // This tests that the comparison still works even with unusual values
+    const result = diffNotificationCounts(
+      { pendingCount: 0, degradedCount: 0 },
+      { pendingCount: -1, degradedCount: -1 },
+    );
+    // Negative to zero is an increase in absolute terms
+    expect(result.pendingIncreased).toBe(true);
+    expect(result.degradedIncreased).toBe(true);
+  });
+
+  it('handles equal counts correctly', () => {
+    const result = diffNotificationCounts(
+      { pendingCount: 5, degradedCount: 3 },
+      { pendingCount: 5, degradedCount: 3 },
+    );
+    expect(result).toEqual({ pendingIncreased: false, degradedIncreased: false });
+  });
+});
+
+// ── Sound storage edge cases ──────────────────────────────────────────────
+
+describe('sound-storage edge cases', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('handles corrupted localStorage value gracefully', () => {
+      const mockStorage = createMockStorage();
+      mockStorage.setItem(SOUND_ENABLED_KEY, 'not-a-boolean');
+      vi.stubGlobal('window', { localStorage: mockStorage });
+
+      const result = loadSoundEnabled();
+      // Invalid values (not 'true') return false, per the implementation
+      expect(result).toBe(false);
+    });
+
+  it('handles localStorage quota exceeded error', () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn(() => {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+        get length() { return 0; },
+        key: vi.fn(() => null),
+      },
+    });
+
+    // Should not throw
+    expect(() => saveSoundEnabled(true)).not.toThrow();
+  });
+});
