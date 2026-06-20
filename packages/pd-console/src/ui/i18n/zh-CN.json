@@ -359,6 +359,7 @@
         "stageReview": "拥有者审查",
         "stageDeploy": "部署通道",
         "stageBehavior": "可观测行为",
+        "trajectoryLoadFailed": "无法加载轨迹数据",
         "lifecycleMetrics": "生命周期指标",
         "lifecycleNote": "规则质量信号，不等于行为变化",
         "insufficientData": "此原则暂无规则或数据不足，无法计算生命周期指标。",
