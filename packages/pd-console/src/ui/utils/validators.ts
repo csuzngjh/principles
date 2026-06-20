@@ -1346,3 +1346,96 @@ export function validateRollbackResult(v: unknown): RollbackResultData | null {
   if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
   return { success: v.success, message: v.message };
 }
+
+// ── Principle Trajectory validators ─────────────────────────────────────────
+
+const VALID_STAGE_KEYS = ['evidence', 'diagnosis', 'proposal', 'review', 'deploy', 'behavior'] as const;
+type StageKey = typeof VALID_STAGE_KEYS[number];
+
+const VALID_STAGE_STATUSES = ['available', 'unavailable', 'not_applicable'] as const;
+type StageStatus = typeof VALID_STAGE_STATUSES[number];
+
+export interface TrajectoryStageData {
+  key: StageKey;
+  status: StageStatus;
+  summary: string;
+  detail?: string;
+  timestamp?: string;
+  unavailableReason?: string;
+  nextAction?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface TrajectoryData {
+  principleId: string;
+  stages: TrajectoryStageData[];
+  degraded?: { reason: string; nextAction: string };
+}
+
+function isStageKey(v: unknown): v is StageKey {
+  return isString(v) && (VALID_STAGE_KEYS as readonly string[]).includes(v);
+}
+
+function isStageStatus(v: unknown): v is StageStatus {
+  return isString(v) && (VALID_STAGE_STATUSES as readonly string[]).includes(v);
+}
+
+function validateTrajectoryStage(v: unknown): TrajectoryStageData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'key') || !isStageKey(v.key)) return null;
+  if (!Object.hasOwn(v, 'status') || !isStageStatus(v.status)) return null;
+  if (!Object.hasOwn(v, 'summary') || !isString(v.summary)) return null;
+
+  const result: TrajectoryStageData = {
+    key: v.key,
+    status: v.status,
+    summary: v.summary,
+  };
+
+  if (Object.hasOwn(v, 'detail')) {
+    if (!isString(v.detail)) return null;
+    result.detail = v.detail;
+  }
+  if (Object.hasOwn(v, 'timestamp')) {
+    if (!isString(v.timestamp)) return null;
+    result.timestamp = v.timestamp;
+  }
+  if (Object.hasOwn(v, 'unavailableReason')) {
+    if (!isString(v.unavailableReason)) return null;
+    result.unavailableReason = v.unavailableReason;
+  }
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+  // meta is Record<string, unknown> — accept any object (ERR-008: bounded preview)
+  if (Object.hasOwn(v, 'meta')) {
+    if (!isObject(v.meta)) return null;
+    result.meta = v.meta;
+  }
+
+  return result;
+}
+
+export function validateTrajectoryData(v: unknown): TrajectoryData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'principleId') || !isString(v.principleId)) return null;
+  if (!Object.hasOwn(v, 'stages') || !Array.isArray(v.stages)) return null;
+  const stages = validateArray(v.stages, validateTrajectoryStage);
+  if (stages === null) return null;
+
+  const result: TrajectoryData = {
+    principleId: v.principleId,
+    stages,
+  };
+
+  if (Object.hasOwn(v, 'degraded')) {
+    if (!isObject(v.degraded)) return null;
+    const d = v.degraded;
+    if (!Object.hasOwn(d, 'reason') || !isString(d.reason)) return null;
+    if (!Object.hasOwn(d, 'nextAction') || !isString(d.nextAction)) return null;
+    result.degraded = { reason: d.reason, nextAction: d.nextAction };
+  }
+
+  return result;
+}

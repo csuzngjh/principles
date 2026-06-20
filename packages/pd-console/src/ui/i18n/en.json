@@ -359,6 +359,7 @@
         "stageReview": "Owner Review",
         "stageDeploy": "Deployment Channel",
         "stageBehavior": "Observable Behavior",
+        "trajectoryLoadFailed": "Failed to load trajectory data",
         "lifecycleMetrics": "Lifecycle Metrics",
         "lifecycleNote": "Rule quality signal, not equivalent to behavior change",
         "insufficientData": "This principle has no rules or insufficient data to compute lifecycle metrics.",

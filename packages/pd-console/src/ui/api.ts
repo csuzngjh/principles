@@ -27,6 +27,7 @@ import {
   validatePrinciplesList,
   validateApprovalsGrouped,
   validateEvidenceChain,
+  validateTrajectoryData,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -53,6 +54,8 @@ import type {
   PrinciplesListData,
   ApprovalsGroupedData,
   EvidenceChainData,
+  TrajectoryData,
+  TrajectoryStageData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -210,6 +213,12 @@ async function fetchPrinciples(filter?: 'all' | 'actionable'): Promise<ApiRespon
 // This endpoint is marked legacy/deferred for full validation.
 async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<unknown>> {
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
+}
+
+// ── Principle Trajectory ──────────────────────────────────────────────────────
+
+async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
+  return request<TrajectoryData>(`/api/principles/${encodeURIComponent(principleId)}/trajectory`, undefined, validateTrajectoryData);
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
@@ -388,6 +397,7 @@ export {
   rejectApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
+  fetchPrincipleTrajectory,
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,
@@ -445,6 +455,8 @@ export type {
   EvidenceChainData,
   EvidenceChainRecordData,
   EvidenceChainStateData,
+  TrajectoryData,
+  TrajectoryStageData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)
