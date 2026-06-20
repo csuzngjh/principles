@@ -69,6 +69,22 @@ Before starting ANY coding task on this project, you MUST read `docs/ERROR_PATTE
 
 Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
 
+### Error Handbook Reading Protocol
+
+**Default: Index-driven loading**
+1. Read `docs/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
+2. Match your task to 1-3 EP cards.
+3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
+4. State which ERR entries you considered and how you avoid them.
+
+**Forbidden: Full-file loading**
+Do NOT read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
+- You are recording a new error (record-error skill)
+- You are auditing the handbook itself
+- The INDEX does not cover your task AND you have confirmed with the user
+
+**Why**: The handbook is 177KB (~44K tokens). Loading it fully consumes ~15% of your context window for marginal benefit — the INDEX already captures all patterns. Full loading degrades your performance on the actual task.
+
 If a code review catches your error, record it in the handbook and tag the Linear issue with `lesson-learned`.
 
 ### Error Handbook Gate
