@@ -111,16 +111,17 @@ export function AppSidebar() {
               >
                 <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                 <span className="flex-1">{t(item.labelKey)}</span>
-                {item.id === "focus" && pendingCount > 0 && (
-                  <span className="ml-auto bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                    {pendingCount}
-                  </span>
-                )}
-                {item.shortcut && (
+                {item.id === "focus" && pendingCount > 0 ? (
+                  <span
+                    className="ml-auto h-2 w-2 rotate-45 rounded-[1px] border border-rose-400/50 bg-rose-400/15 shadow-[0_0_3px_rgba(251,113,133,0.35)]"
+                    role="status"
+                    aria-label={`${pendingCount} pending approvals`}
+                  />
+                ) : item.shortcut ? (
                   <span className="text-ink-4 font-mono text-[11px]">
                     {item.shortcut}
                   </span>
-                )}
+                ) : null}
               </Link>
             );
           })}
@@ -149,16 +150,17 @@ export function AppSidebar() {
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
                   <span className="flex-1">{t(item.labelKey)}</span>
-                  {item.id === "control-center" && degradedCount > 0 && (
-                    <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                      {degradedCount}
-                    </span>
-                  )}
-                  {item.shortcut && (
+                  {item.id === "control-center" && degradedCount > 0 ? (
+                    <span
+                      className="ml-auto h-[7px] w-[7px] rotate-45 rounded-[1px] border border-amber-400/50 bg-amber-400/15 shadow-[0_0_3px_rgba(251,191,36,0.35)]"
+                      role="status"
+                      aria-label={`${degradedCount} degraded signals`}
+                    />
+                  ) : item.shortcut ? (
                     <span className="text-ink-4 font-mono text-[11px]">
                       {item.shortcut}
                     </span>
-                  )}
+                  ) : null}
                 </Link>
               );
             })}
