@@ -18,7 +18,7 @@ import * as vm from 'node:vm';
 import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
 import type { RuleHostHelpers } from '@principles/core/runtime-v2';
 import type { ReplayEvaluateFn } from '@principles/core/runtime-v2';
-import { safeStringifyPreview, validateCorrectionProposal } from '@principles/core/runtime-v2';
+import { safeStringifyPreview, validateRuleHostResult } from '@principles/core/runtime-v2';
 
 function normalizeSource(sourceCode: string): string {
   const withoutExports = sourceCode
@@ -32,29 +32,10 @@ globalThis.__pdRuleModule = {
 };`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function isRuleEvaluator(value: unknown): value is (input: RuleHostInput, helpers: RuleHostHelpers) => unknown {
   return typeof value === 'function';
 }
 
-function isRuleHostResult(value: unknown): value is RuleHostResult {
-  if (!isRecord(value)) return false;
-  const decision = Object.hasOwn(value, 'decision') ? value.decision : undefined;
-  const matched = Object.hasOwn(value, 'matched') ? value.matched : undefined;
-  const reason = Object.hasOwn(value, 'reason') ? value.reason : undefined;
-  if (decision !== 'allow' && decision !== 'block' && decision !== 'requireApproval' && decision !== 'auto_correct') {
-    return false;
-  }
-  if (typeof matched !== 'boolean' || typeof reason !== 'string') return false;
-  if (decision === 'auto_correct') {
-    const proposal = Object.hasOwn(value, 'correctionProposal') ? value.correctionProposal : undefined;
-    return validateCorrectionProposal(proposal).valid;
-  }
-  return true;
-}
 /**
  * Compile rule implementation code and return a typed evaluate function.
  * Mirrors `createReplayEvaluateFromCode` in openclaw-plugin.
@@ -79,13 +60,14 @@ export function compileDemoRule(code: string, sourceLabel: string): ReplayEvalua
   const evaluateFn = moduleExports.evaluate;
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
     const result = evaluateFn(input, helpers);
-    if (!isRuleHostResult(result)) {
+    const validation = validateRuleHostResult(result);
+    if (!validation.valid) {
       throw new Error(
-        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${
+        `[${sourceLabel}]: evaluate returned invalid RuleHostResult — ${validation.errors.join('; ')} (got ${
           typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)
         })`,
       );
     }
-    return result;
+    return result as RuleHostResult;
   };
 }

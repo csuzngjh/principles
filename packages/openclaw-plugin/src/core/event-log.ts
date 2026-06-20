@@ -28,6 +28,7 @@ import type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimeV2PromptActivationsInjectedEventData,
+  RuleHostUnhealthyEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -208,6 +209,18 @@ export class EventLog {
 
   recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void {
     this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
+  }
+
+  /**
+   * PRI-437: Record that an approved rule failed to compile or load.
+   *
+   * This is NOT just a logger.warn — the unhealthy state is persisted to EventLog
+   * so it's visible to CLI (pd runtime health) and Console API.
+   *
+   * ERR-002: degradation includes a reason and nextAction (not silent).
+   */
+  recordRuleHostUnhealthy(data: RuleHostUnhealthyEventData): void {
+    this.record('rulehost_unhealthy', 'failure', undefined, data);
   }
 
   /**

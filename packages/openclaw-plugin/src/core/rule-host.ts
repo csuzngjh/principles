@@ -26,8 +26,10 @@
 
 import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { mergeDecisions } from '@principles/core/runtime-v2';
+import { validateRuleHostResult } from '@principles/core/runtime-v2';
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
+import { EventLogService } from './event-log.js';
 import type {
   RuleHostInput,
   RuleHostResult,
@@ -241,10 +243,13 @@ export class RuleHost {
           const implId = `act-impl-${activationId}`;
           const moduleExports = loadRuleImplementationModule(implementationCode, implId);
 
-          if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
+          if (!moduleExports || typeof moduleExports.callEvaluate !== 'function') {
+            const reason = 'compiled module has no evaluate function';
             this.logger.warn?.(
-              `[RuleHost] Activation ${activationId}: compiled module has no evaluate function, skipping`
+              `[RuleHost] Activation ${activationId}: ${reason}, skipping`
             );
+            this._recordUnhealthy(activationId, artifactId, ruleId, reason,
+              'Fix the RuleCode to export an evaluate(input, helpers) function, then re-activate');
             continue;
           }
 
@@ -258,10 +263,10 @@ export class RuleHost {
             ? moduleExports.meta
             : fallbackMeta;
 
-          const rawEvaluate = moduleExports.evaluate as (
-            _input: RuleHostInput,
-            _helpers: ReturnType<typeof createRuleHostHelpers>
-          ) => RuleHostResult;
+          // PRI-437: Use callEvaluate (vm-context-bounded) instead of raw evaluate.
+          // callEvaluate runs the invocation INSIDE the vm context with a time
+          // boundary, terminating infinite loops and excessive computation.
+          const boundedCallEvaluate = moduleExports.callEvaluate;
 
           loaded.push({
             implId,
@@ -269,7 +274,18 @@ export class RuleHost {
             meta,
             evaluate: (input: RuleHostInput): RuleHostResult => {
               const frozenHelpers = createRuleHostHelpers(input);
-              const result = rawEvaluate(input, frozenHelpers);
+              // PRI-437: Execute inside vm context with timeout boundary.
+              // If the RuleCode infinite-loops or exceeds the time budget,
+              // vm throws an error that is caught by the caller (mergeDecisions
+              // try/catch), resulting in conservative degradation (undefined).
+              const rawResult = boundedCallEvaluate(input, frozenHelpers);
+              const validation = validateRuleHostResult(rawResult);
+              if (!validation.valid) {
+                throw new Error(
+                  `[RuleHost] Activation ${activationId} returned invalid RuleHostResult: ${validation.errors.join('; ')}`
+                );
+              }
+              const result = rawResult as RuleHostResult;
               if (result.matched && (result.decision === 'block' || result.decision === 'requireApproval')) {
                 result.ruleId = ruleId;
                 result.principleId = meta.ruleId ?? ruleId;
@@ -278,9 +294,16 @@ export class RuleHost {
             },
           });
         } catch (loadError: unknown) {
+          const reason = `compilation failed: ${String(loadError)}`;
           this.logger.warn?.(
-            `[RuleHost] Failed to load activation ${activationId}: ${String(loadError)}`
+            `[RuleHost] Failed to load activation ${activationId}: ${reason}`
           );
+          // ruleId is declared inside the try block and may not be assigned yet;
+          // fall back to sourceRuleId or artifactId (both available in scope)
+          this._recordUnhealthy(activationId, artifactId,
+            sourceRuleId ?? artifactId,
+            reason,
+            'Fix the RuleCode syntax/compilation error, then re-activate the rule');
         }
       }
 
@@ -291,6 +314,44 @@ export class RuleHost {
       } catch {
         // best-effort cleanup
       }
+    }
+  }
+
+  /**
+   * PRI-437: Record an unhealthy activation state to EventLog.
+   *
+   * This makes compile/load failures visible to CLI (pd runtime health) and
+   * Console API — NOT just a logger.warn that's silently skipped.
+   *
+   * ERR-002: degradation includes a reason and nextAction (not silent).
+   * Failures in EventLog recording are caught and logged (never throw).
+   */
+  private _recordUnhealthy(
+    activationId: string,
+    artifactId: string,
+    ruleId: string,
+    reason: string,
+    nextAction: string,
+  ): void {
+    try {
+      // Pass undefined as logger: RuleHostLogger only has warn(), but EventLog
+      // calls this.logger.error() without optional chaining. Passing the
+      // RuleHostLogger directly would cause TypeError if EventLog tried to
+      // log an internal error. EventLog's logger is optional; RuleHost already
+      // logs its own warnings for the unhealthy event.
+      const eventLog = EventLogService.get(this.stateDir);
+      eventLog.recordRuleHostUnhealthy({
+        activationId,
+        artifactId,
+        ruleId,
+        reason,
+        nextAction,
+      });
+    } catch (recordError: unknown) {
+      // EventLog recording must never break RuleHost evaluation
+      this.logger.warn?.(
+        `[RuleHost] Failed to record unhealthy event for activation ${activationId}: ${String(recordError)}`
+      );
     }
   }
 }

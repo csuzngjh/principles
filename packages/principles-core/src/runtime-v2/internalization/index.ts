@@ -38,6 +38,10 @@ export type { CompileResult } from './compile-result.js';
 export type { DecisionMergeLogger, RuleHostLogger } from './rule-host-evaluator.js';
 export { mergeDecisions } from './rule-host-evaluator.js';
 
+// RuleHost result validator (PRI-437)
+export type { RuleHostResultValidationResult } from './rule-host-validator.js';
+export { validateRuleHostResult } from './rule-host-validator.js';
+
 // Adapter interface (PRI-45)
 export type { RuleHostImplementationProvider } from './rule-host-adapter.js';
 
