@@ -1,13 +1,15 @@
 /**
  * Rule Host — Constrained execution layer for active code implementations
  *
- * PURPOSE: Load active code implementations from the principle-tree ledger
- * AND from the activations table (code_tool_hook channel), execute them in a
- * constrained node:vm context, and merge their decisions.
+ * PURPOSE: Load active code implementations from the SQLite activations table
+ * (code_tool_hook channel), execute them in a constrained node:vm context,
+ * and merge their decisions.
  *
- * ARCHITECTURE:
- *   - Constructor takes stateDir to access the principle-tree ledger
- *   - Optional workspaceDir enables reading code_tool_hook activations from SQLite
+ * ARCHITECTURE (PRI-436):
+ *   - SQLite is the SOLE production source of active RuleCode
+ *   - No filesystem ledger or implementation asset reads occur during evaluation
+ *   - Constructor takes stateDir for API compatibility (no longer used for impl loading)
+ *   - workspaceDir enables reading code_tool_hook activations from SQLite
  *   - evaluate(input) loads active code implementations and runs them
  *   - Each implementation executes in an isolated vm context with minimal helpers
  *   - Decision merge: block short-circuits, requireApproval collects, allow is implicit
@@ -22,11 +24,6 @@
  *   - Never throw, never bypass downstream gates (Progressive Gate, Edit Verification)
  */
 
-import * as fs from 'fs';
-import {
-  listImplementationsByLifecycleState,
-} from './principle-tree-ledger.js';
-import { loadEntrySource } from './code-implementation-storage.js';
 import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { mergeDecisions } from '@principles/core/runtime-v2';
 import { SqliteConnection } from '@principles/core/runtime-v2';
@@ -37,13 +34,12 @@ import type {
   RuleHostMeta,
   LoadedImplementation,
 } from '@principles/core/runtime-v2';
-import type { Implementation } from '../types/principle-tree-schema.js';
 
 import type { RuleHostLogger } from '@principles/core/runtime-v2';
 export type { RuleHostLogger } from '@principles/core/runtime-v2';
 
 export interface RuleHostOptions {
-  /** Workspace directory for SQLite access. When provided, RuleHost also loads code_tool_hook activations from the activations table. */
+  /** Workspace directory for SQLite access. Required for RuleHost to load active code_tool_hook activations. */
   workspaceDir?: string;
 }
 
@@ -84,7 +80,6 @@ export class RuleHost {
    *   - { decision: 'block', ... } when any implementation returns block (short-circuits)
    *   - { decision: 'requireApproval', ... } when any implementation returns requireApproval
    */
-     
   evaluate(input: RuleHostInput): RuleHostResult | undefined {
     try {
       const activeImpls = this._loadActiveCodeImplementations();
@@ -99,70 +94,28 @@ export class RuleHost {
   }
 
   /**
-   * Load active code implementations from the ledger AND the activations table.
+   * Load active code implementations from the SQLite activations table.
    *
-   * Sources (merged, deduplicated by implId):
-   *   1. principle-tree-ledger.json: implementations with lifecycleState='active' and type='code'
-   *   2. activations table: code_tool_hook channel activations (when workspaceDir is provided)
+   * PRI-436: SQLite is the SOLE production source. The filesystem ledger
+   * (principle-tree-ledger) and implementation asset paths have been deleted.
+   * No fallback, no dual-source, no deprecated adapter.
    *
-   * This bridges the gap between RuleHostWriter (which records activation metadata in SQLite)
-   * and RuleHost enforcement (which previously only read from the ledger JSON file).
-   * See BUG-001 / ERR-011 / ERR-035.
+   * Source: activations table (code_tool_hook channel, deactivated_at IS NULL)
+   *   → JOIN pi_artifacts for content_json → extract implementationCode → compile
    */
   private _loadActiveCodeImplementations(): LoadedImplementation[] {
-    const loaded: LoadedImplementation[] = [];
-    const seenImplIds = new Set<string>();
+    if (!this.workspaceDir) {
+      return [];
+    }
 
-    // Source 1: principle-tree-ledger.json (existing path)
     try {
-      const activeAllTypes = listImplementationsByLifecycleState(
-        this.stateDir,
-        'active'
-      );
-
-      // Filter to code-type implementations only
-      const codeImpls = activeAllTypes.filter((impl) => impl.type === 'code');
-
-      for (const impl of codeImpls) {
-        try {
-          const loadedImpl = this._loadSingleImplementation(impl);
-          if (loadedImpl && !seenImplIds.has(loadedImpl.implId)) {
-            loaded.push(loadedImpl);
-            seenImplIds.add(loadedImpl.implId);
-          }
-        } catch (loadError: unknown) {
-          // Individual load failure: log and skip
-          this.logger.warn?.(
-            `[RuleHost] Failed to load implementation ${impl.id}: ${String(loadError)}`
-          );
-        }
-      }
-    } catch (ledgerError: unknown) {
-      // Ledger access failure: log and continue to activations table
+      return this._loadFromActivationsTable(this.workspaceDir);
+    } catch (activationError: unknown) {
       this.logger.warn?.(
-        `[RuleHost] Failed to access ledger: ${String(ledgerError)}`
+        `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
       );
+      return [];
     }
-
-    // Source 2: activations table (code_tool_hook channel) — bridges BUG-001
-    if (this.workspaceDir) {
-      try {
-        const activationImpls = this._loadFromActivationsTable(this.workspaceDir);
-        for (const impl of activationImpls) {
-          if (!seenImplIds.has(impl.implId)) {
-            loaded.push(impl);
-            seenImplIds.add(impl.implId);
-          }
-        }
-      } catch (activationError: unknown) {
-        // Activations table access failure: log and continue with ledger-only results
-        this.logger.warn?.(
-          `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
-        );
-      }
-    }
-
-    return loaded;
   }
 
   /**
@@ -170,10 +123,15 @@ export class RuleHost {
    *
    * For each activation record:
    *   1. Query the pi_artifacts table for the artifact content
-   *   2. Parse content_json to extract implementationCode
-   *   3. Compile via loadRuleImplementationModule (same vm isolation as ledger path)
+   *   2. Parse content_json to extract implementationCode (treated as unknown, EP-01)
+   *   3. Compile via loadRuleImplementationModule (isolated vm context)
    *
-   * This mirrors the PromptActivationReader pattern for SQLite access.
+   * PRI-436 invariant: at most one active activation per rule (target_ref).
+   * Duplicate active activations for the same target_ref are ALL skipped
+   * (zero executions) and emit structured unhealthy evidence via logger.warn
+   * (Runtime Contract Rule 9: graceful degradation includes a reason).
+   *
+   * All data from SQLite is treated as unknown and validated before use.
    */
   private _loadFromActivationsTable(workspaceDir: string): LoadedImplementation[] {
     const sqliteConn = new SqliteConnection(workspaceDir);
@@ -195,13 +153,58 @@ export class RuleHost {
         return [];
       }
 
-      const loaded: LoadedImplementation[] = [];
-
+      // PRI-436: Group active rows by target_ref to detect duplicates.
+      // At most one active activation per rule (target_ref) is allowed.
+      // Duplicate groups are skipped entirely (zero executions) and emit
+      // structured unhealthy evidence. Non-duplicate rows proceed to compilation.
+      const rowsByTargetRef = new Map<string, Record<string, unknown>[]>();
       for (const row of rows) {
         if (!row || typeof row !== 'object') {
           continue;
         }
         const r = row as Record<string, unknown>;
+        const targetRef = typeof r['target_ref'] === 'string' ? r['target_ref'] : '';
+        const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
+        if (!targetRef) {
+          this.logger.warn?.(
+            `[RuleHost] Activation ${activationId}: missing target_ref, skipping`
+          );
+          continue;
+        }
+        const group = rowsByTargetRef.get(targetRef);
+        if (group) {
+          group.push(r);
+        } else {
+          rowsByTargetRef.set(targetRef, [r]);
+        }
+      }
+
+      // Emit structured unhealthy evidence for duplicate groups; collect valid (non-duplicate) rows.
+      const validRows: Record<string, unknown>[] = [];
+      for (const [targetRef, group] of rowsByTargetRef) {
+        if (group.length > 1) {
+          const activationIds: string[] = [];
+          const artifactIds: string[] = [];
+          for (const r of group) {
+            if (typeof r['activation_id'] === 'string') activationIds.push(r['activation_id']);
+            if (typeof r['artifact_id'] === 'string') artifactIds.push(r['artifact_id']);
+          }
+          this.logger.warn?.(
+            `[RuleHost] Duplicate active activations detected — skipping all executions for this rule. ` +
+            `targetRef=${targetRef} count=${group.length} ` +
+            `activationIds=[${activationIds.join(', ')}] ` +
+            `artifactIds=[${artifactIds.join(', ')}] ` +
+            `reason=at most one active activation per rule is allowed ` +
+            `nextAction=deactivate all but one activation for this target_ref`
+          );
+        } else {
+          validRows.push(group[0]);
+        }
+      }
+
+      const loaded: LoadedImplementation[] = [];
+
+      for (const r of validRows) {
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
         const artifactId = typeof r['artifact_id'] === 'string' ? r['artifact_id'] : '';
         const contentJson = typeof r['content_json'] === 'string' ? r['content_json'] : '';
@@ -288,85 +291,6 @@ export class RuleHost {
       } catch {
         // best-effort cleanup
       }
-    }
-  }
-
-  /**
-   * Load and compile a single implementation from its code asset path.
-   *
-   * The implementation file is expected to export:
-   *   - meta: { name, version, ruleId, coversCondition }
-   *   - evaluate(input: RuleHostInput): RuleHostResult
-   *
-   * Uses the shared isolated runtime loader so candidate code does not execute
-   * in the host global realm.
-   */
-     
-  private _loadSingleImplementation(
-    impl: Implementation
-  ): LoadedImplementation | null {
-    let sourceCode = loadEntrySource(this.stateDir, impl.id);
-    if (!sourceCode) {
-      const assetPath = impl.path;
-      if (!assetPath || !fs.existsSync(assetPath)) {
-        return null;
-      }
-
-      try {
-        sourceCode = fs.readFileSync(assetPath, 'utf-8');
-      } catch {
-        return null;
-      }
-    }
-
-    try {
-      const moduleExports = loadRuleImplementationModule(sourceCode, impl.id);
-
-      if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
-        return null;
-      }
-
-      const fallbackMeta: RuleHostMeta = {
-        name: impl.id,
-        version: impl.version,
-        ruleId: impl.ruleId,
-        coversCondition: impl.coversCondition,
-      };
-      const meta: RuleHostMeta =
-        moduleExports.meta && typeof moduleExports.meta === 'object'
-          ? (moduleExports.meta as RuleHostMeta)
-          : fallbackMeta;
-
-      // Return a loaded implementation that wraps the compiled evaluate
-      // with the actual helpers from the input at evaluation time
-       
-      const rawEvaluate = moduleExports.evaluate as (
-        _input: RuleHostInput,
-        _helpers: ReturnType<typeof createRuleHostHelpers>
-      ) => RuleHostResult;
-       
-
-      return {
-        implId: impl.id,
-        ruleId: impl.ruleId,
-        meta,
-        evaluate: (input: RuleHostInput): RuleHostResult => {
-          const frozenHelpers = createRuleHostHelpers(input);
-          const result = rawEvaluate(input, frozenHelpers);
-          // C: Enrich result with rule/principle IDs for observability
-          if (result.matched && (result.decision === 'block' || result.decision === 'requireApproval')) {
-            result.ruleId = impl.ruleId;
-            result.principleId = meta.ruleId ?? impl.ruleId;
-          }
-          return result;
-        },
-      };
-    } catch (compileError: unknown) {
-      // Compilation failure: log and skip
-      this.logger.warn?.(
-        `[RuleHost] Failed to compile implementation ${impl.id}: ${String(compileError)}`
-      );
-      return null;
     }
   }
 }

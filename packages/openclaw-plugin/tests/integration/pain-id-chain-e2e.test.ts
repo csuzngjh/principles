@@ -26,8 +26,8 @@ import { RuleHost } from '../../src/core/rule-host.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import {
   loadLedger,
-  transitionImplementationState,
 } from '../../src/core/principle-tree-ledger.js';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import { safeRmDir } from '../test-utils.js';
 import type { RuleHostInput } from '../../src/core/rule-host-types.js';
 
@@ -56,6 +56,60 @@ function createTestWorkspace(): TestWorkspace {
 function disposeTestWorkspace(ws: TestWorkspace): void {
   ws.trajectory.dispose();
   safeRmDir(ws.workspaceDir);
+}
+
+/**
+ * PRI-436: Insert compiled rule code as a pi_artifacts row + activations row
+ * so RuleHost can load it from SQLite (the sole production source).
+ */
+function activateCompiledRule(
+  workspaceDir: string,
+  ruleId: string,
+  implementationCode: string,
+  principleId: string,
+): void {
+  const sqliteConn = new SqliteConnection(workspaceDir);
+  try {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    const artifactId = `art-${ruleId}`;
+
+    const contentJson = JSON.stringify({
+      principleId,
+      ruleId,
+      implementationCode,
+    });
+
+    db.prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      artifactId,
+      'rule',
+      `task-${ruleId}`,
+      principleId,
+      ruleId,
+      '[]',
+      'validated',
+      contentJson,
+      now,
+      now,
+    );
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    store.recordActivation({
+      activationId: `act_code_${ruleId}`,
+      idempotencyKey: `${artifactId}::code_tool_hook`,
+      artifactId,
+      channel: 'code_tool_hook',
+      action: 'code_tool_hook_shadow_activate',
+      targetRef: `impl://${ruleId}`,
+      activatedAt: now,
+      deactivatedAt: null,
+    });
+  } finally {
+    try { sqliteConn.close(); } catch { /* best-effort */ }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -134,16 +188,16 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
     expect(compileResult.ruleId).toBeDefined();
     expect(compileResult.implementationId).toBeDefined();
 
-    // Verify implementation is candidate (not active — must be promoted before enforcing)
+    // Verify implementation is candidate (not active — must be activated before enforcing)
     const updatedLedger = loadLedger(ws.stateDir);
     const impl = updatedLedger.tree.implementations[compileResult.implementationId!];
     expect(impl.lifecycleState).toBe('candidate');
 
-    // ── Step 5: Promote to active so RuleHost will enforce ──
-    transitionImplementationState(ws.stateDir, compileResult.implementationId!, 'active');
+    // ── Step 5: Activate via SQLite (PRI-436: sole production source) ──
+    activateCompiledRule(ws.workspaceDir, compileResult.ruleId!, compileResult.code!, principleId!);
 
     // ── Step 6: RuleHost.evaluate(matching input) → block ──
-    const host = new RuleHost(ws.stateDir, { warn: () => {} });
+    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
 
     const matchingInput: RuleHostInput = {
       action: {

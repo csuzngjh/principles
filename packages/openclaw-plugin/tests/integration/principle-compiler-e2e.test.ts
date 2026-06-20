@@ -21,8 +21,8 @@ import { RuleHost } from '../../src/core/rule-host.js';
 import {
   loadLedger,
   saveLedger,
-  transitionImplementationState,
 } from '../../src/core/principle-tree-ledger.js';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import type { RuleHostInput } from '../../src/core/rule-host-types.js';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,60 @@ function createTestWorkspace(): TestWorkspace {
 function disposeTestWorkspace(ws: TestWorkspace): void {
   ws.trajectory.dispose();
   fs.rmSync(ws.workspaceDir, { recursive: true, force: true });
+}
+
+/**
+ * PRI-436: Insert compiled rule code as a pi_artifacts row + activations row
+ * so RuleHost can load it from SQLite (the sole production source).
+ */
+function activateCompiledRule(
+  workspaceDir: string,
+  ruleId: string,
+  implementationCode: string,
+  principleId: string,
+): void {
+  const sqliteConn = new SqliteConnection(workspaceDir);
+  try {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    const artifactId = `art-${ruleId}`;
+
+    const contentJson = JSON.stringify({
+      principleId,
+      ruleId,
+      implementationCode,
+    });
+
+    db.prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      artifactId,
+      'rule',
+      `task-${ruleId}`,
+      principleId,
+      ruleId,
+      '[]',
+      'validated',
+      contentJson,
+      now,
+      now,
+    );
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    store.recordActivation({
+      activationId: `act_code_${ruleId}`,
+      idempotencyKey: `${artifactId}::code_tool_hook`,
+      artifactId,
+      channel: 'code_tool_hook',
+      action: 'code_tool_hook_shadow_activate',
+      targetRef: `impl://${ruleId}`,
+      activatedAt: now,
+      deactivatedAt: null,
+    });
+  } finally {
+    try { sqliteConn.close(); } catch { /* best-effort */ }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,21 +222,16 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
     };
 
-    // ── Step 4: RuleHost should NOT block yet (candidate not loaded) ──
-    const hostBeforePromote = new RuleHost(ws.stateDir, { warn: () => {} });
+    // ── Step 4: RuleHost should NOT block yet (no SQLite activation yet) ──
+    const hostBeforePromote = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
     const noBlockResult = hostBeforePromote.evaluate(matchingInput);
-    expect(noBlockResult).toBeUndefined(); // candidate not loaded → no block
+    expect(noBlockResult).toBeUndefined(); // no activation → no block
 
-    // ── Step 5: Promote to 'active' so RuleHost will enforce ──
-    transitionImplementationState(ws.stateDir, implId, 'active');
-
-    // Verify promotion
-    const ledgerAfterPromote = loadLedger(ws.stateDir);
-    const implAfterPromote = ledgerAfterPromote.tree.implementations[implId];
-    expect(implAfterPromote.lifecycleState).toBe('active');
+    // ── Step 5: Activate via SQLite (PRI-436: sole production source) ──
+    activateCompiledRule(ws.workspaceDir, result.ruleId!, result.code!, principleId);
 
     // ── Step 6: Create RuleHost and evaluate with matching input ──
-    const host = new RuleHost(ws.stateDir, { warn: () => {} });
+    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
 
     // Matching input: bash tool with a heartbeat command (defined in Step 4)
     const blockResult = host.evaluate(matchingInput);
@@ -224,7 +273,7 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
   });
 
   it('should return undefined when no active implementations exist', () => {
-    const host = new RuleHost(ws.stateDir, { warn: () => {} });
+    const host = new RuleHost(ws.stateDir, { warn: () => {} }, { workspaceDir: ws.workspaceDir });
 
     const input: RuleHostInput = {
       action: {
