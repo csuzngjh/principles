@@ -66,16 +66,34 @@ export function normalizePath(filePath: string, projectDir: string): string {
     }
   }
 
-   
-   
+  // POSIX absolute paths (e.g., /etc/passwd) are NOT recognized as absolute
+  // by path.isAbsolute() on Windows. When both the project dir and the file
+  // path are POSIX paths, use path.posix for relative computation.
+  const isPosixAbsolute = normalizedFilePath.startsWith('/') && !fileIsWin;
+  const projectIsPosix = !projectIsWin;
+
   let rel: string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);
-    const fileAbs = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.join(projectAbs, normalizedFilePath);
-    rel = path.relative(projectAbs, fileAbs);
+    if (isPosixAbsolute) {
+      // POSIX absolute path on Windows project: cannot resolve relative to project,
+      // return as-is (path is outside the project directory).
+      rel = normalizedFilePath;
+    } else {
+      const fileAbs = path.isAbsolute(normalizedFilePath)
+        ? normalizedFilePath
+        : path.join(projectAbs, normalizedFilePath);
+      rel = path.relative(projectAbs, fileAbs);
+    }
+  } else if (projectIsPosix && isPosixAbsolute) {
+    // Both project and file are POSIX → use path.posix
+    const projectPosix = projectDir.replace(/\\/g, '/');
+    rel = path.posix.relative(projectPosix, normalizedFilePath);
   } else {
     const projectPosix = projectDir.replace(/\\/g, '/');
-    const filePosix = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.posix.join(projectPosix, normalizedFilePath.replace(/\\/g, '/'));
+    const filePosix = path.isAbsolute(normalizedFilePath)
+      ? normalizedFilePath
+      : path.posix.join(projectPosix, normalizedFilePath.replace(/\\/g, '/'));
     rel = path.posix.relative(projectPosix, filePosix);
   }
 

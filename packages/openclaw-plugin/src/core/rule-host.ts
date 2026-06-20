@@ -275,9 +275,6 @@ export class RuleHost {
             evaluate: (input: RuleHostInput): RuleHostResult => {
               const frozenHelpers = createRuleHostHelpers(input);
               // PRI-437: Execute inside vm context with timeout boundary.
-              // If the RuleCode infinite-loops or exceeds the time budget,
-              // vm throws an error that is caught by the caller (mergeDecisions
-              // try/catch), resulting in conservative degradation (undefined).
               const rawResult = boundedCallEvaluate(input, frozenHelpers);
               const validation = validateRuleHostResult(rawResult);
               if (!validation.valid) {
