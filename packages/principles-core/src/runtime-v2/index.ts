@@ -350,6 +350,7 @@ export {
   isCorePrincipleId,
   getCorePrinciple,
   CorePrincipleSchema,
+  stripFabricatedCorePrincipleIds,
 } from './core-principles/index.js';
 
 export type { CorePrinciple } from './core-principles/index.js';
@@ -446,7 +447,7 @@ export { decideInternalizationRoute } from './internalization/internalization-ro
 export type { PainPattern } from './internalization/template-generator.js';
 export { generateFromTemplate } from './internalization/template-generator.js';
 export type { ValidationResult } from './internalization/rule-code-validator.js';
-export { checkForbiddenPatterns } from './internalization/rule-code-validator.js';
+export { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './internalization/rule-code-validator.js';
 export type { CompileResult } from './internalization/compile-result.js';
 
 // Pruning mask — builds masked principle set from review log (PRI-48)

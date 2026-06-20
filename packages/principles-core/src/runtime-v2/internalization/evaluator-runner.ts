@@ -550,18 +550,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Only fill when absent via Object.hasOwn — present-but-falsy values
    * must reach validation and fail loud (Runtime Contract Rule 3).
    *
-   * Also overrides generatedAt with the actual current timestamp (LLM may
-   * echo the prompt's example date).
+   * generatedAt override is handled by the base class — subclasses must call
+   * super.postFetchTransform() to inherit it.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: EvaluatorContext): void {
+    super.postFetchTransform(taskId, untrustedOutput, _context);
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
-
-    if (typeof untrustedOutput === 'object' && untrustedOutput !== null) {
-      const record = untrustedOutput as Record<string, unknown>;
-      // Override generatedAt with actual timestamp — LLM may echo prompt example date
-      record.generatedAt = new Date().toISOString();
-    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: EvaluatorOutputV1): void {

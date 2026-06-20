@@ -9,6 +9,7 @@ import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { checkAuth, getToken } from "./api.js";
 import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
+import { Toaster } from "./components/ui/sonner.js";
 
 // New page imports (CR2 directory structure)
 import { FocusPage } from "./pages/focus/FocusPage.js";
@@ -197,6 +198,7 @@ export function App() {
         <HashRouter>
           <AuthRoutes />
         </HashRouter>
+        <Toaster />
       </I18nextProvider>
     </ThemeProvider>
   );

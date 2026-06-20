@@ -50,12 +50,22 @@ import { validateCorrectionProposal } from '../internalization/correction-propos
 import { PDRuntimeError } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { SqliteConnection } from '../store/sqlite-connection.js';
+import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
 
 vi.mock('@mariozechner/pi-ai', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai']),
   complete: vi.fn(),
 }));
+
+// Fast retry policy for tests — production DefaultRetryPolicy uses 30s base delay
+// which causes test timeouts when sub-runners return 'retried'
+const fastRetryPolicy: RetryPolicy = {
+  calculateBackoff: () => 10, // 10ms — instant for tests
+  shouldRetry: (task) => task.attemptCount < task.maxAttempts,
+  markRetryWait: vi.fn(),
+  markFailed: vi.fn(),
+};
 
 class InMemoryLedgerAdapter implements LedgerAdapter {
   private readonly entries = new Map<string, LedgerPrincipleEntry>();
@@ -270,6 +280,7 @@ function makeSplitRunner(
     stateManager,
     committer,
     perStageTimeoutMs: options.timeoutMs ?? 5000,
+    retryPolicy: fastRetryPolicy,
   });
 }
 

@@ -29,7 +29,7 @@ export { generateFromTemplate } from './template-generator.js';
 
 // Code validation (PRI-44)
 export type { ValidationResult } from './rule-code-validator.js';
-export { checkForbiddenPatterns } from './rule-code-validator.js';
+export { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './rule-code-validator.js';
 
 // Compile result (PRI-44)
 export type { CompileResult } from './compile-result.js';
