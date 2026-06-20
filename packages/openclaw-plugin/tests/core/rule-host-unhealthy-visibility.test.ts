@@ -164,17 +164,22 @@ describe('PRI-437 Slice 4: Approved compile failure is visible in EventLog', () 
     // Must contain a rulehost_unhealthy event (NOT just logger.warn)
     expect(eventsContent).toContain('rulehost_unhealthy');
 
-    // Must include the activation ID
-    expect(eventsContent).toContain(ACTIVATION_ID_BROKEN);
+    // Structured validation: parse JSONL lines and find the unhealthy event
+    const lines = eventsContent.trim().split('\n').filter(l => l.trim());
+    const unhealthyEvents = lines
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(evt => evt?.type === 'rulehost_unhealthy');
 
-    // Must include the rule ID
-    expect(eventsContent).toContain(RULE_ID_BROKEN);
+    expect(unhealthyEvents.length).toBeGreaterThanOrEqual(1);
 
-    // Must include a reason (compilation error)
-    expect(eventsContent.toLowerCase()).toContain('reason');
-
-    // Must include a nextAction (what to do to fix it)
-    expect(eventsContent.toLowerCase()).toContain('nextaction');
+    // Verify the unhealthy event has all required fields in the same record
+    const unhealthy = unhealthyEvents[0];
+    expect(unhealthy.data.activationId).toBe(ACTIVATION_ID_BROKEN);
+    expect(unhealthy.data.ruleId).toBe(RULE_ID_BROKEN);
+    expect(typeof unhealthy.data.reason).toBe('string');
+    expect(unhealthy.data.reason.length).toBeGreaterThan(0);
+    expect(typeof unhealthy.data.nextAction).toBe('string');
+    expect(unhealthy.data.nextAction.length).toBeGreaterThan(0);
   });
 
   it('valid rule does NOT produce rulehost_unhealthy event', async () => {

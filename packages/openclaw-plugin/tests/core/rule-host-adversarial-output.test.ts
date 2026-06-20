@@ -143,17 +143,9 @@ var meta = { name: 'proto-rule', version: '1', ruleId: '${RULE_ID}', coversCondi
     const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
-    // The adversarial result must be rejected — either undefined (conservative
-    // degradation) or the prototype pollution keys must be caught by the validator
-    if (result !== undefined) {
-      // If result is returned, it must NOT have prototype pollution
-      const diag = result.diagnostics as Record<string, unknown> | undefined;
-      if (diag) {
-        // __proto__ as own property must not survive validation
-        expect(Object.hasOwn(diag, '__proto__')).toBe(false);
-        expect(Object.hasOwn(diag, 'constructor')).toBe(false);
-      }
-    }
+    // PRI-437 fail-closed contract: adversarial results must be rejected entirely,
+    // resulting in conservative degradation (undefined). Not "accepted but sanitized".
+    expect(result).toBeUndefined();
 
     // Must emit warn evidence about the invalid result
     expect(warnCalls.length).toBeGreaterThan(0);
@@ -240,14 +232,9 @@ var meta = { name: 'corr-rule', version: '1', ruleId: '${RULE_ID}', coversCondit
     const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
-    // The adversarial correctionProposal must be rejected
-    // Either undefined (conservative degradation) or the proposal must not be applied
-    if (result !== undefined) {
-      // If result is returned, it must NOT have a valid correctionProposal with prototype pollution
-      if (result.correctionProposal) {
-        expect(Object.hasOwn(result.correctionProposal, '__proto__')).toBe(false);
-      }
-    }
+    // PRI-437 fail-closed contract: adversarial correctionProposal must be rejected
+    // entirely, resulting in conservative degradation (undefined).
+    expect(result).toBeUndefined();
 
     // Must emit warn evidence
     expect(warnCalls.length).toBeGreaterThan(0);

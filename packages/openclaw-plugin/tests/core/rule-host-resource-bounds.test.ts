@@ -199,22 +199,33 @@ describe('PRI-437 Slice 3: Infinite loop and memory allocation terminate without
 
     // Must terminate without crashing the host process
     const startTime = Date.now();
+    let thrown: unknown;
     let result: unknown;
     try {
       result = ruleHost.evaluate(makeInput());
     } catch (err) {
-      // If it throws, that's also acceptable as long as it doesn't crash the process
-      result = undefined;
+      thrown = err;
     }
     const elapsed = Date.now() - startTime;
 
-    // Conservative degradation: undefined (no opinion)
+    // PRI-437 fail-closed: must NOT throw (vm timeout should catch it),
+    // and must return undefined (conservative degradation)
+    expect(thrown).toBeUndefined();
     expect(result).toBeUndefined();
 
     // Must not hang — should complete well under 30 seconds
     expect(elapsed).toBeLessThan(30000);
 
-    // Must emit structured warn evidence (ERR-002: degradation includes reason)
+    // Must emit structured warn evidence with reason (ERR-002)
     expect(warnCalls.length).toBeGreaterThan(0);
+    const reasonWarn = warnCalls.find(m =>
+      m.toLowerCase().includes('timeout') ||
+      m.toLowerCase().includes('timed out') ||
+      m.toLowerCase().includes('terminated') ||
+      m.toLowerCase().includes('memory') ||
+      m.toLowerCase().includes('heap') ||
+      m.toLowerCase().includes('range')
+    );
+    expect(reasonWarn).toBeDefined();
   }, 60000); // 60 second test timeout (fail safe for memory pressure)
 });

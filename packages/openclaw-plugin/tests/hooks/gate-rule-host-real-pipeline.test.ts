@@ -21,6 +21,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import type { PluginHookBeforeToolCallEvent, PluginHookToolContext } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 // ── Test helpers ───────────────────────────────────────────────────────────
@@ -125,19 +126,18 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     await insertActivation();
 
     // Exercise the PUBLIC hook with a real event targeting /etc/passwd
-    const event = {
+    const event: PluginHookBeforeToolCallEvent = {
       toolName: 'write_file',
       params: { file_path: '/etc/passwd', content: 'malicious' },
     };
 
-    const result = handleBeforeToolCall(
-      event as any,
-      {
-        workspaceDir: tempWorkspaceDir,
-        sessionId: 'test-session-gate-002',
-        logger: { warn: () => {}, error: () => {}, info: () => {} },
-      } as any,
-    );
+    const ctx: PluginHookToolContext = {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: 'test-session-gate-002',
+      logger: { warn: () => {}, error: () => {}, info: () => {} },
+    };
+
+    const result = handleBeforeToolCall(event, ctx);
 
     // Verify: block decision is enforced through the public hook
     expect(result).toBeDefined();
@@ -150,19 +150,18 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     await insertActivation();
 
     // Exercise the PUBLIC hook with a safe path that does NOT match the block rule
-    const event = {
+    const event: PluginHookBeforeToolCallEvent = {
       toolName: 'write_file',
       params: { file_path: '/safe/project/file.txt', content: 'safe content' },
     };
 
-    const result = handleBeforeToolCall(
-      event as any,
-      {
-        workspaceDir: tempWorkspaceDir,
-        sessionId: 'test-session-gate-002',
-        logger: { warn: () => {}, error: () => {}, info: () => {} },
-      } as any,
-    );
+    const ctx: PluginHookToolContext = {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: 'test-session-gate-002',
+      logger: { warn: () => {}, error: () => {}, info: () => {} },
+    };
+
+    const result = handleBeforeToolCall(event, ctx);
 
     // Verify: no block (allow passes through)
     expect(result).toBeUndefined();
@@ -172,19 +171,18 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     // Artifact exists but no activation
     insertRuleArtifact();
 
-    const event = {
+    const event: PluginHookBeforeToolCallEvent = {
       toolName: 'write_file',
       params: { file_path: '/etc/passwd', content: 'malicious' },
     };
 
-    const result = handleBeforeToolCall(
-      event as any,
-      {
-        workspaceDir: tempWorkspaceDir,
-        sessionId: 'test-session-gate-002',
-        logger: { warn: () => {}, error: () => {}, info: () => {} },
-      } as any,
-    );
+    const ctx: PluginHookToolContext = {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: 'test-session-gate-002',
+      logger: { warn: () => {}, error: () => {}, info: () => {} },
+    };
+
+    const result = handleBeforeToolCall(event, ctx);
 
     // No activation → RuleHost returns undefined → gate allows
     expect(result).toBeUndefined();
