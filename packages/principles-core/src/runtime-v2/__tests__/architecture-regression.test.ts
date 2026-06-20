@@ -681,6 +681,24 @@ describe('PRI-42 internalization boundary', () => {
     expect(src).not.toContain("from './rule-host-types.js'");
   });
 
+  it('PRI-436: plugin rule-host.ts does NOT import filesystem ledger or implementation storage', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const ruleHostPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/rule-host.ts',
+    );
+    expect(existsSync(ruleHostPath)).toBe(true);
+    const src = readFileSync(ruleHostPath, 'utf-8');
+
+    // PRI-436: SQLite is the sole RuleHost source. No filesystem imports allowed.
+    expect(src).not.toContain("from './principle-tree-ledger.js'");
+    expect(src).not.toContain("from './code-implementation-storage.js'");
+    expect(src).not.toContain('listImplementationsByLifecycleState');
+    expect(src).not.toContain('loadEntrySource');
+    expect(src).not.toContain("import * as fs from 'fs'");
+  });
+
   it('plugin gate.ts imports RuleHostInput from core barrel', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');

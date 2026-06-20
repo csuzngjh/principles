@@ -5,9 +5,7 @@ import * as path from 'path';
 import {
   deleteImplementationAssetDir,
   getImplementationAssetRoot,
-  loadManifest,
   writeManifest,
-  loadEntrySource,
   createImplementationAssetDir,
   writeEntrySource,
   type CodeImplementationManifest,
@@ -60,47 +58,6 @@ describe('CodeImplementationStorage', () => {
       expect(() => getImplementationAssetRoot(stateDir, '')).toThrow(
         'Implementation ID must not be empty',
       );
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // loadManifest
-  // -------------------------------------------------------------------------
-
-  describe('loadManifest', () => {
-    it('returns null when no manifest file exists', () => {
-      const result = loadManifest(stateDir, 'nonexistent');
-      expect(result).toBeNull();
-    });
-
-    it('returns parsed manifest when manifest file exists', () => {
-      const implId = 'IMPL_002';
-      const manifest: CodeImplementationManifest = {
-        version: '1.0.0',
-        entryFile: 'entry.js',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        replaySampleRefs: [],
-        lastEvalReportRef: null,
-      };
-
-      // Write directly (bypass writeManifest to test load independently)
-      const assetRoot = getImplementationAssetRoot(stateDir, implId);
-      fs.mkdirSync(assetRoot, { recursive: true });
-      fs.writeFileSync(path.join(assetRoot, 'manifest.json'), JSON.stringify(manifest), 'utf-8');
-
-      const result = loadManifest(stateDir, implId);
-      expect(result).toEqual(manifest);
-    });
-
-    it('returns null for corrupted manifest JSON', () => {
-      const implId = 'IMPL_003';
-      const assetRoot = getImplementationAssetRoot(stateDir, implId);
-      fs.mkdirSync(assetRoot, { recursive: true });
-      fs.writeFileSync(path.join(assetRoot, 'manifest.json'), 'not-valid-json{{{', 'utf-8');
-
-      const result = loadManifest(stateDir, implId);
-      expect(result).toBeNull();
     });
   });
 
@@ -178,67 +135,6 @@ describe('CodeImplementationStorage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // loadEntrySource
-  // -------------------------------------------------------------------------
-
-  describe('loadEntrySource', () => {
-    it('returns null when no manifest exists', () => {
-      const result = loadEntrySource(stateDir, 'nonexistent');
-      expect(result).toBeNull();
-    });
-
-    it('returns null when manifest exists but entry file does not', () => {
-      const implId = 'IMPL_007';
-      const assetRoot = getImplementationAssetRoot(stateDir, implId);
-      fs.mkdirSync(assetRoot, { recursive: true });
-
-      // Write manifest pointing to a non-existent entry file
-      const manifest: CodeImplementationManifest = {
-        version: '1.0.0',
-        entryFile: 'nonexistent.js',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        replaySampleRefs: [],
-        lastEvalReportRef: null,
-      };
-      fs.writeFileSync(
-        path.join(assetRoot, 'manifest.json'),
-        JSON.stringify(manifest),
-        'utf-8',
-      );
-
-      const result = loadEntrySource(stateDir, implId);
-      expect(result).toBeNull();
-    });
-
-    it('returns file content when entry file exists', () => {
-      const implId = 'IMPL_008';
-      const assetRoot = getImplementationAssetRoot(stateDir, implId);
-      fs.mkdirSync(assetRoot, { recursive: true });
-
-      const entryContent = 'export function evaluate() { return true; }';
-      fs.writeFileSync(path.join(assetRoot, 'entry.js'), entryContent, 'utf-8');
-
-      const manifest: CodeImplementationManifest = {
-        version: '1.0.0',
-        entryFile: 'entry.js',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        replaySampleRefs: [],
-        lastEvalReportRef: null,
-      };
-      fs.writeFileSync(
-        path.join(assetRoot, 'manifest.json'),
-        JSON.stringify(manifest),
-        'utf-8',
-      );
-
-      const result = loadEntrySource(stateDir, implId);
-      expect(result).toBe(entryContent);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // createImplementationAssetDir
   // -------------------------------------------------------------------------
 
@@ -300,7 +196,9 @@ describe('CodeImplementationStorage', () => {
         artificerArtifactId: 'artifact-1',
       });
 
-      const loaded = loadManifest(stateDir, implId);
+      // Verify persisted manifest contains lineage
+      const assetRoot = getImplementationAssetRoot(stateDir, implId);
+      const loaded = JSON.parse(fs.readFileSync(path.join(assetRoot, 'manifest.json'), 'utf-8'));
       expect(loaded?.lineage).toMatchObject({
         sourcePainIds: ['pain:gate:1'],
         sourceGateBlockIds: ['gate:write:1'],
@@ -344,22 +242,23 @@ describe('CodeImplementationStorage', () => {
       expect(fs.existsSync(reportPath)).toBe(true);
     });
 
-    it('manifest is loadable via loadManifest after creation', () => {
+    it('manifest is persisted with correct version after creation', () => {
       const implId = 'IMPL_014';
       createImplementationAssetDir(stateDir, implId, '4.0.0');
 
-      const loaded = loadManifest(stateDir, implId);
+      const assetRoot = getImplementationAssetRoot(stateDir, implId);
+      const loaded = JSON.parse(fs.readFileSync(path.join(assetRoot, 'manifest.json'), 'utf-8'));
       expect(loaded).not.toBeNull();
-      expect(loaded!.version).toBe('4.0.0');
-      expect(loaded!.entryFile).toBe('entry.js');
+      expect(loaded.version).toBe('4.0.0');
+      expect(loaded.entryFile).toBe('entry.js');
     });
 
-    it('entry source is loadable via loadEntrySource after creation', () => {
+    it('entry source is persisted after creation', () => {
       const implId = 'IMPL_015';
       createImplementationAssetDir(stateDir, implId, '1.0.0');
 
-      const source = loadEntrySource(stateDir, implId);
-      expect(source).not.toBeNull();
+      const assetRoot = getImplementationAssetRoot(stateDir, implId);
+      const source = fs.readFileSync(path.join(assetRoot, 'entry.js'), 'utf-8');
       expect(source).toContain('export const meta');
       expect(source).toContain('export function evaluate');
     });
@@ -370,7 +269,8 @@ describe('CodeImplementationStorage', () => {
         entrySource: 'export const meta = { name: "x", version: "1", ruleId: "R", coversCondition: "c" }; export function evaluate() { return { decision: "allow", matched: false, reason: "ok" }; }',
       });
 
-      const source = loadEntrySource(stateDir, implId);
+      const assetRoot = getImplementationAssetRoot(stateDir, implId);
+      const source = fs.readFileSync(path.join(assetRoot, 'entry.js'), 'utf-8');
       expect(source).toContain('export const meta');
       expect(source).not.toContain('placeholder');
     });
@@ -383,7 +283,9 @@ describe('CodeImplementationStorage', () => {
 
       writeEntrySource(stateDir, implId, 'export const meta = { name: "updated", version: "1", ruleId: "R", coversCondition: "c" }; export function evaluate() { return { decision: "allow", matched: false, reason: "updated" }; }');
 
-      expect(loadEntrySource(stateDir, implId)).toContain('updated');
+      const assetRoot = getImplementationAssetRoot(stateDir, implId);
+      const source = fs.readFileSync(path.join(assetRoot, 'entry.js'), 'utf-8');
+      expect(source).toContain('updated');
     });
 
     it('removes the asset directory through deleteImplementationAssetDir', () => {

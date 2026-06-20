@@ -105,20 +105,6 @@ export function getImplementationAssetRoot(stateDir: string, implId: string): st
 }
 
 /**
- * Load manifest from disk. Returns null if not found (does not throw).
- */
-export function loadManifest(stateDir: string, implId: string): CodeImplementationManifest | null {
-  validateImplId(implId);
-  const manifestPath = path.join(getImplementationAssetRoot(stateDir, implId), MANIFEST_FILENAME);
-  if (!fs.existsSync(manifestPath)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as CodeImplementationManifest;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Write manifest atomically using withLock.
  */
 export function writeManifest(
@@ -161,23 +147,6 @@ export function deleteImplementationAssetDir(stateDir: string, implId: string): 
   withLock(assetRoot, () => {
     fs.rmSync(assetRoot, { recursive: true, force: true });
   });
-}
-
-/**
- * Load the entry source code from disk.
- * Returns null if manifest doesn't exist or entry file is missing.
- */
-export function loadEntrySource(stateDir: string, implId: string): string | null {
-  validateImplId(implId);
-  const manifest = loadManifest(stateDir, implId);
-  if (!manifest) return null;
-  const entryPath = path.join(getImplementationAssetRoot(stateDir, implId), manifest.entryFile);
-  if (!fs.existsSync(entryPath)) return null;
-  try {
-    return fs.readFileSync(entryPath, 'utf-8');
-  } catch {
-    return null;
-  }
 }
 
 /**
