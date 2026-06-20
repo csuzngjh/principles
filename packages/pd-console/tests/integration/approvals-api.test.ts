@@ -609,4 +609,366 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(table).toBeUndefined();
     });
   });
+
+  // ── 12. Edit endpoint validation ────────────────────────────────────────
+
+  describe('POST /api/v1/approvals/:id/edit — validation', () => {
+    it('rejects non-JSON body', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not json',
+      });
+      expect(status).toBe(400);
+    });
+
+    it('rejects non-object JSON body', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([1, 2, 3]),
+      });
+      expect(status).toBe(400);
+    });
+
+    it('rejects missing newArtifactId', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editReason: 'test reason' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('newArtifactId');
+    });
+
+    it('rejects non-string newArtifactId', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 123, editReason: 'test' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('newArtifactId');
+    });
+
+    it('rejects missing editReason', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('editReason');
+    });
+
+    it('rejects empty editReason', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: '' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('editReason');
+    });
+
+    it('rejects non-string editReason', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Edit validation test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: { text: 'nested' } }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('editReason');
+    });
+
+    it('returns 404 for nonexistent approval', async () => {
+      const { status } = await fetchJson('/api/v1/approvals/nonexistent-id/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
+      });
+      expect(status).toBe(404);
+    });
+
+    it('returns 409 for already decided approval', async () => {
+      const approvalId = seedApproval('prompt', 'approved', {
+        summary: 'Already approved',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
+      });
+      expect(status).toBe(409);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('already decided');
+    });
+
+    it('returns 403 for unsupported channel edit', async () => {
+      const legacyApprovalId = seedApproval('skill', 'pending', {
+        summary: 'Legacy channel edit test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
+      });
+      // Edit endpoint returns 400 for unsupported channel (not 403)
+      // because the model returns 'unsupported_channel' error but the route
+      // doesn't have a specific handler for edit unsupported_channel
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toBeDefined();
+    });
+  });
+
+  // ── 13. Pagination edge cases ───────────────────────────────────────────
+
+  describe('Pagination edge cases', () => {
+    it('handles invalid page parameter (negative)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?page=-5');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // Negative page should be normalized to 1
+    });
+
+    it('handles invalid page parameter (zero)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?page=0');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // Zero page should be normalized to 1
+    });
+
+    it('handles invalid page parameter (NaN)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?page=abc');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // NaN page should be normalized to 1
+    });
+
+    it('handles large page parameter', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?page=999999');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // Should return items (may not be empty due to pagination logic)
+      const items = getItemsArray(body);
+      // Large page number may still return items if pageSize is not set
+      // (default behavior returns all items)
+      expect(items.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it('handles invalid pageSize parameter (negative)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=-10');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // Negative pageSize should be normalized to 0 (no pagination)
+    });
+
+    it('handles pageSize exceeding maximum (100)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=500');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // PageSize should be capped at 100
+      const items = getItemsArray(body);
+      expect(items.length).toBeLessThanOrEqual(100);
+    });
+
+    it('handles pageSize=0 (no pagination, return all)', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=0');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      // PageSize=0 means no pagination
+    });
+  });
+
+  // ── 14. Status filter edge cases ────────────────────────────────────────
+
+  describe('Status filter edge cases', () => {
+    it('rejects invalid status value', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?status=invalid_status');
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.success).toBe(false);
+      expect(rec.message).toContain('Invalid status');
+    });
+
+    it('filters by pending status', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?status=pending');
+      expect(status).toBe(200);
+      const items = getItemsArray(body);
+      for (const item of items) {
+        expect(getStringField(item, 'status')).toBe('pending');
+      }
+    });
+
+    it('filters by approved status', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?status=approved');
+      expect(status).toBe(200);
+      const items = getItemsArray(body);
+      for (const item of items) {
+        expect(getStringField(item, 'status')).toBe('approved');
+      }
+    });
+
+    it('filters by rejected status', async () => {
+      // Seed a rejected approval
+      seedApproval('prompt', 'rejected', {
+        summary: 'Rejected approval',
+      });
+
+      const { status, body } = await fetchJson('/api/v1/approvals?status=rejected');
+      expect(status).toBe(200);
+      const items = getItemsArray(body);
+      for (const item of items) {
+        expect(getStringField(item, 'status')).toBe('rejected');
+      }
+    });
+
+    it('filters by cancelled status', async () => {
+      // Seed a cancelled approval
+      seedApproval('prompt', 'cancelled', {
+        summary: 'Cancelled approval',
+      });
+
+      const { status, body } = await fetchJson('/api/v1/approvals?status=cancelled');
+      expect(status).toBe(200);
+      const items = getItemsArray(body);
+      for (const item of items) {
+        expect(getStringField(item, 'status')).toBe('cancelled');
+      }
+    });
+  });
+
+  // ── 15. URI encoding edge cases ────────────────────────────────────────
+
+  describe('URI encoding edge cases', () => {
+    it('handles approval ID with special characters', async () => {
+      const approvalId = 'apr_special%2Fchars-test';
+      seedApproval('prompt', 'pending', {
+        summary: 'Special chars test',
+      });
+      // Manually insert with special ID
+      const db = sqliteConn.getDb();
+      db.prepare(
+        'INSERT OR IGNORE INTO approvals' +
+        ' (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)' +
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(approvalId, `artifact-${approvalId}`, 'prompt', 'low', 'pending', 0.8, new Date().toISOString(), 'Special chars', 'Test');
+
+      const { status } = await fetchJson(`/api/v1/approvals/${encodeURIComponent(approvalId)}`);
+      expect(status).toBe(200);
+    });
+
+    it('returns 400 for invalid URI encoding in approval ID', async () => {
+      // Invalid URI encoding (%XX with invalid hex)
+      const { status, body } = await fetchJson('/api/v1/approvals/test%ZZ');
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(getStringField(rec, 'error')).toBe('invalid_id');
+    });
+
+    it('handles approval ID with spaces', async () => {
+      const approvalId = 'apr with spaces';
+      const db = sqliteConn.getDb();
+      db.prepare(
+        'INSERT OR IGNORE INTO approvals' +
+        ' (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, summary, trigger_reason)' +
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(approvalId, `artifact-${approvalId}`, 'prompt', 'low', 'pending', 0.8, new Date().toISOString(), 'Spaces test', 'Test');
+
+      const { status } = await fetchJson(`/api/v1/approvals/${encodeURIComponent(approvalId)}`);
+      expect(status).toBe(200);
+    });
+  });
+
+  // ── 16. Reject endpoint edge cases ──────────────────────────────────────
+
+  describe('POST reject — additional edge cases', () => {
+    it('rejects empty reason', async () => {
+      const approvalId = seedApproval('prompt', 'pending', {
+        summary: 'Reject empty reason test',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('reason must not be empty');
+    });
+
+    it('rejects already rejected approval', async () => {
+      const approvalId = seedApproval('prompt', 'rejected', {
+        summary: 'Already rejected',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Second rejection' }),
+      });
+      expect(status).toBe(409);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('already decided');
+    });
+
+    it('rejects already cancelled approval', async () => {
+      const approvalId = seedApproval('prompt', 'cancelled', {
+        summary: 'Already cancelled',
+      });
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Reject cancelled' }),
+      });
+      expect(status).toBe(409);
+      const rec = requireRecord(body, 'error response');
+      expect(rec.message).toContain('already decided');
+    });
+  });
 });

@@ -86,6 +86,14 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Representative ERRs**: ERR-006, ERR-012, ERR-027, ERR-032, ERR-052.
 - **Automation target**: PR pre-review checklist and `git log main..source-branch` before cherry-pick.
 
+### EP-11 i18n and Accessibility String Consistency
+
+- **Use when**: adding any user-facing string (visible text, `aria-label`, `title`, `placeholder`, `alt`) in a component that already uses an i18n translation function (`t()`, `useTranslation`, `i18next`).
+- **Failure mode**: new strings are hardcoded in the source language (usually English) while the rest of the component routes text through `t()`, causing screen readers, tooltips, and visible text to read in a different language than the active UI locale.
+- **Must check**: every new string attribute in an i18n-enabled component uses `t()` with a translation key; corresponding keys are added to all locale files (`en.json`, `zh-CN.json`, etc.); interpolation parameters (e.g., `{{count}}`) are passed through `t()` options.
+- **Representative ERRs**: ERR-075.
+- **Automation target**: grep for `aria-label={`, `aria-label="`, `title="`, `placeholder="` in `.tsx` files that import `useTranslation`/`t()`; any match not using `t(...)` is a finding.
+
 ## Maintenance Rules
 
 - Every ERR in a pattern card must exist in `docs/ERROR_EXPERIENCE_HANDBOOK.md`.

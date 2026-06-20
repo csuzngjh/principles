@@ -678,7 +678,9 @@
       "controlCenter": "Control Center",
       "reportProblem": "Feedback",
       "settings": "Settings",
-      "update": "Updates"
+      "update": "Updates",
+      "pendingApprovalsAria": "{{count}} pending approvals",
+      "degradedSignalsAria": "{{count}} degraded signals"
     },
     "approvalCard": {
       "confidence": {
