@@ -1780,6 +1780,26 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
+  it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
+    // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
+    const parsed: unknown = yaml.load(generateConfigYamlContent());
+    expect(parsed).toBeTruthy();
+    expect(typeof parsed === 'object' && !Array.isArray(parsed)).toBe(true);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+    expect(Object.hasOwn(parsed, 'features')).toBe(true);
+    const features = (parsed as Record<string, unknown>).features;
+    expect(typeof features === 'object' && features !== null && !Array.isArray(features)).toBe(true);
+    if (typeof features !== 'object' || features === null) return;
+    expect(Object.hasOwn(features, 'code_rule_capability')).toBe(true);
+    const flag = (features as Record<string, unknown>).code_rule_capability;
+    expect(typeof flag === 'object' && flag !== null).toBe(true);
+    if (typeof flag !== 'object' || flag === null) return;
+    expect(Object.hasOwn(flag, 'enabled')).toBe(true);
+    expect((flag as Record<string, unknown>).enabled).toBe(true);
+    expect(Object.hasOwn(flag, 'category')).toBe(true);
+    expect((flag as Record<string, unknown>).category).toBe('core');
+  });
+
   it('quiet features are disabled', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
@@ -1802,7 +1822,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
-  it('only MVP core channels and feedback_channel are enabled by default', () => {
+  it('only MVP core channels, code_rule_capability, and feedback_channel are enabled by default', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     const enabledFlags: string[] = [];
@@ -1812,7 +1832,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
   });
 
   it('written to temp workspace is loadable', () => {

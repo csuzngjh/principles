@@ -364,7 +364,7 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
       expect(flags.flags['evolution_worker']?.enabled).toBe(true);
     });
 
-    it('core flags cannot be disabled by user override', () => {
+    it('PRI-435: core flags can be explicitly emergency-disabled by user override with warning', () => {
       writeConfigYaml(workspaceDir, {
         prompt: { enabled: false },
         code_tool_hook: { enabled: false },
@@ -377,9 +377,11 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
       expect(isRecord(parsed)).toBe(true);
       const features = (parsed as Record<string, unknown>).features;
       const flags = computeEffectiveFlags(features as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
-      expect(flags.flags['prompt']?.enabled).toBe(true); // core cannot be disabled
-      expect(flags.flags['code_tool_hook']?.enabled).toBe(true); // core cannot be disabled
-      expect(flags.warnings.length).toBeGreaterThan(0); // warnings about core override attempt
+      // PRI-435: core flags honor explicit emergency disable when deliberately configured
+      expect(flags.flags['prompt']?.enabled).toBe(false);
+      expect(flags.flags['code_tool_hook']?.enabled).toBe(false);
+      expect(flags.warnings.length).toBeGreaterThan(0); // warnings about emergency disable
+      expect(flags.warnings.some(w => w.includes('core flag explicitly disabled'))).toBe(true);
     });
   });
 

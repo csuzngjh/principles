@@ -453,16 +453,15 @@ describe('Scenario 7: Feature flags from new config contract', () => {
     expect(isFeatureEnabled(flags, 'nonexistent')).toBe(false);
   });
 
-  it('core flags cannot be disabled via config', () => {
+  it('PRI-435: core flags can be explicitly emergency-disabled via config with warning', () => {
     const raw = makeValidConfig();
     raw.features.prompt = { category: 'core', enabled: false };
     const result = validatePdConfig(raw);
-    // Validation passes (user said disabled) but effective config overrides
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const flags = computeFeatureFlagsFromConfig(effective);
-    expect(nn(flags.flags.prompt).enabled).toBe(true);
-    expect(effective.warnings.some(w => w.includes('core flag cannot be disabled'))).toBe(true);
+    expect(nn(flags.flags.prompt).enabled).toBe(false);
+    expect(effective.warnings.some(w => w.includes('core flag explicitly disabled') && w.includes('prompt'))).toBe(true);
   });
 
   it('gone flags cannot be re-enabled via config', () => {
