@@ -519,3 +519,44 @@ describe('PRI-435: candidate internalize rejects non-diagnostician task for line
     expect(Object.hasOwn(parsed, 'nextAction'), 'nextAction field must be present').toBe(true);
   });
 });
+
+describe('candidate internalize resolves the production diag_router candidate chain', () => {
+  it('follows the router run diagnosisId back to the originating diagnostician task', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    const painId = 'pain-router-lineage-001';
+    const seeded = await seedDiagnosisToCandidate(sm, painId);
+    const routerTaskId = `diag_router-${seeded.taskId}`;
+    await sm.createTask({
+      taskId: routerTaskId, taskKind: 'diag_router', status: 'pending',
+      attemptCount: 0, maxAttempts: 3, diagnosticJson: JSON.stringify({ pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 1000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      } }),
+    });
+    await sm.acquireLease({ taskId: routerTaskId, owner: 'test', durationMs: 60_000, runtimeKind: 'openclaw' });
+    const [routerRun] = await sm.getRunsByTask(routerTaskId);
+    if (!routerRun) throw new Error('router run not created');
+    await sm.updateRunOutput(routerRun.runId, JSON.stringify({ diagnosisId: seeded.taskId }));
+    sm.connection.getDb().prepare(
+      'UPDATE principle_candidates SET task_id = ?, source_run_id = ? WHERE candidate_id = ?',
+    ).run(routerTaskId, routerRun.runId, seeded.candidateId);
+    await sm.close();
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await handleCandidateInternalize({ candidateId: seeded.candidateId, workspace: tmpDir, json: true });
+    logSpy.mockRestore();
+
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    const dreamer = (await verify.listTasks()).find((task) => task.taskKind === 'dreamer');
+    expect(dreamer).toBeDefined();
+    const diagnostic: unknown = JSON.parse(dreamer?.diagnosticJson ?? '{}');
+    if (diagnostic === null || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) {
+      throw new Error('dreamer diagnosticJson must be an object');
+    }
+    expect(Reflect.get(diagnostic, 'sourcePainId')).toBe(painId);
+    await verify.close();
+  });
+});

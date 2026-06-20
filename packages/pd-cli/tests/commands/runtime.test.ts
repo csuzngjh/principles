@@ -365,7 +365,7 @@ describe('pd runtime probe', () => {
     // Ensure NONEXISTENT_VAR is NOT set
     delete process.env.NONEXISTENT_VAR;
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleRuntimeProbe({
@@ -376,11 +376,17 @@ describe('pd runtime probe', () => {
       json: true,
     } as RuntimeProbeOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('NONEXISTENT_VAR'));
+    const output = consoleSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(JSON.parse(output)).toEqual(expect.objectContaining({
+      status: 'failed',
+      reason: 'api_key_not_set',
+      message: expect.stringContaining('NONEXISTENT_VAR'),
+      nextAction: expect.any(String),
+    }));
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(vi.mocked(probeRuntime)).not.toHaveBeenCalled();
 
-    consoleErrorSpy.mockRestore();
+    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });
