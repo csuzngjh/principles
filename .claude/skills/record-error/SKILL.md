@@ -16,32 +16,45 @@ Record AI coding assistant errors into `docs/ERROR_EXPERIENCE_HANDBOOK.md` so al
 
 ## Workflow
 
-### Step 1: Classify
+### Step 1: Similarity Gate (ENFORCED)
+
+Before assigning a new number, you MUST:
+
+1. Read `docs/ERROR_PATTERN_INDEX.md` — check if any EP card's "Failure mode" matches your incident.
+2. If a match exists → you MUST update recurrence on one of the EP card's "Representative ERRs", NOT create a new ERR.
+3. Only if NO EP card covers the failure mode → consider a new ERR + new EP card.
+
+**Hard rule**: If the incident's prevention rule can be stated as "When <X>, use <Y> instead of <Z>", and an existing ERR already teaches this exact rule → UPDATE, do not ADD.
+
+**Self-check before adding**: "Could a reviewer confuse my new ERR with an existing one?" If yes → do not add.
+
+### Step 2: Classify
 
 Read the error category table in `references/categories.md` and assign one of:
 1. Architecture Boundary | 2. Missing Tests | 3. Schema & Type | 4. Doc & Spec Drift | 5. Security | 6. Process & Workflow
 
-### Step 2: Assign Number
+### Step 3: Assign Number
 
 Read handbook Statistics section. Next = `ERR-{total+1}`, zero-padded to at least 3 digits (ERR-001 through ERR-999). If total exceeds 999, extend to 4 digits (ERR-1000).
 
-### Step 3: Linear Comment
+### Step 4: Linear Comment
 
 Add comment on the related Linear issue using the entry format in `references/entry-format.md`. Use the Linear MCP save_comment tool with the issue ID.
 
-### Step 4: Tag Issue
+### Step 5: Tag Issue
 
 Add `lesson-learned` label via the Linear MCP save_issue tool with `labels: ["lesson-learned"]`.
 
-### Step 5: Edit Handbook
+### Step 6: Edit Handbook
 
 Edit `docs/ERROR_EXPERIENCE_HANDBOOK.md`:
 
 1. Add row to the relevant category table: `| ERR-XXX | <summary> | <issue ID> |`
 2. Add detailed entry in "Detailed Entries" section (use format from Step 3)
 3. Update Statistics: increment Total lessons, update Last updated, update Top category if needed, increment Recurring errors if recurrence
+4. **Recurrence truncation**: Keep at most the 3 most recent recurrence descriptions in full. For older recurrences, retain only `date + issue ID + one-sentence summary` (≤ 100 chars). Preserve the total count.
 
-### Step 6: Commit & PR
+### Step 7: Commit & PR
 
 ```bash
 git checkout -b docs/err-XXX
