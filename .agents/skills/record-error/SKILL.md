@@ -32,12 +32,15 @@ When <general condition>, assistants must <preventive rule>, otherwise <general 
 
 Do not proceed until the failure mode is broader than a single file, function, or PR.
 
-### Step 2: Similarity and Recurrence Gate
+### Step 2: Similarity and Recurrence Gate (ENFORCED)
 
-Before assigning a new number, read:
-- `docs/ERROR_EXPERIENCE_HANDBOOK.md`
-- `references/categories.md`
-- `references/entry-format.md`
+Before assigning a new number, you MUST:
+
+1. Read `docs/ERROR_PATTERN_INDEX.md` — check if any EP card's "Failure mode" matches your incident.
+2. If a match exists → you MUST update recurrence on one of the EP card's "Representative ERRs", NOT create a new ERR.
+3. Only if NO EP card covers the failure mode → consider a new ERR + new EP card.
+
+Then read the matching detailed entries in `docs/ERROR_EXPERIENCE_HANDBOOK.md` (use `grep -n "ERR-XXX"` to locate specific entries — do NOT load the full file).
 
 Search existing entries for:
 - same violated invariant
@@ -51,6 +54,10 @@ Choose exactly one action:
 1. **Update recurrence** — if an existing ERR already teaches the same prevention rule.
 2. **Broaden existing entry** — if an existing ERR is too narrow but covers the same root cause.
 3. **Add new ERR** — only if the prevention rule is materially different from all existing entries.
+
+**Hard rule**: If the incident's prevention rule can be stated as "When <X>, use <Y> instead of <Z>", and an existing ERR already teaches this exact rule → UPDATE, do not ADD.
+
+**Self-check before adding**: "Could a reviewer confuse my new ERR with an existing one?" If yes → do not add.
 
 New ERR entries are forbidden when they only change the file name, command name, or symptom while sharing the same root cause.
 
@@ -99,8 +106,9 @@ For a new ERR:
 
 For recurrence:
 1. Update the existing detailed entry's `Recurrence` field with date, issue, and short note
-2. Add the source issue to the category row if useful
-3. Update Statistics: Last updated and Recurring errors
+2. **Recurrence field truncation**: Keep at most the 3 most recent recurrence descriptions in full. For older recurrences, retain only `date + issue ID + one-sentence summary` (≤ 100 chars). Preserve the total count (e.g., "Total: 15 recurrences").
+3. Add the source issue to the category row if useful
+4. Update Statistics: Last updated and Recurring errors
 
 For broadening:
 1. Rename the summary if needed to make it less incident-specific
@@ -120,6 +128,17 @@ gh pr create --title "docs: add ERR-XXX to error experience handbook" --body "Re
 ```
 
 **Do NOT merge the PR.** User merges manually.
+
+### Step 10: Archive Gate (when total entries > 50)
+
+If handbook total entries exceed 50 after adding a new ERR:
+
+1. Run `npm run check:error-handbook -- --audit`
+2. The audit lists ERRs whose last recurrence is > 90 days old
+3. Move those ERRs from `ERROR_EXPERIENCE_HANDBOOK.md` to `docs/ERROR_ARCHIVE.md`
+4. In `ERROR_PATTERN_INDEX.md`, mark them as `[archived]`
+5. Keep their EP card reference (the pattern is still active), but point to `ERROR_ARCHIVE.md` for details
+6. Commit: "docs: archive N stale ERR entries to ERROR_ARCHIVE.md"
 
 ## pr-review Integration
 
@@ -143,4 +162,6 @@ When pr-review triage finds an AI error:
 - [ ] Category table row added or existing row updated
 - [ ] Detailed entry added or recurrence/broadening updated
 - [ ] Statistics updated
+- [ ] Recurrence field truncated to ≤ 3 full entries (if recurrence update)
+- [ ] Archive gate checked if total > 50
 - [ ] Commit + PR created (NOT merged)
