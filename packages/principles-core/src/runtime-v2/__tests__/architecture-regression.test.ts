@@ -509,6 +509,7 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-44
     'generateFromTemplate',
     'checkForbiddenPatterns',
+    'checkReturnStatementsMissingFields',
     // PRI-45
     'mergeDecisions',
     // PRI-149 Tier 2

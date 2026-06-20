@@ -80,6 +80,12 @@ CONSTRAINTS:
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - implementationCode MUST define exactly function evaluate(input, helpers) and return { decision, matched, reason }
+- EVERY return statement inside evaluate() MUST include ALL three fields: decision, matched, reason
+- Do NOT return partial objects — missing fields will fail sandbox validation and block activation
+- GOOD: return { decision: 'allow', matched: false, reason: 'path is within workspace, no risk' }
+- GOOD: return { decision: 'block', matched: true, reason: 'write to system path outside workspace' }
+- BAD:  return { matched: false } — missing decision and reason, will be rejected
+- BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
 - input.action contains toolName, normalizedPath, and paramsSummary; inspect only these RuleHost inputs
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block/propose_correction case

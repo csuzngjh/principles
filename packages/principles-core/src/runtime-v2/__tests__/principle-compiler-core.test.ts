@@ -148,6 +148,88 @@ export function evaluate() { return { matched: false, reason: 'ok' }; }
   });
 });
 
+// ── Return statement field check ─────────────────────────────────────────────
+
+describe('checkReturnStatementsMissingFields', () => {
+  async function getModule() {
+    return import('../internalization/rule-code-validator.js');
+  }
+
+  it('returns empty array for code with all three fields in every return', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `
+function evaluate(input, helpers) {
+  if (input.action.toolName === 'write') {
+    return { decision: 'block', matched: true, reason: 'blocked' };
+  }
+  return { decision: 'allow', matched: false, reason: 'safe' };
+}
+`;
+    expect(checkReturnStatementsMissingFields(code)).toEqual([]);
+  });
+
+  it('detects return missing decision and reason', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `
+function evaluate(input, helpers) {
+  return { matched: false };
+}
+`;
+    const violations = checkReturnStatementsMissingFields(code);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain('decision');
+    expect(violations[0]).toContain('reason');
+  });
+
+  it('detects return missing only reason', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `
+function evaluate(input, helpers) {
+  return { decision: 'allow', matched: true };
+}
+`;
+    const violations = checkReturnStatementsMissingFields(code);
+    expect(violations).toHaveLength(1);
+    // The "missing required field(s): reason" part should only list 'reason'
+    const [missingPart] = violations[0].split('—');
+    expect(missingPart).toContain('reason');
+    expect(missingPart).not.toContain('decision');
+  });
+
+  it('detects multiple violations across multiple returns', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `
+function evaluate(input, helpers) {
+  if (input.x) {
+    return { matched: true };
+  }
+  if (input.y) {
+    return { decision: 'block', matched: true };
+  }
+  return { decision: 'allow', matched: false, reason: 'ok' };
+}
+`;
+    const violations = checkReturnStatementsMissingFields(code);
+    expect(violations).toHaveLength(2);
+  });
+
+  it('skips complex returns with nested braces (no false positives)', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `
+function evaluate(input, helpers) {
+  return { decision: 'propose_correction', matched: true, reason: 'fix', correctionProposal: { params: { a: 1 } } };
+}
+`;
+    expect(checkReturnStatementsMissingFields(code)).toEqual([]);
+  });
+
+  it('returns empty for code with no return statements', async () => {
+    const { checkReturnStatementsMissingFields } = await getModule();
+    const code = `const x = 1;`;
+    expect(checkReturnStatementsMissingFields(code)).toEqual([]);
+  });
+});
+
 // ── Type exports via barrel ──────────────────────────────────────────────────
 
 describe('PRI-44 barrel exports', () => {
