@@ -59,14 +59,19 @@ const SELF_MODIFICATION_PATTERNS = [
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  try {
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
-  } catch {
-    return false;
-  }
+/**
+ * Check that a value is a record-like object (non-null, non-array, typeof object).
+ *
+ * PRI-437: We intentionally do NOT check Object.getPrototypeOf() here because
+ * VM-executed code creates objects whose prototype belongs to the VM context's
+ * realm, not the host realm. Using Object.getPrototypeOf() === Object.prototype
+ * would reject all valid auto_correct proposals from VM-executed RuleCode.
+ *
+ * Prototype pollution is handled separately via Object.hasOwn checks for
+ * __proto__/constructor/prototype keys in the validators below.
+ */
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isJsonSerializable(value: unknown, seen: Set<unknown> = new Set()): boolean {
@@ -257,11 +262,11 @@ export function validateProposedParams(
 ): CorrectionProposalValidationResult {
   const errors: string[] = [];
 
-  if (!isPlainObject(originalParams)) {
+  if (!isRecordLike(originalParams)) {
     return { valid: false, errors: ['originalParams must be a plain object'] };
   }
 
-  if (!isPlainObject(proposedParams)) {
+  if (!isRecordLike(proposedParams)) {
     const type = proposedParams === null ? 'null'
       : Array.isArray(proposedParams) ? 'array'
       : typeof proposedParams;
@@ -320,15 +325,24 @@ export function validateCorrectionProposal(
 ): CorrectionProposalValidationResult {
   const errors: string[] = [];
 
-  if (!isPlainObject(proposal)) {
+  if (!isRecordLike(proposal)) {
     errors.push('proposal must be a plain object');
     return { valid: false, errors };
+  }
+
+  // PRI-437: Prototype pollution check on the proposal itself (ERR-013).
+  // Since we no longer check Object.getPrototypeOf(), we must explicitly
+  // reject __proto__/constructor/prototype as own properties.
+  for (const ppKey of PROTOTYPE_POLLUTION_KEYS) {
+    if (Object.hasOwn(proposal, ppKey)) {
+      errors.push(`proposal must not contain prototype pollution key "${ppKey}"`);
+    }
   }
 
   // proposedParams — required, must be a plain object
   if (!Object.hasOwn(proposal, 'proposedParams')) {
     errors.push('proposedParams is required');
-  } else if (!isPlainObject(proposal.proposedParams)) {
+  } else if (!isRecordLike(proposal.proposedParams)) {
     errors.push('proposedParams must be a plain object');
   } else if (!isJsonSerializable(proposal.proposedParams)) {
     errors.push('proposedParams is not JSON-serializable');
@@ -345,12 +359,12 @@ export function validateCorrectionProposal(
   } else if (!Array.isArray(proposal.correctedFields)) {
     errors.push('correctedFields must be an array');
   } else if (!proposal.correctedFields.every((f) =>
-    isPlainObject(f) &&
+    isRecordLike(f) &&
     typeof f.field === 'string' && f.field.trim().length > 0 &&
     typeof f.reason === 'string' && f.reason.trim().length > 0
   )) {
     errors.push('correctedFields must contain objects with non-empty field and reason');
-  } else if (isPlainObject(proposal.proposedParams)) {
+  } else if (isRecordLike(proposal.proposedParams)) {
     for (const cf of proposal.correctedFields) {
       if (PROTOTYPE_POLLUTION_KEYS.has(cf.field)) {
         errors.push(`correctedFields entry "${cf.field}" is a prototype pollution key`);
