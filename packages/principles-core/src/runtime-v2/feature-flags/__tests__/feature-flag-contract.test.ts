@@ -179,18 +179,30 @@ describe('computeEffectiveFlags', () => {
     expect(result.warnings.some(w => w.includes('totally_made_up'))).toBe(true);
   });
 
-  it('preserves core flags as enabled regardless of user config', () => {
+  it('PRI-435: honors explicit emergency disable of core flag when deliberately configured', () => {
     const promptDefault = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'prompt');
-    if (!promptDefault) return;
+    // PRI-435 (CodeRabbit P2): fail loud if the prompt flag is missing from defaults
+    expect(promptDefault).toBeDefined();
     const userFlags = {
       prompt: { enabled: false, since: '2026-01-01' },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const promptFlag = result.flags.prompt;
-    if (promptFlag) {
-      expect(promptFlag.enabled).toBe(true);
-    }
-    expect(result.warnings.some(w => w.includes('core') || w.includes('prompt'))).toBe(true);
+    // PRI-435 (CodeRabbit P2): fail loud if computeEffectiveFlags drops the flag
+    expect(promptFlag).toBeDefined();
+    expect(promptFlag?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('core') && w.includes('prompt'))).toBe(true);
+  });
+
+  it('PRI-435: core flags default ON when config omits enabled value', () => {
+    const userFlags = {
+      prompt: { category: 'core' },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const promptFlag = result.flags.prompt;
+    // PRI-435 (CodeRabbit P2): fail loud if the flag is missing
+    expect(promptFlag).toBeDefined();
+    expect(promptFlag?.enabled).toBe(true);
   });
 
   it('allows explicit enable of quiet flag with valid input', () => {
@@ -278,6 +290,15 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
 
   it('contains code_tool_hook core flag', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'code_tool_hook');
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.category).toBe('core');
+      expect(flag.enabled).toBe(true);
+    }
+  });
+
+  it('contains code_rule_capability core flag (PRI-435: promoted to MVP-Core, default on)', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'code_rule_capability');
     expect(flag).toBeDefined();
     if (flag) {
       expect(flag.category).toBe('core');
