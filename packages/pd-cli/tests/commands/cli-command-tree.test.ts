@@ -2,20 +2,34 @@
  * CLI command tree structure tests — verify command placement.
  *
  * These tests ensure that commands are registered at the correct path in the CLI tree.
+ *
+ * Performance: help output is cached per unique command path so that repeated
+ * assertions on the same subcommand (e.g. "runtime uat --help") only spawn
+ * one child process instead of one per test.
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
+const helpCache = new Map<string, string>();
+
 function runPdHelp(args: string[]): string {
+  const key = args.join(' ');
+  const cached = helpCache.get(key);
+  if (cached !== undefined) return cached;
+
   try {
-    return execFileSync('node', [getBuiltPdCliPath(), ...args], {
+    const output = execFileSync('node', [getBuiltPdCliPath(), ...args], {
       encoding: 'utf8',
       cwd: process.cwd(),
     });
+    helpCache.set(key, output);
+    return output;
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'stdout' in err) {
-      return String((err as { stdout: unknown }).stdout);
+    if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
+      const output = String(Reflect.get(err, 'stdout'));
+      helpCache.set(key, output);
+      return output;
     }
     throw err;
   }
@@ -24,7 +38,6 @@ function runPdHelp(args: string[]): string {
 describe('CLI command tree structure', () => {
   it('uat command exists under runtime (pd runtime uat --help)', () => {
     const output = runPdHelp(['runtime', 'uat', '--help']);
-    // Should contain UAT-specific options
     expect(output).toContain('--workspace');
     expect(output).toContain('--count');
     expect(output).toContain('--min-success-rate');
@@ -38,17 +51,14 @@ describe('CLI command tree structure', () => {
 
   it('runtime subcommand list includes uat (pd runtime --help)', () => {
     const output = runPdHelp(['runtime', '--help']);
-    // Should list 'uat' as a subcommand
     expect(output).toMatch(/uat\s/);
   });
 
   it('pruning subcommand list does NOT include uat (pd runtime pruning --help)', () => {
     const output = runPdHelp(['runtime', 'pruning', '--help']);
-    // Should only have report, explain, review
     expect(output).toContain('report');
     expect(output).toContain('explain');
     expect(output).toContain('review');
-    // Should NOT have uat
     expect(output).not.toMatch(/uat\s/);
   });
 
