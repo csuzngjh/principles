@@ -176,6 +176,9 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
     cwd,
     env,
     shell: spawnConfig.shell,
+    // A dedicated process group lets timeout handling terminate the complete
+    // Unix process tree via a negative PID. Windows uses taskkill /T instead.
+    detached: process.platform !== 'win32',
   } satisfies SpawnOptions);
 
   // Attach data handlers BEFORE spawning so we don't miss any output
@@ -207,13 +210,9 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
         // Process may have already exited — taskkill itself failed
       });
     } else {
-      // Unix: use ChildProcess.kill() which reliably sends the signal to the
-      // direct child. process.kill(-pid) only works when the child was spawned
-      // with detached:true (it gets its own process group); otherwise the
-      // negative-pid lookup fails silently and the child is never killed,
-      // causing the close event to never fire and the promise to hang.
+      // Unix: terminate the dedicated process group, including descendants.
       try {
-        proc.kill('SIGTERM');
+        process.kill(-pid, 'SIGTERM');
       } catch {
         // Process may have already exited
       }
@@ -240,11 +239,14 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
 
       // Then schedule SIGKILL after grace period (only on non-Windows)
       if (process.platform !== 'win32') {
+        const { pid } = proc;
         killGraceHandle = setTimeout(() => {
-          try {
-            proc.kill('SIGKILL');
-          } catch {
-            // Already exited
+          if (pid !== null && pid !== undefined) {
+            try {
+              process.kill(-pid, 'SIGKILL');
+            } catch {
+              // Already exited
+            }
           }
         }, killGracePeriodMs);
       }

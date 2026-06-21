@@ -27,6 +27,10 @@ import {
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * PRI-343: Pure function — deep-merges allowConversationAccess: true into
  * the openclaw.json config without mutating the input.
@@ -39,27 +43,27 @@ export function ensureConversationAccess(config: Record<string, unknown>): Recor
   const result = { ...config };
 
   // Guard: plugins must be a non-null object
-  if (typeof result.plugins !== 'object' || result.plugins === null || Array.isArray(result.plugins)) {
+  if (!isRecord(result.plugins)) {
     return result;
   }
-  const plugins = { ...(result.plugins as Record<string, unknown>) };
+  const plugins = { ...result.plugins };
 
   // Guard: plugins.entries must be a non-null object
-  if (typeof plugins.entries !== 'object' || plugins.entries === null || Array.isArray(plugins.entries)) {
+  if (!isRecord(plugins.entries)) {
     return result;
   }
-  const entries = { ...(plugins.entries as Record<string, unknown>) };
+  const entries = { ...plugins.entries };
 
   // Guard: principles-disciple entry must be a non-null object (or missing)
   const rawEntry = entries['principles-disciple'];
-  const entry: Record<string, unknown> = (typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry))
-    ? { ...(rawEntry as Record<string, unknown>) }
+  const entry: Record<string, unknown> = isRecord(rawEntry)
+    ? { ...rawEntry }
     : { enabled: true };
 
   // Guard: hooks must be a non-null object (or missing)
   const rawHooks = entry.hooks;
-  const hooks = (typeof rawHooks === 'object' && rawHooks !== null && !Array.isArray(rawHooks))
-    ? { ...(rawHooks as Record<string, unknown>) }
+  const hooks = isRecord(rawHooks)
+    ? { ...rawHooks }
     : {};
 
   // Set allowConversationAccess: true (idempotent)

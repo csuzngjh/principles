@@ -7,7 +7,7 @@
  * assertions on the same subcommand (e.g. "runtime uat --help") only spawn
  * one child process instead of one per test.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
@@ -26,8 +26,8 @@ function runPdHelp(args: string[]): string {
     helpCache.set(key, output);
     return output;
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'stdout' in err) {
-      const output = String((err as { stdout: unknown }).stdout);
+    if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
+      const output = String(Reflect.get(err, 'stdout'));
       helpCache.set(key, output);
       return output;
     }
@@ -36,23 +36,6 @@ function runPdHelp(args: string[]): string {
 }
 
 describe('CLI command tree structure', () => {
-  // Pre-warm the cache for the most commonly used help paths.
-  // This runs the expensive child-process spawns once, and all individual
-  // tests read from the cache (effectively instant).
-  beforeAll(() => {
-    runPdHelp(['runtime', 'uat', '--help']);
-    runPdHelp(['runtime', '--help']);
-    runPdHelp(['runtime', 'pruning', '--help']);
-    runPdHelp(['runtime', 'health', 'snapshot', '--help']);
-    runPdHelp(['runtime', 'activation', 'edit', '--help']);
-    runPdHelp(['runtime', 'activation', '--help']);
-    runPdHelp(['rulecode', '--help']);
-    runPdHelp(['rulecode', 'spec', '--help']);
-    runPdHelp(['rulecode', 'validate', '--help']);
-    runPdHelp(['rulecode', 'replay', '--help']);
-    runPdHelp(['legacy', 'cleanup', '--help']);
-  });
-
   it('uat command exists under runtime (pd runtime uat --help)', () => {
     const output = runPdHelp(['runtime', 'uat', '--help']);
     expect(output).toContain('--workspace');

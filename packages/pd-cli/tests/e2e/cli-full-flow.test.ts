@@ -75,6 +75,13 @@ interface RunResult {
   exitCode: number;
 }
 
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return value;
+}
+
 /**
  * Type guard: extract a string field from an unknown error object.
  * ERR-001: no `as` casts on untrusted error data — use Reflect.get + typeof.
@@ -145,7 +152,8 @@ describe('CLI full flow', () => {
     ]);
     expect(exitCode).toBe(0);
     // EP-04 Rule 1: --json stdout must be exactly one parseable JSON object
-    const result = JSON.parse(stdout);
+    const parsed: unknown = JSON.parse(stdout);
+    const result = requireRecord(parsed, 'runtime features output');
     expect(result).toHaveProperty('status');
     expect(result).toHaveProperty('source');
     expect(result).toHaveProperty('features');
@@ -168,10 +176,12 @@ describe('CLI full flow', () => {
     ]);
     expect(exitCode).toBe(0);
     // EP-04 Rule 1: --json stdout must be exactly one parseable JSON object
-    const result = JSON.parse(stdout);
+    const parsed: unknown = JSON.parse(stdout);
+    const result = requireRecord(parsed, 'activation list output');
     expect(result).toHaveProperty('activations');
-    expect(Array.isArray(result.activations)).toBe(true);
-    expect(result.activations).toHaveLength(0);
+    const activations = result.activations;
+    expect(Array.isArray(activations)).toBe(true);
+    expect(activations).toEqual([]);
     // SqliteConnection constructor creates .pd/ and state.db on first access
     expect(fs.existsSync(path.join(workspace, '.pd'))).toBe(true);
     expect(fs.existsSync(path.join(workspace, '.pd', 'state.db'))).toBe(true);
