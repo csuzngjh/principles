@@ -32,7 +32,12 @@ describe('isProductionWorkspace', () => {
     expect(isProductionWorkspace(path.resolve(safePath))).toBe(false);
   });
   it('detects descendant', () => {
-    expect(isProductionWorkspace(path.resolve('D:\\.openclaw\\workspace\\sub\\child'))).toBe(true);
+    // Use a platform-appropriate descendant path so the test works on both
+    // Windows (where D:\... resolves as-is) and Linux CI (where D:\... is
+    // treated as a relative path and resolves under cwd).
+    const prodPath = path.resolve(path.join(os.homedir(), '.openclaw', 'workspace'));
+    const descendantPath = path.join(prodPath, 'sub', 'child');
+    expect(isProductionWorkspace(descendantPath)).toBe(true);
   });
   it('rejects sibling workspace-test (ERR-030)', () => {
     expect(isProductionWorkspace(path.resolve('D:\\.openclaw\\workspace-test'))).toBe(false);
@@ -53,7 +58,9 @@ describe('guardUatWorkspace', () => {
       }
     });
     it('refuses descendant', () => {
-      expect(guardUatWorkspace('D:\\.openclaw\\workspace\\subdir', 'test').refused).toBe(true);
+      const prodPath = path.resolve(path.join(os.homedir(), '.openclaw', 'workspace'));
+      const descendantPath = path.join(prodPath, 'subdir');
+      expect(guardUatWorkspace(descendantPath, 'test').refused).toBe(true);
     });
   });
   describe('allowed', () => {
