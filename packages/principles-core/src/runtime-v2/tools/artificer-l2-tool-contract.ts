@@ -84,8 +84,11 @@ export { ArtificerRuleOutputTypebox as SubmitRulecodeSchema };
  * model can reference it during the loop. Mirrors the constraints in
  * ARTIFICER_PROTOCOL_INSTRUCTION + checkForbiddenPatterns + the matched=false
  * decision rule.
+ *
+ * Exported so the `pd rulecode spec` CLI command (PRI-439 Phase 5) can return
+ * the same canonical text the Artificer L2 agent sees — single source of truth.
  */
-const RULECODE_SPEC_TEXT = [
+export const RULECODE_SPEC_TEXT = [
   '=== RuleCode Dialect Spec (PRI-439) ===',
   '',
   'CANONICAL FORM:',

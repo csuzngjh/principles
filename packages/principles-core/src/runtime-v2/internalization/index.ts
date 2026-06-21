@@ -464,6 +464,23 @@ export { formatAdversarialFeedback } from './adversarial-feedback.js';
 export { ArtificerL2Adapter } from '../adapter/artificer-l2-adapter.js';
 export type { ArtificerL2AdapterConfig } from '../adapter/artificer-l2-adapter.js';
 
+// ── Artificer L2 Agent Loop Tools (PRI-439 Phase 4) ────────────────────────
+// TypeBox redeclaration + 4-tool contract used by ArtificerL2Adapter.
+export {
+  ArtificerRuleOutputTypebox,
+  ArtificerSourceTraceTypebox,
+  GoldenTraceCaseInputTypebox,
+} from '../tools/artificer-output-typebox.js';
+export {
+  buildArtificerL2Tools,
+  ARTIFICER_L2_TOOL_WHITELIST,
+  RULECODE_SPEC_TEXT,
+} from '../tools/artificer-l2-tool-contract.js';
+export type {
+  ArtificerL2ToolContext,
+  ArtificerL2OutputCapture,
+} from '../tools/artificer-l2-tool-contract.js';
+
 export {
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,

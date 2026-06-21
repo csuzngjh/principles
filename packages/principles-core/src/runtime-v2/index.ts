@@ -447,7 +447,7 @@ export { decideInternalizationRoute } from './internalization/internalization-ro
 export type { PainPattern } from './internalization/template-generator.js';
 export { generateFromTemplate } from './internalization/template-generator.js';
 export type { ValidationResult } from './internalization/rule-code-validator.js';
-export { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './internalization/rule-code-validator.js';
+export { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from './internalization/rule-code-validator.js';
 export type { CompileResult } from './internalization/compile-result.js';
 
 // Pruning mask — builds masked principle set from review log (PRI-48)
@@ -965,6 +965,28 @@ export type {
   L2OutputCapture,
 } from './tools/agent-tool-contract.js';
 export { DreamerOutputV1Typebox, DreamerCandidateTypebox } from './tools/dreamer-output-typebox.js';
+
+// ── Artificer L2 Agent Loop Tools (PRI-439 Phase 4) ────────────────────────────
+//
+// TypeBox redeclaration of ArtificerRuleOutput for pi-agent-core tool parameter
+// schemas, plus the 4-tool contract (read_rulecode_spec, validate_rulecode,
+// replay_rulecode, submit_rulecode) used by ArtificerL2Adapter.
+
+export {
+  ArtificerRuleOutputTypebox,
+  ArtificerSourceTraceTypebox,
+  GoldenTraceCaseInputTypebox,
+} from './tools/artificer-output-typebox.js';
+
+export {
+  buildArtificerL2Tools,
+  ARTIFICER_L2_TOOL_WHITELIST,
+  RULECODE_SPEC_TEXT,
+} from './tools/artificer-l2-tool-contract.js';
+export type {
+  ArtificerL2ToolContext,
+  ArtificerL2OutputCapture,
+} from './tools/artificer-l2-tool-contract.js';
 
 // ── L2 Principle Reader (PRI-431) ─────────────────────────────────────────────
 // Only export the pure-logic entry point from the core barrel.
