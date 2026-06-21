@@ -8,8 +8,8 @@
       "channel": "prompt",
       "deactivated_at": null,
       "idempotency_key": "art-principle-fullchain-001::prompt",
-      "target_ref": "ledger://principle-fullchain-001",
-    },
+      "target_ref": "ledger://principle-fullchain-001"
+    }
   ],
   "approvals": [
     {
@@ -32,21 +32,21 @@
       "risk_level": "low",
       "status": "approved",
       "summary": "Always read existing implementation before adding a parallel module",
-      "trigger_reason": "pain-signal-detected",
-    },
+      "trigger_reason": "pain-signal-detected"
+    }
   ],
   "pi_artifacts": [
     {
       "artifact_id": "art-principle-fullchain-001",
       "artifact_kind": "principle",
-      "content_json": "{"principleId":"principle-fullchain-001","text":"Always read existing implementation before adding a parallel module","language":"en","derivedFrom":"Agent added a parallel module without reading the existing implementation, causing duplication."}",
+      "content_json": "{\"principleId\":\"principle-fullchain-001\",\"text\":\"Always read existing implementation before adding a parallel module\",\"language\":\"en\",\"derivedFrom\":\"Agent added a parallel module without reading the existing implementation, causing duplication.\"}",
       "created_at": "<TIMESTAMP>",
       "lineage_artifact_ids": "[]",
       "source_principle_id": "principle-fullchain-001",
       "source_rule_id": null,
       "source_task_id": "task-pain-fullchain-001",
       "updated_at": "<TIMESTAMP>",
-      "validation_status": "validated",
-    },
-  ],
+      "validation_status": "validated"
+    }
+  ]
 }

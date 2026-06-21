@@ -201,7 +201,7 @@ function isRunStatus(v: unknown): v is RunStatus {
 function isStructuredRunOutput(v: unknown): v is StructuredRunOutput {
   if (typeof v !== 'object' || v === null) return false;
   const obj = v as Record<string, unknown>;
-  return isString(obj.runId) && 'payload' in obj;
+  return isString(obj.runId) && Object.hasOwn(obj, 'payload');
 }
 
 /**

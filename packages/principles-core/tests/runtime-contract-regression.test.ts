@@ -141,7 +141,7 @@ describe('ERR-001 reverse-regression: `as` cast cannot bypass schema validation'
     // missing diagnosisId/summary/rootCause/violatedPrinciples/evidence/
     // recommendations/confidence) and use `as DiagnosticianOutputV1` to bypass
     // TypeScript. The runtime schema validator must still reject it.
-    const malformed = { valid: true } as DiagnosticianOutputV1;
+    const malformed = { valid: true } as DiagnosticianOutputV1; // runtime-contract:exempt ERR-001 deliberate type violation to test runtime contract enforcement
 
     // The defense: Value.Check performs runtime structural validation
     expect(Value.Check(DiagnosticianOutputV1Schema, malformed)).toBe(false);
@@ -154,7 +154,7 @@ describe('ERR-001 reverse-regression: `as` cast cannot bypass schema validation'
     const malformed = {
       ...createValidDiagnosticianOutput(),
       confidence: '0.85',
-    } as unknown as DiagnosticianOutputV1;
+    } as unknown as DiagnosticianOutputV1; // runtime-contract:exempt ERR-001 deliberate type violation to test runtime contract enforcement
 
     expect(Value.Check(DiagnosticianOutputV1Schema, malformed)).toBe(false);
   });
@@ -164,7 +164,7 @@ describe('ERR-001 reverse-regression: `as` cast cannot bypass schema validation'
     try {
       // Deliberate violation: `as` bypass — commit a malformed output that
       // TypeScript thinks is DiagnosticianOutputV1 but is not.
-      const malformed = { valid: true } as DiagnosticianOutputV1;
+      const malformed = { valid: true } as DiagnosticianOutputV1; // runtime-contract:exempt ERR-001 deliberate type violation to test runtime contract enforcement
 
       // The defense: committer validates via Value.Check before any DB write
       // and throws PDRuntimeError with category 'input_invalid'.

@@ -13,7 +13,10 @@
  * Default: warning mode (exit 0, violations printed to stderr).
  * Set PD_STRICT_SCAN=1 to fail the process on any violation.
  *
- * Exemption: append `// runtime-contract:exempt ERR-XXX <reason>` to the line
+ * Exemption: append `// runtime-contract:exempt ERR-XXX <reason>` to the line.
+ * The exemption is ERR-specific: only violations matching the specified ERR-XXX
+ * are skipped. A reason after the ERR ID is required.
+ * Example: `// runtime-contract:exempt ERR-001 deliberate type violation to test runtime contract enforcement`
  */
 
 const fs = require('node:fs');
@@ -49,6 +52,12 @@ const PATTERNS = [
     errId: 'ERR-002',
     description: '.catch(() => {}) silently swallowing errors',
   },
+  // ERR-013: `in` operator on potentially untrusted objects
+  {
+    regex: /\b(?:raw|obj|value|entry|data|result|parsed|fixture|output|response)\s+\bin\b(?!\s*\{)/g,
+    errId: 'ERR-013',
+    description: '`in` operator on potentially untrusted object (use Object.hasOwn())',
+  },
 ];
 
 function walkDir(dir, results) {
@@ -70,12 +79,14 @@ function scanFile(filePath) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Skip exemption lines
-    if (/runtime-contract:exempt/.test(line)) continue;
 
     for (const pattern of PATTERNS) {
       const matches = line.matchAll(pattern.regex);
       for (const match of matches) {
+        // Check for ERR-specific exemption: runtime-contract:exempt ERR-XXX <reason>
+        const exemptMatch = line.match(/runtime-contract:exempt\s+ERR-(\d+)/);
+        if (exemptMatch && `ERR-${exemptMatch[1]}` === pattern.errId) continue;
+
         violations.push({
           file: path.relative(ROOT, filePath),
           line: i + 1,

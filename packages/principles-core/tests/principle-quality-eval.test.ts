@@ -27,10 +27,6 @@ interface PrincipleGradeResult {
 
 const PRINCIPLE_ARTIFACT_KINDS = new Set<string>([
   'principle',
-  'rule',
-  'training_data',
-  'skill',
-  'patch',
 ]);
 
 const VALIDATION_STATUSES = new Set<string>(['pending', 'validated', 'rejected']);
@@ -50,14 +46,14 @@ function isStringArray(value: unknown): value is string[] {
  */
 function isPIArtifactSnapshot(value: unknown): value is PIArtifactSnapshot {
   if (!isObject(value)) return false;
-  if (typeof value.artifactId !== 'string') return false;
-  if (typeof value.artifactKind !== 'string' || !PRINCIPLE_ARTIFACT_KINDS.has(value.artifactKind)) return false;
-  if (typeof value.sourceTaskId !== 'string') return false;
-  if (!isStringArray(value.lineageArtifactIds)) return false;
-  if (typeof value.validationStatus !== 'string' || !VALIDATION_STATUSES.has(value.validationStatus)) return false;
-  if (typeof value.contentJson !== 'string') return false;
-  if (typeof value.createdAt !== 'string') return false;
-  if (typeof value.updatedAt !== 'string') return false;
+  if (!Object.hasOwn(value, 'artifactId') || typeof value.artifactId !== 'string') return false;
+  if (!Object.hasOwn(value, 'artifactKind') || typeof value.artifactKind !== 'string' || !PRINCIPLE_ARTIFACT_KINDS.has(value.artifactKind)) return false;
+  if (!Object.hasOwn(value, 'sourceTaskId') || typeof value.sourceTaskId !== 'string') return false;
+  if (!Object.hasOwn(value, 'lineageArtifactIds') || !isStringArray(value.lineageArtifactIds)) return false;
+  if (!Object.hasOwn(value, 'validationStatus') || typeof value.validationStatus !== 'string' || !VALIDATION_STATUSES.has(value.validationStatus)) return false;
+  if (!Object.hasOwn(value, 'contentJson') || typeof value.contentJson !== 'string') return false;
+  if (!Object.hasOwn(value, 'createdAt') || typeof value.createdAt !== 'string') return false;
+  if (!Object.hasOwn(value, 'updatedAt') || typeof value.updatedAt !== 'string') return false;
   return true;
 }
 
@@ -83,6 +79,17 @@ function sourceTaskIdMatchesPainId(sourceTaskId: string, expectedPainId: string)
  */
 function gradePrinciplePureCode(principle: unknown, expectedPainId: string): PrincipleGradeResult {
   const feedback: string[] = [];
+
+  // Early return: reject non-principle artifacts
+  if (isObject(principle) && Object.hasOwn(principle, 'artifactKind') && principle.artifactKind !== 'principle') {
+    return {
+      formatAdherence: 0,
+      taskSuccess: 0,
+      lineageConsistency: 0,
+      overall: 0,
+      feedback: `artifactKind is '${String(principle.artifactKind)}', expected 'principle'`,
+    };
+  }
 
   // ── Dimension 1: formatAdherence ──────────────────────────────────────
   // Shape must match PIArtifactSnapshot AND contentJson must parse to a JSON object.

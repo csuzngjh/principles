@@ -228,8 +228,10 @@ describe('defer_archive channel independent E2E (MVP Quality Task 8)', () => {
 
       // ── Step 7: Owner deactivates (rollback) ──
       const deactivatedAt = '2026-06-18T02:00:00.000Z';
+      const activationId = activation?.activationId;
+      if (!activationId) throw new Error('Expected activationId');
       const rollbackOk = await ws.stateStore.deactivateActivation(
-        activation?.activationId as string,
+        activationId,
         deactivatedAt,
       );
       expect(rollbackOk).toBe(true);

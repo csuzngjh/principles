@@ -41,8 +41,8 @@ afterEach(() => {
     if (ws) {
       try {
         fs.rmSync(ws, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup
+      } catch (e) {
+        console.warn('cleanup failed:', e);
       }
     }
   }
@@ -71,11 +71,16 @@ async function runPd(
     });
     return { stdout, stderr, exitCode: 0 };
   } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; code?: number };
+    const e = err instanceof Error ? err : null;
+    const stdout = Object.hasOwn(err, 'stdout') ? String((err as Record<string, unknown>).stdout) : '';
+    const stderr = Object.hasOwn(err, 'stderr') ? String((err as Record<string, unknown>).stderr) : '';
+    const exitCode = Object.hasOwn(err, 'code') && typeof (err as Record<string, unknown>).code === 'number'
+      ? (err as Record<string, unknown>).code as number
+      : 1;
     return {
-      stdout: e.stdout ?? '',
-      stderr: e.stderr ?? '',
-      exitCode: e.code ?? 1,
+      stdout,
+      stderr,
+      exitCode,
     };
   }
 }

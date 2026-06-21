@@ -244,9 +244,10 @@ describe('code_tool_hook (RuleHost) channel E2E — MVP Release Quality Task 9',
       expect(activation?.deactivatedAt).toBeNull();
 
       // Step 6: Owner rollback — deactivate directly via stateStore
+      if (!activation) throw new Error('Expected activation');
       const deactivatedAt = '2026-06-18T02:00:00.000Z';
       const rollbackOk = await ws.stateStore.deactivateActivation(
-        activation!.activationId,
+        activation.activationId,
         deactivatedAt,
       );
       expect(rollbackOk).toBe(true);
@@ -262,7 +263,7 @@ describe('code_tool_hook (RuleHost) channel E2E — MVP Release Quality Task 9',
 
       // Rollback is idempotent: calling again returns false (already deactivated)
       const rollbackAgain = await ws.stateStore.deactivateActivation(
-        activation!.activationId,
+        activation.activationId,
         '2026-06-18T03:00:00.000Z',
       );
       expect(rollbackAgain).toBe(false);
