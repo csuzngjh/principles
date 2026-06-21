@@ -295,12 +295,14 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         continue;
       }
 
-      // V1 output (no code fields) — nothing to replay. Accept as-is (L1 equivalent).
+      // This adapter is the executable RuleHost path. A valid V1 plan is not a
+      // successful L2 result because it cannot be activated by RuleHost. Give
+      // the model a bounded repair opportunity instead of silently accepting a
+      // text-only artifact as if code generation had succeeded.
       if (!isArtificerOutputV2(candidateWithTaskId)) {
-        this.emitAttempt({ taskId, runId, attempt, decision: 'v1_accepted' });
-        this.emitComplete({ taskId, runId, attempts: attempt, degraded: false, succeeded: true });
-        this.completeRun(runId, 'succeeded', candidateWithTaskId);
-        return this.runHandle(runId, startedAt);
+        lastFailureFeedback = '--- Executable RuleCode required ---\nThe previous output was a text-only V1 plan. Include implementationCode, goldenTraceCases, and affectedTools exactly as required by the output contract.';
+        this.emitAttempt({ taskId, runId, attempt, decision: 'validator_rejected' });
+        continue;
       }
 
       const v2 = candidateWithTaskId;

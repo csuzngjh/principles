@@ -434,6 +434,19 @@ describe("FocusPage: component can be imported", () => {
   });
 });
 
+describe("FocusPage: approval failures remain actionable", () => {
+  it("preserves the backend reason instead of reporting only a failed count", async () => {
+    const { summarizeDecisionResults } = await import("../../src/ui/pages/focus/FocusPage.js");
+    expect(summarizeDecisionResults([
+      { success: false, error: "Approval was rolled back. Reason: rejected_validation_failed" },
+    ])).toEqual({
+      allSucceeded: false,
+      failedCount: 1,
+      failureReason: "Approval was rolled back. Reason: rejected_validation_failed",
+    });
+  });
+});
+
 // ── PRI-332: Zero state clarity tests ─────────────────────────────────────────
 
 describe("FocusPage: PRI-332 zero state clarity", () => {
@@ -491,4 +504,3 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
     expect(src).not.toMatch(/governanceState === "degraded" && degradedSignals/);
   });
 });
-

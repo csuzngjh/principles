@@ -378,6 +378,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const rec = requireRecord(body, 'activation_failed response');
       expect(getStringField(rec, 'error')).toBe('activation_failed');
       expect(getStringField(rec, 'message')).toContain('rolled back to pending');
+      expect(getStringField(rec, 'nextAction')).toContain('artifact');
     });
 
     it('approval rolled back to pending can be re-approved', async () => {
