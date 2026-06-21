@@ -10,8 +10,8 @@ describe('generateFromTemplate', () => {
     const result = generateFromTemplate('P_066', 'Writing to secrets directory', patterns);
 
     expect(result).not.toBeNull();
-    expect(result).toContain("export const meta");
-    expect(result).toContain("export function evaluate(input)");
+    expect(result).toContain("const meta");
+    expect(result).toContain("function evaluate(input, helpers)");
     expect(result).toContain('name: "Auto_P_066"');
     expect(result).toContain('ruleId: "R_P_066_auto"');
     expect(result).toContain('sourcePrincipleId: "P_066"');
@@ -82,7 +82,7 @@ describe('generateFromTemplate', () => {
     expect(result).not.toBeNull();
 
     // Check meta structure
-    expect(result).toMatch(/export const meta = \{/);
+    expect(result).toMatch(/const meta = \{/);
     expect(result).toMatch(/name: "Auto_P_050"/);
     expect(result).toMatch(/version: '1\.0\.0'/);
     expect(result).toMatch(/ruleId: "R_P_050_auto"/);
@@ -90,10 +90,10 @@ describe('generateFromTemplate', () => {
     expect(result).toMatch(/compiledAt: "\d{4}-\d{2}-\d{2}T/);
 
     // Check evaluate function structure
-    expect(result).toMatch(/export function evaluate\(input\)/);
+    expect(result).toMatch(/function evaluate\(input, helpers\)/);
     expect(result).toMatch(/decision: 'block'/);
     expect(result).toMatch(/matched: true/);
-    expect(result).toMatch(/return \{ matched: false \}/);
+    expect(result).toMatch(/return \{ decision: 'allow', matched: false, reason: 'rule not applicable' \}/);
 
     // Check edit tool uses new_string fallback
     expect(result).toContain("input.action.paramsSummary.content || input.action.paramsSummary.new_string");

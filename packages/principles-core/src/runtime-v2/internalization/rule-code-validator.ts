@@ -18,6 +18,11 @@ export interface ValidationResult {
 const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\brequire\s*\(/, label: 'require' },
   { pattern: /\bimport\s+/, label: 'import' },
+  // PRI-439 Phase 2: export forbidden — canonical form is bare `function evaluate(input, helpers)`
+  { pattern: /\bexport\b/, label: 'export' },
+  // PRI-439 Phase 2: async/await forbidden — canonical form is synchronous
+  { pattern: /\basync\b/, label: 'async' },
+  { pattern: /\bawait\b/, label: 'await' },
   { pattern: /\bfetch\s*\(/, label: 'fetch' },
   { pattern: /\beval\s*\(/, label: 'eval' },
   { pattern: /\bFunction\s*\(/, label: 'Function' },
@@ -29,9 +34,17 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bProxy\b/, label: 'Proxy' },
   { pattern: /\bconstructor\b/, label: 'constructor' },
   { pattern: /\bBuffer\b/, label: 'Buffer' },
+  // Timers (PRI-439 Phase 2: added setImmediate, queueMicrotask)
   { pattern: /\bsetTimeout\b/, label: 'setTimeout' },
   { pattern: /\bsetInterval\b/, label: 'setInterval' },
-  { pattern: /\[\s*['"](require|import|fetch|eval|process|globalThis|global|Reflect|Proxy|Buffer|Function)\s*['"]\s*\]/, label: 'bracket access to forbidden global' },
+  { pattern: /\bsetImmediate\b/, label: 'setImmediate' },
+  { pattern: /\bqueueMicrotask\b/, label: 'queueMicrotask' },
+  // Network (PRI-439 Phase 2: added XMLHttpRequest)
+  { pattern: /\bXMLHttpRequest\b/, label: 'XMLHttpRequest' },
+  // Random / non-deterministic (PRI-439 Phase 2)
+  { pattern: /Math\.random/, label: 'Math.random' },
+  { pattern: /\bcrypto\b/, label: 'crypto' },
+  { pattern: /\[\s*['"](require|import|fetch|eval|process|globalThis|global|Reflect|Proxy|Buffer|Function|setImmediate|queueMicrotask|XMLHttpRequest|crypto)\s*['"]\s*\]/, label: 'bracket access to forbidden global' },
 ];
 
 /**
@@ -46,6 +59,45 @@ export function checkForbiddenPatterns(code: string): string[] {
     }
   }
   return labels;
+}
+
+/**
+ * Best-effort static check: find `return { ... }` statements where
+ * `matched: false` is paired with a decision other than 'allow'.
+ *
+ * PRI-439 Phase 2: when matched=false, the only valid decision is 'allow'.
+ * A `return { matched: false, decision: 'block' }` is contradictory —
+ * "the rule did not match, but I want to block" makes no sense.
+ *
+ * Only matches simple return objects without nested braces (same limitation
+ * as checkReturnStatementsMissingFields). Complex returns with nested braces
+ * are skipped — no false positives. The runtime validator
+ * (validateRuleHostResult) is the authoritative check.
+ *
+ * Returns an array of violation messages (empty if no violations found).
+ */
+export function checkMatchedFalseDecisions(code: string): string[] {
+  const violations: string[] = [];
+  const returnPattern = /return\s*\{([^{}]+)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = returnPattern.exec(code)) !== null) {
+    const content = match[1] ?? '';
+    const hasMatchedFalse = /\bmatched\s*:\s*false\b/.test(content);
+    if (!hasMatchedFalse) continue;
+
+    // Extract the decision value from the return object.
+    // Matches: decision: 'block', decision: "block", decision: `block`
+    const decisionMatch = /\bdecision\s*:\s*['"`]([^'"`]+)['"`]/.exec(content);
+    if (decisionMatch === null) continue;
+
+    const [, decisionValue] = decisionMatch;
+    if (decisionValue !== undefined && decisionValue !== 'allow') {
+      violations.push(
+        `matched=false requires decision 'allow', got '${decisionValue}' — found: return { ${content.trim()} }`,
+      );
+    }
+  }
+  return violations;
 }
 
 /**

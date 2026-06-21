@@ -44,7 +44,10 @@ export function validateGeneratedCode(code: string): ValidationResult {
   }
 
   // --- Check 2: Forbidden patterns (delegated to core) ---
-  const forbiddenLabels = checkForbiddenPatterns(code);
+  // PRI-439: checkForbiddenPatterns forbids `export` (canonical dialect is bare function).
+  // The openclaw-plugin legacy compiler still accepts `export` (the sandbox strips it),
+  // so we pass the normalized code (export keywords removed) to the checker.
+  const forbiddenLabels = checkForbiddenPatterns(normalized);
   for (const label of forbiddenLabels) {
     errors.push(`Forbidden pattern: ${label}`);
   }
