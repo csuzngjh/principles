@@ -552,11 +552,11 @@ describe('CLI command wiring (pd console open)', () => {
   });
 
   it('pd console open --json (port free) returns a structured JSON object with required fields', () => {
-    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot);
-    // The CLI will attempt to start the fake server.js; since the file is a stub, the
-    // child will exit early → we should get a structured "failed" JSON, not a crash.
-    // The required-field contract (status, url, port, host, workspaceDir, reason, nextAction, reused, browserOpened) is
-    // what we assert.
+    // The real CLI spawns a long-lived Console server process and then prints
+    // JSON *without exiting* (the child keeps running). execFileSync would
+    // block forever waiting for the child to exit. Use a short timeout so the
+    // test reads stdout before the process is killed.
+    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot, 8_000);
     const parsed = JSON.parse(out);
     expect(parsed).toHaveProperty('status');
     expect(['started', 'reused', 'failed', 'refused']).toContain(parsed.status);
@@ -589,14 +589,16 @@ describe('CLI command wiring (pd console open)', () => {
   });
 
   it('pd console open --json with --no-auth and --no-browser parses options correctly', () => {
-    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-auth', '--no-browser'], workspaceRoot);
+    // Same as port-free test: CLI spawns a long-lived server, use timeout.
+    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-auth', '--no-browser'], workspaceRoot, 8_000);
     const parsed = JSON.parse(out);
     expect(parsed).toHaveProperty('status');
     expect(parsed.browserOpened).toBe(false);
   });
 
   it('pd console --no-auth --json legacy path parses --no-auth correctly', () => {
-    const out = runPd(['console', '--workspace', tmp, '--json', '--no-auth'], workspaceRoot);
+    // Same: may spawn a long-lived server, use timeout.
+    const out = runPd(['console', '--workspace', tmp, '--json', '--no-auth'], workspaceRoot, 8_000);
     expect(out.trim()).not.toBe('');
     const parsed = JSON.parse(out);
     expect(parsed).toBeDefined();
@@ -746,7 +748,8 @@ describe('CLI command wiring (pd console open)', () => {
     });
 
     it('[::1] is accepted and normalized to ::1 (not refused)', () => {
-      const out = runPd(['console', 'open', '--workspace', tmp, '--host', '[::1]', '--json', '--no-browser'], workspaceRoot);
+      // May spawn a long-lived server, use timeout.
+      const out = runPd(['console', 'open', '--workspace', tmp, '--host', '[::1]', '--json', '--no-browser'], workspaceRoot, 8_000);
       const parsed = JSON.parse(out);
       // Should NOT be refused — [::1] is loopback
       expect(parsed.status).not.toBe('refused');
@@ -756,7 +759,7 @@ describe('CLI command wiring (pd console open)', () => {
   });
 });
 
-function runPd(args: string[], cwd: string): string {
+function runPd(args: string[], cwd: string, timeoutMs?: number): string {
   try {
     const env: Record<string, string> = { ...process.env };
     if (!args.includes('--workspace') && !args.includes('--help') && !args.includes('-h')) {
@@ -770,6 +773,7 @@ function runPd(args: string[], cwd: string): string {
       encoding: 'utf8',
       cwd,
       env,
+      timeout: timeoutMs,
     });
   } catch (err: unknown) {
     if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
