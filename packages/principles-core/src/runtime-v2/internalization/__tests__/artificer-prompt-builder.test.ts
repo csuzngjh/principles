@@ -54,6 +54,7 @@ describe('ArtificerPromptBuilder', () => {
 
   it('instruction requires implementationSummary as a non-empty string', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('implementationSummary MUST be a non-empty string');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"implementationPlan"');
   });
 
   it('message is valid JSON containing promptInput', () => {
