@@ -138,8 +138,9 @@ describe('File Lock', () => {
     test('should acquire lock if holder process is dead', () => {
       const lockPath = getLockPath(filePath);
       
-      // 创建一个持有锁的"死进程"
-      fs.writeFileSync(lockPath, '1', 'utf8');  // PID 1 通常是 init，但在这个测试中假设它不存活
+      // 创建一个持有锁的"死进程"（使用确定不存在的 PID，避免容器环境 PID 1 存活问题）
+      const deadPid = 99999999;
+      fs.writeFileSync(lockPath, String(deadPid), 'utf8');
       
       // 使用非常短的过期时间
       const ctx = acquireLock(filePath, { 

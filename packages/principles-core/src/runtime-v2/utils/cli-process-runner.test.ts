@@ -3,14 +3,10 @@
  *
  * Covers: success (exit 0), non-zero exit, timeout, and ENOENT cases.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { runCliProcess } from './cli-process-runner.js';
 
 describe('runCliProcess', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -41,16 +37,15 @@ describe('runCliProcess', () => {
 
   describe('timeout case', () => {
     it('sets timedOut=true and exitCode=null when process is killed on timeout', async () => {
-      const runPromise = runCliProcess({
+      // Use real timers: killProcessTree() sends SIGTERM to the child's process
+      // group (detached:true), which must actually kill the child for the close
+      // event to fire. Fake timers cannot drive real child-process teardown.
+      const result = await runCliProcess({
         command: 'node',
         args: ['-e', 'setTimeout(() => {}, 10000)'],
         timeoutMs: 100,
         killGracePeriodMs: 50,
       });
-
-      // Advance time past the timeout threshold
-      await vi.advanceTimersByTimeAsync(200);
-      const result = await runPromise;
 
       expect(result.timedOut).toBe(true);
       // exitCode is null because the process was killed, not exited normally

@@ -172,11 +172,20 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
   })();
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
-  const proc = spawn(spawnConfig.command, spawnConfig.args, {
+  // On Unix, detached:true creates a new session/process group for the child so
+  // that `process.kill(-pid)` in killProcessTree() can signal the whole group.
+  // Without detached:true the child stays in the parent's process group and
+  // `process.kill(-pid)` targets a non-existent group (ESRCH, silently caught),
+  // leaving the child unkillable on timeout.
+  const spawnOptions: SpawnOptions & { detached?: boolean } = {
     cwd,
     env,
     shell: spawnConfig.shell,
-  } satisfies SpawnOptions);
+  };
+  if (process.platform !== 'win32') {
+    spawnOptions.detached = true;
+  }
+  const proc = spawn(spawnConfig.command, spawnConfig.args, spawnOptions);
 
   // Attach data handlers BEFORE spawning so we don't miss any output
   proc.stdout?.on('data', (chunk: Buffer) => {
