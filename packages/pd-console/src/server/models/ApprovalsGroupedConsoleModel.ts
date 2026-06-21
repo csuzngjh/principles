@@ -113,18 +113,10 @@ function extractCandidateDescription(contentJson: string): string | null {
 }
 
 export class ApprovalsGroupedConsoleModel {
-  private readConnection: SqliteConnection | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
-  }
-
-  private getReadConnection(): SqliteConnection {
-    if (!this.readConnection) {
-      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
-    }
-    return this.readConnection;
   }
 
   async getApprovalsGrouped(): Promise<ApprovalsGroupedResponse> {
@@ -133,130 +125,128 @@ export class ApprovalsGroupedConsoleModel {
       return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
     }
 
-    const conn = this.getReadConnection();
-    const store = new SqliteApprovalQueueStore(conn);
-    const queue = new ApprovalQueue(store);
-    const artifactStore = new SqlitePIArtifactStore(conn);
-
-    let allApprovals: ApprovalRecord[];
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
-      allApprovals = await queue.listAll();
-    } catch (err) {
-      if (isMissingTableError(err)) {
-        return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found — workspace may not be initialized' };
-      }
-      throw err;
-    }
+      const store = new SqliteApprovalQueueStore(conn);
+      const queue = new ApprovalQueue(store);
+      const artifactStore = new SqlitePIArtifactStore(conn);
 
-    // Build artifactId → sourcePrincipleId map AND artifactId → candidateDescription map.
-    // Wave 7: candidateDescription lets FocusPage show human-readable content
-    // instead of a fabricated principleId.
-    const artifactPrincipleMap = new Map<string, string | null>();
-    const artifactDescriptionMap = new Map<string, string | null>();
-    for (const approval of allApprovals) {
-      if (!artifactPrincipleMap.has(approval.artifactId)) {
-        try {
-          const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
-          artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
-          if (artifact?.contentJson) {
-            artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
-          } else {
-            artifactDescriptionMap.set(approval.artifactId, null);
-          }
-        } catch (err) {
-          if (isMissingTableError(err)) {
-            artifactPrincipleMap.set(approval.artifactId, null);
-            artifactDescriptionMap.set(approval.artifactId, null);
-          } else {
-            throw err;
+      let allApprovals: ApprovalRecord[];
+      try {
+        allApprovals = await queue.listAll();
+      } catch (err) {
+        if (isMissingTableError(err)) {
+          return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found — workspace may not be initialized' };
+        }
+        throw err;
+      }
+
+      // Build artifactId → sourcePrincipleId map AND artifactId → candidateDescription map.
+      // Wave 7: candidateDescription lets FocusPage show human-readable content
+      // instead of a fabricated principleId.
+      const artifactPrincipleMap = new Map<string, string | null>();
+      const artifactDescriptionMap = new Map<string, string | null>();
+      for (const approval of allApprovals) {
+        if (!artifactPrincipleMap.has(approval.artifactId)) {
+          try {
+            const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
+            artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
+            if (artifact?.contentJson) {
+              artifactDescriptionMap.set(approval.artifactId, extractCandidateDescription(artifact.contentJson));
+            } else {
+              artifactDescriptionMap.set(approval.artifactId, null);
+            }
+          } catch (err) {
+            if (isMissingTableError(err)) {
+              artifactPrincipleMap.set(approval.artifactId, null);
+              artifactDescriptionMap.set(approval.artifactId, null);
+            } else {
+              throw err;
+            }
           }
         }
       }
-    }
 
-    // Load ledger for principle titles
-    const stateDir = path.join(this.workspaceDir, '.state');
-    let principleTitles = new Map<string, string>();
-    try {
-      const ledger = loadLedger(stateDir);
-      for (const [id, principle] of Object.entries(ledger.tree.principles)) {
-        principleTitles.set(id, principle.text);
-      }
-    } catch {
-      // Ledger not available — will fall back to principleId
-    }
-
-    // Group by principleId (null → "unlinked")
-    const groupMap = new Map<string, {
-      id: string;
-      artifactId: string;
-      channel: string;
-      createdAt: string;
-      status: 'pending' | 'approved' | 'rejected';
-    }[]>();
-
-    for (const approval of allApprovals) {
-      // Each unlinked artifact gets its own group key to avoid mismatched
-      // bulk actions across different artifacts sharing the 'unlinked' bucket.
-      const mappedPrincipleId = artifactPrincipleMap.get(approval.artifactId);
-      const principleId = mappedPrincipleId ?? `unlinked:${approval.artifactId}`;
-
-      if (!groupMap.has(principleId)) {
-        groupMap.set(principleId, []);
-      }
-      const records = groupMap.get(principleId);
-      if (!records) continue;
-
-      records.push({
-        id: approval.approvalId,
-        artifactId: approval.artifactId,
-        channel: approval.channel,
-        createdAt: approval.requestedAt,
-        status: approval.status as 'pending' | 'approved' | 'rejected',
-      });
-    }
-
-    const groups: ApprovalGroup[] = [];
-    for (const [principleId, records] of groupMap) {
-      // Determine overall group status
-      const statuses = records.map((r) => r.status);
-      let status: 'pending' | 'approved' | 'rejected';
-      if (statuses.every((s) => s === 'approved')) {
-        status = 'approved';
-      } else if (statuses.every((s) => s === 'rejected')) {
-        status = 'rejected';
-      } else {
-        status = 'pending';
+      // Load ledger for principle titles
+      const stateDir = path.join(this.workspaceDir, '.state');
+      let principleTitles = new Map<string, string>();
+      try {
+        const ledger = loadLedger(stateDir);
+        for (const [id, principle] of Object.entries(ledger.tree.principles)) {
+          principleTitles.set(id, principle.text);
+        }
+      } catch {
+        // Ledger not available — will fall back to principleId
       }
 
-      const principleTitle = principleTitles.get(principleId) ?? principleId;
+      // Group by principleId (null → "unlinked")
+      const groupMap = new Map<string, {
+        id: string;
+        artifactId: string;
+        channel: string;
+        createdAt: string;
+        status: 'pending' | 'approved' | 'rejected';
+      }[]>();
 
-      // Wave 7: extract candidate description from the first record's artifact.
-      // This is the human-readable content the Owner needs to make a review decision.
-      const firstArtifactId = records[0]?.artifactId;
-      const candidateDescription = firstArtifactId
-        ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
-        : undefined;
+      for (const approval of allApprovals) {
+        const mappedPrincipleId = artifactPrincipleMap.get(approval.artifactId);
+        const principleId = mappedPrincipleId ?? `unlinked:${approval.artifactId}`;
 
-      groups.push({
-        principleId,
-        principleTitle,
-        candidateDescription,
-        status,
-        records,
-      });
+        if (!groupMap.has(principleId)) {
+          groupMap.set(principleId, []);
+        }
+        const records = groupMap.get(principleId);
+        if (!records) continue;
+
+        records.push({
+          id: approval.approvalId,
+          artifactId: approval.artifactId,
+          channel: approval.channel,
+          createdAt: approval.requestedAt,
+          status: approval.status === 'approved' || approval.status === 'rejected'
+            ? approval.status
+            : 'pending',
+        });
+      }
+
+      const groups: ApprovalGroup[] = [];
+      for (const [principleId, records] of groupMap) {
+        const statuses = records.map((r) => r.status);
+        let status: 'pending' | 'approved' | 'rejected';
+        if (statuses.every((s) => s === 'approved')) {
+          status = 'approved';
+        } else if (statuses.every((s) => s === 'rejected')) {
+          status = 'rejected';
+        } else {
+          status = 'pending';
+        }
+
+        const principleTitle = principleTitles.get(principleId) ?? principleId;
+        const firstArtifactId = records[0]?.artifactId;
+        const candidateDescription = firstArtifactId
+          ? (artifactDescriptionMap.get(firstArtifactId) ?? undefined)
+          : undefined;
+
+        groups.push({
+          principleId,
+          principleTitle,
+          candidateDescription,
+          status,
+          records,
+        });
+      }
+
+      return {
+        groups,
+        generatedAt: new Date().toISOString(),
+      };
+    } finally {
+      try { conn.close(); } catch { /* best-effort */ }
     }
-
-    return {
-      groups,
-      generatedAt: new Date().toISOString(),
-    };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
-    if (this.readConnection) {
-      try { this.readConnection.close(); } catch (err) { console.warn('ApprovalsGroupedConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err)); }
-      this.readConnection = null;
-    }
+    // Connections are opened and closed per-request; no persistent state.
   }
 }
