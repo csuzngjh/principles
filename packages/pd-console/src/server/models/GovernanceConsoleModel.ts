@@ -106,18 +106,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class GovernanceConsoleModel {
-  private readConnection: SqliteConnection | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
-  }
-
-  private getReadConnection(): SqliteConnection {
-    if (!this.readConnection) {
-      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
-    }
-    return this.readConnection;
   }
 
   async getGovernanceQueue(): Promise<GovernanceQueueResponse> {
@@ -137,214 +129,218 @@ export class GovernanceConsoleModel {
       };
     }
 
-    const conn = this.getReadConnection();
-    const store = new SqliteApprovalQueueStore(conn);
-    const queue = new ApprovalQueue(store);
-    const artifactStore = new SqlitePIArtifactStore(conn);
-    const db = conn.getDb();
-
-    // ── Gather signals from multiple data sources ───────────────────────
-
-    // 1. Pending approvals
-    let pendingApprovals: ApprovalRecord[];
-    let missingApprovalTable = false;
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
-      pendingApprovals = await queue.listPending();
-    } catch (err) {
-      if (isMissingTableError(err)) {
-        pendingApprovals = [];
-        missingApprovalTable = true;
-      } else {
-        throw err;
-      }
-    }
+      const store = new SqliteApprovalQueueStore(conn);
+      const queue = new ApprovalQueue(store);
+      const artifactStore = new SqlitePIArtifactStore(conn);
+      const db = conn.getDb();
 
-    const pendingReviewCount = pendingApprovals.length;
-    const behaviorDeviationCount = pendingApprovals.filter(
-      (a) => a.riskLevel === 'high' || a.riskLevel === 'critical',
-    ).length;
-
-    // Build artifactId → sourcePrincipleId map for stagnation signals
-    const artifactPrincipleMap = new Map<string, string | null>();
-    for (const approval of pendingApprovals) {
-      if (!artifactPrincipleMap.has(approval.artifactId)) {
-        try {
-          const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
-          artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
-        } catch (err) {
-          if (isMissingTableError(err)) {
-            artifactPrincipleMap.set(approval.artifactId, null);
-          } else {
-            throw err;
-          }
-        }
-      }
-    }
-
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const stagnationSignals: StagnationSignal[] = pendingApprovals
-      .filter((a) => {
-        const requestedAt = new Date(a.requestedAt).getTime();
-        return !Number.isNaN(requestedAt) && requestedAt < sevenDaysAgo;
-      })
-      .map((a) => {
-        const requestedAt = new Date(a.requestedAt).getTime();
-        const daysSince = Math.floor((Date.now() - requestedAt) / (24 * 60 * 60 * 1000));
-        const principleId = artifactPrincipleMap.get(a.artifactId) ?? 'unlinked';
-        return {
-          type: 'never_activated' as const,
-          principleId,
-          daysSince,
-        };
-      });
-
-    // 2. Check internalization pipeline activity (tasks)
-    let hasInternalizationTasks = false;
-    let hasRetryWaitTasks = false;
-    let hasFailedTasks = false;
-    const retryWaitReasons: string[] = [];
-    const failedReasons: string[] = [];
-    try {
-      const tasks = db.prepare(
-        `SELECT task_kind, status, last_error FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator')`
-      ).all() as { task_kind: string; status: string; last_error: string | null }[];
-
-      hasInternalizationTasks = tasks.length > 0;
-
-      for (const task of tasks) {
-        if (task.status === 'retry_wait') {
-          hasRetryWaitTasks = true;
-          const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
-          retryWaitReasons.push(`${task.task_kind}: ${errText}`);
-        }
-        if (task.status === 'failed') {
-          hasFailedTasks = true;
-          const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
-          failedReasons.push(`${task.task_kind}: ${errText}`);
-        }
-      }
-    } catch (err) {
-      if (!isMissingTableError(err)) throw err;
-    }
-
-    // 3. Check candidates table for pipeline activity
-    let hasConsumedCandidates = false;
-    let hasPendingCandidates = false;
-    try {
-      const candidateRow = db.prepare(
-        `SELECT status, COUNT(*) as c FROM principle_candidates GROUP BY status`
-      ).all() as { status: string; c: number }[];
-
-      for (const row of candidateRow) {
-        if (row.status === 'consumed') hasConsumedCandidates = true;
-        if (row.status === 'pending' || row.status === 'new') hasPendingCandidates = true;
-      }
-    } catch (err) {
-      if (!isMissingTableError(err)) throw err;
-    }
-
-    // 4. Degraded signals
-    const degradedSignals: DegradedSignal[] = [];
-
-    if (hasRetryWaitTasks) {
-      degradedSignals.push({
-        reasonCode: 'task_retry_wait',
-        nextActionCode: 'check_task_status',
-        reason: `Internalization task waiting for retry: ${retryWaitReasons.join('; ')}`,
-        nextAction: 'Check internalization pipeline status, or wait for automatic retry.',
-        source: 'internalization_task',
-      });
-    }
-
-    if (hasFailedTasks) {
-      degradedSignals.push({
-        reasonCode: 'task_failed',
-        nextActionCode: 'fix_and_retry',
-        reason: `Internalization task failed: ${failedReasons.join('; ')}`,
-        nextAction: 'Check failure details, fix the issue and retry.',
-        source: 'internalization_task',
-      });
-    }
-
-    if (missingApprovalTable) {
-      degradedSignals.push({
-        reasonCode: 'approval_table_missing',
-        nextActionCode: 'run_integrity_check',
-        reason: 'Approval table does not exist. This may be an old workspace.',
-        nextAction: 'Run pd runtime internalization integrity to check and repair table structure.',
-        source: 'source_unavailable',
-      });
-    }
-
-    // ── Determine governance state ──────────────────────────────────────
-    // P1-2: Only pendingReviewCount determines owner_review_ready.
-    // Validated artifacts are NOT sufficient — they may be demo/smoke/historical.
-    // The owner-actionable queue read model (PRI-330) will refine this.
-
-    const hasOwnerReadyItems = pendingReviewCount > 0;
-    const hasPipelineActivity = hasInternalizationTasks || hasConsumedCandidates || hasPendingCandidates;
-    const hasDegradation = degradedSignals.length > 0;
-
-    let governanceState: GovernanceState;
-    let stateReasonCode: StateReasonCode;
-    let nextActionCode: NextActionCode;
-    let stateReason: string;
-    let nextAction: string;
-    let inProgressSummary: string | undefined;
-
-    if (hasOwnerReadyItems) {
-      governanceState = 'owner_review_ready';
-      stateReasonCode = 'pending_approvals';
-      nextActionCode = 'review_approvals';
-      stateReason = `${pendingReviewCount} principle(s) pending your review and decision.`;
-      nextAction = 'Review pending principles and approve, reject, or park.';
-    } else if (hasDegradation) {
-      governanceState = 'degraded';
-      stateReasonCode = 'degraded_state';
-      nextActionCode = 'check_degraded_signals';
-      stateReason = 'Part of the governance pipeline or data source is degraded.';
-      nextAction = 'Check degraded signal details and follow suggested actions.';
-    } else if (hasPipelineActivity) {
-      governanceState = 'in_progress';
-      if (hasInternalizationTasks) {
-        stateReasonCode = 'pipeline_active';
-        nextActionCode = 'check_pipeline_status';
-        inProgressSummary = 'PD is processing the internalization pipeline: diagnostics, principle candidates, or internalization task activity recorded, but no owner-reviewable decision items yet.';
-        stateReason = 'Pipeline has activity, but candidate principles are not ready for review.';
-        nextAction = 'Wait for internalization tasks to complete. If no change for a long time, check pipeline status.';
-      } else {
-        stateReasonCode = 'consumed_candidates';
-        nextActionCode = 'wait_for_pipeline';
-        inProgressSummary = 'PD has recorded governance chain activity (candidates generated), but candidates are not yet ready for review.';
-        stateReason = 'Candidate records exist, but have not entered the review stage.';
-        nextAction = 'Wait for the internalization pipeline to convert candidates into reviewable principles.';
-      }
-    } else {
-      governanceState = 'none';
-      stateReasonCode = 'no_pipeline_activity';
-      nextActionCode = 'wait_for_pipeline';
-      stateReason = 'No governance chain activity recorded yet.';
-      nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
-    }
-
-    // PRI-380: Query trajectory.db for behavior evidence count
-    // Must happen BEFORE response construction so degradation is included in degradedSignals
-    let evidenceInProgressCount = 0;
-    const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
-    if (fs.existsSync(trajectoryDbPath)) {
+      // 1. Pending approvals
+      let pendingApprovals: ApprovalRecord[];
+      let missingApprovalTable = false;
       try {
-        const Database = (await import('better-sqlite3')).default;
-        const trajDb = new Database(trajectoryDbPath, { readonly: true });
-        try {
-          const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
-          if (Array.isArray(rows) && rows.length > 0) {
-            const [row] = rows;
-            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
-              evidenceInProgressCount = row.c;
+        pendingApprovals = await queue.listPending();
+      } catch (err) {
+        if (isMissingTableError(err)) {
+          pendingApprovals = [];
+          missingApprovalTable = true;
+        } else {
+          throw err;
+        }
+      }
+
+      const pendingReviewCount = pendingApprovals.length;
+      const behaviorDeviationCount = pendingApprovals.filter(
+        (a) => a.riskLevel === 'high' || a.riskLevel === 'critical',
+      ).length;
+
+      const artifactPrincipleMap = new Map<string, string | null>();
+      for (const approval of pendingApprovals) {
+        if (!artifactPrincipleMap.has(approval.artifactId)) {
+          try {
+            const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(approval.artifactId);
+            artifactPrincipleMap.set(approval.artifactId, artifact?.sourcePrincipleId ?? null);
+          } catch (err) {
+            if (isMissingTableError(err)) {
+              artifactPrincipleMap.set(approval.artifactId, null);
+            } else {
+              throw err;
             }
           }
+        }
+      }
+
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const stagnationSignals: StagnationSignal[] = pendingApprovals
+        .filter((a) => {
+          const requestedAt = new Date(a.requestedAt).getTime();
+          return !Number.isNaN(requestedAt) && requestedAt < sevenDaysAgo;
+        })
+        .map((a) => {
+          const requestedAt = new Date(a.requestedAt).getTime();
+          const daysSince = Math.floor((Date.now() - requestedAt) / (24 * 60 * 60 * 1000));
+          const principleId = artifactPrincipleMap.get(a.artifactId) ?? 'unlinked';
+          return {
+            type: 'never_activated' as const,
+            principleId,
+            daysSince,
+          };
+        });
+
+      // 2. Check internalization pipeline activity (tasks)
+      let hasInternalizationTasks = false;
+      let hasRetryWaitTasks = false;
+      let hasFailedTasks = false;
+      const retryWaitReasons: string[] = [];
+      const failedReasons: string[] = [];
+      try {
+        const tasks = db.prepare(
+          `SELECT task_kind, status, last_error FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator')`
+        ).all() as { task_kind: string; status: string; last_error: string | null }[];
+
+        hasInternalizationTasks = tasks.length > 0;
+
+        for (const task of tasks) {
+          if (task.status === 'retry_wait') {
+            hasRetryWaitTasks = true;
+            const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
+            retryWaitReasons.push(`${task.task_kind}: ${errText}`);
+          }
+          if (task.status === 'failed') {
+            hasFailedTasks = true;
+            const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
+            failedReasons.push(`${task.task_kind}: ${errText}`);
+          }
+        }
+      } catch (err) {
+        if (!isMissingTableError(err)) throw err;
+      }
+
+      // 3. Check candidates table
+      let hasConsumedCandidates = false;
+      let hasPendingCandidates = false;
+      try {
+        const candidateRow = db.prepare(
+          `SELECT status, COUNT(*) as c FROM principle_candidates GROUP BY status`
+        ).all() as { status: string; c: number }[];
+
+        for (const row of candidateRow) {
+          if (row.status === 'consumed') hasConsumedCandidates = true;
+          if (row.status === 'pending' || row.status === 'new') hasPendingCandidates = true;
+        }
+      } catch (err) {
+        if (!isMissingTableError(err)) throw err;
+      }
+
+      // 4. Degraded signals
+      const degradedSignals: DegradedSignal[] = [];
+
+      if (hasRetryWaitTasks) {
+        degradedSignals.push({
+          reasonCode: 'task_retry_wait',
+          nextActionCode: 'check_task_status',
+          reason: `Internalization task waiting for retry: ${retryWaitReasons.join('; ')}`,
+          nextAction: 'Check internalization pipeline status, or wait for automatic retry.',
+          source: 'internalization_task',
+        });
+      }
+
+      if (hasFailedTasks) {
+        degradedSignals.push({
+          reasonCode: 'task_failed',
+          nextActionCode: 'fix_and_retry',
+          reason: `Internalization task failed: ${failedReasons.join('; ')}`,
+          nextAction: 'Check failure details, fix the issue and retry.',
+          source: 'internalization_task',
+        });
+      }
+
+      if (missingApprovalTable) {
+        degradedSignals.push({
+          reasonCode: 'approval_table_missing',
+          nextActionCode: 'run_integrity_check',
+          reason: 'Approval table does not exist. This may be an old workspace.',
+          nextAction: 'Run pd runtime internalization integrity to check and repair table structure.',
+          source: 'source_unavailable',
+        });
+      }
+
+      // ── Determine governance state ──────────────────────────────────────
+      const hasOwnerReadyItems = pendingReviewCount > 0;
+      const hasPipelineActivity = hasInternalizationTasks || hasConsumedCandidates || hasPendingCandidates;
+      const hasDegradation = degradedSignals.length > 0;
+
+      let governanceState: GovernanceState;
+      let stateReasonCode: StateReasonCode;
+      let nextActionCode: NextActionCode;
+      let stateReason: string;
+      let nextAction: string;
+      let inProgressSummary: string | undefined;
+
+      if (hasOwnerReadyItems) {
+        governanceState = 'owner_review_ready';
+        stateReasonCode = 'pending_approvals';
+        nextActionCode = 'review_approvals';
+        stateReason = `${pendingReviewCount} principle(s) pending your review and decision.`;
+        nextAction = 'Review pending principles and approve, reject, or park.';
+      } else if (hasDegradation) {
+        governanceState = 'degraded';
+        stateReasonCode = 'degraded_state';
+        nextActionCode = 'check_degraded_signals';
+        stateReason = 'Part of the governance pipeline or data source is degraded.';
+        nextAction = 'Check degraded signal details and follow suggested actions.';
+      } else if (hasPipelineActivity) {
+        governanceState = 'in_progress';
+        if (hasInternalizationTasks) {
+          stateReasonCode = 'pipeline_active';
+          nextActionCode = 'check_pipeline_status';
+          inProgressSummary = 'PD is processing the internalization pipeline: diagnostics, principle candidates, or internalization task activity recorded, but no owner-reviewable decision items yet.';
+          stateReason = 'Pipeline has activity, but candidate principles are not ready for review.';
+          nextAction = 'Wait for internalization tasks to complete. If no change for a long time, check pipeline status.';
+        } else {
+          stateReasonCode = 'consumed_candidates';
+          nextActionCode = 'wait_for_pipeline';
+          inProgressSummary = 'PD has recorded governance chain activity (candidates generated), but candidates are not yet ready for review.';
+          stateReason = 'Candidate records exist, but have not entered the review stage.';
+          nextAction = 'Wait for the internalization pipeline to convert candidates into reviewable principles.';
+        }
+      } else {
+        governanceState = 'none';
+        stateReasonCode = 'no_pipeline_activity';
+        nextActionCode = 'wait_for_pipeline';
+        stateReason = 'No governance chain activity recorded yet.';
+        nextAction = 'PD will surface principle candidates here once behavior deviations are captured and reviewable artifacts are generated.';
+      }
+
+      // PRI-380: Query trajectory.db for behavior evidence count
+      let evidenceInProgressCount = 0;
+      const trajectoryDbPath = path.join(this.workspaceDir, '.state', 'trajectory.db');
+      if (fs.existsSync(trajectoryDbPath)) {
+        try {
+          const Database = (await import('better-sqlite3')).default;
+          const trajDb = new Database(trajectoryDbPath, { readonly: true });
+          try {
+            const rows = trajDb.prepare('SELECT COUNT(*) as c FROM pain_events').all();
+            if (Array.isArray(rows) && rows.length > 0) {
+              const [row] = rows;
+              if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+                evidenceInProgressCount = row.c;
+              }
+            }
+          } catch (err) {
+            if (!isMissingTableError(err)) throw err;
+            degradedSignals.push({
+              reasonCode: 'trajectory_db_unavailable',
+              nextActionCode: 'check_trajectory_db',
+              reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
+              nextAction: 'Check trajectory.db file integrity in .state directory.',
+              source: 'source_unavailable',
+            });
+          } finally {
+            trajDb.close();
+          }
         } catch (err) {
-          if (!isMissingTableError(err)) throw err;
           degradedSignals.push({
             reasonCode: 'trajectory_db_unavailable',
             nextActionCode: 'check_trajectory_db',
@@ -352,90 +348,76 @@ export class GovernanceConsoleModel {
             nextAction: 'Check trajectory.db file integrity in .state directory.',
             source: 'source_unavailable',
           });
-        } finally {
-          trajDb.close();
+          if (!(err instanceof Error)) throw err;
         }
-      } catch (err) {
-        degradedSignals.push({
-          reasonCode: 'trajectory_db_unavailable',
-          nextActionCode: 'check_trajectory_db',
-          reason: 'Behavior evidence source (trajectory.db) is unavailable — evidence count may be inaccurate.',
-          nextAction: 'Check trajectory.db file integrity in .state directory.',
-          source: 'source_unavailable',
-        });
-        if (!(err instanceof Error)) throw err;
       }
-    }
 
-    // Wave 4: Query gate_blocks for today's auto-block count (seconds-level feedback layer)
-    let gateBlocksToday = 0;
-    if (fs.existsSync(trajectoryDbPath)) {
-      try {
-        const Database = (await import('better-sqlite3')).default;
-        const trajDb = new Database(trajectoryDbPath, { readonly: true });
+      // Wave 4: Query gate_blocks for today's auto-block count
+      let gateBlocksToday = 0;
+      if (fs.existsSync(trajectoryDbPath)) {
         try {
-          const todayStart = new Date();
-          todayStart.setHours(0, 0, 0, 0);
-          const row = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString()) as { c: number } | undefined;
-          if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
-            gateBlocksToday = row.c;
+          const Database = (await import('better-sqlite3')).default;
+          const trajDb = new Database(trajectoryDbPath, { readonly: true });
+          try {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const row: unknown = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString());
+            if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
+              gateBlocksToday = row.c;
+            }
+          } catch (err) {
+            if (!isMissingTableError(err)) throw err;
+          } finally {
+            trajDb.close();
           }
         } catch (err) {
-          // gate_blocks table may not exist in older workspaces — degrade silently to 0
-          if (!isMissingTableError(err)) throw err;
-        } finally {
-          trajDb.close();
+          degradedSignals.push({
+            reasonCode: 'trajectory_db_unavailable',
+            nextActionCode: 'check_trajectory_db',
+            reason: 'gate_blocks source is unavailable — gate block count may be inaccurate.',
+            nextAction: 'Check trajectory.db file integrity in .state directory.',
+            source: 'source_unavailable',
+          });
+          console.warn('GovernanceConsoleModel: failed to read gate_blocks:', err);
         }
-      } catch (err) {
-        // trajectory.db open failed — record degradation for observability
-        // (may duplicate evidenceInProgressCount block's signal if both fail,
-        //  but gate_blocks is an independent source worth its own signal)
-        degradedSignals.push({
-          reasonCode: 'trajectory_db_unavailable',
-          nextActionCode: 'check_trajectory_db',
-          reason: 'gate_blocks source is unavailable — gate block count may be inaccurate.',
-          nextAction: 'Check trajectory.db file integrity in .state directory.',
-          source: 'source_unavailable',
-        });
-        console.warn('GovernanceConsoleModel: failed to read gate_blocks:', err);
       }
+
+      const response: GovernanceQueueResponse = {
+        pendingReviewCount,
+        behaviorDeviationCount,
+        stagnationSignals,
+        governanceState,
+        stateReasonCode,
+        nextActionCode,
+        stateReason,
+        nextAction,
+        generatedAt: new Date().toISOString(),
+      };
+
+      if (inProgressSummary) {
+        response.inProgressSummary = inProgressSummary;
+      }
+
+      if (degradedSignals.length > 0) {
+        response.degradedSignals = degradedSignals;
+      }
+
+      if (evidenceInProgressCount > 0) {
+        response.evidenceInProgressCount = evidenceInProgressCount;
+      }
+
+      if (gateBlocksToday > 0) {
+        response.gateBlocksToday = gateBlocksToday;
+      }
+
+      return response;
+    } finally {
+      try { conn.close(); } catch { /* best-effort */ }
     }
-
-    const response: GovernanceQueueResponse = {
-      pendingReviewCount,
-      behaviorDeviationCount,
-      stagnationSignals,
-      governanceState,
-      stateReasonCode,
-      nextActionCode,
-      stateReason,
-      nextAction,
-      generatedAt: new Date().toISOString(),
-    };
-
-    if (inProgressSummary) {
-      response.inProgressSummary = inProgressSummary;
-    }
-
-    if (degradedSignals.length > 0) {
-      response.degradedSignals = degradedSignals;
-    }
-
-    if (evidenceInProgressCount > 0) {
-      response.evidenceInProgressCount = evidenceInProgressCount;
-    }
-
-    if (gateBlocksToday > 0) {
-      response.gateBlocksToday = gateBlocksToday;
-    }
-
-    return response;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
-    if (this.readConnection) {
-      try { this.readConnection.close(); } catch (err) { console.warn('GovernanceConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err)); }
-      this.readConnection = null;
-    }
+    // Connections are opened and closed per-request; no persistent state.
   }
 }

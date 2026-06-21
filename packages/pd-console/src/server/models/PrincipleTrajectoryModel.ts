@@ -145,17 +145,9 @@ function readLedgerPrinciple(workspaceDir: string, principleId: string): LedgerP
 
 export class PrincipleTrajectoryModel {
   private readonly workspaceDir: string;
-  private readConnection: SqliteConnection | null = null;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
-  }
-
-  private getReadConnection(): SqliteConnection {
-    if (!this.readConnection) {
-      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
-    }
-    return this.readConnection;
   }
 
   async getTrajectory(principleId: string): Promise<TrajectoryResponse> {
@@ -176,10 +168,11 @@ export class PrincipleTrajectoryModel {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     let stateDbAvailable = false;
     let db: ReturnType<SqliteConnection['getDb']> | null = null;
+    let conn: SqliteConnection | null = null;
 
     if (fs.existsSync(stateDbPath)) {
       try {
-        const conn = this.getReadConnection();
+        conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
         db = conn.getDb();
         stateDbAvailable = true;
       } catch (err) {
@@ -191,6 +184,8 @@ export class PrincipleTrajectoryModel {
       degradedReasons.push('State database not found');
       degradedNextActions.push('Run pd config doctor to initialize.');
     }
+
+    try {
 
     // 3. Resolve task_id via principle_candidates
     //    derivedFromPainIds[0] == candidate_id in principle_candidates
@@ -329,6 +324,11 @@ export class PrincipleTrajectoryModel {
     }
 
     return response;
+    } finally {
+      if (conn) {
+        try { conn.close(); } catch { /* best-effort */ }
+      }
+    }
   }
 
   // ── Stage assemblers ─────────────────────────────────────────────────────
@@ -579,14 +579,8 @@ export class PrincipleTrajectoryModel {
     }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
-    if (this.readConnection) {
-      try {
-        this.readConnection.close();
-      } catch {
-        // ignore close errors
-      }
-      this.readConnection = null;
-    }
+    // Connection is opened and closed per-request in getTrajectory; no persistent state.
   }
 }
