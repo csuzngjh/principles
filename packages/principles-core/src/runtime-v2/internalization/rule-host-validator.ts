@@ -22,7 +22,7 @@ export interface RuleHostResultValidationResult {
   errors: string[];
 }
 
-const VALID_DECISIONS: ReadonlySet<RuleHostDecision> = new Set([
+const VALID_DECISIONS: ReadonlySet<string> = new Set([
   'allow',
   'block',
   'requireApproval',
@@ -41,6 +41,14 @@ const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype
  */
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Type guard for RuleHostDecision (ERR-001: no `as` bypass).
+ * Checks typeof string + membership in VALID_DECISIONS without a cast.
+ */
+function isRuleHostDecision(value: unknown): value is RuleHostDecision {
+  return typeof value === 'string' && VALID_DECISIONS.has(value);
 }
 
 /**
@@ -82,7 +90,7 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     errors.push('decision is required');
   } else {
     const { decision } = value;
-    if (typeof decision !== 'string' || !VALID_DECISIONS.has(decision as RuleHostDecision)) {
+    if (typeof decision !== 'string' || !isRuleHostDecision(decision)) {
       errors.push(
         `decision must be one of allow|block|requireApproval|auto_correct, got ${String(decision)}`
       );
@@ -107,7 +115,7 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     value.matched === false &&
     Object.hasOwn(value, 'decision') &&
     typeof value.decision === 'string' &&
-    VALID_DECISIONS.has(value.decision as RuleHostDecision) &&
+    isRuleHostDecision(value.decision) &&
     value.decision !== 'allow'
   ) {
     errors.push(

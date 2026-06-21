@@ -54,8 +54,8 @@ export interface ArtificerRuleOutput {
 
 export const ArtificerSourceTraceSchema = Type.Object({
   scribeArtifactId: Type.String({ minLength: 1 }),
-  philosopherArtifactId: Type.Optional(Type.String()),
-  dreamerArtifactId: Type.Optional(Type.String()),
+  philosopherArtifactId: Type.Optional(Type.String({ minLength: 1 })),
+  dreamerArtifactId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const ArtificerRuleOutputSchema = Type.Object({

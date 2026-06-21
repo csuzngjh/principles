@@ -913,11 +913,14 @@ const _legacyCleanupCmd = legacyCmd
       process.exitCode = 1;
       return;
     }
-    // Default to dry-run if neither flag is set (CLI gate rule 4)
+    // Default to dry-run if neither flag is set (CLI gate rule 4).
+    // Pass undefined through — the handler's logic
+    // (opts.apply === true ? false : opts.dryRun !== false) correctly
+    // defaults to dry-run when both are undefined.
     await handleLegacyCleanup({
       workspacePath: opts.workspace,
-      dryRun: opts.dryRun ?? false,
-      apply: opts.apply ?? false,
+      dryRun: opts.dryRun,
+      apply: opts.apply,
       json: opts.json ?? false,
     });
   });

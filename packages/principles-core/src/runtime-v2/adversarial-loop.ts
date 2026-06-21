@@ -119,7 +119,6 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
         `artificer_run_status_${artificerResult.status ?? 'unknown'}`);
     }
 
-    const artificerOutput = artificerResult.output;
     const artificerArtifactId = artificerResult.artifactId ?? null;
 
     // ── Round N: Evaluator (code-review + adversarial replay) ──

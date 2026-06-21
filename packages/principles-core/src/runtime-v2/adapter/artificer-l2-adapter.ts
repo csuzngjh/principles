@@ -188,7 +188,11 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
-    const budgetTimer = setTimeout(() => abortController.abort(), totalBudgetMs);
+    // Track whether the budget timer fired (vs. cancelRun calling abort).
+    // Without this flag, cancelRun() is misidentified as a timeout because
+    // both paths set abortController.signal.aborted to true.
+    let budgetTimedOut = false;
+    const budgetTimer = setTimeout(() => { budgetTimedOut = true; abortController.abort(); }, totalBudgetMs);
 
     // Build the prompt message. Serialized before the try block so a
     // non-serializable inputPayload fails loud with cleanup (no timer leak).
@@ -297,7 +301,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      timedOut = abortController.signal.aborted;
+      timedOut = budgetTimedOut;
       loopError = reason;
     }
 

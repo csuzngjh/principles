@@ -67,6 +67,7 @@ export function normalizePathPure(
 
   if (fileIsAbsolute && projectIsAbsolute) {
     // Both absolute — compute relative path
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const rel = posixRelative(projectBody, fileBody);
     if (rel.startsWith('../')) {
       return fileNormalized;
@@ -76,7 +77,9 @@ export function normalizePathPure(
 
   if (!fileIsAbsolute) {
     // File is relative — join with project body, then compute relative
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const joined = posixJoin(projectBody, fileBody);
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const rel = posixRelative(projectBody, joined);
     if (rel.startsWith('../')) {
       return fileNormalized;
@@ -203,10 +206,7 @@ export function extractFilePathFromParams(
 
 // ── Action snapshot builder ──────────────────────────────────────────────────
 
-export interface BuildRuleHostActionOptions extends ExtractFilePathOptions {
-  /** Project directory for path normalization. */
-  // projectDir is a required parameter of buildRuleHostAction, not an option.
-}
+export type BuildRuleHostActionOptions = ExtractFilePathOptions;
 
 /**
  * Build the `action` field of RuleHostInput — the unified snapshot used by
@@ -215,6 +215,7 @@ export interface BuildRuleHostActionOptions extends ExtractFilePathOptions {
  * This function combines file path extraction + path normalization into a
  * single pure call, ensuring both paths produce the same `normalizedPath`.
  */
+// eslint-disable-next-line @typescript-eslint/max-params
 export function buildRuleHostAction(
   toolName: string,
   params: Record<string, unknown>,

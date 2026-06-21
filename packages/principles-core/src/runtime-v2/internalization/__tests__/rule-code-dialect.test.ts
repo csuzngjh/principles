@@ -308,7 +308,8 @@ describe('PRI-439 Phase 2: template generator canonical form', () => {
     const { checkForbiddenPatterns } = await import('../rule-code-validator.js');
     const result = generateFromTemplate('P_TEST', 'test', [{ toolName: 'bash', commandRegex: 'rm' }]);
     expect(result).not.toBeNull();
-    const labels = checkForbiddenPatterns(result!);
+    if (result === null) throw new Error('expected non-null result');
+    const labels = checkForbiddenPatterns(result);
     expect(labels).toEqual([]);
   });
 
@@ -317,7 +318,8 @@ describe('PRI-439 Phase 2: template generator canonical form', () => {
     const { checkReturnStatementsMissingFields } = await import('../rule-code-validator.js');
     const result = generateFromTemplate('P_TEST', 'test', [{ toolName: 'bash', commandRegex: 'rm' }]);
     expect(result).not.toBeNull();
-    const violations = checkReturnStatementsMissingFields(result!);
+    if (result === null) throw new Error('expected non-null result');
+    const violations = checkReturnStatementsMissingFields(result);
     expect(violations).toEqual([]);
   });
 
@@ -326,7 +328,8 @@ describe('PRI-439 Phase 2: template generator canonical form', () => {
     const { checkMatchedFalseDecisions } = await import('../rule-code-validator.js');
     const result = generateFromTemplate('P_TEST', 'test', [{ toolName: 'bash', commandRegex: 'rm' }]);
     expect(result).not.toBeNull();
-    const violations = checkMatchedFalseDecisions(result!);
+    if (result === null) throw new Error('expected non-null result');
+    const violations = checkMatchedFalseDecisions(result);
     expect(violations).toEqual([]);
   });
 });

@@ -88,6 +88,7 @@ function seedActivation(db: Database, a: SeedActivationInput): void {
   `).run(a.activationId, a.idempotencyKey, a.artifactId, a.channel, a.action, a.targetRef, '2026-01-01T00:00:00.000Z');
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params
 function countTable(db: Database, table: 'pi_artifacts' | 'approvals' | 'activations', whereClause?: string, params?: unknown[]): number {
   const sql = whereClause
     ? `SELECT COUNT(*) as cnt FROM ${table} WHERE ${whereClause}`
@@ -113,7 +114,7 @@ async function runHandler<T>(fn: () => Promise<T>): Promise<{ stdout: string; st
     logSpy.mockRestore();
     errorSpy.mockRestore();
   }
-  const exitCode = process.exitCode;
+  const {exitCode} = process;
   process.exitCode = undefined;
   return { stdout: stdoutChunks.join(''), stderr: stderrChunks.join(''), exitCode, result };
 }
@@ -177,7 +178,7 @@ describe('isV1ArtificerArtifact (pure logic)', () => {
     expect(isV1ArtificerArtifact(json)).toBe(false);
   });
 
-  it('returns false when implementationCode is present but not a string', () => {
+  it('returns true when implementationCode is present but not a string (treated as V1)', () => {
     const json = JSON.stringify({ taskId: 't1', implementationCode: 123 });
     expect(isV1ArtificerArtifact(json)).toBe(true); // non-string = treated as V1 (missing valid code)
   });
@@ -330,13 +331,14 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
     );
 
     expect(result).toBeDefined();
-    expect(result!.status).toBe('ok');
-    expect(result!.mode).toBe('dry-run');
-    expect(result!.v1Artifacts).toHaveLength(1);
-    expect(result!.v1Artifacts[0].artifactId).toBe('art-v1');
-    expect(result!.appliedV1Artifacts).toBe(0);
-    expect(result!.appliedApprovals).toBe(0);
-    expect(result!.appliedActivations).toBe(0);
+    if (!result) throw new Error('expected result');
+    expect(result.status).toBe('ok');
+    expect(result.mode).toBe('dry-run');
+    expect(result.v1Artifacts).toHaveLength(1);
+    expect(result.v1Artifacts[0].artifactId).toBe('art-v1');
+    expect(result.appliedV1Artifacts).toBe(0);
+    expect(result.appliedApprovals).toBe(0);
+    expect(result.appliedActivations).toBe(0);
 
     // Verify nothing was deleted
     const { sm, db } = await openDb();
@@ -361,11 +363,12 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
     );
 
     expect(result).toBeDefined();
-    expect(result!.status).toBe('ok');
-    expect(result!.mode).toBe('apply');
-    expect(result!.appliedV1Artifacts).toBe(1);
-    expect(result!.appliedApprovals).toBe(2);
-    expect(result!.appliedActivations).toBe(2);
+    if (!result) throw new Error('expected result');
+    expect(result.status).toBe('ok');
+    expect(result.mode).toBe('apply');
+    expect(result.appliedV1Artifacts).toBe(1);
+    expect(result.appliedApprovals).toBe(2);
+    expect(result.appliedActivations).toBe(2);
 
     // Verify everything was deleted
     const { sm, db } = await openDb();
@@ -391,7 +394,9 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
       handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: false, json: true })
     );
 
-    expect(result!.appliedV1Artifacts).toBe(1);
+    expect(result).toBeDefined();
+    if (!result) throw new Error('expected result');
+    expect(result.appliedV1Artifacts).toBe(1);
 
     const { sm, db } = await openDb();
     // V1 deleted, V2 preserved
@@ -419,7 +424,9 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
       handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: false, json: true })
     );
 
-    expect(result!.appliedV1Artifacts).toBe(1);
+    expect(result).toBeDefined();
+    if (!result) throw new Error('expected result');
+    expect(result.appliedV1Artifacts).toBe(1);
 
     const { sm, db } = await openDb();
     expect(countTable(db, 'pi_artifacts')).toBe(3); // dreamer, philosopher, scribe preserved
@@ -435,9 +442,10 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
     );
 
     expect(result).toBeDefined();
-    expect(result!.status).toBe('ok');
-    expect(result!.v1Artifacts).toEqual([]);
-    expect(result!.appliedV1Artifacts).toBe(0);
+    if (!result) throw new Error('expected result');
+    expect(result.status).toBe('ok');
+    expect(result.v1Artifacts).toEqual([]);
+    expect(result.appliedV1Artifacts).toBe(0);
     expect(exitCode).toBeUndefined();
   });
 
@@ -478,7 +486,7 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
     // This test verifies the handler itself rejects both flags.
     // The CLI registration in index.ts enforces mutual exclusivity at the parser level.
     const { exitCode, stdout } = await runHandler(() =>
-      handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: true, apply: true, json: true } as never)
+      handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: true, apply: true, json: true })
     );
 
     expect(exitCode).toBe(1);
@@ -503,9 +511,11 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
       handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: false, json: true })
     );
 
-    expect(result!.appliedV1Artifacts).toBe(3);
-    expect(result!.appliedApprovals).toBe(2);
-    expect(result!.appliedActivations).toBe(1);
+    expect(result).toBeDefined();
+    if (!result) throw new Error('expected result');
+    expect(result.appliedV1Artifacts).toBe(3);
+    expect(result.appliedApprovals).toBe(2);
+    expect(result.appliedActivations).toBe(1);
 
     const { sm, db } = await openDb();
     expect(countTable(db, 'pi_artifacts')).toBe(0);
@@ -526,7 +536,9 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
       handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: false, json: true })
     );
 
-    expect(result!.appliedV1Artifacts).toBe(1);
+    expect(result).toBeDefined();
+    if (!result) throw new Error('expected result');
+    expect(result.appliedV1Artifacts).toBe(1);
 
     const { sm, db } = await openDb();
     expect(countTable(db, 'pi_artifacts')).toBe(1);
@@ -561,8 +573,9 @@ describe('handleLegacyCleanup — file cleanup (existing functionality preserved
     );
 
     expect(result).toBeDefined();
-    expect(result!.fileTargets.length).toBeGreaterThan(0);
-    expect(result!.fileTargets.some(t => t.path.includes('diagnostician_tasks.json'))).toBe(true);
+    if (!result) throw new Error('expected result');
+    expect(result.fileTargets.length).toBeGreaterThan(0);
+    expect(result.fileTargets.some(t => t.path.includes('diagnostician_tasks.json'))).toBe(true);
   });
 
   it('--apply: archives empathy-optimizer files', async () => {
@@ -575,7 +588,9 @@ describe('handleLegacyCleanup — file cleanup (existing functionality preserved
       handleLegacyCleanup({ workspacePath: tempWorkspace, dryRun: false, json: true })
     );
 
-    expect(result!.appliedFiles).toBeGreaterThan(0);
+    expect(result).toBeDefined();
+    if (!result) throw new Error('expected result');
+    expect(result.appliedFiles).toBeGreaterThan(0);
     expect(existsSync(diagPath)).toBe(false);
   });
 });

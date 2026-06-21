@@ -47,8 +47,8 @@ export const GoldenTraceCaseInputTypebox = Type.Object({
  */
 export const ArtificerSourceTraceTypebox = Type.Object({
   scribeArtifactId: Type.String({ minLength: 1 }),
-  philosopherArtifactId: Type.Optional(Type.String()),
-  dreamerArtifactId: Type.Optional(Type.String()),
+  philosopherArtifactId: Type.Optional(Type.String({ minLength: 1 })),
+  dreamerArtifactId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 /**

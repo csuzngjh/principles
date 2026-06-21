@@ -87,10 +87,10 @@ export function checkMatchedFalseDecisions(code: string): string[] {
 
     // Extract the decision value from the return object.
     // Matches: decision: 'block', decision: "block", decision: `block`
-    const decisionMatch = content.match(/\bdecision\s*:\s*['"`]([^'"`]+)['"`]/);
+    const decisionMatch = /\bdecision\s*:\s*['"`]([^'"`]+)['"`]/.exec(content);
     if (decisionMatch === null) continue;
 
-    const decisionValue = decisionMatch[1];
+    const [, decisionValue] = decisionMatch;
     if (decisionValue !== undefined && decisionValue !== 'allow') {
       violations.push(
         `matched=false requires decision 'allow', got '${decisionValue}' — found: return { ${content.trim()} }`,
