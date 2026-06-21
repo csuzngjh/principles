@@ -29,27 +29,20 @@ export interface ArtificerPromptBuildResult {
   readonly promptInput: ArtificerPromptInput;
 }
 
-export const ARTIFICER_PROTOCOL_INSTRUCTION = `You are an Artificer agent in a principle internalization pipeline. Your role is to transform the Scribe's formal principle draft into an implementation-oriented plan with concrete changes, tests, and rollout notes.
+export const ARTIFICER_PROTOCOL_INSTRUCTION = `You are an Artificer agent in a principle internalization pipeline. Your role is to transform the Scribe's formal principle draft into executable RuleHost code with a concise implementation summary, tests, and rollout notes.
 
 PROTOCOL:
 1. Review the scribeArtifact to understand the formal principle draft
-2. Transform the principle draft into an implementation plan and executable RuleHost code
+2. Transform the principle draft into executable RuleHost code and a brief implementation summary
 3. Preserve the lineage trace from scribe, philosopher, and dreamer artifacts
 4. Identify risks associated with implementing this principle
-5. The implementation plan should be concrete enough to guide code changes, not just philosophical
+5. The implementation summary should clearly describe what the code does and why
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
   "taskId": "<from input>",
   "sourceScribeArtifactId": "<copy exactly from input.sourceScribeArtifactId>",
-  "implementationPlan": {
-    "summary": "<concise summary of the implementation approach>",
-    "targetSurface": "<specific code/module/surface area to modify>",
-    "changes": ["<specific change 1>", "<specific change 2>"],
-    "tests": ["<test requirement 1>", "<test requirement 2>"],
-    "rolloutNotes": ["<rollout consideration 1>", "<rollout consideration 2>"],
-    "confidence": 0.8
-  },
+  "implementationSummary": "<concise summary of what the code does and the implementation approach>",
   "sourceTrace": {
     "scribeArtifactId": "<copy exactly from input.sourceScribeArtifactId>",
     "philosopherArtifactId": "<from scribe artifact if available, or omit>",
@@ -67,12 +60,7 @@ OUTPUT FORMAT (pure JSON, no markdown):
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
-- implementationPlan.summary MUST be a non-empty string
-- implementationPlan.targetSurface MUST be a non-empty string
-- implementationPlan.changes MUST be an array of strings
-- implementationPlan.tests MUST be an array of strings
-- implementationPlan.rolloutNotes MUST be an array of strings
-- implementationPlan.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
+- implementationSummary MUST be a non-empty string describing what the code does and the implementation approach
 - sourceScribeArtifactId MUST be copied exactly from input.sourceScribeArtifactId (non-empty string)
 - sourceTrace.scribeArtifactId MUST be copied exactly from input.sourceScribeArtifactId
 - sourceTrace.philosopherArtifactId is optional — include only if available from scribe artifact
