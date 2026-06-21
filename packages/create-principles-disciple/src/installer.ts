@@ -52,7 +52,7 @@ export function ensureConversationAccess(config: Record<string, unknown>): Recor
 
   // Guard: principles-disciple entry must be a non-null object (or missing)
   const rawEntry = entries['principles-disciple'];
-  const entry = (typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry))
+  const entry: Record<string, unknown> = (typeof rawEntry === 'object' && rawEntry !== null && !Array.isArray(rawEntry))
     ? { ...(rawEntry as Record<string, unknown>) }
     : { enabled: true };
 
