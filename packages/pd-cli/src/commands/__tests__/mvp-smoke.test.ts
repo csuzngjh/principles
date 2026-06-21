@@ -12,8 +12,11 @@
  *   - Failure paths emit structured JSON (verified via stub workspaces).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { registerMvpCommands } from '../mvp-smoke.js';
 import { registerTaskListCommand } from '../task.js';
 
@@ -266,19 +269,32 @@ describe('--json failure path (EP-04 Rule 6)', () => {
 
   it('pd task list --json on missing workspace exits 1 and does not throw', async () => {
     const { handleTaskList } = await import('../task.js');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-task-list-failure-'));
+    const invalidWorkspace = path.join(tempDir, 'not-a-directory');
+    fs.writeFileSync(invalidWorkspace, 'file blocks workspace directory creation');
     let exitCode: number | null = null;
+    let rawOutput: unknown;
     const origExit = process.exit;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     process.exit = ((code?: number) => { exitCode = code ?? 0; }) as typeof process.exit;
 
     try {
       await handleTaskList({
-        workspace: 'Z:\\pd-nonexistent-workspace-12345',
+        workspace: invalidWorkspace,
         json: true,
       });
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      rawOutput = logSpy.mock.calls[0]?.[0];
     } finally {
       process.exit = origExit;
+      logSpy.mockRestore();
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
     expect(exitCode).toBe(1);
+    expect(typeof rawOutput).toBe('string');
+    if (typeof rawOutput !== 'string') throw new Error('expected one JSON stdout record');
+    const parsed: unknown = JSON.parse(rawOutput);
+    expect(parsed).toMatchObject({ ok: false, count: 0 });
   });
 });

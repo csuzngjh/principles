@@ -16,10 +16,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createSandboxGateDeps, runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
+import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
-import { ArtificerL2Adapter, DefaultArtificerValidator, RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
 type EvaluatorFactory = (taskId: string, artificerArtifactId: string) => unknown;
@@ -138,6 +138,7 @@ function artificerV2(taskId: string, priorId?: string): unknown {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
     implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
     implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); return p.startsWith("/etc") ? { decision: "block", matched: true, reason: "system path" } : { decision: "allow", matched: false, reason: "ok" }; }',
+    implementationSummary: 'Block system path writes',
     goldenTraceCases: [
       { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' },
       { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
@@ -169,6 +170,18 @@ function evaluatorRejected(taskId: string, artificerArtifactId: string): unknown
     codeReview: { intentConsistency: { aligned: false, explanation: 'misses /boot' }, scopePrecision: { verdict: 'imprecise' as const, explanation: 'narrow' }, traceCoverage: { sufficient: false, gaps: ['/boot'], explanation: 'missing' } },
     adversarialCases: [{ caseId: 'adv-1', attackType: 'boundary' as const, toolName: 'write_file', params: { path: '/boot/grub' }, expectedDecision: 'block' as const, rationale: 'system path' }],
     adversarialResult: { passed: false, failedCases: [{ caseId: 'adv-1', errorType: 'wrong_decision', message: 'expected block, got allow' }] },
+  };
+}
+
+function evaluatorNeedsRevision(taskId: string, artificerArtifactId: string): unknown {
+  return {
+    taskId, sourceArtificerArtifactId: artificerArtifactId,
+    evaluation: { decision: 'needs_revision', summary: 'needs revision: adversarial replay failed', score: 0.4, strengths: [], concerns: ['adversarial case failed'], requiredChanges: ['fix matcher'] },
+    sourceTrace: { artificerArtifactId },
+    risks: [], generatedAt: new Date().toISOString(),
+    codeReview: { intentConsistency: { aligned: false, explanation: 'misses system paths' }, scopePrecision: { verdict: 'too_narrow' as const, explanation: 'narrow' }, traceCoverage: { sufficient: false, gaps: [], explanation: 'missing' } },
+    adversarialCases: [{ caseId: 'adv-1', attackType: 'boundary' as const, toolName: 'write_file', params: { path: '/etc/shadow' }, expectedDecision: 'block' as const, rationale: 'system path' }],
+    adversarialResult: { passed: false, failedCases: [{ caseId: 'adv-1', attackType: 'boundary' as const, actualDecision: 'allow', expectedDecision: 'block', rationale: 'system path' }] },
   };
 }
 
@@ -247,51 +260,59 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.approvalId).not.toBeNull();
   }, 60_000);
 
-  it('runs the real ArtificerL2Adapter through fail-feedback-fix before creating a candidate', async () => {
+  it('adversarial feedback loop drives a second artificer round before creating a candidate', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
-    await seedDreamerWithId(sm, 'dreamer-l2-001', 'pain-l2-001');
+    await seedDreamerWithId(sm, 'dreamer-feedback-001', 'pain-feedback-001');
     await sm.close();
 
-    const baseAdapter = makeAdapter();
-    const prompts: string[] = [];
-    let sourceScribeArtifactId: string | null = null;
-    const l2Adapter = new ArtificerL2Adapter({
-      validator: new DefaultArtificerValidator(),
-      gateDeps: createSandboxGateDeps(),
-      generateCode: async (prompt) => {
-        prompts.push(prompt);
-        if (sourceScribeArtifactId === null) {
-          const parsed: unknown = JSON.parse(prompt);
-          if (parsed === null || typeof parsed !== 'object') throw new Error('Artificer prompt must be an object');
-          const sourceId = Reflect.get(parsed, 'sourceScribeArtifactId');
-          if (typeof sourceId !== 'string') throw new Error('sourceScribeArtifactId missing from prompt');
-          sourceScribeArtifactId = sourceId;
+    let adapter: ScriptedAdapter;
+    let artificerCallCount = 0;
+    const artificerPrompts: string[] = [];
+    adapter = new ScriptedAdapter({
+      dreamer: (taskId) => dreamerOut(taskId, 'pain-feedback-001'),
+      philosopher: philosopherOut,
+      scribe: scribeOut,
+      artificer: (taskId, priorId) => {
+        artificerCallCount++;
+        const runId = `run-${taskId}`;
+        const inputPayload = adapter.startRunInputs.get(runId)?.inputPayload;
+        if (typeof inputPayload === 'string') artificerPrompts.push(inputPayload);
+
+        const base = artificerV2(taskId, priorId);
+        if (artificerCallCount === 1) {
+          // Round 1: code fails the adversarial replay, forcing needs_revision.
+          return {
+            ...base,
+            implementationCode: 'function evaluate() { return { decision: "allow", matched: false, reason: "bug" }; }',
+          };
         }
-        const candidate = artificerV2('', sourceScribeArtifactId);
-        if (candidate === null || typeof candidate !== 'object') throw new Error('candidate fixture invalid');
-        Reflect.deleteProperty(candidate, 'taskId');
-        if (prompts.length === 1) {
-          Reflect.set(candidate, 'implementationCode', 'function evaluate() { return { decision: "allow", matched: false, reason: "bug" }; }');
+        // Round 2: fixed code passes the evaluator.
+        return base;
+      },
+      evaluator: (taskId, artificerArtifactId) => {
+        if (artificerCallCount === 1) {
+          return evaluatorNeedsRevision(taskId, artificerArtifactId);
         }
-        return candidate;
+        return evaluatorApproved(taskId, artificerArtifactId);
       },
     });
 
     const result = await runRuleHostPipeline({
       workspaceDir: tmpDir,
-      painId: 'pain-l2-001',
-      runtimeAdapter: baseAdapter,
-      codeRuleCapability: { enabled: true, artificerAdapter: l2Adapter },
+      painId: 'pain-feedback-001',
+      runtimeAdapter: adapter,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
       channel: 'code_tool_hook',
       pollIntervalMs: 5,
       timeoutMs: 1000,
-      onStoreReady: (store) => { baseAdapter.artifactStore = store; },
+      onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('Previous sandbox replay failures');
+    expect(artificerCallCount).toBe(2);
+    expect(artificerPrompts).toHaveLength(2);
+    expect(artificerPrompts[1]).toContain('Prior adversarial replay failures');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
     // P1 #1 fix: candidate should be auto-enqueued into the ApprovalQueue
