@@ -20,6 +20,26 @@ import type {
   DegradedSignal,
 } from "../../api.js";
 
+type DecisionResult =
+  | { success: true }
+  | { success: false; error: string; nextAction?: string };
+
+export function summarizeDecisionResults(results: readonly DecisionResult[]): {
+  allSucceeded: boolean;
+  failedCount: number;
+  failureReason?: string;
+} {
+  const failures = results.filter((result): result is Extract<DecisionResult, { success: false }> => !result.success);
+  const first = failures[0];
+  return {
+    allSucceeded: failures.length === 0,
+    failedCount: failures.length,
+    ...(first
+      ? { failureReason: first.nextAction ? `${first.error} ${first.nextAction}` : first.error }
+      : {}),
+  };
+}
+
 // ── Approval group validator (not in validators.ts, page-specific) ─────────
 
 /** Type guard: is this a non-null object with own properties (not inherited)? */
@@ -302,26 +322,26 @@ function PendingReviewCard({
   async function applyDecisionToAllRecords(
     action: "approve" | "reject",
     reason?: string,
-  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number }> {
+  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number; failureReason?: string }> {
     // Only process pending records — skip already-approved/rejected to avoid
     // stable partial failures on mixed-status groups.
     const pendingRecords = group.records.filter((r) => r.status === "pending");
-    let failedCount = 0;
+    const results: DecisionResult[] = [];
     for (const record of pendingRecords) {
       const result =
         action === "approve"
           ? await approveApproval(record.id)
           : await rejectApproval(record.id, reason ?? "");
-      if (!result.success) failedCount++;
+      results.push(result);
     }
-    return { allSucceeded: failedCount === 0, failedCount, totalCount: pendingRecords.length };
+    return { ...summarizeDecisionResults(results), totalCount: pendingRecords.length };
   }
 
   const handleApprove = async () => {
     if (actionLoading) return;
     setActionLoading(true);
     try {
-      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("approve");
+      const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("approve");
       if (allSucceeded) {
         toast.success(t("pages.focus.approveSucceeded", { defaultValue: "已批准" }));
         onDecisionApplied();
@@ -331,6 +351,7 @@ function PendingReviewCard({
             defaultValue: `批准完成，但 ${failedCount}/${totalCount} 条记录失败。`,
             failedCount,
             totalCount,
+            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
           }),
         );
         onDecisionApplied();
@@ -346,7 +367,7 @@ function PendingReviewCard({
     if (actionLoading || !rejectReason.trim()) return;
     setActionLoading(true);
     try {
-      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("reject", rejectReason.trim());
+      const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("reject", rejectReason.trim());
       if (allSucceeded) {
         toast.success(t("pages.focus.rejectSucceeded", { defaultValue: "已拒绝" }));
         setShowRejectInput(false);
@@ -358,6 +379,7 @@ function PendingReviewCard({
             defaultValue: `拒绝完成，但 ${failedCount}/${totalCount} 条记录失败。`,
             failedCount,
             totalCount,
+            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
           }),
         );
         onDecisionApplied();

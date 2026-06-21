@@ -126,6 +126,36 @@ const FAILED_VALIDATION: RefinerSandboxResult = {
 };
 
 describe('ArtificerL2Adapter (RuleHost MVP Activation, PRI-424)', () => {
+  it('retries when the model omits executable RuleCode from an otherwise valid V1 response', async () => {
+    const prompts: string[] = [];
+    const { implementationCode: _code, goldenTraceCases: _cases, affectedTools: _tools, ...v1 } = makeV2Output();
+    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
+      prompts.push(prompt);
+      return prompts.length === 1 ? v1 : makeV2Output();
+    };
+    const adapter = new ArtificerL2Adapter({
+      generateCode,
+      gateDeps: makeAlwaysPassGateDeps(),
+      validator: new DefaultArtificerValidator(),
+    });
+
+    const handle = await adapter.startRun({
+      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+      taskRef: { taskId: TASK_ID },
+      inputPayload: 'initial prompt',
+      contextItems: [],
+      outputSchemaRef: 'artificer-output-v2',
+      timeoutMs: 300_000,
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('implementationCode');
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(isArtificerOutputV2(output?.payload)).toBe(true);
+    void _code;
+    void _cases;
+    void _tools;
+  });
   // ── happy path ─────────────────────────────────────────────────────────────
 
   it('returns V2 output on 1st attempt when sandbox replay passes (1 LLM call)', async () => {

@@ -208,7 +208,7 @@ function makeTmpDir(): string {
 
 async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string): Promise<void> {
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
-    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
+    dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
   const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId });
   await sm.createTask({ taskId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson });

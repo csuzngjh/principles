@@ -1,4 +1,5 @@
 import { nodeVm } from '../utils/node-vm-polyfill.js';
+import { spawnSync } from 'node:child_process';
 
 export interface RuleImplementationModuleExports {
   meta?: unknown;
@@ -22,7 +23,35 @@ export interface RuleImplementationModuleExports {
 const COMPILE_TIMEOUT_MS = 1000;
 
 /** Timeout (ms) for executing evaluate(input, helpers) inside the vm. */
-const EVALUATE_TIMEOUT_MS = 1000;
+const EVALUATE_PROCESS_TIMEOUT_MS = 3000;
+const EVALUATE_PROCESS_OUTPUT_BYTES = 1024 * 1024;
+
+const EVALUATION_PROCESS_SOURCE = String.raw`
+const vm = require('node:vm');
+try {
+  const workerData = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+  const context = vm.createContext(Object.create(null));
+  new vm.Script(workerData.source, { filename: workerData.filename }).runInContext(context, { timeout: 1000 });
+  const input = workerData.input;
+  const helpers = Object.freeze({
+    isRiskPath: () => input.workspace.isRiskPath,
+    getToolName: () => input.action.toolName,
+    getEstimatedLineChanges: () => input.derived.estimatedLineChanges,
+    getBashRisk: () => input.derived.bashRisk,
+    hasPlanFile: () => input.workspace.hasPlanFile,
+    getPlanStatus: () => input.workspace.planStatus,
+    getEpTier: () => input.evolution.epTier,
+  });
+  context.__pdCallInput = input;
+  context.__pdCallHelpers = helpers;
+  const result = new vm.Script('__pdRuleModule.evaluate(__pdCallInput, __pdCallHelpers)', { filename: workerData.filename + '.call' })
+    .runInContext(context, { timeout: 1000 });
+  process.stdout.write(JSON.stringify({ ok: true, result }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({ ok: false, error: String(error) }));
+  process.exitCode = 1;
+}
+`;
 
 function normalizeImplementationSource(sourceCode: string): string {
   const withoutExports = sourceCode
@@ -34,6 +63,10 @@ globalThis.__pdRuleModule = {
   meta: typeof meta === 'undefined' ? undefined : meta,
   evaluate: typeof evaluate === 'undefined' ? undefined : evaluate,
 };`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function loadRuleImplementationModule(
@@ -73,23 +106,35 @@ export function loadRuleImplementationModule(
   //   3. Runs it in the context with EVALUATE_TIMEOUT_MS
   //   4. Cleans up globals
   //   5. Returns the raw result (validation happens in the caller)
-  const callScript = new nodeVm.Script(
-    '__pdRuleModule.evaluate(__pdCallInput, __pdCallHelpers)',
-    { filename: `${filename}.call` },
-  );
-
-  const callEvaluate = (input: unknown, helpers: unknown): unknown => {
-    (context as { __pdCallInput?: unknown }).__pdCallInput = input;
-    (context as { __pdCallHelpers?: unknown }).__pdCallHelpers = helpers;
-    try {
-      return callScript.runInContext(context, {
-        timeout: EVALUATE_TIMEOUT_MS,
-        displayErrors: true,
-      });
-    } finally {
-      try { delete (context as { __pdCallInput?: unknown }).__pdCallInput; } catch { /* noop */ }
-      try { delete (context as { __pdCallHelpers?: unknown }).__pdCallHelpers; } catch { /* noop */ }
+  const normalizedSource = normalizeImplementationSource(sourceCode);
+  const callEvaluate = (input: unknown, _helpers: unknown): unknown => {
+    const child = spawnSync(process.execPath, [
+      '--max-old-space-size=32',
+      '-e',
+      EVALUATION_PROCESS_SOURCE,
+    ], {
+      input: JSON.stringify({ source: normalizedSource, filename, input }),
+      encoding: 'utf8',
+      timeout: EVALUATE_PROCESS_TIMEOUT_MS,
+      maxBuffer: EVALUATE_PROCESS_OUTPUT_BYTES,
+      windowsHide: true,
+    });
+    if (child.error) {
+      throw new Error(`RuleCode process failed: ${child.error.message}`);
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(child.stdout);
+    } catch {
+      const stderr = child.stderr.trim().slice(0, 500);
+      throw new Error(`RuleCode process exited without a valid result${stderr ? `: ${stderr}` : ''}`);
+    }
+    if (!isRecord(parsed) || !Object.hasOwn(parsed, 'ok') || parsed['ok'] !== true || !Object.hasOwn(parsed, 'result')) {
+      const reason = isRecord(parsed) && Object.hasOwn(parsed, 'error') && typeof parsed['error'] === 'string'
+        ? parsed['error'] : 'RuleCode process failed';
+      throw new Error(reason);
+    }
+    return parsed['result'];
   };
 
   return {

@@ -144,15 +144,37 @@ interface ResolvedRecommendation {
  */
 export async function resolveSourcePainIdFromDiagnostician(
   stateManager: RuntimeStateManager,
-  candidate: { taskId?: string },
+  candidate: { taskId?: string; sourceRunId?: string },
 ): Promise<string | null> {
-  const diagTaskId = candidate.taskId?.trim();
-  if (!diagTaskId) return null;
+  const candidateTaskId = candidate.taskId?.trim();
+  if (!candidateTaskId) return null;
 
-  const diagTask = await stateManager.getTask(diagTaskId);
-  // PRI-435 (CodeRabbit P1): Verify taskKind is 'diagnostician' to prevent
-  // cross-task-chain lineage contamination. If candidate.taskId points to a
-  // non-diagnostician task, sourcePainId must not be trusted.
+  let diagTask = await stateManager.getTask(candidateTaskId);
+  if (!diagTask) return null;
+
+  // Production candidates are emitted by diag_router. Resolve its validated
+  // diagnosisId from the exact source run, then verify the referenced task is
+  // a diagnostician task before trusting its lineage.
+  if (diagTask.taskKind === 'diag_router') {
+    const sourceRunId = candidate.sourceRunId?.trim();
+    if (!sourceRunId) return null;
+    const sourceRun = await stateManager.getRun(sourceRunId);
+    if (!sourceRun || sourceRun.taskId !== candidateTaskId || typeof sourceRun.outputPayload !== 'string') return null;
+    let routerOutput: unknown;
+    try {
+      routerOutput = JSON.parse(sourceRun.outputPayload);
+    } catch {
+      return null;
+    }
+    if (routerOutput === null || typeof routerOutput !== 'object' || Array.isArray(routerOutput) ||
+        !Object.hasOwn(routerOutput, 'diagnosisId')) return null;
+    const diagnosisId = Reflect.get(routerOutput, 'diagnosisId');
+    if (typeof diagnosisId !== 'string' || diagnosisId.trim() === '') return null;
+    diagTask = await stateManager.getTask(diagnosisId.trim());
+  }
+
+  // Reject every non-canonical task kind to prevent cross-chain lineage
+  // contamination from arbitrary candidate.taskId values.
   if (!diagTask || diagTask.taskKind !== 'diagnostician') return null;
 
   if (typeof diagTask.diagnosticJson !== 'string') return null;

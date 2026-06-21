@@ -22,6 +22,7 @@ import { validateRuleHostResult } from './rule-host-validator.js';
 
 export interface DecisionMergeLogger {
   warn?: (_message: string) => void;
+  onImplementationUnhealthy?: (_implementation: LoadedImplementation, _reason: string) => void;
 }
 
 /**
@@ -67,9 +68,11 @@ export function mergeDecisions(
         // bypasses the production RuleHost validation path.
         const validation = validateRuleHostResult(result);
         if (!validation.valid) {
+          const reason = `invalid RuleHostResult: ${validation.errors.join('; ')}`;
           logger?.warn?.(
-            `[RuleHost] Implementation ${impl.implId} returned invalid result: ${validation.errors.join('; ')}`
+            `[RuleHost] Implementation ${impl.implId} returned ${reason}`
           );
+          logger?.onImplementationUnhealthy?.(impl, reason);
           continue;
         }
 
@@ -89,9 +92,11 @@ export function mergeDecisions(
         }
         // 'allow' is implicit �?no action needed
       } catch (evalError: unknown) {
+        const reason = `evaluation failed: ${String(evalError)}`;
         logger?.warn?.(
-          `[RuleHost] Implementation ${impl.implId} evaluation failed: ${String(evalError)}`
+          `[RuleHost] Implementation ${impl.implId} ${reason}`
         );
+        logger?.onImplementationUnhealthy?.(impl, reason);
       }
     }
 
