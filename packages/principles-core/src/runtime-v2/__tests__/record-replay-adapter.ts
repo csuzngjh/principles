@@ -72,6 +72,10 @@ const VOLATILE_KEYS: ReadonlySet<string> = new Set([
 /** Fixture file format version. Bump on breaking schema changes. */
 const FIXTURE_VERSION = 1;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Shape of a recorded fixture (after JSON.parse, before validation). */
 interface RecordedFixture {
   readonly version: number;
@@ -100,8 +104,8 @@ function normalizeForHash(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(normalizeForHash);
   }
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
+  if (isRecord(value)) {
+    const obj = value;
     const result: Record<string, unknown> = {};
     const keys = Object.keys(obj)
       .filter((k) => !VOLATILE_KEYS.has(k))
@@ -169,20 +173,20 @@ function isRuntimeKind(v: unknown): v is RuntimeKind {
 }
 
 function isRuntimeArtifactRef(v: unknown): v is RuntimeArtifactRef {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
+  if (!isRecord(v)) return false;
+  const obj = v;
   return isString(obj.artifactType) && isString(obj.ref);
 }
 
 function isRunHandle(v: unknown): v is RunHandle {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
+  if (!isRecord(v)) return false;
+  const obj = v;
   return isString(obj.runId) && isRuntimeKind(obj.runtimeKind) && isString(obj.startedAt);
 }
 
 function isRunStatus(v: unknown): v is RunStatus {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
+  if (!isRecord(v)) return false;
+  const obj = v;
   if (!isString(obj.runId)) return false;
   const { status } = obj;
   if (
@@ -199,8 +203,8 @@ function isRunStatus(v: unknown): v is RunStatus {
 }
 
 function isStructuredRunOutput(v: unknown): v is StructuredRunOutput {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
+  if (!isRecord(v)) return false;
+  const obj = v;
   return isString(obj.runId) && Object.hasOwn(obj, 'payload');
 }
 
@@ -210,12 +214,12 @@ function isStructuredRunOutput(v: unknown): v is StructuredRunOutput {
  * Returns the fixture on success, throws on failure (fail loud — ERR-009).
  */
 function validateFixture(raw: unknown, expectedHash: string): RecordedFixture {
-  if (typeof raw !== 'object' || raw === null) {
+  if (!isRecord(raw)) {
     throw new Error(
       `[RecordReplayAdapter] Fixture is not a JSON object (hash=${expectedHash}).`,
     );
   }
-  const obj = raw as Record<string, unknown>;
+  const obj = raw;
 
   const { version } = obj;
   if (!isNumber(version)) {

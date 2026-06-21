@@ -54,7 +54,7 @@ const PATTERNS = [
   },
   // ERR-013: `in` operator on potentially untrusted objects
   {
-    regex: /\b(?:raw|obj|value|entry|data|result|parsed|fixture|output|response)\s+\bin\b(?!\s*\{)/g,
+    regex: /(?:['"`][^'"`]+['"`]|\b[A-Za-z_$][\w$]*)\s+in\s+(?:raw|obj|value|entry|data|result|parsed|fixture|output|response)\b/g,
     errId: 'ERR-013',
     description: '`in` operator on potentially untrusted object (use Object.hasOwn())',
   },
@@ -84,7 +84,7 @@ function scanFile(filePath) {
       const matches = line.matchAll(pattern.regex);
       for (const match of matches) {
         // Check for ERR-specific exemption: runtime-contract:exempt ERR-XXX <reason>
-        const exemptMatch = line.match(/runtime-contract:exempt\s+ERR-(\d+)/);
+        const exemptMatch = line.match(/runtime-contract:exempt\s+ERR-(\d+)\s+(\S.*)$/);
         if (exemptMatch && `ERR-${exemptMatch[1]}` === pattern.errId) continue;
 
         violations.push({
