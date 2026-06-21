@@ -21,6 +21,7 @@ import { mkdirSync, cpSync, rmSync, existsSync, readFileSync, writeFileSync, rea
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -88,7 +89,7 @@ const PD_CLI = join(ROOT, 'packages/pd-cli/dist/index.js');
 const FIXTURES_DIR = join(ROOT, 'tests/e2e-fixtures');
 const E2E_WS_BASE = join(ROOT, 'tests/e2e-workspace');
 const EVIDENCE_DIR = join(ROOT, 'evidence');
-const OPENCLAW_WORKSPACE = process.env.OPENCLAW_WORKSPACE_DIR || 'D:\\.openclaw\\workspace';
+const OPENCLAW_WORKSPACE = process.env.OPENCLAW_WORKSPACE_DIR || join(tmpdir(), 'pd-e2e-story-a');
 
 function sh(cmd, opts = {}) {
   try {
@@ -136,7 +137,7 @@ function phase0(trap, runId) {
   cpSync(trapDir, ws, { recursive: true });
 
   // Copy live workspace config if available
-  const liveWs = 'D:\\.openclaw\\workspace';
+  const liveWs = process.env.OPENCLAW_WORKSPACE_DIR || join(tmpdir(), 'pd-e2e-story-a');
   const configFiles = ['.pd/feature-flags.yaml', '.state/workflows.yaml'];
   for (const f of configFiles) {
     const src = join(liveWs, f);
