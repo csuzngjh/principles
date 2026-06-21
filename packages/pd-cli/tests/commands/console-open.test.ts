@@ -556,6 +556,8 @@ describe('CLI command wiring (pd console open)', () => {
     // JSON *without exiting* (the child keeps running). execFileSync would
     // block forever waiting for the child to exit. Use a short timeout so the
     // test reads stdout before the process is killed.
+    // Vitest timeout (10s) must exceed execFileSync timeout (8s) so the child
+    // is killed by execFileSync first, allowing stdout to be read.
     const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot, 8_000);
     const parsed = JSON.parse(out);
     expect(parsed).toHaveProperty('status');
@@ -565,7 +567,7 @@ describe('CLI command wiring (pd console open)', () => {
     expect(parsed).toHaveProperty('workspaceDir');
     expect(parsed).toHaveProperty('reused');
     expect(parsed).toHaveProperty('browserOpened');
-  });
+  }, 10_000);
 
   it('pd console open --port 99999 --json returns a structured failure (invalid port)', () => {
     const out = runPd(['console', 'open', '--workspace', tmp, '--port', '99999', '--json', '--no-browser'], workspaceRoot);
@@ -594,7 +596,7 @@ describe('CLI command wiring (pd console open)', () => {
     const parsed = JSON.parse(out);
     expect(parsed).toHaveProperty('status');
     expect(parsed.browserOpened).toBe(false);
-  });
+  }, 10_000);
 
   it('pd console --no-auth --json legacy path parses --no-auth correctly', () => {
     // Same: may spawn a long-lived server, use timeout.
@@ -602,7 +604,7 @@ describe('CLI command wiring (pd console open)', () => {
     expect(out.trim()).not.toBe('');
     const parsed = JSON.parse(out);
     expect(parsed).toBeDefined();
-  });
+  }, 10_000);
 
   describe('openBrowser', () => {
     afterEach(() => {
@@ -755,7 +757,7 @@ describe('CLI command wiring (pd console open)', () => {
       expect(parsed.status).not.toBe('refused');
       // Host should be normalized to ::1 (without brackets)
       expect(parsed.host).toBe('::1');
-    });
+    }, 10_000);
   });
 });
 
