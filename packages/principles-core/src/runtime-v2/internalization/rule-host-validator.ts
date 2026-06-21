@@ -22,7 +22,7 @@ export interface RuleHostResultValidationResult {
   errors: string[];
 }
 
-const VALID_DECISIONS: ReadonlySet<RuleHostDecision> = new Set([
+const VALID_DECISIONS: ReadonlySet<string> = new Set([
   'allow',
   'block',
   'requireApproval',
@@ -41,6 +41,14 @@ const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype
  */
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Type guard for RuleHostDecision (ERR-001: no `as` bypass).
+ * Checks typeof string + membership in VALID_DECISIONS without a cast.
+ */
+function isRuleHostDecision(value: unknown): value is RuleHostDecision {
+  return typeof value === 'string' && VALID_DECISIONS.has(value);
 }
 
 /**
@@ -82,7 +90,7 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     errors.push('decision is required');
   } else {
     const { decision } = value;
-    if (typeof decision !== 'string' || !VALID_DECISIONS.has(decision as RuleHostDecision)) {
+    if (typeof decision !== 'string' || !isRuleHostDecision(decision)) {
       errors.push(
         `decision must be one of allow|block|requireApproval|auto_correct, got ${String(decision)}`
       );
@@ -94,6 +102,25 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     errors.push('matched is required');
   } else if (typeof value.matched !== 'boolean') {
     errors.push(`matched must be a boolean, got ${typeof value.matched}`);
+  }
+
+  // PRI-439 Phase 2: when matched=false, decision must be 'allow'.
+  // A `matched=false, decision='block'` result is contradictory —
+  // "the rule did not match, but I want to block" makes no sense.
+  // This is checked AFTER both matched and decision are individually validated
+  // so we only run the cross-field check when both fields are present and valid.
+  if (
+    Object.hasOwn(value, 'matched') &&
+    typeof value.matched === 'boolean' &&
+    value.matched === false &&
+    Object.hasOwn(value, 'decision') &&
+    typeof value.decision === 'string' &&
+    isRuleHostDecision(value.decision) &&
+    value.decision !== 'allow'
+  ) {
+    errors.push(
+      `matched=false requires decision 'allow', got '${value.decision}'`,
+    );
   }
 
   // reason — required, must be string

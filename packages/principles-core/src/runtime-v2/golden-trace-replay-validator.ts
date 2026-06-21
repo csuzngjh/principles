@@ -43,6 +43,14 @@ export interface ReplayValidatorResult {
 
 export interface ReplayValidatorConfig {
   maxRepairAttempts: number;
+  /**
+   * Project directory for path normalization (PRI-439 Phase 3).
+   * When provided, Golden Trace replay produces non-null `normalizedPath`
+   * values that match the production OpenClaw Gate, enabling path-based
+   * rules to be validated in replay.
+   * When not provided, `normalizedPath` falls back to `null` (legacy behavior).
+   */
+  projectDir?: string;
 }
 
 export const DEFAULT_REPLAY_VALIDATOR_CONFIG: ReplayValidatorConfig = {
@@ -196,9 +204,12 @@ function validateProposeCorrectionCase(
 function validateCase(
   evaluateFn: ReplayEvaluateFn,
   traceCase: GoldenTraceCase,
+  projectDir?: string,
 ): ReplayValidatorCaseResult {
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
+    {},
+    projectDir ? { projectDir } : {},
   );
 
   const baseResult: ReplayValidatorCaseResult = {
@@ -281,7 +292,7 @@ export function replayGoldenTrace(
     };
   }
 
-  const perCaseResults = cases.map((traceCase) => validateCase(evaluateFn, traceCase));
+  const perCaseResults = cases.map((traceCase) => validateCase(evaluateFn, traceCase, _config.projectDir));
   const passedCases = perCaseResults.filter((r) => r.passed).length;
   const failedCases = perCaseResults.length - passedCases;
   const failureReasons = perCaseResults

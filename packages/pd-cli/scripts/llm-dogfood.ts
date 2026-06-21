@@ -26,7 +26,6 @@ import * as fs from 'node:fs';
 import {
   PiAiRuntimeAdapter,
   ArtificerL2Adapter,
-  buildArtificerL2GenerateCode,
   DefaultArtificerValidator,
   RuntimeStateManager,
   SqliteApprovalQueueStore,
@@ -153,22 +152,19 @@ async function main(): Promise<void> {
     workspace: tmpDir,
   });
 
-  // Construct the ArtificerL2Adapter for the artificer stage.
-  // This adapter uses buildArtificerL2GenerateCode to call the LLM directly
-  // (via completeSimple) and runs sandbox replay to validate generated code.
-  const generateCode = buildArtificerL2GenerateCode({
+  // Construct the ArtificerL2Adapter for the artificer stage (PRI-439 Phase 4).
+  // This adapter uses runAgentLoop with 4 tools (read_rulecode_spec,
+  // validate_rulecode, replay_rulecode, submit_rulecode) to generate and
+  // verify RuleCode inside a multi-turn agent loop.
+  const artificerAdapter = new ArtificerL2Adapter({
     provider: PROVIDER,
     model: MODEL_ID,
-    apiKey: process.env[API_KEY_ENV]!,
+    apiKeyEnv: API_KEY_ENV,
     baseUrl: LM_STUDIO_BASE_URL,
-    timeoutMs: 600_000,
-  });
-
-  const artificerAdapter = new ArtificerL2Adapter({
-    generateCode,
     gateDeps: createSandboxGateDeps(),
     validator: new DefaultArtificerValidator(),
-    maxAttempts: 3,
+    totalBudgetMs: 600_000,
+    maxTokens: 8192,
   });
 
   const capability: CodeRuleCapability = { enabled: true, artificerAdapter };

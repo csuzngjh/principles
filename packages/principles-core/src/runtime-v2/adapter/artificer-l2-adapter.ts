@@ -1,36 +1,44 @@
 /**
- * ArtificerL2Adapter (RuleHost MVP Activation, ADR-0014 Amendment 2026-06-17,
- * PRD Decision 8, PRI-424).
+ * ArtificerL2Adapter (PRI-439 Phase 4 — tool-using L2 agent).
  *
- * A PDRuntimeAdapter that runs Artificer through a write-test-fix loop:
- *   generate code (LLM) → validate → sandbox replay → on failure, inject
- *   RefinerSandboxFailedCase[] feedback into the next attempt → regenerate.
- *   Max 3 attempts. On exhaustion, degrade to a V1 output (plan only, no code
- *   fields) so the downstream Evaluator's isArtificerOutputV2() returns false
- *   and the principle-artifact path remains usable.
+ * A PDRuntimeAdapter that runs Artificer through a multi-turn agent loop
+ * (@earendil-works/pi-agent-core) with 4 tools:
+ *   - read_rulecode_spec : RuleCode dialect spec (canonical form, forbidden patterns)
+ *   - validate_rulecode  : static validation (forbidden patterns + return shape)
+ *   - replay_rulecode    : sandbox replay against a golden trace
+ *   - submit_rulecode    : final ArtificerRuleOutput submission (terminates loop)
+ *
+ * Why runAgentLoop (not completeSimple):
+ *   The former completeSimple write-test-fix loop required the adapter to
+ *   re-prompt the LLM with sandbox failure feedback. runAgentLoop lets the
+ *   model call validate_rulecode + replay_rulecode itself, inspect the
+ *   violations, and iterate inside a single agent loop — no external retry
+ *   wiring. This matches the Dreamer L2 precedent (L2AgentLoopAdapter).
  *
  * Why the loop lives in the adapter (not in BasePeerRunner.succeedTask):
  *   BasePeerRunner.run() is strictly linear (lease → buildContext → invokeRuntime
  *   → poll → fetch → validate → succeedTask). succeedTask runs AFTER invokeRuntime
  *   returns a terminal output and cannot loop back to invokeRuntime. Encapsulating
- *   the write-test-fix loop inside a PDRuntimeAdapter (like Dreamer's
- *   L2AgentLoopAdapter) keeps BasePeerRunner unchanged — it still sees a single
- *   startRun() that blocks until the loop finishes.
+ *   the agent loop inside a PDRuntimeAdapter keeps BasePeerRunner unchanged — it
+ *   still sees a single startRun() that blocks until the loop finishes.
  *
- * Testability: the LLM call is an injected `generateCode` function (mockable).
- * Sandbox replay uses the real evaluateRefinerRuleHostGate with an injected
- * RefinerRuleHostGateDeps. No real LLM calls in tests.
+ * No V1/L1 fallback (PRI-439):
+ *   Missing/invalid/replay-failing RuleCode fails loud (PDRuntimeError). No
+ *   degradation to a plan-only output, no completeSimple fallback. The loop
+ *   either produces a valid ArtificerRuleOutput via submit_rulecode, or throws.
  *
- * ERR considerations (EP-05 Loop State Freshness):
- *   - Each attempt reads FRESH sandbox errors. The feedback string injected into
- *     attempt N+1 is built from attempt N's RefinerSandboxFailedCase[], never
- *     from a stale earlier attempt. (ERR-015/018/019)
- *   - The recorded output is always from the attempt that produced it, not a
- *     blend of multiple attempts.
+ * ERR considerations:
+ *   - EP-05 Loop State Freshness: each runAgentLoop call uses a fresh
+ *     outputCapture + turnCount (never stale loop state across runs).
+ *   - EP-03 Fail Loud: exhaustion throws PDRuntimeError with a structured
+ *     nextAction (Runtime Contract Rule 9).
+ *   - EP-01 Trust Boundary: submit_rulecode validates params via the injected
+ *     ArtificerValidator before storing (Runtime Contract Rule 1/2).
  */
 import { randomUUID } from 'node:crypto';
-import { completeSimple } from '@earendil-works/pi-ai';
-import type { Context } from '@earendil-works/pi-ai';
+import { runAgentLoop } from '@earendil-works/pi-agent-core';
+import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
+import type { Message } from '@earendil-works/pi-ai';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -43,95 +51,39 @@ import type {
   RuntimeArtifactRef,
   ContextItem,
 } from '../runtime-protocol.js';
-import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../internalization/refiner-rulehost-gate.js';
-import { evaluateRefinerRuleHostGate } from '../internalization/refiner-rulehost-gate.js';
-import type { RefinerSandboxFailedCase } from '../internalization/refiner-sandbox-wrapper.js';
-import type { ArtificerValidator, ArtificerOutputV1, ArtificerOutputV2 } from '../internalization/artificer-output.js';
-import { isArtificerOutputV2 } from '../internalization/artificer-output.js';
-import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
+import type { RefinerRuleHostGateDeps } from '../internalization/refiner-rulehost-gate.js';
+import type { ArtificerValidator } from '../internalization/artificer-output.js';
 import { PDRuntimeError } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
 import { resolveL2Model } from './l2-agent-loop-adapter.js';
-import { extractJsonObject } from './json-extractor.js';
-
-/**
- * Mockable LLM call. Receives the assembled prompt (initial prompt + optional
- * sandbox failure feedback) and returns an UNTRUSTED candidate output. The
- * caller (adapter) validates it before use — never trust the shape here.
- */
-export type ArtificerL2GenerateCodeFn = (prompt: string) => Promise<unknown>;
-
-/**
- * Factory: build a production `generateCode` function from LLM config.
- *
- * Uses `resolveL2Model` + `completeSimple` from @earendil-works/pi-ai. The
- * returned function takes a prompt string, calls the LLM, extracts text content,
- * parses JSON, and returns it as `unknown` (the adapter validates it).
- *
- * This factory lives in principles-core (not pd-cli) so the LLM wiring logic
- * stays in one place and pd-cli doesn't need a direct @earendil-works/pi-ai
- * dependency.
- *
- * ERR refs:
- *   - ERR-001: returned value is `unknown` — caller must validate
- *   - ERR-014: response content is safely extracted (no raw JSON.stringify on unknown)
- */
-
-export function buildArtificerL2GenerateCode(config: {
-  readonly provider: string;
-  readonly model: string;
-  readonly apiKey: string;
-  readonly baseUrl?: string;
-  readonly timeoutMs?: number;
-}): ArtificerL2GenerateCodeFn {
-  const model = resolveL2Model(config.provider, config.model, config.baseUrl);
-  const timeoutMs = config.timeoutMs ?? 120_000;
-
-  return async (prompt: string): Promise<unknown> => {
-    const context: Context = {
-      messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
-    };
-    const response = await completeSimple(model, context, {
-      apiKey: config.apiKey,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    // Extract text content from the response (ERR-014: safe extraction).
-    let text: string | null = null;
-    if (typeof response.content === 'string') {
-      text = response.content;
-    } else if (Array.isArray(response.content)) {
-      const textPart = response.content.find(
-        (c): c is { type: 'text'; text: string } =>
-          typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text',
-      );
-      text = textPart?.text ?? null;
-    }
-    if (!text) {
-      throw new Error('ArtificerL2 generateCode: response had no text content');
-    }
-
-    // Parse JSON from the text. The adapter validates the shape — we just
-    // return the parsed value as unknown.
-    const extracted = extractJsonObject(text);
-    if (!extracted) {
-      throw new Error('ArtificerL2 generateCode: response had no parseable JSON');
-    }
-    return extracted;
-  };
-}
+import {
+  buildArtificerL2Tools,
+  ARTIFICER_L2_TOOL_WHITELIST,
+  type ArtificerL2ToolContext,
+  type ArtificerL2OutputCapture,
+} from '../tools/artificer-l2-tool-contract.js';
 
 export interface ArtificerL2AdapterConfig {
-  /** Injected LLM call (mockable; production wires completeSimple). */
-  readonly generateCode: ArtificerL2GenerateCodeFn;
+  /** Provider id (e.g. 'openai', 'anthropic'). */
+  readonly provider: string;
+  /** Model id. */
+  readonly model: string;
+  /** Env var name holding the API key. */
+  readonly apiKeyEnv: string;
+  /** Optional custom base URL (OpenAI-compatible endpoints). */
+  readonly baseUrl?: string;
   /** Sandbox replay deps (real or test double). */
   readonly gateDeps: RefinerRuleHostGateDeps;
-  /** Artificer output validator (V1/V2 accepting). */
+  /** Artificer output validator (used by submit_rulecode). */
   readonly validator: ArtificerValidator;
-  /** Max write-test-fix attempts (default 3). */
-  readonly maxAttempts?: number;
+  /** Max agent-loop turns before forced stop (default 8). */
+  readonly maxTurns?: number;
+  /** Total wall-clock budget for the whole loop in ms (default 300_000). */
+  readonly totalBudgetMs?: number;
+  /** Max output tokens per LLM call (default 8192). */
+  readonly maxTokens?: number;
   /** Optional event emitter; defaults to the shared singleton. */
   readonly eventEmitter?: StoreEventEmitter;
 }
@@ -140,73 +92,29 @@ interface ArtificerL2RunState {
   readonly runId: string;
   readonly startedAt: string;
   endedAt: string;
-  status: 'succeeded' | 'failed';
+  status: 'succeeded' | 'failed' | 'timed_out';
   output: StructuredRunOutput | null;
   reason?: string;
 }
 
-const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_MAX_TURNS = 8;
+const DEFAULT_TOTAL_BUDGET_MS = 300_000;
+const DEFAULT_MAX_TOKENS = 8192;
 const MAX_RETAINED_RUNS = 100;
 
-/** Build the feedback string injected into the next LLM attempt. */
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
-
-/**
- * Ensure the candidate carries the expected taskId (LLM may echo a stale or
- * example id). Only fills when absent via Object.hasOwn — present-but-wrong
- * values reach the validator and fail loud (Runtime Contract Rule 3).
- */
-function injectTaskId(candidate: unknown, taskId: string): unknown {
-  if (isRecord(candidate) && !Object.hasOwn(candidate, 'taskId')) {
-    candidate.taskId = taskId;
-  }
-  return candidate;
-}
-
-function formatSandboxFeedback(failedCases: RefinerSandboxFailedCase[]): string {
-  const lines = failedCases.map(
-    (c) => `- caseId: ${c.caseId} | errorType: ${c.errorType} | message: ${c.message}`,
-  );
-  return [
-    '--- Previous sandbox replay failures (fix these) ---',
-    ...lines,
-    '--- end failures ---',
-  ].join('\n');
-}
-
-/**
- * Strip the V2 code fields from an output, producing a V1-compatible object
- * (plan + lineage only). Used on L2 exhaustion so the principle-artifact path
- * still works. Returns a fresh object; does not mutate the input.
- */
-function degradeToV1(v2: ArtificerOutputV2): ArtificerOutputV1 {
-  const { implementationCode: _code, goldenTraceCases: _cases, affectedTools: _tools, ...v1 } = v2;
-  void _code;
-  void _cases;
-  void _tools;
-  return v1;
-}
-
 export class ArtificerL2Adapter implements PDRuntimeAdapter {
-  private readonly config: Required<Omit<ArtificerL2AdapterConfig, 'generateCode' | 'gateDeps' | 'validator' | 'eventEmitter'>>;
-  private readonly generateCode: ArtificerL2GenerateCodeFn;
+  private readonly config: ArtificerL2AdapterConfig;
   private readonly gateDeps: RefinerRuleHostGateDeps;
   private readonly validator: ArtificerValidator;
   private readonly eventEmitter: StoreEventEmitter;
   private readonly runs = new Map<string, ArtificerL2RunState>();
+  private readonly abortControllers = new Map<string, AbortController>();
 
   constructor(config: ArtificerL2AdapterConfig) {
-    const maxAttempts = config.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-    if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
-      throw new RangeError('maxAttempts must be a positive integer');
-    }
-    this.generateCode = config.generateCode;
+    this.config = config;
     this.gateDeps = config.gateDeps;
     this.validator = config.validator;
     this.eventEmitter = config.eventEmitter ?? storeEmitter;
-    this.config = { maxAttempts };
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- required by interface
@@ -218,7 +126,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   async getCapabilities(): Promise<RuntimeCapabilities> {
     return {
       supportsStructuredJsonOutput: true,
-      supportsToolUse: false,
+      supportsToolUse: true,
       supportsWorkingDirectory: false,
       supportsModelSelection: true,
       supportsLongRunningSessions: false,
@@ -233,24 +141,37 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     return this.getCapabilities();
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- required by interface
   async healthCheck(): Promise<RuntimeHealth> {
+    const lastCheckedAt = new Date().toISOString();
+    const apiKey = process.env[this.config.apiKeyEnv];
+    if (!apiKey) {
+      return {
+        healthy: false,
+        degraded: false,
+        warnings: [`API key not found in env: ${this.config.apiKeyEnv}`],
+        lastCheckedAt,
+      };
+    }
     return {
       healthy: true,
       degraded: false,
       warnings: [],
-      lastCheckedAt: new Date().toISOString(),
+      lastCheckedAt,
     };
   }
 
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
-    const taskId = input.taskRef?.taskId ?? runId;
-    const initialPrompt = typeof input.inputPayload === 'string'
-      ? truncatePreview(input.inputPayload, 50_000)
-      : safeStringifyPreview(input.inputPayload, 50_000);
+    const apiKey = process.env[this.config.apiKeyEnv];
+    if (!apiKey) {
+      throw new PDRuntimeError(
+        'runtime_unavailable',
+        `API key not found in env: ${this.config.apiKeyEnv}`,
+      );
+    }
 
+    const taskId = input.taskRef?.taskId ?? runId;
     const runState: ArtificerL2RunState = {
       runId,
       startedAt,
@@ -261,105 +182,159 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     this.runs.set(runId, runState);
     this.evictOldRuns();
 
-    let lastValidV2: ArtificerOutputV2 | null = null;
-    let lastFailureFeedback: string | null = null;
+    const totalBudgetMs = this.config.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS;
+    const maxTurns = this.config.maxTurns ?? DEFAULT_MAX_TURNS;
+    const maxTokens = this.config.maxTokens ?? DEFAULT_MAX_TOKENS;
 
-    for (let attempt = 1; attempt <= this.config.maxAttempts; attempt += 1) {
-      // Build prompt: initial + (on retry) the IMMEDIATELY-PRIOR attempt's failure feedback.
-      // EP-05: lastFailureFeedback is reassigned each iteration from the current attempt's
-      // sandbox result, so attempt N+1 always sees attempt N's errors, never stale ones.
-      const prompt = lastFailureFeedback === null
-        ? initialPrompt
-        : `${initialPrompt}\n\n${lastFailureFeedback}`;
+    const abortController = new AbortController();
+    this.abortControllers.set(runId, abortController);
+    // Track whether the budget timer fired (vs. cancelRun calling abort).
+    // Without this flag, cancelRun() is misidentified as a timeout because
+    // both paths set abortController.signal.aborted to true.
+    let budgetTimedOut = false;
+    const budgetTimer = setTimeout(() => { budgetTimedOut = true; abortController.abort(); }, totalBudgetMs);
 
-      let candidateRaw: unknown;
-      try {
-        candidateRaw = await this.generateCode(prompt);
-      } catch (err) {
-        // LLM call threw — record and continue to next attempt (or degrade).
-        const llmError = err instanceof Error ? err.message : String(err);
-        lastFailureFeedback = `--- LLM call failed ---\n${llmError}`;
-        this.emitAttempt({ taskId, runId, attempt, decision: 'llm_error' });
-        continue;
-      }
-
-      // Validate the candidate. taskId is injected for lineage consistency.
-      const candidateWithTaskId = injectTaskId(candidateRaw, taskId);
-      const validation = await this.validator.validate(candidateWithTaskId, taskId);
-      if (!validation.valid) {
-        // Malformed output (e.g. missing affectedTools). Feed the validator errors back.
-        // P2 fix: do NOT update lastValidV2 here — degradation must only trust candidates
-        // that PASSED validation, otherwise we'd emit an unvalidated V1 downstream.
-        lastFailureFeedback = `--- Validator rejected previous output ---\n${validation.errors.join('\n')}`;
-        this.emitAttempt({ taskId, runId, attempt, decision: 'validator_rejected' });
-        continue;
-      }
-
-      // This adapter is the executable RuleHost path. A valid V1 plan is not a
-      // successful L2 result because it cannot be activated by RuleHost. Give
-      // the model a bounded repair opportunity instead of silently accepting a
-      // text-only artifact as if code generation had succeeded.
-      if (!isArtificerOutputV2(candidateWithTaskId)) {
-        lastFailureFeedback = '--- Executable RuleCode required ---\nThe previous output was a text-only V1 plan. Include implementationCode, goldenTraceCases, and affectedTools exactly as required by the output contract.';
-        this.emitAttempt({ taskId, runId, attempt, decision: 'validator_rejected' });
-        continue;
-      }
-
-      const v2 = candidateWithTaskId;
-      lastValidV2 = v2;
-
-      // Build the GoldenTrace for sandbox replay.
-      const traceResult = buildGoldenTraceFromArtificer({
-        cases: v2.goldenTraceCases,
-        sourceArtifactId: undefined,
-      });
-      if (!traceResult.ok) {
-        lastFailureFeedback = `--- Golden trace build failed ---\n${traceResult.reason}`;
-        this.emitAttempt({ taskId, runId, attempt, decision: 'trace_build_failed' });
-        continue;
-      }
-
-      // Sandbox replay.
-      const gateResult: RefinerRuleHostGateResult = evaluateRefinerRuleHostGate(
-        { code: v2.implementationCode, goldenTrace: traceResult.trace },
-        this.gateDeps,
+    // Build the prompt message. Serialized before the try block so a
+    // non-serializable inputPayload fails loud with cleanup (no timer leak).
+    let messageContent: string;
+    try {
+      messageContent = typeof input.inputPayload === 'string'
+        ? truncatePreview(input.inputPayload, 50_000)
+        : safeStringifyPreview(input.inputPayload, 50_000);
+    } catch (err) {
+      clearTimeout(budgetTimer);
+      this.abortControllers.delete(runId);
+      const reason = err instanceof Error ? err.message : String(err);
+      runState.status = 'failed';
+      runState.reason = `inputPayload not serializable: ${reason}`;
+      runState.endedAt = new Date().toISOString();
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Artificer L2 inputPayload is not serializable: ${reason}`,
+        { nextAction: 'ensure StartRunInput.inputPayload is a string or JSON-serializable object' },
       );
-
-      if (gateResult.decision === 'accepted_shadow') {
-        // Success — store the V2 output.
-        this.emitAttempt({ taskId, runId, attempt, decision: 'replay_passed' });
-        this.emitComplete({ taskId, runId, attempts: attempt, degraded: false, succeeded: true });
-        this.completeRun(runId, 'succeeded', v2);
-        return this.runHandle(runId, startedAt);
-      }
-
-      // Replay failed — capture THIS attempt's failures for the next prompt (EP-05).
-      const { failedCases } = gateResult.sandboxResult;
-      lastFailureFeedback = failedCases.length > 0
-        ? formatSandboxFeedback(failedCases)
-        : `--- Sandbox replay failed ---\n${gateResult.decision}: ${gateResult.reasons.join('; ')}`;
-      this.emitAttempt({ taskId, runId, attempt, decision: 'replay_failed' });
     }
 
-    // Exhaustion: degrade to V1 if we ever saw a VALIDATED V2 candidate, else fail.
-    if (lastValidV2) {
-      const v1 = degradeToV1(lastValidV2);
-      this.emitComplete({ taskId, runId, attempts: this.config.maxAttempts, degraded: true, succeeded: false });
-      this.completeRun(runId, 'succeeded', v1);
+    const toolInstruction =
+      '\n\n--- Tool protocol (Artificer L2 mode, PRI-439) ---\n' +
+      'You have 4 tools to write and verify RuleCode:\n' +
+      '  - read_rulecode_spec: read the RuleCode dialect spec (canonical form, forbidden patterns, return shape). Call FIRST.\n' +
+      '  - validate_rulecode: statically validate a code string (forbidden patterns + return shape). Call after drafting code.\n' +
+      '  - replay_rulecode: sandbox-replay code against a golden trace. Call after validate passes.\n' +
+      '  - submit_rulecode: submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object; the loop stops after you call it.\n' +
+      'Do not emit your final answer as free text — call submit_rulecode.';
+
+    const prompts: AgentMessage[] = [
+      { role: 'user', content: messageContent + toolInstruction, timestamp: Date.now() },
+    ];
+
+    // Fresh capture + turn counter per run (EP-05 loop-state freshness).
+    const outputCapture: ArtificerL2OutputCapture = { output: null };
+    let turnCount = 0;
+    const toolsInvoked: Record<string, number> = {};
+
+    const toolContext: ArtificerL2ToolContext = {
+      gateDeps: this.gateDeps,
+      validator: this.validator,
+      taskId,
+      outputCapture,
+      onToolExecution: (info) => {
+        toolsInvoked[info.toolName] = (toolsInvoked[info.toolName] ?? 0) + 1;
+        this.eventEmitter.emitTelemetry({
+          eventType: 'artificer_l2_turn',
+          traceId: taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'l2-adapter',
+          agentId: 'artificer-l2',
+          payload: { runId, toolName: info.toolName, ok: info.ok, error: info.error, turn: turnCount },
+        });
+      },
+    };
+
+    const tools = buildArtificerL2Tools(toolContext);
+    const agentContext = {
+      systemPrompt: '',
+      messages: prompts,
+      tools,
+    };
+
+    const loopConfig: AgentLoopConfig = {
+      model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
+      apiKey,
+      maxTokens,
+      convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
+        if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
+          return m as Message;
+        }
+        throw new PDRuntimeError('output_invalid', `Artificer L2 convertToLlm encountered an unsupported message role: ${String((m as { role?: string }).role)}`);
+      }),
+      beforeToolCall: async (ctx) => {
+        if (!ARTIFICER_L2_TOOL_WHITELIST.has(ctx.toolCall.name)) {
+          return { block: true, reason: `tool '${ctx.toolCall.name}' is not in the Artificer L2 whitelist` };
+        }
+        return undefined;
+      },
+      shouldStopAfterTurn: () => {
+        turnCount += 1;
+        return outputCapture.output !== null || turnCount >= maxTurns;
+      },
+    };
+
+    this.eventEmitter.emitTelemetry({
+      eventType: 'artificer_l2_turn',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'l2-adapter',
+      agentId: 'artificer-l2',
+      payload: { runId, phase: 'loop_started', maxTurns, totalBudgetMs, maxTokens },
+    });
+
+    let timedOut = false;
+    let loopError: string | null = null;
+    try {
+      await runAgentLoop(
+        prompts,
+        agentContext,
+        loopConfig,
+        async (event: AgentEvent) => { void event; },
+        abortController.signal,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      timedOut = budgetTimedOut;
+      loopError = reason;
+    }
+
+    clearTimeout(budgetTimer);
+    this.abortControllers.delete(runId);
+
+    // Extract output from the capture (set by submit_rulecode).
+    if (outputCapture.output !== null) {
+      runState.status = 'succeeded';
+      runState.endedAt = new Date().toISOString();
+      runState.output = { runId, payload: outputCapture.output };
+      this.emitComplete({ taskId, runId, turnCount, toolsInvoked, succeeded: true, timedOut: false });
       return this.runHandle(runId, startedAt);
     }
 
-    // No validated candidate ever produced — fail loud (Runtime Contract Rule 9).
-    // Throw PDRuntimeError so BasePeerRunner's handlePostLeaseError handles it
-    // (aligns with Dreamer L2's failure pattern in L2AgentLoopAdapter).
-    runState.status = 'failed';
+    // No output captured — fail loud (Runtime Contract Rule 9, ERR-002).
+    // PRI-439: no V1/L1 fallback. Missing/invalid/replay-failing RuleCode
+    // creates no rule artifact, approval, or activation.
+    const failureReason = loopError !== null
+      ? `Artificer L2 agent loop threw: ${loopError}`
+      : `Artificer L2 agent loop ended without a submit_rulecode call after ${turnCount} turn(s)`;
+    runState.status = timedOut ? 'timed_out' : 'failed';
     runState.endedAt = new Date().toISOString();
-    runState.reason = `Artificer L2 exhausted ${this.config.maxAttempts} attempts without a validated candidate`;
-    this.emitComplete({ taskId, runId, attempts: this.config.maxAttempts, degraded: false, succeeded: false });
+    runState.reason = failureReason;
+    this.emitComplete({ taskId, runId, turnCount, toolsInvoked, succeeded: false, timedOut });
     throw new PDRuntimeError(
-      'output_invalid',
-      runState.reason,
-      { nextAction: 'inspect artificer L2 feedback chain; verify LLM produces parseable ArtificerOutputV1/V2' },
+      timedOut ? 'timeout' : 'output_invalid',
+      failureReason,
+      {
+        nextAction: timedOut
+          ? 'increase totalBudgetMs or use a faster model; verify the model supports tool use'
+          : 'inspect artificer L2 telemetry; verify the model calls submit_rulecode with a valid ArtificerRuleOutput',
+      },
     );
   }
 
@@ -378,6 +353,10 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
   }
 
   async cancelRun(runId: string): Promise<void> {
+    const controller = this.abortControllers.get(runId);
+    if (controller) {
+      controller.abort();
+    }
     const state = this.runs.get(runId);
     if (state && state.status !== 'succeeded') {
       state.status = 'failed';
@@ -403,17 +382,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
   // ── internals ──────────────────────────────────────────────────────────────
 
-  private completeRun(runId: string, status: 'succeeded' | 'failed', payload: unknown): void {
-    const state = this.runs.get(runId);
-    if (!state) return;
-    state.status = status;
-    state.endedAt = new Date().toISOString();
-    state.output = { runId, payload };
-  }
-
   private runHandle(runId: string, startedAt: string): RunHandle {
-    // RunHandleSchema = { runId, runtimeKind, startedAt } — no status field.
-    // The run's terminal status is reported via pollRun(), not the handle.
     return {
       runId,
       runtimeKind: this.kind(),
@@ -421,28 +390,13 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     };
   }
 
-  private emitAttempt(opts: {
-    taskId: string;
-    runId: string;
-    attempt: number;
-    decision: string;
-  }): void {
-    this.eventEmitter.emitTelemetry({
-      eventType: 'artificer_l2_attempt',
-      traceId: opts.taskId,
-      timestamp: new Date().toISOString(),
-      sessionId: 'l2-adapter',
-      agentId: 'artificer-l2',
-      payload: { runId: opts.runId, attempt: opts.attempt, decision: opts.decision },
-    });
-  }
-
   private emitComplete(opts: {
     taskId: string;
     runId: string;
-    attempts: number;
-    degraded: boolean;
+    turnCount: number;
+    toolsInvoked: Record<string, number>;
     succeeded: boolean;
+    timedOut: boolean;
   }): void {
     this.eventEmitter.emitTelemetry({
       eventType: 'artificer_l2_complete',
@@ -452,9 +406,11 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       agentId: 'artificer-l2',
       payload: {
         runId: opts.runId,
-        attempts: opts.attempts,
-        degraded: opts.degraded,
+        turnCount: opts.turnCount,
+        toolsInvoked: opts.toolsInvoked,
         succeeded: opts.succeeded,
+        timedOut: opts.timedOut,
+        outputPreview: safeStringifyPreview(this.runs.get(opts.runId)?.output?.payload, 300),
       },
     });
   }
