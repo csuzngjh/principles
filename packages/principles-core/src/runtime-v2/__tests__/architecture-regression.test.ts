@@ -2051,21 +2051,21 @@ describe('PRI-111 ArtificerRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  it('BARREL_EXPORTS: internalization/index.ts exports ArtificerRunner and ArtificerOutput', async () => {
+  it('BARREL_EXPORTS: internalization/index.ts exports ArtificerRunner and ArtificerRuleOutput', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
     expect(src).toContain('ArtificerRunner');
-    expect(src).toContain('ArtificerOutput');
+    expect(src).toContain('ArtificerRuleOutput');
     expect(src).toContain('DefaultArtificerValidator');
   });
 
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers artificer-output-v1 schema', async () => {
+  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers artificer-rule-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
-    expect(src).toContain('artificer-output-v1');
-    expect(src).toContain('ArtificerOutputV1Schema');
+    expect(src).toContain('artificer-rule-output-v1');
+    expect(src).toContain('ArtificerRuleOutputSchema');
   });
 });
 

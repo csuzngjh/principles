@@ -19,6 +19,10 @@ export type {
 export type { RuleHostHelpers } from './rule-host-helpers.js';
 export { createRuleHostHelpers } from './rule-host-helpers.js';
 
+// RuleHost input builder (PRI-439 Phase 3 — pure action snapshot)
+export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './rule-host-input-builder.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';
 export { decideInternalizationRoute } from './internalization-route.js';
@@ -27,9 +31,9 @@ export { decideInternalizationRoute } from './internalization-route.js';
 export type { PainPattern } from './template-generator.js';
 export { generateFromTemplate } from './template-generator.js';
 
-// Code validation (PRI-44)
+// Code validation (PRI-44, PRI-439 Phase 2)
 export type { ValidationResult } from './rule-code-validator.js';
-export { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './rule-code-validator.js';
+export { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from './rule-code-validator.js';
 
 // Compile result (PRI-44)
 export type { CompileResult } from './compile-result.js';
@@ -247,9 +251,7 @@ export {
 // ── Artificer Runner (PRI-111) ────────────────────────────────────────────────
 
 export type {
-  ArtificerOutputV1,
-  ArtificerOutputV2,
-  ArtificerImplementationPlan,
+  ArtificerRuleOutput,
   ArtificerSourceTrace,
   ArtificerValidationResult,
   ArtificerValidator,
@@ -258,10 +260,8 @@ export type {
 
 export {
   DefaultArtificerValidator,
-  ArtificerOutputV1Schema,
-  ArtificerImplementationPlanSchema,
+  ArtificerRuleOutputSchema,
   ArtificerSourceTraceSchema,
-  isArtificerOutputV2,
 } from './artificer-output.js';
 
 export type {
@@ -460,9 +460,9 @@ export type { AdversarialConversionResult } from './adversarial-case.js';
 export { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 export { formatAdversarialFeedback } from './adversarial-feedback.js';
 
-// ── Artificer L2 Adapter (PRI-424) ─────────────────────────────────────────
+// ── Artificer L2 Adapter (PRI-424 / PRI-439 Phase 4) ───────────────────────
 export { ArtificerL2Adapter } from '../adapter/artificer-l2-adapter.js';
-export type { ArtificerL2AdapterConfig, ArtificerL2GenerateCodeFn } from '../adapter/artificer-l2-adapter.js';
+export type { ArtificerL2AdapterConfig } from '../adapter/artificer-l2-adapter.js';
 
 export {
   ROUTE_CHANNEL_MAP,

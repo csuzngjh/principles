@@ -31,7 +31,6 @@ import { createSandboxGateDeps } from '../services/rulehost-pipeline-runner.js';
 import {
   PiAiRuntimeAdapter,
   ArtificerL2Adapter,
-  buildArtificerL2GenerateCode,
   DefaultArtificerValidator,
   resolveAgentRuntimeBinding,
   computeFeatureFlagsFromConfig,
@@ -184,18 +183,14 @@ function resolveRunRuleHostRuntime(
   agentRuntimeProfiles.artificer = artificerBinding.profileId;
   agentRuntimeProfiles.evaluator = evaluator.profileId;
 
-  const generateCode = buildArtificerL2GenerateCode({
+  const artificerAdapter = new ArtificerL2Adapter({
     provider: artificerProfile.provider,
     model: artificerProfile.model,
-    apiKey,
+    apiKeyEnv: artificerProfile.apiKeyEnv,
     baseUrl: artificerProfile.baseUrl,
-    timeoutMs,
-  });
-
-  const artificerAdapter = new ArtificerL2Adapter({
-    generateCode,
     gateDeps: createSandboxGateDeps(),
     validator: new DefaultArtificerValidator(),
+    totalBudgetMs: timeoutMs,
   });
 
   return {
