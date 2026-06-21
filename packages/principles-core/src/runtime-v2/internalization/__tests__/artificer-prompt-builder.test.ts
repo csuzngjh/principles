@@ -52,8 +52,9 @@ describe('ArtificerPromptBuilder', () => {
     expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v1');
   });
 
-  it('confidence instruction says number not string/percentage', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('NOT a string, NOT a percentage');
+  it('instruction requires implementationSummary as a non-empty string', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('implementationSummary MUST be a non-empty string');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"implementationPlan"');
   });
 
   it('message is valid JSON containing promptInput', () => {
