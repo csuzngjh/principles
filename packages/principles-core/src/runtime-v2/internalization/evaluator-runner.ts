@@ -62,7 +62,7 @@ interface EvaluatorContext {
    * Scribe principle artifact contentJson (RuleHost MVP Activation, PRD Decision 12).
    * Loaded so the evaluator LLM can judge code intentConsistency/scopePrecision
    * against the original principle text. Null when no scribe artifact is resolvable
-   * (V1 artificer output, or scribeArtifactId missing/malformed).
+   * (scribeArtifactId missing/malformed or upstream artifact unavailable).
    */
   readonly scribeArtifact: string | null;
   readonly sourceScribeArtifactId: string | null;

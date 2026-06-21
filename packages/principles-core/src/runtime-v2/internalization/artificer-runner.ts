@@ -22,7 +22,7 @@
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
  *   2. resolve Scribe dependency from dependencyTaskIds
  *   3. fetch Scribe artifact via PIArtifactStore
- *   4. startRun with outputSchemaRef: 'artificer-rule-output-v1'
+ *   4. startRun with outputSchemaRef: 'artificer-rule-output-v2'
  *   5. pollUntilTerminal (inherited)
  *   6. fetchOutput → validate as unknown → cast to ArtificerRuleOutput
  *   7. checkLineageIntegrity (sourceScribeArtifactId consistency, ERR-008)
@@ -228,7 +228,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'artificer-rule-output-v1',
+      outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,
     });
   }

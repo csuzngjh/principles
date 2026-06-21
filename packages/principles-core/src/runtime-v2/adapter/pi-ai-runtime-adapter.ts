@@ -333,7 +333,7 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['dreamer-output-v1', DreamerOutputV1Schema],
   ['philosopher-output-v1', PhilosopherOutputV1Schema],
   ['scribe-output-v1', ScribeOutputV1Schema],
-  ['artificer-rule-output-v1', ArtificerRuleOutputSchema],
+  ['artificer-rule-output-v2', ArtificerRuleOutputSchema],
   ['evaluator-output-v1', EvaluatorOutputV1Schema],
   ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
   ['trainer-output-v1', TrainerOutputV1Schema],
