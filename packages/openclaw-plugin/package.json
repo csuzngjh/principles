@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "1.73.0",
+  "version": "1.74.1",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",
   "main": "./dist/bundle.js",
@@ -76,7 +76,7 @@
     }
   },
   "dependencies": {
-    "@principles/core": "^1.73.0",
+    "@principles/core": "^1.74.1",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
