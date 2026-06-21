@@ -579,6 +579,7 @@ export class PrincipleTrajectoryModel {
     }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
     // Connection is opened and closed per-request in getTrajectory; no persistent state.
   }

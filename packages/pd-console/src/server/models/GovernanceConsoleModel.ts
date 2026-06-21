@@ -361,7 +361,7 @@ export class GovernanceConsoleModel {
           try {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
-            const row = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString()) as { c: number } | undefined;
+            const row: unknown = trajDb.prepare('SELECT COUNT(*) as c FROM gate_blocks WHERE created_at >= ?').get(todayStart.toISOString());
             if (isRecord(row) && Object.hasOwn(row, 'c') && typeof row.c === 'number') {
               gateBlocksToday = row.c;
             }
@@ -416,6 +416,7 @@ export class GovernanceConsoleModel {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
     // Connections are opened and closed per-request; no persistent state.
   }

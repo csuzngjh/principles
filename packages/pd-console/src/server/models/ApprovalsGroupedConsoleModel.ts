@@ -203,7 +203,9 @@ export class ApprovalsGroupedConsoleModel {
           artifactId: approval.artifactId,
           channel: approval.channel,
           createdAt: approval.requestedAt,
-          status: approval.status as 'pending' | 'approved' | 'rejected',
+          status: approval.status === 'approved' || approval.status === 'rejected'
+            ? approval.status
+            : 'pending',
         });
       }
 
@@ -243,6 +245,7 @@ export class ApprovalsGroupedConsoleModel {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
     // Connections are opened and closed per-request; no persistent state.
   }

@@ -120,6 +120,7 @@ export class ActivationsConsoleModel {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
     // Connections are opened and closed per-request; no persistent state.
   }
