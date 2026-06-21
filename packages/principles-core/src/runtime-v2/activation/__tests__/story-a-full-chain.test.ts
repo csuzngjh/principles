@@ -67,6 +67,7 @@ import {
 import type {
   PIArtifactSnapshot,
 } from '../activation-types.js';
+import type { Database } from 'better-sqlite3';
 
 // ── Test workspace setup ────────────────────────────────────────────────────
 
@@ -192,6 +193,70 @@ function toArtifactRow(artifact: {
     content_json: artifact.contentJson,
     validation_status: artifact.validationStatus,
   };
+}
+
+// ── DB snapshot helpers (MVP Quality Task 18) ───────────────────────────────
+// Capture raw SQLite table state for golden-file comparison. Strips
+// non-deterministic timestamps and UUIDs but PRESERVES lineage fields
+// (source_task_id, source_principle_id, source_rule_id, previous_artifact_id,
+// lineage_artifact_ids) so ERR-004/008/015 (lineage inconsistency, stale loop
+// state) surface as snapshot diffs.
+
+interface DbSnapshot {
+  [tableName: string]: Record<string, unknown>[];
+}
+
+const TIMESTAMP_FIELDS = new Set([
+  'created_at', 'updated_at', 'createdAt', 'updatedAt',
+  'activated_at', 'deactivated_at', 'decided_at', 'requested_at', 'edited_at',
+]);
+
+const LINEAGE_FIELDS = new Set([
+  'source_task_id', 'source_principle_id', 'source_rule_id',
+  'previous_artifact_id', 'lineage_artifact_ids',
+]);
+
+const ID_FIELDS = new Set([
+  'activation_id', 'artifact_id', 'approval_id', 'idempotency_key', 'run_id',
+]);
+
+const UUID_PREFIX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}/;
+
+const TABLE_ORDER_BY: Record<string, string> = {
+  activations: 'activated_at, activation_id',
+  approvals: 'approval_id',
+  pi_artifacts: 'artifact_id',
+};
+
+function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (TIMESTAMP_FIELDS.has(key) && typeof value === 'string') {
+      // Only strip actual timestamp strings; preserve null (e.g. deactivated_at
+      // before rollback) so the snapshot distinguishes "not set" from "set".
+      out[key] = '<TIMESTAMP>';
+    } else if (LINEAGE_FIELDS.has(key)) {
+      // Preserve lineage fields as-is (ERR-004/008/015 consistency check)
+      out[key] = value;
+    } else if (ID_FIELDS.has(key) && typeof value === 'string' && UUID_PREFIX_RE.test(value)) {
+      out[key] = '<UUID>';
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function snapshotDb(db: Database, tables: readonly string[]): DbSnapshot {
+  const result: DbSnapshot = {};
+  for (const table of tables) {
+    const order = TABLE_ORDER_BY[table] ?? 'rowid';
+    const rows = db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
+    result[table] = (Array.isArray(rows) ? rows : []).map((row) =>
+      normalizeRow(row as Record<string, unknown>),
+    );
+  }
+  return result;
 }
 
 // ── Full-Chain Tests ────────────────────────────────────────────────────────
@@ -336,6 +401,33 @@ describe('Story A full-chain happy-path (MVP Quality Task 10)', () => {
       expect(directiveText).toContain(PRINCIPLE_ID);
       expect(directiveText).toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
       expect(directiveText).toContain('MANDATORY');
+
+      // ── DB state snapshot (MVP Quality Task 18) ──
+      // Verify database state matches a golden snapshot. Strips timestamps/UUIDs
+      // but preserves lineage fields to catch ERR-004/008/015 (lineage
+      // inconsistency, stale loop state). Snapshot is taken AFTER activation
+      // and BEFORE rollback so the golden file reflects the active state.
+      const db = ws.connection.getDb();
+      const dbSnapshot = snapshotDb(db, ['activations', 'approvals', 'pi_artifacts']);
+      await expect(dbSnapshot).toMatchFileSnapshot(
+        './__snapshots__/story-a-full-chain-after-activation.db.json',
+      );
+
+      // Lineage consistency (ERR-004/008): pi_artifacts.source_task_id must
+      // trace back to the original pain task. The activation and approval
+      // records must reference the same artifact_id (cross-table lineage).
+      for (const row of dbSnapshot.pi_artifacts ?? []) {
+        if (row.artifact_id === principleArtifact.artifactId) {
+          expect(row.source_task_id).toBe(principleArtifact.sourceTaskId);
+          expect(row.source_principle_id).toBe(principleArtifact.sourcePrincipleId);
+        }
+      }
+      for (const row of dbSnapshot.activations ?? []) {
+        expect(row.artifact_id).toBe(principleArtifact.artifactId);
+      }
+      for (const row of dbSnapshot.approvals ?? []) {
+        expect(row.artifact_id).toBe(principleArtifact.artifactId);
+      }
 
       // ── Step 6: Owner rollback → behavior restored ──
       // The owner deactivates the activation. After rollback, listPromptActivations
