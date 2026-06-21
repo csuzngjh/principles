@@ -79,8 +79,8 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
  * callers treat null as "code review degraded (no principle text)".
  *
  * Looks in two locations:
- *   1. top-level sourceTrace.scribeArtifactId (ArtificerOutputV1/V2 contract)
- *   2. top-level sourceScribeArtifactId (ArtificerOutputV1/V2 contract)
+ *   1. top-level sourceTrace.scribeArtifactId (ArtificerRuleOutput contract)
+ *   2. top-level sourceScribeArtifactId (ArtificerRuleOutput contract)
  */
 function extractScribeArtifactId(artificerContentJson: string): string | null {
   let parsed: unknown;

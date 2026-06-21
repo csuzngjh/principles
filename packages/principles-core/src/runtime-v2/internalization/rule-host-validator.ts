@@ -96,6 +96,25 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     errors.push(`matched must be a boolean, got ${typeof value.matched}`);
   }
 
+  // PRI-439 Phase 2: when matched=false, decision must be 'allow'.
+  // A `matched=false, decision='block'` result is contradictory —
+  // "the rule did not match, but I want to block" makes no sense.
+  // This is checked AFTER both matched and decision are individually validated
+  // so we only run the cross-field check when both fields are present and valid.
+  if (
+    Object.hasOwn(value, 'matched') &&
+    typeof value.matched === 'boolean' &&
+    value.matched === false &&
+    Object.hasOwn(value, 'decision') &&
+    typeof value.decision === 'string' &&
+    VALID_DECISIONS.has(value.decision as RuleHostDecision) &&
+    value.decision !== 'allow'
+  ) {
+    errors.push(
+      `matched=false requires decision 'allow', got '${value.decision}'`,
+    );
+  }
+
   // reason — required, must be string
   if (!Object.hasOwn(value, 'reason')) {
     errors.push('reason is required');

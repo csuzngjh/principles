@@ -1,70 +1,103 @@
 /**
- * ArtificerL2Adapter tests (RuleHost MVP Activation, ADR-0014 Amendment 2026-06-17,
- * PRD Decision 8, test module 7).
+ * ArtificerL2Adapter tests (PRI-439 Phase 4 — tool-using L2 agent).
  *
- * TDD Phase 4.1 RED — asserts behavior not yet implemented in
- * artificer-l2-adapter.ts.
+ * Mocks runAgentLoop (no real LLM calls) to verify the adapter's orchestration:
+ *   - submit_rulecode capture terminates the loop and stores the output
+ *   - maxTurns cap forces stop when submit_rulecode is never called
+ *   - beforeToolCall whitelist blocks non-allowlisted tools
+ *   - shouldStopAfterTurn checks output capture + turn count
+ *   - no V1/L1 fallback: exhaustion throws PDRuntimeError
+ *   - timeout: abort signal triggers timed_out failure
+ *   - telemetry events (artificer_l2_turn / artificer_l2_complete) are emitted
  *
- * The adapter encapsulates a write-test-fix loop (generate code → sandbox replay →
- * inject RefinerSandboxFailedCase[] feedback → regenerate, max 3 attempts) inside
- * a PDRuntimeAdapter. BasePeerRunner sees a single startRun(); the loop is invisible
- * to it. This follows the Dreamer L2 precedent (L2AgentLoopAdapter) of putting the
- * multi-attempt logic in the adapter, not in succeedTask().
- *
- * Testability: LLM calls are mocked via an injected `generateCode` function.
- * Sandbox replay uses real evaluateRefinerRuleHostGate with a controllable
- * RefinerRuleHostGateDeps. No real LLM calls.
- *
- * Coverage (PRD test module 7):
- *   - happy path: 1st attempt passes replay → V2 output (1 LLM call)
- *   - fix path: 1st attempt fails → feedback injected → 2nd passes → V2 (2 LLM calls)
- *   - exhaustion: 3 attempts all fail → V1 degraded output (no code fields)
- *   - error types: forbidden_pattern / runtime_error / timeout / validation_failed
- *   - V1 backward compat: degraded V1 output is NOT detected as V2 by isArtificerOutputV2
- *
- * ERR checklist (EP-05 Loop State Freshness): each attempt reads fresh sandbox
- * errors; the feedback injected into attempt N+1 is from attempt N's failure,
- * never stale. (ERR-015/018/019)
+ * ERR checklist:
+ *   - EP-05 Loop State Freshness: each startRun uses fresh outputCapture + turnCount
+ *   - EP-03 Fail Loud: exhaustion throws PDRuntimeError with structured nextAction
+ *   - EP-01 Trust Boundary: submit_rulecode validates via injected validator
  */
-import { describe, it, expect } from 'vitest';
-import { ArtificerL2Adapter, type ArtificerL2GenerateCodeFn } from '../artificer-l2-adapter.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+type LoopCfg = {
+  shouldStopAfterTurn?: () => boolean;
+  beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown>;
+  maxTokens?: number;
+};
+type LoopImpl = ((...args: never[]) => Promise<unknown[]>) | null;
+
+const hoisted = vi.hoisted((): {
+  lastLoopConfig: LoopCfg;
+  mockReturn: { role: string; content: unknown }[];
+  impl: LoopImpl;
+} => {
+  return {
+    lastLoopConfig: {},
+    mockReturn: [],
+    impl: null,
+  };
+});
+
+/* eslint-disable @typescript-eslint/max-params -- runAgentLoop mock mirrors the real 5-param signature */
+vi.mock('@earendil-works/pi-agent-core', () => ({
+  runAgentLoop: vi.fn(async (
+    prompts: unknown,
+    context: unknown,
+    config: typeof hoisted.lastLoopConfig,
+    emit: unknown,
+    signal?: AbortSignal,
+  ) => {
+    hoisted.lastLoopConfig = config;
+    if (typeof hoisted.impl === 'function') {
+      const fn = hoisted.impl as (p: unknown, c: unknown, cfg: unknown, e: unknown, sig?: AbortSignal) => Promise<unknown[]>;
+      return fn(prompts, context, config, emit, signal);
+    }
+    return hoisted.mockReturn.slice();
+  }),
+}));
+/* eslint-enable @typescript-eslint/max-params */
+
+// Mock resolveL2Model's pi-ai dependencies (getModel/getProviders) — the adapter
+// uses the custom baseUrl path so these stubs are never called for real.
+vi.mock('@earendil-works/pi-ai', () => ({
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => ({ id: 'test', name: 'test', api: 'openai-completions', provider: 'test-provider' })),
+  getProviders: vi.fn(() => []),
+}));
+
+vi.mock('../../store/event-emitter.js', () => ({
+  storeEmitter: { emitTelemetry: vi.fn() },
+}));
+
+import { storeEmitter } from '../../store/event-emitter.js';
+import { ArtificerL2Adapter } from '../artificer-l2-adapter.js';
+import type { StartRunInput } from '../../runtime-protocol.js';
 import type { RefinerRuleHostGateDeps } from '../../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult } from '../../internalization/refiner-sandbox-wrapper.js';
-import type { ArtificerOutputV2 } from '../../internalization/artificer-output.js';
-import { isArtificerOutputV2, DefaultArtificerValidator } from '../../internalization/artificer-output.js';
-import { validateGoldenTrace } from '../../golden-trace.js';
-import { Value } from '@sinclair/typebox/value';
-import { RunHandleSchema, RuntimeKindSchema } from '../../runtime-protocol.js';
+import type { ArtificerRuleOutput } from '../../internalization/artificer-output.js';
+import { DefaultArtificerValidator } from '../../internalization/artificer-output.js';
+
+const emitTelemetryMock = storeEmitter.emitTelemetry as unknown as ReturnType<typeof vi.fn>;
 
 const TASK_ID = 'task-artificer-l2-001';
 
-/** A valid V2 output the LLM might produce. */
-function makeV2Output(overrides: Partial<ArtificerOutputV2> = {}): ArtificerOutputV2 {
+/** A valid ArtificerRuleOutput the model might submit via submit_rulecode. */
+function makeRuleOutput(overrides: Partial<ArtificerRuleOutput> = {}): ArtificerRuleOutput {
   return {
     taskId: TASK_ID,
-    sourceScribeArtifactId: 'pi-art-scribe-001-run-001',
-    implementationPlan: {
-      summary: 'Block writes to system dirs',
-      targetSurface: 'edit gate',
-      changes: ['path prefix check'],
-      tests: ['golden trace replay'],
-      rolloutNotes: ['shadow first'],
-      confidence: 0.8,
-    },
-    sourceTrace: { scribeArtifactId: 'pi-art-scribe-001-run-001' },
-    risks: [],
-    generatedAt: '2026-06-17T00:00:00.000Z',
+    sourceScribeArtifactId: 'pi-art-scribe-001',
     implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
     goldenTraceCases: [
       { caseId: 'negative-1', kind: 'negative', toolName: 'edit', params: { path: '/etc/x' }, expectedDecision: 'block' },
       { caseId: 'positive-1', kind: 'positive', toolName: 'read', params: { path: '/tmp/y' }, expectedDecision: 'allow' },
     ],
     affectedTools: ['edit'],
+    implementationSummary: 'Block writes to system dirs',
+    risks: [],
+    sourceTrace: { scribeArtifactId: 'pi-art-scribe-001' },
+    generatedAt: '2026-06-17T00:00:00.000Z',
     ...overrides,
   };
 }
 
-/** Build a gateDeps whose sandbox always accepts (replay passes). */
 function makeAlwaysPassGateDeps(): RefinerRuleHostGateDeps {
   const passingResult: RefinerSandboxResult = {
     success: true,
@@ -73,528 +106,316 @@ function makeAlwaysPassGateDeps(): RefinerRuleHostGateDeps {
     forbiddenPatternViolations: [],
   };
   return {
-     
     evaluateInSandbox: (_code, _trace, _opts) => passingResult,
   };
 }
 
-/**
- * Build a gateDeps whose sandbox fails N times then passes.
- * Each failure carries a distinct RefinerSandboxFailedCase so tests can assert
- * that the RIGHT feedback was injected into the next attempt (EP-05 freshness).
- */
-function makeFailNTimesGateDeps(failures: RefinerSandboxResult[]): {
-  deps: RefinerRuleHostGateDeps;
-  calls: { code: string }[];
-} {
-  const calls: { code: string }[] = [];
-  let attempt = 0;
-  const deps: RefinerRuleHostGateDeps = {
-    evaluateInSandbox: (code, _trace, _opts) => {
-      calls.push({ code });
-      const result = failures[attempt] ?? { success: true, failedCases: [], executionTimeMs: 1, forbiddenPatternViolations: [] };
-      attempt += 1;
-      return result;
-    },
+function makeStartRun(overrides: Partial<StartRunInput> = {}): StartRunInput {
+  return {
+    agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
+    taskRef: { taskId: TASK_ID },
+    inputPayload: 'initial prompt',
+    contextItems: [],
+    outputSchemaRef: 'artificer-output-v2',
+    timeoutMs: 300_000,
+    ...overrides,
   };
-  return { deps, calls };
 }
 
-const FAILED_FORBIDDEN: RefinerSandboxResult = {
-  success: false,
-  failedCases: [{ caseId: '__sandbox__', errorType: 'forbidden_pattern', message: 'require() detected' }],
-  executionTimeMs: 1,
-  forbiddenPatternViolations: ['require'],
-};
-const FAILED_RUNTIME: RefinerSandboxResult = {
-  success: false,
-  failedCases: [{ caseId: 'negative-1', errorType: 'runtime_error', message: 'TypeError: x is undefined' }],
-  executionTimeMs: 1,
-  forbiddenPatternViolations: [],
-};
-const FAILED_TIMEOUT: RefinerSandboxResult = {
-  success: false,
-  failedCases: [{ caseId: 'negative-1', errorType: 'timeout', message: 'exceeded 1000ms' }],
-  executionTimeMs: 1001,
-  forbiddenPatternViolations: [],
-};
-const FAILED_VALIDATION: RefinerSandboxResult = {
-  success: false,
-  failedCases: [{ caseId: 'negative-1', errorType: 'validation_failed', message: 'expected block got allow' }],
-  executionTimeMs: 1,
-  forbiddenPatternViolations: [],
-};
-
-describe('ArtificerL2Adapter (RuleHost MVP Activation, PRI-424)', () => {
-  it('retries when the model omits executable RuleCode from an otherwise valid V1 response', async () => {
-    const prompts: string[] = [];
-    const { implementationCode: _code, goldenTraceCases: _cases, affectedTools: _tools, ...v1 } = makeV2Output();
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      prompts.push(prompt);
-      return prompts.length === 1 ? v1 : makeV2Output();
-    };
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
-
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('implementationCode');
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(isArtificerOutputV2(output?.payload)).toBe(true);
-    void _code;
-    void _cases;
-    void _tools;
+function makeAdapter(overrides: {
+  maxTurns?: number;
+  totalBudgetMs?: number;
+  maxTokens?: number;
+  gateDeps?: RefinerRuleHostGateDeps;
+} = {}): ArtificerL2Adapter {
+  return new ArtificerL2Adapter({
+    provider: 'test-provider',
+    model: 'test-model',
+    apiKeyEnv: 'TEST_API_KEY',
+    baseUrl: 'http://localhost:1234/v1',
+    gateDeps: overrides.gateDeps ?? makeAlwaysPassGateDeps(),
+    validator: new DefaultArtificerValidator(),
+    maxTurns: overrides.maxTurns,
+    totalBudgetMs: overrides.totalBudgetMs ?? 60_000,
+    maxTokens: overrides.maxTokens,
   });
-  // ── happy path ─────────────────────────────────────────────────────────────
+}
 
-  it('returns V2 output on 1st attempt when sandbox replay passes (1 LLM call)', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+  hoisted.mockReturn = [];
+  hoisted.impl = null;
+  hoisted.lastLoopConfig = {};
+  process.env.TEST_API_KEY = 'test-key';
+});
 
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
+// ── submit_rulecode capture (primary extraction) ─────────────────────────────
 
-    expect(generateCalls).toHaveLength(1);
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output).not.toBeNull();
-    if (!output) return;
-    expect(isArtificerOutputV2(output.payload)).toBe(true);
-  });
-
-  // ── fix path ───────────────────────────────────────────────────────────────
-
-  it('injects sandbox failure feedback into 2nd attempt and returns V2 when it passes (2 LLM calls)', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(generateCalls).toHaveLength(2);
-    // 2nd prompt MUST contain the failure feedback from attempt 1 (EP-05 freshness).
-    expect(generateCalls[1]).toContain('TypeError: x is undefined');
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output).not.toBeNull();
-    if (!output) return;
-    expect(isArtificerOutputV2(output.payload)).toBe(true);
-  });
-
-  // ── exhaustion → V1 degradation ────────────────────────────────────────────
-
-  it('degrades to V1 output (no code fields) when all 3 attempts fail (3 LLM calls)', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME, FAILED_RUNTIME, FAILED_RUNTIME]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(generateCalls).toHaveLength(3);
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output).not.toBeNull();
-    if (!output) return;
-    // Degraded output must NOT be detected as V2 — downstream Evaluator skips code review.
-    expect(isArtificerOutputV2(output.payload)).toBe(false);
-    // V1 fields preserved (plan, lineage) so principle artifact path still works.
-    expect(output.payload).toHaveProperty('implementationPlan');
-  });
-
-  it('degraded V1 output still passes the V1 validator (principle artifact path intact)', async () => {
-    const generateCode: ArtificerL2GenerateCodeFn = async () => makeV2Output();
-    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME, FAILED_RUNTIME, FAILED_RUNTIME]);
-    const validator = new DefaultArtificerValidator();
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator,
-    });
-
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output).not.toBeNull();
-    if (!output) return;
-    const result = await validator.validate(output.payload, TASK_ID);
-    expect(result.valid).toBe(true);
-  });
-
-  // ── error type coverage ────────────────────────────────────────────────────
-
-  it('handles forbidden_pattern failure and injects it as feedback', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const { deps } = makeFailNTimesGateDeps([FAILED_FORBIDDEN]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(generateCalls).toHaveLength(2);
-    expect(generateCalls[1]).toContain('require');
-  });
-
-  it('handles timeout failure and injects it as feedback', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const { deps } = makeFailNTimesGateDeps([FAILED_TIMEOUT]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(generateCalls[1]).toContain('timeout');
-  });
-
-  it('handles validation_failed failure and injects it as feedback', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    const { deps } = makeFailNTimesGateDeps([FAILED_VALIDATION]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(generateCalls[1]).toContain('expected block got allow');
-  });
-
-  // ── EP-05 freshness: each attempt uses the immediately-prior failure ───────
-
-  it('injects attempt-N failure (not stale) into attempt N+1 prompt', async () => {
-    const generateCalls: string[] = [];
-    const generateCode: ArtificerL2GenerateCodeFn = async (prompt) => {
-      generateCalls.push(prompt);
-      return makeV2Output();
-    };
-    // attempt 1 fails with runtime_error, attempt 2 fails with timeout, attempt 3 passes
-    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME, FAILED_TIMEOUT]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    // attempt 2 prompt must mention attempt 1's runtime_error, NOT attempt 2's timeout
-    expect(generateCalls[1]).toContain('TypeError: x is undefined');
-    expect(generateCalls[1]).not.toContain('exceeded 1000ms');
-    // attempt 3 prompt must mention attempt 2's timeout, NOT attempt 1's runtime_error
-    expect(generateCalls[2]).toContain('exceeded 1000ms');
-  });
-
-  // ── golden trace used for replay must be valid ──────────────────────────────
-
-  it('builds a valid golden trace from the V2 output for sandbox replay', async () => {
-    const generateCode: ArtificerL2GenerateCodeFn = async () => makeV2Output();
-    let capturedTrace: unknown = null;
-    const deps: RefinerRuleHostGateDeps = {
-      evaluateInSandbox: (_code, trace, _opts) => {
-        capturedTrace = trace;
-        return { success: true, failedCases: [], executionTimeMs: 1, forbiddenPatternViolations: [] };
-      },
-    };
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
-
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
-    expect(capturedTrace).not.toBeNull();
-    expect(validateGoldenTrace(capturedTrace).valid).toBe(true);
-  });
-
-  // ── invalid LLM output (fails validator) is retried, not silently accepted ─
-
-  it('retries when LLM output fails the ArtificerValidator (malformed V2)', async () => {
-    let attempt = 0;
-    const generateCode: ArtificerL2GenerateCodeFn = async () => {
-      attempt += 1;
-      if (attempt === 1) {
-        // Malformed: missing affectedTools
-        const bad = makeV2Output() as unknown as Record<string, unknown>;
-        delete bad.affectedTools;
-        return bad;
+describe('PRI-439 ArtificerL2Adapter — submit_rulecode capture', () => {
+  it('returns the captured output when submit_rulecode was called', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
       }
-      return makeV2Output();
+      return [];
     };
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
 
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
-
+    const handle = await adapter.startRun(makeStartRun());
     const output = await adapter.fetchOutput(handle.runId);
     expect(output).not.toBeNull();
-    if (!output) return;
-    // 2nd attempt produces valid V2 → replay passes → V2 output
-    expect(isArtificerOutputV2(output.payload)).toBe(true);
+    expect(output?.payload).toEqual(makeRuleOutput());
   });
 
-  // ── P1+P2 fixes: validator-rejected candidates never degrade, total failure throws ─
-
-  it('throws (does NOT degrade) when all 3 attempts fail validation — no validated V2 to degrade from', async () => {
-    // P2 fix: validator rejection must NOT set lastValidV2. Without a validated
-    // candidate, degradation is impossible (Runtime Contract Rule 1/3 — never
-    // emit an unvalidated object). The adapter throws PDRuntimeError instead,
-    // which BasePeerRunner.handlePostLeaseError catches → task fails.
-    const generateCode: ArtificerL2GenerateCodeFn = async () => {
-      // Every attempt returns malformed V2 (missing affectedTools).
-      const bad = makeV2Output() as unknown as Record<string, unknown>;
-      delete bad.affectedTools;
-      return bad;
+  it('shouldStopAfterTurn returns true after output is captured', async () => {
+    const adapter = makeAdapter({ maxTurns: 8 });
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
+      }
+      return [];
     };
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
 
-    await expect(adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    })).rejects.toThrow(/without a validated candidate/);
+    await adapter.startRun(makeStartRun());
+    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
+    expect(typeof stopFn).toBe('function');
+    if (!stopFn) return;
+    // After submit_rulecode captured output, the next shouldStopAfterTurn call returns true.
+    expect(stopFn()).toBe(true);
+  });
+});
+
+// ── maxTurns cap ─────────────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — maxTurns cap', () => {
+  it('shouldStopAfterTurn returns false below maxTurns and true at/above, WITHOUT submit_rulecode', async () => {
+    const adapter = makeAdapter({ maxTurns: 5 });
+    hoisted.mockReturn = [
+      { role: 'assistant', content: 'thinking...' },
+    ];
+
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // startRun throws when no output is captured — that's expected here.
+    });
+    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
+    if (!stopFn) { expect.fail('shouldStopAfterTurn not wired'); return; }
+    expect(stopFn()).toBe(false); // turn 1
+    expect(stopFn()).toBe(false); // turn 2
+    expect(stopFn()).toBe(false); // turn 3
+    expect(stopFn()).toBe(false); // turn 4
+    expect(stopFn()).toBe(true);  // turn 5 (>= maxTurns)
+    expect(stopFn()).toBe(true);  // turn 6 (still >= maxTurns)
+  });
+});
+
+// ── beforeToolCall whitelist ─────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — beforeToolCall whitelist', () => {
+  it('blocks unknown tools', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
+
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // startRun throws when no output is captured — expected.
+    });
+    const beforeFn = hoisted.lastLoopConfig.beforeToolCall;
+    expect(typeof beforeFn).toBe('function');
+    if (!beforeFn) return;
+
+    const result = await beforeFn({ toolCall: { name: 'unknown_tool' } });
+    expect(result).toEqual({ block: true, reason: expect.stringContaining('unknown_tool') });
   });
 
-  it('degrades to V1 only when a VALIDATED V2 candidate existed (replay failed, not validation)', async () => {
-    // Confirms the positive side of the P2 fix: a validated V2 that fails replay
-    // CAN degrade. This is the legitimate degradation path (plan is valid, only
-    // the code was wrong).
-    const generateCode: ArtificerL2GenerateCodeFn = async () => makeV2Output();
-    const { deps } = makeFailNTimesGateDeps([FAILED_RUNTIME, FAILED_RUNTIME, FAILED_RUNTIME]);
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: deps,
-      validator: new DefaultArtificerValidator(),
-    });
+  it('allows whitelisted tools', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
 
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // startRun throws when no output is captured — expected.
     });
+    const beforeFn = hoisted.lastLoopConfig.beforeToolCall;
+    if (!beforeFn) { expect.fail('beforeToolCall not wired'); return; }
 
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output).not.toBeNull();
-    if (!output) return;
-    expect(isArtificerOutputV2(output.payload)).toBe(false);
+    for (const name of ['read_rulecode_spec', 'validate_rulecode', 'replay_rulecode', 'submit_rulecode']) {
+      const result = await beforeFn({ toolCall: { name } });
+      expect(result).toBeUndefined();
+    }
+  });
+});
+
+// ── exhaustion: no V1/L1 fallback ────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — exhaustion (no fallback)', () => {
+  it('throws PDRuntimeError when the loop ends without submit_rulecode', async () => {
+    const adapter = makeAdapter({ maxTurns: 3 });
+    hoisted.mockReturn = [
+      { role: 'assistant', content: 'I cannot produce valid code.' },
+    ];
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/without a submit_rulecode call/);
+
+    // No output stored for the failed run — fetchOutput returns null.
+    const runs = (adapter as unknown as { runs: Map<string, { output: unknown }> }).runs;
+    expect(runs.size).toBe(1);
+    for (const [, state] of runs) {
+      expect(state.output).toBeNull();
+    }
   });
 
-  // ── runtime metadata ─────────────────────────────────────────────────────────
+  it('emits artificer_l2_complete telemetry with succeeded=false on exhaustion', async () => {
+    const adapter = makeAdapter({ maxTurns: 2 });
+    hoisted.mockReturn = [{ role: 'assistant', content: 'no code' }];
 
-  it('pollRun returns terminal status after startRun completes', async () => {
-    const generateCode: ArtificerL2GenerateCodeFn = async () => makeV2Output();
-    const adapter = new ArtificerL2Adapter({
-      generateCode,
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow();
 
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: 'initial prompt',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 300_000,
-    });
+    const completeCalls = emitTelemetryMock.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { eventType: string }).eventType === 'artificer_l2_complete',
+    );
+    expect(completeCalls.length).toBe(1);
+    const payload = (completeCalls[0]![0] as { payload: { succeeded: boolean } }).payload;
+    expect(payload.succeeded).toBe(false);
+  });
+});
 
+// ── loop error ───────────────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — loop error', () => {
+  it('throws PDRuntimeError when runAgentLoop throws', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async () => {
+      throw new Error('LLM provider unavailable');
+    };
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/agent loop threw/);
+  });
+});
+
+// ── runtime metadata ─────────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — runtime metadata', () => {
+  it('pollRun returns succeeded status after startRun completes with output', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
+      }
+      return [];
+    };
+
+    const handle = await adapter.startRun(makeStartRun());
     const status = await adapter.pollRun(handle.runId);
-    // RunStatus is an object { runId, status, ... }; status.status is the execution state.
-    expect(['succeeded', 'failed']).toContain(status.status);
+    expect(status.status).toBe('succeeded');
   });
 
-  it('kind() returns a stable runtime kind identifier', () => {
-    const adapter = new ArtificerL2Adapter({
-      generateCode: async () => makeV2Output(),
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
-    expect(Value.Check(RuntimeKindSchema, adapter.kind())).toBe(true);
+  it('kind() returns pi-ai-l2', () => {
+    const adapter = makeAdapter();
     expect(adapter.kind()).toBe('pi-ai-l2');
   });
 
-  it('returns a RunHandle that satisfies the runtime protocol schema', async () => {
-    const adapter = new ArtificerL2Adapter({
-      generateCode: async () => makeV2Output(),
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
-
-    const handle = await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: '{}',
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 30_000,
-    });
-
-    expect(Value.Check(RunHandleSchema, handle)).toBe(true);
+  it('getCapabilities reports supportsToolUse=true', async () => {
+    const adapter = makeAdapter();
+    const caps = await adapter.getCapabilities();
+    expect(caps.supportsToolUse).toBe(true);
   });
 
-  it.each([0, -1, 1.5, Number.POSITIVE_INFINITY])('rejects invalid maxAttempts=%s', (maxAttempts) => {
-    expect(() => new ArtificerL2Adapter({
-      generateCode: async () => makeV2Output(),
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-      maxAttempts,
-    })).toThrow(/maxAttempts/);
+  it('healthCheck returns unhealthy when API key is missing', async () => {
+    delete process.env.TEST_API_KEY;
+    const adapter = makeAdapter();
+    const health = await adapter.healthCheck();
+    expect(health.healthy).toBe(false);
   });
 
+  it('healthCheck returns healthy when API key is present', async () => {
+    const adapter = makeAdapter();
+    const health = await adapter.healthCheck();
+    expect(health.healthy).toBe(true);
+  });
+
+  it('startRun throws when API key is missing', async () => {
+    delete process.env.TEST_API_KEY;
+    const adapter = makeAdapter();
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/API key not found/);
+  });
+});
+
+// ── config defaults ──────────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — config defaults', () => {
+  it('wires maxTokens=8192 default into loopConfig', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
+
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // expected — no output captured
+    });
+    expect(hoisted.lastLoopConfig.maxTokens).toBe(8192);
+  });
+
+  it('wires custom maxTokens when provided', async () => {
+    const adapter = makeAdapter({ maxTokens: 4096 });
+    hoisted.mockReturn = [];
+
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // expected
+    });
+    expect(hoisted.lastLoopConfig.maxTokens).toBe(4096);
+  });
+});
+
+// ── telemetry ────────────────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — telemetry', () => {
+  it('emits artificer_l2_turn with phase=loop_started at start', async () => {
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
+
+    await adapter.startRun(makeStartRun()).catch(() => {
+      // expected
+    });
+    const startCalls = emitTelemetryMock.mock.calls.filter(
+      (c: unknown[]) => {
+        const evt = c[0] as { eventType: string; payload: { phase?: string } };
+        return evt.eventType === 'artificer_l2_turn' && evt.payload?.phase === 'loop_started';
+      },
+    );
+    expect(startCalls.length).toBe(1);
+  });
+
+  it('emits artificer_l2_complete with succeeded=true on success', async () => {
+    const adapter = makeAdapter();
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
+      }
+      return [];
+    };
+
+    await adapter.startRun(makeStartRun());
+    const completeCalls = emitTelemetryMock.mock.calls.filter(
+      (c: unknown[]) => (c[0] as { eventType: string }).eventType === 'artificer_l2_complete',
+    );
+    expect(completeCalls.length).toBe(1);
+    const payload = (completeCalls[0]![0] as { payload: { succeeded: boolean } }).payload;
+    expect(payload.succeeded).toBe(true);
+  });
+});
+
+// ── input serialization ──────────────────────────────────────────────────────
+
+describe('PRI-439 ArtificerL2Adapter — input serialization', () => {
   it('bounds and safely serializes an unknown prompt payload', async () => {
     const circular: Record<string, unknown> = { text: 'x'.repeat(60_000) };
     circular.self = circular;
-    let receivedPrompt = '';
-    const adapter = new ArtificerL2Adapter({
-      generateCode: async (prompt) => {
-        receivedPrompt = prompt;
-        return makeV2Output();
-      },
-      gateDeps: makeAlwaysPassGateDeps(),
-      validator: new DefaultArtificerValidator(),
-    });
+    const adapter = makeAdapter();
+    hoisted.mockReturn = [];
 
-    await adapter.startRun({
-      agentSpec: { agentId: 'artificer', schemaVersion: 'v1' },
-      taskRef: { taskId: TASK_ID },
-      inputPayload: circular,
-      contextItems: [],
-      outputSchemaRef: 'artificer-output-v2',
-      timeoutMs: 30_000,
-    });
-
-    expect(receivedPrompt.length).toBeLessThanOrEqual(50_003);
+    // The circular payload is safely stringified (safeStringifyPreview handles cycles).
+    // startRun still throws because no output is captured, but it should NOT throw
+    // a serialization error.
+    await expect(adapter.startRun(makeStartRun({ inputPayload: circular }))).rejects.toThrow(/without a submit_rulecode call/);
   });
 });

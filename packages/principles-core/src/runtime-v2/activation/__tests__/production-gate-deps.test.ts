@@ -124,7 +124,7 @@ function notEvaluate(input, helpers) {
     expect(result.failedCases.length).toBeGreaterThan(0);
   });
 
-  it('handles export function evaluate syntax (normalized by compiler)', () => {
+  it('rejects export function evaluate syntax (PRI-439 Phase 2: export is forbidden)', () => {
     const deps = createProductionGateDeps();
 
     const exportCode = `
@@ -145,6 +145,34 @@ export function evaluate(input, helpers) {
     });
 
     const result = deps.evaluateInSandbox(exportCode, goldenTrace);
+
+    // PRI-439 Phase 2: `export` is now a forbidden pattern. The validator
+    // rejects it before compilation — no stripping, no normalization.
+    expect(result.success).toBe(false);
+    expect(result.forbiddenPatternViolations).toContain('export');
+  });
+
+  it('handles bare function evaluate(input, helpers) syntax (canonical dialect)', () => {
+    const deps = createProductionGateDeps();
+
+    const bareCode = `
+function evaluate(input, helpers) {
+  var p = input.action.paramsSummary;
+  if (helpers.getToolName() === 'edit' && p && p.filePath === '/etc/passwd') {
+    return { decision: 'block', matched: true, reason: 'system path blocked' };
+  }
+  return { decision: 'allow', matched: false, reason: 'safe path' };
+}
+`;
+
+    const goldenTrace = createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'block',
+    });
+
+    const result = deps.evaluateInSandbox(bareCode, goldenTrace);
 
     expect(result.success).toBe(true);
     expect(result.failedCases).toHaveLength(0);

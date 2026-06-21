@@ -26,7 +26,7 @@ import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-out
 import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
 import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
 import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
-import { ArtificerOutputV1Schema } from '../internalization/artificer-output.js';
+import { ArtificerRuleOutputSchema } from '../internalization/artificer-output.js';
 import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js';
 import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import { TrainerOutputV1Schema } from '../internalization/trainer-output.js';
@@ -333,7 +333,7 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['dreamer-output-v1', DreamerOutputV1Schema],
   ['philosopher-output-v1', PhilosopherOutputV1Schema],
   ['scribe-output-v1', ScribeOutputV1Schema],
-  ['artificer-output-v1', ArtificerOutputV1Schema],
+  ['artificer-rule-output-v1', ArtificerRuleOutputSchema],
   ['evaluator-output-v1', EvaluatorOutputV1Schema],
   ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
   ['trainer-output-v1', TrainerOutputV1Schema],

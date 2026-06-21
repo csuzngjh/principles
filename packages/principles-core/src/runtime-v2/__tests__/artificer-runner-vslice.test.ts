@@ -6,7 +6,7 @@ import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
-import type { ArtificerOutputV1 } from '../internalization/artificer-output.js';
+import type { ArtificerRuleOutput } from '../internalization/artificer-output.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
@@ -58,18 +58,17 @@ function makeArtificerTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
-function makeArtificerOutput(): ArtificerOutputV1 {
+function makeArtificerOutput(): ArtificerRuleOutput {
   return {
     taskId: ARTIFICER_TASK_ID,
     sourceScribeArtifactId: 'pi-art-scribe-001-run-001',
-    implementationPlan: {
-      summary: 'Add input validation to all async operations',
-      targetSurface: 'src/async-ops/*.ts',
-      changes: ['Add try-catch to asyncOp1', 'Add error boundary to asyncOp2'],
-      tests: ['Unit test for asyncOp1 error handling', 'Integration test for error boundary'],
-      rolloutNotes: ['Deploy behind feature flag', 'Monitor error rates post-deploy'],
-      confidence: 0.85,
-    },
+    implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
+    goldenTraceCases: [
+      { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
+      { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+    ],
+    affectedTools: ['write_file'],
+    implementationSummary: 'Add input validation to all async operations',
     sourceTrace: {
       scribeArtifactId: 'pi-art-scribe-001-run-001',
     },
@@ -320,17 +319,13 @@ describe('ArtificerRunner (PRI-111)', () => {
     await store.upsertArtifact(makeScribeArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    const invalidOutput: ArtificerOutputV1 = {
+    const invalidOutput: ArtificerRuleOutput = {
       taskId: 'wrong-task-id',
       sourceScribeArtifactId: '',
-      implementationPlan: {
-        summary: '',
-        targetSurface: '',
-        changes: [],
-        tests: [],
-        rolloutNotes: [],
-        confidence: 1.5,
-      },
+      implementationCode: '',
+      goldenTraceCases: [],
+      affectedTools: [],
+      implementationSummary: '',
       sourceTrace: {
         scribeArtifactId: '',
       },
@@ -446,65 +441,33 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
     expect(result.errors.some(e => e.includes('sourceTrace.scribeArtifactId mismatch'))).toBe(true);
   });
 
-  it('rejects confidence as string', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).confidence = '0.85';
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('confidence must be number'))).toBe(true);
-  });
-
-  it('rejects confidence > 1', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).confidence = 1.5;
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('confidence must be in [0, 1]'))).toBe(true);
-  });
-
-  it('rejects NaN confidence', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).confidence = NaN;
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('confidence must be number'))).toBe(true);
-  });
-
-  it('rejects Infinity confidence', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).confidence = Infinity;
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('confidence must be number'))).toBe(true);
-  });
-
   it('rejects null output', async () => {
     const result = await validator.validate(null, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
   });
 
-  it('rejects changes with non-string elements', async () => {
+  it('rejects missing implementationCode (unified output requires code)', async () => {
     const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).changes = [1, 2];
+    (output as unknown as Record<string, unknown>).implementationCode = '';
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('changes must be an array of strings'))).toBe(true);
+    expect(result.errors.some(e => e.includes('implementationCode'))).toBe(true);
   });
 
-  it('rejects tests with non-string elements', async () => {
+  it('rejects missing implementationSummary', async () => {
     const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).tests = [true];
+    (output as unknown as Record<string, unknown>).implementationSummary = '';
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('tests must be an array of strings'))).toBe(true);
+    expect(result.errors.some(e => e.includes('implementationSummary'))).toBe(true);
   });
 
-  it('rejects rolloutNotes with non-string elements', async () => {
+  it('rejects empty affectedTools array', async () => {
     const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).rolloutNotes = [42];
+    (output as unknown as Record<string, unknown>).affectedTools = [];
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('rolloutNotes must be an array of strings'))).toBe(true);
+    expect(result.errors.some(e => e.includes('affectedTools'))).toBe(true);
   });
 
   it('rejects risks with non-string elements', async () => {
@@ -513,22 +476,6 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('risks must be an array of strings'))).toBe(true);
-  });
-
-  it('rejects missing implementationPlan.summary', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).summary = '';
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('implementationPlan.summary'))).toBe(true);
-  });
-
-  it('rejects missing implementationPlan.targetSurface', async () => {
-    const output = makeArtificerOutput();
-    (output.implementationPlan as unknown as Record<string, unknown>).targetSurface = '';
-    const result = await validator.validate(output, ARTIFICER_TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('implementationPlan.targetSurface'))).toBe(true);
   });
 
   it('rejects missing sourceTrace.scribeArtifactId', async () => {
@@ -571,7 +518,7 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
 
   it('rejects prototype-inherited taskId (ERR-013)', async () => {
     const proto = { taskId: ARTIFICER_TASK_ID };
-    const output = Object.create(proto) as ArtificerOutputV1;
+    const output = Object.create(proto) as ArtificerRuleOutput;
     // Copy all own properties from a valid output except taskId
     const valid = makeArtificerOutput();
     Object.assign(output, { ...valid, taskId: undefined });
@@ -601,14 +548,14 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
     expect(result.errors.some(e => e.includes('sourceTrace.scribeArtifactId'))).toBe(true);
   });
 
-  it('rejects prototype-inherited implementationPlan.summary (ERR-013)', async () => {
+  it('rejects prototype-inherited implementationSummary (ERR-013)', async () => {
     const output = makeArtificerOutput();
-    const ownValue = output.implementationPlan.summary;
-    delete (output.implementationPlan as unknown as Record<string, unknown>).summary;
-    Object.setPrototypeOf(output.implementationPlan, { summary: ownValue });
+    const ownValue = output.implementationSummary;
+    delete (output as unknown as Record<string, unknown>).implementationSummary;
+    Object.setPrototypeOf(output, { implementationSummary: ownValue });
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('implementationPlan.summary'))).toBe(true);
+    expect(result.errors.some(e => e.includes('implementationSummary'))).toBe(true);
   });
 
   it('rejects empty string sourceTrace.philosopherArtifactId when present', async () => {
@@ -684,14 +631,13 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
         payload: {
           taskId: ARTIFICER_TASK_ID,
           sourceScribeArtifactId: capturedSourceScribeArtifactId,
-          implementationPlan: {
-            summary: 'Add input validation to all async operations',
-            targetSurface: 'src/async-ops/*.ts',
-            changes: ['Add try-catch to asyncOp1'],
-            tests: ['Unit test for asyncOp1 error handling'],
-            rolloutNotes: ['Deploy behind feature flag'],
-            confidence: 0.85,
-          },
+          implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
+          goldenTraceCases: [
+            { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
+            { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+          ],
+          affectedTools: ['write_file'],
+          implementationSummary: 'Add input validation to all async operations',
           sourceTrace: {
             scribeArtifactId: capturedSourceScribeArtifactId,
           },
@@ -758,7 +704,7 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
     const [storedArtifact] = artifacts;
     expect(storedArtifact).toBeDefined();
     if (!storedArtifact) return;
-    const storedOutput = JSON.parse(storedArtifact.contentJson) as ArtificerOutputV1;
+    const storedOutput = JSON.parse(storedArtifact.contentJson) as ArtificerRuleOutput;
     expect(storedOutput.sourceScribeArtifactId).toBe(SCRIBE_ART_ID);
     expect(storedOutput.sourceTrace.scribeArtifactId).toBe(SCRIBE_ART_ID);
   });

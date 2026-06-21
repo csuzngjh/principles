@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import type { RuleHostInput } from './internalization/rule-host-contracts.js';
 import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
+import { buildRuleHostAction } from './internalization/rule-host-input-builder.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
 const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
@@ -74,6 +75,22 @@ export interface SyntheticRuleHostInputOverrides {
   evolution?: Partial<RuleHostInput['evolution']>;
   derived?: Partial<RuleHostInput['derived']>;
   normalizedPath?: string | null;
+}
+
+/**
+ * Options for createSyntheticRuleHostInput (PRI-439 Phase 3).
+ *
+ * When `projectDir` is provided and `overrides.normalizedPath` is NOT set,
+ * the action snapshot is built via `buildRuleHostAction` — extracting the
+ * file path from `snapshot.params` and normalizing it against `projectDir`.
+ * This produces a non-null `normalizedPath` that matches the production
+ * OpenClaw Gate, so path-based rules can be validated in Golden Trace replay.
+ *
+ * When `projectDir` is NOT provided, `normalizedPath` falls back to `null`
+ * (backwards compat with existing callers that don't have a project dir).
+ */
+export interface CreateSyntheticRuleHostInputOptions {
+  projectDir?: string;
 }
 
 export interface GoldenTraceFixtureInput {
@@ -152,13 +169,24 @@ export function validateGoldenTrace(input: unknown): GoldenTraceValidationResult
 export function createSyntheticRuleHostInput(
   snapshot: ToolCallSnapshot,
   overrides: SyntheticRuleHostInputOverrides = {},
+  options: CreateSyntheticRuleHostInputOptions = {},
 ): RuleHostInput {
+  // PRI-439 Phase 3: when projectDir is provided and normalizedPath is not
+  // explicitly overridden, build the action snapshot via the pure
+  // buildRuleHostAction function — extracting the file path from params and
+  // normalizing it. This produces the same normalizedPath as the production
+  // OpenClaw Gate, so path-based rules can be validated in Golden Trace replay.
+  const action =
+    options.projectDir && overrides.normalizedPath === undefined
+      ? buildRuleHostAction(snapshot.toolName, snapshot.params, options.projectDir)
+      : {
+          toolName: snapshot.toolName,
+          normalizedPath: overrides.normalizedPath ?? null,
+          paramsSummary: { ...snapshot.params },
+        };
+
   return {
-    action: {
-      toolName: snapshot.toolName,
-      normalizedPath: overrides.normalizedPath ?? null,
-      paramsSummary: { ...snapshot.params },
-    },
+    action,
     workspace: {
       isRiskPath: false,
       planStatus: 'UNKNOWN',

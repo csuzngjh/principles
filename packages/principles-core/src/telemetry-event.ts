@@ -223,10 +223,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_turn'),
   Type.Literal('dreamer_l2_complete'),
   Type.Literal('dreamer_l2_fallback_to_l1'),
-  // PRI-424: Artificer L2 write-test-fix loop telemetry.
-  // - artificer_l2_attempt: per LLM attempt (attempt number, decision, degraded flag)
-  // - artificer_l2_complete: when the loop finishes (attempts, degraded, succeeded)
+  // PRI-424/PRI-439: Artificer L2 agent loop telemetry.
+  // - artificer_l2_attempt: per LLM attempt in the legacy write-test-fix loop (kept for backward compat)
+  // - artificer_l2_turn: per tool-execution turn inside the L2 agent loop (PRI-439 Phase 4)
+  // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, timedOut)
   Type.Literal('artificer_l2_attempt'),
+  Type.Literal('artificer_l2_turn'),
   Type.Literal('artificer_l2_complete'),
   // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
   // - evaluator_adversarial_replay: emitted after each gate invocation with the

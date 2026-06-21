@@ -21,8 +21,8 @@ describe('generateFromTemplate', () => {
     ]);
 
     expect(result).not.toBeNull();
-    expect(result).toContain('export const meta');
-    expect(result).toContain('export function evaluate(input)');
+    expect(result).toContain('const meta =');
+    expect(result).toContain('function evaluate(input, helpers)');
     expect(result).toContain('name: "Auto_P_066"');
     expect(result).toContain('ruleId: "R_P_066_auto"');
     expect(result).toContain('sourcePrincipleId: "P_066"');
@@ -79,14 +79,14 @@ describe('generateFromTemplate', () => {
     ]);
 
     expect(result).not.toBeNull();
-    expect(result).toMatch(/export const meta = \{/);
+    expect(result).toMatch(/const meta = \{/);
     expect(result).toMatch(/name: "Auto_P_050"/);
     expect(result).toMatch(/version: '1\.0\.0'/);
     expect(result).toMatch(/ruleId: "R_P_050_auto"/);
     expect(result).toMatch(/sourcePrincipleId: "P_050"/);
     expect(result).toMatch(/compiledAt: "\d{4}-\d{2}-\d{2}T/);
-    expect(result).toMatch(/export function evaluate\(input\)/);
-    expect(result).toMatch(/return \{ matched: false \}/);
+    expect(result).toMatch(/function evaluate\(input, helpers\)/);
+    expect(result).toMatch(/return \{ decision: 'allow', matched: false, reason: 'rule not applicable' \}/);
   });
 
   it('edit tool uses new_string fallback in content check', async () => {
@@ -110,8 +110,8 @@ describe('checkForbiddenPatterns', () => {
   it('returns empty array for clean code', async () => {
     const { checkForbiddenPatterns } = await getModule();
     const code = `
-export const meta = { name: 'x', version: '1', ruleId: 'R', coversCondition: 'c' };
-export function evaluate() { return { matched: false, reason: 'ok' }; }
+const meta = { name: 'x', version: '1', ruleId: 'R', coversCondition: 'c' };
+function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'ok' }; }
 `;
     expect(checkForbiddenPatterns(code)).toEqual([]);
   });
