@@ -17,7 +17,7 @@
     "check:error-handbook": "node scripts/check-error-handbook.cjs",
     "check:error-handbook:audit": "node scripts/check-error-handbook.cjs --audit",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
-    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console",
+    "verify:merge": "node scripts/scan-runtime-contract-violations.cjs && npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console",
     "verify:publish": "npm run build && cd packages/openclaw-plugin && npm pack --dry-run",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
