@@ -197,9 +197,14 @@ function makeAdapter(opts?: { evaluator?: EvaluatorFactory }): ScriptedAdapter {
  * diagnosticJson (outside the pi_metadata envelope). This mirrors the pattern
  * from source-trace-locator.test.ts and PainSignalBridge.
  */
-async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string): Promise<void> {
+async function seedDreamerWithId(
+  sm: RuntimeStateManager,
+  taskId: string,
+  painId: string,
+  channel: 'prompt' | 'code_tool_hook' | 'defer_archive' = 'code_tool_hook',
+): Promise<void> {
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
-    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
+    dependencyTaskIds: [], channel, timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
   const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId });
   await sm.createTask({ taskId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson });
@@ -439,6 +444,85 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(result.decision).toBe('generation_rejected');
     expect(result.degradationReason).toContain('ambiguous_dreamer_tasks_for_pain');
     expect(result.stages[0]?.status).toBe('failed');
+  }, 60_000);
+
+  it('selects the Dreamer task matching the requested activation channel', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-prompt', 'pain-multi-channel', 'prompt');
+    await seedDreamerWithId(sm, 'dreamer-code-hook', 'pain-multi-channel', 'code_tool_hook');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-multi-channel',
+      runtimeAdapter: adapter,
+      channel: 'code_tool_hook',
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.stages[0]).toMatchObject({
+      name: 'pain_lookup',
+      status: 'succeeded',
+      taskId: 'dreamer-code-hook',
+    });
+  }, 60_000);
+
+  it('uses the sole pain-linked Dreamer seed when its source channel differs from the target channel', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-prompt-seed', 'pain-cross-channel', 'prompt');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir,
+      painId: 'pain-cross-channel',
+      runtimeAdapter: adapter,
+      channel: 'code_tool_hook',
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+
+    expect(result.stages[0]).toMatchObject({
+      name: 'pain_lookup',
+      status: 'succeeded',
+      taskId: 'dreamer-prompt-seed',
+    });
+  }, 60_000);
+
+  it('resumes from a succeeded Dreamer seed instead of trying to lease it again', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-resume', 'pain-resume');
+    await sm.close();
+
+    const firstAdapter = makeAdapter();
+    await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-resume', runtimeAdapter: firstAdapter,
+      pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { firstAdapter.artifactStore = store; },
+    });
+
+    const resumedAdapter = makeAdapter();
+    const resumed = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-resume', runtimeAdapter: resumedAdapter,
+      pollIntervalMs: 5, timeoutMs: 1000,
+      onStoreReady: (store) => { resumedAdapter.artifactStore = store; },
+    });
+
+    expect(resumed.stages.slice(0, 2)).toEqual([
+      { name: 'pain_lookup', status: 'succeeded', taskId: 'dreamer-resume' },
+      { name: 'dreamer', taskId: 'dreamer-resume', status: 'succeeded' },
+    ]);
+    expect(resumed.degradationReason).not.toContain('lease');
   }, 60_000);
 
   // ── Test 8 (E fix): retried status is NOT terminal — bounded retry succeeds ──

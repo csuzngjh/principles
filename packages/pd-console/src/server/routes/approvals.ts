@@ -140,7 +140,13 @@ export async function handleApprovalsRoute(
         } else if (result.error === 'unsupported_channel') {
           sendError(res, 403, 'unsupported_channel', `Cannot approve unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be approved.`);
         } else if (result.error === 'activation_failed') {
-          sendError(res, 500, 'activation_failed', `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`);
+          sendError(
+            res,
+            500,
+            'activation_failed',
+            `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`,
+            { nextAction: 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
+          );
         } else {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));
         }

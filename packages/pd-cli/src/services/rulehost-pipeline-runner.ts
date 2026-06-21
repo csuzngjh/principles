@@ -39,6 +39,7 @@ import {
   EvaluatorRunner,
   DefaultEvaluatorValidator,
   createPITaskDiagnosticJson,
+  parsePITaskMetadata,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -263,7 +264,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // D fix (PRI-429): exact sourcePainId match via Object.hasOwn on parsed
     // diagnosticJson. No substring matching (pain-1 must NOT match pain-10).
     onProgress('pain_lookup', 'start', `painId=${opts.painId}`);
-    const dreamerLookup = await findDreamerTaskForPain(stateManager, opts.painId);
+    const dreamerLookup = await findDreamerTaskForPain(stateManager, opts.painId, channel);
     if (dreamerLookup.status === 'ambiguous') {
       const reason = `ambiguous_dreamer_tasks_for_pain: ${dreamerLookup.taskIds.join(',')}`;
       stages.push({ name: 'pain_lookup', status: 'failed', reason });
@@ -281,15 +282,19 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
 
     // ── Stage: dreamer ──
     onProgress('dreamer', 'start');
-    const dreamerRunner = new DreamerRunner(
-      { stateManager, runtimeAdapter: agentAdapters.dreamer, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
-      runnerOptsFor(agentAdapters.dreamer),
-    );
-    const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId, { maxStageRetries, pollIntervalMs });
-    stages.push(stageFromResult('dreamer', dreamerSeedTaskId, dreamerResult));
-    if (dreamerResult.status !== 'succeeded') {
-      onProgress('dreamer', 'failed', dreamerResult.failureReason);
-      return rejectedResult(opts.painId, stages, `dreamer_failed: ${dreamerResult.failureReason ?? dreamerResult.status}`);
+    if (dreamerLookup.taskStatus === 'succeeded') {
+      stages.push({ name: 'dreamer', taskId: dreamerSeedTaskId, status: 'succeeded' });
+    } else {
+      const dreamerRunner = new DreamerRunner(
+        { stateManager, runtimeAdapter: agentAdapters.dreamer, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
+        runnerOptsFor(agentAdapters.dreamer),
+      );
+      const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId, { maxStageRetries, pollIntervalMs });
+      stages.push(stageFromResult('dreamer', dreamerSeedTaskId, dreamerResult));
+      if (dreamerResult.status !== 'succeeded') {
+        onProgress('dreamer', 'failed', dreamerResult.failureReason);
+        return rejectedResult(opts.painId, stages, `dreamer_failed: ${dreamerResult.failureReason ?? dreamerResult.status}`);
+      }
     }
     onProgress('dreamer', 'succeeded');
 
@@ -451,18 +456,25 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
  *   - ERR-009: missing sourcePainId = no match (fail loud, not silent skip)
  */
 type DreamerTaskLookup =
-  | { readonly status: 'found'; readonly taskId: string }
+  | { readonly status: 'found'; readonly taskId: string; readonly taskStatus: 'pending' | 'retry_wait' | 'succeeded' }
   | { readonly status: 'not_found' }
   | { readonly status: 'ambiguous'; readonly taskIds: readonly string[] };
 
-async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId: string): Promise<DreamerTaskLookup> {
+async function findDreamerTaskForPain(
+  stateManager: RuntimeStateManager,
+  painId: string,
+  channel: 'prompt' | 'code_tool_hook' | 'defer_archive',
+): Promise<DreamerTaskLookup> {
   const tasks = await stateManager.listTasks();
   const dreamerTasks = tasks.filter((t) =>
-    t.taskKind === 'dreamer' && (t.status === 'pending' || t.status === 'retry_wait'),
+    t.taskKind === 'dreamer' && (t.status === 'pending' || t.status === 'retry_wait' || t.status === 'succeeded'),
   );
-  const matches: string[] = [];
+  const allMatches: typeof dreamerTasks = [];
+  const channelMatches: typeof dreamerTasks = [];
   for (const t of dreamerTasks) {
     if (typeof t.diagnosticJson !== 'string') continue;
+    const metadata = parsePITaskMetadata(t.diagnosticJson);
+    if (!metadata) continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(t.diagnosticJson);
@@ -476,13 +488,19 @@ async function findDreamerTaskForPain(stateManager: RuntimeStateManager, painId:
     if (!Object.hasOwn(parsed, 'sourcePainId')) continue;
     const stored = Reflect.get(parsed, 'sourcePainId');
     if (typeof stored === 'string' && stored === painId) {
-      matches.push(t.taskId);
+      allMatches.push(t);
+      if (metadata.channel === channel) channelMatches.push(t);
     }
   }
-  matches.sort();
+  const matches = channelMatches.length > 0 ? channelMatches : allMatches;
+  matches.sort((left, right) => left.taskId.localeCompare(right.taskId));
   if (matches.length === 0) return { status: 'not_found' };
-  if (matches.length > 1) return { status: 'ambiguous', taskIds: matches };
-  return { status: 'found', taskId: matches[0] };
+  if (matches.length > 1) return { status: 'ambiguous', taskIds: matches.map((task) => task.taskId) };
+  const [match] = matches;
+  if (!match || (match.status !== 'pending' && match.status !== 'retry_wait' && match.status !== 'succeeded')) {
+    return { status: 'not_found' };
+  }
+  return { status: 'found', taskId: match.taskId, taskStatus: match.status };
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
