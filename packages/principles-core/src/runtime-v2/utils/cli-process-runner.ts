@@ -207,9 +207,13 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
         // Process may have already exited — taskkill itself failed
       });
     } else {
-      // Unix: send SIGTERM to the process group (negative pid = whole group)
+      // Unix: use ChildProcess.kill() which reliably sends the signal to the
+      // direct child. process.kill(-pid) only works when the child was spawned
+      // with detached:true (it gets its own process group); otherwise the
+      // negative-pid lookup fails silently and the child is never killed,
+      // causing the close event to never fire and the promise to hang.
       try {
-        process.kill(-pid, 'SIGTERM');
+        proc.kill('SIGTERM');
       } catch {
         // Process may have already exited
       }
@@ -236,14 +240,11 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
 
       // Then schedule SIGKILL after grace period (only on non-Windows)
       if (process.platform !== 'win32') {
-        const {pid} = proc;
         killGraceHandle = setTimeout(() => {
-          if (pid != null) {
-            try {
-              process.kill(-pid, 'SIGKILL');
-            } catch {
-              // Already exited
-            }
+          try {
+            proc.kill('SIGKILL');
+          } catch {
+            // Already exited
           }
         }, killGracePeriodMs);
       }
