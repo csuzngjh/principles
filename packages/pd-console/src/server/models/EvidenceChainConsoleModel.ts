@@ -178,18 +178,10 @@ function readLedgerPrinciples(workspaceDir: string): LedgerReadResult {
 // ── Model ──────────────────────────────────────────────────────────────────────
 
 export class EvidenceChainConsoleModel {
-  private readConnection: SqliteConnection | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
-  }
-
-  private getReadConnection(): SqliteConnection {
-    if (!this.readConnection) {
-      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
-    }
-    return this.readConnection;
   }
 
   async getEvidenceChain(): Promise<EvidenceChainResponse> {
@@ -205,9 +197,6 @@ export class EvidenceChainConsoleModel {
       let trajDb: Database.Database | null = null;
       try {
         trajDb = new Database(trajectoryDbPath, { readonly: true });
-        // PRI-406: Try SELECT with canonical_pain_id and runtime_task_id columns.
-        // If the DB was created before the PRI-406 migration, these columns won't exist.
-        // Fall back to the legacy SELECT without them.
         try {
           painEvents = trajDb.prepare(
             'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id FROM pain_events ORDER BY created_at DESC LIMIT 100',
@@ -239,15 +228,16 @@ export class EvidenceChainConsoleModel {
       degradedNextActions.push('PD has not recorded any pain signals in this workspace yet.');
     }
 
-    // ── 2. Read tasks from state.db ───────────────────────────────────────
+    // ── 2. Read tasks & candidates from state.db ──────────────────────
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     let tasks: unknown[] = [];
     let dreamerTasks: unknown[] = [];
+    let candidates: unknown[] = [];
     let stateDbAvailable = false;
 
     if (fs.existsSync(stateDbPath)) {
+      const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
       try {
-        const conn = this.getReadConnection();
         const db = conn.getDb();
 
         try {
@@ -283,27 +273,6 @@ export class EvidenceChainConsoleModel {
           degradedNextActions.push('Check state database dreamer task table integrity.');
         }
 
-        stateDbAvailable = true;
-      } catch (err) {
-        if (isMissingTableError(err)) {
-          degradedReasons.push('Tasks table not found in state database');
-          degradedNextActions.push('Workspace may need initialization via pd config doctor.');
-        } else {
-          degradedReasons.push('Failed to read state database');
-          degradedNextActions.push('Check workspace .pd directory integrity.');
-        }
-      }
-    } else {
-      degradedReasons.push('State database not found');
-      degradedNextActions.push('PD runtime has not been initialized in this workspace.');
-    }
-
-    // ── 3. Read candidates from state.db ──────────────────────────────────
-    let candidates: unknown[] = [];
-    if (stateDbAvailable) {
-      try {
-        const conn = this.getReadConnection();
-        const db = conn.getDb();
         try {
           candidates = db.prepare(
             'SELECT candidate_id, task_id, title, description, abstracted_principle, confidence, recommendation_kind FROM principle_candidates',
@@ -317,18 +286,25 @@ export class EvidenceChainConsoleModel {
             throw colErr;
           }
         }
+
+        stateDbAvailable = true;
       } catch (err) {
         if (isMissingTableError(err)) {
-          degradedReasons.push('Candidates table not found in state database');
-          degradedNextActions.push('Candidate and internalization chain links are unavailable. Workspace may need initialization.');
+          degradedReasons.push('Tasks/candidates table not found in state database');
+          degradedNextActions.push('Workspace may need initialization via pd config doctor.');
         } else {
-          degradedReasons.push('Failed to read candidates table');
-          degradedNextActions.push('Check state database integrity.');
+          degradedReasons.push('Failed to read state database');
+          degradedNextActions.push('Check workspace .pd directory integrity.');
         }
+      } finally {
+        try { conn.close(); } catch { /* best-effort */ }
       }
+    } else {
+      degradedReasons.push('State database not found');
+      degradedNextActions.push('PD runtime has not been initialized in this workspace.');
     }
 
-    // ── 4. Read ledger principles ─────────────────────────────────────────
+    // ── 3. Read ledger principles ────────────────────────────────────
     const ledgerResult = readLedgerPrinciples(this.workspaceDir);
     const ledgerPrinciples = ledgerResult.principles;
     if (ledgerResult.degradedReason) {
@@ -336,7 +312,7 @@ export class EvidenceChainConsoleModel {
       degradedNextActions.push(ledgerResult.nextAction ?? 'Review principle ledger file.');
     }
 
-    // ── 5. Assemble using shared logic ────────────────────────────────────
+    // ── 4. Assemble using shared logic ──────────────────────────────
     const response = assembleEvidenceChain({
       workspaceDir: this.workspaceDir,
       painEvents,
@@ -350,7 +326,7 @@ export class EvidenceChainConsoleModel {
       degradedNextActions,
     });
 
-    // ── 6. Sanitize strings in place (I/O boundary privacy policy) ────────
+    // ── 5. Sanitize strings in place ─────────────────────────────────
     for (const record of response.records) {
       record.summary = sanitizeString(record.summary, this.workspaceDir);
       if (record.rootCauseSummary) {
@@ -371,13 +347,6 @@ export class EvidenceChainConsoleModel {
   }
 
   dispose(): void {
-    if (this.readConnection) {
-      try {
-        this.readConnection.close();
-      } catch (err) {
-        console.warn('EvidenceChainConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err));
-      }
-      this.readConnection = null;
-    }
+    // Connections are opened and closed per-request; no persistent state.
   }
 }
