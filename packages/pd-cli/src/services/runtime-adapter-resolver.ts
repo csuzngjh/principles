@@ -257,7 +257,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     if (opts.runnerKind === 'dreamer' && opts.l2ArtifactReader && opts.l2StateDir) {
       const effectiveFlags = loadEffectiveFeatureFlags(opts.workspaceDir);
       const l2Flag = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
-        ? effectiveFlags.flags.l2_dreamer.enabled
+        ? (effectiveFlags.flags.l2_dreamer?.enabled ?? false)
         : false;
       if (l2Flag) {
         return new L2AgentLoopAdapter(

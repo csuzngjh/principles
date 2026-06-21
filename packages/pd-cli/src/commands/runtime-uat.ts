@@ -96,7 +96,8 @@ export function parseJsonOutput(output: string): unknown {
     // Find the last line that looks like a JSON object
     const lines = output.trim().split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
+      const line = lines[i]?.trim();
+      if (!line) continue;
       if (line.startsWith('{')) {
         try {
           return JSON.parse(line);

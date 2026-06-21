@@ -147,7 +147,7 @@ export async function importSessionHistory(
     // Use the latest timestamp from the session as ended_at
     const lastTimestamp =
       assistantTurns.length > 0
-        ? assistantTurns[assistantTurns.length - 1].created_at
+        ? (assistantTurns[assistantTurns.length - 1]?.created_at ?? now)
         : now;
 
     // Build input (user turns + tool calls) and output (assistant turns) payloads
@@ -183,13 +183,14 @@ export async function importSessionHistory(
 
     const runId = `run_${task_id}_history_1`;
 
+    const firstTurnCreatedAt = assistantTurns[0]?.created_at ?? now;
     upsertRun.run({
       runId,
       taskId: task_id,
       executionStatus: 'succeeded',
-      startedAt: assistantTurns[0].created_at,
+      startedAt: firstTurnCreatedAt,
       endedAt: lastTimestamp,
-      createdAt: assistantTurns[0].created_at,
+      createdAt: firstTurnCreatedAt,
       updatedAt: now,
       inputPayload,
       outputPayload,

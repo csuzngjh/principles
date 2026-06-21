@@ -496,7 +496,11 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
         workspaceDir: '/ws',
       });
 
-      const callArgs = mockOpenClawCliCtor.mock.calls[0][0] as Record<string, unknown>;
+      const firstCall = mockOpenClawCliCtor.mock.calls[0];
+      if (!firstCall) {
+        throw new Error('Expected OpenClawCli constructor to have been called');
+      }
+      const callArgs = firstCall[0] as Record<string, unknown>;
       expect(callArgs).not.toHaveProperty('agentId');
     });
   });

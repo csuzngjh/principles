@@ -357,7 +357,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
     // Add duplicate batches using shared painIds
     const sharedIds = ['flood-stress-shared-A', 'flood-stress-shared-B', 'flood-stress-shared-C'];
     for (let i = 0; i < stressDupCount; i++) {
-      const sharedId = sharedIds[i % sharedIds.length];
+      const sharedId = sharedIds[i % sharedIds.length] ?? 'flood-stress-shared-A';
       stressSignals.push({
         painId: sharedId,
         painType: 'tool_failure',
@@ -375,7 +375,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
 
     const failedStages = stages.filter(s => s.status === 'failed');
     const reason = failedStages.length > 0
-      ? truncateReason(`${failedStages.length} scenario(s) failed: ${failedStages.map(s => s.scenarioName).join(', ')}. ${failedStages[0].reason ?? 'unknown reason'}`)
+      ? truncateReason(`${failedStages.length} scenario(s) failed: ${failedStages.map(s => s.scenarioName).join(', ')}. ${failedStages[0]?.reason ?? 'unknown reason'}`)
       : undefined;
     const nextAction = recommendedNextIssue
       ? `Investigate: ${recommendedNextIssue}`

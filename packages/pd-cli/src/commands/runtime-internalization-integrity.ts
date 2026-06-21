@@ -74,7 +74,8 @@ export async function handleRuntimeInternalizationIntegrity(opts: Internalizatio
     if (opts.json) {
       console.log(JSON.stringify(failure, null, 2));
     } else {
-      console.error(`FAIL: ${failure.brokenLinks[0].reason}`);
+      const firstBroken = failure.brokenLinks[0];
+      console.error(`FAIL: ${firstBroken?.reason ?? 'unknown reason'}`);
     }
     process.exitCode = 1;
     return;
