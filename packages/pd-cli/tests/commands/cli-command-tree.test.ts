@@ -76,4 +76,44 @@ describe('CLI command tree structure', () => {
     const output = runPdHelp(['runtime', 'activation', '--help']);
     expect(output).toMatch(/edit\s/);
   });
+
+  it('rulecode command exists with spec/validate/replay subcommands (pd rulecode --help)', () => {
+    const output = runPdHelp(['rulecode', '--help']);
+    expect(output).toContain('spec');
+    expect(output).toContain('validate');
+    expect(output).toContain('replay');
+  });
+
+  it('rulecode spec subcommand has --json and --workspace (pd rulecode spec --help)', () => {
+    const output = runPdHelp(['rulecode', 'spec', '--help']);
+    expect(output).toContain('--json');
+    expect(output).toContain('--workspace');
+  });
+
+  it('rulecode validate subcommand has --code, --code-file, --json (pd rulecode validate --help)', () => {
+    const output = runPdHelp(['rulecode', 'validate', '--help']);
+    expect(output).toContain('--code');
+    expect(output).toContain('--code-file');
+    expect(output).toContain('--json');
+  });
+
+  it('rulecode replay subcommand has --golden-trace (required), --code, --json (pd rulecode replay --help)', () => {
+    const output = runPdHelp(['rulecode', 'replay', '--help']);
+    expect(output).toContain('--golden-trace');
+    expect(output).toContain('--code');
+    expect(output).toContain('--json');
+  });
+
+  it('legacy cleanup subcommand has --dry-run, --apply, --json (pd legacy cleanup --help)', () => {
+    const output = runPdHelp(['legacy', 'cleanup', '--help']);
+    expect(output).toContain('--dry-run');
+    expect(output).toContain('--apply');
+    expect(output).toContain('--json');
+    expect(output).toContain('--workspace');
+  });
+
+  it('legacy cleanup description mentions V1 Artificer artifacts', () => {
+    const output = runPdHelp(['legacy', 'cleanup', '--help']);
+    expect(output).toContain('V1 Artificer');
+  });
 });

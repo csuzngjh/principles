@@ -186,6 +186,9 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-419: L2 agent loop tool contract + typebox output redeclaration (pure logic, no I/O)
   'tools/agent-tool-contract.ts',
   'tools/dreamer-output-typebox.ts',
+  // PRI-439: Artificer L2 agent loop tool contract + typebox output redeclaration (pure logic, no I/O)
+  'tools/artificer-l2-tool-contract.ts',
+  'tools/artificer-output-typebox.ts',
   // PRI-408: Production gate deps factory — canonical vm-based rule compilation
   'activation/production-gate-deps.ts',
   // PRI-408: Formal approval-completion production service
@@ -2051,21 +2054,21 @@ describe('PRI-111 ArtificerRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  it('BARREL_EXPORTS: internalization/index.ts exports ArtificerRunner and ArtificerOutput', async () => {
+  it('BARREL_EXPORTS: internalization/index.ts exports ArtificerRunner and ArtificerRuleOutput', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
     expect(src).toContain('ArtificerRunner');
-    expect(src).toContain('ArtificerOutput');
+    expect(src).toContain('ArtificerRuleOutput');
     expect(src).toContain('DefaultArtificerValidator');
   });
 
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers artificer-output-v1 schema', async () => {
+  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers artificer-rule-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
-    expect(src).toContain('artificer-output-v1');
-    expect(src).toContain('ArtificerOutputV1Schema');
+    expect(src).toContain('artificer-rule-output-v1');
+    expect(src).toContain('ArtificerRuleOutputSchema');
   });
 });
 

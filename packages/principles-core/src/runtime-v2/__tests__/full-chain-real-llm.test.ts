@@ -168,8 +168,8 @@ describe.skipIf(!config)('Full Internalization Chain Real LLM E2E', () => {
     const artificerTaskId = await createTask('artificer', [scribeTaskId]);
     const artificerResult = await runWithRetry(artificerRunner, artificerTaskId, retryOpts);
     expect(artificerResult.status).toBe('succeeded');
-    expect(artificerResult.output?.implementationPlan?.summary).toBeDefined();
-    expect(artificerResult.output?.implementationPlan?.targetSurface).toBeDefined();
+    expect(artificerResult.output?.implementationSummary).toBeDefined();
+    expect(artificerResult.output?.implementationCode).toBeDefined();
 
     const evaluatorTaskId = await createTask('evaluator', [artificerTaskId]);
     const evaluatorResult = await runWithRetry(evaluatorRunner, evaluatorTaskId, retryOpts);
