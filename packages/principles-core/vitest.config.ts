@@ -7,6 +7,14 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      thresholds: {
+        // Initial thresholds set to current coverage -2% to avoid immediate red.
+        // Ratchet up by 2-3% every two weeks until reaching target (lines 70%, branches 60%).
+        lines: 60,
+        functions: 60,
+        branches: 50,
+        statements: 60,
+      },
     },
     benchmark: {
       include: ['tests/bench/**/*.bench.ts'],
