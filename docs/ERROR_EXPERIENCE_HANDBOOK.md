@@ -1018,7 +1018,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - When implementing a `PDRuntimeAdapter`, read `RunHandleSchema` / `RunStatusSchema` from `runtime-protocol.ts` and copy field names verbatim — do not rely on memory. The two objects differ only by `status`, which is easy to conflate.
   - Treat every output-emitting path (happy, degraded, fallback, retry-exhausted) as a trust boundary: each must emit only objects that passed validation. Degradation is a *content* transformation (strip code fields), not a *trust* escape hatch.
   - Prefer `throw PDRuntimeError` over returning a contradictory state object on total failure — it surfaces in `handlePostLeaseError` with a structured reason, rather than relying on the caller to cross-check handle vs pollRun.
-- **Recurrence**: First occurrence (EP-01 Trust Boundary + EP-02 Production Path Wiring). Found in self-review before external handoff; both fixed in commit c396ed92 before any PR.
+- **Recurrence**: 2026-06-21 PR #993 — the production Artificer prompt requested the retired `implementationPlan` field while the validator required `implementationSummary`, again coding against a remembered output contract instead of the canonical schema. Fixed by aligning the prompt and schema reference on V2 and adding negative assertions for the retired V1 field. Original occurrence was found in self-review before external handoff and fixed in commit c396ed92.
 
 **[ERR-070]** | New public types/classes not exported from barrel `index.ts` — module consumers cannot import the new API surface
 
