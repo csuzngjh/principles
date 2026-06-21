@@ -282,6 +282,11 @@ export class EvidenceChainConsoleModel {
             candidates = db.prepare(
               'SELECT candidate_id, task_id FROM principle_candidates',
             ).all();
+          } else if (isMissingTableError(colErr)) {
+            // ERR-002: degrade with a specific reason instead of falling through
+            // to the generic "Tasks/candidates" message.
+            degradedReasons.push('Candidates table not found in state database');
+            degradedNextActions.push('Workspace may need initialization via pd config doctor.');
           } else {
             throw colErr;
           }
