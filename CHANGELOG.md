@@ -1,4 +1,4 @@
-# [1.73.1](https://github.com/csuzngjh/principles/compare/v1.73.0...main) (2026-06-21)
+# [1.74.1](https://github.com/csuzngjh/principles/compare/v1.74.0...main) (2026-06-21)
 
 ### Bug Fixes
 
