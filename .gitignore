@@ -96,6 +96,8 @@ docs/*
 # Exception: ADRs must be committed
 !docs/adr/
 !docs/adr/**
+# Exception: release Go/No-Go checklist must be committed
+!docs/release-go-no-go-checklist.md
 # Exception: brand guidelines must be committed
 !docs/brand/
 !docs/brand/**
