@@ -5,7 +5,6 @@
  *
  * Pure functions for classifying task intent and building routing guidance.
  * No I/O dependencies — suitable for any host.
- * The full classifyTask() with stateDir I/O lives in the plugin.
  */
 
 // ---------------------------------------------------------------------------

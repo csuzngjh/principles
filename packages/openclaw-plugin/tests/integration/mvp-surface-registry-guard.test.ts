@@ -298,14 +298,11 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       }
     });
 
-    it('subagent/shadow hooks are MVP-Quiet (ADR-0014 §2.5)', () => {
+    it('no subagent/shadow hooks remain in registry (PRI-448 deletion)', () => {
       const shadowHooks = PLUGIN_SURFACE_REGISTRY.filter(
         s => s.kind === 'hook' && (s.id.includes('subagent') || s.id.includes('shadow')),
       );
-      for (const hook of shadowHooks) {
-        expect(hook.category).toBe('quiet');
-        expect(hook.enabledByDefault).toBe(false);
-      }
+      expect(shadowHooks).toEqual([]);
     });
 
     it('lifecycle hooks are MVP-Quiet (ADR-0014 §2.5)', () => {
@@ -374,14 +371,14 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
 
     it('isSurfaceEnabled returns false for quiet surfaces by default', async () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
-      const result = isSurfaceEnabled('hook:subagent_spawning');
+      const result = isSurfaceEnabled('hook:before_reset');
       expect(result.enabled).toBe(false);
       expect(result.reason).toBeDefined();
     });
 
     it('isSurfaceEnabled allows quiet surfaces with explicit override', async () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
-      const result = isSurfaceEnabled('hook:subagent_spawning', { 'hook:subagent_spawning': true });
+      const result = isSurfaceEnabled('hook:before_reset', { 'hook:before_reset': true });
       expect(result.enabled).toBe(true);
     });
 

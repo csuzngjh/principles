@@ -3,8 +3,7 @@
  *
  * Phase: PRI-74 Routing Guidance Migration (follow-up to PRI-75 Prompt Injection SDK Migration)
  *
- * These tests verify the pure classification logic migrated from
- * packages/openclaw-plugin/src/core/local-worker-routing.ts.
+ * Tests for pure task-intent classification and routing guidance.
  * No I/O dependencies — all inputs are plain objects.
  */
 

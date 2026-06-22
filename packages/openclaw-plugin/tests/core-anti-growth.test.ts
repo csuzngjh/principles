@@ -36,7 +36,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
   // Categories 3-5: Plugin I/O adapters, Do Not Move, I/O boundary
   const PLUGIN_IO_FILES = [
     // Thin adapter candidates
-    'local-worker-routing.ts',
     'principle-internalization/principle-lifecycle-service.ts',
     'principle-tree-ledger-adapter.ts',
     'principle-compiler/ledger-registrar.ts',
@@ -77,13 +76,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // I/O boundary
     'trajectory.ts',
     'evolution-reducer.ts',
-    'promotion-gate.ts',
-    'model-training-registry.ts',
     'focus-history.ts',
-    'model-deployment-registry.ts',
     'replay-engine.ts',
     'external-training-contract.ts',
-    'shadow-observation-registry.ts',
     'control-ui-db.ts',
     'thinking-models.ts',
     'pd-task-reconciler.ts',
