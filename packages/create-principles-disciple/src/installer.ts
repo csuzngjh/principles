@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync } from 'fs';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -558,6 +558,24 @@ function syncPdCli(pluginDir: string): boolean {
   cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
   copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
 
+  // Create node_modules/@principles/core symlink so pd-cli can resolve
+  // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
+  // Without this, `node dist/index.js --version` fails because static imports
+  // from @principles/core/runtime-v2 cannot be resolved.
+  const coreLinkDir = path.join(installedPdCliDir, 'node_modules', '@principles');
+  const coreLinkTarget = path.join(getPluginExtDir(), 'core');
+  mkdirSync(coreLinkDir, { recursive: true });
+  const coreLinkPath = path.join(coreLinkDir, 'core');
+  if (!existsSync(coreLinkPath)) {
+    if (isWindows()) {
+      // On Windows, use a junction (directory symlink) which doesn't require elevated privileges
+      symlinkSync(coreLinkTarget, coreLinkPath, 'junction');
+    } else {
+      // On Unix, use a relative symlink for portability
+      symlinkSync('../../core', coreLinkPath, 'dir');
+    }
+  }
+
   tryUpgradePdCliFromNpm(installedPdCliDir);
 
   const installedBinDir = getInstalledBinDir();
@@ -603,7 +621,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   } catch (e: unknown) {
     const err = e as { stderr?: Buffer; message?: string };
     const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
-    console.error(`[PD DEBUG] PD CLI local verification failed: ${detail}`);
+    logger.warn(`PD CLI local verification failed: ${detail}`);
   }
 
   const globalOk = (() => {
