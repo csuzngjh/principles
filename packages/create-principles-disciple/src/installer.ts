@@ -572,7 +572,7 @@ function syncPdCli(pluginDir: string): boolean {
       symlinkSync(coreLinkTarget, coreLinkPath, 'junction');
     } else {
       // On Unix, use a relative symlink for portability
-      symlinkSync('../../core', coreLinkPath, 'dir');
+      symlinkSync('../../../core', coreLinkPath, 'dir');
     }
   }
 
