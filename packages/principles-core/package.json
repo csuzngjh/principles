@@ -42,6 +42,10 @@
       "types": "./dist/pain-flag-resolver.d.ts",
       "default": "./dist/pain-flag-resolver.js"
     },
+    "./principle-tree-ledger": {
+      "types": "./dist/principle-tree-ledger.d.ts",
+      "default": "./dist/principle-tree-ledger.js"
+    },
     "./workspace-resolver": {
       "types": "./dist/types/workspace-resolver.d.ts",
       "default": "./dist/types/workspace-resolver.js"
