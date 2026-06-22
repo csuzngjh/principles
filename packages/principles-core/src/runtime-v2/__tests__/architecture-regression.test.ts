@@ -3515,3 +3515,68 @@ describe('PRI-416: barrel cap guards', () => {
     expect(exportLines.length).toBeLessThanOrEqual(BARREL_MAX_EXPORT_LINES);
   });
 });
+
+// ── PRI-443: Pure module boundary guards ──────────────────────────────────────
+//
+// Phases 1-3 extracted pure types/codecs/schema out of I/O modules. These guards
+// ensure those pure modules never regress to importing fs/path, and that the
+// runtime-v2 barrel never re-exports I/O functions from principle-tree-ledger.
+
+describe('PRI-443: pure module boundary guards', () => {
+  const FORBIDDEN_PURE_IMPORTS = [
+    "from 'fs'",
+    'from "fs"',
+    "from 'node:fs'",
+    'from "node:fs"',
+    "from 'path'",
+    'from "path"',
+    "from 'node:path'",
+    'from "node:path"',
+  ];
+
+  async function readSrc(relPath: string): Promise<string> {
+    const fsMod: typeof import('fs') = await import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const pathMod: typeof import('path') = await import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const full = pathMod.resolve(__dirname, '..', relPath);
+    return fsMod.readFileSync(full, 'utf-8');
+  }
+
+  it('runtime-v2/types/ledger-store.ts has zero fs/path imports (pure types module)', async () => {
+    const src = await readSrc('types/ledger-store.ts');
+    for (const pat of FORBIDDEN_PURE_IMPORTS) {
+      expect(src).not.toContain(pat);
+    }
+  });
+
+  it('runtime-v2/principle-tree/ledger-codec.ts has zero fs/path imports (pure codec module)', async () => {
+    const src = await readSrc('principle-tree/ledger-codec.ts');
+    for (const pat of FORBIDDEN_PURE_IMPORTS) {
+      expect(src).not.toContain(pat);
+    }
+  });
+
+  it('runtime-v2/types/pain-signal.ts has zero fs/path imports (pure schema module)', async () => {
+    const src = await readSrc('types/pain-signal.ts');
+    for (const pat of FORBIDDEN_PURE_IMPORTS) {
+      expect(src).not.toContain(pat);
+    }
+  });
+
+  it('runtime-v2/index.ts barrel does NOT export I/O functions from principle-tree-ledger', async () => {
+    const src = await readSrc('index.ts');
+    // I/O functions must not be re-exported through the pure-types barrel.
+    expect(src).not.toMatch(/export\s+\{[^}]*\bloadLedger\b[^}]*\}\s*from\s*['"]\.\.\/principle-tree-ledger/);
+    expect(src).not.toMatch(/export\s+\{[^}]*\bsaveLedger\b[^}]*\}\s*from\s*['"]\.\.\/principle-tree-ledger/);
+    expect(src).not.toMatch(/export\s+\{[^}]*\bgetLedgerFilePathPublic\b[^}]*\}\s*from\s*['"]\.\.\/principle-tree-ledger/);
+    expect(src).not.toMatch(/export\s+\{[^}]*\bupdatePrinciple\b[^}]*\}\s*from\s*['"]\.\.\/principle-tree-ledger/);
+    expect(src).not.toMatch(/export\s+\{[^}]*\batomicWriteFileSync\b[^}]*\}\s*from\s*['"]\.\.\/principle-tree-ledger/);
+  });
+
+  it('runtime-v2/index.ts barrel re-exports LedgerTreeStore type from pure types module, not from principle-tree-ledger', async () => {
+    const src = await readSrc('index.ts');
+    // The type must come from the pure types module (./types/ledger-store.js),
+    // NOT from the I/O module (../principle-tree-ledger.js).
+    expect(src).toMatch(/export\s+type\s+\{\s*LedgerTreeStore\s*\}\s*from\s*['"]\.\/types\/ledger-store\.js['"]/);
+    expect(src).not.toMatch(/export\s+type\s+\{\s*LedgerTreeStore\s*\}\s*from\s*['"]\.\.\/principle-tree-ledger\.js['"]/);
+  });
+});
