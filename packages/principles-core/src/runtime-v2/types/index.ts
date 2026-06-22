@@ -217,6 +217,22 @@ export {
   validatePainSignal,
 } from './pain-signal.js';
 
+// PRI-443: Ledger store types — pure types, zero I/O
+// Only ledger-specific types are exported here to avoid conflicts with
+// the richer Principle/Rule/Implementation from principle-schema.js.
+// Consumers needing the ledger versions should import from
+// @principles/core/principle-tree-ledger or ./ledger-store.js directly.
+export type {
+  LedgerPrinciple,
+  LedgerRule,
+  LedgerTreeStore,
+  LegacyPrincipleTrainingState,
+  LegacyPrincipleTrainingStore,
+  HybridLedgerStore,
+} from './ledger-store.js';
+
+export { TREE_NAMESPACE } from './ledger-store.js';
+
 // PD Task types
 export type {
   PDTaskSchedule,

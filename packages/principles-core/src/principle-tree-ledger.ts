@@ -15,120 +15,38 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFileSync } from './io.js';
 
+// PRI-443: Types and constants now live in the pure module
+import type {
+  Principle,
+  Rule,
+  Implementation,
+  PrincipleValueMetrics,
+  LedgerPrinciple,
+  LedgerRule,
+  LedgerTreeStore,
+  LegacyPrincipleTrainingState,
+  LegacyPrincipleTrainingStore,
+  HybridLedgerStore,
+} from './runtime-v2/types/ledger-store.js';
+import { TREE_NAMESPACE } from './runtime-v2/types/ledger-store.js';
+
+// Re-export for backward compatibility — existing imports from
+// @principles/core/principle-tree-ledger continue to work.
+export type {
+  Principle,
+  Rule,
+  Implementation,
+  PrincipleValueMetrics,
+  LedgerPrinciple,
+  LedgerRule,
+  LedgerTreeStore,
+  LegacyPrincipleTrainingState,
+  LegacyPrincipleTrainingStore,
+  HybridLedgerStore,
+};
+export { TREE_NAMESPACE };
+
 const PRINCIPLE_TRAINING_FILE = 'principle_training_state.json';
-
-// ---------------------------------------------------------------------------
-// Types (subset of openclaw-plugin types needed for ledger operations)
-// ---------------------------------------------------------------------------
-
-export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
-export type PrinciplePriority = 'P0' | 'P1' | 'P2';
-export type PrincipleScope = 'general' | 'domain';
-export type PrincipleEvaluability = 'manual_only' | 'deterministic' | 'weak_heuristic';
-
-export interface Principle {
-  id: string;
-  version: number;
-  text: string;
-  triggerPattern: string;
-  action: string;
-  status: PrincipleStatus;
-  priority: PrinciplePriority;
-  scope: PrincipleScope;
-  evaluability: PrincipleEvaluability;
-  valueScore: number;
-  adherenceRate: number;
-  painPreventedCount: number;
-  derivedFromPainIds: string[];
-  ruleIds: string[];
-  conflictsWithPrincipleIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Rule {
-  id: string;
-  principleId: string;
-  ruleIds: string[];
-  implementationIds: string[];
-  type?: string;
-  status?: string;
-  lifecycleState?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface Implementation {
-  id: string;
-  ruleId: string;
-  type?: string;
-  lifecycleState?: string;
-  [key: string]: unknown;
-}
-
-export interface PrincipleValueMetrics {
-  principleId: string;
-  painPreventedCount?: number;
-  lastPainPreventedAt?: string;
-  avgPainSeverityPrevented?: number;
-  totalOpportunities?: number;
-  adheredCount?: number;
-  violatedCount?: number;
-  implementationCost?: number;
-  benefitScore?: number;
-  calculatedAt?: string;
-}
-
-export interface LedgerPrinciple extends Principle {
-  suggestedRules?: string[];
-  lastTriggeredAt?: string;
-}
-
-export interface LedgerRule extends Rule {
-  implementationIds: string[];
-}
-
-export interface LedgerTreeStore {
-  principles: Record<string, LedgerPrinciple>;
-  rules: Record<string, LedgerRule>;
-  implementations: Record<string, Implementation>;
-  metrics: Record<string, PrincipleValueMetrics>;
-  lastUpdated: string;
-}
-
-export interface LegacyPrincipleTrainingState {
-  principleId: string;
-  evaluability: 'deterministic' | 'weak_heuristic' | 'manual_only';
-  applicableOpportunityCount: number;
-  observedViolationCount: number;
-  complianceRate: number;
-  violationTrend: number;
-  generatedSampleCount: number;
-  approvedSampleCount: number;
-  includedTrainRunIds: string[];
-  deployedCheckpointIds: string[];
-  lastEvalScore?: number;
-  internalizationStatus:
-    | 'prompt_only'
-    | 'needs_training'
-    | 'in_training'
-    | 'deployed_pending_eval'
-    | 'internalized'
-    | 'regressed';
-}
-
-export type LegacyPrincipleTrainingStore = Record<string, LegacyPrincipleTrainingState>;
-
-export interface HybridLedgerStore {
-  trainingStore: LegacyPrincipleTrainingStore;
-  tree: LedgerTreeStore;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-export const TREE_NAMESPACE = '_tree';
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
 const VALID_INTERNALIZATION_STATUSES = [

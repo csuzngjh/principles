@@ -2811,7 +2811,8 @@ describe('PRI-139 L1 Hard Cap & LRU Eviction', () => {
   it('LedgerPrinciple includes lastTriggeredAt field', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', '..', 'principle-tree-ledger.ts'), 'utf-8');
+    // PRI-443: type moved to pure module
+    const src = readFileSync(resolve(__dirname, '..', 'types', 'ledger-store.ts'), 'utf-8');
     expect(src).toContain('lastTriggeredAt');
   });
 
@@ -3469,7 +3470,7 @@ describe('PRI-416: type single-ownership guards', () => {
 
   it('HybridLedgerStore is defined exactly once in core/src/', () => {
     const hits = findDefinitions(/export\s+interface\s+HybridLedgerStore\s*\{/);
-    expect(hits).toEqual(['principle-tree-ledger.ts']);
+    expect(hits).toEqual(['runtime-v2/types/ledger-store.ts']);
   });
 
   it('atomicWriteFileSync is defined exactly once in core/src/', () => {
