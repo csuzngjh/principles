@@ -139,7 +139,8 @@ describe('File Lock', () => {
       const lockPath = getLockPath(filePath);
       
       // 创建一个持有锁的"死进程"
-      fs.writeFileSync(lockPath, '1', 'utf8');  // PID 1 通常是 init，但在这个测试中假设它不存活
+      // 使用极高 PID 保证进程不存在（99999 远大于实际进程 ID 上限）
+      fs.writeFileSync(lockPath, '99999', 'utf8');
       
       // 使用非常短的过期时间
       const ctx = acquireLock(filePath, { 
