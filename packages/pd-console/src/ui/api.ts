@@ -240,6 +240,17 @@ async function rejectApproval(approvalId: string, reason: string): Promise<ApiRe
   }, validateApprovalRecordDirect);
 }
 
+async function editApproval(
+  approvalId: string,
+  newArtifactId: string,
+  editReason: string,
+): Promise<ApiResponse<ApprovalRecordData>> {
+  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/edit', {
+    method: 'POST',
+    body: JSON.stringify({ newArtifactId, editReason }),
+  }, validateApprovalRecordDirect);
+}
+
 // ── MVP seed feedback report drafts (PRI-285) ────────────────────────────────
 
 async function createFeedbackReport(
@@ -394,6 +405,7 @@ export {
   fetchApprovalDetail,
   approveApproval,
   rejectApproval,
+  editApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
   fetchPrincipleTrajectory,
