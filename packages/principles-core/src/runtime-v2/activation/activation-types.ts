@@ -9,7 +9,6 @@ export const LOW_RISK_CHANNELS: readonly InternalizationChannel[] = ['prompt', '
 export const HIGH_RISK_CHANNEL_MAP: Readonly<Record<string, ActivationRiskLevel>> = {
   skill: 'medium',
   code_tool_hook: 'high',
-  model_training: 'critical',
 } as const;
 
 export const AUTO_PROMOTION_CONFIDENCE_THRESHOLD = 0.95;

@@ -121,6 +121,10 @@ describe('Real packaged install smoke test', () => {
           ...process.env,
           HOME: tempHomeDir,
           USERPROFILE: tempHomeDir,
+          // Skip npm upgrade so we test the bundled pd-cli (built from current
+          // repo state) rather than the npm-published version, which may be
+          // incompatible with local core changes (e.g., removed exports).
+          PD_SKIP_NPM_UPGRADE: '1',
         },
         timeout: 180_000,
       });
@@ -288,6 +292,7 @@ describe('Real packaged install smoke test', () => {
             ...process.env,
             HOME: backupHomeDir,
             USERPROFILE: backupHomeDir,
+            PD_SKIP_NPM_UPGRADE: '1',
           },
           timeout: 180_000,
         }).toString();

@@ -217,12 +217,6 @@ describe("Channel display honesty — no fake selector", () => {
     expect(getPagesKeyZh("principles.channelPrompt")).toBeTruthy();
   });
 
-  it("retired channels are marked as retired in i18n", () => {
-    // Check that model_training channel is marked retired
-    const channelKeys = getNestedValue(enJson, "components.approvalCard.channel") as Record<string, unknown> | undefined;
-    expect(channelKeys).toBeTruthy();
-    expect(String(channelKeys!.model_training)).toContain("retired");
-  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -615,7 +609,7 @@ describe("PRI-332: Principle Review readability", () => {
 
   it("PrinciplesPage never shows raw i18n key for unknown channels", () => {
     // Old pattern: t("principles." + (CHANNEL_LABELS[ch] ?? ch))
-    // This would show "principles.model_training" as raw key for unknown channels
+    // This would show "principles.unknown_channel" as raw key for unknown channels
     // Current pattern: enumLabel('channel', ch, t) — centralized 3-tier fallback
     // (i18n → local map → raw value) that never exposes a raw i18n key.
     expect(principlesPageSrc).not.toMatch(/CHANNEL_LABELS\[ch\] \?\? ch/);

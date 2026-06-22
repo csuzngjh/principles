@@ -19,7 +19,7 @@ import type { TaskRecord } from '../task-status.js';
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
 /**
- * The 5 channels through which principle internalization can occur.
+ * The 4 channels through which principle internalization can occur.
  *
  * @see ADR-0003 Section 3.2
  */
@@ -27,11 +27,10 @@ export type InternalizationChannel =
   | 'prompt'
   | 'skill'
   | 'code_tool_hook'
-  | 'model_training'
   | 'defer_archive';
 
 /**
- * The 7 peer runner kinds in the Internalization Engine.
+ * The 6 peer runner kinds in the Internalization Engine.
  * All runners are peers — no main/sub hierarchy.
  *
  * @see ADR-0003 Section 3.3
@@ -42,7 +41,6 @@ export type PeerRunnerKind =
   | 'scribe'
   | 'artificer'
   | 'evaluator'
-  | 'trainer'
   | 'rollout_reviewer';
 
 /**
@@ -58,7 +56,7 @@ export type DiagnosticianStageKind =
 
 /**
  * Broad execution-kind union — used by orchestrator for task dispatch.
- * Preserves the "7 peer runners" invariant: PeerRunnerKind and
+ * Preserves the "6 peer runners" invariant: PeerRunnerKind and
  * DiagnosticianStageKind are disjoint sets.
  */
 export type RunnerKind = PeerRunnerKind | DiagnosticianStageKind;
@@ -71,7 +69,6 @@ export type RunnerKind = PeerRunnerKind | DiagnosticianStageKind;
 export type PIArtifactKind =
   | 'principle'
   | 'rule'
-  | 'training_data'
   | 'skill'
   | 'patch';
 
@@ -155,7 +152,6 @@ export const PEER_RUNNER_KINDS: readonly PeerRunnerKind[] = [
   'scribe',
   'artificer',
   'evaluator',
-  'trainer',
   'rollout_reviewer',
 ] as const;
 
@@ -175,7 +171,6 @@ export const INTERNALIZATION_CHANNELS: readonly InternalizationChannel[] = [
   'prompt',
   'skill',
   'code_tool_hook',
-  'model_training',
   'defer_archive',
 ] as const;
 
@@ -185,7 +180,6 @@ export const INTERNALIZATION_CHANNELS: readonly InternalizationChannel[] = [
 export const PI_ARTIFACT_KINDS: readonly PIArtifactKind[] = [
   'principle',
   'rule',
-  'training_data',
   'skill',
   'patch',
 ] as const;

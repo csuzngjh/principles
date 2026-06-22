@@ -60,7 +60,6 @@ function buildApprovalContext(
   const CHANNEL_EFFECTS: Record<string, string> = {
     skill: 'This principle will be activated as a skill that monitors and influences agent behavior in real-time.',
     code_tool_hook: 'This principle will be injected as a code tool hook that intercepts and validates tool calls before execution.',
-    model_training: 'This principle will be used as training data for model fine-tuning, affecting future model responses.',
   };
 
   return {

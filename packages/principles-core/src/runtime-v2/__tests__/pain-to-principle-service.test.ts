@@ -234,7 +234,6 @@ describe('PainToPrincipleService', () => {
             artificer: { enabled: true },
             evaluator: { enabled: true },
             rolloutReviewer: { enabled: true },
-            trainer: { enabled: false },
             correctionObserver: { enabled: true },
             empathyObserver: { enabled: true },
           },

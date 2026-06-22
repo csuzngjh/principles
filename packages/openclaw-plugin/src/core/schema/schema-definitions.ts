@@ -93,6 +93,8 @@ export const SCHEMAS: Record<DbType, SchemaCatalog> = {
           empathy_signal_json TEXT NOT NULL,
           blob_ref TEXT,
           raw_excerpt TEXT,
+          stop_reason TEXT,
+          thinking_blocks_count INTEGER,
           created_at TEXT NOT NULL
         )`,
         indexes: [
@@ -131,6 +133,7 @@ export const SCHEMAS: Record<DbType, SchemaCatalog> = {
           gfi_before REAL,
           gfi_after REAL,
           params_json TEXT NOT NULL,
+          result_preview TEXT,
           created_at TEXT NOT NULL
         )`,
         indexes: [

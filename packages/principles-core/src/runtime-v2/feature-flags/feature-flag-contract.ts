@@ -135,8 +135,6 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
-  { id: 'model_training', category: 'gone', enabled: false, since: '2026-05-24', description: 'Model training channel (retired)' },
-  { id: 'trainer', category: 'gone', enabled: false, since: '2026-05-24', description: 'Trainer peer runner (retired)' },
 ];
 
 export function computeEffectiveFlags(

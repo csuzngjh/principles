@@ -33,7 +33,7 @@ let store!: MemoryApprovalQueueStore;
     it('returns all records regardless of status', async () => {
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-1' }), '2026-01-01T00:00:00Z');
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-2', channel: 'skill' }), '2026-01-01T00:00:00Z');
-      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'model_training' }), '2026-01-01T00:00:00Z');
+      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'code_tool_hook' }), '2026-01-01T00:00:00Z');
       await store.approve(r3.approvalId, 'user-1');
       const all = await store.listAll();
       expect(all).toHaveLength(3);
@@ -69,7 +69,7 @@ let store!: MemoryApprovalQueueStore;
     it('returns correct counts grouped by status', async () => {
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-1' }), '2026-01-01T00:00:00Z');
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-2', channel: 'skill' }), '2026-01-01T00:00:00Z');
-      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'model_training' }), '2026-01-01T00:00:00Z');
+      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'code_tool_hook' }), '2026-01-01T00:00:00Z');
       await store.approve(r3.approvalId, 'user-1');
       const stats = await store.countByStatus();
       expect(stats.pending).toBe(2);
@@ -124,7 +124,7 @@ let store!: SqliteApprovalQueueStore;
     it('returns all records regardless of status', async () => {
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-1' }), '2026-01-01T00:00:00Z');
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-2', channel: 'skill' }), '2026-01-01T00:00:00Z');
-      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'model_training' }), '2026-01-01T00:00:00Z');
+      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'code_tool_hook' }), '2026-01-01T00:00:00Z');
       await store.approve(r3.approvalId, 'user-1');
       const all = await store.listAll();
       expect(all).toHaveLength(3);
@@ -160,7 +160,7 @@ let store!: SqliteApprovalQueueStore;
     it('returns correct counts grouped by status', async () => {
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-1' }), '2026-01-01T00:00:00Z');
       await store.enqueue(makeEnqueueInput({ artifactId: 'art-2', channel: 'skill' }), '2026-01-01T00:00:00Z');
-      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'model_training' }), '2026-01-01T00:00:00Z');
+      const r3 = await store.enqueue(makeEnqueueInput({ artifactId: 'art-3', channel: 'code_tool_hook' }), '2026-01-01T00:00:00Z');
       await store.approve(r3.approvalId, 'user-1');
       const stats = await store.countByStatus();
       expect(stats.pending).toBe(2);

@@ -106,9 +106,8 @@ Three channels are currently active in the MVP:
 | `defer_archive` | n/a | Ledger state change | No |
 | `code_tool_hook` | L2 (hard) | RuleHost JS code | Yes |
 
-Two additional channels exist in the architecture but are **not active** in the MVP:
+One additional channel exists in the architecture but is **not active** in the MVP:
 - `skill` (L1.5) — stretch goal, not yet implemented
-- `model_training` (L3) — retired, feature flag set to `gone`
 
 ## Development Workflow
 

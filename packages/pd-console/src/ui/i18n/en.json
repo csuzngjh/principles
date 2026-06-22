@@ -726,8 +726,7 @@
         "code_tool_hook": "RuleHost",
         "defer_archive": "Defer Archive",
         "prompt": "Prompt",
-        "skill": "Skill (retired)",
-        "model_training": "Model Training (retired)"
+        "skill": "Skill (retired)"
       },
       "retired": "This channel is retired and cannot be actioned",
       "riskLevel": "Risk Level"

@@ -65,7 +65,6 @@ function makeValidConfig(): PdConfig {
         philosopher: { enabled: false },
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
-        trainer: { enabled: false },
         correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
       },
@@ -105,8 +104,8 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     const effective = computeEffectivePdConfig(null);
     expect(nn(effective.config.features.nocturnal).enabled).toBe(false);
     expect(nn(effective.config.features.nocturnal).category).toBe('gone');
-    expect(nn(effective.config.features.model_training).enabled).toBe(false);
-    expect(nn(effective.config.features.trainer).enabled).toBe(false);
+    expect(nn(effective.config.features.idle_trigger).enabled).toBe(false);
+    expect(nn(effective.config.features.idle_trigger).category).toBe('gone');
   });
 
   it('defaults include openclaw.default runtime profile', () => {
@@ -714,9 +713,9 @@ describe('Edge cases', () => {
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const summary = redactPdConfig(effective);
-    const trainer = summary.agents.find(a => a.name === 'trainer');
-    expect(nn(trainer).enabled).toBe(false);
-    expect(nn(trainer).readiness).toBe('disabled');
+    const philosopher = summary.agents.find(a => a.name === 'philosopher');
+    expect(nn(philosopher).enabled).toBe(false);
+    expect(nn(philosopher).readiness).toBe('disabled');
   });
 
   it('pi-ai profile with all required fields has readiness=not_ready (runtime unknown)', () => {

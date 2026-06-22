@@ -45,6 +45,8 @@ function createTrajectoryDb(): Database.Database {
       raw_text TEXT,
       sanitized_text TEXT,
       blob_ref TEXT,
+      stop_reason TEXT,
+      thinking_blocks_count INTEGER,
       created_at TEXT NOT NULL
     )
   `);
@@ -74,6 +76,7 @@ function createTrajectoryDb(): Database.Database {
       gfi_before REAL,
       gfi_after REAL,
       params_json TEXT NOT NULL DEFAULT '{}',
+      result_preview TEXT,
       created_at TEXT NOT NULL
     )
   `);
@@ -114,11 +117,12 @@ function insertToolCall(
   errorType: string | null,
   exitCode: number | null,
   createdAt: string,
+  resultPreview?: string | null,
 ): void {
   db.prepare(`
-    INSERT INTO tool_calls (session_id, tool_name, outcome, error_type, exit_code, duration_ms, params_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, toolName, outcome, errorType, exitCode, 100, '{}', createdAt);
+    INSERT INTO tool_calls (session_id, tool_name, outcome, error_type, exit_code, duration_ms, params_json, result_preview, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(sessionId, toolName, outcome, errorType, exitCode, 100, '{}', resultPreview ?? null, createdAt);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -279,6 +283,55 @@ describe('buildTrajectoryEvidenceFromDb — PRI-341', () => {
       expect(evidence.length).toBeGreaterThan(0);
       // Should NOT have tool_call_failure:unavailable since we have no other evidence
       // and the table simply doesn't exist (not an error condition worth reporting)
+    });
+  });
+
+  // ── Trajectory v2 enhancement: resultPreview + stopReason ─────────────────
+
+  describe('trajectory v2 enhancement: resultPreview and stopReason', () => {
+    it('includes resultPreview in tool failure evidence note', () => {
+      const db = createTrajectoryDb();
+      insertToolCall(db, '123', 'bash', 'failure', 'ENOENT', 1, '2026-01-01T10:00:00Z', 'Error: no such file or directory');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const failureEntry = evidence.find(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntry).toBeDefined();
+      expect(failureEntry!.note).toContain('ENOENT');
+      expect(failureEntry!.note).toContain('Error: no such file or directory');
+    });
+
+    it('includes truncation warning when stop_reason is length', () => {
+      const db = createTrajectoryDb();
+      db.prepare(`
+        INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run('123', 'Partial output truncated...', 'length', '2026-01-01T10:00:00Z');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const agentEntry = evidence.find(e => e.sourceRef.startsWith('agent_turn:'));
+      expect(agentEntry).toBeDefined();
+      expect(agentEntry!.note).toContain('Partial output truncated...');
+      expect(agentEntry!.note).toContain('[TRUNCATED: output cut off by length limit]');
+    });
+
+    it('does not include truncation warning when stop_reason is end_turn', () => {
+      const db = createTrajectoryDb();
+      db.prepare(`
+        INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run('123', 'Complete output', 'end_turn', '2026-01-01T10:00:00Z');
+      db.close();
+
+      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+
+      const agentEntry = evidence.find(e => e.sourceRef.startsWith('agent_turn:'));
+      expect(agentEntry).toBeDefined();
+      expect(agentEntry!.note).toBe('Complete output');
+      expect(agentEntry!.note).not.toContain('[TRUNCATED');
     });
   });
 });

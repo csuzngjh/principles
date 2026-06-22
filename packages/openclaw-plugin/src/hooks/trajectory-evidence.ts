@@ -50,9 +50,11 @@ export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: strin
       const sanitizedNote = sanitizeAssistantText(
         (turn.sanitizedText ?? '').slice(0, MAX_EVIDENCE_NOTE_CHARS)
       );
+      // Enhanced: append truncation warning when stop_reason=length
+      const truncationWarning = turn.stopReason === 'length' ? ' [TRUNCATED: output cut off by length limit]' : '';
       evidence.push({
         sourceRef: `agent_turn:${turn.createdAt}`,
-        note: sanitizedNote,
+        note: sanitizedNote + truncationWarning,
       });
     }
   } catch (e) {
@@ -70,7 +72,9 @@ export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: strin
     const failedToolCalls = allToolCalls.filter(tc => tc.outcome === 'failure').slice(-3);
     for (const tc of failedToolCalls) {
       if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
-      const note = `Tool ${tc.toolName} failed: ${tc.errorType ?? 'unknown'} (exitCode: ${tc.exitCode ?? 'N/A'})`;
+      // Enhanced: append resultPreview when available
+      const previewSuffix = tc.resultPreview ? ` | ${tc.resultPreview.slice(0, 200)}` : '';
+      const note = `Tool ${tc.toolName} failed: ${tc.errorType ?? 'unknown'} (exitCode: ${tc.exitCode ?? 'N/A'})${previewSuffix}`;
       evidence.push({
         sourceRef: `tool_call_failure:${tc.createdAt}`,
         note: sanitizeAssistantText(note.slice(0, MAX_EVIDENCE_NOTE_CHARS)),

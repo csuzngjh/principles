@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync } from 'fs';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -482,6 +482,15 @@ function installGlobalPdShim(): boolean {
 }
 
 function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  // Allow skipping the npm upgrade in smoke tests / offline environments.
+  // The bundled pd-cli is built from the current repo state and is the
+  // authoritative version for testing. Upgrading to an npm-published version
+  // can introduce incompatibilities (e.g., when local core has removed
+  // exports that the npm pd-cli still imports).
+  if (process.env.PD_SKIP_NPM_UPGRADE === '1' || process.env.PD_SKIP_NPM_UPGRADE === 'true') {
+    logger.info('Skipping pd-cli npm upgrade (PD_SKIP_NPM_UPGRADE set).');
+    return;
+  }
   try {
     const npmVersion = execSync('npm view @principles/pd-cli version', {
       encoding: 'utf-8',
@@ -557,6 +566,24 @@ function syncPdCli(pluginDir: string): boolean {
   mkdirSync(installedPdCliDir, { recursive: true });
   cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
   copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
+
+  // Create node_modules/@principles/core symlink so pd-cli can resolve
+  // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
+  // Without this, `node dist/index.js --version` fails because static imports
+  // from @principles/core/runtime-v2 cannot be resolved.
+  const coreLinkDir = path.join(installedPdCliDir, 'node_modules', '@principles');
+  const coreLinkTarget = path.join(getPluginExtDir(), 'core');
+  mkdirSync(coreLinkDir, { recursive: true });
+  const coreLinkPath = path.join(coreLinkDir, 'core');
+  if (!existsSync(coreLinkPath)) {
+    if (isWindows()) {
+      // On Windows, use a junction (directory symlink) which doesn't require elevated privileges
+      symlinkSync(coreLinkTarget, coreLinkPath, 'junction');
+    } else {
+      // On Unix, use a relative symlink for portability
+      symlinkSync('../../../core', coreLinkPath, 'dir');
+    }
+  }
 
   tryUpgradePdCliFromNpm(installedPdCliDir);
 

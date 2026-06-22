@@ -248,6 +248,7 @@ export interface PluginHookLlmOutputEvent {
   usage?: TokenUsage;
   assistantTexts?: string[];
   trigger?: string;
+  lastAssistant?: unknown;
   [key: string]: unknown;
 }
 

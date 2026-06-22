@@ -278,7 +278,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'focus-history.ts',
   'training-program.ts',
   'replay-engine.ts',
-  'external-training-contract.ts',
   'merge-gate-audit.ts',
   'control-ui-db.ts',
   'thinking-models.ts',
@@ -374,7 +373,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-448: Removed local-worker-routing.ts, promotion-gate.ts,
     // model-training-registry.ts, model-deployment-registry.ts,
     // shadow-observation-registry.ts (98 → 93)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // PRI-449: Removed external-training-contract.ts (93 → 92)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
   });
 });
 
@@ -2152,79 +2152,6 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
     expect(src).toContain('rollout-reviewer-output-v1');
     expect(src).toContain('RolloutReviewerOutputV1Schema');
-  });
-});
-
-// ── PRI-116: TrainerRunner boundary guards ──────────────────────────────────
-
-describe('PRI-116 TrainerRunner boundary', () => {
-  it('trainer source files exist in internalization directory', async () => {
-    const { existsSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    expect(existsSync(resolve(__dirname, '..', 'internalization', 'trainer-runner.ts'))).toBe(true);
-    expect(existsSync(resolve(__dirname, '..', 'internalization', 'trainer-output.ts'))).toBe(true);
-    expect(existsSync(resolve(__dirname, '..', 'internalization', 'trainer-prompt-builder.ts'))).toBe(true);
-  });
-
-  it('trainer test file exists', async () => {
-    const { existsSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    expect(existsSync(resolve(__dirname, 'trainer-runner-vslice.test.ts'))).toBe(true);
-  });
-
-  it('CORE_NO_FORBIDDEN_IMPORTS: trainer-output.ts has no openclaw-plugin, fs, path imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'trainer-output.ts'), 'utf-8');
-    expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:path');
-  });
-
-  it('CORE_NO_FORBIDDEN_IMPORTS: trainer-runner.ts has no openclaw-plugin, RolloutReviewerRunner, nocturnal-trinity imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'trainer-runner.ts'), 'utf-8');
-    expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('RolloutReviewerRunner');
-    expect(src).not.toContain('nocturnal-trinity');
-    expect(src).not.toContain('InternalizationOrchestrator');
-    expect(src).not.toContain('createTask');
-    expect(src).not.toContain('enqueueTask');
-  });
-
-  it('CORE_NO_SCHEDULING: trainer-runner.ts has no node:fs, node:cron imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'trainer-runner.ts'), 'utf-8');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:cron');
-  });
-
-  it('BARREL_EXPORTS: internalization/index.ts exports TrainerRunner and TrainerOutput', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
-    expect(src).toContain('TrainerRunner');
-    expect(src).toContain('TrainerOutput');
-    expect(src).toContain('DefaultTrainerValidator');
-  });
-
-  it('BARREL_EXPORTS: runtime-v2/index.ts exports TrainerRunner and TrainerOutput', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('TrainerRunner');
-    expect(src).toContain('TrainerOutput');
-    expect(src).toContain('DefaultTrainerValidator');
-  });
-
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers trainer-output-v1 schema', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
-    expect(src).toContain('trainer-output-v1');
-    expect(src).toContain('TrainerOutputV1Schema');
   });
 });
 

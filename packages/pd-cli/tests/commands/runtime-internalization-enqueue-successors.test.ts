@@ -30,7 +30,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     };
   }),
   isPeerRunnerKind: vi.fn().mockImplementation((k: string) =>
-    ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer'].includes(k),
+    ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(k),
   ),
   hydratePITaskRecord: vi.fn().mockImplementation((task: Record<string, unknown>) => {
     if (typeof task.diagnosticJson !== 'string' || task.diagnosticJson.length === 0) return null;
@@ -225,22 +225,6 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].successorTaskId).toBe('philosopher-dreamer-003-prompt');
   });
 
-  it('terminal runner returns no_successor', async () => {
-    const trainerTask = makeSucceededTask('trainer-001', 'trainer');
-    mockListTasks.mockResolvedValue([trainerTask]);
-    mockCommitNextTaskProposal.mockResolvedValue({
-      decision: 'no_successor',
-      sourceTaskId: 'trainer-001',
-      reason: 'No valid successor in job graph for this task kind and channel',
-    });
-
-    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, confirm: true, json: true });
-
-    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.actions[0].decision).toBe('no_successor');
-    expect(output.actions[0].taskId).toBe('trainer-001');
-    expect(output.actions[0].reason).toBe('No valid successor in job graph for this task kind and channel');
-  });
 
   it('succeeded task with malformed metadata is skipped with reason; no successor created', async () => {
     const malformedTask = makeMalformedTask('malformed-001', 'dreamer');
@@ -524,17 +508,6 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.skippedCount).toBe(1);
   });
 
-  it('dry-run with no_successor proposal: reports no_successor', async () => {
-    const trainerTask = makeSucceededTask('trainer-dry-001', 'trainer');
-    mockListTasks.mockResolvedValue([trainerTask]);
-    mockProposeNextTask.mockResolvedValue(null);
-
-    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
-
-    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.actions[0].decision).toBe('no_successor');
-    expect(output.actions[0].taskId).toBe('trainer-dry-001');
-  });
 
   it('successor index build failure: fails closed with structured error', async () => {
     const dreamerTask = makeSucceededTask('dreamer-index-err', 'dreamer');
