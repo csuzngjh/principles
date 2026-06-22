@@ -482,6 +482,15 @@ function installGlobalPdShim(): boolean {
 }
 
 function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  // Allow skipping the npm upgrade in smoke tests / offline environments.
+  // The bundled pd-cli is built from the current repo state and is the
+  // authoritative version for testing. Upgrading to an npm-published version
+  // can introduce incompatibilities (e.g., when local core has removed
+  // exports that the npm pd-cli still imports).
+  if (process.env.PD_SKIP_NPM_UPGRADE === '1' || process.env.PD_SKIP_NPM_UPGRADE === 'true') {
+    logger.info('Skipping pd-cli npm upgrade (PD_SKIP_NPM_UPGRADE set).');
+    return;
+  }
   try {
     const npmVersion = execSync('npm view @principles/pd-cli version', {
       encoding: 'utf-8',
