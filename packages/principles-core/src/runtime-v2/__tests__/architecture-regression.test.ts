@@ -275,15 +275,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // ── I/O Boundary ────────────────────────────────────────────────────────
   'trajectory.ts',
   'evolution-reducer.ts',
-  'promotion-gate.ts',
-  'model-training-registry.ts',
   'focus-history.ts',
-  'model-deployment-registry.ts',
   'training-program.ts',
   'replay-engine.ts',
   'external-training-contract.ts',
   'merge-gate-audit.ts',
-  'shadow-observation-registry.ts',
   'control-ui-db.ts',
   'thinking-models.ts',
   'pd-task-reconciler.ts',
@@ -375,8 +371,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
     // PRI-307: Added pd-config-loader.ts (96 → 97)
     // PRI-346: Added config-health.ts (97 → 98)
-    // PRI-448: Removed local-worker-routing.ts (98 → 97)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    // PRI-448: Removed local-worker-routing.ts, promotion-gate.ts,
+    // model-training-registry.ts, model-deployment-registry.ts,
+    // shadow-observation-registry.ts (98 → 93)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
