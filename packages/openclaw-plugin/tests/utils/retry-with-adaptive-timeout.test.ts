@@ -8,7 +8,7 @@
  *    boundary case for sample=[] clamping at min/max thresholds
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   retryWithAdaptiveTimeout,
   computeAdaptiveTimeout,
@@ -16,14 +16,12 @@ import {
   MAX_TIMEOUT_MS,
 } from '../../src/utils/retry.js';
 
-describe('computeAdaptiveTimeout', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+// NOTE: no fake timers here. computeAdaptiveTimeout is a pure function and
+// retryWithAdaptiveTimeout measures real elapsed time via Date.now(); faking
+// timers would freeze Date.now() and make every recorded duration 0, turning
+// the duration-recording assertion into a vacuous `0 >= 0` pass (EP-09).
 
+describe('computeAdaptiveTimeout', () => {
   it('returns at least MIN_TIMEOUT_MS when history is empty', () => {
     const t = computeAdaptiveTimeout([], 1);
     expect(t).toBeGreaterThanOrEqual(MIN_TIMEOUT_MS);
@@ -59,12 +57,9 @@ describe('computeAdaptiveTimeout', () => {
 });
 
 describe('retryWithAdaptiveTimeout', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  // NOTE: no fake timers. See file-top comment — retryWithAdaptiveTimeout
+  // measures elapsed time via Date.now(); faking timers would freeze it and
+  // make the duration-recording assertion vacuously pass.
 
   it('returns the fn value on the first successful call', async () => {
     const fn = vi.fn().mockResolvedValue('ok');
@@ -94,8 +89,11 @@ describe('retryWithAdaptiveTimeout', () => {
 
   it('records successful outcome: records duration after fn call count > 0', async () => {
     const durations: number[] = [];
+    // DurationHistorySource.getDurations(limit) contract: return up to `limit`
+    // most-recent durations. The mock honours the signature so this test would
+    // catch a future change where retry.ts starts passing a limit.
     const fakeDurationHistory = {
-      getDurations: () => durations.slice(),
+      getDurations: (limit: number) => durations.slice(-limit),
       recordDuration: (d: number) => {
         durations.push(d);
       },
@@ -113,6 +111,10 @@ describe('retryWithAdaptiveTimeout', () => {
     });
 
     expect(durations.length).toBe(1);
+    // Real elapsed time (no fake timers): a non-negative millisecond count.
+    // We do not assert > 0 because the mocked fn resolves synchronously and
+    // the measured delta can legitimately be 0 on fast machines.
     expect(durations[0]).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(durations[0])).toBe(true);
   });
 });
