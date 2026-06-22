@@ -57,7 +57,7 @@ describe('makeIdempotencyKey', () => {
 
   it('handles all valid channels', () => {
     const channels: InternalizationChannel[] = [
-      'prompt', 'defer_archive', 'skill', 'code_tool_hook', 'model_training',
+      'prompt', 'defer_archive', 'skill', 'code_tool_hook',
     ];
     for (const channel of channels) {
       const key = makeIdempotencyKey('art-001', channel);
@@ -99,10 +99,6 @@ describe('isLowRiskChannel', () => {
     expect(isLowRiskChannel('code_tool_hook')).toBe(false);
   });
 
-  it('returns false for model_training channel', () => {
-    expect(isLowRiskChannel('model_training')).toBe(false);
-  });
-
   it('LOW_RISK_CHANNELS contains exactly prompt and defer_archive', () => {
     expect(LOW_RISK_CHANNELS).toHaveLength(2);
     expect(LOW_RISK_CHANNELS).toContain('prompt');
@@ -111,7 +107,7 @@ describe('isLowRiskChannel', () => {
 
   it('isLowRiskChannel matches LOW_RISK_CHANNELS membership', () => {
     const allChannels: InternalizationChannel[] = [
-      'prompt', 'defer_archive', 'skill', 'code_tool_hook', 'model_training',
+      'prompt', 'defer_archive', 'skill', 'code_tool_hook',
     ];
     for (const channel of allChannels) {
       expect(isLowRiskChannel(channel)).toBe(LOW_RISK_CHANNELS.includes(channel));
@@ -142,10 +138,6 @@ describe('getChannelRiskLevel', () => {
     expect(getChannelRiskLevel('code_tool_hook')).toBe('high');
   });
 
-  it('returns critical for model_training channel', () => {
-    expect(getChannelRiskLevel('model_training')).toBe('critical');
-  });
-
   it('returns high for unknown channel (safe default)', () => {
     expect(getChannelRiskLevel('unknown' as InternalizationChannel)).toBe('high');
   });
@@ -153,7 +145,6 @@ describe('getChannelRiskLevel', () => {
   it('HIGH_RISK_CHANNEL_MAP has correct entries', () => {
     expect(HIGH_RISK_CHANNEL_MAP.skill).toBe('medium');
     expect(HIGH_RISK_CHANNEL_MAP.code_tool_hook).toBe('high');
-    expect(HIGH_RISK_CHANNEL_MAP.model_training).toBe('critical');
   });
 
   it('getChannelRiskLevel returns low for LOW_RISK_CHANNELS', () => {
@@ -168,13 +159,12 @@ describe('getChannelRiskLevel', () => {
     }
   });
 
-  it('risk levels are ordered: low < medium < high < critical', () => {
+  it('risk levels are ordered: low < medium < high', () => {
     // This is a semantic ordering test, not a numeric comparison
-    const levels = ['low', 'medium', 'high', 'critical'];
+    const levels = ['low', 'medium', 'high'];
     expect(getChannelRiskLevel('prompt')).toBe(levels[0]);
     expect(getChannelRiskLevel('skill')).toBe(levels[1]);
     expect(getChannelRiskLevel('code_tool_hook')).toBe(levels[2]);
-    expect(getChannelRiskLevel('model_training')).toBe(levels[3]);
   });
 });
 
@@ -269,12 +259,12 @@ describe('constants', () => {
 
   it('all InternalizationChannel values are covered', () => {
     const allChannels: InternalizationChannel[] = [
-      'prompt', 'defer_archive', 'skill', 'code_tool_hook', 'model_training',
+      'prompt', 'defer_archive', 'skill', 'code_tool_hook',
     ];
     // Every channel should have a defined risk level
     for (const channel of allChannels) {
       const riskLevel = getChannelRiskLevel(channel);
-      expect(['low', 'medium', 'high', 'critical']).toContain(riskLevel);
+      expect(['low', 'medium', 'high']).toContain(riskLevel);
     }
   });
 });

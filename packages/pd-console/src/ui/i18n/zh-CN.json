@@ -726,8 +726,7 @@
         "code_tool_hook": "RuleHost",
         "defer_archive": "延迟归档",
         "prompt": "提示词注入",
-        "skill": "技能激活（已停用）",
-        "model_training": "模型训练（已停用）"
+        "skill": "技能激活（已停用）"
       },
       "retired": "此通道已停用，无法执行审批操作",
       "riskLevel": "风险级别"

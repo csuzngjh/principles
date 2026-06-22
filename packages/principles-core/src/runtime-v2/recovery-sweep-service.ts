@@ -48,7 +48,7 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
   async detectFailedTasks(): Promise<FailedTaskRecoveryInfo[]> {
     const failedTasks = await this.stateManager.listTasks({ status: 'failed' });
     const isRunnerKind = (kind: string) =>
-      ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer'].includes(kind);
+      ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(kind);
     return failedTasks
       .filter(t => isRunnerKind(t.taskKind))
       .map(t => ({

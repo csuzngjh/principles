@@ -57,17 +57,17 @@ describe('SqliteApprovalQueueStore', () => {
 
   it('listPending returns only pending records', async () => {
     await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await store.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
+    await store.enqueue({ artifactId: 'art-2', channel: 'code_tool_hook', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
     const pending = await store.listPending();
     expect(pending).toHaveLength(2);
   });
 
   it('listPending filters by channel', async () => {
     await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await store.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
-    const pending = await store.listPending({ channel: 'model_training' });
+    await store.enqueue({ artifactId: 'art-2', channel: 'prompt', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
+    const pending = await store.listPending({ channel: 'code_tool_hook' });
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.channel).toBe('model_training');
+    expect(pending[0]?.channel).toBe('code_tool_hook');
   });
 
   it('approve changes status to approved', async () => {
@@ -121,10 +121,10 @@ describe('SqliteApprovalQueueStore', () => {
 
   it('listPending filters by riskLevel', async () => {
     await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
-    await store.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
+    await store.enqueue({ artifactId: 'art-2', channel: 'code_tool_hook', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
     const pending = await store.listPending({ riskLevel: 'critical' });
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.channel).toBe('model_training');
+    expect(pending[0]?.channel).toBe('code_tool_hook');
   });
 
   it('reject returns error for already-rejected record', async () => {

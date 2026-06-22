@@ -196,7 +196,7 @@ describe('GET /api/v1/config/summary', () => {
     }>(res);
     expect(data.source).toBe('user_config');
     expect(data.runtimeProfiles).toHaveLength(3);
-    expect(data.agents).toHaveLength(10); // all internal agents
+    expect(data.agents).toHaveLength(9); // all internal agents
   });
 
   it('never returns raw secret values in summary', async () => {

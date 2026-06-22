@@ -217,22 +217,22 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       channels: [],
       inputValidationFailure: {
         reason: 'unknown_channels',
-        message: 'Unknown channels: skill, model_training. Valid channels: prompt, code_tool_hook, defer_archive',
+        message: 'Unknown channels: skill, legacy_channel. Valid channels: prompt, code_tool_hook, defer_archive',
         nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
-        unknownChannels: ['skill', 'model_training'],
+        unknownChannels: ['skill', 'legacy_channel'],
       },
       continuityMatrix: [],
-      recommendedNextIssue: 'PRI-240: Unknown channels provided: skill, model_training',
+      recommendedNextIssue: 'PRI-240: Unknown channels provided: skill, legacy_channel',
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await handleProvenChannelBaseline({ json: true, channels: 'prompt,skill,model_training' });
+      await handleProvenChannelBaseline({ json: true, channels: 'prompt,skill,legacy_channel' });
       expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
         expect.objectContaining({
-          unknownChannels: ['skill', 'model_training'],
+          unknownChannels: ['skill', 'legacy_channel'],
         }),
       );
     } finally {

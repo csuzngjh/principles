@@ -49,16 +49,6 @@ describe('classifyTaskActionability', () => {
     expect(result.diagnostic.channel).toBe('skill');
   });
 
-  it('suppresses disabled-channel model_training task with channel_disabled reason', () => {
-    const result = classifyTaskActionability(
-      { taskId: 'dreamer-abc-mt', taskKind: 'dreamer', channel: 'model_training' },
-      defaultPolicy,
-    );
-    expect(result.actionable).toBe(false);
-    if (result.actionable) throw new Error('expected not actionable');
-    expect(result.reason).toBe('channel_disabled');
-  });
-
   it('suppresses rollout_reviewer task with task_kind_not_mvp_actionable reason', () => {
     const result = classifyTaskActionability(
       { taskId: 'rollout-abc-prompt', taskKind: 'rollout_reviewer', channel: 'prompt' },
@@ -85,16 +75,6 @@ describe('classifyTaskActionability', () => {
       defaultPolicy,
     );
     expect(result.actionable).toBe(true);
-  });
-
-  it('suppresses trainer task with task_kind_not_mvp_actionable reason', () => {
-    const result = classifyTaskActionability(
-      { taskId: 'trainer-abc-prompt', taskKind: 'trainer', channel: 'prompt' },
-      defaultPolicy,
-    );
-    expect(result.actionable).toBe(false);
-    if (result.actionable) throw new Error('expected not actionable');
-    expect(result.reason).toBe('task_kind_not_mvp_actionable');
   });
 
   it('double-suppression: disabled channel AND non-MVP kind reports channel_disabled', () => {
@@ -132,6 +112,5 @@ describe('MVP_CORE_TASK_KINDS constant', () => {
 
   it('does not include post-MVP runners', () => {
     expect(MVP_CORE_TASK_KINDS).not.toContain('rollout_reviewer');
-    expect(MVP_CORE_TASK_KINDS).not.toContain('trainer');
   });
 });

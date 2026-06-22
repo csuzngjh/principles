@@ -55,7 +55,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const PROVEN_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
-const UNSUPPORTED_CHANNELS = ['skill', 'model_training'] as const;
+const UNSUPPORTED_CHANNELS = ['skill', 'legacy_channel'] as const;
 
 let server: http.Server;
 let baseUrl: string;
@@ -231,7 +231,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
   // ── 1. GET /api/v1/approvals — default list ────────────────────────────────
 
   describe('GET /api/v1/approvals — default list', () => {
-    it('returns only proven channel records (no skill/model_training)', async () => {
+    it('returns only proven channel records (no skill/legacy_channel)', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals');
       expect(status).toBe(200);
       const items = getItemsArray(body);
@@ -253,8 +253,8 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(rec.success).toBe(false);
     });
 
-    it('rejects ?channel=model_training with bad request', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=model_training');
+    it('rejects ?channel=legacy_channel with bad request', async () => {
+      const { status, body } = await fetchJson('/api/v1/approvals?channel=legacy_channel');
       expect(status).toBe(400);
       const rec = requireRecord(body, 'error response');
       expect(rec.success).toBe(false);
