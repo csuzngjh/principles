@@ -1249,11 +1249,14 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(getStringField(rec, 'message')).toContain('already decided');
     });
 
-    it('double submit is idempotent for edit', async () => {
-      const approvalId = `apr-edit-idempotent-${Date.now()}`;
-      const originalArtifactId = `art-original-idempotent-${Date.now()}`;
-      const revisedArtifactId = `art-revised-idempotent-${Date.now()}`;
-      const sourcePrincipleId = `P_IDEMPOTENT_${Date.now()}`;
+    it('edit records previousArtifactId pointing at the pre-edit artifact', async () => {
+      // Core acceptance for the edit path: after one edit, the audit field
+      // previousArtifactId must reference the originally-queued artifact so
+      // the owner (and any audit query) can trace what was revised.
+      const approvalId = `apr-edit-audit-${Date.now()}`;
+      const originalArtifactId = `art-original-audit-${Date.now()}`;
+      const revisedArtifactId = `art-revised-audit-${Date.now()}`;
+      const sourcePrincipleId = `P_AUDIT_${Date.now()}`;
 
       await seedPrincipleArtifact(originalArtifactId, {
         sourcePrincipleId,
@@ -1266,24 +1269,114 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const payload = { newArtifactId: revisedArtifactId, editReason: 'Idempotent edit' };
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Audit trace' }),
+      });
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(data, 'previousArtifactId')).toBe(originalArtifactId);
+    });
+
+    it('re-editing to the SAME artifact id is accepted by the store', async () => {
+      // Documents the CURRENT store behaviour: submitting the same newArtifactId
+      // as the approval's current artifact is NOT short-circuited — the UPDATE
+      // runs unconditionally, which currently makes previousArtifactId
+      // self-referential. See the `it.fails` test below for the audit-trail
+      // requirement that is NOT yet met.
+      const approvalId = `apr-edit-same-${Date.now()}`;
+      const originalArtifactId = `art-original-same-${Date.now()}`;
+      const revisedArtifactId = `art-revised-same-${Date.now()}`;
+      const sourcePrincipleId = `P_SAME_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const payload = { newArtifactId: revisedArtifactId, editReason: 'First edit' };
       const first = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       expect(first.status).toBe(200);
+      const firstData = getDataObject(first.body);
+      expect(getStringField(firstData, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(firstData, 'previousArtifactId')).toBe(originalArtifactId);
 
       const second = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      // The second edit is a no-op because the approval already points to the
-      // requested artifact and remains pending.
       expect(second.status).toBe(200);
       const data = getDataObject(second.body);
       expect(getStringField(data, 'artifactId')).toBe(revisedArtifactId);
+    });
+
+    // KNOWN DEFECT — exposed explicitly so the audit-trail regression does not
+    // pass silently. When this test starts FAILING (i.e. the assertion finally
+    // holds), remove `.fails` and the underlying store bug has been fixed.
+    //
+    // Root cause: sqlite-approval-store.ts edit() does
+    //   `SET previous_artifact_id = artifact_id, artifact_id = ?`
+    // unconditionally. A second edit overwrites previousArtifactId with the
+    // CURRENT artifact_id (the first revision), permanently losing the
+    // ORIGINAL artifact from the audit trail. This is a pre-existing bug in
+    // principles-core, surfaced by this PR's owner-facing edit UI. Tracked
+    // as a follow-up to this PR (see PR comment).
+    it.fails('re-editing to a DIFFERENT artifact preserves the original artifactId in previousArtifactId', async () => {
+      const approvalId = `apr-edit-chain-${Date.now()}`;
+      const originalArtifactId = `art-original-chain-${Date.now()}`;
+      const revisedV2 = `art-revised-v2-${Date.now()}`;
+      const revisedV3 = `art-revised-v3-${Date.now()}`;
+      const sourcePrincipleId = `P_CHAIN_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'V1 original' },
+      });
+      await seedPrincipleArtifact(revisedV2, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'V2 revision' },
+      });
+      await seedPrincipleArtifact(revisedV3, {
+        sourcePrincipleId,
+        lineageArtifactIds: [revisedV2],
+        contentJson: { principleId: sourcePrincipleId, text: 'V3 revision' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      // Edit 1: original → v2
+      await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedV2, editReason: 'v2' }),
+      });
+
+      // Edit 2: v2 → v3. previousArtifactId SHOULD still point at the ORIGINAL
+      // (or at minimum chain v2→original), but the store overwrites it to v2.
+      const { body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedV3, editReason: 'v3' }),
+      });
+      const data = getDataObject(body);
+      expect(getStringField(data, 'artifactId')).toBe(revisedV3);
+      // The audit requirement: the ORIGINAL artifact must remain traceable.
+      // This assertion currently FAILS because previousArtifactId === revisedV2.
+      expect(getStringField(data, 'previousArtifactId')).toBe(originalArtifactId);
     });
   });
 });

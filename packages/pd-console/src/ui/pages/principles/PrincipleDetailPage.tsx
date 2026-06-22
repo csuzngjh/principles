@@ -343,12 +343,19 @@ export function PrincipleDetailPage() {
 
   const confirmEdit = async () => {
     if (!isActionable || !approvalGroup || !editReason.trim() || !newArtifactId.trim() || actionLoading) return;
+    const pendingRecords = approvalGroup.records.filter((r) => r.status === "pending");
+    // P1-5: guard against an empty pending set — without this the loop is a
+    // no-op yet allSucceeded evaluates true, reporting a misleading success.
+    if (pendingRecords.length === 0) {
+      toast.error(t("principles.detail.editFailed", { defaultValue: "没有可编辑的待处理记录。" }));
+      setShowEditInput(false);
+      return;
+    }
     setActionLoading(true);
     try {
-      const records = approvalGroup.records.filter((r) => r.status === "pending");
       let failedCount = 0;
       let failureReason: string | undefined;
-      for (const record of records) {
+      for (const record of pendingRecords) {
         const result = await editApproval(record.id, newArtifactId.trim(), editReason.trim());
         if (!result.success) {
           failedCount++;
@@ -365,11 +372,15 @@ export function PrincipleDetailPage() {
         setNewArtifactId("");
         loadData();
       } else {
+        // P1-4: thread the backend failureReason into the toast so the owner
+        // sees WHY records failed (matches FocusPage behaviour). Previously
+        // failureReason was computed but never used (dead code).
         toast.error(
           t("principles.detail.partialFailure", {
-            defaultValue: `编辑完成，但 ${failedCount}/${records.length} 条记录失败。请检查后重试。`,
+            defaultValue: `编辑完成，但 ${failedCount}/${pendingRecords.length} 条记录失败：${failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" })}`,
             failedCount,
-            totalCount: records.length,
+            totalCount: pendingRecords.length,
+            reason: failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" }),
           }),
         );
         loadData();
