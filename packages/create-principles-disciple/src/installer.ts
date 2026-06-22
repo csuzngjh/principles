@@ -600,7 +600,11 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
     execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
     localOk = true;
-  } catch { /* local entry failed */ }
+  } catch (e: unknown) {
+    const err = e as { stderr?: Buffer; message?: string };
+    const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
+    logger.warn(`PD CLI local verification failed: ${detail}`);
+  }
 
   const globalOk = (() => {
     try {
