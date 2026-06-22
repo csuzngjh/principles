@@ -162,8 +162,8 @@ export class TrajectoryDatabase {
       const result = this.db.prepare(`
         INSERT INTO assistant_turns (
           session_id, run_id, provider, model, raw_text, sanitized_text, usage_json,
-          empathy_signal_json, blob_ref, raw_excerpt, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          empathy_signal_json, blob_ref, raw_excerpt, stop_reason, thinking_blocks_count, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.runId,
@@ -175,6 +175,8 @@ export class TrajectoryDatabase {
         safeJson(input.empathySignalJson),
         rawStorage.blobRef,
         rawStorage.excerpt,
+        input.stopReason ?? null,
+        input.thinkingBlocksCount ?? null,
         createdAt,
       );
       return Number(result.lastInsertRowid);
@@ -213,8 +215,8 @@ export class TrajectoryDatabase {
       const result = this.db.prepare(`
         INSERT INTO tool_calls (
           session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message,
-          gfi_before, gfi_after, params_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          gfi_before, gfi_after, params_json, result_preview, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.toolName,
@@ -226,6 +228,7 @@ export class TrajectoryDatabase {
         input.gfiBefore ?? null,
         input.gfiAfter ?? null,
         safeJson(input.paramsJson),
+        input.resultPreview ?? null,
         createdAt,
       );
       return Number(result.lastInsertRowid);
@@ -771,7 +774,8 @@ export class TrajectoryDatabase {
    */
   listAssistantTurns(sessionId: string): AssistantTurnRecord[] {
     const rows = this.db.prepare(`
-      SELECT id, session_id, run_id, provider, model, raw_text, sanitized_text, blob_ref, created_at
+      SELECT id, session_id, run_id, provider, model, raw_text, sanitized_text, blob_ref,
+             stop_reason, thinking_blocks_count, created_at
       FROM assistant_turns
       WHERE session_id = ?
       ORDER BY id ASC
@@ -786,6 +790,8 @@ export class TrajectoryDatabase {
       rawText: this.restoreRawText(row.raw_text as string | null, row.blob_ref as string | null),
       sanitizedText: String(row.sanitized_text ?? ''),
       blobRef: row.blob_ref ? String(row.blob_ref) : null,
+      stopReason: row.stop_reason != null ? String(row.stop_reason) : null,
+      thinkingBlocksCount: row.thinking_blocks_count != null ? Number(row.thinking_blocks_count) : null,
       createdAt: String(row.created_at),
     }));
   }
@@ -807,11 +813,12 @@ export class TrajectoryDatabase {
     errorMessage: string | null;
     gfiBefore: number | null;
     gfiAfter: number | null;
+    resultPreview: string | null;
     createdAt: string;
   }[] {
     const rows = this.db.prepare(`
       SELECT id, tool_name, outcome, params_json, duration_ms, exit_code, error_type, error_message,
-             gfi_before, gfi_after, created_at
+             gfi_before, gfi_after, result_preview, created_at
       FROM tool_calls
       WHERE session_id = ?
       ORDER BY id ASC
@@ -844,6 +851,7 @@ export class TrajectoryDatabase {
         errorMessage: row.error_message ? String(row.error_message) : null,
         gfiBefore: row.gfi_before != null ? Number(row.gfi_before) : null,
         gfiAfter: row.gfi_after != null ? Number(row.gfi_after) : null,
+        resultPreview: row.result_preview != null ? String(row.result_preview) : null,
         createdAt: String(row.created_at),
       };
     });
@@ -1369,6 +1377,23 @@ export class TrajectoryDatabase {
     ]) {
       try {
         this.db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+          throw err;
+        }
+      }
+    }
+
+    // Trajectory enhancement: add stop_reason, thinking_blocks_count, result_preview
+    const trajectoryEnhancementColumns = [
+      { table: 'assistant_turns', name: 'stop_reason', type: 'TEXT' },
+      { table: 'assistant_turns', name: 'thinking_blocks_count', type: 'INTEGER' },
+      { table: 'tool_calls', name: 'result_preview', type: 'TEXT' },
+    ];
+    for (const col of trajectoryEnhancementColumns) {
+      try {
+        this.db.exec(`ALTER TABLE ${col.table} ADD COLUMN ${col.name} ${col.type}`);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         if (!message.includes('duplicate column name') && !message.includes('no column named')) {

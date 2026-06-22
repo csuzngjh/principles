@@ -31,6 +31,72 @@ import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from './after-tool-call-types.js';
 
+const RESULT_PREVIEW_MAX_LENGTH = 500;
+
+/**
+ * Extract a preview string from tool call result for diagnostic evidence.
+ * Pure function — no I/O, no side effects. ERR-001 / ERR-014 compliant.
+ */
+export function extractToolResultPreview(result: unknown): string | null {
+  if (result === null || result === undefined) return null;
+
+  try {
+    // String result: truncate directly
+    if (typeof result === 'string') {
+      return result.length > RESULT_PREVIEW_MAX_LENGTH
+        ? `${result.slice(0, RESULT_PREVIEW_MAX_LENGTH - 3)}...`
+        : result;
+    }
+
+    // Object with content array (e.g., Anthropic content blocks)
+    if (typeof result === 'object' && !Array.isArray(result)) {
+      const obj = result as Record<string, unknown>;
+      if (Array.isArray(obj.content)) {
+        const textParts: string[] = [];
+        for (const block of obj.content) {
+          if (block && typeof block === 'object' && !Array.isArray(block)) {
+            const blockObj = block as Record<string, unknown>;
+            if (blockObj.type === 'text' && typeof blockObj.text === 'string') {
+              textParts.push(blockObj.text);
+            }
+          }
+        }
+        if (textParts.length > 0) {
+          const joined = textParts.join('\n');
+          return joined.length > RESULT_PREVIEW_MAX_LENGTH
+            ? `${joined.slice(0, RESULT_PREVIEW_MAX_LENGTH - 3)}...`
+            : joined;
+        }
+      }
+
+      // Object without content array: JSON.stringify with depth limiter (ERR-014)
+      const serialized = JSON.stringify(obj, (_key, value) => {
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          const keys = Object.keys(value as Record<string, unknown>);
+          if (keys.length > 10) {
+            const truncated: Record<string, unknown> = {};
+            for (const k of keys.slice(0, 10)) {
+              truncated[k] = (value as Record<string, unknown>)[k];
+            }
+            truncated['__truncated__'] = true;
+            return truncated;
+          }
+        }
+        return value;
+      }, 2);
+      if (serialized && serialized !== '{}') {
+        return serialized.length > RESULT_PREVIEW_MAX_LENGTH
+          ? `${serialized.slice(0, RESULT_PREVIEW_MAX_LENGTH - 3)}...`
+          : serialized;
+      }
+    }
+
+    return null;
+  } catch {
+    return '[result_preview_extraction_failed]';
+  }
+}
+
 // ── Stage 1: Classify ───────────────────────────────────────────────────────
 
 /**
@@ -195,6 +261,7 @@ export function handleFrictionTrackingForFailure(
     gfiBefore,
     gfiAfter: updatedState.currentGfi,
     paramsJson: sanitizeToolParamsForEvidence(event.params, workspaceDir),
+    resultPreview: extractToolResultPreview(event.result),
   });
 
   return updatedState;
@@ -246,6 +313,7 @@ export function handleFrictionTrackingForSuccess(
     gfiBefore,
     gfiAfter: resetState.currentGfi,
     paramsJson: sanitizeToolParamsForEvidence(event.params, workspaceDir),
+    resultPreview: extractToolResultPreview(event.result),
   });
 
   wctx.eventLog.recordToolCall(sessionId, {

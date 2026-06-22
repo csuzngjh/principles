@@ -277,4 +277,67 @@ describe('buildTrajectoryEvidence', () => {
       expect(result.some(e => e.sourceRef === 'tool_call_failure:unavailable')).toBe(false);
     });
   });
+
+  // ── Trajectory v2 enhancement: resultPreview + stopReason ─────────────────
+
+  describe('trajectory v2 enhancement: resultPreview and stopReason', () => {
+    it('appends resultPreview to tool failure evidence note', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockReturnValue([
+        { id: 1, toolName: 'bash', outcome: 'failure', errorType: 'ENOENT', exitCode: 1, errorMessage: 'no such file', filePath: null, durationMs: 100, gfiBefore: null, gfiAfter: null, resultPreview: 'Error: no such file or directory, open \'/tmp/foo\'', createdAt: '2024-01-15T10:00:00Z' },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const failureEntry = result.find(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntry).toBeDefined();
+      expect(failureEntry!.note).toContain('bash');
+      expect(failureEntry!.note).toContain('ENOENT');
+      expect(failureEntry!.note).toContain('Error: no such file or directory');
+    });
+
+    it('does not append preview when resultPreview is null', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listToolCallsForSession!).mockReturnValue([
+        { id: 1, toolName: 'bash', outcome: 'failure', errorType: 'timeout', exitCode: 124, errorMessage: null, filePath: null, durationMs: 30000, gfiBefore: null, gfiAfter: null, resultPreview: null, createdAt: '2024-01-15T10:00:00Z' },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const failureEntry = result.find(e => e.sourceRef.startsWith('tool_call_failure:'));
+      expect(failureEntry).toBeDefined();
+      expect(failureEntry!.note).toContain('timeout');
+      expect(failureEntry!.note).not.toContain(' | ');
+    });
+
+    it('appends truncation warning when stopReason is length', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([
+        { createdAt: '2024-01-15T10:00:00Z', sanitizedText: 'Partial output...', stopReason: 'length', thinkingBlocksCount: 5 },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const agentEntry = result.find(e => e.sourceRef.startsWith('agent_turn:'));
+      expect(agentEntry).toBeDefined();
+      expect(agentEntry!.note).toContain('Partial output...');
+      expect(agentEntry!.note).toContain('[TRUNCATED: output cut off by length limit]');
+    });
+
+    it('does not append truncation warning when stopReason is end_turn', () => {
+      vi.mocked(mockTrajectory.listUserTurnsForSession!).mockReturnValue([]);
+      vi.mocked(mockTrajectory.listAssistantTurns!).mockReturnValue([
+        { createdAt: '2024-01-15T10:00:00Z', sanitizedText: 'Complete output', stopReason: 'end_turn', thinkingBlocksCount: 0 },
+      ]);
+
+      const result = buildTrajectoryEvidence(mockWctx as WorkspaceContext, 'session-123');
+
+      const agentEntry = result.find(e => e.sourceRef.startsWith('agent_turn:'));
+      expect(agentEntry).toBeDefined();
+      expect(agentEntry!.note).toBe('Complete output');
+      expect(agentEntry!.note).not.toContain('[TRUNCATED');
+    });
+  });
 });
