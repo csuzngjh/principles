@@ -11,6 +11,7 @@ import {
   fetchApprovalsGrouped,
   approveApproval,
   rejectApproval,
+  editApproval,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
@@ -312,6 +313,11 @@ function PendingReviewCard({
   const [actionLoading, setActionLoading] = useState(false);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [showEditInput, setShowEditInput] = useState(false);
+  const [editReason, setEditReason] = useState("");
+  const [newArtifactId, setNewArtifactId] = useState("");
+
+  const isActionable = group.status === "pending" && group.records.some((r) => r.status === "pending");
 
   // Display title: prefer candidateDescription (human-readable) over principleTitle
   // (which falls back to a fabricated principleId when the principle isn't in ledger).
@@ -338,7 +344,7 @@ function PendingReviewCard({
   }
 
   const handleApprove = async () => {
-    if (actionLoading) return;
+    if (!isActionable || actionLoading) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("approve");
@@ -364,7 +370,7 @@ function PendingReviewCard({
   };
 
   const handleReject = async () => {
-    if (actionLoading || !rejectReason.trim()) return;
+    if (!isActionable || actionLoading || !rejectReason.trim()) return;
     setActionLoading(true);
     try {
       const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("reject", rejectReason.trim());
@@ -386,6 +392,48 @@ function PendingReviewCard({
       }
     } catch {
       toast.error(t("pages.focus.rejectFailed", { defaultValue: "拒绝失败，请稍后重试。" }));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const currentArtifactId = group.records.find((r) => r.status === "pending")?.artifactId ?? "";
+
+  const handleEdit = async () => {
+    if (!isActionable || actionLoading || !editReason.trim() || !newArtifactId.trim()) return;
+    setActionLoading(true);
+    try {
+      const pendingRecords = group.records.filter((r) => r.status === "pending");
+      const results: DecisionResult[] = [];
+      for (const record of pendingRecords) {
+        const result = await editApproval(record.id, newArtifactId.trim(), editReason.trim());
+        results.push(
+          result.success
+            ? { success: true }
+            : { success: false, error: result.error, nextAction: result.nextAction },
+        );
+      }
+      const { allSucceeded, failedCount, failureReason } = summarizeDecisionResults(results);
+      const totalCount = results.length;
+      if (allSucceeded) {
+        toast.success(t("pages.focus.editSucceeded", { defaultValue: "已保存修订" }));
+        setShowEditInput(false);
+        setEditReason("");
+        setNewArtifactId("");
+        onDecisionApplied();
+      } else {
+        toast.error(
+          t("pages.focus.partialFailure", {
+            defaultValue: `编辑完成，但 ${failedCount}/${totalCount} 条记录失败。`,
+            failedCount,
+            totalCount,
+            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
+          }),
+        );
+        onDecisionApplied();
+      }
+    } catch {
+      toast.error(t("pages.focus.editFailed", { defaultValue: "编辑失败，请稍后重试。" }));
     } finally {
       setActionLoading(false);
     }
@@ -423,15 +471,23 @@ function PendingReviewCard({
         <button
           type="button"
           onClick={handleApprove}
-          disabled={actionLoading}
+          disabled={!isActionable || actionLoading}
           className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {actionLoading ? t("common.loading") + "…" : t("pages.focus.approveAction", { defaultValue: "批准" })}
         </button>
         <button
           type="button"
-          onClick={() => setShowRejectInput((v) => !v)}
-          disabled={actionLoading}
+          onClick={() => { setShowEditInput((v) => !v); setShowRejectInput(false); }}
+          disabled={!isActionable || actionLoading}
+          className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        >
+          {t("pages.focus.editAction", { defaultValue: "编辑" })}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setShowRejectInput((v) => !v); setShowEditInput(false); }}
+          disabled={!isActionable || actionLoading}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
@@ -468,6 +524,49 @@ function PendingReviewCard({
             <button
               type="button"
               onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+            >
+              {t("pages.focus.cancelAction", { defaultValue: "取消" })}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Edit revision input (inline, not dialog) */}
+      {showEditInput && (
+        <div className="mt-3 p-3 border border-gov/20 rounded-[var(--radius-md)]">
+          <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+            {t("pages.focus.editReasonLabel", { defaultValue: "编辑原因（必填）" })}
+          </label>
+          <div className="mb-2 text-ink-4 text-[12px] font-mono">
+            {t("pages.focus.currentArtifactLabel", { defaultValue: "当前工件" })}: {currentArtifactId}
+          </div>
+          <input
+            type="text"
+            value={newArtifactId}
+            onChange={(e) => setNewArtifactId(e.target.value)}
+            placeholder={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+            aria-label={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+          />
+          <textarea
+            value={editReason}
+            onChange={(e) => setEditReason(e.target.value)}
+            placeholder={t("pages.focus.editReasonPlaceholder", { defaultValue: "请说明编辑原因" })}
+            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              type="button"
+              onClick={handleEdit}
+              disabled={!editReason.trim() || !newArtifactId.trim() || actionLoading}
+              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {t("pages.focus.confirmEdit", { defaultValue: "确认编辑" })}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowEditInput(false); setEditReason(""); setNewArtifactId(""); }}
               className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
             >
               {t("pages.focus.cancelAction", { defaultValue: "取消" })}

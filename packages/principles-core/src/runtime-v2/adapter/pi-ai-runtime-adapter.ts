@@ -37,7 +37,7 @@ import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
-import { buildRecordDiagnosisV1Tool } from './tools/diagnostician-tool.js';
+import { buildSchemaToolDefinition } from './tools/diagnostician-tool.js';
 import { DefaultSchemaPromptAdapter } from './schema-prompt-adapter.js';
 import type {
   PDRuntimeAdapter,
@@ -880,10 +880,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   /**
    * Path 1: Tool calling (PRI-271 B2).
    *
-   * Passes `buildRecordDiagnosisV1Tool()` via context.tools and injects
+   * Passes a schema-derived tool definition via context.tools and injects
    * `tool_choice: 'required'` via onPayload. If the provider supports tool
    * calling, the response contains ToolCall content blocks with pre-parsed
    * arguments that we validate against the schema.
+   *
+   * PRI-284: Tool definition uses params.schema (per-runner) instead of
+   * hardcoded DiagnosticianOutputV1Schema.
    */
    
   private async tryToolCallPath(
@@ -902,7 +905,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     try {
       const toolContext: Context = {
         ...params.baseContext,
-        tools: [buildRecordDiagnosisV1Tool(new DefaultSchemaPromptAdapter(), DiagnosticianOutputV1Schema)],
+        tools: [buildSchemaToolDefinition(params.schemaRef, params.schema, new DefaultSchemaPromptAdapter())],
       };
 
       const completeOptions: SimpleStreamOptions = {
