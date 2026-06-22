@@ -424,4 +424,155 @@ describe('TrajectoryDatabase', () => {
       db.dispose();
     });
   });
+
+  describe('trajectory v2 enhancement fields', () => {
+    it('persists and reads stopReason and thinkingBlocksCount for assistant turns', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordAssistantTurn({
+        sessionId: 's1',
+        runId: 'run-1',
+        provider: 'test',
+        model: 'model',
+        rawText: 'test output',
+        sanitizedText: 'test output',
+        usageJson: {},
+        empathySignalJson: {},
+        stopReason: 'length',
+        thinkingBlocksCount: 3,
+      });
+
+      const turns = db.listAssistantTurns('s1');
+      expect(turns).toHaveLength(1);
+      expect(turns[0].stopReason).toBe('length');
+      expect(turns[0].thinkingBlocksCount).toBe(3);
+      db.dispose();
+    });
+
+    it('persists null enhanced fields when not provided', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordAssistantTurn({
+        sessionId: 's1',
+        runId: 'run-1',
+        provider: 'test',
+        model: 'model',
+        rawText: 'test',
+        sanitizedText: 'test',
+        usageJson: {},
+        empathySignalJson: {},
+      });
+
+      const turns = db.listAssistantTurns('s1');
+      expect(turns).toHaveLength(1);
+      expect(turns[0].stopReason).toBeNull();
+      expect(turns[0].thinkingBlocksCount).toBeNull();
+      db.dispose();
+    });
+
+    it('persists and reads resultPreview for tool calls', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({
+        sessionId: 's1',
+        toolName: 'bash',
+        outcome: 'failure',
+        errorType: 'ENOENT',
+        exitCode: 1,
+        resultPreview: 'Error: no such file or directory',
+      });
+
+      const calls = db.listToolCallsForSession('s1');
+      expect(calls).toHaveLength(1);
+      expect(calls[0].resultPreview).toBe('Error: no such file or directory');
+      db.dispose();
+    });
+
+    it('persists null resultPreview when not provided', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({
+        sessionId: 's1',
+        toolName: 'bash',
+        outcome: 'success',
+      });
+
+      const calls = db.listToolCallsForSession('s1');
+      expect(calls).toHaveLength(1);
+      expect(calls[0].resultPreview).toBeNull();
+      db.dispose();
+    });
+
+    it('migrates existing database by adding enhancement columns via ALTER TABLE', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+
+      // Create a DB without the new columns (simulate old schema)
+      const Database = require('better-sqlite3');
+      const stateDir = path.join(workspaceDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      const blobsDir = path.join(stateDir, 'blobs');
+      const exportsDir = path.join(stateDir, 'exports');
+      fs.mkdirSync(blobsDir, { recursive: true });
+      fs.mkdirSync(exportsDir, { recursive: true });
+      const dbPath = path.join(stateDir, 'trajectory.db');
+      const rawDb = new Database(dbPath);
+      // Create minimal tables WITHOUT the new columns
+      rawDb.exec(`
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version VALUES (1);
+        CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE assistant_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, raw_text TEXT, sanitized_text TEXT NOT NULL, usage_json TEXT NOT NULL, empathy_signal_json TEXT NOT NULL, blob_ref TEXT, raw_excerpt TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, raw_text TEXT, blob_ref TEXT, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, correction_cue TEXT, references_assistant_turn_id INTEGER, created_at TEXT NOT NULL);
+        CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE gate_blocks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, tool_name TEXT NOT NULL, file_path TEXT, reason TEXT NOT NULL, plan_status TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE trust_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, previous_score REAL NOT NULL, new_score REAL NOT NULL, delta REAL NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE principle_events (id INTEGER PRIMARY KEY AUTOINCREMENT, principle_id TEXT, event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE task_outcomes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, task_id TEXT, outcome TEXT NOT NULL, summary TEXT, principle_ids_json TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE correction_samples (sample_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, bad_assistant_turn_id INTEGER NOT NULL, user_correction_turn_id INTEGER NOT NULL, recovery_tool_span_json TEXT NOT NULL, diff_excerpt TEXT NOT NULL, principle_ids_json TEXT NOT NULL, quality_score REAL NOT NULL, review_status TEXT NOT NULL, export_mode TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE sample_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, sample_id TEXT NOT NULL, review_status TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE exports_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, export_kind TEXT NOT NULL, mode TEXT NOT NULL, approved_only INTEGER NOT NULL, file_path TEXT NOT NULL, row_count INTEGER NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE evolution_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT UNIQUE NOT NULL, trace_id TEXT NOT NULL, source TEXT NOT NULL, reason TEXT, score INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', enqueued_at TEXT, started_at TEXT, completed_at TEXT, resolution TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE evolution_events (id INTEGER PRIMARY KEY AUTOINCREMENT, trace_id TEXT NOT NULL, task_id TEXT, stage TEXT NOT NULL, level TEXT DEFAULT 'info', message TEXT NOT NULL, summary TEXT, metadata_json TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE ingest_checkpoint (source_key TEXT PRIMARY KEY, imported_at TEXT NOT NULL);
+      `);
+      rawDb.close();
+
+      // Now open with TrajectoryDatabase — should migrate and add columns
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordAssistantTurn({
+        sessionId: 's1',
+        runId: 'run-1',
+        provider: 'test',
+        model: 'model',
+        rawText: 'migrated test',
+        sanitizedText: 'migrated test',
+        usageJson: {},
+        empathySignalJson: {},
+        stopReason: 'end_turn',
+        thinkingBlocksCount: 2,
+      });
+
+      db.recordToolCall({
+        sessionId: 's1',
+        toolName: 'bash',
+        outcome: 'failure',
+        exitCode: 1,
+        resultPreview: 'migrated preview',
+      });
+
+      const turns = db.listAssistantTurns('s1');
+      expect(turns[0].stopReason).toBe('end_turn');
+      expect(turns[0].thinkingBlocksCount).toBe(2);
+
+      const calls = db.listToolCallsForSession('s1');
+      expect(calls[0].resultPreview).toBe('migrated preview');
+      db.dispose();
+    });
+  });
 });

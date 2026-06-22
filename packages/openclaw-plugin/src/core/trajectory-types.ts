@@ -31,6 +31,8 @@ export interface TrajectoryAssistantTurnInput {
   sanitizedText: string;
   usageJson: unknown;
   empathySignalJson: unknown;
+  stopReason?: string | null;
+  thinkingBlocksCount?: number | null;
   createdAt?: string;
 }
 
@@ -55,6 +57,7 @@ export interface TrajectoryToolCallInput {
   gfiBefore?: number | null;
   gfiAfter?: number | null;
   paramsJson?: unknown;
+  resultPreview?: string | null;
   createdAt?: string;
 }
 
@@ -213,6 +216,8 @@ export interface AssistantTurnRecord {
   rawText: string;
   sanitizedText: string;
   blobRef: string | null;
+  stopReason: string | null;
+  thinkingBlocksCount: number | null;
   createdAt: string;
 }
 
