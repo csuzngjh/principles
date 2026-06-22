@@ -139,8 +139,6 @@ describe('PRI-294: Surface registry coverage audit', () => {
     'hook:before_tool_call',
     'hook:after_tool_call',
     'hook:llm_output',
-    'hook:subagent_spawning',
-    'hook:subagent_ended',
     'hook:before_reset',
     'hook:before_compaction',
     'hook:after_compaction',
@@ -258,8 +256,6 @@ describe('PRI-294: MVP core hooks enabled, non-core disabled', () => {
   ];
 
   const QUIET_HOOKS = [
-    'hook:subagent_spawning',
-    'hook:subagent_ended',
     'hook:before_reset',
     'hook:before_compaction',
     'hook:after_compaction',
