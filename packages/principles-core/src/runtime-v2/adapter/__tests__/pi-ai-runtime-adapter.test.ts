@@ -121,10 +121,44 @@ async function expectStartRunError(
 
 /** Extract the first emitted telemetry event matching the given eventType. */
 function findTelemetryEvent(eventType: string): Record<string, unknown> | undefined {
-  const call = mockEmitTelemetry.mock.calls.find(
-    (c: unknown[]) => (c[0] as Record<string, unknown>).eventType === eventType,
-  );
-  return call ? (call[0] as Record<string, unknown>) : undefined;
+  // Runtime Contract Rule 2 (no `as` bypass): validate the mock-call shape
+  // before treating it as a telemetry payload.
+  const call = mockEmitTelemetry.mock.calls.find((c: unknown[]) => {
+    const payload = c[0];
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      Object.hasOwn(payload, 'eventType') &&
+      (payload as { eventType: unknown }).eventType === eventType
+    );
+  });
+  if (!call) return undefined;
+  const payload = call[0];
+  return typeof payload === 'object' && payload !== null
+    ? (payload as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Type guard for the tool-context shape passed as the 2nd arg to completeSimple.
+ * Avoids `as` casts on mock-call data (Runtime Contract Rule 2 / ERR-001).
+ */
+function isToolContext(
+  value: unknown,
+): value is { tools: Array<{ name: string; parameters: unknown }> } {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'tools')) {
+    return false;
+  }
+  const tools = (value as { tools: unknown }).tools;
+  if (!Array.isArray(tools)) return false;
+  return tools.every((tool) => {
+    if (typeof tool !== 'object' || tool === null) return false;
+    return (
+      Object.hasOwn(tool, 'name') &&
+      typeof (tool as { name: unknown }).name === 'string' &&
+      Object.hasOwn(tool, 'parameters')
+    );
+  });
 }
 
 // ── Tests ──
@@ -2008,10 +2042,17 @@ describe('PiAiRuntimeAdapter', () => {
 
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
 
-      // Verify fallback telemetry was emitted for tool_call path
-      const fallbackEvents = mockEmitTelemetry.mock.calls.filter(
-        (c: unknown[]) => (c[0] as Record<string, unknown>).eventType === 'output_path_fallback',
-      );
+      // Verify fallback telemetry was emitted for tool_call path.
+      // Runtime Contract Rule 2: validate shape before reading eventType.
+      const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
+        const payload = c[0];
+        return (
+          typeof payload === 'object' &&
+          payload !== null &&
+          Object.hasOwn(payload, 'eventType') &&
+          (payload as { eventType: unknown }).eventType === 'output_path_fallback'
+        );
+      });
       expect(fallbackEvents.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -2035,20 +2076,23 @@ describe('PiAiRuntimeAdapter', () => {
       await adapter.startRun(makeToolCallInput());
 
       // Verify the context passed to completeSimple includes a tool
-      // whose name is derived from the schemaRef, not hardcoded
+      // whose name is derived from the schemaRef, not hardcoded.
+      // Runtime Contract Rule 2 (no `as` bypass): use a type guard on the
+      // unknown mock-call shape instead of asserting the type.
       const [firstCallArgs] = mockComplete.mock.calls;
       expect(firstCallArgs).toBeDefined();
-      const toolContext = firstCallArgs?.[1] as { tools?: { name: string; parameters: unknown }[] } | undefined;
-      expect(toolContext?.tools).toBeDefined();
-      expect(toolContext?.tools?.length).toBe(1);
-      const tool = toolContext?.tools?.[0];
-      expect(tool).toBeDefined();
+      const rawContext = firstCallArgs?.[1];
+      expect(isToolContext(rawContext)).toBe(true);
+      if (!isToolContext(rawContext)) throw new Error('invalid tool context');
+      expect(rawContext.tools.length).toBe(1);
+      const tool = rawContext.tools[0];
+      if (!tool) throw new Error('expected exactly one tool');
       // Name derived from schemaRef 'diagnostician-output-v1'
-      expect(tool?.name).toBe('record_diagnostician_output_v1');
+      expect(tool.name).toBe('record_diagnostician_output_v1');
       // Not the old hardcoded name
-      expect(tool?.name).not.toBe('record_diagnosis_v1');
+      expect(tool.name).not.toBe('record_diagnosis_v1');
       // Parameters should be the schema from registry
-      expect(tool?.parameters).toBeDefined();
+      expect(tool.parameters).toBeDefined();
     });
   });
 
@@ -2102,10 +2146,17 @@ describe('PiAiRuntimeAdapter', () => {
 
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
 
-      // Verify fallback telemetry
-      const fallbackEvents = mockEmitTelemetry.mock.calls.filter(
-        (c: unknown[]) => (c[0] as Record<string, unknown>).eventType === 'output_path_fallback',
-      );
+      // Verify fallback telemetry.
+      // Runtime Contract Rule 2: validate shape before reading eventType.
+      const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
+        const payload = c[0];
+        return (
+          typeof payload === 'object' &&
+          payload !== null &&
+          Object.hasOwn(payload, 'eventType') &&
+          (payload as { eventType: unknown }).eventType === 'output_path_fallback'
+        );
+      });
       expect(fallbackEvents.length).toBeGreaterThanOrEqual(1);
     });
 
