@@ -3,7 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
-import { buildRecordDiagnosisV1Tool } from '../tools/diagnostician-tool.js';
+import { buildRecordDiagnosisV1Tool, buildSchemaToolDefinition } from '../tools/diagnostician-tool.js';
 
 describe('DefaultSchemaPromptAdapter', () => {
   const adapter = new DefaultSchemaPromptAdapter();
@@ -186,6 +186,26 @@ describe('buildRecordDiagnosisV1Tool()', () => {
 
   it('parameters reference the schema', () => {
     const tool = buildRecordDiagnosisV1Tool(adapter, DiagnosticianOutputV1Schema);
+    expect(tool.parameters).toBe(DiagnosticianOutputV1Schema);
+  });
+});
+
+describe('buildSchemaToolDefinition() (PRI-284)', () => {
+  const adapter = new DefaultSchemaPromptAdapter();
+
+  it('derives tool name from schemaRef (dreamer-output-v1 → record_dreamer_output_v1)', () => {
+    const tool = buildSchemaToolDefinition('dreamer-output-v1', DiagnosticianOutputV1Schema, adapter);
+    expect(tool.name).toBe('record_dreamer_output_v1');
+  });
+
+  it('description includes schemaRef and constraints', () => {
+    const tool = buildSchemaToolDefinition('evaluator-output-v1', DiagnosticianOutputV1Schema, adapter);
+    expect(tool.description).toContain('evaluator-output-v1');
+    expect(tool.description).toContain('category prefix');
+  });
+
+  it('parameters reference the passed schema', () => {
+    const tool = buildSchemaToolDefinition('philosopher-output-v1', DiagnosticianOutputV1Schema, adapter);
     expect(tool.parameters).toBe(DiagnosticianOutputV1Schema);
   });
 });
