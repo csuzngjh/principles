@@ -11,11 +11,7 @@ import type {
   PluginHookBeforeResetEvent,
   PluginHookBeforeCompactionEvent,
   PluginHookAfterCompactionEvent,
-  PluginHookSubagentEndedEvent,
   PluginHookLlmOutputEvent,
-  PluginHookSubagentSpawningEvent,
-  PluginHookSubagentSpawningResult,
-  PluginHookSubagentContext,
   PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
@@ -23,8 +19,6 @@ import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
 export { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
-import { classifyTask } from './core/local-worker-routing.js';
-import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
@@ -33,7 +27,6 @@ import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
-import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
@@ -62,18 +55,11 @@ import { migrateStaleWorkspaceGuidance } from './core/workspace-guidance-migrato
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
-import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/shadow-fingerprint.js';
-import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
-
-// Map from childSessionKey → shadowObservationId
-// Used to complete shadow observations when subagent ends
-const pendingShadowObservations = new Map<string, string>();
 
 // ── Conversation Access Health Check (PRI-343) ────────────────────────────
 // Re-exported from core/config-health.ts for backward compatibility.
@@ -429,89 +415,6 @@ const plugin = {
             error: String(err)
           });
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
-        }
-      })
-    );
-
-    // ── Hook: Subagent Loop Closure ──
-    api.on(
-      'subagent_spawning',
-       
-      guardHook('hook:subagent_spawning', api.logger, (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
-        try {
-          // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
-          // For subagent hooks, we use event.agentId as the target agent for workspace resolution.
-          const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId);
-          if (!workspaceDir) {
-            api.logger.error(`[PD] subagent_spawning: cannot resolve workspaceDir for agent "${event.agentId}" — skipping shadow routing`);
-            return { status: 'ok' };
-          }
-          api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_spawning: ${workspaceDir}`);
-          const { agentId, childSessionKey } = event;
-          // Only handle PD local worker profiles
-          if (!PD_LOCAL_PROFILES.has(agentId as WorkerProfile)) {
-            return { status: 'ok' };
-          }
-          // Use the real runtime hook to record shadow evidence. We still consult the
-          // routing/deployment state here, but the observation itself must originate
-          // from actual subagent execution rather than an operator command path.
-          const routingInput = { targetProfile: agentId as WorkerProfile };
-          const decision = classifyTask(routingInput, workspaceDir);
-          const shouldRecordShadow =
-            decision.activeCheckpointState === 'shadow_ready' &&
-            !!decision.activeCheckpointId &&
-            decision.deploymentCheck.routingEnabled &&
-            decision.deploymentCheck.checkpointDeployable;
-
-          if (shouldRecordShadow) {
-            const observation = recordShadowRouting(workspaceDir, {
-              checkpointId: decision.activeCheckpointId!,  
-              workerProfile: agentId as WorkerProfile,
-              taskFingerprint: computeRuntimeShadowTaskFingerprint(event),
-            });
-            pendingShadowObservations.set(childSessionKey, observation.observationId);
-          }
-          return { status: 'ok' };
-        } catch (err) {
-          api.logger.error(`[PD] Error in subagent_spawning shadow routing: ${String(err)}`);
-          return { status: 'ok' }; // Don't block spawn on shadow observation errors
-        }
-      })
-    );
-
-    api.on(
-      'subagent_ended',
-      guardHook('hook:subagent_ended', api.logger, (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
-        try {
-          // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
-          const workspaceDir = resolveWorkspaceDirFromApi(api, undefined);
-          if (!workspaceDir) {
-            api.logger.error(`[PD] subagent_ended: cannot resolve workspaceDir — skipping shadow observation completion`);
-            return;
-          }
-          api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_ended: ${workspaceDir}`);
-          // Complete any pending shadow observation for this subagent session
-          const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
-          if (shadowObsId && workspaceDir) {
-            try {
-              const outcome = event.outcome === 'ok'
-                ? 'accepted'
-                : event.outcome === 'error'
-                  ? 'rejected'
-                  : 'escalated';
-              completeShadowObservation(workspaceDir, {
-                observationId: shadowObsId,
-                outcome,
-                failureSignals: event.outcome === 'error' ? { threwException: true, timedOut: false, invalidOutput: false, profileRejected: false, extra: {} } : undefined,
-              });
-              pendingShadowObservations.delete(event.targetSessionKey);
-            } catch (err) {
-              api.logger.error(`[PD] Failed to complete shadow observation: ${String(err)}`);
-            }
-          }
-          handleSubagentEnded(event, { ...ctx, workspaceDir, api });
-        } catch (err) {
-          api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
         }
       })
     );

@@ -7,8 +7,8 @@ import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbat
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
-// local-worker-routing: removed from prompt injection per PRI-291 (MVP-Quiet)
-// classifyTask is still available for non-prompt consumers
+// local-worker-routing module and its routing helpers removed entirely per PRI-448.
+// Routing guidance is no longer injected into prompts.
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
@@ -980,9 +980,8 @@ ${empathySilenceConstraint}
     prependSystemContext += directiveText;
   }
 
-  // Routing guidance removed per PRI-291 (MVP diet).
-  // Local worker routing is MVP-Quiet per ADR-0014 §2.5.
-  // The classifyTask helper and local-worker-routing module are preserved for non-prompt consumers.
+  // Routing guidance removed per PRI-291; local-worker-routing module and its
+  // routing helpers deleted per PRI-448. No routing-related content is injected.
 
 
   // 6. Principles (always on, highest priority, goes last for recency effect)

@@ -145,15 +145,6 @@ vi.mock('../../src/core/focus-history.js', () => ({
   safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
 }));
 
-vi.mock('../../src/core/local-worker-routing.js', () => ({
-  classifyTask: vi.fn().mockReturnValue({
-    decision: 'stay_main',
-    classification: 'unknown',
-    reason: 'mocked',
-    blockers: [],
-  }),
-}));
-
 function makeMinimalEvent(overrides: {
   trigger?: string;
   sessionId?: string;

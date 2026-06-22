@@ -93,8 +93,8 @@ describe('surface-guard', () => {
     });
 
     it('allows override for quiet surface', () => {
-      const result = isSurfaceEnabled('hook:subagent_spawning', {
-        'hook:subagent_spawning': true,
+      const result = isSurfaceEnabled('hook:before_reset', {
+        'hook:before_reset': true,
       });
       expect(result.enabled).toBe(true);
     });
@@ -308,16 +308,11 @@ describe('surface-guard', () => {
       }
     });
 
-    it('subagent hook disabledReason is opt-in and ADR-anchored (PRI-298)', () => {
+    it('subagent/shadow hooks removed from registry (PRI-448)', () => {
       const subagent = PLUGIN_SURFACE_REGISTRY.find(
         s => s.id === 'hook:subagent_spawning',
       );
-      expect(subagent?.disabledReason).toBeDefined();
-      const reason = subagent!.disabledReason!.toLowerCase();
-      // Quiet hook copy is opt-in / opt-out anchored on a real ADR section
-      expect(reason).toContain('opt-in');
-      expect(reason).toContain('default off');
-      expect(reason).toMatch(/adr-?0014/);
+      expect(subagent).toBeUndefined();
     });
 
     it('no quiet surface disabledReason promises a feature flag override (PRI-298 / chatgpt P2)', () => {
