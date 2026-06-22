@@ -2,6 +2,7 @@ import { createRuntimeStateHandle } from './runtime-state-handle.js';
 import type { RuntimeStateHandle } from './runtime-state-handle.js';
 import type { RecoveryResult } from './store/lifecycle/recovery-sweep.js';
 import { PDRuntimeError } from './error-categories.js';
+import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 
 export interface FailedTaskRecoveryInfo {
   taskId: string;
@@ -47,10 +48,8 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
 
   async detectFailedTasks(): Promise<FailedTaskRecoveryInfo[]> {
     const failedTasks = await this.stateManager.listTasks({ status: 'failed' });
-    const isRunnerKind = (kind: string) =>
-      ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'].includes(kind);
     return failedTasks
-      .filter(t => isRunnerKind(t.taskKind))
+      .filter(t => isPeerRunnerKind(t.taskKind))
       .map(t => ({
         taskId: t.taskId,
         taskKind: t.taskKind,
