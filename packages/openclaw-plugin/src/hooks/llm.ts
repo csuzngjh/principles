@@ -141,6 +141,41 @@ export function isEmpathyAuditPayload(text: string): boolean {
     return false;
 }
 
+/**
+ * Extract enhanced fields from lastAssistant (complete AssistantMessage) in hook payload.
+ * Pure function — no I/O, no side effects. ERR-001 compliant.
+ */
+export function extractAssistantEnhancedFields(lastAssistant: unknown): {
+    stopReason: string | null;
+    thinkingBlocksCount: number | null;
+} {
+    if (!lastAssistant || typeof lastAssistant !== 'object' || Array.isArray(lastAssistant)) {
+        return { stopReason: null, thinkingBlocksCount: null };
+    }
+
+    const obj = lastAssistant as Record<string, unknown>;
+
+    // stopReason: typeof guard
+    const stopReason = typeof obj.stopReason === 'string' ? obj.stopReason : null;
+
+    // thinkingBlocksCount: iterate content array, count thinking/redacted_thinking blocks
+    let thinkingBlocksCount: number | null = null;
+    if (Array.isArray(obj.content)) {
+        let count = 0;
+        for (const block of obj.content) {
+            if (block && typeof block === 'object' && !Array.isArray(block)) {
+                const blockType = (block as Record<string, unknown>).type;
+                if (blockType === 'thinking' || blockType === 'redacted_thinking') {
+                    count++;
+                }
+            }
+        }
+        thinkingBlocksCount = count;
+    }
+
+    return { stopReason, thinkingBlocksCount };
+}
+
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
     ctx: PluginHookAgentContext & { workspaceDir?: string }
@@ -164,6 +199,7 @@ export function handleLlmOutput(
 
     const text = event.assistantTexts.join('\n');
     const signal = extractEmpathySignal(text);
+    const enhancedFields = extractAssistantEnhancedFields(event.lastAssistant);
     const createdAt = new Date().toISOString();
     let assistantTurnId: number | null = null;
     try {
@@ -176,6 +212,8 @@ export function handleLlmOutput(
             sanitizedText: sanitizeAssistantText(text),
             usageJson: event.usage || {},
             empathySignalJson: signal,
+            stopReason: enhancedFields.stopReason,
+            thinkingBlocksCount: enhancedFields.thinkingBlocksCount,
             createdAt,
         });
     } catch (error) {
