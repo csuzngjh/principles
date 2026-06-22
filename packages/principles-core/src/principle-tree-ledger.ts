@@ -13,7 +13,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { atomicWriteFileSync } from './io.js';
 
 // PRI-443: Types and constants now live in the pure module
 import type {
@@ -55,6 +54,54 @@ export type {
 export { TREE_NAMESPACE };
 
 const PRINCIPLE_TRAINING_FILE = 'principle_training_state.json';
+
+// ---------------------------------------------------------------------------
+// Atomic file write (inlined PRI-443 Phase 4)
+// ---------------------------------------------------------------------------
+//
+// Previously exported from ./io.ts. Inlined here as a private helper because
+// this is the ONLY consumer in principles-core. The openclaw-plugin has its
+// own copy at src/utils/io.ts.
+//
+// Crash-safe: writes to a .tmp file then renames. On Windows, retries with
+// exponential backoff on EPERM/EBUSY/EACCES to handle transient file locks.
+
+const RENAME_MAX_RETRIES = 3;
+const RENAME_BASE_DELAY_MS = 50;
+
+function atomicWriteFileSync(filePath: string, data: string): void {
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, data, 'utf8');
+
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
+    try {
+      fs.renameSync(tmpPath, filePath);
+      return;
+    } catch (err) {
+      lastError = err as Error;
+      const {code} = (err as { code?: string });
+      // Only retry on Windows transient lock errors
+      if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+        if (attempt < RENAME_MAX_RETRIES - 1) {
+          const delay = RENAME_BASE_DELAY_MS * Math.pow(2, attempt);
+          // Synchronous sleep using a tight spin with accessSync yield
+          const waitUntil = Date.now() + delay;
+          while (Date.now() < waitUntil) {
+            try { fs.accessSync(tmpPath); } catch { /* ignore */ }
+          }
+        }
+        continue;
+      }
+      // Non-retryable error — throw immediately
+      break;
+    }
+  }
+
+  // Clean up temp file on failure
+  try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+  throw lastError ?? new Error('atomicWriteFileSync: rename failed');
+}
 
 // ---------------------------------------------------------------------------
 // Ledger file I/O (the only non-pure part of this module)

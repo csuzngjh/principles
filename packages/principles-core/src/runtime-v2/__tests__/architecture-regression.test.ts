@@ -3473,9 +3473,17 @@ describe('PRI-416: type single-ownership guards', () => {
     expect(hits).toEqual(['runtime-v2/types/ledger-store.ts']);
   });
 
-  it('atomicWriteFileSync is defined exactly once in core/src/', () => {
+  it('atomicWriteFileSync is NOT exported from any core/src/ file (PRI-443 Phase 4)', () => {
+    // After PRI-443 Phase 4, atomicWriteFileSync is inlined as a PRIVATE helper
+    // inside principle-tree-ledger.ts. It must NOT be exported from core.
     const hits = findDefinitions(/export\s+function\s+atomicWriteFileSync\s*\(/);
-    expect(hits).toEqual(['io.ts']);
+    expect(hits).toEqual([]);
+  });
+
+  it('atomicWriteFileSync is defined exactly once as a private function in principle-tree-ledger.ts (PRI-443 Phase 4)', () => {
+    // The function is now a private (non-exported) helper inlined in principle-tree-ledger.ts
+    const hits = findDefinitions(/function\s+atomicWriteFileSync\s*\(/);
+    expect(hits).toEqual(['principle-tree-ledger.ts']);
   });
 });
 
