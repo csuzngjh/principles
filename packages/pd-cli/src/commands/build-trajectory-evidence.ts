@@ -100,7 +100,7 @@ export function buildTrajectoryEvidenceFromDb(
     // Try to read assistant turns (last 3)
     try {
       const assistantTurns = db.prepare(`
-        SELECT id, sanitized_text, created_at
+        SELECT id, sanitized_text, stop_reason, created_at
         FROM assistant_turns
         WHERE session_id = ?
         ORDER BY id ASC
@@ -116,9 +116,12 @@ export function buildTrajectoryEvidenceFromDb(
           sanitizedText.slice(0, MAX_EVIDENCE_NOTE_CHARS),
           workspaceDir,
         );
+        // Enhanced: append truncation warning when stop_reason=length
+        const stopReason = typeof turn.stop_reason === 'string' ? turn.stop_reason : null;
+        const truncationWarning = stopReason === 'length' ? ' [TRUNCATED: output cut off by length limit]' : '';
         evidence.push({
           sourceRef: `agent_turn:${String(turn.created_at ?? 'unknown')}`,
-          note: sanitizedNote,
+          note: sanitizedNote + truncationWarning,
         });
       }
     } catch {
@@ -134,9 +137,9 @@ export function buildTrajectoryEvidenceFromDb(
     // PRI-358: Try to read failed tool_calls (last 3 failures, chronological order)
     try {
       const failedToolCalls = db.prepare(`
-        SELECT tool_name, error_type, exit_code, created_at
+        SELECT tool_name, error_type, exit_code, result_preview, created_at
         FROM (
-          SELECT tool_name, error_type, exit_code, created_at
+          SELECT tool_name, error_type, exit_code, result_preview, created_at
           FROM tool_calls
           WHERE session_id = ? AND outcome = 'failure'
           ORDER BY created_at DESC
@@ -150,7 +153,10 @@ export function buildTrajectoryEvidenceFromDb(
         const toolName = typeof tc.tool_name === 'string' ? tc.tool_name : 'unknown';
         const errorType = typeof tc.error_type === 'string' ? tc.error_type : 'unknown';
         const exitCode = tc.exit_code != null ? String(tc.exit_code) : 'N/A';
-        const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})`;
+        // Enhanced: append resultPreview when available
+        const resultPreview = typeof tc.result_preview === 'string' ? tc.result_preview : null;
+        const previewSuffix = resultPreview ? ` | ${resultPreview.slice(0, 200)}` : '';
+        const note = `Tool ${toolName} failed: ${errorType} (exitCode: ${exitCode})${previewSuffix}`;
         evidence.push({
           sourceRef: `tool_call_failure:${String(tc.created_at ?? 'unknown')}`,
           note: sanitizeString(note.slice(0, MAX_EVIDENCE_NOTE_CHARS), workspaceDir),
