@@ -37,8 +37,10 @@ function getStringField(obj: unknown, key: string): string | undefined {
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(isRecord(value)).withContext(`${label} must be a record`).toBe(true);
-  return value as Record<string, unknown>;
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be a record`);
+  }
+  return value;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -216,9 +218,9 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       // Verify approval is back to pending (not stuck in approved)
       const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
       expect(detailStatus).toBe(200);
-      const data = detailBody as Record<string, unknown>;
-      const dataInner = data?.data as Record<string, unknown> | undefined;
-      expect(dataInner).toBeDefined();
+      const data = requireRecord(detailBody, 'detailBody');
+      const dataInner = data.data;
+      expect(isRecord(dataInner)).toBe(true);
       expect(getStringField(dataInner, 'status')).toBe('pending');
 
       // Re-approve: should also fail for same reason but proves idempotent retry works

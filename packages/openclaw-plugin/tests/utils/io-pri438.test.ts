@@ -34,7 +34,7 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
     it('handles POSIX absolute path with multiple ../ segments', () => {
       const result = normalizePath('/project/../outside/file.ts', '/project');
       // Path escapes project → return normalized absolute path
-      expect(result).toContain('outside');
+      expect(result).toBe('/project/../outside/file.ts');
     });
   });
 
@@ -42,7 +42,7 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
     it('converts Windows path to WSL format when project is POSIX', () => {
       // Windows path D:\file.txt on POSIX project /mnt/d/project
       const result = normalizePath('D:\\file.txt', '/mnt/d/project');
-      expect(result).toContain('/mnt/d');
+      expect(result).toBe('/mnt/d/file.txt');
     });
 
     it('handles Windows project with POSIX relative file path', () => {
@@ -51,13 +51,12 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
     });
 
     it('handles Windows absolute path on Windows project (platform-dependent)', () => {
-      // Note: On Linux, path.isAbsolute('D:\\project\\src\\file.ts') returns false
-      // because Windows paths are not recognized as absolute. The function
-      // treats it as a relative path and joins with the project.
-      // This test documents current behavior on Linux.
       const result = normalizePath('D:\\project\\src\\file.ts', 'D:\\project');
-      // On Linux, the path is treated as relative and joined
-      expect(result).toMatch(/src\/file\.ts|D:/);
+      if (process.platform === 'win32') {
+        expect(result).toBe('src/file.ts');
+      } else {
+        expect(result).toBe('D:/project/src/file.ts');
+      }
     });
   });
 
@@ -74,12 +73,8 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
     });
 
     it('handles path with mixed separators (platform-dependent)', () => {
-      // Note: On Linux, 'src\\sub/file.ts' is detected as a Windows path
-      // because it contains '\\'. The function converts it to WSL format.
       const result = normalizePath('src\\sub/file.ts', '/project');
-      // On Linux, the path is converted to WSL format (/mnt/s/c/sub/file.ts)
-      // because it's detected as a Windows path. The 's' from 'src' becomes the drive letter.
-      expect(result).toMatch(/src\/sub\/file\.ts|\/mnt\/s/);
+      expect(result).toBe('/mnt/sc/sub/file.ts');
     });
 
     it('handles path with trailing slash', () => {
@@ -131,7 +126,9 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
     });
 
     it('returns false for undefined/null inputs', () => {
-      expect(isRisky('', ['src/db'])).toBe(false);
+      expect(isRisky(undefined as unknown as string, ['src/db'])).toBe(false);
+      expect(isRisky('src/db', null as unknown as string[])).toBe(false);
+      expect(isRisky(null as unknown as string, undefined as unknown as string[])).toBe(false);
     });
 
     it('prevents false prefix match (src/db_backup should not match src/db)', () => {
@@ -239,28 +236,32 @@ describe('PRI-438: normalizePath cross-platform handling', () => {
 describe('atomicWriteFileSync', () => {
   it('writes file atomically (write to temp then rename)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-write-'));
-    const filePath = path.join(tmpDir, 'test.txt');
-    const content = 'test content';
+    try {
+      const filePath = path.join(tmpDir, 'test.txt');
+      const content = 'test content';
 
-    atomicWriteFileSync(filePath, content);
+      atomicWriteFileSync(filePath, content);
 
-    expect(fs.existsSync(filePath)).toBe(true);
-    expect(fs.readFileSync(filePath, 'utf8')).toBe(content);
-    expect(fs.existsSync(filePath + '.tmp')).toBe(false);
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      expect(fs.existsSync(filePath)).toBe(true);
+      expect(fs.readFileSync(filePath, 'utf8')).toBe(content);
+      expect(fs.existsSync(filePath + '.tmp')).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('overwrites existing file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-atomic-write-'));
-    const filePath = path.join(tmpDir, 'test.txt');
+    try {
+      const filePath = path.join(tmpDir, 'test.txt');
 
-    atomicWriteFileSync(filePath, 'original');
-    atomicWriteFileSync(filePath, 'updated');
+      atomicWriteFileSync(filePath, 'original');
+      atomicWriteFileSync(filePath, 'updated');
 
-    expect(fs.readFileSync(filePath, 'utf8')).toBe('updated');
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('updated');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('throws on non-retryable error (e.g., permission denied on parent dir)', () => {
