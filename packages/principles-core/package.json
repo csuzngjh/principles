@@ -90,7 +90,7 @@
     "@mariozechner/pi-ai": "^0.73.1",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^5.0.0",
     "typebox": "^1.2.2"
   },
   "devDependencies": {
