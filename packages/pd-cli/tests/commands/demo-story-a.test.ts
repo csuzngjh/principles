@@ -60,8 +60,8 @@ describe('pd demo story-a CLI', () => {
 
     const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
     const forbidden = [
-      'skill', 'model_training', 'Nocturnal', 'nocturnal',
-      'idle', 'night', 'Trainer', 'trainer',
+      'skill', 'Nocturnal', 'nocturnal',
+      'idle', 'night',
       'sleep_reflection', 'sleep-cycle', 'Phase 1C', 'Phase 1D',
       'Attribution', 'PRRR', 'BALM', 'LRAS', 'GAP',
       'MissionScheduler', 'WorkspaceLearningSummary', 'Probation',

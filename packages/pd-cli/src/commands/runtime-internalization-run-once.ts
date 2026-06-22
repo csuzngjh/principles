@@ -8,7 +8,6 @@ import {
   ArtificerRunner,
   EvaluatorRunner,
   RolloutReviewerRunner,
-  TrainerRunner,
   StoreEventEmitter,
   DefaultDreamerValidator,
   DefaultPhilosopherValidator,
@@ -16,10 +15,9 @@ import {
   DefaultArtificerValidator,
   DefaultEvaluatorValidator,
   DefaultRolloutReviewerValidator,
-  DefaultTrainerValidator,
   TestDoubleRuntimeAdapter,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import {
@@ -40,7 +38,7 @@ interface RunOnceOptions {
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
 
-const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer']);
+const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']);
 
 interface RunOnceOutput {
   decision: string;
@@ -51,7 +49,7 @@ interface RunOnceOutput {
   runId?: string;
   artifactId?: string;
   resultRef?: string;
-  runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult | TrainerRunnerResult;
+  runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult;
   skipReason?: string;
   conflictReason?: string;
   reason?: string;
@@ -67,7 +65,7 @@ interface RunOnceOutput {
   timeoutSource?: string;
 }
 
-function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult | TrainerRunnerResult, skipReason?: string): RunOnceOutput {
+function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult, skipReason?: string): RunOnceOutput {
   const base: RunOnceOutput = { decision: wakeResult.decision };
 
   switch (wakeResult.decision) {
@@ -197,7 +195,7 @@ function formatTextOutput(output: RunOnceOutput): string {
 
 /**
  * PRI-431: Local test-double payload builder.
- * The 7 runner-specific payloads are unique to run-once.ts; the shared resolver
+ * The 6 runner-specific payloads are unique to run-once.ts; the shared resolver
  * calls this via `testDoublePayloadBuilder` callback.
  */
 function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAdapter {
@@ -380,58 +378,6 @@ function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAd
       }),
     });
   }
-  if (runnerKind === 'trainer') {
-    let capturedSourceRolloutReviewerArtifactId = 'pi-art-test-rollout-reviewer';
-    return new TestDoubleRuntimeAdapter({
-      onStartRun: (input) => {
-        try {
-          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
-          const parsed = JSON.parse(payloadStr);
-          if (typeof parsed.sourceRolloutReviewerArtifactId === 'string' && parsed.sourceRolloutReviewerArtifactId.trim() !== '') {
-            capturedSourceRolloutReviewerArtifactId = parsed.sourceRolloutReviewerArtifactId;
-          }
-        } catch { /* use default */ }
-        return { runId: `td-trainer-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
-      },
-      onPollRun: (_runId: string) => ({
-        runId: _runId,
-        status: 'succeeded',
-        startedAt: new Date().toISOString(),
-        endedAt: new Date().toISOString(),
-      }),
-      onFetchOutput: (_runId: string) => ({
-        runId: _runId,
-        payload: {
-          taskId,
-          sourceRolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
-          ruleCandidate: {
-            toolScope: 'src/**/*.ts',
-            triggerCondition: 'TypeScript file edit with schema mismatch',
-            proposedDecision: 'auto_correct',
-            proposedCorrection: {
-              description: 'Auto-correct by adding input validation before processing',
-              proposedParams: {
-                strategy: 'prepend',
-                snippet: 'const validated = schema.parse(input); if (!validated.success) throw new ValidationError(validated.error);',
-              },
-            },
-            rationale: 'Auto-correct validates input before processing to prevent downstream errors',
-            confidence: 0.88,
-          },
-          safety: {
-            limitations: ['Requires schema definition for all input types', 'May not handle complex nested structures'],
-            falsePositiveRisks: ['Could over-correct on intentional dynamic patterns'],
-            requiredReplayCases: ['Schema validation edge case', 'Nested object validation'],
-          },
-          sourceTrace: {
-            rolloutReviewerArtifactId: capturedSourceRolloutReviewerArtifactId,
-          },
-          risks: [],
-          generatedAt: new Date().toISOString(),
-        },
-      }),
-    });
-  }
   // dreamer / default
   return new TestDoubleRuntimeAdapter({
     onPollRun: (_runId: string) => ({
@@ -509,7 +455,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       return;
     }
 
-    let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult | TrainerRunnerResult | undefined = undefined;
+    let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | EvaluatorRunnerResult | RolloutReviewerRunnerResult | undefined = undefined;
     let skipReason: string | undefined = undefined;
 
     if (wakeResult.decision === 'would_lease') {
@@ -574,13 +520,6 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         } else if (runnerKind === 'rollout_reviewer') {
           const validator = new DefaultRolloutReviewerValidator();
           const runner = new RolloutReviewerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
-          );
-          runnerResult = await runner.run(wakeResult.taskId);
-        } else if (runnerKind === 'trainer') {
-          const validator = new DefaultTrainerValidator();
-          const runner = new TrainerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );

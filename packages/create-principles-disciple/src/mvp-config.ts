@@ -7,7 +7,7 @@ export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as con
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
 
 export const MVP_QUIET_FLAGS = ['gfi'] as const;
-export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger', 'model_training', 'trainer'] as const;
+export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger'] as const;
 
 export interface FeatureFlagDefinition {
   id: string;
@@ -24,8 +24,6 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
-  { id: 'model_training', category: 'gone', enabled: false, since: '2026-05-24', description: 'Model training channel (retired)' },
-  { id: 'trainer', category: 'gone', enabled: false, since: '2026-05-24', description: 'Trainer peer runner (retired)' },
 ];
 
 export interface ComponentStatus {
@@ -328,8 +326,6 @@ export function generateConfigYamlContent(): string {
       // MVP-Gone (ADR-0014 §2.6)
       nocturnal:          { category: 'gone',  enabled: false },
       idle_trigger:       { category: 'gone',  enabled: false },
-      model_training:     { category: 'gone',  enabled: false },
-      trainer:            { category: 'gone',  enabled: false },
     },
     runtimeProfiles: {
       'openclaw.default': {
@@ -347,7 +343,6 @@ export function generateConfigYamlContent(): string {
         artificer:         { enabled: true,  runtimeProfile: 'openclaw.default' },
         evaluator:         { enabled: false, runtimeProfile: 'openclaw.default' },
         rolloutReviewer:   { enabled: false, runtimeProfile: 'openclaw.default' },
-        trainer:           { enabled: false, runtimeProfile: 'openclaw.default' },
         correctionObserver:{ enabled: false, runtimeProfile: 'openclaw.default' },
         empathyObserver:   { enabled: false, runtimeProfile: 'openclaw.default' },
       },

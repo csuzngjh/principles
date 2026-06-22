@@ -12,7 +12,7 @@ describe('resolveRecommendationKind', () => {
 
   it('falls back to principle for strings outside whitelist', () => {
     expect(resolveRecommendationKind('skill')).toBe('principle');
-    expect(resolveRecommendationKind('model_training')).toBe('principle');
+    expect(resolveRecommendationKind('retired_channel')).toBe('principle');
     expect(resolveRecommendationKind('')).toBe('principle');
     expect(resolveRecommendationKind('PRINCIPLE')).toBe('principle');
   });

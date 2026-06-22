@@ -19,8 +19,8 @@ import type { RuleHostInput } from '../internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from '../internalization/rule-host-helpers.js';
 
 const FORBIDDEN_TERMS = [
-  'skill', 'model_training', 'Nocturnal', 'nocturnal',
-  'idle', 'night', 'Trainer', 'trainer',
+  'skill', 'Nocturnal', 'nocturnal',
+  'idle', 'night',
   'sleep_reflection', 'sleep-cycle', 'Phase 1C', 'Phase 1D',
   'Attribution', 'PRRR', 'BALM', 'LRAS', 'GAP',
   'MissionScheduler', 'WorkspaceLearningSummary', 'Probation',

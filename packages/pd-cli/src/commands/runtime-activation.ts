@@ -118,7 +118,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
   }
 
   const confirm = opts.confirm === true;
-  const channel = (opts.channel ?? 'prompt') as 'prompt' | 'defer_archive' | 'skill' | 'code_tool_hook' | 'model_training';
+  const channel = (opts.channel ?? 'prompt') as 'prompt' | 'defer_archive' | 'skill' | 'code_tool_hook';
 
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });

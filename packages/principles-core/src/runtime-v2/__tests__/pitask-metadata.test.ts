@@ -106,12 +106,12 @@ describe('PITaskMetadata serialization', () => {
 
 describe('parsePITaskMetadata', () => {
   it('valid JSON with all required fields → returns PITaskMetadata', () => {
-    const meta = makeMetadata({ channel: 'model_training', timeoutMs: 900000 });
+    const meta = makeMetadata({ channel: 'code_tool_hook', timeoutMs: 900000 });
     const json = serializePITaskMetadata(meta);
     const result = parsePITaskMetadata(json);
     expect(result).not.toBeNull();
     if (result === null) return; // exhaustive guard
-    expect(result.channel).toBe('model_training');
+    expect(result.channel).toBe('code_tool_hook');
     expect(result.timeoutMs).toBe(900000);
     expect(result.dependencyTaskIds).toEqual([]);
     expect(result.inputArtifactRefs).toEqual([]);
@@ -290,7 +290,7 @@ describe('hydratePITaskRecord', () => {
   });
 
   it('every valid PeerRunnerKind still hydrates successfully', () => {
-    const validKinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'trainer', 'rollout_reviewer'] as const;
+    const validKinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'] as const;
     const meta = makeMetadata({ channel: 'prompt', timeoutMs: 60000 });
 
     for (const kind of validKinds) {
@@ -341,7 +341,7 @@ describe('SqliteTaskStore roundtrip', () => {
     const tmpDir = createTempDir();
     const conn = new SqliteConnection(tmpDir);
     const store = new SqliteTaskStore(conn);
-    const meta = makeMetadata({ channel: 'model_training', timeoutMs: 600000 });
+    const meta = makeMetadata({ channel: 'code_tool_hook', timeoutMs: 600000 });
     const diagJson = createPITaskDiagnosticJson(meta);
 
     const task = makeBaseTaskRecord({ taskId: 'task-sqlite-roundtrip', taskKind: 'artificer' });
