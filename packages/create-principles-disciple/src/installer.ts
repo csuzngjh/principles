@@ -603,7 +603,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   } catch (e: unknown) {
     const err = e as { stderr?: Buffer; message?: string };
     const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
-    logger.warn(`PD CLI local verification failed: ${detail}`);
+    console.error(`[PD DEBUG] PD CLI local verification failed: ${detail}`);
   }
 
   const globalOk = (() => {
