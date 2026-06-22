@@ -68,7 +68,6 @@ function makeValidConfigYaml(): string {
         philosopher: { enabled: false },
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
-        trainer: { enabled: false },
         correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
       },

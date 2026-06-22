@@ -94,7 +94,6 @@ describe('static regression: no truthiness pattern in runners', () => {
     'artificer-runner.ts',
     'evaluator-runner.ts',
     'rollout-reviewer-runner.ts',
-    'trainer-runner.ts',
   ])('%s does not use truthiness check for taskId reinjection', (filename) => {
     // Read the source file and verify the old pattern is gone
     const filePath = resolve(__dirname, '..', filename);

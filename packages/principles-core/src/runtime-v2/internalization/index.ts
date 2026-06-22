@@ -115,8 +115,6 @@ export {
 export {
   ALLOWED_EDGES,
   DIAGNOSTICIAN_EDGES,
-  MODEL_TRAINING_CHANNEL,
-  TRAINER_KIND,
   validateEdge,
   validateDiagEdge,
   getDiagSuccessors,
@@ -372,52 +370,6 @@ export type {
   RolloutReviewerPromptInput,
   RolloutReviewerPromptBuildResult,
 } from './rollout-reviewer-prompt-builder.js';
-
-// ── Trainer Runner (PRI-116) ────────────────────────────────────────────────
-
-export type {
-  TrainerRuleCandidate,
-  TrainerSafety,
-  TrainerSourceTrace,
-  TrainerOutputV1,
-  TrainerValidationResult,
-  TrainerValidator,
-} from './trainer-output.js';
-
-export {
-  DefaultTrainerValidator,
-  TrainerOutputV1Schema,
-  TrainerRuleCandidateSchema,
-  TrainerSafetySchema,
-  TrainerSourceTraceSchema,
-  TRAINER_DECISIONS,
-} from './trainer-output.js';
-
-export type {
-  TrainerRunnerResultStatus,
-  TrainerRunnerResult,
-  TrainerRunnerOptions,
-  ResolvedTrainerRunnerOptions,
-  TrainerRunnerDeps,
-} from './trainer-runner.js';
-
-export {
-  TrainerRunner,
-  resolveTrainerRunnerOptions,
-  DEFAULT_TRAINER_RUNNER_OPTIONS,
-} from './trainer-runner.js';
-
-export {
-  TrainerPromptBuilder,
-  TRAINER_PROTOCOL_INSTRUCTION,
-  TRAINER_PROMPT_CONTRACT_VERSION,
-} from './trainer-prompt-builder.js';
-
-export type {
-  TrainerPromptBuilderInput,
-  TrainerPromptInput,
-  TrainerPromptBuildResult,
-} from './trainer-prompt-builder.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 

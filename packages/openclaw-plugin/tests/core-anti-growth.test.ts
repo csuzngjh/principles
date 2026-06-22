@@ -78,7 +78,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'evolution-reducer.ts',
     'focus-history.ts',
     'replay-engine.ts',
-    'external-training-contract.ts',
     'control-ui-db.ts',
     'thinking-models.ts',
     'pd-task-reconciler.ts',

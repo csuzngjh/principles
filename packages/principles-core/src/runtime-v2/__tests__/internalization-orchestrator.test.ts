@@ -796,24 +796,24 @@ describe('InternalizationOrchestrator', () => {
     });
 
     it('terminal runner with no successor returns no_successor', async () => {
-      const succeededTrainer = makeRawTask({
-        taskId: 'trainer-1',
-        taskKind: 'trainer',
+      const succeededRolloutReviewer = makeRawTask({
+        taskId: 'rollout-reviewer-1',
+        taskKind: 'rollout_reviewer',
         status: 'succeeded',
-        channel: 'model_training',
+        channel: 'prompt',
       });
-      mockStateManager.getTask.mockResolvedValue(succeededTrainer);
+      mockStateManager.getTask.mockResolvedValue(succeededRolloutReviewer);
 
       const orchestrator = new OrchestratorClass(
         { stateManager: mockStateManager as unknown as RuntimeStateManager },
-        { owner: 'test-owner', runtimeKind: 'trainer' }
+        { owner: 'test-owner', runtimeKind: 'rollout_reviewer' }
       );
 
-      const result = await orchestrator.commitNextTaskProposal('trainer-1');
+      const result = await orchestrator.commitNextTaskProposal('rollout-reviewer-1');
 
       expect(result.decision).toBe('no_successor');
       if (result.decision === 'no_successor') {
-        expect(result.sourceTaskId).toBe('trainer-1');
+        expect(result.sourceTaskId).toBe('rollout-reviewer-1');
       }
     });
 

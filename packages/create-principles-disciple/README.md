@@ -18,7 +18,7 @@ Three MVP-Core channels are always enabled and cannot be disabled:
 - `code_tool_hook` — RuleHost hard enforcement
 - `defer_archive` — graceful deferral
 
-Quiet and gone capabilities (gfi, nocturnal, idle_trigger, model_training, trainer) are **not surfaced** to users.
+Quiet and gone capabilities (gfi, nocturnal, idle_trigger) are **not surfaced** to users.
 
 ## Usage
 

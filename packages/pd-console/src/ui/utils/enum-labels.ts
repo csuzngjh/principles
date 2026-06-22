@@ -71,7 +71,6 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'defer_archive': '延迟归档',
     'code_tool_hook': 'Code Tool Hook',
     'skill': '技能激活（已停用）',
-    'model_training': '模型训练（已停用）',
   },
   readiness: {
     'ready': '就绪',

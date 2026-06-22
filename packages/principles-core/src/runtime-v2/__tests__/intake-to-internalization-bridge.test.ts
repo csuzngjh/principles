@@ -572,9 +572,8 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       expect(MVP_ENABLED_CHANNELS.has('defer_archive')).toBe(true);
     });
 
-    it('does not contain skill or model_training', () => {
+    it('does not contain skill', () => {
       expect(MVP_ENABLED_CHANNELS.has('skill')).toBe(false);
-      expect(MVP_ENABLED_CHANNELS.has('model_training')).toBe(false);
     });
   });
 

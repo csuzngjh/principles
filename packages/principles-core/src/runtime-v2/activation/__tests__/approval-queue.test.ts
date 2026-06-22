@@ -56,9 +56,6 @@ describe('decideAutoPromotion', () => {
     expect(decideAutoPromotion('code_tool_hook', 0.99)).toBe(false);
     expect(decideAutoPromotion('code_tool_hook', 1.0)).toBe(false);
 
-    // model_training is not auto-promotable
-    expect(decideAutoPromotion('model_training', 0.99)).toBe(false);
-
     // prompt is low-risk but not auto-promotable (goes through direct activation)
     expect(decideAutoPromotion('prompt', 0.99)).toBe(false);
 
@@ -101,7 +98,7 @@ describe('decideAutoPromotion', () => {
 
   it('only skill channel can be auto-promoted', () => {
     const channels: InternalizationChannel[] = [
-      'prompt', 'defer_archive', 'skill', 'code_tool_hook', 'model_training',
+      'prompt', 'defer_archive', 'skill', 'code_tool_hook',
     ];
     for (const channel of channels) {
       const canAutoPromote = decideAutoPromotion(channel, 0.95);

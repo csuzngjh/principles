@@ -162,7 +162,6 @@ function makeDefaultInternalAgents(): EffectivePdConfig['config']['internalAgent
       artificer: { enabled: true },
       evaluator: { enabled: true },
       rolloutReviewer: { enabled: true },
-      trainer: { enabled: true },
       correctionObserver: { enabled: true },
       empathyObserver: { enabled: true },
     },
@@ -472,8 +471,6 @@ describe('Diag chain e2e', () => {
         diagnostician_split_pipeline: { category: 'quiet', enabled: true },
         nocturnal: { category: 'gone', enabled: false },
         idle_trigger: { category: 'gone', enabled: false },
-        model_training: { category: 'gone', enabled: false },
-        trainer: { category: 'gone', enabled: false },
       },
       runtimeProfiles: {
         'default': { type: 'openclaw', source: 'default' },
