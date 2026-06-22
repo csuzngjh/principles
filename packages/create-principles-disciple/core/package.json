@@ -69,6 +69,10 @@
     "./runtime-v2/feedback": {
       "types": "./dist/runtime-v2/feedback/index.d.ts",
       "default": "./dist/runtime-v2/feedback/index.js"
+    },
+    "./quality-scorecard": {
+      "types": "./dist/quality-scorecard/index.d.ts",
+      "default": "./dist/quality-scorecard/index.js"
     }
   },
   "files": [
@@ -81,15 +85,20 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.79.4",
+    "@earendil-works/pi-ai": "^0.79.4",
     "@mariozechner/pi-ai": "^0.73.1",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
-    "js-yaml": "^4.1.1"
+    "js-yaml": "^4.1.1",
+    "typebox": "^1.2.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.6.2",
     "typescript": "^6.0.3",
+    "vite": "^8.0.16",
     "vitest": "^4.1.8"
   },
   "license": "MIT",

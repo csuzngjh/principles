@@ -318,14 +318,15 @@ export function decideArtifactRejectionFeedback(
  *   - scribe → artificer
  *   - artificer → evaluator
  *   - evaluator → rollout_reviewer
- *   - rollout_reviewer → trainer (model_training channel only, v1 terminal successor)
+ *
+ * rollout_reviewer is the v1 terminal peer runner; the trainer/model_training
+ * surface was removed in PRI-449 (MVP-Gone).
  *
  * Requires currentTask.status === 'succeeded' — non-terminal tasks
  * must not generate successor proposals (prevents pipeline乱序).
  *
  * Filters successors by channel constraint: a runner kind transition
  * is only valid when validateEdge(fromKind, toKind, channel) is true.
- * For example, rollout_reviewer → trainer requires channel === 'model_training'.
  *
  * Returns null if the task is not succeeded or no channel-valid
  * successors exist.
@@ -354,7 +355,7 @@ export function createNextTaskProposal(
   const effectiveChannel = channel ?? currentTask.channel;
   const successors = getAllowedSuccessors(taskKind);
 
-  // Filter to only channel-valid successors (M1: prevent invalid trainer proposal)
+  // Filter to only channel-valid successors (M1: gate by job graph + channel policy)
   const validSuccessors = successors.filter(s =>
     validateEdge(taskKind, s, effectiveChannel),
   );

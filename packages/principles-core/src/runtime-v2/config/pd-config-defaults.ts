@@ -47,7 +47,6 @@ const DEFAULT_AGENT_ENABLED: Record<InternalAgentName, boolean> = {
   artificer: true,
   evaluator: false,
   rolloutReviewer: false,
-  trainer: false,
   correctionObserver: false,
   empathyObserver: false,
 };

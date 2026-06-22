@@ -509,7 +509,7 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     // The core validator rejects __proto__ and constructor as dangerous keys
     fs.writeFileSync(
       path.join(pdDir, 'config.yaml'),
-      'version: 1\nfeatures:\n  __proto__:\n    category: core\n    enabled: true\n  prompt:\n    category: core\n    enabled: true\n  constructor:\n    category: core\n    enabled: false\nruntimeProfiles:\n  openclaw.default:\n    type: openclaw\n    source: default\ninternalAgents:\n  defaultRuntime: openclaw.default\n  agents:\n    diagnostician:\n      enabled: true\n    dreamer:\n      enabled: true\n    scribe:\n      enabled: true\n    artificer:\n      enabled: true\n    philosopher:\n      enabled: false\n    evaluator:\n      enabled: false\n    rolloutReviewer:\n      enabled: false\n    trainer:\n      enabled: false\n    correctionObserver:\n      enabled: false\n    empathyObserver:\n      enabled: false\n',
+      'version: 1\nfeatures:\n  __proto__:\n    category: core\n    enabled: true\n  prompt:\n    category: core\n    enabled: true\n  constructor:\n    category: core\n    enabled: false\nruntimeProfiles:\n  openclaw.default:\n    type: openclaw\n    source: default\ninternalAgents:\n  defaultRuntime: openclaw.default\n  agents:\n    diagnostician:\n      enabled: true\n    dreamer:\n      enabled: true\n    scribe:\n      enabled: true\n    artificer:\n      enabled: true\n    philosopher:\n      enabled: false\n    evaluator:\n      enabled: false\n    rolloutReviewer:\n      enabled: false\n    correctionObserver:\n      enabled: false\n    empathyObserver:\n      enabled: false\n',
       'utf8',
     );
 

@@ -252,10 +252,6 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       expect(isMvpChannel('skill')).toBe(false);
     });
 
-    it('isMvpChannel returns false for model_training', () => {
-      expect(isMvpChannel('model_training')).toBe(false);
-    });
-
     it('isMvpChannel returns true for all MVP channels', () => {
       for (const ch of MVP_CHANNELS) {
         expect(isMvpChannel(ch)).toBe(true);
@@ -276,9 +272,9 @@ describe('Proven Channel Baseline (PRI-240)', () => {
     });
 
     it('reports unknown channels', () => {
-      const result = parseChannels('prompt,skill,model_training');
+      const result = parseChannels('prompt,skill,legacy_channel');
       expect(result.channels).toEqual(['prompt']);
-      expect(result.unknowns).toEqual(['skill', 'model_training']);
+      expect(result.unknowns).toEqual(['skill', 'legacy_channel']);
     });
 
     it('returns all unknowns when no valid channels', () => {

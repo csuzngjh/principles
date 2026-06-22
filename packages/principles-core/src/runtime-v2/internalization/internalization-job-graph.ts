@@ -20,8 +20,8 @@ import type { InternalizationChannel, PeerRunnerKind, DiagnosticianStageKind } f
  * Allowed edges in the job graph (v1).
  * Each tuple is [from, to] meaning from → to is a legal transition.
  *
- * v1 policy B: trainer is terminal successor of rollout_reviewer only.
- * Fan-out to trainer from arbitrary runners is future scope (v2+).
+ * v1: rollout_reviewer is the terminal peer runner. The trainer/model_training
+ * surface was removed in PRI-449 (MVP-Gone).
  *
  * @see ADR-0003 Section 3.7
  */
@@ -31,7 +31,6 @@ export const ALLOWED_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])
   ['scribe', 'artificer'] as const,
   ['artificer', 'evaluator'] as const,
   ['evaluator', 'rollout_reviewer'] as const,
-  ['rollout_reviewer', 'trainer'] as const,
 ] as const;
 
 /**
@@ -43,41 +42,23 @@ export const DIAGNOSTICIAN_EDGES: readonly (readonly [DiagnosticianStageKind, Di
   ['diag_distiller', 'diag_router'] as const,
 ] as const;
 
-/**
- * The channel required for the rollout_reviewer → trainer transition.
- * v1 policy B: trainer is terminal successor of rollout_reviewer only.
- */
-export const MODEL_TRAINING_CHANNEL: InternalizationChannel = 'model_training';
-
-/**
- * The trainer peer runner kind.
- */
-export const TRAINER_KIND: PeerRunnerKind = 'trainer';
-
 // ── Edge Validation ────────────────────────────────────────────────────────────
 
 /**
  * Validates whether a transition from one runner to another is legal.
  *
- * For non-trainer targets: checks ALLOWED_EDGES
- * For trainer target: requires model_training channel AND source must be rollout_reviewer
- *   (v1 policy B: trainer is terminal successor of rollout_reviewer only)
+ * Checks ALLOWED_EDGES only. The trainer/model_training surface was removed
+ * in PRI-449 (MVP-Gone), so no channel-gated special cases remain.
  *
  * @param from - Source peer runner kind
  * @param to - Target peer runner kind
- * @param channel - Optional internalization channel (required for trainer target)
+ * @param _channel - Internalization channel (kept for API compatibility; unused)
  */
 export function validateEdge(
   from: PeerRunnerKind,
   to: PeerRunnerKind,
-  channel?: InternalizationChannel,
+  _channel?: InternalizationChannel,
 ): boolean {
-  // Trainer requires model_training channel AND rollout_reviewer source (v1 policy B)
-  if (to === TRAINER_KIND) {
-    return from === 'rollout_reviewer' && channel === MODEL_TRAINING_CHANNEL;
-  }
-
-  // Non-trainer targets: check allowed edges
   return ALLOWED_EDGES.some(([f, t]) => f === from && t === to);
 }
 
@@ -178,8 +159,7 @@ export function isAcyclic(
 /**
  * Returns all allowed successor runner kinds for a given runner.
  *
- * v1 policy B: returns only ALLOWED_EDGES successors.
- * trainer is terminal v1 successor of rollout_reviewer only (no fan-out shortcut).
+ * v1: returns only ALLOWED_EDGES successors. rollout_reviewer is terminal.
  *
  * @param from - Source peer runner kind
  * @returns Array of allowed successor runner kinds

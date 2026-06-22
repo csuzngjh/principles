@@ -70,7 +70,6 @@ export const INTERNAL_AGENT_NAMES = [
   'artificer',
   'evaluator',
   'rolloutReviewer',
-  'trainer',
   'correctionObserver',
   'empathyObserver',
 ] as const;

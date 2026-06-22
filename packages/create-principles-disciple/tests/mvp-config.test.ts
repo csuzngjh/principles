@@ -368,8 +368,6 @@ describe('isMvpChannel', () => {
     expect(isMvpChannel('skill')).toBe(false);
     expect(isMvpChannel('nocturnal')).toBe(false);
     expect(isMvpChannel('evolution')).toBe(false);
-    expect(isMvpChannel('model_training')).toBe(false);
-    expect(isMvpChannel('trainer')).toBe(false);
   });
 });
 
