@@ -23,7 +23,6 @@ import type { ArtificerRunner } from './internalization/artificer-runner.js';
 import type { EvaluatorRunner } from './internalization/evaluator-runner.js';
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { PIArtifactStore } from './internalization/pi-artifact.js';
-import { isArtificerOutputV2 } from './internalization/artificer-output.js';
 import { isEvaluatorOutputV2 } from './internalization/evaluator-output.js';
 import type { EvaluatorAdversarialResult } from './internalization/evaluator-output.js';
 import { formatAdversarialFeedback } from './internalization/adversarial-feedback.js';
@@ -120,34 +119,13 @@ export async function runAdversarialLoop(input: AdversarialLoopInput): Promise<A
         `artificer_run_status_${artificerResult.status ?? 'unknown'}`);
     }
 
-    const artificerOutput = artificerResult.output;
     const artificerArtifactId = artificerResult.artifactId ?? null;
 
-    // ── V1 degradation: Artificer L2 fell back to plan-only (no code) ──
-    // Per PRD: skip code review, run evaluator on the V1 plan, degrade.
-    if (!isArtificerOutputV2(artificerOutput)) {
-      const v1EvaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
-      try {
-        await createEvaluatorTask(input.stateManager, v1EvaluatorTaskId, artificerTaskId, channel);
-        await input.evaluatorRunner.run(v1EvaluatorTaskId);
-      } catch (v1Err) {
-        // Non-fatal: we're degrading anyway. Principle artifact may still be
-        // written by the evaluator; if not, principleArtifactId resolves null.
-        // Catching here preserves the loop's never-throws contract (ERR-018).
-        void v1Err;
-      }
-      const v1Principle = await resolvePrincipleArtifactId(input, v1EvaluatorTaskId);
-      return {
-        decision: 'rejected',
-        rounds: round,
-        finalEvaluatorTaskId: v1EvaluatorTaskId,
-        ruleArtifactId: null,
-        principleArtifactId: v1Principle,
-        degradationReason: 'artificer_degraded_to_v1_no_implementation_code',
-      };
-    }
-
-    // ── Round N: Evaluator (V2 code-review + adversarial replay) ──
+    // ── Round N: Evaluator (code-review + adversarial replay) ──
+    // The unified ArtificerRuleOutput always carries implementationCode (PRI-439).
+    // If Artificer failed to produce valid code, ArtificerRunner.startRun throws
+    // PDRuntimeError and artificerResult.status !== 'succeeded' is caught above.
+    // There is no V1 plan-only degradation path.
     const evaluatorTaskId = `${correlation}-evaluator-r${round}-${Date.now().toString(36)}`;
     lastEvaluatorTaskId = evaluatorTaskId;
     try {

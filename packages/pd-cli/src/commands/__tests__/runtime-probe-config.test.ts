@@ -62,7 +62,7 @@ beforeEach(() => {
   console.error = vi.fn((...args: unknown[]) => { capturedStderr.push(args.join(' ')); });
   console.warn = vi.fn(() => { /* capture warnings */ });
   mockProbeRuntime.mockReset();
-  process.env = { ...originalEnv, LMSTUDIO_API_KEY: 'test-key-for-pri-402' };
+  process.env = { ...originalEnv, LMSTUDIO_API_KEY: 'test-key-for-pri-402', OPENROUTER_API_KEY: 'test-key-for-pri-402' };
 });
 
 afterEach(() => {

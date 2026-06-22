@@ -13,7 +13,7 @@
  *
  * Trust boundary (Artificer is activation-capable, higher risk than upstream runners):
  *   - LLM output enters as `unknown`; only after validateOutput + lineage check
- *     can it be treated as ArtificerOutputV1
+ *     can it be treated as ArtificerRuleOutput
  *   - sourceScribeArtifactId lineage consistency enforced in succeedTask (ERR-004)
  *   - Invalid activation/action/channel cannot succeed commit
  *   - Artifact write failure → retryOrFail, never silent
@@ -22,9 +22,9 @@
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
  *   2. resolve Scribe dependency from dependencyTaskIds
  *   3. fetch Scribe artifact via PIArtifactStore
- *   4. startRun with outputSchemaRef: 'artificer-output-v1'
+ *   4. startRun with outputSchemaRef: 'artificer-rule-output-v2'
  *   5. pollUntilTerminal (inherited)
- *   6. fetchOutput → validate as unknown → cast to ArtificerOutputV1
+ *   6. fetchOutput → validate as unknown → cast to ArtificerRuleOutput
  *   7. checkLineageIntegrity (sourceScribeArtifactId consistency, ERR-008)
  *   8. updateRunOutput → persist serialized output
  *   9. write PIArtifact → markTaskSucceeded with artificer:// resultRef
@@ -33,7 +33,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
-import type { ArtificerOutputV1, ArtificerValidator } from './artificer-output.js';
+import type { ArtificerRuleOutput, ArtificerValidator } from './artificer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
@@ -74,7 +74,7 @@ export interface ArtificerRunnerResult {
   readonly artifactId?: string;
   readonly resultRef?: string;
   readonly contextHash?: string;
-  readonly output?: ArtificerOutputV1;
+  readonly output?: ArtificerRuleOutput;
   readonly errorCategory?: PDErrorCategory;
   readonly failureReason?: string;
   readonly attemptCount: number;
@@ -126,7 +126,7 @@ export interface ArtificerRunnerDeps extends PeerRunnerDeps {
 
 // ── ArtificerRunner ──────────────────────────────────────────────────────────
 
-export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerOutputV1> {
+export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
 
   constructor(deps: ArtificerRunnerDeps, options: PeerRunnerOptions) {
@@ -228,7 +228,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'artificer-output-v1',
+      outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,
     });
   }
@@ -264,11 +264,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
   async succeedTask(
     taskId: string,
     runId: string,
-    output: ArtificerOutputV1,
+    output: ArtificerRuleOutput,
     task: TaskRecord,
     contextHash: string,
     context: ArtificerContext,
-  ): Promise<PeerRunnerResult<ArtificerOutputV1>> {
+  ): Promise<PeerRunnerResult<ArtificerRuleOutput>> {
     // Lineage consistency: sourceScribeArtifactId must match buildContext result (ERR-004, ERR-008).
     if (!context.sourceScribeArtifactId || output.sourceScribeArtifactId !== context.sourceScribeArtifactId) {
       throw new PDRuntimeError(
@@ -353,7 +353,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
     this.emitEvent('task_succeeded', taskId, {
       attemptCount: task.attemptCount,
       resultRef,
-      implementationSummary: output.implementationPlan.summary,
+      implementationSummary: output.implementationSummary,
     });
 
     return {
@@ -383,11 +383,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
   }
 
-  protected override emitSuccessTelemetry(taskId: string, output: ArtificerOutputV1): void {
+  protected override emitSuccessTelemetry(taskId: string, output: ArtificerRuleOutput): void {
     this.emitEvent('implementation_plan_generated', taskId, {
-      implementationSummary: output.implementationPlan.summary,
-      targetSurface: output.implementationPlan.targetSurface,
-      confidence: output.implementationPlan.confidence,
+      implementationSummary: output.implementationSummary,
+      affectedTools: output.affectedTools,
+      goldenTraceCaseCount: output.goldenTraceCases.length,
     });
   }
 }

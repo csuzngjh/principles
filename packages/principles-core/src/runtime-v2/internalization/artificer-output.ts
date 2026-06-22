@@ -1,28 +1,13 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 
-export interface ArtificerImplementationPlan {
-  readonly summary: string;
-  readonly targetSurface: string;
-  readonly changes: readonly string[];
-  readonly tests: readonly string[];
-  readonly rolloutNotes: readonly string[];
-  readonly confidence: number;
-}
-
+/**
+ * Artificer source trace — lineage back to upstream peer artifacts.
+ */
 export interface ArtificerSourceTrace {
   readonly scribeArtifactId: string;
   readonly philosopherArtifactId?: string;
   readonly dreamerArtifactId?: string;
-}
-
-export interface ArtificerOutputV1 {
-  readonly taskId: string;
-  readonly sourceScribeArtifactId: string;
-  readonly implementationPlan: ArtificerImplementationPlan;
-  readonly sourceTrace: ArtificerSourceTrace;
-  readonly risks: readonly string[];
-  readonly generatedAt: string;
 }
 
 /**
@@ -45,44 +30,62 @@ export interface GoldenTraceCaseInput {
 }
 
 /**
- * ArtificerOutputV2 — V1 plus executable rule code fields (Decision 1).
+ * ArtificerRuleOutput — the UNIFIED Artificer output (PRI-439).
  *
- * A V2 output is produced only by `ArtificerL2Adapter` (write-test-fix loop).
- * V1 outputs (no code fields) flow through the existing principle-artifact
- * path unchanged. `isArtificerOutputV2()` distinguishes the two at runtime;
- * never `as`-cast (Runtime Contract Rule 2, ERR-001).
+ * Replaces the former V1/V2 dual-version system. `implementationCode` is now
+ * MANDATORY; there is no plan-only (V1) acceptance path and no degradation.
+ * Missing, invalid, or replay-failing RuleCode fails loud and creates no rule
+ * artifact, approval, or activation.
+ *
+ * `meta`, `taskId`, lineage, and `generatedAt` are server-injected / model-filled
+ * per the existing contract; the validator enforces their presence and consistency.
  */
-export interface ArtificerOutputV2 extends ArtificerOutputV1 {
+export interface ArtificerRuleOutput {
+  readonly taskId: string;
+  readonly sourceScribeArtifactId: string;
   readonly implementationCode: string;
   readonly goldenTraceCases: readonly GoldenTraceCaseInput[];
   readonly affectedTools: readonly string[];
+  readonly implementationSummary: string;
+  readonly risks: readonly string[];
+  readonly sourceTrace: ArtificerSourceTrace;
+  readonly generatedAt: string;
 }
-
-export const ArtificerImplementationPlanSchema = Type.Object({
-  summary: Type.String({ minLength: 1 }),
-  targetSurface: Type.String({ minLength: 1 }),
-  changes: Type.Array(Type.String()),
-  tests: Type.Array(Type.String()),
-  rolloutNotes: Type.Array(Type.String()),
-  confidence: Type.Number({ minimum: 0, maximum: 1 }),
-});
 
 export const ArtificerSourceTraceSchema = Type.Object({
   scribeArtifactId: Type.String({ minLength: 1 }),
-  philosopherArtifactId: Type.Optional(Type.String()),
-  dreamerArtifactId: Type.Optional(Type.String()),
+  philosopherArtifactId: Type.Optional(Type.String({ minLength: 1 })),
+  dreamerArtifactId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
-export const ArtificerOutputV1Schema = Type.Object({
+export const ArtificerRuleOutputSchema = Type.Object({
   taskId: Type.String({ minLength: 1 }),
   sourceScribeArtifactId: Type.String({ minLength: 1 }),
-  implementationPlan: ArtificerImplementationPlanSchema,
-  sourceTrace: ArtificerSourceTraceSchema,
+  implementationCode: Type.String({ minLength: 1 }),
+  goldenTraceCases: Type.Array(
+    Type.Object({
+      caseId: Type.String({ minLength: 1 }),
+      kind: Type.Union([Type.Literal('positive'), Type.Literal('negative')]),
+      toolName: Type.String({ minLength: 1 }),
+      params: Type.Record(Type.String(), Type.Unknown()),
+      expectedDecision: Type.Union([
+        Type.Literal('allow'),
+        Type.Literal('block'),
+        Type.Literal('propose_correction'),
+      ]),
+      expectedProposedParams: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      expectedApplicationMode: Type.Optional(Type.Union([Type.Literal('shadow'), Type.Literal('live')])),
+    }),
+    { minItems: 2, maxItems: 10 },
+  ),
+  affectedTools: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+  implementationSummary: Type.String({ minLength: 1 }),
   risks: Type.Array(Type.String()),
+  sourceTrace: ArtificerSourceTraceSchema,
   generatedAt: Type.String({ minLength: 1 }),
 });
 
-export type ArtificerOutputV1TB = Static<typeof ArtificerOutputV1Schema>;
+export type ArtificerRuleOutputTB = Static<typeof ArtificerRuleOutputSchema>;
 
 export interface ArtificerValidationResult {
   readonly valid: boolean;
@@ -159,7 +162,7 @@ function validateGoldenTraceCasesInput(raw: unknown): string[] {
       errors.push(`${prefix}: positive cases must expect allow (got ${entry.expectedDecision})`);
     }
     // propose_correction requires expectedProposedParams + expectedApplicationMode
-    // (mirrors golden-trace.ts:110-114). Enforced here so malformed V2 output
+    // (mirrors golden-trace.ts:110-114). Enforced here so malformed output
     // fails at validation, not later in the sandbox.
     if (entry.expectedDecision === 'propose_correction') {
       if (!Object.hasOwn(entry, 'expectedProposedParams') || !isRecord(entry.expectedProposedParams)) {
@@ -199,23 +202,6 @@ function validateAffectedTools(raw: unknown): string[] {
   return errors;
 }
 
-/**
- * Runtime type guard distinguishing V2 (code-bearing) artificer output from V1.
- * Use this — not `as ArtificerOutputV2` — after `validate()` succeeds to decide
- * whether the rule-artifact assembly path applies (Runtime Contract Rule 2).
- *
- * Detection: V2 requires ALL three code fields present and well-formed. A
- * partially-populated object is NOT V2 (it is malformed and will have been
- * rejected by validate()).
- */
-export function isArtificerOutputV2(output: unknown): output is ArtificerOutputV2 {
-  if (!isRecord(output)) return false;
-  if (typeof output.implementationCode !== 'string' || output.implementationCode.trim() === '') return false;
-  if (!Array.isArray(output.goldenTraceCases) || output.goldenTraceCases.length === 0) return false;
-  if (!Array.isArray(output.affectedTools) || output.affectedTools.length === 0) return false;
-  return true;
-}
-
 export class DefaultArtificerValidator implements ArtificerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async validate(output: unknown, taskId: string, expectedSourceScribeArtifactId?: string): Promise<ArtificerValidationResult> {
@@ -227,32 +213,45 @@ export class DefaultArtificerValidator implements ArtificerValidator {
 
     const rec = output;
 
+    // ── taskId ──
     if (!Object.hasOwn(rec, 'taskId') || rec.taskId !== taskId) {
       errors.push(`taskId mismatch: expected ${taskId}, got ${String(rec.taskId)}`);
     }
 
+    // ── sourceScribeArtifactId ──
     if (!Object.hasOwn(rec, 'sourceScribeArtifactId') || typeof rec.sourceScribeArtifactId !== 'string' || rec.sourceScribeArtifactId.trim() === '') {
       errors.push('sourceScribeArtifactId must be non-empty string');
     } else if (expectedSourceScribeArtifactId && rec.sourceScribeArtifactId !== expectedSourceScribeArtifactId) {
       errors.push(`sourceScribeArtifactId mismatch: expected ${expectedSourceScribeArtifactId}, got ${rec.sourceScribeArtifactId}`);
     }
 
-    if (!Object.hasOwn(rec, 'implementationPlan') || !isRecord(rec.implementationPlan)) {
-      errors.push('implementationPlan must be an object');
-    } else {
-      const ip = rec.implementationPlan;
-      if (!Object.hasOwn(ip, 'summary') || typeof ip.summary !== 'string' || ip.summary.trim() === '') errors.push('implementationPlan.summary must be non-empty string');
-      if (!Object.hasOwn(ip, 'targetSurface') || typeof ip.targetSurface !== 'string' || ip.targetSurface.trim() === '') errors.push('implementationPlan.targetSurface must be non-empty string');
-      if (!Object.hasOwn(ip, 'changes') || !Array.isArray(ip.changes)) errors.push('implementationPlan.changes must be an array');
-      else if (!ip.changes.every((e: unknown) => typeof e === 'string')) errors.push('implementationPlan.changes must be an array of strings');
-      if (!Object.hasOwn(ip, 'tests') || !Array.isArray(ip.tests)) errors.push('implementationPlan.tests must be an array');
-      else if (!ip.tests.every((e: unknown) => typeof e === 'string')) errors.push('implementationPlan.tests must be an array of strings');
-      if (!Object.hasOwn(ip, 'rolloutNotes') || !Array.isArray(ip.rolloutNotes)) errors.push('implementationPlan.rolloutNotes must be an array');
-      else if (!ip.rolloutNotes.every((e: unknown) => typeof e === 'string')) errors.push('implementationPlan.rolloutNotes must be an array of strings');
-      if (!Object.hasOwn(ip, 'confidence') || typeof ip.confidence !== 'number' || !Number.isFinite(ip.confidence)) errors.push('implementationPlan.confidence must be number');
-      else if (ip.confidence < 0 || ip.confidence > 1) errors.push('implementationPlan.confidence must be in [0, 1]');
+    // ── implementationCode (MANDATORY — no V1 plan-only acceptance) ──
+    if (!Object.hasOwn(rec, 'implementationCode') || typeof rec.implementationCode !== 'string' || rec.implementationCode.trim() === '') {
+      errors.push('implementationCode must be a non-empty string');
     }
 
+    // ── implementationSummary (MANDATORY) ──
+    if (!Object.hasOwn(rec, 'implementationSummary') || typeof rec.implementationSummary !== 'string' || rec.implementationSummary.trim() === '') {
+      errors.push('implementationSummary must be a non-empty string');
+    }
+
+    // ── goldenTraceCases (MANDATORY) ──
+    if (!Object.hasOwn(rec, 'goldenTraceCases')) {
+      errors.push('goldenTraceCases is required');
+    } else {
+      const casesErr = validateGoldenTraceCasesInput(rec.goldenTraceCases);
+      errors.push(...casesErr);
+    }
+
+    // ── affectedTools (MANDATORY) ──
+    if (!Object.hasOwn(rec, 'affectedTools')) {
+      errors.push('affectedTools is required');
+    } else {
+      const toolsErr = validateAffectedTools(rec.affectedTools);
+      errors.push(...toolsErr);
+    }
+
+    // ── sourceTrace ──
     if (!Object.hasOwn(rec, 'sourceTrace') || !isRecord(rec.sourceTrace)) {
       errors.push('sourceTrace must be an object');
     } else {
@@ -274,12 +273,14 @@ export class DefaultArtificerValidator implements ArtificerValidator {
       }
     }
 
+    // ── risks ──
     if (!Object.hasOwn(rec, 'risks') || !Array.isArray(rec.risks)) {
       errors.push('risks must be an array');
     } else if (!rec.risks.every((e: unknown) => typeof e === 'string')) {
       errors.push('risks must be an array of strings');
     }
 
+    // ── lineage consistency: sourceScribeArtifactId ↔ sourceTrace.scribeArtifactId ──
     if (typeof rec.sourceScribeArtifactId === 'string' && rec.sourceScribeArtifactId.trim() !== ''
       && isRecord(rec.sourceTrace)
       && Object.hasOwn(rec.sourceTrace, 'scribeArtifactId')
@@ -288,39 +289,9 @@ export class DefaultArtificerValidator implements ArtificerValidator {
       errors.push('sourceScribeArtifactId and sourceTrace.scribeArtifactId must match');
     }
 
+    // ── generatedAt ──
     if (!Object.hasOwn(rec, 'generatedAt') || typeof rec.generatedAt !== 'string' || rec.generatedAt.trim() === '') {
       errors.push('generatedAt must be non-empty string');
-    }
-
-    // ── V2 fields (optional; present when ArtificerL2Adapter produces code) ──
-    // V1 backward compatibility: absence of code fields is valid (existing path).
-    // When ANY V2 field is present, ALL must be present and well-formed (fail loud,
-    // ERR-009/010). Detection via Object.hasOwn (ERR-013), never `in`.
-    const hasCode = Object.hasOwn(rec, 'implementationCode');
-    const hasCases = Object.hasOwn(rec, 'goldenTraceCases');
-    const hasTools = Object.hasOwn(rec, 'affectedTools');
-    if (hasCode || hasCases || hasTools) {
-      // All three must be present together — partial V2 is malformed.
-      if (!hasCode) errors.push('implementationCode is required when goldenTraceCases or affectedTools are present (V2 output)');
-      if (!hasCases) errors.push('goldenTraceCases is required when implementationCode or affectedTools are present (V2 output)');
-      if (!hasTools) errors.push('affectedTools is required when implementationCode or goldenTraceCases are present (V2 output)');
-
-      if (hasCode) {
-        const code = rec.implementationCode;
-        if (typeof code !== 'string' || code.trim() === '') {
-          errors.push('implementationCode must be a non-empty string');
-        }
-      }
-
-      if (hasCases) {
-        const casesErr = validateGoldenTraceCasesInput(rec.goldenTraceCases);
-        errors.push(...casesErr);
-      }
-
-      if (hasTools) {
-        const toolsErr = validateAffectedTools(rec.affectedTools);
-        errors.push(...toolsErr);
-      }
     }
 
     return errors.length > 0

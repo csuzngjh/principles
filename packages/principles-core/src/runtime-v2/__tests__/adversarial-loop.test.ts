@@ -22,7 +22,7 @@ import { ArtificerRunner } from '../internalization/artificer-runner.js';
 import { EvaluatorRunner } from '../internalization/evaluator-runner.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import { DefaultEvaluatorValidator } from '../internalization/evaluator-output.js';
-import type { ArtificerOutputV1, ArtificerOutputV2 } from '../internalization/artificer-output.js';
+import type { ArtificerRuleOutput } from '../internalization/artificer-output.js';
 import type { EvaluatorOutputV1, EvaluatorOutputV2 } from '../internalization/evaluator-output.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
@@ -51,7 +51,7 @@ function requireRecord(value: unknown): Record<string, unknown> {
 
 // ── Scripted adapter with per-round factories ────────────────────────────────
 
-type ArtificerFactory = (taskId: string) => ArtificerOutputV1;
+type ArtificerFactory = (taskId: string) => ArtificerRuleOutput;
 type EvaluatorFactory = (taskId: string, artificerArtifactId: string) => EvaluatorOutputV1;
 
 class FactoryAdapter {
@@ -126,42 +126,17 @@ function makeScribeArtifact(): PIArtifactRecord {
   };
 }
 
-function makeArtificerV2(taskId: string): ArtificerOutputV2 {
+function makeArtificerOutput(taskId: string): ArtificerRuleOutput {
   return {
     taskId,
     sourceScribeArtifactId: 'pi-art-scribe-loop-001',
-    implementationPlan: {
-      summary: 'Block system path writes',
-      targetSurface: 'rule-host-evaluator',
-      changes: ['Add path-prefix matcher'],
-      tests: ['unit test for /etc prefix'],
-      rolloutNotes: ['shadow mode'],
-      confidence: 0.85,
-    },
     implementationCode: 'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "system path" }; }',
     goldenTraceCases: [
       { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
       { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
     ],
     affectedTools: ['write_file'],
-    sourceTrace: { scribeArtifactId: 'pi-art-scribe-loop-001' },
-    risks: [],
-    generatedAt: new Date().toISOString(),
-  };
-}
-
-function makeArtificerV1(taskId: string): ArtificerOutputV1 {
-  return {
-    taskId,
-    sourceScribeArtifactId: 'pi-art-scribe-loop-001',
-    implementationPlan: {
-      summary: 'Plan only, no code',
-      targetSurface: 'docs',
-      changes: ['document'],
-      tests: [],
-      rolloutNotes: [],
-      confidence: 0.5,
-    },
+    implementationSummary: 'Block system path writes',
     sourceTrace: { scribeArtifactId: 'pi-art-scribe-loop-001' },
     risks: [],
     generatedAt: new Date().toISOString(),
@@ -277,7 +252,7 @@ describe('runAdversarialLoop (PRI-428)', () => {
   afterEach(() => { try { fs.rmSync(h.tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } });
 
   it('Round 1 approved → 1 round, rule artifact written', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorApproved);
 
     const result = await runAdversarialLoop({
@@ -294,7 +269,7 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('does not report approved when the evaluator produced no rule artifact', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
       taskId,
       sourceArtificerArtifactId: artificerArtifactId,
@@ -319,7 +294,7 @@ describe('runAdversarialLoop (PRI-428)', () => {
 
   it('enforces the two-round hard cap when callers request more rounds', async () => {
     for (let i = 0; i < 3; i += 1) {
-      h.adapter.queueArtificer(makeArtificerV2);
+      h.adapter.queueArtificer(makeArtificerOutput);
       h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
     }
 
@@ -337,9 +312,9 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('Round 1 needs_revision + Round 2 approved → 2 rounds, rule artifact written', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorApproved);
 
     const result = await runAdversarialLoop({
@@ -356,9 +331,9 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('Round 1+2 both needs_revision → rejected (max rounds exhausted)', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
 
     const result = await runAdversarialLoop({
@@ -377,35 +352,10 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(result.ruleArtifactId).toBeNull();
   });
 
-  it('Artificer L2 degraded to V1 → rejected, skip code review', async () => {
-    h.adapter.queueArtificer(makeArtificerV1);
-    // Evaluator still runs (V1 path) but should not write a rule artifact.
-    h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
-      taskId,
-      sourceArtificerArtifactId: artificerArtifactId,
-      evaluation: { decision: 'approved', summary: 'v1 plan approved', score: 0.7, strengths: [], concerns: [], requiredChanges: [] },
-      sourceTrace: { artificerArtifactId, scribeArtifactId: 'pi-art-scribe-loop-001' },
-      risks: [],
-      generatedAt: new Date().toISOString(),
-    }));
-
-    const result = await runAdversarialLoop({
-      artificerRunner: h.artificerRunner,
-      artifactStore: h.artifactStore,
-      evaluatorRunner: h.evaluatorRunner,
-      stateManager: h.stateManager,
-      scribeTaskId: SCRIBE_TASK_ID,
-    });
-
-    expect(result.decision).toBe('rejected');
-    expect(result.degradationReason).toContain('v1');
-    expect(result.ruleArtifactId).toBeNull();
-  });
-
   it('adversarialFeedback from Round 1 is injected into Round 2 Artificer prompt', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorApproved);
 
     await runAdversarialLoop({
@@ -443,9 +393,9 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('adversarialFeedback is stored on the Round-2 artificer task diagnosticJson', async () => {
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
-    h.adapter.queueArtificer(makeArtificerV2);
+    h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorApproved);
 
     await runAdversarialLoop({
@@ -468,35 +418,26 @@ describe('runAdversarialLoop (PRI-428)', () => {
     expect(typeof meta?.adversarialFeedback).toBe('string');
     expect(meta!.adversarialFeedback!.length).toBeGreaterThan(0);
   });
-  it('P1 regression: V1 degradation path does not throw when evaluator task creation fails (ERR-018 never-throws)', async () => {
-    h.adapter.queueArtificer(makeArtificerV1);
+  it('artificer failure (throw) → rejected with artificer_run_threw, no rule artifact (ERR-018 never-throws)', async () => {
+    // PRI-439: the V1 degradation path is gone. Artificer exhaustion now throws
+    // PDRuntimeError('output_invalid', ...) (see ArtificerL2Adapter). The loop
+    // must catch the throw and return { decision: 'rejected' } with
+    // degradationReason 'artificer_run_threw: ...' rather than propagating.
+    const throwingRunner = {
+      ...h.artificerRunner,
+      run: async () => { throw new Error('simulated artificer exhaustion'); },
+    } as unknown as typeof h.artificerRunner;
 
-    // Wrap the stateManager so createTask throws ONLY for the V1 evaluator
-    // task (taskKind='evaluator'). This exercises the previously-unguarded
-    // createEvaluatorTask call in the V1 branch. The loop must catch it and
-    // return { decision: 'rejected' } rather than throwing.
-    const realCreate = h.stateManager.createTask.bind(h.stateManager);
-    const throwingSm = {
-      ...h.stateManager,
-      createTask: async (record: Parameters<typeof realCreate>[0]) => {
-        if (record.taskKind === 'evaluator') {
-          throw new Error('simulated V1 evaluator task create failure');
-        }
-        return realCreate(record);
-      },
-    } as unknown as typeof h.stateManager;
-
-    // Must NOT throw — resolve to rejected.
     const result = await runAdversarialLoop({
-      artificerRunner: h.artificerRunner,
+      artificerRunner: throwingRunner,
       artifactStore: h.artifactStore,
       evaluatorRunner: h.evaluatorRunner,
-      stateManager: throwingSm,
+      stateManager: h.stateManager,
       scribeTaskId: SCRIBE_TASK_ID,
     });
 
     expect(result.decision).toBe('rejected');
-    expect(result.degradationReason).toContain('v1');
+    expect(result.degradationReason).toContain('artificer_run_threw');
     expect(result.ruleArtifactId).toBeNull();
   });
 });

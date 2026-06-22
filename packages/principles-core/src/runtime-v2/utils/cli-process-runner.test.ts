@@ -41,21 +41,23 @@ describe('runCliProcess', () => {
 
   describe('timeout case', () => {
     it('sets timedOut=true and exitCode=null when process is killed on timeout', async () => {
-      const runPromise = runCliProcess({
+      // ERR-018: use real timers for this case. Fake timers plus real child
+      // processes are unreliable — vi.advanceTimersByTimeAsync only advances
+      // the JS clock but does NOT kill the real OS process, so the close
+      // event never fires and the promise hangs.
+      vi.useRealTimers();
+
+      const result = await runCliProcess({
         command: 'node',
         args: ['-e', 'setTimeout(() => {}, 10000)'],
         timeoutMs: 100,
         killGracePeriodMs: 50,
       });
 
-      // Advance time past the timeout threshold
-      await vi.advanceTimersByTimeAsync(200);
-      const result = await runPromise;
-
       expect(result.timedOut).toBe(true);
       // exitCode is null because the process was killed, not exited normally
       expect(result.exitCode).toBeNull();
-    });
+    }, 5000);
   });
 
   describe('ENOENT case (binary not found)', () => {

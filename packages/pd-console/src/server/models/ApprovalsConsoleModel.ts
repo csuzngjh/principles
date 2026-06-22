@@ -54,39 +54,22 @@ function stateDbExists(workspaceDir: string): boolean {
 }
 
 export class ApprovalsConsoleModel {
-  private readConnection: SqliteConnection | null = null;
-  private readQueue: ApprovalQueue | null = null;
-  private writeConnection: SqliteConnection | null = null;
-  private writeQueue: ApprovalQueue | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
 
-  private getReadQueue(): ApprovalQueue {
-    if (!this.readQueue) {
-      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
-      const store = new SqliteApprovalQueueStore(this.readConnection);
-      this.readQueue = new ApprovalQueue(store);
-    }
-    return this.readQueue;
+  private createReadContext(): { queue: ApprovalQueue; connection: SqliteConnection } {
+    const connection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
+    const store = new SqliteApprovalQueueStore(connection);
+    return { queue: new ApprovalQueue(store), connection };
   }
 
-  private getWriteQueue(): ApprovalQueue {
-    if (!this.writeQueue) {
-      this.writeConnection = new SqliteConnection({ workspaceDir: this.workspaceDir });
-      const store = new SqliteApprovalQueueStore(this.writeConnection);
-      this.writeQueue = new ApprovalQueue(store);
-    }
-    return this.writeQueue;
-  }
-
-  private getWriteConnection(): SqliteConnection {
-    this.getWriteQueue();
-    const conn = this.writeConnection;
-    if (!conn) throw new Error('writeConnection not initialized');
-    return conn;
+  private createWriteContext(): { queue: ApprovalQueue; connection: SqliteConnection } {
+    const connection = new SqliteConnection({ workspaceDir: this.workspaceDir });
+    const store = new SqliteApprovalQueueStore(connection);
+    return { queue: new ApprovalQueue(store), connection };
   }
 
   async listApprovals(filter?: ApprovalListFilter): Promise<ApprovalListResult> {
@@ -142,7 +125,13 @@ export class ApprovalsConsoleModel {
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
-    const approvalResult = await this.getWriteQueue().approve(approvalId, decidedBy, note);
+    const { queue: writeQueue, connection: writeConnection } = this.createWriteContext();
+    let approvalResult: ApprovalDecisionResult;
+    try {
+      approvalResult = await writeQueue.approve(approvalId, decidedBy, note);
+    } finally {
+      try { writeConnection.close(); } catch { /* best-effort */ }
+    }
     if (!approvalResult.ok) {
       if (approvalResult.error === 'already_decided') {
         return { ok: false, error: 'already_decided', status: approvalResult.status };
@@ -157,8 +146,13 @@ export class ApprovalsConsoleModel {
       const detail = 'reason' in activation ? activation.reason : activation.decision;
       let approvalRolledBack = false;
       try {
-        const rollbackResult = await this.getWriteQueue().resetToPending(approvalId);
-        approvalRolledBack = rollbackResult.ok;
+        const { queue: rollbackQueue, connection: rollbackConnection } = this.createWriteContext();
+        try {
+          const rollbackResult = await rollbackQueue.resetToPending(approvalId);
+          approvalRolledBack = rollbackResult.ok;
+        } finally {
+          try { rollbackConnection.close(); } catch { /* best-effort */ }
+        }
       } catch { /* best-effort rollback */ }
       return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack };
     }
@@ -212,47 +206,51 @@ export class ApprovalsConsoleModel {
     }
 
     // P1 #2: validate the new artifact before swapping the approval pointer.
-    const conn = this.getWriteConnection();
-    const piArtifactStore = new SqlitePIArtifactStore(conn);
-    const newArtifact = await piArtifactStore.getArtifactById(newArtifactId);
-    if (!newArtifact) {
-      return { ok: false, error: 'artifact_not_found', reason: `Artifact ${newArtifactId} does not exist in the artifact store` };
-    }
-    if (newArtifact.validationStatus !== 'validated') {
-      return { ok: false, error: 'artifact_not_validated', reason: `Artifact ${newArtifactId} has validationStatus '${newArtifact.validationStatus}', must be 'validated'` };
-    }
-    // A revision may be produced by a new task, but it must reference the
-    // original artifact or its source principle.
-    const originalArtifact = await piArtifactStore.getArtifactById(existing.artifactId);
-    if (!originalArtifact) {
-      return {
-        ok: false,
-        error: 'artifact_lineage_mismatch',
-        reason: `Original artifact ${existing.artifactId} does not exist; revision lineage cannot be verified`,
-      };
-    }
-    if (!isArtifactRevisionOf(newArtifact, originalArtifact)) {
-      return {
-        ok: false,
-        error: 'artifact_lineage_mismatch',
-        reason: `Artifact ${newArtifactId} does not reference ${originalArtifact.artifactId} or its source principle`,
-      };
-    }
-
-    const editResult = await this.getWriteQueue().edit({
-      approvalId,
-      editedBy,
-      newArtifactId,
-      editReason,
-      now: new Date().toISOString(),
-    });
-    if (!editResult.ok) {
-      if (editResult.error === 'already_decided') {
-        return { ok: false, error: 'already_decided', status: editResult.status };
+    const { queue, connection } = this.createWriteContext();
+    try {
+      const piArtifactStore = new SqlitePIArtifactStore(connection);
+      const newArtifact = await piArtifactStore.getArtifactById(newArtifactId);
+      if (!newArtifact) {
+        return { ok: false, error: 'artifact_not_found', reason: `Artifact ${newArtifactId} does not exist in the artifact store` };
       }
-      return { ok: false, error: 'not_found' };
+      if (newArtifact.validationStatus !== 'validated') {
+        return { ok: false, error: 'artifact_not_validated', reason: `Artifact ${newArtifactId} has validationStatus '${newArtifact.validationStatus}', must be 'validated'` };
+      }
+      // A revision may be produced by a new task, but it must reference the
+      // original artifact or its source principle.
+      const originalArtifact = await piArtifactStore.getArtifactById(existing.artifactId);
+      if (!originalArtifact) {
+        return {
+          ok: false,
+          error: 'artifact_lineage_mismatch',
+          reason: `Original artifact ${existing.artifactId} does not exist; revision lineage cannot be verified`,
+        };
+      }
+      if (!isArtifactRevisionOf(newArtifact, originalArtifact)) {
+        return {
+          ok: false,
+          error: 'artifact_lineage_mismatch',
+          reason: `Artifact ${newArtifactId} does not reference ${originalArtifact.artifactId} or its source principle`,
+        };
+      }
+
+      const editResult = await queue.edit({
+        approvalId,
+        editedBy,
+        newArtifactId,
+        editReason,
+        now: new Date().toISOString(),
+      });
+      if (!editResult.ok) {
+        if (editResult.error === 'already_decided') {
+          return { ok: false, error: 'already_decided', status: editResult.status };
+        }
+        return { ok: false, error: 'not_found' };
+      }
+      return { ok: true, record: editResult.record };
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
     }
-    return { ok: true, record: editResult.record };
   }
 
   private async dispatchActivationAfterApproval(
@@ -280,9 +278,9 @@ export class ApprovalsConsoleModel {
       return undefined;
     }
 
+    const { connection } = this.createWriteContext();
     try {
-      const conn = this.getWriteConnection();
-      const piArtifactStore = new SqlitePIArtifactStore(conn);
+      const piArtifactStore = new SqlitePIArtifactStore(connection);
       const artifactReadModel = {
         getArtifactById: async (id: string): Promise<PIArtifactSnapshot | null> => {
           const rec = await piArtifactStore.getArtifactById(id);
@@ -301,8 +299,8 @@ export class ApprovalsConsoleModel {
           };
         },
       };
-      const activationStateStore = new SqliteActivationStateStore(conn);
-      const approvalQueueStore = new SqliteApprovalQueueStore(conn);
+      const activationStateStore = new SqliteActivationStateStore(connection);
+      const approvalQueueStore = new SqliteApprovalQueueStore(connection);
       // Wire all three MVP-Core writers, including RuleHostWriter for code_tool_hook.
       // This fixes the P0 breakpoint where code_tool_hook approvals could not activate.
       const dispatcher = new ActivationDispatcher(
@@ -352,6 +350,8 @@ export class ApprovalsConsoleModel {
         channel: existing.channel,
         riskLevel: existing.riskLevel,
       };
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
     }
   }
 
@@ -364,41 +364,42 @@ export class ApprovalsConsoleModel {
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
-    return this.getWriteQueue().reject(approvalId, decidedBy, reason);
+    const { queue, connection } = this.createWriteContext();
+    try {
+      return await queue.reject(approvalId, decidedBy, reason);
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
   }
 
   /** Returns null when the approvals table does not exist. */
   private async readSafeGetById(approvalId: string): Promise<ApprovalRecord | null> {
-    const queue = this.getReadQueue();
+    const { queue, connection } = this.createReadContext();
     try {
       return await queue.getById(approvalId);
     } catch (err) {
       if (isMissingTableError(err)) return null;
       throw err;
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
     }
   }
 
   /** Returns null when the approvals table does not exist. */
   private async readSafeList(filter?: ApprovalListFilter): Promise<ApprovalRecord[] | null> {
-    const queue = this.getReadQueue();
+    const { queue, connection } = this.createReadContext();
     try {
       return await queue.listAll({ status: filter?.status, channel: filter?.channel });
     } catch (err) {
       if (isMissingTableError(err)) return null;
       throw err;
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- lifecycle interface; connections are request-scoped
   dispose(): void {
-    if (this.readConnection) {
-      try { this.readConnection.close(); } catch { /* best-effort */ }
-      this.readConnection = null;
-    }
-    this.readQueue = null;
-    if (this.writeConnection) {
-      try { this.writeConnection.close(); } catch { /* best-effort */ }
-      this.writeConnection = null;
-    }
-    this.writeQueue = null;
+    // Connections are opened and closed per-request; no persistent state.
   }
 }

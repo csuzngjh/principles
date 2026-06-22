@@ -53,6 +53,7 @@ import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
 import { registerMvpCommands } from './commands/mvp-smoke.js';
+import { registerRulecodeCommand } from './commands/rulecode.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -895,22 +896,43 @@ artifactCmd
 
 const _legacyCleanupCmd = legacyCmd
   .command('cleanup')
-  .description('Clean legacy empathy/diagnostician artifacts from workspace')
+  .description('Clean legacy empathy/diagnostician artifacts and V1 Artificer artifacts from workspace')
   .requiredOption('-w, --workspace <path>', 'Workspace directory')
-  .option('--dry-run', 'Show what would be cleaned without applying', false)
-  .option('--apply', 'Actually apply the cleanup', false)
+  .option('--dry-run', 'Show what would be cleaned without applying (default)')
+  .option('--apply', 'Actually apply the cleanup')
+  .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    const apply = opts.apply ?? false;
-    if (!apply && !opts.dryRun) {
-      console.error('Specify --dry-run or --apply');
-      process.exit(1);
+    // CLI gate rule 4: --dry-run and --apply are mutually exclusive
+    if (opts.dryRun && opts.apply) {
+      const msg = 'Error: --dry-run and --apply are mutually exclusive';
+      if (opts.json) {
+        console.log(JSON.stringify({ status: 'failed', reason: msg, nextAction: 'Specify either --dry-run or --apply, not both' }, null, 2));
+      } else {
+        console.error(msg);
+      }
+      process.exitCode = 1;
+      return;
     }
-    await handleLegacyCleanup(opts.workspace, apply);
+    // Default to dry-run if neither flag is set (CLI gate rule 4).
+    // Pass undefined through — the handler's logic
+    // (opts.apply === true ? false : opts.dryRun !== false) correctly
+    // defaults to dry-run when both are undefined.
+    await handleLegacyCleanup({
+      workspacePath: opts.workspace,
+      dryRun: opts.dryRun,
+      apply: opts.apply,
+      json: opts.json ?? false,
+    });
   });
 
 // ─── MVP Smoke (PRI-397) ────────────────────────────────────────────────────
 
 registerMvpCommands(program);
+
+// ─── RuleCode CLI (PRI-439 Phase 5) ─────────────────────────────────────────
+// Read-only commands: spec, validate, replay. No DB mutation, no artifact writes.
+
+registerRulecodeCommand(program);
 
 const consoleCmd = program
   .command('console')

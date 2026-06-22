@@ -174,6 +174,7 @@ function artificerV2(taskId: string, priorId?: string): unknown {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
     implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
     implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); return p.startsWith("/etc") ? { decision: "block", matched: true, reason: "system path" } : { decision: "allow", matched: false, reason: "ok" }; }',
+    implementationSummary: 'Block system path writes',
     goldenTraceCases: [
       { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' },
       { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },

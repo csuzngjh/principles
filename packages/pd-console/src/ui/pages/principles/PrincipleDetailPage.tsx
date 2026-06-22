@@ -13,6 +13,7 @@ import {
   fetchPrincipleTrajectory,
   approveApproval,
   rejectApproval,
+  editApproval,
 } from "../../api.js";
 import type {
   PrincipleDetail,
@@ -129,6 +130,9 @@ export function PrincipleDetailPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [showEditInput, setShowEditInput] = useState(false);
+  const [editReason, setEditReason] = useState("");
+  const [newArtifactId, setNewArtifactId] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
   // Evidence ID copy state (Wave 6: stop showing raw UUIDs as primary content)
@@ -320,6 +324,72 @@ export function PrincipleDetailPage() {
 
   const handlePark = () => {
     // No-op: Park is disabled and not available in this version.
+  };
+
+  const handleEdit = () => {
+    if (!isActionable) return;
+    setShowEditInput(true);
+    setShowRejectInput(false);
+    setShowConfirm(false);
+  };
+
+  const cancelEdit = () => {
+    setShowEditInput(false);
+    setEditReason("");
+    setNewArtifactId("");
+  };
+
+  const currentArtifactId = approvalGroup?.records.find((r) => r.status === "pending")?.artifactId ?? "";
+
+  const confirmEdit = async () => {
+    if (!isActionable || !approvalGroup || !editReason.trim() || !newArtifactId.trim() || actionLoading) return;
+    const pendingRecords = approvalGroup.records.filter((r) => r.status === "pending");
+    // P1-5: guard against an empty pending set — without this the loop is a
+    // no-op yet allSucceeded evaluates true, reporting a misleading success.
+    if (pendingRecords.length === 0) {
+      toast.error(t("principles.detail.editFailed", { defaultValue: "没有可编辑的待处理记录。" }));
+      setShowEditInput(false);
+      return;
+    }
+    setActionLoading(true);
+    try {
+      let failedCount = 0;
+      let failureReason: string | undefined;
+      for (const record of pendingRecords) {
+        const result = await editApproval(record.id, newArtifactId.trim(), editReason.trim());
+        if (!result.success) {
+          failedCount++;
+          if (!failureReason) {
+            failureReason = result.nextAction ? `${result.error} ${result.nextAction}` : result.error;
+          }
+        }
+      }
+      const allSucceeded = failedCount === 0;
+      if (allSucceeded) {
+        toast.success(t("principles.detail.editSucceeded", { defaultValue: "已保存修订" }));
+        setShowEditInput(false);
+        setEditReason("");
+        setNewArtifactId("");
+        loadData();
+      } else {
+        // P1-4: thread the backend failureReason into the toast so the owner
+        // sees WHY records failed (matches FocusPage behaviour). Previously
+        // failureReason was computed but never used (dead code).
+        toast.error(
+          t("principles.detail.partialFailure", {
+            defaultValue: `编辑完成，但 ${failedCount}/${pendingRecords.length} 条记录失败：${failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" })}`,
+            failedCount,
+            totalCount: pendingRecords.length,
+            reason: failureReason ?? t("principles.detail.unknownFailure", { defaultValue: "请检查服务日志。" }),
+          }),
+        );
+        loadData();
+      }
+    } catch {
+      toast.error(t("principles.detail.editFailed", { defaultValue: "编辑失败，请稍后重试。" }));
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -629,7 +699,15 @@ export function PrincipleDetailPage() {
           >
             {t("principles.detail.approve")}
           </Button>
-          
+
+          <Button
+            variant="outline"
+            onClick={handleEdit}
+            disabled={!isActionable || actionLoading}
+          >
+            {t("principles.detail.editAction", { defaultValue: "编辑" })}
+          </Button>
+
           <Button
             variant="outline"
             onClick={handlePark}
@@ -637,7 +715,7 @@ export function PrincipleDetailPage() {
           >
             {t("principles.detail.park")}
           </Button>
-          
+
           <Button
             variant="destructive"
             onClick={handleReject}
@@ -700,6 +778,45 @@ export function PrincipleDetailPage() {
                 {t("principles.detail.confirmReject")}
               </Button>
               <Button variant="outline" size="sm" onClick={cancelReject}>
+                {t("principles.detail.cancel")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Edit revision input (inline, not dialog) */}
+        {isActionable && showEditInput && (
+          <div className="mt-4 p-3 border border-gov/20 rounded-[var(--radius-md)]">
+            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+              {t("principles.detail.editReasonLabel", { defaultValue: "编辑原因" })}
+            </label>
+            <div className="mb-2 text-ink-4 text-[12px] font-mono">
+              {t("principles.detail.currentArtifactLabel", { defaultValue: "当前工件" })}: {currentArtifactId}
+            </div>
+            <input
+              type="text"
+              value={newArtifactId}
+              onChange={(e) => setNewArtifactId(e.target.value)}
+              placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+              aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+            />
+            <textarea
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              placeholder={t("principles.detail.editReasonPlaceholder", { defaultValue: "请说明编辑原因" })}
+              className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+            />
+            <div className="flex gap-2 mt-2">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={confirmEdit}
+                disabled={!editReason.trim() || !newArtifactId.trim() || actionLoading}
+              >
+                {t("principles.detail.confirmEdit", { defaultValue: "确认编辑" })}
+              </Button>
+              <Button variant="outline" size="sm" onClick={cancelEdit}>
                 {t("principles.detail.cancel")}
               </Button>
             </div>

@@ -6,6 +6,8 @@ import * as fs from 'node:fs';
 import {
   SqliteConnection,
   SqliteApprovalQueueStore,
+  SqlitePIArtifactStore,
+  SqliteActivationStateStore,
   ApprovalQueue,
 } from '@principles/core/runtime-v2';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
@@ -91,6 +93,62 @@ function seedApproval(channel: string, status: string = 'pending', extra?: Recor
     extra?.rejectionEffect ?? null,
   );
   return approvalId;
+}
+
+// ── PRI-447 edit-then-approve helpers ────────────────────────────────────────
+
+async function seedPrincipleArtifact(
+  artifactId: string,
+  overrides?: Partial<{
+    sourceTaskId: string;
+    sourcePrincipleId: string;
+    lineageArtifactIds: string[];
+    validationStatus: string;
+    contentJson: Record<string, unknown>;
+  }>,
+): Promise<void> {
+  const store = new SqlitePIArtifactStore(sqliteConn);
+  const now = new Date().toISOString();
+  await store.upsertArtifact({
+    artifactId,
+    artifactKind: 'principle',
+    sourceTaskId: overrides?.sourceTaskId ?? `task-${artifactId}`,
+    sourcePrincipleId: overrides?.sourcePrincipleId ?? null,
+    sourceRuleId: undefined,
+    lineageArtifactIds: overrides?.lineageArtifactIds ?? [],
+    validationStatus: overrides?.validationStatus ?? 'validated',
+    contentJson: JSON.stringify(overrides?.contentJson ?? { principleId: artifactId, text: 'Test principle' }),
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+async function seedPendingApprovalForArtifact(
+  approvalId: string,
+  artifactId: string,
+  channel: string,
+): Promise<void> {
+  const db = sqliteConn.getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT OR IGNORE INTO approvals' +
+      ' (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at,' +
+      ' summary, trigger_reason, confidence_explanation, effect_description, rejection_effect)' +
+      ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    approvalId,
+    artifactId,
+    channel,
+    'low',
+    'pending',
+    0.85,
+    now,
+    `Test approval ${approvalId}`,
+    'Automated PRI-447 seed',
+    null,
+    null,
+    null,
+  );
 }
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
@@ -970,6 +1028,355 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(status).toBe(409);
       const rec = requireRecord(body, 'error response');
       expect(rec.message).toContain('already decided');
+    });
+  });
+
+  // ── 17. Edit-then-approve production path (PRI-447) ───────────────────────
+
+  describe('POST /api/v1/approvals/:id/edit — edit-then-approve flow', () => {
+    it('edits a pending approval to a validated revision and preserves previousArtifactId', async () => {
+      const approvalId = `apr-edit-${Date.now()}`;
+      const originalArtifactId = `art-original-${Date.now()}`;
+      const revisedArtifactId = `art-revised-${Date.now()}`;
+      const sourceTaskId = `task-edit-${Date.now()}`;
+      const sourcePrincipleId = `P_EDIT_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourceTaskId,
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original wording' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourceTaskId: `${sourceTaskId}-revised`,
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised wording' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Fix wording' }),
+      });
+      expect(status).toBe(200);
+
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(data, 'previousArtifactId')).toBe(originalArtifactId);
+      expect(getStringField(data, 'status')).toBe('pending');
+
+      // Verify the DB record reflects the swap.
+      const store = new SqliteApprovalQueueStore(sqliteConn);
+      const record = await store.getById(approvalId);
+      expect(record).not.toBeNull();
+      expect(record!.artifactId).toBe(revisedArtifactId);
+      expect(record!.previousArtifactId).toBe(originalArtifactId);
+      expect(record!.editReason).toBe('Fix wording');
+    });
+
+    it('edit then approve activates the revised artifact, not the original', async () => {
+      const approvalId = `apr-edit-approve-${Date.now()}`;
+      const originalArtifactId = `art-original-approve-${Date.now()}`;
+      const revisedArtifactId = `art-revised-approve-${Date.now()}`;
+      const sourceTaskId = `task-edit-approve-${Date.now()}`;
+      const sourcePrincipleId = `P_EDIT_APPROVE_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourceTaskId,
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourceTaskId: `${sourceTaskId}-revised`,
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      // Edit the approval to point at the revision.
+      const { status: editStatus, body: editBody } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Activate revised wording' }),
+      });
+      expect(editStatus).toBe(200);
+      const editData = getDataObject(editBody);
+      expect(editData).toBeDefined();
+      expect(getStringField(editData, 'artifactId')).toBe(revisedArtifactId);
+
+      // Approve the edited approval.
+      const { status: approveStatus, body: approveBody } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Approved after edit' }),
+      });
+      expect(approveStatus).toBe(200);
+      const approveData = getDataObject(approveBody);
+      expect(approveData).toBeDefined();
+      expect(getStringField(approveData, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(approveData, 'status')).toBe('approved');
+
+      const activation = approveData?.activation;
+      expect(isRecord(activation)).toBe(true);
+      if (isRecord(activation)) {
+        expect(getStringField(activation, 'decision')).toBe('activated');
+      }
+
+      // Verify the activation state store references the revised artifact.
+      const stateStore = new SqliteActivationStateStore(sqliteConn);
+      const idempotencyKey = `${revisedArtifactId}::prompt`;
+      const activationRecord = await stateStore.getActivationStatus(idempotencyKey);
+      expect(activationRecord).not.toBeNull();
+      expect(activationRecord!.artifactId).toBe(revisedArtifactId);
+      expect(activationRecord!.channel).toBe('prompt');
+
+      // Original artifact must NOT have an active activation.
+      const originalKey = `${originalArtifactId}::prompt`;
+      const originalActivation = await stateStore.getActivationStatus(originalKey);
+      expect(originalActivation).toBeNull();
+    });
+
+    it('rejects edit when revision artifact does not exist', async () => {
+      const approvalId = `apr-edit-missing-${Date.now()}`;
+      const originalArtifactId = `art-original-missing-${Date.now()}`;
+      await seedPrincipleArtifact(originalArtifactId, {
+        contentJson: { principleId: `P_MISSING_${Date.now()}`, text: 'Original' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: 'art-does-not-exist', editReason: 'Should fail' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(getStringField(rec, 'message')).toContain('does not exist');
+    });
+
+    it('rejects edit when revision artifact is not validated', async () => {
+      const approvalId = `apr-edit-unvalidated-${Date.now()}`;
+      const originalArtifactId = `art-original-unvalidated-${Date.now()}`;
+      const revisedArtifactId = `art-revised-unvalidated-${Date.now()}`;
+      const sourcePrincipleId = `P_UNVALIDATED_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        validationStatus: 'pending',
+        contentJson: { principleId: sourcePrincipleId, text: 'Unvalidated revision' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Should fail' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(getStringField(rec, 'message')).toContain('must be \'validated\'');
+    });
+
+    it('rejects edit when revision artifact lineage does not match original', async () => {
+      const approvalId = `apr-edit-lineage-${Date.now()}`;
+      const originalArtifactId = `art-original-lineage-${Date.now()}`;
+      const unrelatedArtifactId = `art-unrelated-${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourceTaskId: 'task-original-lineage',
+        sourcePrincipleId: 'P_ORIGINAL_LINEAGE',
+        contentJson: { principleId: 'P_ORIGINAL_LINEAGE', text: 'Original' },
+      });
+      // Unrelated artifact: different task, different principle, no lineage link.
+      await seedPrincipleArtifact(unrelatedArtifactId, {
+        sourceTaskId: 'task-unrelated',
+        sourcePrincipleId: 'P_UNRELATED',
+        contentJson: { principleId: 'P_UNRELATED', text: 'Unrelated' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: unrelatedArtifactId, editReason: 'Should fail' }),
+      });
+      expect(status).toBe(400);
+      const rec = requireRecord(body, 'error response');
+      expect(getStringField(rec, 'message')).toContain('lineage');
+    });
+
+    it('rejects edit on already decided approval', async () => {
+      const approvalId = `apr-edit-decided-${Date.now()}`;
+      const originalArtifactId = `art-original-decided-${Date.now()}`;
+      const revisedArtifactId = `art-revised-decided-${Date.now()}`;
+      const sourcePrincipleId = `P_DECIDED_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      // Approve first.
+      const { status: approveStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Approve first' }),
+      });
+      expect(approveStatus).toBe(200);
+
+      // Edit must fail because approval is no longer pending.
+      const { status: editStatus, body: editBody } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Too late' }),
+      });
+      expect(editStatus).toBe(409);
+      const rec = requireRecord(editBody, 'error response');
+      expect(getStringField(rec, 'message')).toContain('already decided');
+    });
+
+    it('edit records previousArtifactId pointing at the pre-edit artifact', async () => {
+      // Core acceptance for the edit path: after one edit, the audit field
+      // previousArtifactId must reference the originally-queued artifact so
+      // the owner (and any audit query) can trace what was revised.
+      const approvalId = `apr-edit-audit-${Date.now()}`;
+      const originalArtifactId = `art-original-audit-${Date.now()}`;
+      const revisedArtifactId = `art-revised-audit-${Date.now()}`;
+      const sourcePrincipleId = `P_AUDIT_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Audit trace' }),
+      });
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(data, 'previousArtifactId')).toBe(originalArtifactId);
+    });
+
+    it('re-editing to the SAME artifact id is accepted by the store', async () => {
+      // Documents the CURRENT store behaviour: submitting the same newArtifactId
+      // as the approval's current artifact is NOT short-circuited — the UPDATE
+      // runs unconditionally, which currently makes previousArtifactId
+      // self-referential. See the `it.fails` test below for the audit-trail
+      // requirement that is NOT yet met.
+      const approvalId = `apr-edit-same-${Date.now()}`;
+      const originalArtifactId = `art-original-same-${Date.now()}`;
+      const revisedArtifactId = `art-revised-same-${Date.now()}`;
+      const sourcePrincipleId = `P_SAME_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'Original' },
+      });
+      await seedPrincipleArtifact(revisedArtifactId, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'Revised' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      const payload = { newArtifactId: revisedArtifactId, editReason: 'First edit' };
+      const first = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      expect(first.status).toBe(200);
+      const firstData = getDataObject(first.body);
+      expect(getStringField(firstData, 'artifactId')).toBe(revisedArtifactId);
+      expect(getStringField(firstData, 'previousArtifactId')).toBe(originalArtifactId);
+
+      const second = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      expect(second.status).toBe(200);
+      const data = getDataObject(second.body);
+      expect(getStringField(data, 'artifactId')).toBe(revisedArtifactId);
+    });
+
+    // KNOWN DEFECT — exposed explicitly so the audit-trail regression does not
+    // pass silently. When this test starts FAILING (i.e. the assertion finally
+    // holds), remove `.fails` and the underlying store bug has been fixed.
+    //
+    // Root cause: sqlite-approval-store.ts edit() does
+    //   `SET previous_artifact_id = artifact_id, artifact_id = ?`
+    // unconditionally. A second edit overwrites previousArtifactId with the
+    // CURRENT artifact_id (the first revision), permanently losing the
+    // ORIGINAL artifact from the audit trail. This is a pre-existing bug in
+    // principles-core, surfaced by this PR's owner-facing edit UI. Tracked
+    // as a follow-up to this PR (see PR comment).
+    it.fails('re-editing to a DIFFERENT artifact preserves the original artifactId in previousArtifactId', async () => {
+      const approvalId = `apr-edit-chain-${Date.now()}`;
+      const originalArtifactId = `art-original-chain-${Date.now()}`;
+      const revisedV2 = `art-revised-v2-${Date.now()}`;
+      const revisedV3 = `art-revised-v3-${Date.now()}`;
+      const sourcePrincipleId = `P_CHAIN_${Date.now()}`;
+
+      await seedPrincipleArtifact(originalArtifactId, {
+        sourcePrincipleId,
+        contentJson: { principleId: sourcePrincipleId, text: 'V1 original' },
+      });
+      await seedPrincipleArtifact(revisedV2, {
+        sourcePrincipleId,
+        lineageArtifactIds: [originalArtifactId],
+        contentJson: { principleId: sourcePrincipleId, text: 'V2 revision' },
+      });
+      await seedPrincipleArtifact(revisedV3, {
+        sourcePrincipleId,
+        lineageArtifactIds: [revisedV2],
+        contentJson: { principleId: sourcePrincipleId, text: 'V3 revision' },
+      });
+      await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
+
+      // Edit 1: original → v2
+      await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedV2, editReason: 'v2' }),
+      });
+
+      // Edit 2: v2 → v3. previousArtifactId SHOULD still point at the ORIGINAL
+      // (or at minimum chain v2→original), but the store overwrites it to v2.
+      const { body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newArtifactId: revisedV3, editReason: 'v3' }),
+      });
+      const data = getDataObject(body);
+      expect(getStringField(data, 'artifactId')).toBe(revisedV3);
+      // The audit requirement: the ORIGINAL artifact must remain traceable.
+      // This assertion currently FAILS because previousArtifactId === revisedV2.
+      expect(getStringField(data, 'previousArtifactId')).toBe(originalArtifactId);
     });
   });
 });

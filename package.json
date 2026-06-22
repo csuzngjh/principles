@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "1.73.0",
+  "version": "1.74.1",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "type": "module",
@@ -17,7 +17,9 @@
     "check:error-handbook": "node scripts/check-error-handbook.cjs",
     "check:error-handbook:audit": "node scripts/check-error-handbook.cjs --audit",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
-    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console",
+    "check:runtime-contract": "node scripts/check-runtime-contract.js",
+    "test:scripts": "cd scripts && vitest run",
+    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run check:runtime-contract && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console",
     "verify:publish": "npm run build && cd packages/openclaw-plugin && npm pack --dry-run",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",

@@ -30,7 +30,7 @@ import type {
 } from '../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult, RefinerSandboxOptions } from '../internalization/refiner-sandbox-wrapper.js';
 import { evaluateInRefinerSandbox } from '../internalization/refiner-sandbox-wrapper.js';
-import { checkForbiddenPatterns, checkReturnStatementsMissingFields } from '../internalization/rule-code-validator.js';
+import { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from '../internalization/rule-code-validator.js';
 import { validateCorrectionProposal } from '../internalization/correction-proposal.js';
 import { safeStringifyPreview } from '../feedback/safe-stringify.js';
 
@@ -201,6 +201,24 @@ export function createProductionGateDeps(): RefinerRuleHostGateDeps {
           success: false,
           failedCases: returnShapeViolations.map((msg) => ({
             caseId: '__return_shape__',
+            errorType: 'validation_failed' as const,
+            message: msg,
+          })),
+          executionTimeMs: Date.now() - startTime,
+          forbiddenPatternViolations: [],
+        };
+      }
+
+      // PRI-439 Phase 2: static check for matched=false paired with a
+      // non-allow decision. The runtime validator (validateRuleHostResult)
+      // enforces this authoritatively, but this early-warning layer catches
+      // the most common LLM mistake before VM execution.
+      const matchedFalseViolations = checkMatchedFalseDecisions(code);
+      if (matchedFalseViolations.length > 0) {
+        return {
+          success: false,
+          failedCases: matchedFalseViolations.map((msg) => ({
+            caseId: '__matched_false_decision__',
             errorType: 'validation_failed' as const,
             message: msg,
           })),

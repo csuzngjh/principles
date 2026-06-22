@@ -62,7 +62,7 @@ interface EvaluatorContext {
    * Scribe principle artifact contentJson (RuleHost MVP Activation, PRD Decision 12).
    * Loaded so the evaluator LLM can judge code intentConsistency/scopePrecision
    * against the original principle text. Null when no scribe artifact is resolvable
-   * (V1 artificer output, or scribeArtifactId missing/malformed).
+   * (scribeArtifactId missing/malformed or upstream artifact unavailable).
    */
   readonly scribeArtifact: string | null;
   readonly sourceScribeArtifactId: string | null;
@@ -79,8 +79,8 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
  * callers treat null as "code review degraded (no principle text)".
  *
  * Looks in two locations:
- *   1. top-level sourceTrace.scribeArtifactId (ArtificerOutputV1/V2 contract)
- *   2. top-level sourceScribeArtifactId (ArtificerOutputV1/V2 contract)
+ *   1. top-level sourceTrace.scribeArtifactId (ArtificerRuleOutput contract)
+ *   2. top-level sourceScribeArtifactId (ArtificerRuleOutput contract)
  */
 function extractScribeArtifactId(artificerContentJson: string): string | null {
   let parsed: unknown;
