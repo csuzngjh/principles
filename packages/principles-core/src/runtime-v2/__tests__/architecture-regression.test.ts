@@ -226,7 +226,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'principle-compiler/template-generator.ts',
 
   // ── Thin Adapter Candidates — plugin I/O boundary wrappers ──────────────
-  'local-worker-routing.ts',
   'principle-tree-migration.ts',
   'principle-internalization/principle-lifecycle-service.ts',
   'principle-tree-ledger-adapter.ts',
@@ -276,15 +275,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // ── I/O Boundary ────────────────────────────────────────────────────────
   'trajectory.ts',
   'evolution-reducer.ts',
-  'promotion-gate.ts',
-  'model-training-registry.ts',
   'focus-history.ts',
-  'model-deployment-registry.ts',
   'training-program.ts',
   'replay-engine.ts',
   'external-training-contract.ts',
   'merge-gate-audit.ts',
-  'shadow-observation-registry.ts',
   'control-ui-db.ts',
   'thinking-models.ts',
   'pd-task-reconciler.ts',
@@ -369,14 +364,17 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (98 files)', async () => {
+  it('known baseline count is self-consistent (97 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
     // PRI-307: Added pd-config-loader.ts (96 → 97)
     // PRI-346: Added config-health.ts (97 → 98)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
+    // PRI-448: Removed local-worker-routing.ts, promotion-gate.ts,
+    // model-training-registry.ts, model-deployment-registry.ts,
+    // shadow-observation-registry.ts (98 → 93)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
@@ -1883,50 +1881,6 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).not.toMatch(/function extractMilestones\s*\(/);
     expect(src).not.toMatch(/function validateCurrentFocus\s*\(/);
     expect(src).not.toMatch(/function mergeWorkingMemory\s*\(/);
-  });
-});
-
-// ── PRI-74: Routing guidance thin-adapter boundary ───────────────────────────
-
-describe('PRI-74 routing guidance thin-adapter boundary', () => {
-  it('prompt-builder/routing-guidance.ts has zero infrastructure imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/routing-guidance.ts'), 'utf-8');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:path');
-    expect(src).not.toContain('node:process');
-    expect(src).not.toContain('openclaw-plugin');
-  });
-
-  it('plugin local-worker-routing.ts imports classifyTaskKind/buildReason/buildBlockers from core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/local-worker-routing.ts'
-    ), 'utf-8');
-    expect(src).toContain('@principles/core/prompt-builder');
-    expect(src).toContain('classifyTaskKind');
-    expect(src).toContain('buildReason');
-    expect(src).toContain('buildBlockers');
-  });
-
-  it('plugin local-worker-routing.ts does NOT have inline keyword arrays or classifyTaskKind implementation', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/local-worker-routing.ts'
-    ), 'utf-8');
-    // Must NOT re-define the keyword constants locally
-    expect(src).not.toMatch(/READER_KEYWORDS\s*=/);
-    expect(src).not.toMatch(/EDITOR_KEYWORDS\s*=/);
-    expect(src).not.toMatch(/HIGH_ENTROPY_KEYWORDS\s*=/);
-    // Must NOT have inline classifyTaskKind function body
-    expect(src).not.toMatch(/export\s+function\s+classifyTaskKind/);
-    // Must delegate to coreClassifyTaskKind
-    expect(src).toContain('coreClassifyTaskKind');
-    expect(src).toContain('coreBuildReason');
-    expect(src).toContain('coreBuildBlockers');
   });
 });
 
