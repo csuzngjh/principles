@@ -121,10 +121,44 @@ async function expectStartRunError(
 
 /** Extract the first emitted telemetry event matching the given eventType. */
 function findTelemetryEvent(eventType: string): Record<string, unknown> | undefined {
-  const call = mockEmitTelemetry.mock.calls.find(
-    (c: unknown[]) => (c[0] as Record<string, unknown>).eventType === eventType,
-  );
-  return call ? (call[0] as Record<string, unknown>) : undefined;
+  // Runtime Contract Rule 2 (no `as` bypass): validate the mock-call shape
+  // before treating it as a telemetry payload.
+  const call = mockEmitTelemetry.mock.calls.find((c: unknown[]) => {
+    const payload = c[0];
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      Object.hasOwn(payload, 'eventType') &&
+      (payload as { eventType: unknown }).eventType === eventType
+    );
+  });
+  if (!call) return undefined;
+  const payload = call[0];
+  return typeof payload === 'object' && payload !== null
+    ? (payload as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Type guard for the tool-context shape passed as the 2nd arg to completeSimple.
+ * Avoids `as` casts on mock-call data (Runtime Contract Rule 2 / ERR-001).
+ */
+function isToolContext(
+  value: unknown,
+): value is { tools: Array<{ name: string; parameters: unknown }> } {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'tools')) {
+    return false;
+  }
+  const tools = (value as { tools: unknown }).tools;
+  if (!Array.isArray(tools)) return false;
+  return tools.every((tool) => {
+    if (typeof tool !== 'object' || tool === null) return false;
+    return (
+      Object.hasOwn(tool, 'name') &&
+      typeof (tool as { name: unknown }).name === 'string' &&
+      Object.hasOwn(tool, 'parameters')
+    );
+  });
 }
 
 // ── Tests ──
@@ -1930,6 +1964,214 @@ describe('PiAiRuntimeAdapter', () => {
       expect(caughtErr?.details?.nextAction).toBeDefined();
       const nextAction = String(caughtErr?.details?.nextAction ?? '');
       expect(nextAction.includes('maxTokens')).toBe(true);
+    });
+  });
+
+  // ── PRI-284: tool_call_first / json_mode_first path tests ──
+
+  describe('output path strategy: tool_call_first (PRI-284)', () => {
+    function makeToolCallResponse(args: Record<string, unknown>, toolName = 'record_diagnostician_output_v1') {
+      return {
+        content: [
+          { type: 'toolCall' as const, id: 'call-1', name: toolName, arguments: args },
+        ],
+        role: 'assistant' as const,
+        stopReason: 'toolUse' as const,
+        api: 'openai-completions',
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4',
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        timestamp: Date.now(),
+      };
+    }
+
+    function makeToolCallInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
+      return {
+        agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+        inputPayload: 'Diagnose this pain signal',
+        contextItems: [],
+        timeoutMs: 60_000,
+        outputSchemaRef: 'diagnostician-output-v1',
+        ...overrides,
+      };
+    }
+
+    it('tool_call success: provider returns toolUse with valid schema → output extracted from tool args', async () => {
+      mockComplete.mockResolvedValueOnce(makeToolCallResponse(VALID_DIAGNOSIS));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'tool_call_first' });
+      const handle = await adapter.startRun(makeToolCallInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1', valid: true });
+
+      // Verify telemetry includes correct outputPath
+      const pathEvent = findTelemetryEvent('output_path_chosen');
+      expect(pathEvent?.payload).toMatchObject({
+        outputPath: 'tool_call',
+        outputSchemaRef: 'diagnostician-output-v1',
+      });
+    });
+
+    it('tool_call strips lineage fields from tool args (ERR-008)', async () => {
+      const outputWithLineage = { ...VALID_DIAGNOSIS, sourcePainId: 'pain-injected', sourceTaskId: 'task-injected' };
+      mockComplete.mockResolvedValueOnce(makeToolCallResponse(outputWithLineage));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'tool_call_first' });
+      const handle = await adapter.startRun(makeToolCallInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).not.toHaveProperty('sourcePainId');
+      expect(output?.payload).not.toHaveProperty('sourceTaskId');
+      // Non-lineage fields preserved
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('tool_call schema invalid → falls through to json_mode → free_form', async () => {
+      // Path 1: tool call with invalid schema args
+      const invalidToolArgs = { invalid: 'data' };
+      mockComplete.mockResolvedValueOnce(makeToolCallResponse(invalidToolArgs));
+      // Path 2: json_mode also fails (non-JSON text)
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('not json at all'));
+      // Path 3: free_form succeeds
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'tool_call_first' });
+      const handle = await adapter.startRun(makeToolCallInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+
+      // Verify fallback telemetry was emitted for tool_call path.
+      // Runtime Contract Rule 2: validate shape before reading eventType.
+      const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
+        const payload = c[0];
+        return (
+          typeof payload === 'object' &&
+          payload !== null &&
+          Object.hasOwn(payload, 'eventType') &&
+          (payload as { eventType: unknown }).eventType === 'output_path_fallback'
+        );
+      });
+      expect(fallbackEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('tool_call not supported (stopReason != toolUse) → falls to json_mode', async () => {
+      // Path 1 (tool_call): provider returns non-toolUse response
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('not json'));
+      // Path 2 (json_mode): provider returns valid JSON
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'tool_call_first' });
+      const handle = await adapter.startRun(makeToolCallInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('tool_call uses per-runner schema from registry, not hardcoded (PRI-284)', async () => {
+      mockComplete.mockResolvedValueOnce(makeToolCallResponse(VALID_DIAGNOSIS));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'tool_call_first' });
+      await adapter.startRun(makeToolCallInput());
+
+      // Verify the context passed to completeSimple includes a tool
+      // whose name is derived from the schemaRef, not hardcoded.
+      // Runtime Contract Rule 2 (no `as` bypass): use a type guard on the
+      // unknown mock-call shape instead of asserting the type.
+      const [firstCallArgs] = mockComplete.mock.calls;
+      expect(firstCallArgs).toBeDefined();
+      const rawContext = firstCallArgs?.[1];
+      expect(isToolContext(rawContext)).toBe(true);
+      if (!isToolContext(rawContext)) throw new Error('invalid tool context');
+      expect(rawContext.tools.length).toBe(1);
+      const tool = rawContext.tools[0];
+      if (!tool) throw new Error('expected exactly one tool');
+      // Name derived from schemaRef 'diagnostician-output-v1'
+      expect(tool.name).toBe('record_diagnostician_output_v1');
+      // Not the old hardcoded name
+      expect(tool.name).not.toBe('record_diagnosis_v1');
+      // Parameters should be the schema from registry
+      expect(tool.parameters).toBeDefined();
+    });
+  });
+
+  describe('output path strategy: json_mode_first (PRI-284)', () => {
+    function makeJsonModeInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
+      return {
+        agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+        inputPayload: 'Diagnose this pain signal',
+        contextItems: [],
+        timeoutMs: 60_000,
+        outputSchemaRef: 'diagnostician-output-v1',
+        ...overrides,
+      };
+    }
+
+    it('json_mode success: provider returns valid JSON text → output extracted', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'json_mode_first' });
+      const handle = await adapter.startRun(makeJsonModeInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+
+      const pathEvent = findTelemetryEvent('output_path_chosen');
+      expect(pathEvent?.payload).toMatchObject({
+        outputPath: 'json_object_mode',
+      });
+    });
+
+    it('json_mode strips lineage fields (ERR-008)', async () => {
+      const outputWithLineage = { ...VALID_DIAGNOSIS, sourcePainId: 'pain-llm-injected' };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(outputWithLineage)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'json_mode_first' });
+      const handle = await adapter.startRun(makeJsonModeInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).not.toHaveProperty('sourcePainId');
+    });
+
+    it('json_mode parse fails → falls to free_form', async () => {
+      // Path 2: json_mode returns non-parseable text
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('this is not json at all'));
+      // Path 3: free_form succeeds
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'json_mode_first' });
+      const handle = await adapter.startRun(makeJsonModeInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+
+      // Verify fallback telemetry.
+      // Runtime Contract Rule 2: validate shape before reading eventType.
+      const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
+        const payload = c[0];
+        return (
+          typeof payload === 'object' &&
+          payload !== null &&
+          Object.hasOwn(payload, 'eventType') &&
+          (payload as { eventType: unknown }).eventType === 'output_path_fallback'
+        );
+      });
+      expect(fallbackEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('json_mode schema invalid → falls to free_form', async () => {
+      // Path 2: json_mode returns valid JSON but wrong schema
+      const wrongSchema = { wrongField: 'wrong value' };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(wrongSchema)));
+      // Path 3: free_form succeeds with correct schema
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'json_mode_first' });
+      const handle = await adapter.startRun(makeJsonModeInput());
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
   });
 });
