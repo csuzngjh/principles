@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-cli",
-  "version": "1.73.1",
+  "version": "1.74.1",
   "description": "PD CLI — Pain recording, sample management, and evolution tasks",
   "type": "module",
   "bin": {
