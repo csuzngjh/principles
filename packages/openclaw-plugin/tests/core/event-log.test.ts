@@ -58,10 +58,9 @@ describe('EventLog', () => {
       
       // Errors field
       expect(stats.errors).toBeDefined();
-      
-      // Pain field
-      expect(stats.pain).toBeDefined();
-      
+
+      // pain field removed (PRI-451 Wave 1.5): no live reader.
+
       // GFI field
       expect(stats.gfi).toBeDefined();
       
@@ -177,17 +176,8 @@ describe('EventLog', () => {
       expect(stats.evolution.tasksCompleted).toBe(1);
     });
 
-    it('should track rule_match events in rulesMatched', () => {
-      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
-      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
-      eventLog.recordRuleMatch('s1', { ruleId: 'path-traversal', layer: 'L1', severity: 0.9, textPreview: 'test2' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.pain.rulesMatched['edit-exact-match']).toBe(2);
-      expect(stats.pain.rulesMatched['path-traversal']).toBe(1);
-    });
+    // rule_match stats test removed (PRI-451 Wave 1): recordRuleMatch is dead
+    // code, deleted alongside this test. rulesMatched counter goes in Wave 1.5.
 
     it('should track rule_promotion events', () => {
       eventLog.recordRulePromotion({ fingerprint: 'fp1', ruleId: 'r1', phrase: 'test', sampleCount: 5, avgSimilarity: 0.9 });
@@ -196,34 +186,12 @@ describe('EventLog', () => {
       const today = new Date().toISOString().slice(0, 10);
       const stats = eventLog.getDailyStats(today);
 
-      expect(stats.pain.candidatesPromoted).toBe(2);
+      // stats.pain.candidatesPromoted assertion removed (PRI-451 Wave 1.5): dead counter.
       expect(stats.evolution.rulesPromoted).toBe(2);
     });
 
-    it('should track pain signals by source', () => {
-      eventLog.recordPainSignal('s1', { source: 'tool_failure', score: 50, reason: 'edit failed' });
-      eventLog.recordPainSignal('s2', { source: 'tool_failure', score: 60, reason: 'read failed' });
-      eventLog.recordPainSignal('s3', { source: 'user_empathy', score: 10, reason: 'user frustrated' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.pain.signalsBySource['tool_failure']).toBe(2);
-      expect(stats.pain.signalsBySource['user_empathy']).toBe(1);
-      expect(stats.pain.signalsDetected).toBe(3);
-    });
-
-    it('should calculate avgScore for pain signals', () => {
-      eventLog.recordPainSignal('s1', { source: 'tool_failure', score: 50, reason: 'test' });
-      eventLog.recordPainSignal('s2', { source: 'tool_failure', score: 70, reason: 'test' });
-      eventLog.recordPainSignal('s3', { source: 'tool_failure', score: 60, reason: 'test' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.pain.avgScore).toBe(60); // (50+70+60)/3 = 60
-      expect(stats.pain.maxScore).toBe(70);
-    });
+    // pain signals by source + avgScore tests removed (PRI-451 Wave 1.5): they
+    // asserted stats.pain.* counters, which are dead (no live reader) and removed.
 
     // PD-FUNNEL-1.2: Legacy backward compat — old events with { success: boolean } shape
     // Stats are loaded from daily-stats.json (not re-read from JSONL), so we

@@ -80,12 +80,9 @@ export const migration: Migration = {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at)`);
 
-    // FTS5
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS pain_events_fts USING fts5(
-      text,
-      pain_event_id UNINDEXED,
-      tokenize='porter unicode61'
-    )`);
+    // pain_events_fts FTS5 virtual table removed (PRI-451 Wave 1): the only
+    // reader (searchPainEvents) was dead code. Existing DBs keep the orphan
+    // table harmlessly (CREATE was IF NOT EXISTS); new DBs simply don't create it.
 
     db.exec(`CREATE TABLE IF NOT EXISTS gate_blocks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

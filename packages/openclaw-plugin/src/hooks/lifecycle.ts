@@ -145,12 +145,9 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(dailyLogPath, entry, 'utf8');
 
-      const semanticPath = wctx.resolve('SEMANTIC_PAIN');
-      const semanticDir = path.dirname(semanticPath);
-      if (!fs.existsSync(semanticDir)) fs.mkdirSync(semanticDir, { recursive: true });
-
-      let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
-      fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
+      // SEMANTIC_PAIN (confusion_samples.md) write removed (PRI-451 Wave 1):
+      // the file had zero readers. The MEMORY.md write above and the fatal-intercept
+      // emitPainDetectedEvent below are both LIVE and remain.
 
       const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
       if (hasFatal) {
