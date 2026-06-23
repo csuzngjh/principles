@@ -129,4 +129,52 @@ export default defineConfig(
       },
     },
   },
+
+  // ── PRI-450: Core boundary — ban fs/path imports in principles-core/src/ ──
+  // Production files in core must be pure logic. I/O belongs in openclaw-plugin.
+  // Whitelisted files are exempt (they are legacy I/O modules awaiting migration).
+  {
+    files: ['packages/principles-core/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: [
+            'fs', 'fs/*',
+            'node:fs', 'node:fs/*',
+            'path', 'path/*',
+            'node:path', 'node:path/*',
+          ],
+          message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 architecture-regression.test.ts 的白名单。',
+        }],
+      }],
+    },
+  },
+
+  // PRI-450: Exempt whitelisted I/O files and test files from the fs/path ban.
+  // The whitelist mirrors ALLOWED_IO_FILES in architecture-regression.test.ts.
+  {
+    files: [
+      'packages/principles-core/src/**/*.test.ts',
+      'packages/principles-core/src/**/*.spec.ts',
+      'packages/principles-core/src/principle-tree-ledger.ts',
+      'packages/principles-core/src/evolution-store.ts',
+      'packages/principles-core/src/trajectory-store.ts',
+      'packages/principles-core/src/workflow-funnel-loader.ts',
+      'packages/principles-core/src/runtime-v2/store/sqlite-connection.ts',
+      'packages/principles-core/src/runtime-v2/store/runtime-state-manager.ts',
+      'packages/principles-core/src/runtime-v2/adapter/openclaw-cli-runtime-adapter.ts',
+      'packages/principles-core/src/runtime-v2/candidate-audit.ts',
+      'packages/principles-core/src/runtime-v2/pain-signal-observability.ts',
+      'packages/principles-core/src/runtime-v2/internalization-chain-integrity-read-model.ts',
+      'packages/principles-core/src/runtime-v2/internalization-integrity-remediation.ts',
+      'packages/principles-core/src/runtime-v2/operator-health-read-model.ts',
+      'packages/principles-core/src/runtime-v2/pain-chain-read-model.ts',
+      'packages/principles-core/src/runtime-v2/pruning-read-model.ts',
+      'packages/principles-core/src/runtime-v2/pruning-review-log.ts',
+      'packages/principles-core/src/runtime-v2/schema-conformance-read-model.ts',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
 );
