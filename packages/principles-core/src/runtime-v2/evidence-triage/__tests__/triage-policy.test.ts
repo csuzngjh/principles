@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { evaluateTriage } from '../triage-policy.js';
+import { evaluateTriage, RISKY_HIGH_SCORE_THRESHOLD, REPEATED_FAILURE_THRESHOLD } from '../triage-policy.js';
 import type { TriageInput, TriageResult, SourceKind } from '../types.js';
 import { isSourceKind } from '../types.js';
 import { getSourceDescriptor, SOURCE_DESCRIPTORS } from '../source-descriptors.js';
@@ -184,6 +184,122 @@ describe('rulehost_block', () => {
       score: 80,
     }));
     expect(result.decision).toBe('evidence_only');
+  });
+});
+
+// ── PRI-446: migrated upgrade rules (risky high-score, repeated failure) ────
+
+describe('PRI-446 upgrade thresholds', () => {
+  it('RISKY_HIGH_SCORE_THRESHOLD is 70 (matches prior plugin magic number)', () => {
+    expect(RISKY_HIGH_SCORE_THRESHOLD).toBe(70);
+  });
+
+  it('REPEATED_FAILURE_THRESHOLD is 4 (matches prior plugin magic number)', () => {
+    expect(REPEATED_FAILURE_THRESHOLD).toBe(4);
+  });
+});
+
+describe('PRI-446 risky high-score upgrade', () => {
+  it('upgrades tool_failure to admit when isRisky && score >= 70', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 70,
+      isRisky: true,
+    }));
+    expect(result.decision).toBe('admit');
+    // Verbatim string from the prior plugin triage-adapter
+    expect(result.reason).toBe('Risky high-score operation overrides evidence-only decision. Immediate diagnosis required.');
+    expect(result.nextAction).toBe('create_diagnostic_task');
+  });
+
+  it('stays evidence_only when score is below 70 even if risky', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 69,
+      isRisky: true,
+    }));
+    expect(result.decision).toBe('evidence_only');
+  });
+
+  it('stays evidence_only when not risky even with high score', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 95,
+      isRisky: false,
+    }));
+    expect(result.decision).toBe('evidence_only');
+  });
+
+  it('upgrades any evidence_only kind, not just tool_failure', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'semantic',
+      score: 75,
+      isRisky: true,
+    }));
+    expect(result.decision).toBe('admit');
+  });
+
+  it('never upgrades a non-evidence_only kind (health_only stays health_only)', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'provider_failure',
+      score: 90,
+      isRisky: true,
+    }));
+    expect(result.decision).toBe('health_only');
+  });
+});
+
+describe('PRI-446 repeated-failure upgrade', () => {
+  it('upgrades tool_failure to admit when consecutiveErrors >= 4', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 50,
+      consecutiveErrors: 4,
+    }));
+    expect(result.decision).toBe('admit');
+    // Verbatim string from the prior plugin triage-adapter
+    expect(result.reason).toBe('Repeated failures override evidence-only decision. Pattern suggests systemic issue requiring diagnosis.');
+    expect(result.nextAction).toBe('create_diagnostic_task');
+  });
+
+  it('stays evidence_only when consecutiveErrors is below 4', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 50,
+      consecutiveErrors: 3,
+    }));
+    expect(result.decision).toBe('evidence_only');
+  });
+
+  it('stays evidence_only when consecutiveErrors is undefined', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 50,
+    }));
+    expect(result.decision).toBe('evidence_only');
+  });
+
+  it('upgrades even at low score when consecutiveErrors >= 4', () => {
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 5,
+      consecutiveErrors: 10,
+    }));
+    expect(result.decision).toBe('admit');
+  });
+});
+
+describe('PRI-446 upgrade rule precedence', () => {
+  it('risky high-score takes precedence (checked first) when both conditions hold', () => {
+    // Both risky-high-score and repeated-failure are true; risky reason wins.
+    const result = evaluateTriage(makeInput({
+      sourceKind: 'tool_failure',
+      score: 80,
+      isRisky: true,
+      consecutiveErrors: 10,
+    }));
+    expect(result.decision).toBe('admit');
+    expect(result.reason).toBe('Risky high-score operation overrides evidence-only decision. Immediate diagnosis required.');
   });
 });
 
