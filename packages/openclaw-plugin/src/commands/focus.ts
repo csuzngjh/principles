@@ -74,6 +74,7 @@ function compressFocusContent(content: string, workspaceDir?: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (!line) continue;
     const trimmedLine = line.trim();
 
     // 识别章节
@@ -292,7 +293,8 @@ async function compressFocus(
   }
 
   // 6. 更新版本号和日期
-  const [majorVersion] = oldVersion.split('.');
+  const versionParts = oldVersion.split('.');
+  const majorVersion = versionParts[0] ?? '';
   const newVersion = `${(parseInt(majorVersion, 10) || 1) + 1}`;
   const [today] = new Date().toISOString().split('T');
   const newContent = compressedContent
@@ -372,6 +374,11 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
   }
 
   const targetFile = files[index - 1];
+  if (!targetFile) {
+    return isZh
+      ? `❌ 无效的序号: ${index}\n\n💡 请输入 1-${files.length} 之间的数字`
+      : `❌ Invalid index: ${index}\n\n💡 Please enter a number between 1-${files.length}`;
+  }
   const historyContent = fs.readFileSync(targetFile.path, 'utf-8');
 
   // 备份当前版本
@@ -496,7 +503,7 @@ export async function handleFocusCommand(
       break;
     case 'rollback':
     case 'rb': {
-      const index = parseInt(args[1], 10);
+      const index = parseInt(args[1] ?? '', 10);
       if (isNaN(index)) {
         result = isZh
           ? '❌ 请指定要回滚的版本序号\n\n💡 输入 `/pd-focus history` 查看可用版本'

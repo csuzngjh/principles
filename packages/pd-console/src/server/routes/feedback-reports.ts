@@ -116,15 +116,17 @@ export async function handleFeedbackReportsRoute(
       if (
         ctx.featureFlags
         && Object.hasOwn(ctx.featureFlags, 'feedback_channel')
-        && !ctx.featureFlags.feedback_channel.enabled
       ) {
-        sendError(
-          res,
-          403,
-          'feedback_channel_disabled',
-          'feedback_channel feature flag is disabled. Enable feedback_channel in .pd/feature-flags.yaml to use feedback reports.',
-        );
-        return;
+        const feedbackChannel = ctx.featureFlags.feedback_channel;
+        if (feedbackChannel && !feedbackChannel.enabled) {
+          sendError(
+            res,
+            403,
+            'feedback_channel_disabled',
+            'feedback_channel feature flag is disabled. Enable feedback_channel in .pd/feature-flags.yaml to use feedback reports.',
+          );
+          return;
+        }
       }
 
       const bodyResult = await readJsonBody(req);
@@ -132,7 +134,7 @@ export async function handleFeedbackReportsRoute(
         sendBadRequest(res, bodyResult.error);
         return;
       }
-      if (bodyResult.value === null || typeof bodyResult.value !== 'object') {
+      if (bodyResult.value === null || typeof bodyResult.value !== 'object' || Array.isArray(bodyResult.value)) {
         sendBadRequest(res, 'request body must be a JSON object with {input, diagnostics}');
         return;
       }

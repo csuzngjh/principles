@@ -21,10 +21,11 @@ function scanEnvironment(wctx: WorkspaceContext): any {
 
   for (const tool of TOOLS_TO_SCAN) {
     try {
-      const [versionLine] = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+      const lines = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+      const versionLine = lines[0];
       tools[tool.name] = {
         available: true,
-        version: versionLine.trim(),
+        version: versionLine ? versionLine.trim() : undefined,
       };
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch parameter intentionally unused - we only care that the command failed
     } catch (_e) {

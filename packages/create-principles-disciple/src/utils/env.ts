@@ -202,10 +202,16 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
         `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess"`,
         { encoding: 'utf-8', timeout: 5000 }
       ).trim();
-      if (output) pid = parseInt(output.split('\n')[0].trim(), 10);
+      if (output) {
+        const [firstLine] = output.split('\n');
+        if (firstLine) pid = parseInt(firstLine.trim(), 10);
+      }
     } else {
       const output = execSync(`lsof -i :${port} -t -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
-      if (output) pid = parseInt(output.split('\n')[0].trim(), 10);
+      if (output) {
+        const [firstLine] = output.split('\n');
+        if (firstLine) pid = parseInt(firstLine.trim(), 10);
+      }
     }
   } catch { /* ignore */ }
 

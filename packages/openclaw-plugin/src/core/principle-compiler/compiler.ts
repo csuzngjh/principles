@@ -286,6 +286,7 @@ export class PrincipleCompiler {
     if (patterns.length === 0) return [];
 
     const pattern = patterns[0];
+    if (!pattern) return [];
     // Skip replay when the pattern has no regex qualifier -- the generated template
     // blocks ALL calls to the tool, making it impossible to construct a passing
     // positive case. Replay is only meaningful when the template is selective.
