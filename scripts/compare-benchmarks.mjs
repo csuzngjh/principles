@@ -28,7 +28,15 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (a === '--baseline') args.baseline = argv[++i];
     else if (a === '--current') args.current = argv[++i];
-    else if (a === '--threshold') args.threshold = parseFloat(argv[++i]);
+    else if (a === '--threshold') {
+      const raw = argv[++i];
+      const parsed = parseFloat(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        console.error(`Invalid --threshold: "${raw}". Must be a positive number (e.g., 0.2 for 20%).`);
+        exit(1);
+      }
+      args.threshold = parsed;
+    }
     else if (a === '--help' || a === '-h') args.help = true;
   }
   return args;

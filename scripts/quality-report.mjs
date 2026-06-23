@@ -76,8 +76,8 @@ export function parseErrStats(handbookPath) {
   // Count ERR entries: lines starting with **[ERR-XXX]**
   const totalMatches = content.match(/\*\*\[ERR-\d+\]\*\*/g) || [];
   const total = totalMatches.length;
-  // Count recurring entries: entries with **Recurrence** field
-  const recurringMatches = content.match(/\*\*Recurrence\*\*/g) || [];
+  // Count recurring entries: only entries with **Recurrence**: Yes (not None/First occurrence)
+  const recurringMatches = content.match(/\*\*Recurrence\*\*:\s*Yes/g) || [];
   const recurring = recurringMatches.length;
   const recurrenceRate = total > 0 ? Math.round((recurring / total) * 1000) / 10 : 0;
   return { total, recurring, recurrenceRate };
