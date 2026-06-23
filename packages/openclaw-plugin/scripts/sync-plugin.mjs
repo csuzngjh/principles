@@ -1083,7 +1083,7 @@ function restartGatewayWindows() {
                         execSync(`wmic process where "ProcessId=${pidTrim}" call terminate`, { stdio: 'ignore' });
                     } catch { /* ignore individual failures */ }
                 }
-                execSync('timeout /t 3 /nobreak > nul', { shell: true, stdio: 'ignore' });
+                execSync('timeout /t 3 /nobreak', { shell: true, stdio: 'ignore' });
             }
         } catch { /* no existing processes */ }
 
@@ -1147,7 +1147,7 @@ function restartGatewayWindows() {
                 }
             } catch { /* port not listening yet */ }
             try {
-                execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+                execSync('timeout /t 1 /nobreak', { shell: true, stdio: 'ignore' });
             } catch { /* ignore */ }
         }
 
