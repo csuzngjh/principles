@@ -24,6 +24,14 @@ export { evaluateTriage } from './triage-policy.js';
 // PRI-446: upgrade thresholds (single source of truth, migrated from plugin)
 export { RISKY_HIGH_SCORE_THRESHOLD, REPEATED_FAILURE_THRESHOLD } from './triage-policy.js';
 
+// Observation resolver — PRI-446 (migrated from plugin raw-observation-adapter)
+export type { RawObservation } from './observation-resolver.js';
+export {
+  resolveSourceKind,
+  buildToolFailureObservation,
+  buildLlmDetectionObservation,
+} from './observation-resolver.js';
+
 // Trigger controller — PEAT-B2
 export type {
   TriggerOutcome,
