@@ -2,7 +2,7 @@
  * PRI-413: Ledger Schema SSOT Guard
  *
  * Detects field-set divergence between the two principle-tree-ledger copies:
- *   - packages/principles-core/src/principle-tree-ledger.ts  (CANONICAL — SSOT)
+ *   - packages/principles-core/src/runtime-v2/types/ledger-store.ts  (CANONICAL — SSOT, PRI-443)
  *   - packages/openclaw-plugin/src/core/principle-tree-ledger.ts (richer impl, must stay aligned)
  *
  * This test reads both source files and extracts interface field names,
@@ -10,6 +10,10 @@
  * that core does not have, this test fails — forcing a conscious convergence decision.
  *
  * Related: docs/architecture-audit-2026-06.md §0.3, §4 A0
+ *
+ * PRI-443: Core types moved from principle-tree-ledger.ts to
+ * runtime-v2/types/ledger-store.ts (pure module, no I/O). This test now
+ * reads from the new canonical location.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -58,7 +62,10 @@ function extractInterfaceFields(source: string, interfaceName: string): string[]
 // Load source files
 // ---------------------------------------------------------------------------
 
-const CORE_LEDGER_PATH = resolve(__dirname, '..', 'src', 'principle-tree-ledger.ts');
+// PRI-443: Core types now live in the pure module runtime-v2/types/ledger-store.ts
+const CORE_LEDGER_TYPES_PATH = resolve(__dirname, '..', 'src', 'runtime-v2', 'types', 'ledger-store.ts');
+// PRI-443: PRINCIPLE_TRAINING_FILE constant still lives in principle-tree-ledger.ts (I/O module)
+const CORE_LEDGER_IO_PATH = resolve(__dirname, '..', 'src', 'principle-tree-ledger.ts');
 const PLUGIN_LEDGER_PATH = resolve(
   __dirname,
   '..',
@@ -69,7 +76,8 @@ const PLUGIN_LEDGER_PATH = resolve(
   'principle-tree-ledger.ts',
 );
 
-const coreSource = readFileSync(CORE_LEDGER_PATH, 'utf-8');
+const coreTypesSource = readFileSync(CORE_LEDGER_TYPES_PATH, 'utf-8');
+const coreIoSource = readFileSync(CORE_LEDGER_IO_PATH, 'utf-8');
 const pluginSource = readFileSync(PLUGIN_LEDGER_PATH, 'utf-8');
 
 // ---------------------------------------------------------------------------
@@ -79,7 +87,7 @@ const pluginSource = readFileSync(PLUGIN_LEDGER_PATH, 'utf-8');
 describe('PRI-413: Ledger schema SSOT guard', () => {
   describe('LegacyPrincipleTrainingState field parity', () => {
     it('core and plugin define identical field sets for LegacyPrincipleTrainingState', () => {
-      const coreFields = extractInterfaceFields(coreSource, 'LegacyPrincipleTrainingState');
+      const coreFields = extractInterfaceFields(coreTypesSource, 'LegacyPrincipleTrainingState');
       const pluginFields = extractInterfaceFields(pluginSource, 'LegacyPrincipleTrainingState');
 
       expect(coreFields.length).toBeGreaterThan(0);
@@ -90,7 +98,7 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
 
   describe('HybridLedgerStore field parity', () => {
     it('core and plugin define identical field sets for HybridLedgerStore', () => {
-      const coreFields = extractInterfaceFields(coreSource, 'HybridLedgerStore');
+      const coreFields = extractInterfaceFields(coreTypesSource, 'HybridLedgerStore');
       const pluginFields = extractInterfaceFields(pluginSource, 'HybridLedgerStore');
 
       expect(coreFields.length).toBeGreaterThan(0);
@@ -102,7 +110,7 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
   describe('LegacyPrincipleTrainingStore type alias parity', () => {
     it('both define LegacyPrincipleTrainingStore as Record<string, LegacyPrincipleTrainingState>', () => {
       // Both should declare: type LegacyPrincipleTrainingStore = Record<string, LegacyPrincipleTrainingState>
-      const coreHasType = /export\s+type\s+LegacyPrincipleTrainingStore\s*=\s*Record<string,\s*LegacyPrincipleTrainingState>/.test(coreSource);
+      const coreHasType = /export\s+type\s+LegacyPrincipleTrainingStore\s*=\s*Record<string,\s*LegacyPrincipleTrainingState>/.test(coreTypesSource);
       const pluginHasType = /export\s+type\s+LegacyPrincipleTrainingStore\s*=\s*Record<string,\s*LegacyPrincipleTrainingState>/.test(pluginSource);
 
       expect(coreHasType).toBe(true);
@@ -111,9 +119,9 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
   });
 
   describe('SSOT: HybridLedgerStore defined exactly once in core src/', () => {
-    it('core principle-tree-ledger.ts is the sole HybridLedgerStore definition in core/src/', async () => {
+    it('core runtime-v2/types/ledger-store.ts is the sole HybridLedgerStore definition in core/src/', async () => {
       // Scan all .ts files under core/src/ for `interface HybridLedgerStore` declarations
-      // The only hit should be in principle-tree-ledger.ts
+      // PRI-443: The only hit should be in runtime-v2/types/ledger-store.ts (pure types module)
       const { readdirSync, statSync } = await import('node:fs');
       const { join } = await import('node:path');
 
@@ -140,21 +148,24 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
 
       scanDir(coreSrcDir);
 
-      // PRI-415 D6 deleted types.ts — only principle-tree-ledger.ts remains.
+      // PRI-443: HybridLedgerStore now lives in runtime-v2/types/ledger-store.ts (pure module)
+      // Normalize path separators to forward slashes for cross-platform comparison
+      const normalizedHits = hits.map((f: string) => f.replace(/\\/g, '/'));
       const allowedFiles = [
-        'principle-tree-ledger.ts',
+        'runtime-v2/types/ledger-store.ts',
       ];
-      const unexpected = hits.filter((f: string) => !allowedFiles.includes(f));
+      const unexpected = normalizedHits.filter((f: string) => !allowedFiles.includes(f));
       expect(unexpected).toEqual([]);
 
       // The canonical file must always be present
-      expect(hits).toContain('principle-tree-ledger.ts');
+      expect(normalizedHits).toContain('runtime-v2/types/ledger-store.ts');
     });
   });
 
   describe('Serialization format parity', () => {
     it('both copies use the same TREE_NAMESPACE constant value', () => {
-      const coreNs = coreSource.match(/export\s+const\s+TREE_NAMESPACE\s*=\s*'([^']+)'/);
+      // PRI-443: TREE_NAMESPACE now lives in runtime-v2/types/ledger-store.ts (core)
+      const coreNs = coreTypesSource.match(/export\s+const\s+TREE_NAMESPACE\s*=\s*'([^']+)'/);
       const pluginNs = pluginSource.match(/export\s+const\s+TREE_NAMESPACE\s*=\s*'([^']+)'/);
 
       expect(coreNs).not.toBeNull();
@@ -163,7 +174,8 @@ describe('PRI-413: Ledger schema SSOT guard', () => {
     });
 
     it('both copies use the same PRINCIPLE_TRAINING_FILE constant value', () => {
-      const coreFile = coreSource.match(/const\s+PRINCIPLE_TRAINING_FILE\s*=\s*'([^']+)'/);
+      // PRI-443: PRINCIPLE_TRAINING_FILE still lives in principle-tree-ledger.ts (I/O module)
+      const coreFile = coreIoSource.match(/const\s+PRINCIPLE_TRAINING_FILE\s*=\s*'([^']+)'/);
       const pluginFile = pluginSource.match(/const\s+PRINCIPLE_TRAINING_FILE\s*=\s*'([^']+)'/);
 
       expect(coreFile).not.toBeNull();

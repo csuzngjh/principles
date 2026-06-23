@@ -94,10 +94,15 @@ vi.mock('@principles/core/runtime-v2', () => ({
   SqliteConnection: vi.fn().mockImplementation(function() {
     return mockDb;
   }),
-  loadLedger: mockLoadLedger,
-  getLedgerFilePathPublic: mockGetLedgerFilePath,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+}));
+
+// PRI-443 Phase 5: loadLedger and getLedgerFilePathPublic now imported from
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+vi.mock('@principles/core/principle-tree-ledger', () => ({
+  loadLedger: mockLoadLedger,
+  getLedgerFilePathPublic: mockGetLedgerFilePath,
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({

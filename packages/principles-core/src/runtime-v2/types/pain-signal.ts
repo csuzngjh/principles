@@ -35,9 +35,9 @@ export type PainSeverity = Static<typeof PainSeverity>;
 /**
  * TypeBox schema for a universal pain signal.
  *
- * Every signal MUST have: source, score, timestamp, reason, sessionId,
- * agentId, traceId, triggerTextPreview. Optional fields (domain, severity,
- * context) default during validation.
+ * Every signal MUST have: source, score, timestamp, reason,
+ * triggerTextPreview. Optional fields (sessionId, agentId, traceId,
+ * domain, severity, context, version) default during validation.
  */
 export const PainSignalSchema = Type.Object({
   /** What triggered this pain signal (e.g., 'tool_failure', 'human_intervention') */
@@ -56,6 +56,8 @@ export const PainSignalSchema = Type.Object({
   traceId: Type.Optional(Type.String()),
   /** Preview of the text that triggered this pain */
   triggerTextPreview: Type.String(),
+  /** Schema version for forward compatibility (e.g., '0.1.0') */
+  version: Type.Optional(Type.String({ default: '0.1.0' })),
   /** Domain context (e.g., 'coding', 'writing', 'analysis') */
   domain: Type.String({ default: 'coding' }),
   /** Severity level derived from score */
@@ -113,9 +115,10 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
   const raw = input;
 
   // Apply defaults for optional fields before validation
-  const hydrated = {
+  const hydrated: Record<string, unknown> = {
     ...raw,
     domain: raw.domain ?? 'coding',
+    version: raw.version ?? '0.1.0',
     sessionId: raw.sessionId ?? undefined,
     agentId: raw.agentId ?? undefined,
     traceId: raw.traceId ?? undefined,
@@ -124,6 +127,26 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
     ),
     context: raw.context ?? {},
   };
+
+  // Security: enforce context size limit to prevent memory exhaustion (PRI-443)
+  const MAX_CONTEXT_SIZE = 10_000;
+  let serializedContext: string;
+  try {
+    serializedContext = JSON.stringify(hydrated.context);
+  } catch {
+    return { valid: false, errors: ['context must be JSON-serializable'] };
+  }
+  if (serializedContext.length > MAX_CONTEXT_SIZE) {
+    return { valid: false, errors: ['Context object exceeds maximum size (10KB)'] };
+  }
+
+  // Validate ISO 8601 timestamp format (PRI-443)
+  if (
+    typeof hydrated.timestamp === 'string' &&
+    isNaN(Date.parse(hydrated.timestamp))
+  ) {
+    return { valid: false, errors: ['timestamp must be a valid ISO 8601 date string'] };
+  }
 
   // Collect TypeBox errors
   const errors = [...Value.Errors(PainSignalSchema, hydrated)];
