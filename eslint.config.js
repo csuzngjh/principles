@@ -138,7 +138,12 @@ export default defineConfig(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['fs', 'node:fs', 'path', 'node:path'],
+          group: [
+            'fs', 'fs/*',
+            'node:fs', 'node:fs/*',
+            'path', 'path/*',
+            'node:path', 'node:path/*',
+          ],
           message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 architecture-regression.test.ts 的白名单。',
         }],
       }],

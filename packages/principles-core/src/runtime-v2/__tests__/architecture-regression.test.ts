@@ -3612,11 +3612,30 @@ describe('PRI-450: core I/O whitelist guard', () => {
     'runtime-v2/schema-conformance-read-model.ts',
   ]);
 
-  // Regex matching static imports of fs or path (including node: prefix).
-  // Matches: import ... from 'fs', import ... from "node:path", etc.
-  // Does NOT match dynamic imports (await import('fs')) which are used in test files.
-  const FS_PATH_IMPORT_RE =
-    /import\s+[^;]*\bfrom\s+['"](node:)?(fs|path)['"]/;
+  // Extract all import module paths from source code.
+  // Handles: import ... from 'mod', import 'mod' (side-effect), and multiline imports.
+  // Reuses the same pattern proven in the PRI-215 extractImportModulePaths helper.
+  function extractImportPaths(src: string): string[] {
+    const paths: string[] = [];
+    for (const m of src.matchAll(/import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null) paths.push(m[1]);
+    }
+    for (const m of src.matchAll(/import\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null && !paths.includes(m[1])) paths.push(m[1]);
+    }
+    return paths;
+  }
+
+  // Check if any import path references fs or path (including sub-paths like fs/promises).
+  function importsFsOrPath(src: string): boolean {
+    const paths = extractImportPaths(src);
+    return paths.some((p) =>
+      p === 'fs' || p.startsWith('fs/') ||
+      p === 'node:fs' || p.startsWith('node:fs/') ||
+      p === 'path' || p.startsWith('path/') ||
+      p === 'node:path' || p.startsWith('node:path/')
+    );
+  }
 
   function collectTsFiles(dir: string, acc: string[]): void {
     const entries = fsSync.readdirSync(dir, { withFileTypes: true });
@@ -3643,7 +3662,7 @@ describe('PRI-450: core I/O whitelist guard', () => {
     const violations: string[] = [];
     for (const filePath of allFiles) {
       const content = fsSync.readFileSync(filePath, 'utf-8');
-      if (FS_PATH_IMPORT_RE.test(content)) {
+      if (importsFsOrPath(content)) {
         const relPath = pathSync.relative(coreSrcDir, filePath).replace(/\\/g, '/');
         if (!ALLOWED_IO_FILES.has(relPath)) {
           violations.push(relPath);
@@ -3664,5 +3683,20 @@ describe('PRI-450: core I/O whitelist guard', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('importsFsOrPath detects sub-path imports (fs/promises) and side-effect imports', () => {
+    // Sub-path import
+    expect(importsFsOrPath(`import { mkdir } from 'node:fs/promises';`)).toBe(true);
+    expect(importsFsOrPath(`import { posix } from 'path/posix';`)).toBe(true);
+    // Side-effect import
+    expect(importsFsOrPath(`import 'fs';`)).toBe(true);
+    expect(importsFsOrPath(`import "node:path";`)).toBe(true);
+    // Standard import
+    expect(importsFsOrPath(`import * as fs from 'fs';`)).toBe(true);
+    expect(importsFsOrPath(`import { resolve } from 'node:path';`)).toBe(true);
+    // Non-fs/path imports
+    expect(importsFsOrPath(`import { foo } from 'bar';`)).toBe(false);
+    expect(importsFsOrPath(``)).toBe(false);
   });
 });
