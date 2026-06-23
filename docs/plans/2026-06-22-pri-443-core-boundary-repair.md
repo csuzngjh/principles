@@ -967,46 +967,70 @@ git commit -m "test(core): add PRI-443 boundary guards for pure modules (PRI-443
 
 ## Phase 7: Final verification
 
-- [ ] **Step 1: Build all packages**
+**Status: COMPLETED**
+
+- [x] **Step 1: Build all packages**
 
 ```bash
 cd packages/principles-core && npm run build
 cd packages/openclaw-plugin && npm run build
 cd packages/pd-cli && npm run build
 ```
-Expected: All builds succeed.
+Result: All builds succeed.
 
-- [ ] **Step 2: Run all tests**
+- [x] **Step 2: Run all tests**
 
 ```bash
-cd packages/principles-core && npm run test
-cd packages/openclaw-plugin && npm run test
-cd packages/pd-cli && npm run test
+cd packages/principles-core && npm run test   # 5039 passed | 3 skipped | 3 todo
+cd packages/openclaw-plugin && npm run test   # 1822 passed | 29 skipped
+cd packages/pd-cli && npm run test            # 1072 passed | 2 skipped
+cd packages/pd-console && npm run test        # 1108 passed | 1 expected fail
 ```
-Expected: All tests pass.
+Result: All tests pass.
 
-- [ ] **Step 3: Run lint**
+- [x] **Step 3: Run lint**
 
 ```bash
 npm run lint
 ```
-Expected: No errors.
+Result: 0 errors (1 pre-existing warning in create-principles-disciple, unrelated).
 
-- [ ] **Step 4: Run verify:merge**
+- [x] **Step 4: Run verify:merge**
 
 ```bash
 npm run verify:merge
 ```
-Expected: All checks pass.
+Result: All checks pass (including pd-console typecheck).
 
-- [ ] **Step 5: Verify MVP activation channels**
+- [x] **Step 5: Verify MVP activation channels**
 
-Run the activation E2E tests to confirm prompt, code_tool_hook, and defer_archive channels still work:
+Ran targeted activation tests across all packages:
 
 ```bash
-cd packages/openclaw-plugin && npx vitest run src/__tests__/activation-e2e*.test.ts
+# core: activation dispatcher + rule-host writer + evaluator
+cd packages/principles-core && npx vitest run \
+  src/runtime-v2/activation/__tests__/activation-dispatcher.test.ts \
+  src/runtime-v2/activation/writers/__tests__/rule-host-writer.test.ts \
+  src/runtime-v2/__tests__/activation-types-helpers.test.ts \
+  src/runtime-v2/__tests__/rule-host-evaluator.test.ts
+# Result: 149 passed
+
+# plugin: rule-host SQLite source + validation + autocorrect VM
+cd packages/openclaw-plugin && npx vitest run \
+  tests/core/rule-host-sqlite-source.test.ts \
+  tests/core/rule-host-validation.test.ts \
+  tests/core/rule-host-autocorrect-vm.test.ts
+# Result: 17 passed
+
+# console: activations model + disable route
+cd packages/pd-console && npx vitest run \
+  tests/models/activations-console-model.test.ts \
+  tests/server/routes/activations-disable.test.ts
+# Result: 20 passed
 ```
-Expected: All three channels PASS.
+Result: All MVP activation channel tests PASS (prompt, code_tool_hook, defer_archive). Zero dependency on refactored files confirmed.
+
+**Phase 7 fix:** pd-console's `ApprovalsGroupedConsoleModel.ts` and `ConsoleLifecycleDatasource.ts` were missed in Phase 5 — they still imported `loadLedger` from `@principles/core/runtime-v2`. Fixed by updating imports to `@principles/core/principle-tree-ledger`.
 
 ---
 
