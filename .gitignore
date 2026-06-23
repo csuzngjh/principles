@@ -9,6 +9,9 @@ debug_*.txt
 *_debug.txt
 test_log_*.txt
 full_test_report*.txt
+# Windows Git Bash creates actual files instead of redirecting to NUL device
+nul
+NUL
 temp/
 tmp/
 
