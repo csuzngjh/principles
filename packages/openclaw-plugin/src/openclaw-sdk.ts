@@ -157,7 +157,11 @@ export interface OpenClawPluginApi {
     match?: 'prefix' | 'exact';
     handler: (req: unknown, res: { json: (data: unknown) => void; status: (code: number) => { json: (data: unknown) => void }; text: (content: string, code?: number) => void }) => boolean | Promise<boolean>;
   }) => void;
-  on: (event: string, handler: (...args: any[]) => unknown) => void;
+  on: (
+    event: string,
+    handler: (...args: any[]) => unknown,
+    opts?: { priority?: number; timeoutMs?: number },
+  ) => void;
 }
 
 export interface PluginHookBeforePromptBuildEvent {
