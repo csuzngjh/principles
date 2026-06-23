@@ -871,9 +871,9 @@ function copyDir(src, dest) {
 }
 
 /**
- * Inject local workspace packages (monorepo) into node_modules before npm install.
- * @principles/core is a workspace package, not published to npm — we must copy it
- * from the monorepo's node_modules so npm install --production doesn't 404 it.
+ * Inject local workspace packages (monorepo) into node_modules after npm install.
+ * @principles/core from the local monorepo is authoritative because the
+ * npm-published package line lacks exports required by the current pd-cli.
  */
 function injectLocalWorkspacePackages() {
     const monorepoModules = join(SOURCE_DIR, '..', '..', 'node_modules', '@principles', 'core');
