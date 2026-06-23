@@ -141,8 +141,8 @@ describe('DiagRootCauseOutputV1Schema', () => {
 
   it('handles undefined taskId gracefully', async () => {
     const validator = new DefaultDiagRootCauseValidator();
-    const output = { ...validOutput };
-    delete output.taskId;
+    // Create a copy without taskId property
+    const output = { ...validOutput, taskId: undefined };
     const result = await validator.validate(output, 'diag_rootcause-diagnosis_manual_undefined');
     expect(result.valid).toBe(false);
     expect(result.errors.some((e: string) => e.includes('taskId mismatch'))).toBe(true);
@@ -233,8 +233,8 @@ describe('DiagRootCauseOutputV1Schema', () => {
 
   it('handles missing causalChain gracefully', async () => {
     const validator = new DefaultDiagRootCauseValidator();
-    const output = { ...validOutput };
-    delete output.causalChain;
+    // Create a copy without causalChain property
+    const output = { ...validOutput, causalChain: undefined };
     const result = await validator.validate(output, 'task-001');
     expect(result.valid).toBe(false);
     // TypeBox schema validation should catch missing required field
@@ -243,8 +243,8 @@ describe('DiagRootCauseOutputV1Schema', () => {
 
   it('handles missing evidence gracefully', async () => {
     const validator = new DefaultDiagRootCauseValidator();
-    const output = { ...validOutput };
-    delete output.evidence;
+    // Create a copy without evidence property
+    const output = { ...validOutput, evidence: undefined };
     const result = await validator.validate(output, 'task-001');
     expect(result.valid).toBe(false);
     // TypeBox schema validation should catch missing required field

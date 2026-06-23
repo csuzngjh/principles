@@ -466,12 +466,13 @@ describe('TestDoubleRuntimeAdapter', () => {
 
     it('handles taskRef without taskId gracefully', async () => {
       const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
+      // Cast to any to bypass TypeScript type checking for test purposes
       const handle = await adapter.startRun({
         agentSpec: { agentId: 'test', schemaVersion: 'v1' },
         inputPayload: {},
         contextItems: [],
         timeoutMs: 5000,
-        taskRef: { otherField: 'value' },
+        taskRef: {} as any, // Empty taskRef (no taskId)
       });
       const output = await adapter.fetchOutput(handle.runId);
       expect(output).not.toBeNull();
