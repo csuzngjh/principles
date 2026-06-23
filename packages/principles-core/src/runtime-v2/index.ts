@@ -1598,6 +1598,7 @@ export type {
   TriageResult,
   TriageInput,
   SourceDescriptor,
+  RawObservation,
   TriggerOutcome,
   TriggerDecision,
   TriggerControllerInput,
@@ -1612,6 +1613,11 @@ export {
   SOURCE_DESCRIPTORS,
   getSourceDescriptor,
   evaluateTriage,
+  RISKY_HIGH_SCORE_THRESHOLD,
+  REPEATED_FAILURE_THRESHOLD,
+  resolveSourceKind,
+  buildToolFailureObservation,
+  buildLlmDetectionObservation,
   evaluateTriggerController,
   shouldCreateTask,
   isAdmittedOutcome,
@@ -1623,4 +1629,35 @@ export {
   serializeAdmissionEvent,
   validateEventPrivacy,
 } from './evidence-triage/index.js';
+
+// Pain diagnostic gate — PRI-446 (pure decision logic migrated from plugin)
+export type {
+  PainDiagnosticSource,
+  PainDiagnosticGateReason,
+  PainDiagnosticGateInput,
+  PainDiagnosticGateDecision,
+  CooldownCheckInput,
+} from './pain-gate/index.js';
+export {
+  DEFAULT_COOLDOWN_MS,
+  DEFAULT_PAIN_TRIGGER,
+  DEFAULT_HIGH_SEVERITY,
+  DEFAULT_REPEATED_FAILURE,
+  DEFAULT_SEMANTIC_PAIN_FLOOR,
+  normalizedSource,
+  buildEpisodeKey,
+  evaluatePainDiagnosticGateDecision,
+  isCooldownActive,
+} from './pain-gate/index.js';
+
+// Detection funnel — PRI-446 (pure logic migrated from plugin)
+export type {
+  DetectionResult,
+  PainMatchResult,
+  PainMatcher,
+  TextHasher,
+  ProtocolTokenGate,
+  DetectionFunnelConfig,
+} from './detection/index.js';
+export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 

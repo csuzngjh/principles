@@ -86,6 +86,20 @@ export interface TriageInput {
   readonly isUnsafeHighConfidence?: boolean;
   /** Provenance: how was this pain observed? */
   readonly provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  /**
+   * Whether the failed action was risky/irreversible.
+   *
+   * Migrated from the plugin triage-adapter (PRI-446): a risky action with
+   * a high pain score upgrades an evidence_only decision to admit.
+   */
+  readonly isRisky?: boolean;
+  /**
+   * Number of consecutive failures observed for the current session/tool.
+   *
+   * Migrated from the plugin triage-adapter (PRI-446): repeated failures
+   * (>= RISKY_HIGH_SCORE_THRESHOLD) upgrade an evidence_only decision to admit.
+   */
+  readonly consecutiveErrors?: number;
 }
 
 // ── Source Kind Validation ───────────────────────────────────────────────────
