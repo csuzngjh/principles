@@ -154,6 +154,11 @@ describe('resolveModelFromConfig', () => {
     it('returns null for object with non-string primary', () => {
       expect(resolveModelFromConfig({ primary: 123 })).toBe(null);
     });
+
+    it('ignores inherited primary property on object input', () => {
+      const inheritedConfig = Object.create({ primary: 'openai/gpt-4' });
+      expect(resolveModelFromConfig(inheritedConfig)).toBe(null);
+    });
   });
 
   describe('logger compatibility', () => {

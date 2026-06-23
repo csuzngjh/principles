@@ -65,9 +65,12 @@ export function resolveModelFromConfig(
 
   // Case 2: modelConfig is an object { primary, fallbacks } like { primary: "provider/model", fallbacks: [...] }
   if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
-    const cfg = modelConfig as ModelConfigObject;
-    if (cfg.primary && typeof cfg.primary === 'string') {
-      const trimmed = cfg.primary.trim();
+    if (Object.hasOwn(modelConfig, 'primary')) {
+      const primaryDescriptor = Object.getOwnPropertyDescriptor(modelConfig, 'primary');
+      if (!primaryDescriptor) return null;
+      const primary = primaryDescriptor.value;
+      if (typeof primary !== 'string') return null;
+      const trimmed = primary.trim();
       if (!trimmed) return null;
       if (!isValidModelFormat(trimmed)) {
         logger?.warn?.(`[PD:Prompt] Invalid primary model format: "${trimmed}". Expected "provider/model" format.`);
