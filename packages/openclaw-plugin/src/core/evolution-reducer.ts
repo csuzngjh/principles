@@ -105,8 +105,9 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly failureStreak = new Map<string, number>();
   private lastPromotedAt: string | null = null;
   private isReplaying = false;
-  /** Registered pain_detected callbacks (e.g., PainSignalBridge). */
-  private readonly _painCallbacks: Array<(event: EvolutionLoopEvent) => void> = [];
+  // _painCallbacks pub/sub removed (PRI-451 Wave 1): no code ever registered a
+  // callback via .on(). The pain_detected → PainSignalBridge bridge happens via
+  // emitPainDetectedEvent (hooks/pain.ts), not this pub/sub layer.
 
   constructor(opts: { workspaceDir: string; stateDir?: string }) {
     this.workspaceDir = opts.workspaceDir;
@@ -147,14 +148,9 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     // Performance: sweepExpiredProbation() moved to getProbationPrinciples() for lazy cleanup
   }
 
-  /**
-   * Register a callback for 'pain_detected' events.
-   * The callback is invoked synchronously within emitSync() after applyEvent completes.
-   * HG-4: Callbacks are fire-and-forget from the emitSync perspective.
-   */
-  on(callback: (event: EvolutionLoopEvent) => void): void {
-    this._painCallbacks.push(callback);
-  }
+  // on(callback) pub/sub registration removed (PRI-451 Wave 1): dead code —
+  // no caller ever registered a callback. pain_detected events still flow via
+  // emitPainDetectedEvent → PainSignalBridge, unaffected.
 
   getEventLog(): EvolutionLoopEvent[] {
     return [...this.memoryEvents];
@@ -661,14 +657,9 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         if (!this.isReplaying) {
           this.onPainDetected(event.data, event.ts);
         }
-        // PainSignalBridge subscriptions: invoke registered callbacks (fire-and-forget)
-        for (const cb of this._painCallbacks) {
-          try {
-            cb(event);
-          } catch {
-            // Keep the evolution loop resilient — callback errors must not propagate
-          }
-        }
+        // _painCallbacks dispatch removed (PRI-451 Wave 1): no callback was ever
+        // registered via .on() (also removed). The pain_detected → PainSignalBridge
+        // bridge flows through emitPainDetectedEvent (hooks/pain.ts), not here.
         return;
       case 'candidate_created':
         this.onCandidateCreated(event.data, event.ts);

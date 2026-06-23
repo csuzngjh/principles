@@ -418,3 +418,53 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRI-451 Wave 1: dead-code retirement assertions
+//
+// These mirror the existing presence-assertions above. Each asserts a dead
+// symbol's call/definition is GONE from source (matched via call syntax so the
+// retirement comments do not trigger false positives). Written BEFORE deletion
+// (TDD) so the deletion commit turns them green.
+//
+// Evidence each is dead (full map in PRI-451):
+// - recordRuleMatch          : only consumer was stats.pain.rulesMatched (dead).
+// - processDetectionQueue    : sole caller of searchPainEvents; all its leaf
+//                              effects (recordRuleMatch, funnel.updateCache)
+//                              have no downstream reader.
+// - searchPainEvents / FTS5  : only caller was processDetectionQueue (dead).
+//
+// LIVE invariants preserved (must NOT regress) — the 4 emit sites still call
+// emitPainDetectedEvent (cross-site section above), consumed by PainSignalBridge.
+//
+// ERR refs: ERR-009 (fail-loud) — these fail if the dead code is reintroduced.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('PRI-451 Wave 1: dead pain-diagnostic-track symbols removed', () => {
+  const EVOLUTION_WORKER = 'packages/openclaw-plugin/src/service/evolution-worker.ts';
+  const TRAJECTORY = 'packages/openclaw-plugin/src/core/trajectory.ts';
+  const EVENT_LOG = 'packages/openclaw-plugin/src/core/event-log.ts';
+
+  it('processDetectionQueue is removed from evolution-worker', () => {
+    const src = read(EVOLUTION_WORKER);
+    // Match a call or definition, not the retirement comment.
+    expect(src).not.toMatch(/\bprocessDetectionQueue\s*\(/);
+  });
+
+  it('searchPainEvents is removed from trajectory', () => {
+    const src = read(TRAJECTORY);
+    expect(src).not.toMatch(/\bsearchPainEvents\s*\(/);
+  });
+
+  it('recordRuleMatch is removed from event-log', () => {
+    const src = read(EVENT_LOG);
+    expect(src).not.toMatch(/\brecordRuleMatch\s*\(/);
+  });
+
+  it('recordRuleMatch call is removed from llm.ts (detection block stays)', () => {
+    const src = read(LLM);
+    expect(src).not.toMatch(/\brecordRuleMatch\s*\(/);
+    // The surrounding detection block that feeds pain emission must remain.
+    expect(src).toMatch(/DetectionService\.get/);
+  });
+});

@@ -72,7 +72,8 @@ export const PD_FILES = {
     CURRENT_FOCUS: posixJoin(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
     WEEK_STATE: posixJoin(PD_DIRS.OKR, 'WEEK_STATE.json'),
     THINKING_OS_CANDIDATES: posixJoin(PD_DIRS.MEMORY, 'THINKING_OS_CANDIDATES.md'),
-    SEMANTIC_PAIN: posixJoin(PD_DIRS.PAIN_SAMPLES, 'confusion_samples.md'),
+    // SEMANTIC_PAIN (confusion_samples.md) removed (PRI-451 Wave 1): the file
+    // had zero readers. The lifecycle write that populated it was also removed.
     EVOLUTION_STREAM: posixJoin(PD_DIRS.MEMORY, 'evolution.jsonl'),
     EVOLUTION_LOCK: posixJoin(PD_DIRS.LOCKS, 'evolution'),
 };
