@@ -347,6 +347,9 @@ const plugin = {
     );
 
     // ── Hook: Pain & Trust ──
+    // timeoutMs=10s: OpenClaw has no default timeout for after_tool_call; without
+    // this a stuck SQLite write (busy_timeout=5000ms) leaks the handler promise.
+    // 10s gives 2x headroom over busy_timeout. fail-open means agent is unaffected.
     api.on(
       'after_tool_call',
       guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
@@ -379,10 +382,13 @@ const plugin = {
           }, { flushImmediately: true });
           api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
         }
-      })
+      }),
+      { timeoutMs: 10_000 },
     );
 
     // ── Hook: LLM Analysis ──
+    // timeoutMs=10s: OpenClaw has no default timeout for llm_output; without
+    // this a stuck SQLite write leaks the handler promise. See after_tool_call.
     api.on(
       'llm_output',
       guardHook('hook:llm_output', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
@@ -416,7 +422,8 @@ const plugin = {
           });
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
         }
-      })
+      }),
+      { timeoutMs: 10_000 },
     );
 
     // ── Hook: Lifecycle ──
