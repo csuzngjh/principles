@@ -58,6 +58,7 @@ The following phrases in an issue or PR description are **automatic stop signals
 - "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
 - "review 时觉得这块缺失" / "during review I noticed X is missing"
 - "为下个 Phase 准备" / "prep for next Phase"
+- "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, update the whitelist in `architecture-regression.test.ts` and the exemption list in `eslint.config.js` (PRI-450).
 
 These are **maintainer-driven completeness anxiety**, not external user signal. PD does not act on them during MVP stage.
 
