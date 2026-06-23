@@ -21,6 +21,7 @@
 - [ ] 无破坏性变更（或已标记为 breaking change）
 - [ ] 通过 Thinking OS 检查（T-01/T-04/T-05）
 - [ ] 迁移删除检查：如果删除了源文件，确认 barrel (`index.ts`) 和 compile test (`exports-compile.ts`) 已同步清理
+- [ ] Core 边界检查：本 PR 是否在 `packages/principles-core/src/` 新增了 `fs`/`path` 导入？如果是，是否更新了 `architecture-regression.test.ts` 的白名单和 `eslint.config.js` 的豁免列表？
 
 ### 相关 Issue
 <!-- 关闭的 issue：Closes #XX -->
