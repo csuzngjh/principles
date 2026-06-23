@@ -58,7 +58,7 @@ docs/                    # Architecture docs, design documents, maps
 
 ### Core Modules (packages/openclaw-plugin/src/)
 - `core/` — Business logic (evolution-engine, pain-context-extractor, local-worker-routing, promotion-gate)
-- `hooks/` — OpenClaw lifecycle hooks (prompt.ts, gate.ts, pain.ts, llm.ts, lifecycle.ts, subagent.ts)
+- `hooks/` — OpenClaw lifecycle hooks (prompt.ts, gate.ts, pain.ts, llm.ts, lifecycle.ts)
 - `commands/` — Slash commands (/pd-status, /pd-pain, etc.)
 - `service/` — Background services (evolution-worker, trajectory-service, nocturnal-service)
 - `types/` — TypeScript type definitions

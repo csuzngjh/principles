@@ -224,7 +224,7 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
     expect(prepend).toContain('AGENT IDENTITY');
   });
 
-  it('evolution principles can still be injected when active', async () => {
+  it('active principles can still be injected when present', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
@@ -244,7 +244,7 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain('<evolution_principles>');
+    expect(result?.appendSystemContext).toContain('<core_principles>');
     expect(result?.appendSystemContext).toContain('Evolution principle still works');
   });
 
