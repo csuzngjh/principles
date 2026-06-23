@@ -130,7 +130,13 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
 
   // Security: enforce context size limit to prevent memory exhaustion (PRI-443)
   const MAX_CONTEXT_SIZE = 10_000;
-  if (JSON.stringify(hydrated.context).length > MAX_CONTEXT_SIZE) {
+  let serializedContext: string;
+  try {
+    serializedContext = JSON.stringify(hydrated.context);
+  } catch {
+    return { valid: false, errors: ['context must be JSON-serializable'] };
+  }
+  if (serializedContext.length > MAX_CONTEXT_SIZE) {
     return { valid: false, errors: ['Context object exceeds maximum size (10KB)'] };
   }
 

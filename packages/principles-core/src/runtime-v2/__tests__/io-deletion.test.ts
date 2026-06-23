@@ -32,9 +32,15 @@ describe('PRI-443 Phase 4: io.ts deletion', () => {
 
   it('package.json does NOT expose "./io" subpath', () => {
     const pkgPath = resolve(CORE_SRC, '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { exports?: Record<string, unknown> };
-    expect(pkg.exports).toBeDefined();
-    expect(Object.prototype.hasOwnProperty.call(pkg.exports, './io')).toBe(false);
+    const parsed: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || !Object.hasOwn(parsed, 'exports')) {
+      throw new Error('package.json 缺少 exports 字段');
+    }
+    const pkgExports = (parsed as { exports: unknown }).exports;
+    if (!pkgExports || typeof pkgExports !== 'object') {
+      throw new Error('package.json exports 字段格式非法');
+    }
+    expect(Object.hasOwn(pkgExports, './io')).toBe(false);
   });
 
   it('principle-tree-ledger.ts inlines atomicWriteFileSync as a private (non-exported) helper', () => {

@@ -39,8 +39,14 @@ describe('PRI-443 Phase 5: runtime-v2 barrel I/O cleanup', () => {
 
   it('package.json exposes "./principle-tree-ledger" subpath', () => {
     const pkgPath = resolve(CORE_SRC, '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { exports?: Record<string, unknown> };
-    expect(pkg.exports).toBeDefined();
-    expect(Object.prototype.hasOwnProperty.call(pkg.exports, './principle-tree-ledger')).toBe(true);
+    const parsed: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || !Object.hasOwn(parsed, 'exports')) {
+      throw new Error('package.json 缺少 exports 字段');
+    }
+    const pkgExports = (parsed as { exports: unknown }).exports;
+    if (!pkgExports || typeof pkgExports !== 'object') {
+      throw new Error('package.json exports 字段格式非法');
+    }
+    expect(Object.hasOwn(pkgExports, './principle-tree-ledger')).toBe(true);
   });
 });

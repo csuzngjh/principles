@@ -90,6 +90,46 @@ describe('PRI-443: pain-signal.ts unification', () => {
     expect(result.errors.some((e: string) => e.includes('Context'))).toBe(true);
   });
 
+  it('rejects context with circular references without crashing (PR review fix)', () => {
+    const circularContext: Record<string, unknown> = {};
+    circularContext.self = circularContext;
+    const signal = {
+      source: 'tool_failure',
+      score: 75,
+      timestamp: '2026-01-01T00:00:00Z',
+      reason: 'Test',
+      sessionId: 'sess-123',
+      agentId: 'main',
+      traceId: 'trace-abc',
+      triggerTextPreview: 'test',
+      domain: 'coding',
+      severity: 'high',
+      context: circularContext,
+    };
+    const result = validatePainSignal(signal);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('JSON-serializable'))).toBe(true);
+  });
+
+  it('rejects context with BigInt values without crashing (PR review fix)', () => {
+    const signal = {
+      source: 'tool_failure',
+      score: 75,
+      timestamp: '2026-01-01T00:00:00Z',
+      reason: 'Test',
+      sessionId: 'sess-123',
+      agentId: 'main',
+      traceId: 'trace-abc',
+      triggerTextPreview: 'test',
+      domain: 'coding',
+      severity: 'high',
+      context: { bigNum: BigInt(123) },
+    };
+    const result = validatePainSignal(signal);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('JSON-serializable'))).toBe(true);
+  });
+
   it('accepts signal with optional sessionId/agentId/traceId missing', () => {
     const signal = {
       source: 'tool_failure',
