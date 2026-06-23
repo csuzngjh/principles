@@ -21,6 +21,8 @@ export { SOURCE_DESCRIPTORS, getSourceDescriptor } from './source-descriptors.js
 
 // Triage policy
 export { evaluateTriage } from './triage-policy.js';
+// PRI-446: upgrade thresholds (single source of truth, migrated from plugin)
+export { RISKY_HIGH_SCORE_THRESHOLD, REPEATED_FAILURE_THRESHOLD } from './triage-policy.js';
 
 // Trigger controller — PEAT-B2
 export type {

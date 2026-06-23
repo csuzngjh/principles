@@ -61,46 +61,19 @@ export function evaluateEvidenceTriage(
     isRisky?: boolean;
   },
 ): TriageResult {
+  // PRI-446: the risky high-score and repeated-failure upgrade rules now live
+  // in core triage-policy.ts (single source of truth). The adapter passes the
+  // context flags straight through; core decides whether to upgrade.
   const input: TriageInput = {
     sourceKind,
     score,
     isUnsafeHighConfidence: options?.isUnsafeHighConfidence,
     provenance: options?.provenance,
+    isRisky: options?.isRisky,
+    consecutiveErrors: options?.consecutiveErrors,
   };
 
-  let result = evaluateTriage(input);
-
-  // PEAT-B1 upgrade logic: risky high-score overrides evidence_only
-  // Matches PainDiagnosticGate.risky_high_score: isRisky && score >= 70 → admit
-  if (
-    result.decision === 'evidence_only' &&
-    options?.isRisky === true &&
-    score >= 70
-  ) {
-    result = {
-      ...result,
-      decision: 'admit',
-      reason: 'Risky high-score operation overrides evidence-only decision. Immediate diagnosis required.',
-      nextAction: 'create_diagnostic_task',
-    };
-  }
-
-  // PEAT-B1 upgrade logic: repeated failures override evidence_only
-  // Threshold: 4 consecutive failures (matches PainDiagnosticGate.repeatedFailure)
-  if (
-    result.decision === 'evidence_only' &&
-    options?.consecutiveErrors !== undefined &&
-    options.consecutiveErrors >= 4
-  ) {
-    result = {
-      ...result,
-      decision: 'admit',
-      reason: 'Repeated failures override evidence-only decision. Pattern suggests systemic issue requiring diagnosis.',
-      nextAction: 'create_diagnostic_task',
-    };
-  }
-
-  return result;
+  return evaluateTriage(input);
 }
 
 // ── High-Confidence Unsafe Action Detection ──────────────────────────────────
