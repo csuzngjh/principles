@@ -264,14 +264,18 @@ describe('assembleAppendSystemContext', () => {
   it('wraps sections in XML tags', () => {
     const result = assembleAppendSystemContext({
       projectContext: 'PC',
+      workingMemory: 'WM',
       thinkingOs: 'TO',
       evolutionPrinciples: 'EP',
       corePrinciples: 'CP',
     });
     expect(result).toContain('<project_context>\nPC\n</project_context>');
+    expect(result).toContain('WM');
     expect(result).toContain('<thinking_os>\nTO\n</thinking_os>');
     expect(result).toContain('<evolution_principles>\nEP\n</evolution_principles>');
     expect(result).toContain('<core_principles>\nCP\n</core_principles>');
+    expect(result).toContain('`<working_memory>`');
+    expect(result).toContain('`<thinking_os>`');
   });
 
   it('wraps behavioral_constraints with empathy content', () => {
@@ -294,8 +298,10 @@ describe('assembleAppendSystemContext', () => {
       corePrinciples: 'CP',
     });
     expect(result).toContain('**【EXECUTION RULES】**');
-    expect(result).toContain('<behavioral_constraints>');
-    expect(result).toContain('<core_principles>');
+    expect(result).not.toContain('`<behavioral_constraints>`');
+    expect(result).not.toContain('`<working_memory>`');
+    expect(result).not.toContain('`<thinking_os>`');
+    expect(result).toContain('`<core_principles>`');
   });
 
   it('skips undefined parts', () => {
@@ -306,7 +312,7 @@ describe('assembleAppendSystemContext', () => {
     });
     expect(result).toContain('PC');
     expect(result).toContain('CP');
-    expect(result).not.toContain('<thinking_os>');
+    expect(result).not.toContain('<thinking_os>\n');
   });
 
   it('skips empty string parts', () => {

@@ -54,6 +54,17 @@ const STATIC_FILE_TTL_MS = 60_000; // 1 minute
  */
 const _staticFileCache = new Map<string, Map<string, CachedFile>>();
 
+function getOwnValue(value: object, key: string): unknown {
+  if (!Object.hasOwn(value, key)) return undefined;
+  return Object.getOwnPropertyDescriptor(value, key)?.value;
+}
+
+function readErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = getOwnValue(error, 'code');
+  return typeof code === 'string' ? code : undefined;
+}
+
 function getFileCache(workspaceDir: string): Map<string, CachedFile> {
   let cache = _staticFileCache.get(workspaceDir);
   if (!cache) {
@@ -86,9 +97,12 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
     const content = fs.readFileSync(filePath, 'utf8');
     cache.set(filePath, { content, mtime, loadedAt: now });
     return content;
-  } catch {
+  } catch (error) {
     // File doesn't exist or unreadable — invalidate cache
     cache.delete(filePath);
+    if (readErrorCode(error) !== 'ENOENT') {
+      console.warn(`[PD:Prompt] cachedReadFile failed: path=${filePath}, workspace=${workspaceDir}, error=${String(error)}`);
+    }
     return '';
   }
 }
@@ -122,6 +136,49 @@ export function resetPromptStateForTest(workspaceDir?: string): void {
   }
 }
 
+function parseContextInjectionConfig(value: unknown): ContextInjectionConfig | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+
+  const config: ContextInjectionConfig = { ...defaultContextConfig };
+  const thinkingOs = getOwnValue(value, 'thinkingOs');
+  const projectFocus = getOwnValue(value, 'projectFocus');
+  const evolutionContext = getOwnValue(value, 'evolutionContext');
+
+  if (thinkingOs !== undefined) {
+    if (typeof thinkingOs !== 'boolean') return null;
+    config.thinkingOs = thinkingOs;
+  }
+
+  if (projectFocus !== undefined) {
+    if (projectFocus !== 'full' && projectFocus !== 'summary' && projectFocus !== 'off') return null;
+    config.projectFocus = projectFocus;
+  }
+
+  if (evolutionContext !== undefined) {
+    if (typeof evolutionContext !== 'object' || evolutionContext === null || Array.isArray(evolutionContext)) return null;
+
+    config.evolutionContext = { ...defaultContextConfig.evolutionContext };
+    const enabled = getOwnValue(evolutionContext, 'enabled');
+    const maxMessages = getOwnValue(evolutionContext, 'maxMessages');
+    const maxCharsPerMessage = getOwnValue(evolutionContext, 'maxCharsPerMessage');
+
+    if (enabled !== undefined) {
+      if (typeof enabled !== 'boolean') return null;
+      config.evolutionContext.enabled = enabled;
+    }
+    if (maxMessages !== undefined) {
+      if (typeof maxMessages !== 'number' || !Number.isFinite(maxMessages)) return null;
+      config.evolutionContext.maxMessages = maxMessages;
+    }
+    if (maxCharsPerMessage !== undefined) {
+      if (typeof maxCharsPerMessage !== 'number' || !Number.isFinite(maxCharsPerMessage)) return null;
+      config.evolutionContext.maxCharsPerMessage = maxCharsPerMessage;
+    }
+  }
+
+  return config;
+}
+
 /**
  * OpenClaw API Prompt Hook
  * Constructs the system prompt injected into LLM context for Principles Disciple
@@ -140,16 +197,16 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
     const raw = cachedReadFile(profilePath, workspaceDir);
     if (raw) {
       const profile = JSON.parse(raw);
-      if (profile && typeof profile === 'object' && profile.contextInjection && typeof profile.contextInjection === 'object') {
-        const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
-        return {
-          ...defaultContextConfig,
-          ...contextInjection,
-          evolutionContext: {
-            ...defaultContextConfig.evolutionContext,
-            ...(contextInjection.evolutionContext ?? {}),
-          },
-        };
+      if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+        const contextInjection = getOwnValue(profile, 'contextInjection');
+        if (contextInjection !== undefined) {
+          const parsed = parseContextInjectionConfig(contextInjection);
+          if (!parsed) {
+            console.warn(`[PD:Prompt] Invalid contextInjection config in ${profilePath}; using defaults.`);
+            return { ...defaultContextConfig };
+          }
+          return parsed;
+        }
       }
     }
   } catch (e) {

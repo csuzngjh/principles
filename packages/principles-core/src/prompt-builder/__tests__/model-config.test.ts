@@ -60,11 +60,15 @@ describe('resolveModelFromConfig', () => {
     });
 
     it('returns null for empty string', () => {
-      expect(resolveModelFromConfig('')).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig('', logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Empty model string'));
     });
 
     it('returns null for whitespace-only string', () => {
-      expect(resolveModelFromConfig('   ')).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig('   ', logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Empty model string'));
     });
 
     it('returns null and warns for invalid format', () => {
@@ -95,13 +99,17 @@ describe('resolveModelFromConfig', () => {
     });
 
     it('returns null when primary is missing', () => {
+      const logger: CoreLogger = { warn: vi.fn() };
       const cfg: ModelConfigObject = { fallbacks: ['openai/gpt-4'] };
-      expect(resolveModelFromConfig(cfg)).toBe(null);
+      expect(resolveModelFromConfig(cfg, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Missing primary model'));
     });
 
     it('returns null when primary is empty string', () => {
+      const logger: CoreLogger = { warn: vi.fn() };
       const cfg: ModelConfigObject = { primary: '' };
-      expect(resolveModelFromConfig(cfg)).toBe(null);
+      expect(resolveModelFromConfig(cfg, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Empty primary model string'));
     });
 
     it('returns null and warns for invalid primary format', () => {
@@ -136,28 +144,40 @@ describe('resolveModelFromConfig', () => {
 
   describe('other inputs', () => {
     it('returns null for null', () => {
-      expect(resolveModelFromConfig(null)).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig(null, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Missing model config'));
     });
 
     it('returns null for undefined', () => {
-      expect(resolveModelFromConfig(undefined)).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig(undefined, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Missing model config'));
     });
 
     it('returns null for number', () => {
-      expect(resolveModelFromConfig(42)).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig(42, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Unsupported model config type: number'));
     });
 
     it('returns null for empty object', () => {
-      expect(resolveModelFromConfig({})).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig({}, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Missing primary model'));
     });
 
     it('returns null for object with non-string primary', () => {
-      expect(resolveModelFromConfig({ primary: 123 })).toBe(null);
+      const logger: CoreLogger = { warn: vi.fn() };
+      expect(resolveModelFromConfig({ primary: 123 }, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Invalid primary model type: number'));
     });
 
     it('ignores inherited primary property on object input', () => {
+      const logger: CoreLogger = { warn: vi.fn() };
       const inheritedConfig = Object.create({ primary: 'openai/gpt-4' });
-      expect(resolveModelFromConfig(inheritedConfig)).toBe(null);
+      expect(resolveModelFromConfig(inheritedConfig, logger)).toBe(null);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Missing primary model'));
     });
   });
 

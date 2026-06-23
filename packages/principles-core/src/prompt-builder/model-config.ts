@@ -29,6 +29,12 @@ export interface ModelConfigObject {
 
 const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]\/[a-zA-Z0-9._-]+$/;
 
+function describeModelConfigType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
 /**
  * Validate model format: must be "provider/model".
  *
@@ -50,12 +56,18 @@ export function resolveModelFromConfig(
   modelConfig: unknown,
   logger?: CoreLogger,
 ): string | null {
-  if (!modelConfig) return null;
+  if (modelConfig === null || modelConfig === undefined) {
+    logger?.warn?.(`[PD:Prompt] Missing model config.`);
+    return null;
+  }
 
   // Case 1: modelConfig is a string like "provider/model"
   if (typeof modelConfig === 'string') {
     const trimmed = modelConfig.trim();
-    if (!trimmed) return null;
+    if (!trimmed) {
+      logger?.warn?.(`[PD:Prompt] Empty model string.`);
+      return null;
+    }
     if (!isValidModelFormat(trimmed)) {
       logger?.warn?.(`[PD:Prompt] Invalid model format: "${trimmed}". Expected "provider/model" format.`);
       return null;
@@ -69,15 +81,23 @@ export function resolveModelFromConfig(
       const primaryDescriptor = Object.getOwnPropertyDescriptor(modelConfig, 'primary');
       if (!primaryDescriptor) return null;
       const primary = primaryDescriptor.value;
-      if (typeof primary !== 'string') return null;
+      if (typeof primary !== 'string') {
+        logger?.warn?.(`[PD:Prompt] Invalid primary model type: ${describeModelConfigType(primary)}. Expected string.`);
+        return null;
+      }
       const trimmed = primary.trim();
-      if (!trimmed) return null;
+      if (!trimmed) {
+        logger?.warn?.(`[PD:Prompt] Empty primary model string.`);
+        return null;
+      }
       if (!isValidModelFormat(trimmed)) {
         logger?.warn?.(`[PD:Prompt] Invalid primary model format: "${trimmed}". Expected "provider/model" format.`);
         return null;
       }
       return trimmed;
     }
+    logger?.warn?.(`[PD:Prompt] Missing primary model in object config.`);
+    return null;
   }
 
   // Case 3: Array format not supported
@@ -86,5 +106,6 @@ export function resolveModelFromConfig(
     return null;
   }
 
+  logger?.warn?.(`[PD:Prompt] Unsupported model config type: ${describeModelConfigType(modelConfig)}.`);
   return null;
 }

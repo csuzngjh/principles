@@ -274,15 +274,21 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 
 `;
   result += appendParts.join('\n\n');
+  const executionRules = [
+    parts.behavioralConstraints ? '- `<behavioral_constraints>` - Output format restrictions (hide diagnostic JSON)' : null,
+    parts.projectContext ? '- `<project_context>` - Current priorities (can be overridden)' : null,
+    parts.workingMemory ? '- `<working_memory>` - Persisted compacted memory snapshot' : null,
+    parts.thinkingOs ? '- `<thinking_os>` - Stable reasoning framework' : null,
+    parts.evolutionPrinciples ? '- `<evolution_principles>` - Learned principles (active + probation)' : null,
+    parts.corePrinciples ? '- `<core_principles>` - Core rules (NON-NEGOTIABLE, highest priority)' : null,
+  ].filter((line): line is string => line !== null);
+
   result += `
 
 ---
 
 **【EXECUTION RULES】** (Priority: Low → High):
-- \`<behavioral_constraints>\` - Output format restrictions (hide diagnostic JSON)
-- \`<project_context>\` - Current priorities (can be overridden)
-- \`<evolution_principles>\` - Learned principles (active + probation)
-- \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
+${executionRules.join('\n')}
 `;
   return result;
 }

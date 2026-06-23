@@ -34,7 +34,5 @@ Probation principles (contextual, caution):
 ---
 
 **【EXECUTION RULES】** (Priority: Low → High):
-- `<behavioral_constraints>` - Output format restrictions (hide diagnostic JSON)
-- `<project_context>` - Current priorities (can be overridden)
 - `<evolution_principles>` - Learned principles (active + probation)
 - `<core_principles>` - Core rules (NON-NEGOTIABLE, highest priority)
