@@ -456,14 +456,14 @@ export class EventLog {
     } else if (entry.type === 'diagnostician_report') {
       const raw = entry.data as unknown as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(raw, 'category')) {
-        const cat = raw['category'] as string;
-        if (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields') {
+        const cat = raw['category'];
+        if (typeof cat === 'string' && (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields')) {
           stats.evolution.diagnosticianReportsWritten++;
         }
-        if (cat === 'missing_json') {
+        if (typeof cat === 'string' && cat === 'missing_json') {
           stats.evolution.reportsMissingJson++;
         }
-        if (cat === 'incomplete_fields') {
+        if (typeof cat === 'string' && cat === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
       } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {

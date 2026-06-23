@@ -120,7 +120,7 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principles_list_error', (err as Error).message);
+      sendError(res, 500, 'principles_list_error', err instanceof Error ? err.message : String(err));
     }
     return;
   }
@@ -170,7 +170,7 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principle_detail_error', (err as Error).message);
+      sendError(res, 500, 'principle_detail_error', err instanceof Error ? err.message : String(err));
     }
     return;
   }

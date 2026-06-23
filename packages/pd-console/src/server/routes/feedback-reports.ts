@@ -134,7 +134,7 @@ export async function handleFeedbackReportsRoute(
         sendBadRequest(res, bodyResult.error);
         return;
       }
-      if (bodyResult.value === null || typeof bodyResult.value !== 'object') {
+      if (bodyResult.value === null || typeof bodyResult.value !== 'object' || Array.isArray(bodyResult.value)) {
         sendBadRequest(res, 'request body must be a JSON object with {input, diagnostics}');
         return;
       }
