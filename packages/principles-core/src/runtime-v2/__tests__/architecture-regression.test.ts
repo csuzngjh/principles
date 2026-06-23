@@ -1858,7 +1858,9 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).toContain('@principles/core/prompt-builder');
     expect(src).toMatch(/import\s*\{[^}]*escapeXml[^}]*\}\s*from\s*['"]@principles\/core\/prompt-builder['"]/);
     // Must NOT reimplement escapeXml inline
-    expect(src).not.toMatch(/function escapeXml\s*\(/);
+    expect(src).not.toMatch(
+      /\b(function\s+escapeXml\s*\(|const\s+escapeXml\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>)/,
+    );
   });
 
   it('plugin empathy-keyword-matcher.ts is a thin adapter (re-exports from core)', async () => {

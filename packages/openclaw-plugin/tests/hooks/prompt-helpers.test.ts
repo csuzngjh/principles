@@ -180,8 +180,10 @@ describe('formatCorePrinciples', () => {
   });
 
   it('returns empty string for non-array input', () => {
-    expect(formatCorePrinciples(null as unknown as never[])).toBe('');
-    expect(formatCorePrinciples(undefined as unknown as never[])).toBe('');
+    // @ts-expect-error intentional runtime invalid-input test
+    expect(formatCorePrinciples(null)).toBe('');
+    // @ts-expect-error intentional runtime invalid-input test
+    expect(formatCorePrinciples(undefined)).toBe('');
   });
 
   it('handles single principle', () => {
