@@ -32,7 +32,9 @@ function extractTag(content: string, tagName: string): string {
   const regex = new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, 'i');
   const match = content.match(regex);
   if (!match) return '';
-  return match[1].trim().replace(/\s+/g, ' ');
+  const raw = match[1];
+  if (!raw) return '';
+  return raw.trim().replace(/\s+/g, ' ');
 }
 
 /**
@@ -49,16 +51,20 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
   let _match: RegExpExecArray | null = null;
 
   while ((_match = directiveRegex.exec(content)) !== null) {
-    const [, attrs, body] = _match;
+    const attrs = _match[1];
+    const body = _match[2];
+    if (!attrs || !body) continue;
 
     const idMatch = /id="([^"]+)"/i.exec(attrs);
     const nameMatch = /name="([^"]+)"/i.exec(attrs);
 
     if (!idMatch) continue;
+    const id = idMatch[1];
+    if (!id) continue;
 
     const directive: ThinkingOsDirective = {
-      id: idMatch[1],
-      name: nameMatch ? nameMatch[1] : '',
+      id,
+      name: nameMatch ? (nameMatch[1] ?? '') : '',
       trigger: extractTag(body, 'trigger'),
       must: extractTag(body, 'must'),
       forbidden: extractTag(body, 'forbidden'),

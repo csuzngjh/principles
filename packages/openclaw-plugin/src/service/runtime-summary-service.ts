@@ -541,7 +541,9 @@ export class RuntimeSummaryService {
       return { session: null, reason: 'none' };
     }
 
-    return { session: sessions[0], reason: 'latest_active' };
+    const session = sessions[0];
+    if (!session) return { session: null, reason: 'none' };
+    return { session, reason: 'latest_active' };
   }
 
      
@@ -678,6 +680,7 @@ export class RuntimeSummaryService {
             const m = file.match(/^events_(\d{4}-\d{2}-\d{2})\.jsonl$/);
             if (!m) continue;
             const fileDate = m[1];
+            if (!fileDate) continue;
             if (fileDate > newestDate) {
               newestDate = fileDate;
               bestFile = path.join(dir, file);
@@ -766,6 +769,7 @@ export class RuntimeSummaryService {
   ): RuntimePainSignal | null {
     for (let i = events.length - 1; i >= 0; i--) {
       const entry = events[i];
+      if (!entry) continue;
       if (entry.type !== 'pain_signal') continue;
       if (sessionId && entry.sessionId !== sessionId) continue;
       return {

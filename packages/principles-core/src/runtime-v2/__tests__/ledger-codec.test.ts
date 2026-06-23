@@ -313,7 +313,7 @@ describe('PRI-443: ledger-codec.ts pure parse/serialize module', () => {
     };
     const result = parseHybridLedger(raw);
     // TREE_NAMESPACE entries should be skipped in trainingStore
-    expect(result.trainingStore['_tree']).toBeUndefined();
+    expect(result.trainingStore._tree).toBeUndefined();
   });
 
   it('parsePrinciples handles missing ruleIds', () => {

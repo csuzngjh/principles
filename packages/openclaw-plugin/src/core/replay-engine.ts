@@ -42,7 +42,7 @@ export class ReplayEngine {
 
   getLatestReport(implementationId: string): ReplayReport | null {
     const reports = this.listReports(implementationId);
-    return reports.length > 0 ? reports[0] : null;
+    return reports[0] ?? null;
   }
 
   hasPassingReport(implementationId: string): boolean {

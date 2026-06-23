@@ -253,7 +253,7 @@ describe('DiagRootCauseOutputV1Schema', () => {
 
   it('handles all rootCauseCategory values correctly', async () => {
     const validator = new DefaultDiagRootCauseValidator();
-    const categories: Array<'People' | 'Design' | 'Assumption' | 'Tooling'> = ['People', 'Design', 'Assumption', 'Tooling'];
+    const categories: ('People' | 'Design' | 'Assumption' | 'Tooling')[] = ['People', 'Design', 'Assumption', 'Tooling'];
 
     for (const category of categories) {
       const output = {

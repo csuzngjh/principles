@@ -69,14 +69,15 @@ export function generateFeatureFlagsYamlContent(channels?: string[]): string {
 
   for (const flag of DEFAULT_FEATURE_FLAGS) {
     const isEnabled = flag.category === 'core' ? true : enabledSet.has(flag.id);
-    flags[flag.id] = {
+    const entry: { enabled: boolean; category: string; since: string; description?: string } = {
       enabled: isEnabled,
       category: flag.category,
       since: flag.since,
     };
     if (flag.description) {
-      flags[flag.id].description = flag.description;
+      entry.description = flag.description;
     }
+    flags[flag.id] = entry;
   }
 
   return yaml.dump(flags, { lineWidth: -1, quotingType: '"' });

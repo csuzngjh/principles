@@ -231,7 +231,8 @@ export class RuleHost {
             }
           }
         } else {
-          validRows.push(group[0]);
+          const row = group[0];
+          if (row) validRows.push(row);
         }
       }
 

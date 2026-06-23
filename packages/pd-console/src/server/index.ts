@@ -62,7 +62,10 @@ function resolveWorkspaceDir(argv: string[]): string {
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && i + 1 < args.length) {
-      explicitWorkspace = path.resolve(args[i + 1]);
+      const next = args[i + 1];
+      if (next !== undefined) {
+        explicitWorkspace = path.resolve(next);
+      }
       break;
     }
   }
@@ -79,12 +82,15 @@ function resolveWorkspaceDir(argv: string[]): string {
   const workspaces = configStore.getWorkspaces();
   const enabled = workspaces.filter(e => e.config?.enabled !== false);
   if (enabled.length > 0) {
-    const resolved = path.resolve(enabled[0].path);
-    if (fs.existsSync(resolved)) {
-      console.log('[pd-console] No --workspace flag; using registered workspace: ' + resolved);
-      return resolved;
+    const [first] = enabled;
+    if (first) {
+      const resolved = path.resolve(first.path);
+      if (fs.existsSync(resolved)) {
+        console.log('[pd-console] No --workspace flag; using registered workspace: ' + resolved);
+        return resolved;
+      }
+      console.warn('[pd-console] Registered workspace path does not exist: ' + resolved + ', falling back to cwd');
     }
-    console.warn('[pd-console] Registered workspace path does not exist: ' + resolved + ', falling back to cwd');
   }
 
   return process.cwd();
@@ -100,21 +106,30 @@ function parseArgs(argv: string[]): ServerOptions {
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && i + 1 < args.length) {
-      const parsed = parseInt(args[i + 1], 10);
-      if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
-        console.error('Invalid port: ' + args[i + 1] + '. Must be 1-65535.');
-        process.exit(1);
+      const portStr = args[i + 1];
+      if (portStr !== undefined) {
+        const parsed = parseInt(portStr, 10);
+        if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+          console.error('Invalid port: ' + portStr + '. Must be 1-65535.');
+          process.exit(1);
+        }
+        port = parsed;
+        i++;
       }
-      port = parsed;
-      i++;
     } else if (args[i] === '--host' && i + 1 < args.length) {
-      host = args[i + 1];
-      i++;
+      const next = args[i + 1];
+      if (next !== undefined) {
+        host = next;
+        i++;
+      }
     } else if (args[i] === '--no-auth') {
       noAuth = true;
     } else if (args[i] === '--token' && i + 1 < args.length) {
-      token = args[i + 1];
-      i++;
+      const next = args[i + 1];
+      if (next !== undefined) {
+        token = next;
+        i++;
+      }
     }
   }
 

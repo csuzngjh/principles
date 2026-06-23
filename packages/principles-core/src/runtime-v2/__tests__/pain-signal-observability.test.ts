@@ -256,7 +256,7 @@ describe('recordPainSignalObservability', () => {
 
   // PRI-406 regression tests — empty string config guards
   it('handles empty workspaceDir gracefully (returns warnings)', () => {
-    const { workspaceDir, stateDir } = makeWorkspace();
+    const { stateDir } = makeWorkspace();
     const result = recordPainSignalObservability({
       workspaceDir: '',
       stateDir,
@@ -364,7 +364,7 @@ describe('recordPainSignalObservability', () => {
     const canonicalPainId = 'preserve_original_test';
 
     // First insert
-    const result1 = recordPainSignalObservability({
+    recordPainSignalObservability({
       workspaceDir,
       stateDir,
       data: {

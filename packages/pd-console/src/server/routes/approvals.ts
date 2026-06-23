@@ -93,9 +93,14 @@ export async function handleApprovalsRoute(
   // GET /api/v1/approvals/:id - detail
   const detailMatch = /^[/]([^/]+)$/.exec(subPath);
   if (req.method === 'GET' && detailMatch) {
+    const [, rawId] = detailMatch;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Approval ID is missing');
+      return;
+    }
     let approvalId: string;
     try {
-      approvalId = decodeURIComponent(detailMatch[1]);
+      approvalId = decodeURIComponent(rawId);
     } catch {
       sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
       return;
@@ -116,9 +121,14 @@ export async function handleApprovalsRoute(
   // POST /api/v1/approvals/:id/approve
   const approveMatch = /^[/]([^/]+)[/]approve$/.exec(subPath);
   if (req.method === 'POST' && approveMatch) {
+    const [, rawId] = approveMatch;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Approval ID is missing');
+      return;
+    }
     let approvalId: string;
     try {
-      approvalId = decodeURIComponent(approveMatch[1]);
+      approvalId = decodeURIComponent(rawId);
     } catch {
       sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
       return;
@@ -167,9 +177,14 @@ export async function handleApprovalsRoute(
   // POST /api/v1/approvals/:id/reject
   const rejectMatch = /^[/]([^/]+)[/]reject$/.exec(subPath);
   if (req.method === 'POST' && rejectMatch) {
+    const [, rawId] = rejectMatch;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Approval ID is missing');
+      return;
+    }
     let approvalId: string;
     try {
-      approvalId = decodeURIComponent(rejectMatch[1]);
+      approvalId = decodeURIComponent(rawId);
     } catch {
       sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
       return;
@@ -213,9 +228,14 @@ export async function handleApprovalsRoute(
   // POST /api/v1/approvals/:id/edit — edit a pending approval's artifact (P1 #2 fix)
   const editMatch = /^[/]([^/]+)[/]edit$/.exec(subPath);
   if (req.method === 'POST' && editMatch) {
+    const [, rawId] = editMatch;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Approval ID is missing');
+      return;
+    }
     let approvalId: string;
     try {
-      approvalId = decodeURIComponent(editMatch[1]);
+      approvalId = decodeURIComponent(rawId);
     } catch {
       sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
       return;

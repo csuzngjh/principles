@@ -48,7 +48,7 @@ export default defineConfig({
     teardownTimeout: 30000,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text', 'json', 'lcov', 'html'],
       exclude: ['tests/**'],
       thresholds: {
         lines: 58,
