@@ -56,7 +56,7 @@ export function isCooldownActiveForEpisode(
   errorHash: string | undefined,
   cooldownMs?: number,
 ): boolean {
-  const episodeKey = buildEpisodeKey({ source, sessionId, errorHash } as PainDiagnosticGateInput);
+  const episodeKey = buildEpisodeKey({ source, sessionId, errorHash, score: 0, currentGfi: 0 });
   const last = lastDiagnosedAtByEpisode.get(episodeKey);
   const nowMs = Date.now();
   return isCooldownActiveCore({ source, sessionId, errorHash, cooldownMs, nowMs, lastDiagnosedAtMs: last });

@@ -15,8 +15,8 @@
  * 3. isSubagentError → subagent_error
  * 4. isRateLimit → rate_limit / provider_failure
  * 5. toolName === 'pain' / 'skill:pain' → agent_on_owner_request / owner_reported
- * 6. failureSource → tool_failure / dispatch_error
- * 7. isGfiTriggered → gfi_threshold
+ * 6. isGfiTriggered → gfi_threshold
+ * 7. failureSource → tool_failure / dispatch_error
  * 8. detectionSource → llm_paralysis / semantic / empathy_inferred / unknown
  * 9. Fallback → unknown
  *

@@ -137,7 +137,9 @@ export function evaluatePainDiagnosticGateDecision(
   const semanticPain = input.thresholds?.semanticPain ?? Math.max(painTrigger, DEFAULT_SEMANTIC_PAIN_FLOOR);
   const score = Number.isFinite(input.score) ? input.score : 0;
   const currentGfi = Number.isFinite(input.currentGfi) ? input.currentGfi : 0;
-  const consecutiveErrors: number = Number.isFinite(input.consecutiveErrors) ? (input.consecutiveErrors as number) : 0;
+  const consecutiveErrors = typeof input.consecutiveErrors === 'number' && Number.isFinite(input.consecutiveErrors)
+    ? input.consecutiveErrors
+    : 0;
 
   const cooldownMs = input.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const nowMs = input.nowMs ?? 0;
