@@ -197,6 +197,12 @@ const REQUIRED_SOURCE_FILES = [
   'activation/approval-completion-service.ts',
   // PRI-431: L2 principle reader (pure logic, extracted from pd-cli + plugin duplicates)
   'build-l2-principle-reader.ts',
+  // PRI-446: pure logic migrated from openclaw-plugin into core
+  'evidence-triage/observation-resolver.ts',
+  'pain-gate/pain-diagnostic-gate-policy.ts',
+  'pain-gate/index.ts',
+  'detection/detection-funnel-policy.ts',
+  'detection/index.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -253,6 +259,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'schema/migration-runner.ts',
   'rule-host.ts',
   'principle-training-state.ts',
+  // PRI-446: now a thin adapter delegating pure decision logic to
+  // runtime-v2/pain-gate/pain-diagnostic-gate-policy.ts. Kept here because it
+  // owns the cooldown Map + SystemLogger + Date.now side effects.
   'pain-diagnostic-gate.ts',
   'hygiene/tracker.ts',
   'schema/migrations/002-init-central.ts',
@@ -296,6 +305,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'dictionary.ts',
   'thinking-os-parser.ts',
   'system-logger.ts',
+  // PRI-446: now a thin shell wiring DetectionFunnelCore (core runtime-v2/detection)
+  // with crypto.createHash + PainDictionary. Kept here because it owns the
+  // crypto + dictionary I/O boundary.
   'detection-funnel.ts',
   'risk-calculator.ts',
   'migration.ts',
@@ -376,6 +388,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // model-training-registry.ts, model-deployment-registry.ts,
     // shadow-observation-registry.ts (98 → 93)
     // PRI-449: Removed external-training-contract.ts (93 → 92)
+    // PRI-446: pain-diagnostic-gate.ts and detection-funnel.ts remain at 92 —
+    // they are now thin adapters delegating pure logic to core, but still live
+    // in plugin src/core/ and own I/O side effects, so they stay classified.
     expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
   });
 });
@@ -634,6 +649,34 @@ describe('PRI-42 internalization boundary', () => {
     const files = readdirSync(triageDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     for (const file of files) {
       const src = readFileSync(join(triageDir, file), 'utf-8');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('../../../openclaw-plugin');
+    }
+  });
+
+  it('PRI-446: pain-gate has zero openclaw-plugin imports', async () => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const dir = resolve(__dirname, '..', 'pain-gate');
+    expect(existsSync(dir)).toBe(true);
+
+    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+    for (const file of files) {
+      const src = readFileSync(join(dir, file), 'utf-8');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('../../../openclaw-plugin');
+    }
+  });
+
+  it('PRI-446: detection has zero openclaw-plugin imports', async () => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const dir = resolve(__dirname, '..', 'detection');
+    expect(existsSync(dir)).toBe(true);
+
+    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+    for (const file of files) {
+      const src = readFileSync(join(dir, file), 'utf-8');
       expect(src).not.toContain('openclaw-plugin');
       expect(src).not.toContain('../../../openclaw-plugin');
     }
