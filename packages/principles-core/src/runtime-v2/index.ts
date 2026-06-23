@@ -298,8 +298,10 @@ export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 export { migrateWorkspaceGuidance, containsStalePlanMdGuidance, STALE_PLAN_MD_PATTERNS } from './workspace-guidance-migration.js';
 export type { MigrationResult as WorkspaceGuidanceMigrationResult } from './workspace-guidance-migration.js';
 
-// Ledger file utilities (for audit/consistency checks)
-export { loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple } from '../principle-tree-ledger.js';
+// Ledger file utilities — PRI-443 Phase 5: removed from runtime-v2 barrel.
+// I/O functions (loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple)
+// are now imported directly from @principles/core/principle-tree-ledger by consumers
+// (pd-cli, openclaw-plugin). The runtime-v2 barrel must stay pure-types-only.
 
 // Pruning read model (PRI-15)
 export { PruningReadModel, removeOrphanReferencesFromLedger } from './pruning-read-model.js';
@@ -557,7 +559,8 @@ export type { LifecycleDatasource } from './internalization/lifecycle-datasource
 export { buildLifecycleReadModel } from './internalization/lifecycle-read-model.js';
 
 // Ledger domain types needed by plugin datasource implementations (PRI-56)
-export type { LedgerTreeStore } from '../principle-tree-ledger.js';
+// PRI-443 Phase 5: import from pure types module, not the I/O module
+export type { LedgerTreeStore } from './types/ledger-store.js';
 
 // ── Internalization Peer Runner Contracts (PRI-61) ─────────────────────────
 

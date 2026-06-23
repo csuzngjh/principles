@@ -3,8 +3,8 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
-  loadLedger,
 } from '@principles/core/runtime-v2';
+import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

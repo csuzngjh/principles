@@ -38,8 +38,13 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { getLastSuccessfulChain: mockGetLastSuccessfulChain, close: mockPainChainClose };
   }),
   auditCandidateLedgerConsistency: mockAuditCandidateLedgerConsistency,
-  getLedgerFilePathPublic: vi.fn().mockReturnValue('/fake/workspace/.state/principle_training_state.json'),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+}));
+
+// PRI-443 Phase 5: getLedgerFilePathPublic now imported from
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+vi.mock('@principles/core/principle-tree-ledger', () => ({
+  getLedgerFilePathPublic: vi.fn().mockReturnValue('/fake/workspace/.state/principle_training_state.json'),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({

@@ -7,7 +7,6 @@ import {
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
   buildL2PrincipleReaderFromLedger,
-  loadLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
   resolveRuntimeConfigFromPdConfig,
@@ -17,6 +16,7 @@ import {
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
 } from '@principles/core/runtime-v2';
+import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
 

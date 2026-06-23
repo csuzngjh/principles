@@ -53,9 +53,14 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     buildL2PrincipleReaderFromLedger: mockBuildL2PrincipleReader.mockReturnValue({
       listActivePrinciples: vi.fn(),
     }),
-    loadLedger: vi.fn().mockReturnValue({ tree: { principles: {} } }),
   };
 });
+
+// PRI-443 Phase 5: loadLedger now imported from
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+vi.mock('@principles/core/principle-tree-ledger', () => ({
+  loadLedger: vi.fn().mockReturnValue({ tree: { principles: {} } }),
+}));
 
 const mockLoadEffectiveFeatureFlags = vi.fn();
 vi.mock('../feature-flag-loader.js', () => ({

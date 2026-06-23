@@ -18,13 +18,12 @@ import {
   candidateShow,
   CandidateIntakeService,
   CandidateIntakeError,
-  loadLedger,
-  getLedgerFilePathPublic,
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
   PrincipleTreeLedgerAdapter,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
+import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';

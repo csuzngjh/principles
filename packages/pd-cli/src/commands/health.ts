@@ -12,8 +12,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
+import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
 import type { PainChainTrace } from '@principles/core/runtime-v2';
+import { getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 
 interface LastSuccessfulChain {
   painId?: string;
