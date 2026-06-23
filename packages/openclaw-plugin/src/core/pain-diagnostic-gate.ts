@@ -1,88 +1,45 @@
+/**
+ * Pain Diagnostic Gate — PRI-446 thin adapter
+ *
+ * The pure decision logic (threshold tree, cooldown comparison, episode-key
+ * construction) now lives in principles-core
+ * (runtime-v2/pain-gate/pain-diagnostic-gate-policy.ts). This file is the
+ * stateful adapter that owns:
+ *   - the cooldown Map (lastDiagnosedAtByEpisode)
+ *   - Date.now() injection
+ *   - SystemLogger for unknown-source telemetry
+ *
+ * It preserves the original export names (evaluatePainDiagnosticGate,
+ * isCooldownActiveForEpisode, resetPainDiagnosticGateForTest) so all 5 callers
+ * (gate-block-helper, llm, pain, prompt x2) and the characterization test keep
+ * working unchanged.
+ *
+ * ERR checklist:
+ * - ERR-011: this is a stateful adapter delegating to core pure logic.
+ */
+
 import { SystemLogger } from './system-logger.js';
+import {
+  evaluatePainDiagnosticGateDecision,
+  normalizedSource,
+  buildEpisodeKey,
+  isCooldownActive as isCooldownActiveCore,
+  type PainDiagnosticSource,
+  type PainDiagnosticGateReason,
+  type PainDiagnosticGateInput,
+  type PainDiagnosticGateDecision,
+} from '@principles/core/runtime-v2';
 
-const PAIN_DIAGNOSTIC_SOURCES = [
-  'manual',
-  'tool_failure',
-  'dispatch_error',
-  'gate_blocked',
-  'user_empathy',
-  'llm_paralysis',
-  'semantic',
-  'subagent_error',
-] as const;
+// Re-export types so existing type imports keep working.
+export type {
+  PainDiagnosticSource,
+  PainDiagnosticGateReason,
+  PainDiagnosticGateInput,
+  PainDiagnosticGateDecision,
+};
 
-export type PainDiagnosticSource = typeof PAIN_DIAGNOSTIC_SOURCES[number];
-
-export type PainDiagnosticGateReason =
-  | 'manual'
-  | 'high_gfi'
-  | 'repeated_failure'
-  | 'semantic_pain'
-  | 'llm_paralysis'
-  | 'risky_high_score'
-  | 'subagent_error'
-  | 'gate_blocked'
-  | 'cooldown'
-  | 'below_gate';
-
-export interface PainDiagnosticGateInput {
-  source: PainDiagnosticSource | string;
-  score: number;
-  currentGfi: number;
-  consecutiveErrors?: number;
-  isRisky?: boolean;
-  errorHash?: string;
-  sessionId?: string;
-  nowMs?: number;
-  cooldownMs?: number;
-  thresholds?: {
-    painTrigger?: number;
-    highSeverity?: number;
-    highGfi?: number;
-    repeatedFailure?: number;
-    semanticPain?: number;
-  };
-}
-
-export interface PainDiagnosticGateDecision {
-  shouldDiagnose: boolean;
-  reason: PainDiagnosticGateReason;
-  episodeKey: string;
-  detail: string;
-}
-
-const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000;
+// Module-level cooldown state — owned by this adapter (core is stateless).
 const lastDiagnosedAtByEpisode = new Map<string, number>();
-
-function normalizedSource(source: string): PainDiagnosticSource | string {
-  if (source.startsWith('llm_') && source !== 'llm_paralysis') {
-    return 'semantic';
-  }
-  if (!(PAIN_DIAGNOSTIC_SOURCES as readonly string[]).includes(source)) {
-    SystemLogger.log('', 'GATE_UNKNOWN_SOURCE', `Unknown pain source: "${source}"`);
-  }
-  return source;
-}
-
-function buildEpisodeKey(input: PainDiagnosticGateInput): string {
-  const source = normalizedSource(input.source);
-  const sessionId = input.sessionId || 'unknown';
-  const hash = input.errorHash || 'no-hash';
-  return `${sessionId}:${source}:${hash}`;
-}
-
-function withinCooldown(input: PainDiagnosticGateInput, episodeKey: string): boolean {
-  const cooldownMs = input.cooldownMs ?? DEFAULT_COOLDOWN_MS;
-  if (cooldownMs <= 0) return false;
-
-  const nowMs = input.nowMs ?? Date.now();
-  const last = lastDiagnosedAtByEpisode.get(episodeKey);
-  return last !== undefined && nowMs - last < cooldownMs;
-}
-
-function markDiagnosed(input: PainDiagnosticGateInput, episodeKey: string): void {
-  lastDiagnosedAtByEpisode.set(episodeKey, input.nowMs ?? Date.now());
-}
 
 export function resetPainDiagnosticGateForTest(): void {
   lastDiagnosedAtByEpisode.clear();
@@ -100,70 +57,33 @@ export function isCooldownActiveForEpisode(
   cooldownMs?: number,
 ): boolean {
   const episodeKey = buildEpisodeKey({ source, sessionId, errorHash } as PainDiagnosticGateInput);
-  return withinCooldown({ source, sessionId, errorHash, cooldownMs } as PainDiagnosticGateInput, episodeKey);
+  const last = lastDiagnosedAtByEpisode.get(episodeKey);
+  const nowMs = Date.now();
+  return isCooldownActiveCore({ source, sessionId, errorHash, cooldownMs, nowMs, lastDiagnosedAtMs: last });
 }
 
+/**
+ * Evaluate the pain diagnostic gate. Delegates the pure decision to core and,
+ * when the decision is to diagnose, records the current time against the
+ * episode so subsequent calls within the cooldown window are suppressed.
+ */
 export function evaluatePainDiagnosticGate(input: PainDiagnosticGateInput): PainDiagnosticGateDecision {
-  const source = normalizedSource(input.source);
+  // Surface unknown sources via telemetry (core cannot log).
+  const { unknown } = normalizedSource(input.source);
+  if (unknown) {
+    SystemLogger.log('', 'GATE_UNKNOWN_SOURCE', `Unknown pain source: "${input.source}"`);
+  }
+
   const episodeKey = buildEpisodeKey(input);
-  const painTrigger = input.thresholds?.painTrigger ?? 40;
-  const highSeverity = input.thresholds?.highSeverity ?? 70;
-  const highGfi = input.thresholds?.highGfi ?? Math.max(highSeverity, painTrigger + 30);
-  const repeatedFailure = input.thresholds?.repeatedFailure ?? 4;
-  const semanticPain = input.thresholds?.semanticPain ?? Math.max(painTrigger, 60);
-  const score = Number.isFinite(input.score) ? input.score : 0;
-  const currentGfi = Number.isFinite(input.currentGfi) ? input.currentGfi : 0;
-  const consecutiveErrors: number = Number.isFinite(input.consecutiveErrors) ? (input.consecutiveErrors as number) : 0;
+  const last = lastDiagnosedAtByEpisode.get(episodeKey);
+  const nowMs = input.nowMs ?? Date.now();
 
-  const approve = (reason: PainDiagnosticGateReason, detail: string): PainDiagnosticGateDecision => {
-    if (withinCooldown(input, episodeKey)) {
-      return {
-        shouldDiagnose: false,
-        reason: 'cooldown',
-        episodeKey,
-        detail: `recently diagnosed; ${detail}`,
-      };
-    }
-    markDiagnosed(input, episodeKey);
-    return { shouldDiagnose: true, reason, episodeKey, detail };
-  };
+  const decision = evaluatePainDiagnosticGateDecision({ ...input, nowMs }, last);
 
-  if (source === 'manual') {
-    return approve('manual', 'manual pain signal bypasses automatic gate');
+  // Record the diagnosis time when approved (matches prior markDiagnosed behavior).
+  if (decision.shouldDiagnose) {
+    lastDiagnosedAtByEpisode.set(episodeKey, nowMs);
   }
 
-  if (source === 'subagent_error' && score >= painTrigger) {
-    return approve('subagent_error', `subagent error score ${score} >= ${painTrigger}`);
-  }
-
-  if (source === 'llm_paralysis' && score >= painTrigger) {
-    return approve('llm_paralysis', `llm paralysis score ${score} >= ${painTrigger}`);
-  }
-
-  if (source === 'gate_blocked' && score >= painTrigger) {
-    return approve('gate_blocked', `gate blocked score ${score} >= ${painTrigger}`);
-  }
-
-  if ((source === 'user_empathy' || source === 'semantic') && score >= semanticPain) {
-    return approve('semantic_pain', `semantic pain score ${score} >= ${semanticPain}`);
-  }
-
-  if (input.isRisky === true && score >= highSeverity) {
-    return approve('risky_high_score', `risky operation score ${score} >= ${highSeverity}`);
-  }
-
-  if (consecutiveErrors >= repeatedFailure) {
-    return approve('repeated_failure', `consecutive errors ${consecutiveErrors} >= ${repeatedFailure}`);
-  }
-
-  if (currentGfi >= highGfi) {
-    return approve('high_gfi', `GFI ${currentGfi.toFixed(1)} >= ${highGfi}`);
-  }
-
-  return {
-    shouldDiagnose: false,
-    reason: 'below_gate',
-    episodeKey,
-    detail: `score=${score}; gfi=${currentGfi.toFixed(1)}; consecutive=${consecutiveErrors}`,
-  };
+  return decision;
 }
