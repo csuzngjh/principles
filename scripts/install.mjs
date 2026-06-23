@@ -76,12 +76,17 @@ function injectCorePackage(targetDir) {
   }
 
   console.log('  📦 Injecting @principles/core...');
-  mkdirSync(dirname(targetModules), { recursive: true });
-  try {
-    execSync(`cp -rL "${monorepoModules}" "${targetModules}"`, { stdio: 'ignore' });
-  } catch {
-    copyDir(monorepoModules, targetModules);
+
+  // Remove target first: cp -rL on an existing directory copies INTO it,
+  // producing a nested core/core/ that leaves the npm version intact.
+  if (existsSync(targetModules)) {
+    rmSync(targetModules, { recursive: true, force: true });
   }
+
+  mkdirSync(dirname(targetModules), { recursive: true });
+  // Use copyDir (Node-based) instead of cp -rL for reliable overwrite
+  copyDir(monorepoModules, targetModules);
+  console.log('    ✅ @principles/core injected');
 }
 
 // ── Argument parsing ─────────────────────────────────────────────────────────────────────
@@ -366,10 +371,10 @@ function installPdConsole(args) {
   );
   console.log('  📄 package.json');
 
-  // Inject @principles/core from monorepo (console lives inside plugin dir)
-  injectCorePackage(INSTALL_CONSOLE_DIR);
-
-  // Install production dependencies for pd-console
+  // Install production dependencies for pd-console FIRST,
+  // THEN inject @principles/core from monorepo to overwrite any npm registry version.
+  // The npm-published @principles/core lacks the ./principle-tree-ledger export
+  // that the local build provides. Injection must be the authoritative source.
   console.log('  📦 Installing pd-console dependencies...');
   try {
     execSync('npm install --omit=dev --no-audit --no-fund --prefer-offline --legacy-peer-deps', {
@@ -379,6 +384,9 @@ function installPdConsole(args) {
   } catch (e) {
     console.warn(`  ⚠️  npm install failed for pd-console: ${e.message}`);
   }
+
+  // Inject @principles/core from monorepo (console lives inside plugin dir)
+  injectCorePackage(INSTALL_CONSOLE_DIR);
 
   // Create startup scripts — console is at extensions/principles-disciple/console/
   if (isWindows()) {
