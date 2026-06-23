@@ -29,11 +29,11 @@ import {
   OpenClawCliRuntimeAdapter,
   L2AgentLoopAdapter,
   buildL2PrincipleReaderFromLedger,
-  loadLedger,
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult } from '@principles/core/runtime-v2';
+import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadEffectiveFeatureFlags } from './feature-flag-loader.js';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
 import type { ResolvedRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';

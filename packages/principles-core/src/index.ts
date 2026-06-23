@@ -25,9 +25,6 @@ export type { TelemetryEvent, TelemetryEventValidationResult, TelemetryEventType
 // PrincipleInjector interface and DefaultPrincipleInjector
 export { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from './principle-injector.js';
 
-// I/O utilities (D-03: atomicWriteFileSync for crash-safe writes)
-export { atomicWriteFileSync } from './io.js';
-
 // Prompt builder primitives — pure functions extracted from openclaw-plugin prompt hook (PRI-75)
 export {
   buildAttitudeDirective,
