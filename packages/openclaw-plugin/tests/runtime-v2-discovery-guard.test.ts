@@ -129,7 +129,7 @@ describe('PRI-228: Runtime V2 discovery guard', () => {
       expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
     });
 
-    const hostEnhancementHooks = ['prompt.ts', 'lifecycle.ts', 'gate.ts', 'subagent.ts', 'llm.ts'];
+    const hostEnhancementHooks = ['prompt.ts', 'lifecycle.ts', 'gate.ts', 'llm.ts'];
     for (const hookFile of hostEnhancementHooks) {
       it(hookFile + ' is a host enhancement hook — uses fromHookContext with early-return guard', () => {
         const filePath = path.join(PLUGIN_SRC, 'hooks', hookFile);

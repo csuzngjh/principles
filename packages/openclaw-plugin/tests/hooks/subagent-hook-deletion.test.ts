@@ -5,7 +5,9 @@ import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
 
 const repoRoot = path.resolve(__dirname, '../..');
 const indexPath = path.join(repoRoot, 'src/index.ts');
+const hooksAgentsPath = path.join(repoRoot, 'src/hooks/AGENTS.md');
 const indexSrc = fs.readFileSync(indexPath, 'utf-8');
+const hooksAgentsSrc = fs.readFileSync(hooksAgentsPath, 'utf-8');
 
 function extractApiOnRegistrations(source: string): Array<{ event: string; surfaceId: string | null }> {
   const registrations: Array<{ event: string; surfaceId: string | null }> = [];
@@ -24,6 +26,11 @@ describe('PRI-448: subagent/shadow hook deletion', () => {
   it('index.ts no longer registers subagent_spawning or subagent_ended', () => {
     expect(indexSrc).not.toContain("api.on('subagent_spawning'");
     expect(indexSrc).not.toContain("api.on('subagent_ended'");
+  });
+
+  it('hooks AGENTS.md no longer routes subagent hooks to deleted files', () => {
+    expect(hooksAgentsSrc).not.toContain('subagent_*');
+    expect(hooksAgentsSrc).not.toContain('subagent.ts');
   });
 
   it('index.ts no longer imports or calls shadow-routing symbols', () => {

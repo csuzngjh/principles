@@ -23,6 +23,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // ─── Mock dependencies ───────────────────────────────────────────────────────
 
@@ -152,13 +155,14 @@ function makeMinimalEvent(overrides: {
 }
 
 function makeCtx(overrides: {
+  workspaceDir?: string;
   sessionGfi?: number;
   trigger?: string;
   sessionId?: string;
 } = {}) {
-  const { sessionGfi = 20, trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
+  const { workspaceDir = '/fake/workspace', sessionGfi = 20, trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
   return {
-    workspaceDir: '/fake/workspace',
+    workspaceDir,
     trigger,
     sessionId,
     api: {
@@ -357,6 +361,30 @@ describe('Minimal trigger skips project context', () => {
   });
 
   it('regular user trigger DOES inject project_context when focus is configured', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-characterization-'));
+    fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, '.principles', 'PROFILE.json'),
+      JSON.stringify({ contextInjection: { projectFocus: 'full' } }),
+      'utf-8',
+    );
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir,
+      stateDir: '/fake/state',
+      resolve: (key: string) => {
+        if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'CURRENT_FOCUS.md');
+        return path.join(workspaceDir, key);
+      },
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: { get: vi.fn() },
+      eventLog: { recordRuntimeV2ActivationsInjected: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+
     // Mock currentFocus to return non-empty content
     const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
     (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
@@ -371,7 +399,12 @@ describe('Minimal trigger skips project context', () => {
     });
 
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
-    const content = await getProjectContextContent('user', 'regular-user-session');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(
+      makeMinimalEvent(),
+      makeCtx({ workspaceDir, trigger: 'user', sessionId: 'regular-user-session' }),
+    );
+    const content = result?.appendSystemContext ?? '';
 
     // For non-minimal triggers (user), project_context IS injected
     // The <project_context> tag should appear in the output

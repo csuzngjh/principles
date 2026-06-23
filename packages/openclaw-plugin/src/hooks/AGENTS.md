@@ -1,6 +1,6 @@
 # src/hooks/ — OpenClaw Lifecycle Hooks
 
-**8 TypeScript files.** Intercepts agent behavior at key moments: prompt building, tool calls, session lifecycle.
+Hook handlers and helper modules for intercepting agent behavior at key moments: prompt building, tool calls, session lifecycle.
 
 ## WHERE TO LOOK
 
@@ -13,7 +13,6 @@
 | `after_compaction` | `lifecycle.ts` | State recovery |
 | `before_reset` / `session_*` | `lifecycle.ts` | Session lifecycle management |
 | `llm_output` | `llm.ts` | Analyzes LLM responses for pain signals |
-| `subagent_*` | `subagent.ts` | Ensures sub-agents inherit mental models |
 | `before_message_write` | `message-sanitize.ts` | Strips sensitive data from messages |
 | — | `trajectory-collector.ts` | Collects tool call trajectories for SQLite analytics |
 

@@ -18,15 +18,18 @@ export type { InjectablePrinciple, PrincipleSelectionResult } from './principle-
 export type { RoutingInput, RoutingClassification } from './routing-guidance.js';
 export type { EmpathyKeywordStore, EmpathyKeywordEntry, EmpathyKeywordStats, EmpathyMatchResult, EmpathyKeywordUpdate, EmpathyOptimizationResult, SeedKeywordEntry, EmpathyKeywordConfig } from './empathy-types.js';
 export type { FileArtifact, WorkingMemorySnapshot, FocusCompressionOptions, FocusCompressionResult } from './focus-compression.js';
+export type { CoreLogger, ModelConfigObject } from './model-config.js';
 
 // Functions
 export { buildAttitudeDirective } from './attitude-directive.js';
 export { detectCorrectionCue } from './correction-cue.js';
+export { escapeXml } from './xml-escape.js';
 export { extractMessageContent } from './message-extraction.js';
 export { isMinimalTrigger } from './minimal-trigger.js';
 export { truncateInjectionToBudget } from './size-guard.js';
 export { formatPrinciple, selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from './principle-selection.js';
 export { containsKeyword, computeCombinedText, classifyTaskKind, buildReason, buildBlockers, READER_KEYWORDS, EDITOR_KEYWORDS, HIGH_ENTROPY_KEYWORDS } from './routing-guidance.js';
+export { isValidModelFormat, resolveModelFromConfig } from './model-config.js';
 
 // PRI-81 Phase A: Empathy keyword matching
 export { matchEmpathyKeywords, createDefaultKeywordStore, applyKeywordUpdates, shouldTriggerOptimization, getKeywordStoreSummary } from './empathy-keyword-matching.js';
