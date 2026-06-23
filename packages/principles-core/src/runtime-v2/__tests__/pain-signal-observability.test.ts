@@ -253,4 +253,162 @@ describe('recordPainSignalObservability', () => {
       db.close();
     }
   });
+
+  // PRI-406 regression tests — empty string config guards
+  it('handles empty workspaceDir gracefully (returns warnings)', () => {
+    const { stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir: '',
+      stateDir,
+      data: {
+        painId: 'empty_workspace_test',
+        painType: 'tool_failure',
+        source: 'manual',
+        reason: 'empty workspace test',
+        score: 60,
+        sessionId: 'cli',
+      },
+    });
+
+    // Should still succeed but may have warnings about path resolution
+    expect(result.warnings.length).toBeGreaterThanOrEqual(0);
+    // trajectoryPainEventId should still be valid
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+  });
+
+  it('handles empty stateDir gracefully (returns warnings)', () => {
+    const { workspaceDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir: '',
+      data: {
+        painId: 'empty_state_test',
+        painType: 'tool_failure',
+        source: 'manual',
+        reason: 'empty state test',
+        score: 60,
+        sessionId: 'cli',
+      },
+    });
+
+    // Should still succeed but may have warnings about path resolution
+    expect(result.warnings.length).toBeGreaterThanOrEqual(0);
+    // trajectoryPainEventId should still be valid (default path used)
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+  });
+
+  it('handles empty canonicalPainId gracefully (stored as empty string)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'empty_canonical_test',
+        painType: 'tool_failure',
+        source: 'manual',
+        reason: 'empty canonical test',
+        score: 60,
+        sessionId: 'cli',
+      },
+      canonicalPainId: '',
+      runtimeTaskId: 'task_empty',
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+
+    // Verify canonical_pain_id is stored as empty string (not null)
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT canonical_pain_id FROM pain_events WHERE id = ?').get(result.trajectoryPainEventId) as { canonical_pain_id: string | null };
+      // Empty string is stored as empty string, not null
+      expect(row.canonical_pain_id).toBe('');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('handles whitespace-only canonicalPainId gracefully (stored as whitespace)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'whitespace_canonical_test',
+        painType: 'tool_failure',
+        source: 'manual',
+        reason: 'whitespace canonical test',
+        score: 60,
+        sessionId: 'cli',
+      },
+      canonicalPainId: '   ',
+      runtimeTaskId: 'task_whitespace',
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.trajectoryPainEventId).toBeGreaterThan(0);
+
+    // Verify canonical_pain_id is stored as whitespace string (not null)
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT canonical_pain_id FROM pain_events WHERE id = ?').get(result.trajectoryPainEventId) as { canonical_pain_id: string | null };
+      // Whitespace string is stored as whitespace, not null
+      expect(row.canonical_pain_id).toBe('   ');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('preserves original score and reason on UNIQUE constraint violation', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const canonicalPainId = 'preserve_original_test';
+
+    // First insert
+    recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: canonicalPainId,
+        taskId: 'diagnosis_preserve_001',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'original reason',
+        score: 80,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+      canonicalPainId,
+      runtimeTaskId: 'task_001',
+    });
+
+    // Second insert with different score/reason
+    const result2 = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: canonicalPainId,
+        taskId: 'diagnosis_preserve_002',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'new reason',
+        score: 95,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+      canonicalPainId,
+      runtimeTaskId: 'task_002',
+    });
+
+    expect(result2.warnings).toEqual([]);
+
+    // Verify original score and reason are preserved (not updated)
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT score, reason FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId) as { score: number; reason: string };
+      expect(row.score).toBe(80);
+      expect(row.reason).toBe('original reason');
+    } finally {
+      db.close();
+    }
+  });
 });

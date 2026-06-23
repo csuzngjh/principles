@@ -375,4 +375,213 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(payloadB.taskId).toContain('diag_distiller-');
     });
   });
+
+  // PRI-401 regression tests — stage-aware dispatch edge cases
+  describe('stage-aware dispatch edge cases', () => {
+    it('handles taskId with diag_rootcause prefix in middle of string', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'prefix_diag_rootcause-diagnosis_pain-001_suffix' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should dispatch to rootcause output
+      expect(payload.rootCauseCategory).toBeDefined();
+    });
+
+    it('handles taskId with diag_distiller prefix in middle of string', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'prefix_diag_distiller-diagnosis_pain-001_suffix' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should dispatch to distiller output
+      expect(payload.abstractedPrinciple).toBeDefined();
+    });
+
+    it('handles taskId with diag_router prefix in middle of string', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'prefix_diag_router-diagnosis_pain-001_suffix' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should dispatch to router output
+      expect(payload.recommendations).toBeDefined();
+    });
+
+    it('handles empty taskId gracefully', async () => {
+      const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: '' },
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should fall back to monolithic output
+      expect(payload.taskId).toBe('fallback-task');
+      expect(payload.rootCauseCategory).toBeUndefined();
+    });
+
+    it('handles null taskRef gracefully', async () => {
+      const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        // taskRef is not provided
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should fall back to monolithic output with defaultTaskId
+      expect(payload.taskId).toBe('fallback-task');
+    });
+
+    it('handles taskRef without taskId gracefully', async () => {
+      const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
+      // Cast to any to bypass TypeScript type checking for test purposes
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: '' }, // Empty taskId to test fallback behavior
+      });
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      // Should fall back to monolithic output with defaultTaskId
+      expect(payload.taskId).toBe('fallback-task');
+    });
+
+    it('handles multiple sequential runs with different taskIds', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+
+      // Run 1: rootcause
+      const handle1 = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_rootcause-diagnosis_pain-001' },
+      });
+      const output1 = await adapter.fetchOutput(handle1.runId);
+      expect(output1).not.toBeNull();
+      if (!output1) throw new Error('output1 is null');
+      const payload1 = output1.payload as Record<string, unknown>;
+      expect(payload1.rootCauseCategory).toBe('Design');
+
+      // Run 2: distiller
+      const handle2 = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_distiller-diagnosis_pain-002' },
+      });
+      const output2 = await adapter.fetchOutput(handle2.runId);
+      expect(output2).not.toBeNull();
+      if (!output2) throw new Error('output2 is null');
+      const payload2 = output2.payload as Record<string, unknown>;
+      expect(payload2.abstractedPrinciple).toBeDefined();
+
+      // Run 3: router
+      const handle3 = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_router-diagnosis_pain-003' },
+      });
+      const output3 = await adapter.fetchOutput(handle3.runId);
+      expect(output3).not.toBeNull();
+      if (!output3) throw new Error('output3 is null');
+      const payload3 = output3.payload as Record<string, unknown>;
+      expect(payload3.recommendations).toBeDefined();
+
+      // Verify all outputs are different
+      expect(payload1.rootCauseCategory).toBeDefined();
+      expect(payload2.abstractedPrinciple).toBeDefined();
+      expect(payload3.recommendations).toBeDefined();
+    });
+
+    it('handles runId to taskId mapping correctly', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const taskId = 'diag_rootcause-diagnosis_pain-mapping';
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId },
+      });
+
+      // Verify runId was created
+      expect(handle.runId).toMatch(/^td-\d+$/);
+
+      // Verify output has correct taskId
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output).not.toBeNull();
+      if (!output) throw new Error('output is null');
+      const payload = output.payload as Record<string, unknown>;
+      expect(payload.taskId).toBe(taskId);
+    });
+
+    it('handles concurrent fetchOutput calls for same runId', async () => {
+      const adapter = new TestDoubleRuntimeAdapter();
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'test', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 5000,
+        taskRef: { taskId: 'diag_rootcause-diagnosis_pain-concurrent' },
+      });
+
+      // Fetch output multiple times
+      const output1 = await adapter.fetchOutput(handle.runId);
+      const output2 = await adapter.fetchOutput(handle.runId);
+      const output3 = await adapter.fetchOutput(handle.runId);
+
+      // All should return same output
+      expect(output1).not.toBeNull();
+      expect(output2).not.toBeNull();
+      expect(output3).not.toBeNull();
+
+      const payload1 = output1?.payload as Record<string, unknown>;
+      const payload2 = output2?.payload as Record<string, unknown>;
+      const payload3 = output3?.payload as Record<string, unknown>;
+
+      expect(payload1.taskId).toBe(payload2.taskId);
+      expect(payload2.taskId).toBe(payload3.taskId);
+    });
+  });
 });

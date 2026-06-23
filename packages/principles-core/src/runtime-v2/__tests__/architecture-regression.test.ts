@@ -5,6 +5,8 @@
  * Add entries here whenever a new service/read-model boundary is established.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+import * as fsSync from 'fs';
+import * as pathSync from 'path';
 
 // ── Source-file existence ──────────────────────────────────────────────────
 
@@ -3578,5 +3580,123 @@ describe('PRI-443: pure module boundary guards', () => {
     // NOT from the I/O module (../principle-tree-ledger.js).
     expect(src).toMatch(/export\s+type\s+\{\s*LedgerTreeStore\s*\}\s*from\s*['"]\.\/types\/ledger-store\.js['"]/);
     expect(src).not.toMatch(/export\s+type\s+\{\s*LedgerTreeStore\s*\}\s*from\s*['"]\.\.\/principle-tree-ledger\.js['"]/);
+  });
+});
+
+// ── PRI-450: Core I/O whitelist guard ──────────────────────────────────────────
+//
+// Scans all production (.ts, non-test) files under packages/principles-core/src/
+// for fs/path imports and verifies they match an explicit whitelist. Any new file
+// that needs I/O must be added to ALLOWED_IO_FILES here — otherwise CI fails.
+// This forces developers to explain "why does this file need I/O?" in their PR.
+
+describe('PRI-450: core I/O whitelist guard', () => {
+  // Whitelist of production files allowed to import fs/path.
+  // Paths are relative to packages/principles-core/src/.
+  const ALLOWED_IO_FILES: ReadonlySet<string> = new Set([
+    'principle-tree-ledger.ts',
+    'evolution-store.ts',
+    'trajectory-store.ts',
+    'workflow-funnel-loader.ts',
+    'runtime-v2/store/sqlite-connection.ts',
+    'runtime-v2/store/runtime-state-manager.ts',
+    'runtime-v2/adapter/openclaw-cli-runtime-adapter.ts',
+    'runtime-v2/candidate-audit.ts',
+    'runtime-v2/pain-signal-observability.ts',
+    'runtime-v2/internalization-chain-integrity-read-model.ts',
+    'runtime-v2/internalization-integrity-remediation.ts',
+    'runtime-v2/operator-health-read-model.ts',
+    'runtime-v2/pain-chain-read-model.ts',
+    'runtime-v2/pruning-read-model.ts',
+    'runtime-v2/pruning-review-log.ts',
+    'runtime-v2/schema-conformance-read-model.ts',
+  ]);
+
+  // Extract all import module paths from source code.
+  // Handles: import ... from 'mod', import 'mod' (side-effect), and multiline imports.
+  // Reuses the same pattern proven in the PRI-215 extractImportModulePaths helper.
+  function extractImportPaths(src: string): string[] {
+    const paths: string[] = [];
+    for (const m of src.matchAll(/import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null) paths.push(m[1]);
+    }
+    for (const m of src.matchAll(/import\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null && !paths.includes(m[1])) paths.push(m[1]);
+    }
+    return paths;
+  }
+
+  // Check if any import path references fs or path (including sub-paths like fs/promises).
+  function importsFsOrPath(src: string): boolean {
+    const paths = extractImportPaths(src);
+    return paths.some((p) =>
+      p === 'fs' || p.startsWith('fs/') ||
+      p === 'node:fs' || p.startsWith('node:fs/') ||
+      p === 'path' || p.startsWith('path/') ||
+      p === 'node:path' || p.startsWith('node:path/')
+    );
+  }
+
+  function collectTsFiles(dir: string, acc: string[]): void {
+    const entries = fsSync.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = pathSync.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        collectTsFiles(fullPath, acc);
+      } else if (
+        entry.isFile() &&
+        entry.name.endsWith('.ts') &&
+        !entry.name.endsWith('.test.ts') &&
+        !entry.name.endsWith('.spec.ts')
+      ) {
+        acc.push(fullPath);
+      }
+    }
+  }
+
+  it('core/src/ production files: only whitelisted files import fs/path', () => {
+    const coreSrcDir = pathSync.resolve(__dirname, '..', '..');
+    const allFiles: string[] = [];
+    collectTsFiles(coreSrcDir, allFiles);
+
+    const violations: string[] = [];
+    for (const filePath of allFiles) {
+      const content = fsSync.readFileSync(filePath, 'utf-8');
+      if (importsFsOrPath(content)) {
+        const relPath = pathSync.relative(coreSrcDir, filePath).replace(/\\/g, '/');
+        if (!ALLOWED_IO_FILES.has(relPath)) {
+          violations.push(relPath);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('ALLOWED_IO_FILES whitelist entries all exist on disk', () => {
+    const coreSrcDir = pathSync.resolve(__dirname, '..', '..');
+    const missing: string[] = [];
+    for (const relPath of ALLOWED_IO_FILES) {
+      const fullPath = pathSync.join(coreSrcDir, ...relPath.split('/'));
+      if (!fsSync.existsSync(fullPath)) {
+        missing.push(relPath);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('importsFsOrPath detects sub-path imports (fs/promises) and side-effect imports', () => {
+    // Sub-path import
+    expect(importsFsOrPath(`import { mkdir } from 'node:fs/promises';`)).toBe(true);
+    expect(importsFsOrPath(`import { posix } from 'path/posix';`)).toBe(true);
+    // Side-effect import
+    expect(importsFsOrPath(`import 'fs';`)).toBe(true);
+    expect(importsFsOrPath(`import "node:path";`)).toBe(true);
+    // Standard import
+    expect(importsFsOrPath(`import * as fs from 'fs';`)).toBe(true);
+    expect(importsFsOrPath(`import { resolve } from 'node:path';`)).toBe(true);
+    // Non-fs/path imports
+    expect(importsFsOrPath(`import { foo } from 'bar';`)).toBe(false);
+    expect(importsFsOrPath(``)).toBe(false);
   });
 });

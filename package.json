@@ -27,6 +27,7 @@
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run",
     "e2e:story-a": "node scripts/e2e-story-a.mjs",
+    "quality:report": "node scripts/quality-report.mjs",
     "version:patch": "cd packages/openclaw-plugin && npm version patch",
     "version:minor": "cd packages/openclaw-plugin && npm version minor",
     "version:major": "cd packages/openclaw-plugin && npm version major"

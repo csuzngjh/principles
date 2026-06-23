@@ -28,9 +28,14 @@ export async function handleLifecycleRoute(
   // GET /api/v1/lifecycle/principles/:principleId
   const principleMatch = /^[/]principles[/]([^/]+)$/.exec(subPath);
   if (principleMatch) {
+    const [, rawId] = principleMatch;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_encoding', 'Principle ID is missing');
+      return;
+    }
     let principleId: string;
     try {
-      principleId = decodeURIComponent(principleMatch[1]);
+      principleId = decodeURIComponent(rawId);
     } catch {
       sendError(res, 400, 'invalid_encoding', 'Principle ID contains invalid percent encoding');
       return;

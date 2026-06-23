@@ -57,7 +57,7 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   const subcommand = args.split(/\s+/)[0] || '';
   const implId = subcommand === 'list' ? '' : subcommand;
   const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
-  const reason = reasonMatch ? reasonMatch[1] : null;
+  const reason = reasonMatch ? (reasonMatch[1] ?? null) : null;
 
   // List active
   if (subcommand === 'list' || subcommand === '') {

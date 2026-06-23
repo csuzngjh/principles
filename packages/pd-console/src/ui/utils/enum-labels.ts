@@ -175,7 +175,10 @@ export function enumLabel(
   // 2. Fall back to local map
   const localMap = LOCAL_LABELS[category];
   if (localMap && Object.hasOwn(localMap, value)) {
-    return localMap[value];
+    const label = localMap[value];
+    if (label !== undefined) {
+      return label;
+    }
   }
 
   // 3. Last resort: raw value
