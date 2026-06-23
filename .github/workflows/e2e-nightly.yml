@@ -35,12 +35,59 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run E2E Story A' (trap-03)
+      - name: Install OpenClaw
+        run: npm install -g openclaw
+
+      - name: Configure OpenClaw with SenseNova
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SENSENOVA_API_KEY: ${{ secrets.SENSENOVA_API_KEY }}
           E2E_LLM_MODEL: ${{ secrets.E2E_LLM_MODEL }}
         run: |
-          node scripts/e2e-story-a.mjs --trap trap-03 ${{ env.E2E_LLM_MODEL && format('--model {0}', env.E2E_LLM_MODEL) || '' }} 2>&1 | tee e2e-output.log
+          # Configure OpenClaw to use SenseNova OpenAI-compatible endpoint
+          mkdir -p ~/.openclaw
+          cat > ~/.openclaw/openclaw.json << 'OCEOF'
+          {
+            "providers": {
+              "default": {
+                "type": "openai",
+                "baseUrl": "https://token.sensenova.cn/v1",
+                "apiKeyEnv": "SENSENOVA_API_KEY",
+                "model": "deepseek-v4-flash"
+              }
+            }
+          }
+          OCEOF
+          echo "OpenClaw configured with SenseNova endpoint"
+
+      - name: Start OpenClaw Gateway
+        run: |
+          openclaw gateway run --force &
+          # Wait for gateway to be ready (max 30s)
+          for i in $(seq 1 30); do
+            if openclaw status 2>/dev/null | grep -q "running"; then
+              echo "Gateway is ready"
+              break
+            fi
+            echo "Waiting for gateway... ($i/30)"
+            sleep 1
+          done
+
+      - name: Run E2E Story A' (trap-03)
+        env:
+          SENSENOVA_API_KEY: ${{ secrets.SENSENOVA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.SENSENOVA_API_KEY }}
+          E2E_LLM_MODEL: ${{ secrets.E2E_LLM_MODEL }}
+        run: |
+          MODEL_FLAG=""
+          if [ -n "$E2E_LLM_MODEL" ]; then
+            MODEL_FLAG="--model $E2E_LLM_MODEL"
+          fi
+          node scripts/e2e-story-a.mjs --trap trap-03 $MODEL_FLAG 2>&1 | tee e2e-output.log
+
+      - name: Stop OpenClaw Gateway
+        if: always()
+        run: |
+          openclaw gateway stop 2>/dev/null || true
 
       - name: Close failure issue on success
         if: success()
