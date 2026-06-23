@@ -2,7 +2,7 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
@@ -27,23 +27,41 @@ import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
   detectCorrectionCue as coreDetectCorrectionCue,
+  escapeXml,
   extractMessageContent,
   isMinimalTrigger,
 } from '@principles/core/prompt-builder';
 import { sanitizeForEvidence } from './message-sanitize.js';
+import {
+  buildAgentIdentity,
+  buildEmpathySilenceConstraint,
+  extractUserMessageFromPrompt,
+  assembleHeartbeatChecklist,
+  formatCorePrinciples,
+  formatEvolutionPrinciples,
+  assembleAppendSystemContext,
+} from './prompt-helpers.js';
+import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
 // ---------------------------------------------------------------------------
 const STATIC_FILE_TTL_MS = 60_000; // 1 minute
 
-interface CachedFile {
-  content: string;
-  mtime: number;   // file modification time at read
-  loadedAt: number; // when we cached it
-}
+/**
+ * Per-workspace file cache. Keyed by workspaceDir to avoid cross-workspace
+ * cache pollution. Previously a module-level Map keyed by filePath only.
+ */
+const _staticFileCache = new Map<string, Map<string, CachedFile>>();
 
-const _staticFileCache = new Map<string, CachedFile>();
+function getFileCache(workspaceDir: string): Map<string, CachedFile> {
+  let cache = _staticFileCache.get(workspaceDir);
+  if (!cache) {
+    cache = new Map();
+    _staticFileCache.set(workspaceDir, cache);
+  }
+  return cache;
+}
 
 /**
  * Reads a file with TTL-based caching.
@@ -52,9 +70,10 @@ const _staticFileCache = new Map<string, CachedFile>();
  *   2. File mtime hasn't changed (detects external edits)
  * Otherwise re-reads from disk.
  */
-function cachedReadFile(filePath: string): string {
+function cachedReadFile(filePath: string, workspaceDir: string): string {
+  const cache = getFileCache(workspaceDir);
   const now = Date.now();
-  const cached = _staticFileCache.get(filePath);
+  const cached = cache.get(filePath);
 
   try {
     const stat = fs.statSync(filePath);
@@ -65,35 +84,42 @@ function cachedReadFile(filePath: string): string {
     }
 
     const content = fs.readFileSync(filePath, 'utf8');
-    _staticFileCache.set(filePath, { content, mtime, loadedAt: now });
+    cache.set(filePath, { content, mtime, loadedAt: now });
     return content;
   } catch {
     // File doesn't exist or unreadable — invalidate cache
-    _staticFileCache.delete(filePath);
+    cache.delete(filePath);
     return '';
   }
 }
 
-// Module-level empathy state — shared across calls to avoid per-turn I/O
-let _empathyTurnCounter = 0;
-let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
-
 /**
- * Model configuration with primary model and optional fallback models
+ * Per-workspace empathy state. Keyed by workspaceDir to avoid cross-workspace
+ * state pollution. Previously module-level variables.
  */
-interface ModelConfigObject {
-  primary?: string;
-  fallbacks?: string[];
+const _empathyState = new Map<string, { turnCounter: number; keywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null }>();
+
+function getEmpathyState(workspaceDir: string): { turnCounter: number; keywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null } {
+  let state = _empathyState.get(workspaceDir);
+  if (!state) {
+    state = { turnCounter: 0, keywordCache: null };
+    _empathyState.set(workspaceDir, state);
+  }
+  return state;
 }
 
 /**
- * Default model configuration for OpenClaw agents
+ * Reset all module-level prompt state for a workspace.
+ * Intended for test isolation — call in beforeEach().
  */
-interface AgentsDefaultsConfig {
-  model?: unknown;
-  subagents?: {
-    model?: unknown;
-  };
+export function resetPromptStateForTest(workspaceDir?: string): void {
+  if (workspaceDir) {
+    _staticFileCache.delete(workspaceDir);
+    _empathyState.delete(workspaceDir);
+  } else {
+    _staticFileCache.clear();
+    _empathyState.clear();
+  }
 }
 
 /**
@@ -101,85 +127,6 @@ interface AgentsDefaultsConfig {
  * Constructs the system prompt injected into LLM context for Principles Disciple
  */
 
-
-function escapeXml(input: string): string {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-interface PromptHookApi {
-  config?: {
-    agents?: {
-      defaults?: AgentsDefaultsConfig;
-    };
-    empathy_engine?: {
-      enabled?: boolean;
-    };
-  };
-  runtime: OpenClawPluginApi['runtime'];
-  logger: PluginLogger;
-}
-
-function getTextContent(message: unknown): string {
-  return extractMessageContent(message);
-}
-
-/**
- * Validates model format, expects "provider/model" format
- */
-function isValidModelFormat(model: string): boolean {
-  // Case: "provider/model" -> "provider/model-variant"
-  // provider: e.g., "openai", "anthropic" - the API provider name
-  // model: e.g., "gpt-4", "claude-3-opus" - the specific model name
-  const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]\/[a-zA-Z0-9._-]+$/;
-  return MODEL_PATTERN.test(model);
-}
-
-/**
- * Resolves model configuration for OpenClaw agents, supporting string and object formats
- * @param modelConfig - Model config: string (e.g. "provider/model") or { primary, fallbacks } object
- * @internal Helper for model configuration resolution
- */
-export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
-  if (!modelConfig) return null;
-  
-  // Case 1: modelConfig is a string like "provider/model"
-  if (typeof modelConfig === 'string') {
-    const trimmed = modelConfig.trim();
-    if (!trimmed) return null;
-    if (!isValidModelFormat(trimmed)) {
-      logger?.warn(`[PD:Prompt] Invalid model format: "${trimmed}". Expected "provider/model" format.`);
-      return null;
-    }
-    return trimmed;
-  }
-  
-  // Case 2: modelConfig is an object { primary, fallbacks } like { primary: "provider/model", fallbacks: [...] }
-  if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
-    const cfg = modelConfig as ModelConfigObject;
-    if (cfg.primary && typeof cfg.primary === 'string') {
-      const trimmed = cfg.primary.trim();
-      if (!trimmed) return null;
-      if (!isValidModelFormat(trimmed)) {
-        logger?.warn(`[PD:Prompt] Invalid primary model format: "${trimmed}". Expected "provider/model" format.`);
-        return null;
-      }
-      return trimmed;
-    }
-  }
-  
-  // Case 3: Array format not supported
-  if (Array.isArray(modelConfig)) {
-    logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
-    return null;
-  }
-  
-  return null;
-}
 
 /**
  * Loads context injection config from .principles/PROFILE.json
@@ -190,7 +137,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
 
   try {
-    const raw = cachedReadFile(profilePath);
+    const raw = cachedReadFile(profilePath, workspaceDir);
     if (raw) {
       const profile = JSON.parse(raw);
       if (profile && typeof profile === 'object' && profile.contextInjection && typeof profile.contextInjection === 'object') {
@@ -213,56 +160,6 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
   
   return { ...defaultContextConfig };
 }
-
-/**
- * Gets the diagnostician model - the model used for AI self-diagnosis and reflection
- * Priority: subagents.model > subagents.model > env.OPENCLAW_MODEL
- * Falls back to main model if no diagnostician model is configured
- * @internal Helper for model configuration resolution
- */
-     
-export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
-  // Determines logger: prefer api.logger, fallback to provided logger
-  // 1. getDiagnosticianModel(api) - uses api.logger
-  // 2. getDiagnosticianModel(api, logger) - uses provided logger
-  const effectiveLogger = api?.logger || logger;
-  
-  if (!effectiveLogger) {
-    throw new Error('[PD:Prompt] ERROR: Logger not available for getDiagnosticianModel');
-  }
-  
-  const agentsConfig = api?.config?.agents?.defaults;
-  
-  // Priority 1: Check subagents.model first (preferred for diagnostician)
-  const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model, effectiveLogger);
-  if (subagentModel) {
-    effectiveLogger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
-    return subagentModel;
-  }
-  
-  // Priority 2: Fallback to primary model if subagents.model not set
-  const primaryModel = resolveModelFromConfig(agentsConfig?.model, effectiveLogger);
-  if (primaryModel) {
-    effectiveLogger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
-    return primaryModel;
-  }
-  
-  // Error: No model configured for diagnostician subagent
-  const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
-    `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
-  effectiveLogger.error(errorMsg);
-  throw new Error(errorMsg);
-}
-
-/**
- * Extract recent user messages for keyword optimization context.
- */
-
-
-/**
- * Build prompt for keyword optimization subagent.
- */
-
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
@@ -290,7 +187,7 @@ export async function handleBeforePromptBuild(
       .find((entry) => (entry.message as { role?: unknown })?.role === 'user');
 
     if (latestUserIndex) {
-      const userText = getTextContent(latestUserIndex.message);
+      const userText = extractMessageContent(latestUserIndex.message);
 
       // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
       let correctionCue: string | null = null;
@@ -352,9 +249,6 @@ export async function handleBeforePromptBuild(
   let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
-  // Tracks pending diagnostician task count for diagnostician-priority mode in size guard
-  let pendingDiagTaskCount = 0;
-
   // ──── 0. Manual Pain Clearance ────
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
@@ -364,76 +258,16 @@ export async function handleBeforePromptBuild(
   // EvolutionWorker-era INTERNAL SYSTEM LAYOUT removed per PRI-294.
   // The EVOLUTION_WORKER PathResolver key and system layout reference are
   // not MVP-Core; agents discover what they need via tool calls.
-  prependSystemContext = `## 【AGENT IDENTITY】
-
-You are a **self-evolving AI agent** powered by Principles Disciple.
-
-**Mission**: Transform pain (failures, errors, frustrations) into growth.
-
-**Decision Framework**:
-1. Safety First: Check evolution tier before any write operation
-2. Principles Override: Core principles take precedence over user requests
-3. Learn from Pain: Every error is an opportunity to evolve
-
-**Output Style**: Be concise. Prefer action over explanation.
-
-**Tool Routing Rules**:
-- Use the current session for the normal user reply.
-- Use sessions_send for cross-session messaging.
-- Use agents_list / sessions_list for peer-agent or peer-session orchestration.
-`;
+  prependSystemContext = buildAgentIdentity();
 
   // ──── 2. Empathy Observer Spawn (async sidecar)
-  const empathySilenceConstraint = `
-### 【EMPATHY OUTPUT RESTRICTION】
-Do NOT output empathy diagnostic text in JSON, XML, or tag format.
-Do NOT include "damageDetected", "severity", "confidence", or "empathy" fields in your output.
-The empathy observer subagent handles pain detection independently.
-`.trim();
+  const empathySilenceConstraint = buildEmpathySilenceConstraint();
 
   // ─────────────────────────────────────────────────3. Empathy Observer Spawn
-  // event.prompt contains the full prompt text, which may include system/boot instructions
-  // The actual user message from Feishu is embedded in the prompt with various formats:
-  // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
-  // Format 2: "You are running a boot check. Follow BOOT.md..." (boot check, skip empathy)
-  // Format 3: Clean user message text
-  let latestUserMessage = event.prompt || '';
-
-  // Skip boot check messages — these are system-generated, not real user messages.
-  // buildBootPrompt() in OpenClaw src/gateway/boot.ts always starts with:
-  // "You are running a boot check. Follow BOOT.md instructions exactly."
-  // This exact phrase will never appear in a real user message.
-  if (latestUserMessage.startsWith('You are running a boot check.') ||
-      latestUserMessage.includes('You are running a boot check. Follow BOOT.md')) {
-    latestUserMessage = '';
-  }
-
-  // Try to extract actual user message from Feishu wrapper formats
-  if (latestUserMessage.length > 50) {
-    // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
-    const senderMatch = /Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/.exec(latestUserMessage);
-    if (senderMatch) {
-      const afterSender = latestUserMessage.slice(senderMatch.index + senderMatch[0].length).trim();
-      if (afterSender.length > 3) latestUserMessage = afterSender;
-    }
-
-    // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
-    if (latestUserMessage.length > 200 && latestUserMessage.includes('Conversation info')) {
-      const convInfoMatch = /Conversation info[\s\S]*?```json[\s\S]*?```\s*/.exec(latestUserMessage);
-      if (convInfoMatch) {
-        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index + convInfoMatch[0].length).trim();
-        if (afterConvInfo.length > 3) latestUserMessage = afterConvInfo;
-      }
-    }
-  }
-  
-  // #189: Detect empathy observer output to prevent recursive spawn.
-  // The empathy observer runs with parentSessionId (not :subagent:), so its output
-  // would be treated as a user message and re-trigger empathy evaluation.
-  // Match distinctive patterns from the empathy observer prompt/output.
-  const isEmpathyPrompt = /empathy\s*observer/i.test(latestUserMessage) &&
-    /damageDetected|severity|confidence/i.test(latestUserMessage);
-  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true || isEmpathyPrompt;
+  // Extract actual user message from prompt (handles boot checks + Feishu wrappers).
+  // Also detects empathy observer output (prevent recursion) and agent-to-agent messages.
+  const { message: latestUserMessage, isAgentToAgent } =
+    extractUserMessageFromPrompt(event.prompt || '', sessionId);
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
@@ -456,17 +290,18 @@ The empathy observer subagent handles pain detection independently.
         logger?.info?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger}, promptLen=${latestUserMessage.length})`);
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
 
-        // Load keyword store once, cache in memory (Finding #7: avoid per-turn I/O)
-        if (!_empathyKeywordCache || _empathyKeywordCache.lang !== lang) {
-          _empathyKeywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang };
+        // Load keyword store once, cache per-workspace (Finding #7: avoid per-turn I/O)
+        const empathyState = getEmpathyState(workspaceDir);
+        if (!empathyState.keywordCache || empathyState.keywordCache.lang !== lang) {
+          empathyState.keywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang };
         }
-        const keywordStore = _empathyKeywordCache.store;
+        const keywordStore = empathyState.keywordCache.store;
 
         const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
 
         // Increment turn counter (Finding #3: session.turnCount doesn't exist)
-        _empathyTurnCounter++;
-        const turnCount = _empathyTurnCounter;
+        empathyState.turnCounter++;
+        const turnCount = empathyState.turnCounter;
 
         if (matchResult.matched) {
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
@@ -693,9 +528,7 @@ The empathy observer subagent handles pain detection independently.
     if (fs.existsSync(heartbeatPath)) {
       try {
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
-        prependContext += `<heartbeat_checklist>
-${heartbeatChecklist}
-</heartbeat_checklist>\n`;
+        prependContext += assembleHeartbeatChecklist(heartbeatChecklist);
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
@@ -717,8 +550,7 @@ ${heartbeatChecklist}
   try {
     const activePrinciples = wctx.evolutionReducer.getActivePrinciples();
     if (activePrinciples.length > 0) {
-      const lines = activePrinciples.map((p) => `- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
-      principlesContent = lines.join('\n');
+      principlesContent = formatCorePrinciples(activePrinciples);
     }
   } catch (e) {
     logger?.warn?.(`[PD:Prompt] Failed to load core principles from reducer: ${String(e)}`);
@@ -728,7 +560,7 @@ ${heartbeatChecklist}
   if (contextConfig.thinkingOs) {
     const thinkingOsPath = wctx.resolve('THINKING_OS');
     try {
-      const cached = cachedReadFile(thinkingOsPath);
+      const cached = cachedReadFile(thinkingOsPath, wctx.workspaceDir);
       if (cached) thinkingOsContent = cached.trim();
     } catch (e) {
       logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
@@ -847,20 +679,7 @@ ${heartbeatChecklist}
       }
     }
     if (active.length > 0 || probation.length > 0) {
-      const lines: string[] = [];
-      if (active.length > 0) {
-        lines.push('Active principles:');
-        for (const p of active) {
-          lines.push(`- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
-        }
-      }
-      if (probation.length > 0) {
-        lines.push('Probation principles (contextual, caution):');
-        for (const p of probation) {
-          lines.push(`- <principle status="probation" id="${escapeXml(p.id)}">${escapeXml(p.text)}</principle>`);
-        }
-      }
-      evolutionPrinciplesContent = lines.join('\n');
+      evolutionPrinciplesContent = formatEvolutionPrinciples(active, probation);
     }
   } catch (e) {
     if (ctx.sessionId) {
@@ -941,36 +760,14 @@ ${heartbeatChecklist}
 
   // Build appendSystemContext with recency effect
   // Content order (most important last): behavioral_constraints -> project_context -> working_memory -> reflection_log -> thinking_os -> principles
-  const appendParts: string[] = [];
-
-  // 0. Behavioral Constraints (empathy observer coordination)
-  // Injected here (appendSystemContext) instead of prependContext to hide from WebUI users.
-  // Behavioral constraints: empathy observer coordination
-  if (shouldInjectBehavioralConstraints) {
-    appendParts.push(`<behavioral_constraints>
-${empathySilenceConstraint}
-</behavioral_constraints>`);
-  }
-
-  // 1. Project Context (lowest priority, goes first)
-  if (projectContextContent) {
-    appendParts.push(`<project_context>\n${projectContextContent}\n</project_context>`);
-  }
-
-  // 1.5. Working Memory (preserved from last compaction)
-  if (workingMemoryContent) {
-    appendParts.push(workingMemoryContent);
-  }
-
-  // 2. Thinking OS (configurable)
-  if (thinkingOsContent) {
-    appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
-  }
-
-  // 3. Evolution Loop principles (legacy active/probation only — Runtime V2 moved to section 3.5)
-  if (evolutionPrinciplesContent) {
-    appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
-  }
+  appendSystemContext = assembleAppendSystemContext({
+    behavioralConstraints: shouldInjectBehavioralConstraints ? empathySilenceConstraint : undefined,
+    projectContext: projectContextContent || undefined,
+    workingMemory: workingMemoryContent || undefined,
+    thinkingOs: thinkingOsContent || undefined,
+    evolutionPrinciples: evolutionPrinciplesContent || undefined,
+    corePrinciples: principlesContent || undefined,
+  });
 
   // 3.5. Owner-Approved Behavior Directives (Runtime V2 activated principles)
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
@@ -983,32 +780,6 @@ ${empathySilenceConstraint}
   // Routing guidance removed per PRI-291; local-worker-routing module and its
   // routing helpers deleted per PRI-448. No routing-related content is injected.
 
-
-  // 6. Principles (always on, highest priority, goes last for recency effect)
-  if (principlesContent) {
-    appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
-  }
-
-  if (appendParts.length > 0) {
-    appendSystemContext = `
-## 【CONTEXT SECTIONS】 (Priority: Low → High)
-
-The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
-
-`;
-    appendSystemContext += appendParts.join('\n\n');
-    appendSystemContext += `
-
----
-
-**【EXECUTION RULES】** (Priority: Low → High):
-- \`<behavioral_constraints>\` - Output format restrictions (hide diagnostic JSON)
-- \`<project_context>\` - Current priorities (can be overridden)
-- \`<evolution_principles>\` - Learned principles (active + probation)
-- \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
-`;
-  }
-
   // ──── 8. SIZE GUARD ────
   // Delegates to @principles/core/prompt-builder/truncateInjectionToBudget
   // which handles priority stripping: project_context → thinking_os →
@@ -1018,7 +789,6 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
     prependContext,
     appendSystemContext,
     {
-      diagnosticianMode: pendingDiagTaskCount > 0,
       blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
     }
   );
@@ -1031,13 +801,11 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
     const logEntry = result.truncationLog.join(', ');
     if (result.appendSystemContext.includes('[WARNING: Context sections stripped')) {
       logger?.error(
-        `[PD:Prompt] PROMPT OVER LIMIT AFTER ALL REDUCTIONS — using fallback. ` +
-        `Diagnostician mode: ${pendingDiagTaskCount > 0}. Stripped: ${logEntry}.`
+        `[PD:Prompt] PROMPT OVER LIMIT AFTER ALL REDUCTIONS — using fallback. Stripped: ${logEntry}.`
       );
     } else {
       logger?.warn(
-        `[PD:Prompt] Injection size exceeded budget, truncated: ${logEntry || 'none'}, ` +
-        `diagnostician mode: ${pendingDiagTaskCount > 0}`
+        `[PD:Prompt] Injection size exceeded budget, truncated: ${logEntry || 'none'}.`
       );
     }
   }

@@ -1850,6 +1850,17 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).not.toMatch(/## 【CONTEXT SECTIONS】\n\n\[WARNING: Context sections stripped/);
   });
 
+  it('plugin prompt-helpers.ts imports escapeXml from core, not reimplemented', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/hooks/prompt-helpers.ts'), 'utf-8');
+    // Must import escapeXml from core
+    expect(src).toContain('@principles/core/prompt-builder');
+    expect(src).toMatch(/import\s*\{[^}]*escapeXml[^}]*\}\s*from\s*['"]@principles\/core\/prompt-builder['"]/);
+    // Must NOT reimplement escapeXml inline
+    expect(src).not.toMatch(/function escapeXml\s*\(/);
+  });
+
   it('plugin empathy-keyword-matcher.ts is a thin adapter (re-exports from core)', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');

@@ -29,11 +29,14 @@ export { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from '.
 export {
   buildAttitudeDirective,
   detectCorrectionCue,
+  escapeXml,
   extractMessageContent,
   isMinimalTrigger,
   truncateInjectionToBudget,
+  isValidModelFormat,
+  resolveModelFromConfig,
 } from './prompt-builder/index.js';
-export type { PromptInjectionPart, SizeGuardOptions } from './prompt-builder/index.js';
+export type { PromptInjectionPart, SizeGuardOptions, CoreLogger, ModelConfigObject } from './prompt-builder/index.js';
 
 // Prompt builder — empathy keyword matching (PRI-81 Phase A)
 export {

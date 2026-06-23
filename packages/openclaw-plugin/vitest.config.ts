@@ -30,7 +30,6 @@ export const integrationTests = [
   'tests/service/evolution-worker.timeout.test.ts',
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies
-  'tests/hooks/subagent.test.ts',
   'tests/hooks/gate-rule-host-pipeline.test.ts',
   // Script tests with DB
   'tests/scripts/validate-live-path.test.ts',
