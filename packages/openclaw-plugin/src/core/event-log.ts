@@ -9,7 +9,8 @@ import type {
   EmpathyEventStats,
   ToolCallEventData,
   PainSignalEventData,
-  RuleMatchEventData,
+  // RuleMatchEventData import removed (PRI-451 Wave 1.5): the rule_match handler
+  // that consumed it is gone (recordRuleMatch deleted in Wave 1.1).
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
@@ -51,7 +52,8 @@ export class EventLog {
   private currentEventsFile: string | undefined;
   private currentDate: string | undefined;
 
-  private readonly painScoreSums: Map<string, number> = new Map();
+  // painScoreSums map removed (PRI-451 Wave 1.5): it only fed the dead
+  // stats.pain.avgScore counter, which is also removed.
 
   constructor(stateDir: string, logger?: PluginLogger) {
     this.logsDir = path.join(stateDir, 'logs');
@@ -370,18 +372,8 @@ export class EventLog {
       }
     } else if (entry.type === 'pain_signal') {
       const data = entry.data as unknown as PainSignalEventData;
-      stats.pain.signalsDetected++;
-      stats.pain.maxScore = Math.max(stats.pain.maxScore, data.score);
-
-      if (data.source) {
-        stats.pain.signalsBySource[data.source] = (stats.pain.signalsBySource[data.source] || 0) + 1;
-      }
-
-      const currentSum = this.painScoreSums.get(entry.date) ?? 0;
-      this.painScoreSums.set(entry.date, currentSum + (data.score || 0));
-      stats.pain.avgScore = stats.pain.signalsDetected > 0
-        ? Math.round((currentSum + (data.score || 0)) / stats.pain.signalsDetected)
-        : 0;
+      // stats.pain.* counters removed (PRI-451 Wave 1.5): no live reader.
+      // The user_empathy aggregation below (stats.empathy.*) is LIVE and stays.
 
       if (data.source === 'user_empathy') {
         if (data.deduped) {
@@ -433,13 +425,12 @@ export class EventLog {
       const data = entry.data as unknown as EmpathyRollbackEventData;
       stats.empathy.rollbackCount++;
       stats.empathy.rolledBackScore += data.originalScore || 0;
-    } else if (entry.type === 'rule_match') {
-      const data = entry.data as unknown as RuleMatchEventData;
-      if (data.ruleId) {
-        stats.pain.rulesMatched[data.ruleId] = (stats.pain.rulesMatched[data.ruleId] || 0) + 1;
-      }
-    } else if (entry.type === 'rule_promotion') {
-      stats.pain.candidatesPromoted++;
+    }
+    // rule_match handler removed (PRI-451 Wave 1.5): recordRuleMatch is gone
+    // (Wave 1.1), so no rule_match events are emitted; stats.pain.rulesMatched
+    // was its only consumer and is also removed.
+    else if (entry.type === 'rule_promotion') {
+      // stats.pain.candidatesPromoted removed (PRI-451 Wave 1.5): dead counter.
       stats.evolution.rulesPromoted++;
     } else if (entry.type === 'evolution_task') {
       if (entry.category === 'completed') {
