@@ -871,9 +871,9 @@ function copyDir(src, dest) {
 }
 
 /**
- * Inject local workspace packages (monorepo) into node_modules before npm install.
- * @principles/core is a workspace package, not published to npm — we must copy it
- * from the monorepo's node_modules so npm install --production doesn't 404 it.
+ * Inject local workspace packages (monorepo) into node_modules after npm install.
+ * @principles/core from the local monorepo is authoritative because the
+ * npm-published package line lacks exports required by the current pd-cli.
  */
 function injectLocalWorkspacePackages() {
     const monorepoModules = join(SOURCE_DIR, '..', '..', 'node_modules', '@principles', 'core');
@@ -885,24 +885,25 @@ function injectLocalWorkspacePackages() {
     }
 
     console.log('  📦 Injecting local workspace packages (@principles/core)...');
-    mkdirSync(dirname(targetModules), { recursive: true });
-    // cpSync creates symlinks on Windows for symlinked dirs — use cp -rL (dereference) via exec
-    let injected = false;
-    try {
-        execSync(`cp -rL "${monorepoModules}" "${targetModules}"`, { stdio: 'ignore' });
-        injected = true;
-    } catch {
-        // Fallback: manual copy via node (Windows-compatible)
-        try {
-            copyDir(monorepoModules, targetModules);
-            injected = true;
-        } catch (copyErr) {
-            console.warn('  ⚠️ Failed to inject @principles/core from monorepo: ' + copyErr.message);
-            console.warn('  ⚠️ npm install --production may fail if @principles/core is not published');
-        }
+
+    // Remove the target FIRST, because cp -rL on Windows copies the source
+    // directory INTO the existing target, creating a nested core/core/ that
+    // leaves the original npm-version package.json untouched. We must start
+    // with a clean slate so the local version is authoritative.
+    if (existsSync(targetModules)) {
+        rmSync(targetModules, { recursive: true, force: true });
     }
-    if (injected && !existsSync(targetModules)) {
-        console.warn('  ⚠️ Injection reported success but target not found: ' + targetModules);
+
+    mkdirSync(dirname(targetModules), { recursive: true });
+    // Use copyDir (Node-based, no cp -rL semantics trap) for reliable
+    // cross-platform overwrite. cpSync creates symlinks on Windows for
+    // symlinked dirs — copyDir dereferences by reading file contents.
+    try {
+        copyDir(monorepoModules, targetModules);
+        console.log('    ✅ @principles/core local build injected');
+    } catch (copyErr) {
+        console.warn('  ⚠️ Failed to inject @principles/core from monorepo: ' + copyErr.message);
+        console.warn('  ⚠️ npm version remains in place — pd-cli may fail if exports differ');
     }
 }
 
@@ -1309,8 +1310,18 @@ function main() {
     syncFilteredManifest(args.lang);
     syncPdCli();
 
-    injectLocalWorkspacePackages();
+    // IMPORTANT: npm install must run FIRST, then injectLocalWorkspacePackages
+    // overwrites @principles/core with the local monorepo version.
+    //
+    // Why: @principles/core on npm (v1.164.0-1.174.0, from a different publish
+    // line) is semantically "^1.74.1"-compatible but its exports field does NOT
+    // include ./principle-tree-ledger that pd-cli/health.js requires. The npm
+    // registry version must never be used — only the local monorepo build has
+    // the correct exports. Injecting BEFORE npm install is useless because npm
+    // overwrites the injected copy. The authoritative source is always the
+    // local monorepo, applied AFTER npm install.
     installTargetDependencies();
+    injectLocalWorkspacePackages();
     verifyInjectedWorkspaceDeps();
     verifyPdCliShim();
 
