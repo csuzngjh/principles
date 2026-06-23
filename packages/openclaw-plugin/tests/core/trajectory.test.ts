@@ -423,6 +423,112 @@ describe('TrajectoryDatabase', () => {
 
       db.dispose();
     });
+
+    // PRI-406 regression tests — canonical_pain_id UNIQUE constraint edge cases
+    it('handles empty canonicalPainId string gracefully (treated as null)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Empty string canonicalPainId should be treated as null/undefined
+      const id = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'test',
+        origin: 'test',
+        canonicalPainId: '',
+      });
+
+      expect(id).toBeGreaterThan(0);
+      db.dispose();
+    });
+
+    it('handles whitespace-only canonicalPainId gracefully', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const id = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'test',
+        origin: 'test',
+        canonicalPainId: '   ',
+      });
+
+      expect(id).toBeGreaterThan(0);
+      db.dispose();
+    });
+
+    it('preserves original score and reason on UNIQUE constraint violation', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-preserve';
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'original reason',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+
+      // Second insert with different score/reason should NOT update those fields
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 90,
+        reason: 'new reason',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+      });
+
+      const queryResult = (db as any).db.prepare(
+        'SELECT score, reason FROM pain_events WHERE canonical_pain_id = ?'
+      ).get(canonicalId);
+
+      // Original values should be preserved (not updated)
+      expect(queryResult.score).toBe(50);
+      expect(queryResult.reason).toBe('original reason');
+
+      db.dispose();
+    });
+
+    it('handles concurrent UNIQUE constraint violations safely', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-concurrent';
+
+      // Simulate concurrent inserts with same canonicalPainId
+      const id1 = db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'first',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: 'task-1',
+      });
+
+      const id2 = db.recordPainEvent({
+        sessionId: 's2',
+        source: 'test',
+        score: 60,
+        reason: 'second',
+        origin: 'test',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: 'task-2',
+      });
+
+      // Both should succeed and return the same ID
+      expect(id1).toBeGreaterThan(0);
+      expect(id2).toBe(id1);
+
+      db.dispose();
+    });
   });
 
   describe('trajectory v2 enhancement fields', () => {
