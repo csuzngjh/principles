@@ -120,7 +120,7 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principles_list_error', (err as Error).message);
+      sendError(res, 500, 'principles_list_error', err instanceof Error ? err.message : String(err));
     }
     return;
   }
@@ -129,6 +129,10 @@ export async function handlePrinciplesRoute({
   const trajectoryMatch = /^\/([^/]+)\/trajectory$/.exec(subPath);
   if (trajectoryMatch) {
     const [, rawPrincipleId] = trajectoryMatch;
+    if (!rawPrincipleId) {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+      return;
+    }
     let decodedPrincipleId: string;
     try {
       decodedPrincipleId = decodeURIComponent(rawPrincipleId);
@@ -154,6 +158,10 @@ export async function handlePrinciplesRoute({
   const detailMatch = /^\/([^/]+)$/.exec(subPath);
   if (detailMatch) {
     const [, principleId] = detailMatch;
+    if (!principleId) {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+      return;
+    }
     try {
       const result = await model.getPrincipleDetail(principleId);
       if (!result) {
@@ -162,7 +170,7 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principle_detail_error', (err as Error).message);
+      sendError(res, 500, 'principle_detail_error', err instanceof Error ? err.message : String(err));
     }
     return;
   }

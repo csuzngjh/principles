@@ -674,7 +674,7 @@ export function recoverFromTemplate(
 
     let template = fs.readFileSync(templatePath, 'utf-8');
 
-    const [today] = new Date().toISOString().split('T');
+    const today = new Date().toISOString().split('T')[0] ?? '';
     template = template.replace(/{YYYY-MM-DD}/g, today);
 
     if (fs.existsSync(focusPath)) {

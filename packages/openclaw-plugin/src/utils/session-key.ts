@@ -12,6 +12,8 @@ export function extractAgentIdFromSessionKey(sessionKey: string | undefined): st
     if (!sessionKey) return undefined;
     const match = /^agent:([^:]+):/.exec(sessionKey);
     if (!match) return undefined;
-    const agentId = match[1].trim();
+    const raw = match[1];
+    if (!raw) return undefined;
+    const agentId = raw.trim();
     return agentId || undefined;
 }

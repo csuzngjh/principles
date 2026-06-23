@@ -71,7 +71,7 @@ export class EventLog {
   }
 
   private getTodayStr(): string {
-    return new Date().toISOString().split('T')[0];
+    return new Date().toISOString().split('T')[0] ?? '';
   }
 
   private ensureEventsFile(): string {
@@ -334,7 +334,7 @@ export class EventLog {
   }
 
   private formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
+    return date.toISOString().split('T')[0] ?? '';
   }
 
   private loadStats(): void {
@@ -423,9 +423,12 @@ export class EventLog {
         if (!stats.hooks.byType[data.hook]) {
           stats.hooks.byType[data.hook] = { total: 0, success: 0, failure: 0 };
         }
-        stats.hooks.byType[data.hook].total++;
-        if (entry.category === 'success') stats.hooks.byType[data.hook].success++;
-        else stats.hooks.byType[data.hook].failure++;
+        const hookStats = stats.hooks.byType[data.hook];
+        if (hookStats) {
+          hookStats.total++;
+          if (entry.category === 'success') hookStats.success++;
+          else hookStats.failure++;
+        }
       }
     } else if (entry.type === 'empathy_rollback') {
       const data = entry.data as unknown as EmpathyRollbackEventData;
@@ -453,14 +456,14 @@ export class EventLog {
     } else if (entry.type === 'diagnostician_report') {
       const raw = entry.data as unknown as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(raw, 'category')) {
-        const cat = raw['category'] as string;
-        if (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields') {
+        const cat = raw['category'];
+        if (typeof cat === 'string' && (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields')) {
           stats.evolution.diagnosticianReportsWritten++;
         }
-        if (cat === 'missing_json') {
+        if (typeof cat === 'string' && cat === 'missing_json') {
           stats.evolution.reportsMissingJson++;
         }
-        if (cat === 'incomplete_fields') {
+        if (typeof cat === 'string' && cat === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
       } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {
@@ -729,6 +732,7 @@ export class EventLog {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
       const entry = allEvents[i];
+      if (!entry) continue;
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if (data.source === 'user_empathy' && !data.deduped) {
@@ -744,6 +748,7 @@ export class EventLog {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
       const entry = allEvents[i];
+      if (!entry) continue;
       if (entry.sessionId === sessionId && entry.type === "pain_signal") {
         return entry.data as unknown as PainSignalEventData;
       }

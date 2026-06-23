@@ -518,14 +518,15 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
       });
 
       const tgzFiles = readdirSync(tmpDir).filter(f => f.endsWith('.tgz'));
-      if (tgzFiles.length === 0) {
+      const [tgzFile] = tgzFiles;
+      if (!tgzFile) {
         logger.info('No npm tarball found, keeping bundled version.');
         return;
       }
 
       const extractDir = path.join(tmpDir, 'extracted');
       mkdirSync(extractDir, { recursive: true });
-      execSync(`tar -xzf "${path.join(tmpDir, tgzFiles[0])}" -C "${extractDir}"`, {
+      execSync(`tar -xzf "${path.join(tmpDir, tgzFile)}" -C "${extractDir}"`, {
         encoding: 'utf-8',
         timeout: 15_000,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -739,7 +740,11 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
   for (let p = CONSOLE_PORT_RANGE_MIN; p <= CONSOLE_PORT_RANGE_MAX; p++) portRange.push(p);
   for (let i = portRange.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [portRange[i], portRange[j]] = [portRange[j], portRange[i]];
+    const a = portRange[i];
+    const b = portRange[j];
+    if (a === undefined || b === undefined) continue;
+    portRange[i] = b;
+    portRange[j] = a;
   }
   const portsToTry = portRange.slice(0, CONSOLE_PORT_MAX_RETRIES);
 

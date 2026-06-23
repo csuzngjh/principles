@@ -358,6 +358,9 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
     const sharedIds = ['flood-stress-shared-A', 'flood-stress-shared-B', 'flood-stress-shared-C'];
     for (let i = 0; i < stressDupCount; i++) {
       const sharedId = sharedIds[i % sharedIds.length];
+      if (!sharedId) {
+        throw new Error('sharedIds array is empty; cannot generate duplicate pain ID');
+      }
       stressSignals.push({
         painId: sharedId,
         painType: 'tool_failure',
@@ -374,8 +377,9 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
     const recommendedNextIssue = recommendFloodNextIssue(stages);
 
     const failedStages = stages.filter(s => s.status === 'failed');
-    const reason = failedStages.length > 0
-      ? truncateReason(`${failedStages.length} scenario(s) failed: ${failedStages.map(s => s.scenarioName).join(', ')}. ${failedStages[0].reason ?? 'unknown reason'}`)
+    const [firstFailedStage] = failedStages;
+    const reason = failedStages.length > 0 && firstFailedStage
+      ? truncateReason(`${failedStages.length} scenario(s) failed: ${failedStages.map(s => s.scenarioName).join(', ')}. ${firstFailedStage.reason ?? 'unknown reason'}`)
       : undefined;
     const nextAction = recommendedNextIssue
       ? `Investigate: ${recommendedNextIssue}`

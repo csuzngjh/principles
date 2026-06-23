@@ -72,8 +72,10 @@ function extractCandidateDescription(contentJson: string): string | null {
   if (typeof obj.implementationCode === 'string') {
     const principleMatch = /\/\/\s*Principle:\s*(.+)/.exec(obj.implementationCode);
     const ruleMatch = /\/\/\s*Rule:\s*(.+)/.exec(obj.implementationCode);
-    const principleText = principleMatch ? principleMatch[1].trim() : null;
-    const ruleText = ruleMatch ? ruleMatch[1].trim() : null;
+    const principleRaw = principleMatch ? principleMatch[1] : undefined;
+    const ruleRaw = ruleMatch ? ruleMatch[1] : undefined;
+    const principleText = principleRaw ? principleRaw.trim() : null;
+    const ruleText = ruleRaw ? ruleRaw.trim() : null;
     if (principleText && ruleText) return `${principleText} — ${ruleText}`;
     if (ruleText) return ruleText;
     if (principleText) return principleText;

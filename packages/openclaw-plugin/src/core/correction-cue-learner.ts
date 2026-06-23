@@ -135,6 +135,7 @@ export class CorrectionCueLearner {
       const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
       if (keywordIndex < 0) continue;
       const keyword = this.store.keywords[keywordIndex];
+      if (!keyword) continue;
       this.store.keywords[keywordIndex] = {
         ...keyword,
         hitCount: (keyword.hitCount ?? 0) + 1,

@@ -16,7 +16,7 @@
  * See: .trae/skills/pd-openclaw-e2e/SKILL.md for full design.
  */
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, cpSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +90,40 @@ const E2E_WS_BASE = join(ROOT, 'tests/e2e-workspace');
 const EVIDENCE_DIR = join(ROOT, 'evidence');
 const OPENCLAW_WORKSPACE = process.env.OPENCLAW_WORKSPACE_DIR || 'D:\\.openclaw\\workspace';
 
+// Resolve the openclaw executable for spawnSync.
+// On Windows, `openclaw` is a .cmd wrapper — spawnSync with shell:false cannot execute it.
+// We resolve the actual .mjs entry point so we can bypass cmd.exe entirely,
+// avoiding newline/quoting breakage in --message values.
+let OPENCLAW_BIN = 'openclaw'; // fallback for shell:true or Unix
+const OPENCLAW_CMD_PATH = process.platform === 'win32'
+  ? execSync('npm prefix -g', { encoding: 'utf-8' }).trim()
+  : null;
+if (OPENCLAW_CMD_PATH) {
+  const candidate = join(OPENCLAW_CMD_PATH, 'node_modules', 'openclaw', 'openclaw.mjs');
+  if (existsSync(candidate)) {
+    OPENCLAW_BIN = candidate;
+  }
+}
+
+/**
+ * Run `openclaw agent` via spawnSync, bypassing cmd.exe on Windows.
+ * This avoids newline and quoting breakage in --message values.
+ */
+function openclawAgent(args, timeoutMs) {
+  const spawnArgs = process.platform === 'win32' && OPENCLAW_BIN !== 'openclaw'
+    ? [OPENCLAW_BIN, 'agent', ...args]
+    : ['agent', ...args];
+  const cmd = process.platform === 'win32' && OPENCLAW_BIN !== 'openclaw'
+    ? 'node'
+    : 'openclaw';
+  return spawnSync(cmd, spawnArgs, {
+    encoding: 'utf-8',
+    timeout: timeoutMs,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+  });
+}
+
 function sh(cmd, opts = {}) {
   try {
     return execSync(cmd, { encoding: 'utf-8', timeout: opts.timeout ?? 30000, cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -160,8 +194,9 @@ function phase1() {
     return { ok: false, error: 'Gateway unreachable. Run: openclaw gateway run --force' };
   }
 
-  // Quick agent probe
-  const probe = sh('openclaw agent --session-key "agent:main:main" --message "reply OK" --timeout 30 --json', { timeout: 45000 });
+  // Quick agent probe — use openclawAgent to avoid cmd.exe quoting issues
+  const probeProc = openclawAgent(['--session-key', 'agent:main:main', '--message', 'reply OK', '--timeout', '30', '--json'], 45000);
+  const probe = (probeProc.stdout ?? '').trim();
   if (!probe) {
     return { ok: false, error: 'Agent probe failed — no response from openclaw agent' };
   }
@@ -195,26 +230,54 @@ function phase2(ws) {
 function phase3(trap, runId, timeoutSec, ws, model) {
   const sessionKey = `agent:e2e:${runId}`;
   const prompt = trap.promptTemplate(ws);
-  const modelFlag = model ? ` --model "${model}"` : '';
-  const cmd = `openclaw agent --session-key "${sessionKey}"${modelFlag} --message "${prompt.replace(/"/g, '\\"')}" --timeout ${timeoutSec} --json`;
 
   log('3', `Driving trap with session: ${sessionKey}`);
-  const raw = sh(cmd, { timeout: (timeoutSec + 30) * 1000 });
+
+  // Use openclawAgent (spawnSync with args array) to avoid cmd.exe quoting/newline issues.
+  // cmd.exe cannot handle newlines inside double-quoted --message values,
+  // which causes the command to be truncated and the agent to receive a garbled prompt.
+  const args = ['--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json'];
+  if (model) args.push('--model', model);
+
+  const proc = openclawAgent(args, (timeoutSec + 30) * 1000);
+  const raw = (proc.stdout ?? '').trim();
 
   let result = null;
   try { result = JSON.parse(raw); } catch { /* non-JSON response */ }
 
-  const toolSummary = result?.toolSummary ?? result?.meta?.toolSummary ?? [];
-  const toolCalls = Array.isArray(toolSummary) ? toolSummary : [];
-  const failedTools = toolCalls.filter(t => t.exitCode !== 0 || t.error);
-  const sessionUsed = sessionKey;
+  // OpenClaw returns toolSummary as {calls, tools, failures} at result.meta.toolSummary.
+  // Older code expected an array — handle both formats.
+  const rawSummary = result?.toolSummary ?? result?.meta?.toolSummary ?? null;
+  let toolCalls = [];
+  let failedTools = [];
+
+  if (rawSummary && typeof rawSummary === 'object' && !Array.isArray(rawSummary)) {
+    // Object format: {calls: number, tools: string[], failures: number}
+    const callCount = typeof rawSummary.calls === 'number' ? rawSummary.calls : 0;
+    const failureCount = typeof rawSummary.failures === 'number' ? rawSummary.failures : 0;
+    const toolNames = Array.isArray(rawSummary.tools) ? rawSummary.tools : [];
+    // Reconstruct toolCalls array for backward compatibility with evidence report
+    for (let i = 0; i < callCount; i++) {
+      const isFailure = i >= callCount - failureCount;
+      toolCalls.push({
+        name: toolNames[i] ?? toolNames[0] ?? 'unknown',
+        exitCode: isFailure ? 1 : 0,
+        error: isFailure,
+      });
+    }
+    failedTools = toolCalls.filter(t => t.exitCode !== 0 || t.error);
+  } else if (Array.isArray(rawSummary)) {
+    // Legacy array format (if ever used)
+    toolCalls = rawSummary;
+    failedTools = toolCalls.filter(t => t.exitCode !== 0 || t.error);
+  }
 
   return {
     raw: raw.slice(0, 2000),
     result,
     toolCalls,
     failedTools,
-    sessionKey: sessionUsed,
+    sessionKey,
     agentResponded: !!raw,
   };
 }
@@ -222,15 +285,20 @@ function phase3(trap, runId, timeoutSec, ws, model) {
 function phase3b(trap, runId, ws, model, sessionKey) {
   if (!trap.multiTurn || !trap.followUpMessages?.length) return null;
 
-  const modelFlag = model ? ` --model "${model}"` : '';
   const followUpResults = [];
 
   for (let i = 0; i < trap.followUpMessages.length; i++) {
     const msg = trap.followUpMessages[i](ws);
-    const cmd = `openclaw agent --session-key "${sessionKey}"${modelFlag} --message "${msg.replace(/"/g, '\\"')}" --timeout 120 --json`;
 
     log('3b', `Sending follow-up ${i + 1}/${trap.followUpMessages.length}: "${msg.slice(0, 60)}..."`);
-    const raw = sh(cmd, { timeout: 150000 });
+
+    // Use openclawAgent to avoid cmd.exe quoting/newline issues on Windows
+    const args = ['--session-key', sessionKey, '--message', msg, '--timeout', '120', '--json'];
+    if (model) args.push('--model', model);
+
+    const proc = openclawAgent(args, 150000);
+
+    const raw = (proc.stdout ?? '').trim();
 
     let result = null;
     try { result = JSON.parse(raw); } catch { /* non-JSON */ }

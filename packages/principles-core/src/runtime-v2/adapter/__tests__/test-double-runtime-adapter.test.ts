@@ -472,7 +472,7 @@ describe('TestDoubleRuntimeAdapter', () => {
         inputPayload: {},
         contextItems: [],
         timeoutMs: 5000,
-        taskRef: {} as any, // Empty taskRef (no taskId)
+        taskRef: { taskId: '' }, // Empty taskId to test fallback behavior
       });
       const output = await adapter.fetchOutput(handle.runId);
       expect(output).not.toBeNull();

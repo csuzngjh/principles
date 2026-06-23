@@ -93,7 +93,7 @@ function detectCodeBlocks(text: string): Array<{ type: "code"; language: string;
     if (match.index > lastIndex) {
       parts.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
-    parts.push({ type: "code", language: match[1] || "", code: match[2].trimEnd() });
+    parts.push({ type: "code", language: match[1] || "", code: (match[2] ?? "").trimEnd() });
     lastIndex = match.index + match[0].length;
   }
 
@@ -166,28 +166,32 @@ function renderTextBlock(text: string): React.ReactNode[] {
     }
 
     if (headingMatch) {
-      const level = headingMatch[1].length;
+      const levelStr = headingMatch[1] ?? "";
+      const content = headingMatch[2] ?? "";
+      const level = levelStr.length;
       const Tag = `h${level}` as keyof React.JSX.IntrinsicElements;
       const sizeClass = level === 1 ? "text-lg" : level === 2 ? "text-base" : "text-sm";
       nodes.push(
         <Tag key={key++} className={cn("font-semibold mt-3 mb-1", sizeClass)}>
-          {renderInlineMarkdown(headingMatch[2])}
+          {renderInlineMarkdown(content)}
         </Tag>
       );
     } else if (listItemMatch) {
       inList = true;
+      const itemText = listItemMatch[1] ?? "";
       nodes.push(
         <div key={key++} className="flex items-start gap-2 ml-2">
           <span className="text-muted-foreground mt-0.5">•</span>
-          <span className="flex-1">{renderInlineMarkdown(listItemMatch[1])}</span>
+          <span className="flex-1">{renderInlineMarkdown(itemText)}</span>
         </div>
       );
     } else if (numberedItemMatch) {
       inList = true;
+      const itemText = numberedItemMatch[1] ?? "";
       nodes.push(
         <div key={key++} className="flex items-start gap-2 ml-2">
           <span className="text-muted-foreground text-xs tabular-nums">•</span>
-          <span className="flex-1">{renderInlineMarkdown(numberedItemMatch[1])}</span>
+          <span className="flex-1">{renderInlineMarkdown(itemText)}</span>
         </div>
       );
     } else if (line.trim() === "") {

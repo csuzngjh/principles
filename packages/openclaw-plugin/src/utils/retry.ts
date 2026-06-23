@@ -383,12 +383,14 @@ export function percentile(values: number[], p: number): number {
 
   // For small samples, use median to avoid overfitting
   if (n < 10) {
-    return sorted[Math.floor(n / 2)];
+    const median = sorted[Math.floor(n / 2)];
+    return median ?? 0;
   }
 
   // Standard percentile calculation (nearest-rank method)
   const rank = Math.ceil((p / 100) * n);
-  return sorted[Math.min(rank, n) - 1];
+  const result = sorted[Math.min(rank, n) - 1];
+  return result ?? 0;
 }
 
 /**
@@ -489,6 +491,9 @@ export function computeAdaptiveTimeout(
   const sorted = [...history].sort((a, b) => a - b);
   const rank = Math.ceil((p / 100) * sorted.length);
   const pValue = sorted[Math.min(rank, sorted.length) - 1];
+  if (pValue === undefined) {
+    return Math.max(minTimeoutMs, Math.min(maxTimeoutMs, fallbackMs));
+  }
   const adaptive = pValue * safetyMultiplier;
 
   return Math.max(minTimeoutMs, Math.min(maxTimeoutMs, Math.round(adaptive)));

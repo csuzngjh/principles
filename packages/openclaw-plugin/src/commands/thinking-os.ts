@@ -20,7 +20,10 @@ function getModels(wctx: WorkspaceContext): Record<string, string> {
         for (const line of lines) {
             const match = /^###\s*(T-\d+):\s*(.*)/.exec(line);
             if (match) {
-                models[match[1]] = match[2].trim();
+                const key = match[1];
+                const value = match[2];
+                if (key === undefined || value === undefined) continue;
+                models[key] = value.trim();
             }
         }
     } catch (e) {

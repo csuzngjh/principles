@@ -258,8 +258,11 @@ describe('findV1ArtificerArtifacts (integration with real DB)', () => {
 
     const targets = findV1ArtificerArtifacts(db);
     expect(targets).toHaveLength(1);
-    expect(targets[0].approvalCount).toBe(2);
-    expect(targets[0].activationCount).toBe(1);
+    const [target] = targets;
+    expect(target).toBeDefined();
+    if (!target) throw new Error('expected target');
+    expect(target.approvalCount).toBe(2);
+    expect(target.activationCount).toBe(1);
   });
 
   it('skips artifacts with corrupted content_json (does not delete)', async () => {
@@ -335,7 +338,10 @@ describe('handleLegacyCleanup — V1 artifact cleanup (integration)', () => {
     expect(result.status).toBe('ok');
     expect(result.mode).toBe('dry-run');
     expect(result.v1Artifacts).toHaveLength(1);
-    expect(result.v1Artifacts[0].artifactId).toBe('art-v1');
+    const [v1Artifact] = result.v1Artifacts;
+    expect(v1Artifact).toBeDefined();
+    if (!v1Artifact) throw new Error('expected v1 artifact');
+    expect(v1Artifact.artifactId).toBe('art-v1');
     expect(result.appliedV1Artifacts).toBe(0);
     expect(result.appliedApprovals).toBe(0);
     expect(result.appliedActivations).toBe(0);

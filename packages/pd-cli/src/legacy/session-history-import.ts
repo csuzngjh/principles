@@ -145,10 +145,10 @@ export async function importSessionHistory(
     const toolCalls = trajectoryDb.getToolCalls(session_id);
 
     // Use the latest timestamp from the session as ended_at
-    const lastTimestamp =
-      assistantTurns.length > 0
-        ? assistantTurns[assistantTurns.length - 1].created_at
-        : now;
+    const [firstTurn] = assistantTurns;
+    const lastTurn = assistantTurns[assistantTurns.length - 1];
+    if (!firstTurn || !lastTurn) continue;
+    const lastTimestamp = lastTurn.created_at;
 
     // Build input (user turns + tool calls) and output (assistant turns) payloads
     const inputPayload = JSON.stringify({
@@ -187,9 +187,9 @@ export async function importSessionHistory(
       runId,
       taskId: task_id,
       executionStatus: 'succeeded',
-      startedAt: assistantTurns[0].created_at,
+      startedAt: firstTurn.created_at,
       endedAt: lastTimestamp,
-      createdAt: assistantTurns[0].created_at,
+      createdAt: firstTurn.created_at,
       updatedAt: now,
       inputPayload,
       outputPayload,

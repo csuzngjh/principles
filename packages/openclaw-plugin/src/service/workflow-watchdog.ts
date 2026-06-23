@@ -53,7 +53,8 @@ export async function runWorkflowWatchdog(
           details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
 
           const events = store.getEvents(wf.workflow_id);
-          const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
+          const lastEvent = events[events.length - 1];
+          const lastEventReason = lastEvent ? lastEvent.reason : 'unknown';
           if (isExpectedSubagentError(lastEventReason)) {
             logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
             continue;

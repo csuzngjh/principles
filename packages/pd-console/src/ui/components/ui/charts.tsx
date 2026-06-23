@@ -228,7 +228,10 @@ export function computeValueBuckets(
       Math.floor(p.valueScore / bucketSize),
       bucketCount - 1
     );
-    buckets[bucketIndex].count++;
+    const bucket = buckets[bucketIndex];
+    if (bucket) {
+      bucket.count++;
+    }
   }
 
   return buckets;

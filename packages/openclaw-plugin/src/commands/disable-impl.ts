@@ -147,7 +147,7 @@ export function handleDisableImplCommand(ctx: PluginCommandContext): PluginComma
   const subcommand = parts[0] || '';
   const implId = subcommand === 'list' ? '' : subcommand;
   const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
-  const reason = reasonMatch ? reasonMatch[1] : null;
+  const reason = reasonMatch ? (reasonMatch[1] ?? null) : null;
 
   // Subcommand: list
   if (subcommand === 'list' || subcommand === '') {

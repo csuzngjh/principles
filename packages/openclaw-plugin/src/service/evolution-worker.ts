@@ -163,7 +163,8 @@ export function purgeStaleFailedTasks(
     // Remove purged items from the queue (mutates in place)
     const purgedIds = new Set(purged.map((t) => t.id));
     for (let i = queue.length - 1; i >= 0; i--) {
-        if (purgedIds.has(queue[i].id)) queue.splice(i, 1);
+        const task = queue[i];
+        if (task && purgedIds.has(task.id)) queue.splice(i, 1);
     }
 
     const summary = Object.entries(byReason)
@@ -468,17 +469,19 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                 if (wctx.trajectory) {
                     const searchResults = wctx.trajectory.searchPainEvents(text, 5);
                     if (searchResults.length > 0) {
+                        const topResult = searchResults[0];
+                        if (!topResult) continue;
                         // Found similar pain events - record as L3 semantic hit
                         if (eventLog) {
                             eventLog.recordRuleMatch(undefined, {
                                 ruleId: 'l3_semantic',
                                 layer: 'L3',
-                                severity: searchResults[0].score,
+                                severity: topResult.score,
                                 textPreview: text.substring(0, 100)
                             });
                         }
                         // Update detection funnel cache with L3 hit result
-                        funnel.updateCache(text, { detected: true, severity: searchResults[0].score });
+                        funnel.updateCache(text, { detected: true, severity: topResult.score });
                         // Don't track as candidate - this is a confirmed L3 hit
                         if (logger) logger.info(`[PD:EvolutionWorker] L3 semantic hit: found ${searchResults.length} similar pain events for "${text.substring(0, 50)}..."`);
                         continue;
