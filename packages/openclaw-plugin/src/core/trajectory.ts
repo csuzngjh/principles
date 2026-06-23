@@ -291,19 +291,9 @@ export class TrajectoryDatabase {
       }
     }
     });
-    // FTS indexing is best-effort — run outside the transaction so it cannot
-    // roll back the committed pain event row (MEM-03, MEM-04).
-    if (input.text && insertedId > 0) {
-      try {
-        this.db.prepare(`
-          INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
-        `).run(input.text, insertedId);
-      } catch (err) {
-        // Non-fatal: FTS index is for search convenience, not correctness.
-        // Log but do not re-throw — the pain event itself is already committed.
-        console.warn(`[trajectory] FTS index insert failed for pain_event ${insertedId}: ${String(err)}`);
-      }
-    }
+    // FTS5 index write removed (PRI-451 Wave 1): the only reader (searchPainEvents)
+    // was dead code removed in Wave 1.1. The pain event row itself is committed
+    // above; nothing reads the FTS index anymore.
     return insertedId;
   }
 
@@ -1350,14 +1340,9 @@ export class TrajectoryDatabase {
       WHERE canonical_pain_id IS NOT NULL
     `);
 
-    // Create FTS5 virtual table for pain_events text search (MEM-04)
-    this.db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS pain_events_fts USING fts5(
-        text,
-        pain_event_id UNINDEXED,
-        tokenize='porter unicode61'
-      )
-    `);
+    // pain_events_fts FTS5 virtual table creation removed (PRI-451 Wave 1):
+    // the only reader (searchPainEvents) was dead code. Existing DBs keep the
+    // orphan table harmlessly (CREATE was IF NOT EXISTS); new DBs skip it.
 
     // V2 migration: Add V2 columns to evolution_tasks if they don't exist
     // SQLite does not support IF NOT EXISTS for ADD COLUMN, so we must check manually
