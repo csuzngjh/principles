@@ -225,14 +225,8 @@ export function handleLlmOutput(
     const detectionService = DetectionService.get(wctx.stateDir);
     const detection = detectionService.detect(detectionText);
 
-    if (detection.detected) {
-        eventLog.recordRuleMatch(ctx.sessionId, {
-            ruleId: detection.ruleId || detection.source,
-            layer: detection.source === 'l1_exact' ? 'L1' : (detection.source === 'l2_cache' ? 'L2' : 'L3'),
-            severity: detection.severity || 0,
-            textPreview: detectionText.substring(0, 100)
-        });
-    }
+    // recordRuleMatch call removed (PRI-451 Wave 1): dead code — its only
+    // consumer was stats.pain.rulesMatched (dead counter, removed in Wave 1.5).
 
     let painScore = detection.detected ? (detection.severity || 0) : 0;
     let source = detection.detected

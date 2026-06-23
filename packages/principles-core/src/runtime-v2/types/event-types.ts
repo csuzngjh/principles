@@ -685,24 +685,9 @@ export const ErrorStatsSchema = Type.Object({
 });
 export type ErrorStatsStatic = Static<typeof ErrorStatsSchema>;
 
-export interface PainStats {
-  signalsDetected: number;
-  signalsBySource: Record<string, number>;
-  rulesMatched: Record<string, number>;
-  candidatesPromoted: number;
-  avgScore: number;
-  maxScore: number;
-}
-
-export const PainStatsSchema = Type.Object({
-  signalsDetected: Type.Number(),
-  signalsBySource: Type.Record(Type.String(), Type.Number()),
-  rulesMatched: Type.Record(Type.String(), Type.Number()),
-  candidatesPromoted: Type.Number(),
-  avgScore: Type.Number(),
-  maxScore: Type.Number(),
-});
-export type PainStatsStatic = Static<typeof PainStatsSchema>;
+// PainStats interface + PainStatsSchema + PainStatsStatic removed (PRI-451
+// Wave 1.5): the DailyStats.pain block they backed had no live reader. The
+// pain field is also removed from DailyStats below.
 
 /**
  * Empathy Engine event statistics for tracking emotional signals.
@@ -910,8 +895,7 @@ export interface DailyStats {
   toolCalls: ToolCallStats;
   /** Error statistics */
   errors: ErrorStats;
-  /** Pain signal statistics */
-  pain: PainStats;
+  // pain: PainStats field removed (PRI-451 Wave 1.5): no live reader.
   /** Empathy Engine event statistics */
   empathy: EmpathyEventStats;
   /** GFI statistics */
@@ -933,7 +917,7 @@ export const DailyStatsSchema = Type.Object({
   }),
   toolCalls: ToolCallStatsSchema,
   errors: ErrorStatsSchema,
-  pain: PainStatsSchema,
+  // pain: PainStatsSchema removed (PRI-451 Wave 1.5): no live reader.
   empathy: EmpathyEventStatsSchema,
   gfi: GfiStatsSchema,
   evolution: EventEvolutionStatsSchema,
@@ -966,14 +950,7 @@ export function createEmptyDailyStats(date: string): DailyStats {
       byType: {},
       byTool: {},
     },
-    pain: {
-      signalsDetected: 0,
-      signalsBySource: {},
-      rulesMatched: {},
-      candidatesPromoted: 0,
-      avgScore: 0,
-      maxScore: 0,
-    },
+    // pain: { ... } zero-defaults removed (PRI-451 Wave 1.5): no live reader.
     empathy: {
       totalEvents: 0,
       dedupedCount: 0,
