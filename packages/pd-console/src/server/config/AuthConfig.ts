@@ -41,6 +41,9 @@ export class AuthConfig {
     }
 
     const [, provided] = match;
+    if (!provided) {
+      return false;
+    }
     const providedBuf = Buffer.from(provided, 'utf8');
     const expectedBuf = Buffer.from(this.token as string, 'utf8');
 

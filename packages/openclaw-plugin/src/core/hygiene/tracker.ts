@@ -30,7 +30,7 @@ export class HygieneTracker {
   }
 
   private loadStats(): HygieneStats {
-    const [today] = new Date().toISOString().split('T');
+    const today = new Date().toISOString().split('T')[0] ?? '';
     if (fs.existsSync(this.statsFile)) {
       try {
         const content = fs.readFileSync(this.statsFile, 'utf-8');
@@ -60,7 +60,7 @@ export class HygieneTracker {
     let allStats: Record<string, HygieneStats> = {};
     
     // Check if we need to rotate date (reset currentStats if date changed)
-    const [today] = new Date().toISOString().split('T');
+    const today = new Date().toISOString().split('T')[0] ?? '';
     if (this.currentStats.date !== today) {
       this.currentStats = createEmptyHygieneStats(today);
     }
@@ -113,7 +113,7 @@ export class HygieneTracker {
 
   getStats(): HygieneStats {
     // Check for date change on every get
-    const [today] = new Date().toISOString().split('T');
+    const today = new Date().toISOString().split('T')[0] ?? '';
     if (this.currentStats.date !== today) {
       this.currentStats = createEmptyHygieneStats(today);
     }

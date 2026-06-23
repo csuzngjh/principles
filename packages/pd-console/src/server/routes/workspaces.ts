@@ -68,6 +68,10 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
     }
 
     const [, wsName, rest] = nameMatch;
+    if (!wsName) {
+      sendError(res, 400, 'invalid_name', 'Workspace name is missing');
+      return;
+    }
     let decodedWsName: string;
     try {
       decodedWsName = decodeURIComponent(wsName);

@@ -129,6 +129,10 @@ export async function handlePrinciplesRoute({
   const trajectoryMatch = /^\/([^/]+)\/trajectory$/.exec(subPath);
   if (trajectoryMatch) {
     const [, rawPrincipleId] = trajectoryMatch;
+    if (!rawPrincipleId) {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+      return;
+    }
     let decodedPrincipleId: string;
     try {
       decodedPrincipleId = decodeURIComponent(rawPrincipleId);
@@ -154,6 +158,10 @@ export async function handlePrinciplesRoute({
   const detailMatch = /^\/([^/]+)$/.exec(subPath);
   if (detailMatch) {
     const [, principleId] = detailMatch;
+    if (!principleId) {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+      return;
+    }
     try {
       const result = await model.getPrincipleDetail(principleId);
       if (!result) {

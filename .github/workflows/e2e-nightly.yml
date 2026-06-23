@@ -1,0 +1,131 @@
+name: E2E Nightly
+
+on:
+  schedule:
+    # UTC 02:00 = Beijing 10:00
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  e2e-story-a:
+    name: E2E Story A' Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      - name: Build
+        run: npm run build
+
+      - name: Run E2E Story A' (trap-03)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          E2E_LLM_MODEL: ${{ secrets.E2E_LLM_MODEL }}
+        run: |
+          node scripts/e2e-story-a.mjs --trap trap-03 ${{ env.E2E_LLM_MODEL && format('--model {0}', env.E2E_LLM_MODEL) || '' }} 2>&1 | tee e2e-output.log
+
+      - name: Close failure issue on success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'e2e-failure'
+            });
+            for (const issue of issues) {
+              if (issue.title.includes('[E2E Nightly]')) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: 'E2E 恢复正常 — nightly run passed.'
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed'
+                });
+              }
+            }
+
+      - name: Create or update failure issue
+        if: always() && failure()
+        uses: actions/github-script@v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            let logSummary = 'No log available';
+            try {
+              const log = fs.readFileSync('e2e-output.log', 'utf8');
+              const lines = log.split('\n');
+              logSummary = lines.slice(-50).join('\n');
+            } catch (e) {
+              logSummary = 'Could not read e2e-output.log';
+            }
+            const now = new Date().toISOString();
+            const runUrl = process.env.RUN_URL;
+            const body = `## E2E Nightly Failure\n\n**Time:** ${now} (UTC)\n**Run:** ${runUrl}\n**Reproduce:** \`npm run e2e:story-a -- --trap trap-03\`\n\n### Log summary (last 50 lines)\n\`\`\`\n${logSummary}\n\`\`\`\n`;
+
+            // Ensure labels exist
+            for (const label of ['e2e-failure', 'automated']) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label,
+                  color: 'd73a4a',
+                  description: 'Automated label'
+                });
+              } catch (e) {
+                // Label may already exist
+              }
+            }
+
+            // Search for existing open issue with same title
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'e2e-failure'
+            });
+            const existing = issues.find(i => i.title === "[E2E Nightly] Story A' pipeline failure");
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "[E2E Nightly] Story A' pipeline failure",
+                body: body,
+                labels: ['e2e-failure', 'automated']
+              });
+            }

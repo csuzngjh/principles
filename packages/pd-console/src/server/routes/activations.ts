@@ -63,6 +63,10 @@ export async function handleActivationsRoute(
   const disableExec = /^\/([^/]+)\/disable$/.exec(subPath);
   if (req.method === 'POST' && disableExec) {
     const [, rawId] = disableExec;
+    if (!rawId) {
+      sendError(res, 400, 'invalid_id', 'Activation ID is missing');
+      return;
+    }
     let activationId: string;
     try {
       activationId = decodeURIComponent(rawId);

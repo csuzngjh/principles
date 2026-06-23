@@ -71,7 +71,7 @@ export class EventLog {
   }
 
   private getTodayStr(): string {
-    return new Date().toISOString().split('T')[0];
+    return new Date().toISOString().split('T')[0] ?? '';
   }
 
   private ensureEventsFile(): string {
@@ -334,7 +334,7 @@ export class EventLog {
   }
 
   private formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
+    return date.toISOString().split('T')[0] ?? '';
   }
 
   private loadStats(): void {
@@ -423,9 +423,12 @@ export class EventLog {
         if (!stats.hooks.byType[data.hook]) {
           stats.hooks.byType[data.hook] = { total: 0, success: 0, failure: 0 };
         }
-        stats.hooks.byType[data.hook].total++;
-        if (entry.category === 'success') stats.hooks.byType[data.hook].success++;
-        else stats.hooks.byType[data.hook].failure++;
+        const hookStats = stats.hooks.byType[data.hook];
+        if (hookStats) {
+          hookStats.total++;
+          if (entry.category === 'success') hookStats.success++;
+          else hookStats.failure++;
+        }
       }
     } else if (entry.type === 'empathy_rollback') {
       const data = entry.data as unknown as EmpathyRollbackEventData;
@@ -729,6 +732,7 @@ export class EventLog {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
       const entry = allEvents[i];
+      if (!entry) continue;
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if (data.source === 'user_empathy' && !data.deduped) {
@@ -744,6 +748,7 @@ export class EventLog {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
       const entry = allEvents[i];
+      if (!entry) continue;
       if (entry.sessionId === sessionId && entry.type === "pain_signal") {
         return entry.data as unknown as PainSignalEventData;
       }

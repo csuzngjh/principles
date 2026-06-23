@@ -256,9 +256,10 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     // Other runners (philosopher/scribe/...) stay on L1.
     if (opts.runnerKind === 'dreamer' && opts.l2ArtifactReader && opts.l2StateDir) {
       const effectiveFlags = loadEffectiveFeatureFlags(opts.workspaceDir);
-      const l2Flag = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
-        ? effectiveFlags.flags.l2_dreamer.enabled
-        : false;
+      const l2FlagDef = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
+        ? effectiveFlags.flags.l2_dreamer
+        : undefined;
+      const l2Flag = l2FlagDef ? l2FlagDef.enabled : false;
       if (l2Flag) {
         return new L2AgentLoopAdapter(
           {
