@@ -177,17 +177,8 @@ describe('EventLog', () => {
       expect(stats.evolution.tasksCompleted).toBe(1);
     });
 
-    it('should track rule_match events in rulesMatched', () => {
-      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
-      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
-      eventLog.recordRuleMatch('s1', { ruleId: 'path-traversal', layer: 'L1', severity: 0.9, textPreview: 'test2' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.pain.rulesMatched['edit-exact-match']).toBe(2);
-      expect(stats.pain.rulesMatched['path-traversal']).toBe(1);
-    });
+    // rule_match stats test removed (PRI-451 Wave 1): recordRuleMatch is dead
+    // code, deleted alongside this test. rulesMatched counter goes in Wave 1.5.
 
     it('should track rule_promotion events', () => {
       eventLog.recordRulePromotion({ fingerprint: 'fp1', ruleId: 'r1', phrase: 'test', sampleCount: 5, avgSimilarity: 0.9 });

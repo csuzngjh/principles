@@ -5,8 +5,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
-import { DictionaryService } from '../core/dictionary-service.js';
-import { DetectionService } from '../core/detection-service.js';
+// DetectionService + DictionaryService imports removed — their only consumer
+// (processDetectionQueue) was dead code retired in PRI-451 Wave 1.
 import { ensureStateTemplates, ensureCorePrinciples } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -441,59 +441,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
     }
 }
 
-     
-async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
-    const {logger} = api;
-    try {
-        const funnel = DetectionService.get(wctx.stateDir);
-        const queue = funnel.flushQueue();
-        if (queue.length === 0) return;
-
-        if (logger) logger.info(`[PD:EvolutionWorker] Processing ${queue.length} items from detection funnel.`);
-
-        const dictionary = DictionaryService.get(wctx.stateDir);
-
-        for (const text of queue) {
-            const match = dictionary.match(text);
-            if (match) {
-                if (eventLog) {
-                    eventLog.recordRuleMatch(undefined, {
-                        ruleId: match.ruleId,
-                        layer: 'L2',
-                        severity: match.severity,
-                        textPreview: text.substring(0, 100)
-                    });
-                }
-            } else {
-                // L3 semantic search via trajectory database FTS5 (MEM-04)
-                if (wctx.trajectory) {
-                    const searchResults = wctx.trajectory.searchPainEvents(text, 5);
-                    if (searchResults.length > 0) {
-                        const topResult = searchResults[0];
-                        if (!topResult) continue;
-                        // Found similar pain events - record as L3 semantic hit
-                        if (eventLog) {
-                            eventLog.recordRuleMatch(undefined, {
-                                ruleId: 'l3_semantic',
-                                layer: 'L3',
-                                severity: topResult.score,
-                                textPreview: text.substring(0, 100)
-                            });
-                        }
-                        // Update detection funnel cache with L3 hit result
-                        funnel.updateCache(text, { detected: true, severity: topResult.score });
-                        // Don't track as candidate - this is a confirmed L3 hit
-                        if (logger) logger.info(`[PD:EvolutionWorker] L3 semantic hit: found ${searchResults.length} similar pain events for "${text.substring(0, 50)}..."`);
-                        continue;
-                    }
-                }
-                // No L3 hit — pain candidate tracking removed (D-05)
-            }
-        }
-    } catch (err) {
-        if (logger) logger.warn(`[PD:EvolutionWorker] Detection queue failed: ${String(err)}`);
-    }
-}
+// processDetectionQueue removed (PRI-451 Wave 1): dead code. Its only effects
+// were recordRuleMatch (dead) and searchPainEvents (dead) — see PRI-451.
 
 // PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
 // Evolution queue is now the single active pain→principle path
@@ -708,9 +657,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 cycleResult.queue = queueResult.queue;
                 if (queueResult.errors) cycleResult.errors.push(...queueResult.errors);
 
-                if (api) {
-                    await processDetectionQueue(wctx, api, eventLog);
-                }
+                // processDetectionQueue removed (PRI-451 Wave 1) — was dead code.
                 // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
                 // Correction Observer extracted to independent service (PRI-293) — no longer runs on EvolutionWorker heartbeat
 
@@ -793,9 +740,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 if (queueResult.errors.length > 0) {
                     queueResult.errors.forEach((e) => logger?.error?.(`[PD:EvolutionWorker] Startup cycle error: ${e}`));
                 }
-                if (api) {
-                    await processDetectionQueue(wctx, api, eventLog);
-                }
+                // processDetectionQueue removed (PRI-451 Wave 1) — was dead code.
                 // processPromotion removed (D-06)
                 timeoutId = setTimeout(runCycle, interval);
                 timeoutId.unref();

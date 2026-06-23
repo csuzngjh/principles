@@ -307,68 +307,9 @@ export class TrajectoryDatabase {
     return insertedId;
   }
 
-  /**
-   * Search pain_events using FTS5 full-text search (MEM-04).
-   * Returns pain events matching the query, ordered by relevance.
-   */
-  searchPainEvents(query: string, limit = 10): {
-    id: number;
-    sessionId: string;
-    source: string;
-    score: number;
-    reason: string | null;
-    severity: string | null;
-    origin: string | null;
-    confidence: number | null;
-    text: string | null;
-    createdAt: string;
-  }[] {
-    if (!query || query.trim().length === 0) {
-      return [];
-    }
-
-    // Escape FTS5 special characters and format query for porter tokenizer
-    const ftsQuery = query.trim().split(/\s+/).map(term => `"${term.replace(/"/g, '""')}"`).join(' ');
-
-    try {
-      const results = this.db.prepare(`
-        SELECT pe.*
-        FROM pain_events_fts pf
-        JOIN pain_events pe ON pe.id = pf.pain_event_id
-        WHERE pain_events_fts MATCH ?
-        ORDER BY bm25(pain_events_fts) DESC
-        LIMIT ?
-      `).all(ftsQuery, limit) as {
-        id: number;
-        session_id: string;
-        source: string;
-        score: number;
-        reason: string | null;
-        severity: string | null;
-        origin: string | null;
-        confidence: number | null;
-        text: string | null;
-        created_at: string;
-      }[];
-
-      return results.map(row => ({
-        id: row.id,
-        sessionId: row.session_id,
-        source: row.source,
-        score: row.score,
-        reason: row.reason,
-        severity: row.severity,
-        origin: row.origin,
-        confidence: row.confidence,
-        text: row.text,
-        createdAt: row.created_at,
-      }));
-    } catch (err) {
-      // If FTS5 query fails (e.g., syntax error), return empty results
-      console.warn(`[PD:TrajectoryDatabase] FTS5 search failed: ${String(err)}`);
-      return [];
-    }
-  }
+  // searchPainEvents removed (PRI-451 Wave 1): dead code. Its only caller was
+  // processDetectionQueue (also removed). The FTS5 index write it read is
+  // removed in Wave 1.2.
 
   recordGateBlock(input: TrajectoryGateBlockInput): void {
     this.withWrite(() => {

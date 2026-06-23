@@ -114,9 +114,8 @@ export class EventLog {
     this.record('pain_signal', 'detected', sessionId, data);
   }
   
-  recordRuleMatch(sessionId: string | undefined, data: RuleMatchEventData): void {
-    this.record('rule_match', 'detected', sessionId, data);
-  }
+  // recordRuleMatch removed (PRI-451 Wave 1): dead code. Its only effect was
+  // incrementing stats.pain.rulesMatched (also dead, removed in Wave 1.5).
   
   recordRulePromotion(data: RulePromotionEventData): void {
     this.record('rule_promotion', 'promoted', undefined, data);
