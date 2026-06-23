@@ -285,7 +285,6 @@ describe('PRI-228: Plugin config resolution cutover', () => {
       'prompt.ts',
       'lifecycle.ts',
       'gate.ts',
-      'subagent.ts',
       'llm.ts',
     ];
 

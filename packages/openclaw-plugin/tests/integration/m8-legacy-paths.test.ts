@@ -31,15 +31,9 @@ describe('M8: Legacy diagnostician/cron/subagent paths disabled', () => {
     expect(uncommented).not.toMatch(/EmpathyObserverWorkflowManager/);
   });
 
-  test('does NOT have EmpathyObserverWorkflowManager import in subagent.ts', () => {
-    const content = readFile('packages/openclaw-plugin/src/hooks/subagent.ts');
-    expect(content).not.toMatch(/EmpathyObserverWorkflowManager/);
-  });
-
-  test('does NOT have empathy-observer case in subagent.ts active code', () => {
-    const content = readFile('packages/openclaw-plugin/src/hooks/subagent.ts');
-    const uncommented = content.replace(/\/\/.*$/mg, '');
-    expect(uncommented).not.toMatch(/empathy-observer/);
+  test('subagent.ts is deleted (PRI-444 dead code cleanup)', () => {
+    const filePath = path.join(ROOT, 'packages/openclaw-plugin/src/hooks/subagent.ts');
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   test('PD task reconciliation does NOT create PD Empathy Optimizer cron job', () => {
