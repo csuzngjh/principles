@@ -75,16 +75,16 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: changing tests, fixtures, baselines, smoke tests, database schemas, package installs, or UI route/action state.
 - **Failure mode**: tests prove strings, helper behavior, or hand-written schemas instead of the real behavior users rely on.
 - **Must check**: fixtures match production schema; tests fail if expected output is absent; package tests are run when package code changes; UI tests verify route/action contracts, not just source substrings.
-- **Representative ERRs**: ERR-025, ERR-026, ERR-037, ERR-038, ERR-039, ERR-040, ERR-073.
+- **Representative ERRs**: ERR-025, ERR-026, ERR-037, ERR-038, ERR-039, ERR-040, ERR-073, ERR-077.
 - **Automation target**: production schema fixtures and real-path smoke tests.
 
 ### EP-10 Workflow and Branch Hygiene
 
 - **Use when**: reviewing/fixing PRs, cherry-picking, recording errors, or working on stacked branches.
-- **Failure mode**: comments are missed, stale main rolls back merged code, or unrelated commits contaminate a PR.
-- **Must check**: fetch PR reviews/comments with retries; inspect source branch commit list before cherry-pick; compare diff scope against target branch.
-- **Representative ERRs**: ERR-006, ERR-012, ERR-027, ERR-032, ERR-052.
-- **Automation target**: PR pre-review checklist and `git log main..source-branch` before cherry-pick.
+- **Failure mode**: comments are missed, stale main rolls back merged code, unrelated commits contaminate a PR, **or a PR body self-reports a CI failure as "pre-existing/unrelated/flaky" without verifying it against the base branch (ERR-078)** — the false classification then ships a real regression under a false exoneration.
+- **Must check**: fetch PR reviews/comments with retries; inspect source branch commit list before cherry-pick; compare diff scope against target branch; **for any "pre-existing on main" claim in a PR body, reproduce the failing test on `origin/main` (or prove the changed files can't reach the failing code) before accepting the claim — flag-flips that change `DEFAULT_FEATURE_FLAGS` defaults re-route execution paths in mocked tests**.
+- **Representative ERRs**: ERR-006, ERR-012, ERR-027, ERR-032, ERR-052, ERR-078.
+- **Automation target**: PR pre-review checklist and `git log main..source-branch` before cherry-pick; reviewer check that reproduces each "pre-existing" failure claim against the merge-base.
 
 ### EP-11 i18n and Accessibility String Consistency
 

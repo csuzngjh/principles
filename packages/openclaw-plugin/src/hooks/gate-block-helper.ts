@@ -18,6 +18,8 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { evaluateTriggerController } from '@principles/core/runtime-v2';
+import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { isRisky } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -116,10 +118,15 @@ export function recordGateBlockAndReturn(
     // legacy recordPainEvent call needed — avoids double-write to trajectory.db.
     const gatePainId = `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-    // PEAT-B1: Evidence triage (feature-flagged)
-    let triageAdmitted = true;
-    const gateBlockTriageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
-    if (gateBlockTriageFlag.enabled) {
+    // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
+    // When either OFF → Gate A (PainDiagnosticGate, rollback).
+    const triageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
+    const defaultFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmissionDefault');
+    const useGateB = triageFlag.enabled && defaultFlag.enabled;
+
+    // PEAT-B1: Evidence triage (runs when Gate B is active)
+    const session = getSession(sessionId);
+    if (useGateB) {
       // Load profile with 1MB size guard, matching pain.ts pattern
       const profilePath = wctx.resolve('PROFILE');
       let profile = normalizeProfile({});
@@ -142,17 +149,52 @@ export function recordGateBlockAndReturn(
       // weight, NOT the action risk severity. The rulehost principle already determined
       // this action was important enough to block — that is the real signal.
       const isUnsafe = isRisky(filePath, profile.risk_paths);
+      // PRI-454 P2-1: Pass consecutiveErrors and isRisky to match Gate A's
+      // upgrade logic. Rule 3 (consecutiveErrors >= 4 → admit) was being
+      // dropped, so non-risky repeated gate blocks never triggered diagnosis.
       const triage = evaluateEvidenceTriage('rulehost_block', GATE_BLOCK_PAIN_SCORE, {
         isUnsafeHighConfidence: isUnsafe,
+        isRisky: isUnsafe,
+        consecutiveErrors: session?.consecutiveErrors,
       });
-      if (triage.decision !== 'admit') {
-        triageAdmitted = false;
-        logger.info?.(`[PD_GATE] Triage ${triage.decision}: ${triage.reason}`);
-      }
-    }
 
-    const session = getSession(sessionId);
-    if (triageAdmitted) {
+      if (triage.decision !== 'admit') {
+        logger.info?.(`[PD_GATE] Triage ${triage.decision}: ${triage.reason}`);
+      } else {
+        // PRI-454: Gate B path — TriggerController owns admission
+        const errorHash = `${toolName}:${filePath}:${reason}`;
+        const cooldownActive = isSharedCooldownActive('rulehost_block', sessionId, errorHash);
+        const triggerDecision = evaluateTriggerController({
+          triageResult: triage,
+          isOwnerManual: false,
+          isCooldownActive: cooldownActive,
+          isValid: true,
+          score: GATE_BLOCK_PAIN_SCORE,
+          sessionId,
+        });
+        if (triggerDecision.shouldCreateDiagnosticTask) {
+          markSharedEpisodeAsDiagnosed('rulehost_block', sessionId, errorHash);
+          void emitPainDetectedEvent(wctx, {
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+              painId: gatePainId,
+              painType: 'user_frustration',
+              source: 'gate_blocked',
+              reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+              score: GATE_BLOCK_PAIN_SCORE,
+              sessionId,
+              agentId: 'main',
+            },
+          }).catch((emitErr) => {
+            logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+          });
+        } else {
+          logger.info?.(`[PD_GATE] Gate B skipped: ${triggerDecision.reason}`);
+        }
+      }
+    } else {
+      // PRI-454: Gate A path (rollback when either flag is OFF)
       const gate = evaluatePainDiagnosticGate({
         source: 'gate_blocked',
         score: GATE_BLOCK_PAIN_SCORE,

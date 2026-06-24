@@ -30,6 +30,8 @@ export {
   resolveSourceKind,
   buildToolFailureObservation,
   buildLlmDetectionObservation,
+  buildEmpathyObservation,
+  buildManualPainObservation,
 } from './observation-resolver.js';
 
 // Trigger controller — PEAT-B2

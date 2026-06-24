@@ -73,6 +73,12 @@ vi.mock('../../src/core/workspace-context.js', () => {
         config: {
           get: vi.fn().mockReturnValue(undefined),
         },
+        // PRI-454: real WorkspaceContext exposes resolve(fileKey) for PD file paths.
+        // Gate B path (now default-on) calls wctx.resolve('PROFILE') to read PROFILE.json
+        // for risk-path classification. Return a non-existent path so fs.existsSync fails
+        // and the profile falls back to non-risky defaults — keeping this test focused on
+        // the RuleHost block behavior without depending on Gate B internals.
+        resolve: vi.fn((fileKey: string) => `${ctx.workspaceDir}/.pd/${fileKey}.json`),
       })),
     },
   };
