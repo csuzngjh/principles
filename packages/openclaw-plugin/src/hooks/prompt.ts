@@ -24,6 +24,11 @@ import {
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
+import { evaluateTriggerController } from '@principles/core/runtime-v2';
+import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
+import { buildEmpathyObservation, resolveSourceKind } from './raw-observation-adapter.js';
+import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
   detectCorrectionCue as coreDetectCorrectionCue,
@@ -378,19 +383,11 @@ export async function handleBeforePromptBuild(
             const gfiPainScore = Math.min(Math.round(currentGfi), 60);
             logger?.info?.(`[PD:Empathy] GFI-TRIGGERED: currentGfi=${currentGfi.toFixed(1)} >= highGfi=${highGfiThreshold}, emitting pain signal (score=${gfiPainScore})`);
 
-            const gate = evaluatePainDiagnosticGate({
-              source: 'user_empathy',
-              score: gfiPainScore,
-              currentGfi,
-              consecutiveErrors: currentSession?.consecutiveErrors ?? 0,
-              sessionId,
-              errorHash: 'empathy_gfi_threshold',
-              thresholds: {
-                painTrigger,
-                highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-                semanticPain: Math.max(painTrigger, 60),
-              },
-            });
+            // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
+            // When either OFF → Gate A (PainDiagnosticGate, rollback).
+            const triageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
+            const defaultFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmissionDefault');
+            const useGateB = triageFlag.enabled && defaultFlag.enabled;
 
             wctx.eventLog.recordPainSignal(sessionId, {
               score: gfiPainScore,
@@ -421,32 +418,99 @@ export async function handleBeforePromptBuild(
               canonicalPainId: gfiPainId,
             });
 
-            if (gate.shouldDiagnose) {
-              logger?.info?.(`[PD:Empathy] Gate approved, calling emitPainDetectedEvent...`);
-              try {
-                const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                await emitPainDetectedEvent(wctx, {
-                  ts: new Date().toISOString(),
-                  type: 'pain_detected',
-                  data: {
-                    painId: gfiPainId,
-                    painType: 'user_frustration',
-                    source: 'user_empathy',
-                    reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
-                    score: gfiPainScore,
-                    sessionId,
-                    agentId: 'main',
-                    provenance: 'openclaw_context_bound',
-                    evidence,
-                  },
-                }, { recordObservability: false });
-                logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
-              } catch (emitErr) {
-                console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
-                logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
+            if (useGateB) {
+              // PRI-454: Gate B path — TriggerController owns admission
+              const rawObs = buildEmpathyObservation({
+                detectionSource: 'user_empathy',
+                isGfiTriggered: true,
+                sessionId,
+              });
+              const sourceKind = resolveSourceKind(rawObs);
+              const triage = evaluateEvidenceTriage(sourceKind, gfiPainScore);
+              if (triage.decision !== 'admit') {
+                logger?.info?.(`[PD:Empathy] Triage ${triage.decision}: ${triage.reason}`);
+              } else {
+                const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'empathy_gfi_threshold');
+                const triggerDecision = evaluateTriggerController({
+                  triageResult: triage,
+                  isOwnerManual: false,
+                  isCooldownActive: cooldownActive,
+                  isValid: true,
+                  score: gfiPainScore,
+                  sessionId,
+                });
+                if (triggerDecision.shouldCreateDiagnosticTask) {
+                  markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'empathy_gfi_threshold');
+                  logger?.info?.(`[PD:Empathy] Gate B approved, calling emitPainDetectedEvent...`);
+                  try {
+                    const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                    await emitPainDetectedEvent(wctx, {
+                      ts: new Date().toISOString(),
+                      type: 'pain_detected',
+                      data: {
+                        painId: gfiPainId,
+                        painType: 'user_frustration',
+                        source: 'user_empathy',
+                        reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
+                        score: gfiPainScore,
+                        sessionId,
+                        agentId: 'main',
+                        provenance: 'openclaw_context_bound',
+                        evidence,
+                      },
+                    }, { recordObservability: false });
+                    logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
+                  } catch (emitErr) {
+                    console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
+                    logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
+                  }
+                } else {
+                  logger?.info?.(`[PD:Empathy] Gate B skipped: ${triggerDecision.reason}`);
+                }
               }
             } else {
-              logger?.info?.(`[PD:Empathy] GFI-triggered gate rejected: ${gate.detail}`);
+              // PRI-454: Gate A path (rollback when either flag is OFF)
+              const gate = evaluatePainDiagnosticGate({
+                source: 'user_empathy',
+                score: gfiPainScore,
+                currentGfi,
+                consecutiveErrors: currentSession?.consecutiveErrors ?? 0,
+                sessionId,
+                errorHash: 'empathy_gfi_threshold',
+                thresholds: {
+                  painTrigger,
+                  highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+                  semanticPain: Math.max(painTrigger, 60),
+                },
+              });
+
+              if (gate.shouldDiagnose) {
+                logger?.info?.(`[PD:Empathy] Gate approved, calling emitPainDetectedEvent...`);
+                try {
+                  const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                  await emitPainDetectedEvent(wctx, {
+                    ts: new Date().toISOString(),
+                    type: 'pain_detected',
+                    data: {
+                      painId: gfiPainId,
+                      painType: 'user_frustration',
+                      source: 'user_empathy',
+                      reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
+                      score: gfiPainScore,
+                      sessionId,
+                      agentId: 'main',
+                      provenance: 'openclaw_context_bound',
+                      evidence,
+                    },
+                  }, { recordObservability: false });
+                  logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
+                } catch (emitErr) {
+                  console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
+                  logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
+                }
+              } else {
+                logger?.info?.(`[PD:Empathy] GFI-triggered gate rejected: ${gate.detail}`);
+              }
             }
           }
 
@@ -520,45 +584,106 @@ export async function handleBeforePromptBuild(
                   const freshGfi = freshSession?.currentGfi ?? 0;
                   if (freshGfi >= highGfiThreshold) {
                     const freshGfiPainScore = Math.min(Math.round(freshGfi), 60);
-                    const gate = evaluatePainDiagnosticGate({
-                      source: 'user_empathy',
-                      score: freshGfiPainScore,
-                      currentGfi: freshGfi,
-                      consecutiveErrors: freshSession?.consecutiveErrors ?? 0,
-                      sessionId,
-                      errorHash: 'empathy_gfi_threshold',
-                      thresholds: {
-                        painTrigger,
-                        highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-                        semanticPain: Math.max(painTrigger, 60),
-                      },
-                    });
+                    // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
+                    // When either OFF → Gate A (PainDiagnosticGate, rollback).
+                    const triageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
+                    const defaultFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmissionDefault');
+                    const useGateB = triageFlag.enabled && defaultFlag.enabled;
 
-                    if (gate.shouldDiagnose) {
-                      logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
-                      try {
-                        const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                        // PRI-453: Reuse observerPainId for lineage consistency —
-                        // the same id is used as canonicalPainId in recordPainEvent
-                        // and as painId in the emitted event, so EvidenceChainConsoleModel
-                        // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
-                        await emitPainDetectedEvent(wctx, {
-                          ts: new Date().toISOString(),
-                          type: 'pain_detected',
-                          data: {
-                            painId: observerPainId,
-                            painType: 'user_frustration',
-                            source: 'user_empathy',
-                            reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
-                            score: freshGfiPainScore,
-                            sessionId,
-                            agentId: 'main',
-                            provenance: 'openclaw_context_bound',
-                            evidence,
-                          },
-                        }, { recordObservability: false });
-                      } catch (emitErr) {
-                        logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                    if (useGateB) {
+                      // PRI-454: Gate B path — TriggerController owns admission
+                      const rawObs = buildEmpathyObservation({
+                        detectionSource: 'user_empathy',
+                        isGfiTriggered: true,
+                        sessionId,
+                      });
+                      const sourceKind = resolveSourceKind(rawObs);
+                      const triage = evaluateEvidenceTriage(sourceKind, freshGfiPainScore);
+                      if (triage.decision !== 'admit') {
+                        logger?.info?.(`[PD:Empathy] Observer triage ${triage.decision}: ${triage.reason}`);
+                      } else {
+                        const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'empathy_gfi_observer');
+                        const triggerDecision = evaluateTriggerController({
+                          triageResult: triage,
+                          isOwnerManual: false,
+                          isCooldownActive: cooldownActive,
+                          isValid: true,
+                          score: freshGfiPainScore,
+                          sessionId,
+                        });
+                        if (triggerDecision.shouldCreateDiagnosticTask) {
+                          markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'empathy_gfi_observer');
+                          logger?.info?.(`[PD:Empathy] Gate B approved (observer), calling emitPainDetectedEvent...`);
+                          try {
+                            const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                            // PRI-453: Reuse observerPainId for lineage consistency —
+                            // the same id is used as canonicalPainId in recordPainEvent
+                            // and as painId in the emitted event, so EvidenceChainConsoleModel
+                            // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
+                            await emitPainDetectedEvent(wctx, {
+                              ts: new Date().toISOString(),
+                              type: 'pain_detected',
+                              data: {
+                                painId: observerPainId,
+                                painType: 'user_frustration',
+                                source: 'user_empathy',
+                                reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
+                                score: freshGfiPainScore,
+                                sessionId,
+                                agentId: 'main',
+                                provenance: 'openclaw_context_bound',
+                                evidence,
+                              },
+                            }, { recordObservability: false });
+                          } catch (emitErr) {
+                            logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                          }
+                        } else {
+                          logger?.info?.(`[PD:Empathy] Gate B skipped (observer): ${triggerDecision.reason}`);
+                        }
+                      }
+                    } else {
+                      // PRI-454: Gate A path (rollback when either flag is OFF)
+                      const gate = evaluatePainDiagnosticGate({
+                        source: 'user_empathy',
+                        score: freshGfiPainScore,
+                        currentGfi: freshGfi,
+                        consecutiveErrors: freshSession?.consecutiveErrors ?? 0,
+                        sessionId,
+                        errorHash: 'empathy_gfi_threshold',
+                        thresholds: {
+                          painTrigger,
+                          highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+                          semanticPain: Math.max(painTrigger, 60),
+                        },
+                      });
+
+                      if (gate.shouldDiagnose) {
+                        logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
+                        try {
+                          const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                          // PRI-453: Reuse observerPainId for lineage consistency —
+                          // the same id is used as canonicalPainId in recordPainEvent
+                          // and as painId in the emitted event, so EvidenceChainConsoleModel
+                          // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
+                          await emitPainDetectedEvent(wctx, {
+                            ts: new Date().toISOString(),
+                            type: 'pain_detected',
+                            data: {
+                              painId: observerPainId,
+                              painType: 'user_frustration',
+                              source: 'user_empathy',
+                              reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
+                              score: freshGfiPainScore,
+                              sessionId,
+                              agentId: 'main',
+                              provenance: 'openclaw_context_bound',
+                              evidence,
+                            },
+                          }, { recordObservability: false });
+                        } catch (emitErr) {
+                          logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                        }
                       }
                     }
                   }
