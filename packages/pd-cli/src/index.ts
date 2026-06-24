@@ -417,9 +417,16 @@ activationTopCmd
   .command('list')
   .description('List all activations for a workspace')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-c, --channel <channel>', 'Filter by channel (prompt|code_tool_hook)')
+  .option('--include-deactivated', 'Include deactivated records in output')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeActivationList({ workspace: opts.workspace, json: opts.json });
+    await handleRuntimeActivationList({
+      workspace: opts.workspace,
+      channel: opts.channel,
+      includeDeactivated: opts.includeDeactivated,
+      json: opts.json,
+    });
   });
 
 activationTopCmd

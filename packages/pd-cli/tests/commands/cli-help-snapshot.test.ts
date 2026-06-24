@@ -44,7 +44,9 @@ describe('PRI-455: pd --help shows only MVP owner commands', () => {
 
   for (const cmd of OWNER_COMMANDS) {
     it(`pd --help shows owner command: ${cmd}`, () => {
-      expect(helpOutput).toMatch(new RegExp(`\\b${cmd}\\b`));
+      // Anchor to line beginnings (like the hidden-command check) so the
+      // assertion matches the command list entry, not description text.
+      expect(helpOutput).toMatch(new RegExp(`^\\s+${cmd}\\b`, 'm'));
     });
   }
 
