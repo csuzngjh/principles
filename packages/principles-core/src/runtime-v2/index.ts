@@ -1618,6 +1618,8 @@ export {
   resolveSourceKind,
   buildToolFailureObservation,
   buildLlmDetectionObservation,
+  buildEmpathyObservation,
+  buildManualPainObservation,
   evaluateTriggerController,
   shouldCreateTask,
   isAdmittedOutcome,
