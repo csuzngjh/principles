@@ -495,9 +495,11 @@ export async function handleBeforePromptBuild(
                     eventId,
                   });
 
+                  // PRI-453: Generate painId early to pass as canonicalPainId for dedup.
+                  // Declared outside try block so it's accessible to emitPainDetectedEvent
+                  // later (lineage consistency: same id for trajectory + emitted event).
+                  const observerPainId = `empathy_gfi_${Date.now()}`;
                   try {
-                    // PRI-453: Generate painId early to pass as canonicalPainId for dedup.
-                    const observerPainId = `empathy_gfi_${Date.now()}`;
                     wctx.trajectory?.recordPainEvent?.({
                       sessionId,
                       source: 'user_empathy',
@@ -536,13 +538,15 @@ export async function handleBeforePromptBuild(
                       logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
                       try {
                         const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                        // PRI-453: Reuse the observerPainId for dedup with trajectory record.
-                        const observerEmitPainId = `empathy_gfi_${Date.now()}`;
+                        // PRI-453: Reuse observerPainId for lineage consistency —
+                        // the same id is used as canonicalPainId in recordPainEvent
+                        // and as painId in the emitted event, so EvidenceChainConsoleModel
+                        // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
                         await emitPainDetectedEvent(wctx, {
                           ts: new Date().toISOString(),
                           type: 'pain_detected',
                           data: {
-                            painId: observerEmitPainId,
+                            painId: observerPainId,
                             painType: 'user_frustration',
                             source: 'user_empathy',
                             reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,

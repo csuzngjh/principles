@@ -138,7 +138,7 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     const source = read(PROMPT);
 
     it('uses painId format: empathy_gfi_${Date.now()} (both instances)', () => {
-      // PRI-453: painId is now generated early as a variable (gfiPainId / observerEmitPainId)
+      // PRI-453: painId is now generated early as a variable (gfiPainId / observerPainId)
       // and referenced in the emit data block. Both variables use empathy_gfi_${Date.now()} format.
       const matches = source.match(/`empathy_gfi_\$\{Date\.now\(\)\}`/g);
       expect(matches).not.toBeNull();
@@ -176,7 +176,7 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      // PRI-453: painId is now a variable reference (gfiPainId / observerEmitPainId),
+      // PRI-453: painId is now a variable reference (gfiPainId / observerPainId),
       // so we extract the data blocks by matching the variable name pattern instead.
       // Verify no traceId appears in any emitPainDetectedEvent data block in prompt.ts.
       const emitBlocks = source.match(/emitPainDetectedEvent\(wctx,\s*\{[\s\S]*?\},\s*\{[^}]*\}\);/g);

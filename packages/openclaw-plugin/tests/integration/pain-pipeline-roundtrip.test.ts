@@ -14,8 +14,11 @@
  * 4. Paths without legacy writers (gate-block-helper, lifecycle) do NOT
  *    pass `recordObservability: false` — they keep the SDK default true.
  * 5. `emitPainDetectedEvent` signature accepts optional options parameter.
+ * 6. painId is generated before recordPainEvent (lineage consistency).
+ * 7. Observer path uses same painId for recordPainEvent and emit (ERR-004/ERR-008).
  *
  * ERR refs:
+ * - ERR-004/ERR-008 (lineage consistency): same painId for trajectory + emit
  * - ERR-009 (fail-loud): tests fail if write pattern changes without update
  * - ERR-015/ERR-019 (stale loop state): canonicalPainId must be generated
  *   before recordPainEvent to ensure consistency
@@ -188,6 +191,23 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(painIdLine).toBeGreaterThan(-1);
       expect(recordPainEventLine).toBeGreaterThan(-1);
       expect(painIdLine).toBeLessThan(recordPainEventLine);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Invariant 7: Observer path uses same painId for recordPainEvent and emit
+  // (lineage consistency — ERR-004/ERR-008)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('Observer path uses same painId for trajectory and emit (lineage consistency)', () => {
+    it('prompt.ts Observer path uses observerPainId for both canonicalPainId and emitted painId', () => {
+      const source = read(PROMPT);
+      // The Observer path should use observerPainId as canonicalPainId in recordPainEvent
+      expect(source).toMatch(/canonicalPainId:\s*observerPainId/);
+      // The Observer path should use observerPainId as painId in the emitted event
+      expect(source).toMatch(/painId:\s*observerPainId/);
+      // There should be NO separate observerEmitPainId variable (lineage gap fixed)
+      expect(source).not.toMatch(/observerEmitPainId/);
     });
   });
 });
