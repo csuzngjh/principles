@@ -21,12 +21,13 @@ describe('parseErrStats', () => {
     const content = `# Handbook
 
 **[ERR-001]** | First error
-- **Recurrence**: 2026-01-01 PRI-100
+- **Recurrence**: Yes (2026-01-01 PRI-100)
 
 **[ERR-002]** | Second error
 
 **[ERR-003]** | Third error
-- **Recurrence**: 2026-02-01 PRI-101
+- **Recurrence**: Yes (2026-02-01 PRI-101)
+
 `;
     writeFileSync(handbookPath, content, 'utf8');
     const stats = parseErrStats(handbookPath);
