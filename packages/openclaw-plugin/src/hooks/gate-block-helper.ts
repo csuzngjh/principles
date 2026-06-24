@@ -110,15 +110,11 @@ export function recordGateBlockAndReturn(
   // so one mild block does not start a long diagnostician run.
   if (sessionId) {
     const GATE_BLOCK_PAIN_SCORE = 45; // Must be >= pain_trigger (40) so single gate block can trigger diagnosis (PRI-274)
-    // Record to trajectory (fire-and-forget, no .pain_flag file needed)
-    wctx.trajectory?.recordPainEvent?.({
-      sessionId,
-      source: 'gate_blocked',
-      score: GATE_BLOCK_PAIN_SCORE,
-      reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
-      severity: 'mild',
-      origin: 'system_infer',
-    });
+    // PRI-453: Generate painId early. SDK observability path (emitPainDetectedEvent
+    // with default recordObservability: true) handles all writes: events_*.jsonl +
+    // evolution.jsonl + trajectory.db (with canonicalPainId for dedup). No separate
+    // legacy recordPainEvent call needed — avoids double-write to trajectory.db.
+    const gatePainId = `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
     // PEAT-B1: Evidence triage (feature-flagged)
     let triageAdmitted = true;
@@ -175,7 +171,7 @@ export function recordGateBlockAndReturn(
           ts: new Date().toISOString(),
           type: 'pain_detected',
           data: {
-            painId: `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+            painId: gatePainId,
             painType: 'user_frustration',
             source: 'gate_blocked',
             reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,

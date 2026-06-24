@@ -2,15 +2,19 @@
  * Pain signal observability for Runtime v2 entry points.
  *
  * Design intent (PRI-453): This writer serves paths that do NOT have legacy
- * event-log/trajectory writers — specifically `pd pain record` CLI,
+ * event-log writers — specifically `pd pain record` CLI,
  * `gate-block-helper.ts`, and `lifecycle.ts`. Hook paths that already write
  * via legacy `recordPainSignal` + `recordPainEvent` pass
  * `recordObservability: false` to avoid triple-write.
  *
- * Automatic OpenClaw hook paths already record event-log and trajectory rows
- * before calling PainSignalBridge. `pd pain record` does not have a
- * WorkspaceContext, so it uses this small core writer to avoid an observability
- * gap while keeping `evolution_tasks` legacy queue disabled.
+ * `gate-block-helper.ts` has a legacy `recordGateBlock` call but no legacy
+ * `recordPainSignal` or `recordPainEvent` for pain events — it relies on
+ * this SDK writer for all pain observability (events_*.jsonl + evolution.jsonl
+ * + trajectory.db with canonicalPainId).
+ *
+ * `pd pain record` does not have a WorkspaceContext, so it uses this small
+ * core writer to avoid an observability gap while keeping `evolution_tasks`
+ * legacy queue disabled.
  */
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
