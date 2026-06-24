@@ -18,6 +18,8 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { evaluateTriggerController } from '@principles/core/runtime-v2';
+import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { isRisky } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -116,10 +118,15 @@ export function recordGateBlockAndReturn(
     // legacy recordPainEvent call needed — avoids double-write to trajectory.db.
     const gatePainId = `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-    // PEAT-B1: Evidence triage (feature-flagged)
+    // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
+    // When either OFF → Gate A (PainDiagnosticGate, rollback).
+    const triageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
+    const defaultFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmissionDefault');
+    const useGateB = triageFlag.enabled && defaultFlag.enabled;
+
+    // PEAT-B1: Evidence triage (runs when Gate B is active)
     let triageAdmitted = true;
-    const gateBlockTriageFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'painEvidenceAdmission');
-    if (gateBlockTriageFlag.enabled) {
+    if (useGateB) {
       // Load profile with 1MB size guard, matching pain.ts pattern
       const profilePath = wctx.resolve('PROFILE');
       let profile = normalizeProfile({});
@@ -153,37 +160,72 @@ export function recordGateBlockAndReturn(
 
     const session = getSession(sessionId);
     if (triageAdmitted) {
-      const gate = evaluatePainDiagnosticGate({
-        source: 'gate_blocked',
-        score: GATE_BLOCK_PAIN_SCORE,
-        currentGfi: session?.currentGfi ?? 0,
-        consecutiveErrors: session?.consecutiveErrors ?? 0,
-        sessionId,
-        errorHash: `${toolName}:${filePath}:${reason}`,
-        thresholds: {
-          painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
-          highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-        },
-      });
-
-      if (gate.shouldDiagnose) {
-        void emitPainDetectedEvent(wctx, {
-          ts: new Date().toISOString(),
-          type: 'pain_detected',
-          data: {
-            painId: gatePainId,
-            painType: 'user_frustration',
-            source: 'gate_blocked',
-            reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
-            score: GATE_BLOCK_PAIN_SCORE,
-            sessionId,
-            agentId: 'main',
-          },
-        }).catch((emitErr) => {
-          logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+      if (useGateB) {
+        // PRI-454: Gate B path — TriggerController owns admission
+        const errorHash = `${toolName}:${filePath}:${reason}`;
+        const cooldownActive = isSharedCooldownActive('rulehost_block', sessionId, errorHash);
+        const triggerDecision = evaluateTriggerController({
+          sourceKind: 'rulehost_block',
+          score: GATE_BLOCK_PAIN_SCORE,
+          isOwnerManual: false,
+          isCooldownActive: cooldownActive,
+          isValid: true,
+          sessionId,
         });
+        if (triggerDecision.shouldCreateDiagnosticTask) {
+          markSharedEpisodeAsDiagnosed('rulehost_block', sessionId, errorHash);
+          void emitPainDetectedEvent(wctx, {
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+              painId: gatePainId,
+              painType: 'user_frustration',
+              source: 'gate_blocked',
+              reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+              score: GATE_BLOCK_PAIN_SCORE,
+              sessionId,
+              agentId: 'main',
+            },
+          }).catch((emitErr) => {
+            logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+          });
+        } else {
+          logger.info?.(`[PD_GATE] Gate B skipped: ${triggerDecision.reason}`);
+        }
       } else {
-        logger.info?.(`[PD_GATE] Gate block recorded without Runtime V2 diagnosis: ${gate.detail}`);
+        // PRI-454: Gate A path (rollback when either flag is OFF)
+        const gate = evaluatePainDiagnosticGate({
+          source: 'gate_blocked',
+          score: GATE_BLOCK_PAIN_SCORE,
+          currentGfi: session?.currentGfi ?? 0,
+          consecutiveErrors: session?.consecutiveErrors ?? 0,
+          sessionId,
+          errorHash: `${toolName}:${filePath}:${reason}`,
+          thresholds: {
+            painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
+            highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+          },
+        });
+
+        if (gate.shouldDiagnose) {
+          void emitPainDetectedEvent(wctx, {
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+              painId: gatePainId,
+              painType: 'user_frustration',
+              source: 'gate_blocked',
+              reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+              score: GATE_BLOCK_PAIN_SCORE,
+              sessionId,
+              agentId: 'main',
+            },
+          }).catch((emitErr) => {
+            logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+          });
+        } else {
+          logger.info?.(`[PD_GATE] Gate block recorded without Runtime V2 diagnosis: ${gate.detail}`);
+        }
       }
     }
   }

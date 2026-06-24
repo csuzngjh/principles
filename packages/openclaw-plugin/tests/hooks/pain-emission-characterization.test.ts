@@ -405,7 +405,7 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       }
     });
 
-    it('documents: only after-tool-call-helpers uses evaluateTriggerController', () => {
+    it('documents: after-tool-call-helpers and gate-block-helper use evaluateTriggerController (PRI-454)', () => {
       const atc = read(AFTER_TOOL_CALL_HELPERS);
       const prompt = read(PROMPT);
       const llm = read(LLM);
@@ -414,7 +414,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(atc).toMatch(/evaluateTriggerController/);
       expect(prompt).not.toMatch(/evaluateTriggerController/);
       expect(llm).not.toMatch(/evaluateTriggerController/);
-      expect(gate).not.toMatch(/evaluateTriggerController/);
+      // PRI-454: gate-block-helper now uses evaluateTriggerController when Gate B is active
+      expect(gate).toMatch(/evaluateTriggerController/);
     });
 
     it('documents: 3 of 4 sites use evaluatePainDiagnosticGate (not after-tool-call-helpers)', () => {
