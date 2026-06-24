@@ -253,15 +253,22 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
   it('defer_archive channel: no route maps to defer_archive — no dreamer task seeded', async () => {
     // The intake bridge has NO route that maps to the defer_archive channel.
     // defer recommendations return 'not_internalizable' at computeBridgeDecision.
+    // Use ready: true so the code reaches the route check (not the !ready early exit).
     const bridgeInput: IntakeToInternalizationBridgeInput = {
       candidateId: `cand-defer-${Date.now()}`,
       recommendationKind: 'defer',
       route: 'deferred',
-      ready: false,
+      ready: true,
     };
 
     const decision = computeBridgeDecision(bridgeInput);
     expect(decision.decision).toBe('not_internalizable');
+    // Verify the rejection is specifically because the route is deferred,
+    // not because of a missing ready flag or unknown route.
+    if (!('reason' in decision)) {
+      throw new Error('Expected not_internalizable decision to have a reason field');
+    }
+    expect(decision.reason).toContain('deferred');
 
     // No dreamer task is seeded — no runners run for defer_archive
     // through the internalization pipeline.
@@ -293,17 +300,27 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
       expect(successorTask.diagnosticJson).toBeDefined();
 
       // Parse the PI metadata to verify channel inheritance
+      // Runtime Contract #2/#5: no `as` on untrusted data; use typeof + Object.hasOwn
       const diagJson = successorTask.diagnosticJson;
       if (!diagJson) {
         throw new Error('Successor task diagnosticJson is empty');
       }
-      const parsed = JSON.parse(diagJson) as Record<string, unknown>;
-      const piMeta = parsed.pi_metadata as Record<string, unknown> | undefined;
-      expect(piMeta).toBeDefined();
-      if (!piMeta) {
-        throw new Error('pi_metadata not found in successor diagnosticJson');
+      const parsed: unknown = JSON.parse(diagJson);
+      if (typeof parsed !== 'object' || parsed === null) {
+        throw new Error('diagnosticJson is not an object');
       }
-      expect(piMeta.channel).toBe(channel);
+      if (!Object.hasOwn(parsed, 'pi_metadata')) {
+        throw new Error('pi_metadata key not found in successor diagnosticJson');
+      }
+      const piMeta = (parsed as Record<string, unknown>).pi_metadata;
+      if (typeof piMeta !== 'object' || piMeta === null) {
+        throw new Error('pi_metadata is not an object');
+      }
+      if (!Object.hasOwn(piMeta, 'channel')) {
+        throw new Error('pi_metadata.channel is missing');
+      }
+      const channelValue = (piMeta as Record<string, unknown>).channel;
+      expect(channelValue).toBe(channel);
     }
   });
 

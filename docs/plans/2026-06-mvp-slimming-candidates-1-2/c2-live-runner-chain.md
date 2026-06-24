@@ -64,13 +64,13 @@ by evidence of what actually fires today.
 
 ### `MVP_ENABLED_CHANNELS` (intake-to-internalization-bridge.ts)
 
-```
+```javascript
 Set { 'prompt', 'code_tool_hook', 'defer_archive' }
 ```
 
 ### `MVP_CORE_TASK_KINDS` (queue-actionability.ts)
 
-```
+```javascript
 ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator']
 ```
 
@@ -78,7 +78,7 @@ Set { 'prompt', 'code_tool_hook', 'defer_archive' }
 
 ### `DEFAULT_CONSUMER_RUNNER_KINDS` (internalization-consumer-decision.ts)
 
-```
+```javascript
 ['dreamer']
 ```
 
@@ -103,7 +103,7 @@ through the peer runner chain).
 
 ## ALLOWED_EDGES (Job Graph Topology)
 
-```
+```text
 dreamer → philosopher → scribe → artificer → evaluator → rollout_reviewer
 ```
 
@@ -189,7 +189,7 @@ only calls `wakeOnce('dreamer')`. This is a runtime behavior, not a config gate.
 When a dreamer task succeeds and `commitNextTaskProposal` is called, the
 successor chain created in the store is:
 
-```
+```text
 dreamer (succeeded) → philosopher (pending) → scribe (pending) → artificer (pending) → evaluator (pending) → rollout_reviewer (pending)
 ```
 
