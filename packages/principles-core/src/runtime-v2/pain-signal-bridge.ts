@@ -8,6 +8,7 @@ import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { shapeBridgeResult } from './bridge-result-shaper.js';
 
 export type { PainProvenance };
 
@@ -361,75 +362,18 @@ export class PainSignalBridge {
     const firstCandidate = candidates.at(0);
 
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
-    if (candidateIds.length === 0) {
-      return {
-        status: 'failed',
-        painId,
-        taskId,
-        runId: latestRun?.runId,
-        candidateIds,
-        ledgerEntryIds,
-        admissionResults,
-        message: 'Diagnostician succeeded but produced no principle candidates',
-      };
-    }
-
-    const admittedCount = admissionResults.filter((a) => a.admission.decision === 'admitted').length;
-    const nonAdmittedCount = admissionResults.length - admittedCount;
-
-    if (this.autoIntakeEnabled && admittedCount > 0 && ledgerEntryIds.length === 0) {
-      return {
-        status: 'failed',
-        painId,
-        taskId,
-        runId: latestRun?.runId,
-        artifactId: firstCandidate?.artifactId,
-        candidateIds,
-        ledgerEntryIds,
-        admissionResults,
-        message: 'Candidate intake did not produce a ledger entry',
-      };
-    }
-
-    if (nonAdmittedCount > 0 && admittedCount === 0) {
-      return {
-        status: 'degraded',
-        painId,
-        taskId,
-        runId: latestRun?.runId,
-        artifactId: firstCandidate?.artifactId,
-        candidateIds,
-        ledgerEntryIds,
-        admissionResults,
-        message: `all_candidates_gated:${admissionResults.map((a) => `${a.candidateId}=${a.admission.decision}`).join(',')}${seedFailureNote ? `; ${seedFailureNote}` : ''}`,
-      };
-    }
-
-    if (nonAdmittedCount > 0 && admittedCount > 0) {
-      return {
-        status: 'degraded',
-        painId,
-        taskId,
-        runId: latestRun?.runId,
-        artifactId: firstCandidate?.artifactId,
-        candidateIds,
-        ledgerEntryIds,
-        admissionResults,
-        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated${seedFailureNote ? `; ${seedFailureNote}` : ''}`,
-      };
-    }
-
-    return {
-      status: seedFailureNote ? 'degraded' : 'succeeded',
+    return shapeBridgeResult({
+      path: 'fresh',
       painId,
       taskId,
-      runId: latestRun?.runId,
-      artifactId: firstCandidate?.artifactId,
       candidateIds,
       ledgerEntryIds,
+      runId: latestRun?.runId,
+      artifactId: firstCandidate?.artifactId,
+      autoIntakeEnabled: this.autoIntakeEnabled,
       admissionResults,
-      message: seedFailureNote || undefined,
-    };
+      seedFailureNote,
+    });
   }
 
   private async buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult> {
@@ -440,18 +384,6 @@ export class PainSignalBridge {
     const firstCandidate = candidates.at(0);
     const ledgerEntryIds: string[] = [];
 
-    if (candidateIds.length === 0) {
-      return {
-        status: 'failed',
-        painId: input.painId,
-        taskId: input.taskId,
-        runId: latestRun?.runId,
-        candidateIds: [],
-        ledgerEntryIds: [],
-        message: 'Task has no principle candidates — treating as failed',
-      };
-    }
-
     if (this.autoIntakeEnabled) {
       for (const candidate of candidates) {
         const ledgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
@@ -460,29 +392,17 @@ export class PainSignalBridge {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
       }
-      if (ledgerEntryIds.length === 0) {
-        return {
-          status: 'failed',
-          painId: input.painId,
-          taskId: input.taskId,
-          runId: latestRun?.runId,
-          artifactId: firstCandidate?.artifactId,
-          candidateIds,
-          ledgerEntryIds: [],
-          message: 'Candidate intake did not produce a ledger entry — treating as failed',
-        };
-      }
     }
 
-    return {
-      status: 'succeeded',
+    return shapeBridgeResult({
+      path: 'existing',
       painId: input.painId,
       taskId: input.taskId,
-      runId: latestRun?.runId,
-      artifactId: firstCandidate?.artifactId,
       candidateIds,
       ledgerEntryIds,
-      message: 'Task already succeeded',
-    };
+      runId: latestRun?.runId,
+      artifactId: firstCandidate?.artifactId,
+      autoIntakeEnabled: this.autoIntakeEnabled,
+    });
   }
 }
