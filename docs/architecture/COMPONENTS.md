@@ -148,13 +148,13 @@ PD 系统有 5 类组件：
 
 | Runner | 类型 | 包 | 文件 | 输入工件 | 输出工件 | 状态 |
 |--------|-----|----|----|---------|---------|------|
-| `DreamerRunner` | 🟢 Runner | core | `runtime-v2/internalization/dreamer-runner.ts` | LedgerPrincipleEntry | PIArtifact(principle) | ✅ |
-| `PhilosopherRunner` | 🟢 Runner | core | `runtime-v2/internalization/philosopher-runner.ts` | DreamerOutput | PIArtifact(principle) | ✅ |
-| `ScribeRunner` | 🟢 Runner | core | `runtime-v2/internalization/scribe-runner.ts` | PhilosopherOutput | PIArtifact(principle) | ✅ |
-| `ArtificerRunner` | 🟢 Runner | core | `runtime-v2/internalization/artificer-runner.ts` | ScribeOutput | PIArtifact(rule) | ✅ |
-| `EvaluatorRunner` | 🟢 Runner | core | `runtime-v2/internalization/evaluator-runner.ts` | ArtificerOutput | PIArtifact(rule) | ✅ |
-| `RolloutReviewerRunner` | 🟢 Runner | core | `runtime-v2/internalization/rollout-reviewer-runner.ts` | EvaluatorOutput | PIArtifact(rule) + 触发 ActivationDispatcher | ⚠️ 需扩展 |
-| `TrainerRunner` | 🟢 Runner | core | `runtime-v2/internalization/trainer-runner.ts` | RolloutReviewerOutput | PIArtifact(training_data) | ✅ |
+| `DreamerRunner` | 🟢 Runner | core | `runtime-v2/internalization/dreamer-runner.ts` | LedgerPrincipleEntry | PIArtifact(principle) | ✅ MVP-Core |
+| `PhilosopherRunner` | 🟡 Runner | core | `runtime-v2/internalization/philosopher-runner.ts` | DreamerOutput | PIArtifact(principle) | ✅ MVP-Quiet (default off) |
+| `ScribeRunner` | 🟢 Runner | core | `runtime-v2/internalization/scribe-runner.ts` | PhilosopherOutput | PIArtifact(principle) | ✅ MVP-Core |
+| `ArtificerRunner` | 🟢 Runner | core | `runtime-v2/internalization/artificer-runner.ts` | ScribeOutput | PIArtifact(rule) | ✅ MVP-Core |
+| `EvaluatorRunner` | 🟡 Runner | core | `runtime-v2/internalization/evaluator-runner.ts` | ArtificerOutput | PIArtifact(rule) | ✅ MVP-Quiet (default off; MVP-Core for RuleHost per ADR-0014 amendment) |
+| `RolloutReviewerRunner` | 🟡 Runner | core | `runtime-v2/internalization/rollout-reviewer-runner.ts` | EvaluatorOutput | PIArtifact(rule) + 触发 ActivationDispatcher | ✅ MVP-Quiet (default off) |
+| `TrainerRunner` | 🟢 Runner | core | `runtime-v2/internalization/trainer-runner.ts` | RolloutReviewerOutput | PIArtifact(training_data) | Deferred |
 
 #### 3.2.3 Runner 输出 Validator（每 Runner 一个）
 
