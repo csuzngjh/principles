@@ -191,32 +191,9 @@ export {
 
 export { DreamerRunner } from './dreamer-runner.js';
 
-// ── Philosopher Runner (PRI-90) ────────────────────────────────────────────────
-
-export type {
-  PhilosopherOutputV1,
-  PhilosopherPrincipleCandidate,
-  PhilosopherValidationResult,
-  PhilosopherValidator,
-} from './philosopher-output.js';
-
-export {
-  DefaultPhilosopherValidator,
-} from './philosopher-output.js';
-
-export type {
-  PhilosopherRunnerResultStatus,
-  PhilosopherRunnerResult,
-  PhilosopherRunnerOptions,
-  ResolvedPhilosopherRunnerOptions,
-  PhilosopherRunnerDeps,
-} from './philosopher-runner.js';
-
-export {
-  PhilosopherRunner,
-  resolvePhilosopherRunnerOptions,
-  DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
-} from './philosopher-runner.js';
+// ── Philosopher Runner (PRI-90) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
+// Types/classes remain in philosopher-output.ts and philosopher-runner.ts.
+// Import directly from those source files if needed (not from this barrel).
 
 // ── Scribe Runner (PRI-109) ────────────────────────────────────────────────────
 
@@ -276,100 +253,13 @@ export {
   DEFAULT_ARTIFICER_RUNNER_OPTIONS,
 } from './artificer-runner.js';
 
-// ── Evaluator Runner (PRI-EVAL) ────────────────────────────────────────────────
+// ── Evaluator Runner (PRI-EVAL) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
+// Types/classes remain in evaluator-output.ts, evaluator-runner.ts, and evaluator-prompt-builder.ts.
+// Import directly from those source files if needed (not from this barrel).
 
-export type {
-  EvaluatorEvaluation,
-  EvaluatorSourceTrace,
-  EvaluatorOutputV1,
-  EvaluatorOutputV2,
-  EvaluatorValidationResult,
-  EvaluatorValidator,
-  EvaluatorCodeReview,
-  EvaluatorAdversarialResult,
-  AdversarialCase,
-  AdversarialFailedCase,
-  AdversarialAttackType,
-} from './evaluator-output.js';
-
-export {
-  DefaultEvaluatorValidator,
-  EvaluatorOutputV1Schema,
-  EvaluatorEvaluationSchema,
-  EvaluatorSourceTraceSchema,
-  EVALUATOR_DECISIONS,
-  isEvaluatorOutputV2,
-} from './evaluator-output.js';
-
-export type {
-  EvaluatorRunnerResultStatus,
-  EvaluatorRunnerResult,
-  EvaluatorRunnerOptions,
-  ResolvedEvaluatorRunnerOptions,
-  EvaluatorRunnerDeps,
-} from './evaluator-runner.js';
-
-export {
-  EvaluatorRunner,
-  resolveEvaluatorRunnerOptions,
-  DEFAULT_EVALUATOR_RUNNER_OPTIONS,
-} from './evaluator-runner.js';
-
-export {
-  EvaluatorPromptBuilder,
-  EVALUATOR_PROTOCOL_INSTRUCTION,
-  EVALUATOR_PROMPT_CONTRACT_VERSION,
-} from './evaluator-prompt-builder.js';
-
-export type {
-  EvaluatorPromptBuilderInput,
-  EvaluatorPromptInput,
-  EvaluatorPromptBuildResult,
-} from './evaluator-prompt-builder.js';
-
-// ── Rollout Reviewer Runner (PRI-RR) ────────────────────────────────────────
-
-export type {
-  RolloutReviewerReview,
-  RolloutReviewerSourceTrace,
-  RolloutReviewerOutputV1,
-  RolloutReviewerValidationResult,
-  RolloutReviewerValidator,
-} from './rollout-reviewer-output.js';
-
-export {
-  DefaultRolloutReviewerValidator,
-  RolloutReviewerOutputV1Schema,
-  RolloutReviewerReviewSchema,
-  RolloutReviewerSourceTraceSchema,
-  ROLLOUT_REVIEWER_DECISIONS,
-} from './rollout-reviewer-output.js';
-
-export type {
-  RolloutReviewerRunnerResultStatus,
-  RolloutReviewerRunnerResult,
-  RolloutReviewerRunnerOptions,
-  ResolvedRolloutReviewerRunnerOptions,
-  RolloutReviewerRunnerDeps,
-} from './rollout-reviewer-runner.js';
-
-export {
-  RolloutReviewerRunner,
-  resolveRolloutReviewerRunnerOptions,
-  DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS,
-} from './rollout-reviewer-runner.js';
-
-export {
-  RolloutReviewerPromptBuilder,
-  ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION,
-  ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
-} from './rollout-reviewer-prompt-builder.js';
-
-export type {
-  RolloutReviewerPromptBuilderInput,
-  RolloutReviewerPromptInput,
-  RolloutReviewerPromptBuildResult,
-} from './rollout-reviewer-prompt-builder.js';
+// ── Rollout Reviewer Runner (PRI-RR) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
+// Types/classes remain in rollout-reviewer-output.ts, rollout-reviewer-runner.ts, and rollout-reviewer-prompt-builder.ts.
+// Import directly from those source files if needed (not from this barrel).
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 

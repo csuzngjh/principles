@@ -38,6 +38,9 @@ interface RunOnceOptions {
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
 
+// PRI-458: philosopher, evaluator, rollout_reviewer are MVP-Quiet (default off).
+// They remain supported via --runner for manual operation but are not auto-dispatched.
+// See docs/plans/2026-06-mvp-slimming-candidates-1-2/c2-live-runner-chain.md
 const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer']);
 
 interface RunOnceOutput {
