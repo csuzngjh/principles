@@ -2131,14 +2131,9 @@ describe('PRI-EVAL EvaluatorRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  it('BARREL_EXPORTS: internalization/index.ts exports EvaluatorRunner and EvaluatorOutput', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
-    expect(src).toContain('EvaluatorRunner');
-    expect(src).toContain('EvaluatorOutput');
-    expect(src).toContain('DefaultEvaluatorValidator');
-  });
+  // PRI-458: BARREL_EXPORTS assertion for EvaluatorRunner removed — de-surfaced from
+  // internalization/index.ts (MVP-Quiet). The runner remains in runtime-v2/index.ts
+  // (public barrel) because rulehost-pipeline-runner.ts imports it (EP-02 exception).
 
   it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers evaluator-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
@@ -2195,14 +2190,10 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  it('BARREL_EXPORTS: internalization/index.ts exports RolloutReviewerRunner and RolloutReviewerOutput', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
-    expect(src).toContain('RolloutReviewerRunner');
-    expect(src).toContain('RolloutReviewerOutput');
-    expect(src).toContain('DefaultRolloutReviewerValidator');
-  });
+  // PRI-458: BARREL_EXPORTS assertion for RolloutReviewerRunner removed — de-surfaced from
+  // internalization/index.ts (MVP-Quiet). The runner remains in runtime-v2/index.ts
+  // (public barrel) because runtime-internalization-run-once.ts imports it and
+  // package.json has no deep import path available.
 
   it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers rollout-reviewer-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
@@ -2499,12 +2490,14 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
     }
   });
 
-  it('RUNTIME_V2_USES_PEER_RUNNERS: DreamerRunner/PhilosopherRunner/ScribeRunner are the canonical entry points', async () => {
+  it('RUNTIME_V2_USES_PEER_RUNNERS: DreamerRunner/ScribeRunner/ArtificerRunner are the canonical MVP-Core entry points', async () => {
+    // PRI-458: narrowed to MVP-Core runners only. PhilosopherRunner (MVP-Quiet)
+    // remains in runtime-v2/index.ts for rulehost-pipeline-runner.ts compatibility
+    // but is no longer asserted as a canonical entry point.
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
     expect(src).toContain('DreamerRunner');
-    expect(src).toContain('PhilosopherRunner');
     expect(src).toContain('ScribeRunner');
     expect(src).toContain('ArtificerRunner');
   });
