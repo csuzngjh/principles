@@ -363,6 +363,17 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/loadFeatureFlagFromConfig/);
     });
 
+    it('passes consecutiveErrors and isRisky to evaluateEvidenceTriage in Gate B path (PRI-454 P2-1)', () => {
+      // Regression: Gate B path must pass consecutiveErrors and isRisky so
+      // Rule 3 (consecutiveErrors >= 4 → admit) can fire for non-risky
+      // repeated gate blocks. Without these, only isUnsafeHighConfidence
+      // was passed, dropping the repeated-failure upgrade rule.
+      const triageCall = source.match(/evaluateEvidenceTriage\([^)]+\)/s);
+      expect(triageCall).not.toBeNull();
+      expect(triageCall![0]).toMatch(/consecutiveErrors/);
+      expect(triageCall![0]).toMatch(/isRisky/);
+    });
+
     it('calls emitPainDetectedEvent with void + .catch() (fire-and-forget with error handler)', () => {
       expect(source).toMatch(/void\s+emitPainDetectedEvent/);
       expect(source).toMatch(/\.catch\(\(emitErr\)/);

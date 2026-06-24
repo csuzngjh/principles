@@ -149,8 +149,13 @@ export function recordGateBlockAndReturn(
       // weight, NOT the action risk severity. The rulehost principle already determined
       // this action was important enough to block — that is the real signal.
       const isUnsafe = isRisky(filePath, profile.risk_paths);
+      // PRI-454 P2-1: Pass consecutiveErrors and isRisky to match Gate A's
+      // upgrade logic. Rule 3 (consecutiveErrors >= 4 → admit) was being
+      // dropped, so non-risky repeated gate blocks never triggered diagnosis.
       const triage = evaluateEvidenceTriage('rulehost_block', GATE_BLOCK_PAIN_SCORE, {
         isUnsafeHighConfidence: isUnsafe,
+        isRisky: isUnsafe,
+        consecutiveErrors: session?.consecutiveErrors,
       });
 
       if (triage.decision !== 'admit') {
