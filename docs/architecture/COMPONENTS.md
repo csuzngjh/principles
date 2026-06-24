@@ -451,7 +451,7 @@ PD 系统有 5 类组件：
 | `pd activation status` | `pd-cli/commands/activation.ts` | artifactId | activation status | ❌ 待建 |
 | `pd legacy-import` | `pd-cli/commands/legacy-import.ts` | nocturnal artifacts | imported count | ✅ |
 | `pd legacy-cleanup` | `pd-cli/commands/legacy-cleanup.ts` | n/a | cleaned count | ✅ |
-| `pd central-sync` | `pd-cli/commands/central-sync.ts` | n/a | sync result | ✅ |
+| `pd central-sync` | `pd-cli/commands/central-sync.ts` | n/a | sync result | ❌ MVP-Gone (PRI-455: CLI command removed; service code retained as MVP-Quiet) |
 | `pd samples list / review` | `pd-cli/commands/samples-*.ts` | filter | samples | ✅ |
 | `pd remediation output` | `pd-cli/commands/remediation-output.ts` | n/a | remediation list | ✅ |
 | `pd evolution-tasks list / show` | `pd-cli/commands/evolution-tasks-*.ts` | n/a | evolution tasks | ✅ |

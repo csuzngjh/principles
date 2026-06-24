@@ -144,7 +144,7 @@ export async function handleMvpSmoke(opts: MvpSmokeOptions): Promise<void> {
  */
 export function registerMvpCommands(program: Command): Command {
   const mvpCmd = program
-    .command('mvp')
+    .command('mvp', { hidden: true })
     .description('MVP readiness commands');
 
   withWorkspaceAndJson(

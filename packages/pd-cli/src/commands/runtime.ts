@@ -453,7 +453,7 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
  */
 export function registerRuntimeProbeCommand(runtimeCmd: Command): Command {
   return runtimeCmd
-    .command('probe')
+    .command('probe', { hidden: true })
     .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
     .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'pi-ai', or 'config'")
     .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')

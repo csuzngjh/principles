@@ -49,9 +49,9 @@ describe('CLI command tree structure', () => {
     expect(output).toContain('UAT');
   });
 
-  it('runtime subcommand list includes uat (pd runtime --help)', () => {
+  it('runtime subcommand list does NOT include uat (PRI-455: hidden from --help)', () => {
     const output = runPdHelp(['runtime', '--help']);
-    expect(output).toMatch(/uat\s/);
+    expect(output).not.toMatch(/uat\s/);
   });
 
   it('pruning subcommand list does NOT include uat (pd runtime pruning --help)', () => {
