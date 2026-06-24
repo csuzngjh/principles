@@ -14,6 +14,8 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { resolveSourceKind, type RawObservation } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
+import { evaluateTriggerController } from '@principles/core/runtime-v2';
+import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -284,25 +286,11 @@ export function handleLlmOutput(
     }
 
     if (painScore >= painTriggerThreshold) {
-        // PEAT-B1: Evidence triage (feature-flagged)
-        let triageAdmitted = true;
-        const llmTriageFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmission');
-        if (llmTriageFlag.enabled) {
-            // PRI-360 S1: Build RawObservation for unified source mapping
-            const rawObs: RawObservation = {
-                observedAt: new Date().toISOString(),
-                workspaceId: ctx.workspaceDir,
-                sessionId: ctx.sessionId,
-                detectionSource: source,
-                isGfiTriggered,
-            };
-            const sourceKind = resolveSourceKind(rawObs);
-            const triage = evaluateEvidenceTriage(sourceKind, painScore);
-            if (triage.decision !== 'admit') {
-                triageAdmitted = false;
-                ctx.logger?.info?.(`[PD:LLM] Triage ${triage.decision}: ${triage.reason}`);
-            }
-        }
+        // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
+        // When either OFF → Gate A (PainDiagnosticGate, rollback).
+        const triageFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmission');
+        const defaultFlag = loadFeatureFlagFromConfig(ctx.workspaceDir!, 'painEvidenceAdmissionDefault');
+        const useGateB = triageFlag.enabled && defaultFlag.enabled;
 
         eventLog.recordPainSignal(ctx.sessionId, {
             score: painScore,
@@ -324,7 +312,53 @@ export function handleLlmOutput(
             canonicalPainId: painId,
         });
 
-        if (triageAdmitted) {
+        if (useGateB) {
+            // PRI-454: Gate B path — TriggerController owns admission
+            const rawObs: RawObservation = {
+                observedAt: new Date().toISOString(),
+                workspaceId: ctx.workspaceDir,
+                sessionId: ctx.sessionId,
+                detectionSource: source,
+                isGfiTriggered,
+            };
+            const sourceKind = resolveSourceKind(rawObs);
+            const triage = evaluateEvidenceTriage(sourceKind, painScore);
+            if (triage.decision !== 'admit') {
+                ctx.logger?.info?.(`[PD:LLM] Triage ${triage.decision}: ${triage.reason}`);
+            } else {
+                const cooldownActive = isSharedCooldownActive(sourceKind, ctx.sessionId, source);
+                const triggerDecision = evaluateTriggerController({
+                    triageResult: triage,
+                    isOwnerManual: false,
+                    isCooldownActive: cooldownActive,
+                    isValid: true,
+                    score: painScore,
+                    sessionId: ctx.sessionId,
+                });
+                if (triggerDecision.shouldCreateDiagnosticTask) {
+                    markSharedEpisodeAsDiagnosed(sourceKind, ctx.sessionId, source);
+                    const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
+                    emitPainDetectedEvent(wctx, {
+                        ts: new Date().toISOString(),
+                        type: 'pain_detected',
+                        data: {
+                            painId,
+                            painType: 'user_frustration' as const,
+                            source,
+                            reason: `${matchedReason}; trigger=${triggerDecision.outcome}`,
+                            score: painScore,
+                            sessionId: ctx.sessionId || 'unknown',
+                            agentId: ctx.agentId,
+                            provenance: 'openclaw_context_bound',
+                            evidence,
+                        },
+                    }, { recordObservability: false });
+                } else {
+                    ctx.logger?.info?.(`[PD:LLM] Gate B skipped: ${triggerDecision.reason}`);
+                }
+            }
+        } else {
+            // PRI-454: Gate A path (rollback when either flag is OFF)
             const gate = evaluatePainDiagnosticGate({
                 source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
                 score: painScore,
@@ -359,8 +393,6 @@ export function handleLlmOutput(
             } else {
                 ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
             }
-        } else {
-            ctx.logger?.info?.(`[PD:LLM] Triage evidence-only: pain signal recorded without diagnosis or gate evaluation`);
         }
     }
 

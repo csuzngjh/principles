@@ -245,8 +245,20 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/agentId:\s*ctx\.agentId/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate', () => {
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
       expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult (not sourceKind) for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
     });
 
     it('gates emit on gate.shouldDiagnose being true', () => {
@@ -405,7 +417,7 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       }
     });
 
-    it('documents: after-tool-call-helpers and gate-block-helper use evaluateTriggerController (PRI-454)', () => {
+    it('documents: after-tool-call-helpers, gate-block-helper, and llm.ts use evaluateTriggerController (PRI-454)', () => {
       const atc = read(AFTER_TOOL_CALL_HELPERS);
       const prompt = read(PROMPT);
       const llm = read(LLM);
@@ -413,7 +425,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
 
       expect(atc).toMatch(/evaluateTriggerController/);
       expect(prompt).not.toMatch(/evaluateTriggerController/);
-      expect(llm).not.toMatch(/evaluateTriggerController/);
+      // PRI-454: llm.ts now uses evaluateTriggerController when Gate B is active
+      expect(llm).toMatch(/evaluateTriggerController/);
       // PRI-454: gate-block-helper now uses evaluateTriggerController when Gate B is active
       expect(gate).toMatch(/evaluateTriggerController/);
     });
