@@ -30,6 +30,8 @@ scripts/nocturnal/trainer/experiment-*.json
 graphify-out/.graphify_chunk_*.json
 graphify-out/.graphify_correction.json
 graphify-out/cache/
+.git-fallback-graphify/
+
 
 # Node.js packages
 packages/*/node_modules/

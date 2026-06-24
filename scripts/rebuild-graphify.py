@@ -15,20 +15,36 @@ from graphify.report import generate
 from graphify.export import to_json
 from networkx.readwrite import json_graph
 
+def get_graphify_dir(root_dir=Path('.')):
+    git_path = root_dir / '.git'
+    if git_path.exists():
+        if git_path.is_dir():
+            return git_path / 'graphify'
+        elif git_path.is_file():
+            content = git_path.read_text(encoding='utf-8').strip()
+            if content.startswith('gitdir:'):
+                git_dir_str = content[7:].strip()
+                git_dir = Path(git_dir_str)
+                if not git_dir.is_absolute():
+                    git_dir = (root_dir / git_dir).resolve()
+                return git_dir / 'graphify'
+    return root_dir / '.git-fallback-graphify'
+
 def detect_files(root_path):
     """Re-detect files in packages/"""
     from graphify.detect import detect
     result = detect(root_path)
     return result
 
-def run_ast(code_files):
+
+def run_ast(code_files, out_dir):
     """Extract AST from code files"""
     from graphify.extract import collect_files, extract
     files = []
     for f in code_files:
         files.extend(collect_files(Path(f)) if Path(f).is_dir() else [Path(f)])
     result = extract(files)
-    Path('.graphify_ast.json').write_text(json.dumps(result, indent=2, ensure_ascii=False))
+    (out_dir / '.graphify_ast.json').write_text(json.dumps(result, indent=2, ensure_ascii=False))
     return result
 
 def dispatch_semantic_chunks(uncached_files, out_dir="graphify-out"):
@@ -52,7 +68,7 @@ def dispatch_semantic_chunks(uncached_files, out_dir="graphify-out"):
 
     return n_chunks
 
-def merge_chunks(n_chunks, out_dir="graphify-out"):
+def merge_chunks(n_chunks, out_dir):
     """Merge all chunk files into semantic JSON"""
     all_nodes = []
     all_edges = []
@@ -81,8 +97,9 @@ def merge_chunks(n_chunks, out_dir="graphify-out"):
         'input_tokens': 0,
         'output_tokens': 0,
     }
-    Path('.graphify_semantic.json').write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding='utf-8')
+    (out_dir / '.graphify_semantic.json').write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding='utf-8')
     return merged
+
 
 def merge_all(ast_data, sem_data, correction_path=None):
     """Merge AST + semantic + corrections"""
@@ -121,7 +138,7 @@ def merge_all(ast_data, sem_data, correction_path=None):
         'output_tokens': 0,
     }
 
-def build_and_save(extraction, detection, out_dir="graphify-out"):
+def build_and_save(extraction, detection, out_dir):
     """Build graph, cluster, analyze, save outputs"""
     G = build_from_json(extraction)
     communities = cluster(G)
@@ -171,7 +188,7 @@ def build_and_save(extraction, detection, out_dir="graphify-out"):
         'gods': gods,
         'surprises': surprises,
     }
-    Path('.graphify_analysis.json').write_text(json.dumps(analysis, indent=2))
+    (out_dir / '.graphify_analysis.json').write_text(json.dumps(analysis, indent=2))
 
     return G, communities, labels, gods, surprises
 
@@ -187,20 +204,20 @@ def main():
     import sys
 
     root = Path('packages')
-    out_dir = Path('graphify-out')
-    out_dir.mkdir(exist_ok=True)
+    out_dir = get_graphify_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Detect
     print("=== Detecting files ===")
     detection = detect_files(root)
-    Path('.graphify_detect.json').write_text(json.dumps(detection, indent=2))
+    (out_dir / '.graphify_detect.json').write_text(json.dumps(detection, indent=2))
     all_files = [f for files in detection['files'].values() for f in files]
     print(f"Total files: {len(all_files)}")
 
     # Step 2: AST
     print("\n=== AST extraction ===")
     code_files = detection['files'].get('code', [])
-    ast = run_ast(code_files)
+    ast = run_ast(code_files, out_dir)
     print(f"AST: {len(ast['nodes'])} nodes, {len(ast['edges'])} edges")
 
     # Step 3: Semantic chunks - dispatch
@@ -214,7 +231,7 @@ def main():
 
     # After agents complete, run:
     # sem = merge_chunks(n, out_dir)
-    # merged = merge_all(ast, sem, 'graphify-out/.graphify_correction.json')
+    # merged = merge_all(ast, sem, str(out_dir / '.graphify_correction.json'))
     # build_and_save(merged, detection, out_dir)
     print("\nAfter semantic agents complete, run the merge step manually.")
     print("Or use the full pipeline: python -c '...' (see rebuild script)'")
