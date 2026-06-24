@@ -14,6 +14,8 @@ import {
   resolveSourceKind,
   buildToolFailureObservation,
   buildLlmDetectionObservation,
+  buildEmpathyObservation,
+  buildManualPainObservation,
   type RawObservation,
 } from '../observation-resolver.js';
 
@@ -172,5 +174,59 @@ describe('buildLlmDetectionObservation', () => {
   it('feeds into resolveSourceKind correctly', () => {
     const o = buildLlmDetectionObservation({ detectionSource: 'llm_loop', isGfiTriggered: false });
     expect(resolveSourceKind(o)).toBe('semantic');
+  });
+});
+
+// ── PRI-454: New builders for empathy and manual pain paths ─────────────────
+
+describe('buildEmpathyObservation (PRI-454)', () => {
+  it('builds observation with detectionSource and isGfiTriggered', () => {
+    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true });
+    expect(o.detectionSource).toBe('user_empathy');
+    expect(o.isGfiTriggered).toBe(true);
+    expect(o.observedAt).toBeTruthy();
+  });
+
+  it('includes sessionId when provided', () => {
+    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true, sessionId: 'sess-123' });
+    expect(o.sessionId).toBe('sess-123');
+  });
+
+  it('sessionId is undefined when not provided', () => {
+    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: false });
+    expect(o.sessionId).toBeUndefined();
+  });
+
+  it('isGfiTriggered=true → resolveSourceKind returns gfi_threshold', () => {
+    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true });
+    expect(resolveSourceKind(o)).toBe('gfi_threshold');
+  });
+
+  it('isGfiTriggered=false → resolveSourceKind returns empathy_inferred', () => {
+    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: false });
+    expect(resolveSourceKind(o)).toBe('empathy_inferred');
+  });
+});
+
+describe('buildManualPainObservation (PRI-454)', () => {
+  it('builds observation with isManualEntry=true', () => {
+    const o = buildManualPainObservation({});
+    expect(o.isManualEntry).toBe(true);
+    expect(o.observedAt).toBeTruthy();
+  });
+
+  it('includes sessionId when provided', () => {
+    const o = buildManualPainObservation({ sessionId: 'sess-456' });
+    expect(o.sessionId).toBe('sess-456');
+  });
+
+  it('sessionId is undefined when not provided', () => {
+    const o = buildManualPainObservation({});
+    expect(o.sessionId).toBeUndefined();
+  });
+
+  it('resolveSourceKind returns owner_reported', () => {
+    const o = buildManualPainObservation({});
+    expect(resolveSourceKind(o)).toBe('owner_reported');
   });
 });
