@@ -81,6 +81,7 @@ const AFTER_TOOL_CALL_HELPERS = 'packages/openclaw-plugin/src/hooks/after-tool-c
 const PROMPT = 'packages/openclaw-plugin/src/hooks/prompt.ts';
 const LLM = 'packages/openclaw-plugin/src/hooks/llm.ts';
 const GATE_BLOCK_HELPER = 'packages/openclaw-plugin/src/hooks/gate-block-helper.ts';
+const PAIN = 'packages/openclaw-plugin/src/hooks/pain.ts';
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -353,6 +354,72 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     it('calls emitPainDetectedEvent with void + .catch() (fire-and-forget with error handler)', () => {
       expect(source).toMatch(/void\s+emitPainDetectedEvent/);
       expect(source).toMatch(/\.catch\(\(emitErr\)/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 4b: pain.ts — manual pain path (path 5)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('pain.ts manual pain emit site (PRI-454)', () => {
+    const source = read(PAIN);
+
+    it('uses painId format: pain_${Date.now()}_${hash.slice(0,8)} via createPainId', () => {
+      expect(source).toMatch(/function\s+createPainId\(sessionId:\s*string\)/);
+      expect(source).toMatch(/`pain_\$\{Date\.now\(\)\}_\$\{computeHash\(sessionId\)\.slice\(0,\s*8\)\}`/);
+    });
+
+    it('sets painType to "user_frustration"', () => {
+      expect(source).toMatch(/painType:\s*'user_frustration'/);
+    });
+
+    it('sets source to event.toolName (manual pain)', () => {
+      expect(source).toMatch(/source:\s*event\.toolName/);
+    });
+
+    it('sets score to 100 (manual pain max score)', () => {
+      expect(source).toMatch(/score:\s*100/);
+    });
+
+    it('includes traceId field', () => {
+      expect(source).toMatch(/traceId,/);
+    });
+
+    it('includes evidence field via buildTrajectoryEvidence', () => {
+      expect(source).toMatch(/evidence:\s*buildTrajectoryEvidence\(wctx,\s*sessionId\)/);
+    });
+
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
+      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('uses isOwnerManual: true for manual pain (PRI-454)', () => {
+      expect(source).toMatch(/isOwnerManual:\s*true/);
+    });
+
+    it('uses buildManualPainObservation (PRI-454)', () => {
+      expect(source).toMatch(/buildManualPainObservation/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
+    });
+
+    it('gates emit on gate.shouldDiagnose or triggerDecision.shouldCreateDiagnosticTask', () => {
+      expect(source).toMatch(/gate\.shouldDiagnose|triggerDecision\.shouldCreateDiagnosticTask/);
+    });
+
+    it('calls emitPainDetectedEvent (not legacy APIs)', () => {
+      expect(source).toMatch(/emitPainDetectedEvent\(wctx,/);
+      expect(source).not.toMatch(/\bwritePainFlag\b/);
     });
   });
 
