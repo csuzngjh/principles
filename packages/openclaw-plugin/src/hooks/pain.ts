@@ -63,7 +63,11 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
 
 // ── Pain Event Emission ─────────────────────────────────────────────────────
 
-export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
+export async function emitPainDetectedEvent(
+  wctx: WorkspaceContext,
+  event: EvolutionLoopEvent,
+  options?: { recordObservability?: boolean },
+): Promise<void> {
   try {
     wctx.evolutionReducer.emitSync(event);
   } catch (e) {
@@ -88,6 +92,11 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         }));
       }
 
+      // PRI-453: Hook paths that already write events_*.jsonl + trajectory.db
+      // via legacy writers pass recordObservability: false to avoid triple-write.
+      // CLI pd pain record and paths without legacy writers keep the default true.
+      const recordObs = options?.recordObservability ?? true;
+
       const result = await service.recordPain({
         painId: painData.painId,
         painType: painData.painType,
@@ -100,7 +109,7 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         traceId: painData.traceId,
         provenance: painData.provenance,
         evidence: painData.evidence,
-        recordObservability: true,
+        recordObservability: recordObs,
       });
       if (result.status === 'failed' && result.failureCategory) {
         SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({
@@ -276,6 +285,9 @@ function handleManualPain(
     isRisky: true
   });
 
+  // PRI-453: Generate painId early to pass as canonicalPainId for dedup.
+  const painId = createPainId(sessionId);
+
   wctx.trajectory?.recordPainEvent?.({
     sessionId,
     source: 'manual',
@@ -283,6 +295,7 @@ function handleManualPain(
     reason: `User intervention: ${reason}`,
     origin: 'user_manual',
     text: reason,
+    canonicalPainId: painId,
   });
 
   // Log to EvolutionLogger
@@ -343,7 +356,7 @@ function handleManualPain(
     ts: new Date().toISOString(),
     type: 'pain_detected',
     data: {
-      painId: createPainId(sessionId),
+      painId,
       painType: 'user_frustration',
       source: event.toolName,
       reason: `User intervention: ${reason}`,
@@ -354,5 +367,5 @@ function handleManualPain(
       provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
       evidence: buildTrajectoryEvidence(wctx, sessionId),
     },
-  });
+  }, { recordObservability: false });
 }

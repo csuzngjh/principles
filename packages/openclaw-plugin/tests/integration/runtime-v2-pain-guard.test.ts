@@ -95,10 +95,14 @@ describe('Runtime V2 pain entrypoint guard', () => {
     expect(source).toMatch(/autoIntakeEnabled:\s*true/);
   });
 
-  it('pain.ts passes recordObservability: true to service.recordPain', () => {
+  it('pain.ts passes recordObservability to service.recordPain with default true', () => {
     const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
 
-    expect(source).toMatch(/recordObservability:\s*true/);
+    // PRI-453: recordObservability is now passed via options parameter with default true.
+    // Hook paths pass { recordObservability: false } to avoid triple-write;
+    // CLI and paths without legacy writers keep the default true.
+    expect(source).toMatch(/recordObservability:\s*recordObs/);
+    expect(source).toMatch(/options\?\.recordObservability\s*\?\?\s*true/);
   });
 
   it('pain.ts logs PAIN_SERVICE_FAILED for failed status with failureCategory', () => {
