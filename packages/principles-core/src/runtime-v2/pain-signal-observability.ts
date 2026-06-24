@@ -1,5 +1,11 @@
 /**
- * Pain signal observability for Runtime v2 manual entry points.
+ * Pain signal observability for Runtime v2 entry points.
+ *
+ * Design intent (PRI-453): This writer serves paths that do NOT have legacy
+ * event-log/trajectory writers — specifically `pd pain record` CLI,
+ * `gate-block-helper.ts`, and `lifecycle.ts`. Hook paths that already write
+ * via legacy `recordPainSignal` + `recordPainEvent` pass
+ * `recordObservability: false` to avoid triple-write.
  *
  * Automatic OpenClaw hook paths already record event-log and trajectory rows
  * before calling PainSignalBridge. `pd pain record` does not have a

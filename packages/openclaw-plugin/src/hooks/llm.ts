@@ -311,6 +311,19 @@ export function handleLlmOutput(
             isRisky: false
         });
 
+        // PRI-453: Generate painId early and write to trajectory.db via legacy
+        // recordPainEvent so that disabling SDK observability path does not lose
+        // trajectory coverage. canonicalPainId enables dedup.
+        const painId = `llm_${Date.now()}`;
+        wctx.trajectory?.recordPainEvent?.({
+            sessionId: ctx.sessionId || 'unknown',
+            source,
+            score: painScore,
+            reason: matchedReason,
+            origin: 'system_infer',
+            canonicalPainId: painId,
+        });
+
         if (triageAdmitted) {
             const gate = evaluatePainDiagnosticGate({
                 source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
@@ -332,7 +345,7 @@ export function handleLlmOutput(
                     ts: new Date().toISOString(),
                     type: 'pain_detected',
                     data: {
-                        painId: `llm_${Date.now()}`,
+                        painId,
                         painType: 'user_frustration' as const,
                         source,
                         reason: `${matchedReason}; diagnosticGate=${gate.reason}`,
@@ -342,7 +355,7 @@ export function handleLlmOutput(
                         provenance: 'openclaw_context_bound',
                         evidence,
                     },
-                });
+                }, { recordObservability: false });
             } else {
                 ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
             }

@@ -86,7 +86,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'pain.ts',
     'config.ts',
     'code-implementation-storage.ts',
-    'observability.ts',
     'workflow-funnel-loader.ts',
     'dictionary.ts',
     'thinking-os-parser.ts',
