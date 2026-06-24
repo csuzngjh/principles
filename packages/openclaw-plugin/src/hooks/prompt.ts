@@ -397,6 +397,28 @@ export async function handleBeforePromptBuild(
               source: 'user_empathy',
               reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
               isRisky: false,
+              origin: 'system_infer',
+              severity: gfiPainScore >= 40 ? 'moderate' : 'mild',
+              confidence: 0.5,
+              detection_mode: 'structured',
+              deduped: false,
+              trigger_text_excerpt: sanitizeForEvidence(latestUserMessage, workspaceDir).substring(0, 120),
+              raw_score: gfiPainScore,
+              calibrated_score: gfiPainScore,
+              eventId: `empathy_gfi_${Date.now()}`,
+            });
+
+            // PRI-453: Generate painId early and write to trajectory.db via legacy
+            // recordPainEvent so that disabling SDK observability path does not lose
+            // trajectory coverage. canonicalPainId enables dedup.
+            const gfiPainId = `empathy_gfi_${Date.now()}`;
+            wctx.trajectory?.recordPainEvent?.({
+              sessionId,
+              source: 'user_empathy',
+              score: gfiPainScore,
+              reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
+              origin: 'system_infer',
+              canonicalPainId: gfiPainId,
             });
 
             if (gate.shouldDiagnose) {
@@ -407,7 +429,7 @@ export async function handleBeforePromptBuild(
                   ts: new Date().toISOString(),
                   type: 'pain_detected',
                   data: {
-                    painId: `empathy_gfi_${Date.now()}`,
+                    painId: gfiPainId,
                     painType: 'user_frustration',
                     source: 'user_empathy',
                     reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
@@ -417,7 +439,7 @@ export async function handleBeforePromptBuild(
                     provenance: 'openclaw_context_bound',
                     evidence,
                   },
-                });
+                }, { recordObservability: false });
                 logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
               } catch (emitErr) {
                 console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
@@ -474,6 +496,8 @@ export async function handleBeforePromptBuild(
                   });
 
                   try {
+                    // PRI-453: Generate painId early to pass as canonicalPainId for dedup.
+                    const observerPainId = `empathy_gfi_${Date.now()}`;
                     wctx.trajectory?.recordPainEvent?.({
                       sessionId,
                       source: 'user_empathy',
@@ -483,6 +507,7 @@ export async function handleBeforePromptBuild(
                       origin: 'system_infer',
                       confidence: result.confidence,
                       text: sanitizeForEvidence(latestUserMessage, workspaceDir),
+                      canonicalPainId: observerPainId,
                     });
                   } catch (error) {
                     logger?.warn?.(`[PD:Empathy] Failed to persist trajectory: ${String(error)}`);
@@ -511,11 +536,13 @@ export async function handleBeforePromptBuild(
                       logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
                       try {
                         const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                        // PRI-453: Reuse the observerPainId for dedup with trajectory record.
+                        const observerEmitPainId = `empathy_gfi_${Date.now()}`;
                         await emitPainDetectedEvent(wctx, {
                           ts: new Date().toISOString(),
                           type: 'pain_detected',
                           data: {
-                            painId: `empathy_gfi_${Date.now()}`,
+                            painId: observerEmitPainId,
                             painType: 'user_frustration',
                             source: 'user_empathy',
                             reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
@@ -525,7 +552,7 @@ export async function handleBeforePromptBuild(
                             provenance: 'openclaw_context_bound',
                             evidence,
                           },
-                        });
+                        }, { recordObservability: false });
                       } catch (emitErr) {
                         logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
                       }
