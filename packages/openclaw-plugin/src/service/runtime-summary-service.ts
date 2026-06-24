@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import * as path from 'path';
-import { readPainFlagData } from '../core/pain.js';
 import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
@@ -100,8 +99,6 @@ export interface RuntimeSummary {
     eligibilitySource: 'runtime_truth';
   };
   pain: {
-    activeFlag: boolean;
-    activeFlagSource: string | null;
     candidates: number | null;
     lastSignal: RuntimePainSignal | null;
   };
@@ -354,7 +351,6 @@ export class RuntimeSummaryService {
     const queueStats = this.buildQueueStats(queue);
     const directiveSummary = this.buildDirectiveSummary(queue, directive, generatedAt, warnings);
 
-    const painFlag = readPainFlagData(workspaceDir);
     const painCandidates = this.readJsonFile<{ candidates?: Record<string, unknown> }>(
       wctx.resolve('PAIN_CANDIDATES'),
       warnings,
@@ -479,8 +475,6 @@ export class RuntimeSummaryService {
         eligibilitySource: 'runtime_truth',
       },
       pain: {
-        activeFlag: Object.keys(painFlag).length > 0,
-        activeFlagSource: painFlag.source || null,
         candidates:
           painCandidates?.candidates && typeof painCandidates.candidates === 'object'
             ? Object.keys(painCandidates.candidates).length

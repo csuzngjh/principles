@@ -2,8 +2,8 @@
  * Universal PainSignal schema for the Evolution SDK.
  *
  * This module defines a framework-agnostic pain signal that any AI agent
- * framework can produce. It extends the existing PainFlagData format with
- * additional structured fields (domain, severity, context) needed for
+ * framework can produce. It supersedes the legacy flat-file pain flag format
+ * with additional structured fields (domain, severity, context) needed for
  * cross-workspace evolution and multi-domain support.
  *
  * Validation uses @sinclair/typebox to match existing project patterns.

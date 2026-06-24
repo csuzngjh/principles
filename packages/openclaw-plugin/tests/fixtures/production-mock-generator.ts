@@ -1,6 +1,6 @@
 /**
  * Production Mock Data Generator
- * 
+ *
  * Extracts patterns from production data to create realistic test fixtures.
  * This ensures tests match real-world scenarios and catches edge cases.
  */
@@ -14,19 +14,6 @@ const WORKSPACE_MAIN = OPENCLAW_HOME + '/workspace-main';
 const STATE_DIR = WORKSPACE_MAIN + '/.state';
 
 // Types extracted from production
-export interface ProductionPainFlag {
-  is_risky: string;
-  reason: string;
-  score: string;
-  source: string;
-  time: string;
-  status?: string;
-  task_id?: string;
-  session_id?: string;  // New field
-  agent_id?: string;    // New field
-  trace_id?: string;    // From recent changes
-}
-
 export interface ProductionEvolutionQueueItem {
   id: string;
   score: number;
@@ -52,26 +39,6 @@ export interface ProductionPainCandidate {
   firstSeen: string;
   lastSeen?: string;
   samples: string[];
-}
-
-/**
- * Load real pain_flag from production
- */
-export function loadProductionPainFlag(): ProductionPainFlag | null {
-  const painFlagPath = path.join(STATE_DIR, '.pain_flag');
-  if (!fs.existsSync(painFlagPath)) return null;
-
-  const content = fs.readFileSync(painFlagPath, 'utf8');
-  const result: ProductionPainFlag = {} as ProductionPainFlag;
-
-  for (const line of content.split('\n')) {
-    const match = line.match(/^(\w+):\s*(.+)$/);
-    if (match) {
-      (result as any)[match[1]] = match[2];
-    }
-  }
-
-  return result;
 }
 
 /**
@@ -128,8 +95,8 @@ export function sampleSessionMessages(
             content = msg.content;
           } else if (Array.isArray(msg.content)) {
             content = msg.content
-              .filter((c: any) => c.type === 'text')
-              .map((c: any) => c.text)
+              .filter((c: unknown) => (c as { type?: string }).type === 'text')
+              .map((c: unknown) => (c as { text?: string }).text ?? '')
               .join('\n');
           }
 
@@ -161,7 +128,6 @@ export function sampleSessionMessages(
  * Generate realistic test fixtures from production patterns
  */
 export function generateTestFixtureFromProduction() {
-  const painFlag = loadProductionPainFlag();
   const queue = loadProductionEvolutionQueue();
   const candidates = loadProductionPainCandidates();
 
@@ -169,19 +135,19 @@ export function generateTestFixtureFromProduction() {
   const patterns = {
     // Pain sources seen in production
     painSources: [...new Set(queue.map(q => q.source))],
-    
+
     // Common error patterns
     errorPatterns: queue.map(q => ({
       type: q.source,
       reasonPreview: q.reason.slice(0, 100),
     })),
-    
+
     // Score distribution
     scoreDistribution: queue.reduce((acc, q) => {
       acc[q.score] = (acc[q.score] || 0) + 1;
       return acc;
     }, {} as Record<number, number>),
-    
+
     // Status distribution
     statusDistribution: queue.reduce((acc, q) => {
       acc[q.status] = (acc[q.status] || 0) + 1;
@@ -190,7 +156,6 @@ export function generateTestFixtureFromProduction() {
   };
 
   return {
-    painFlag,
     queue,
     candidates,
     patterns,
@@ -223,39 +188,10 @@ export function createMockQueueItem(overrides: Partial<ProductionEvolutionQueueI
 }
 
 /**
- * Create a mock pain flag based on production patterns
- */
-export function createMockPainFlag(overrides: Partial<ProductionPainFlag> = {}): ProductionPainFlag {
-  const realFlag = loadProductionPainFlag();
-  const template = realFlag || {
-    is_risky: 'false',
-    reason: 'Test pain signal',
-    score: '50',
-    source: 'tool_failure',
-    time: new Date().toISOString(),
-  };
-
-  return {
-    ...template,
-    ...overrides,
-    time: overrides.time || new Date().toISOString(),
-  };
-}
-
-/**
  * Validate that new code handles production data correctly
  */
 export function validateProductionCompatibility() {
   const issues: string[] = [];
-
-  // Check if pain_flag has session_id/agent_id (new fields)
-  const painFlag = loadProductionPainFlag();
-  if (painFlag && !painFlag.session_id) {
-    issues.push('pain_flag missing session_id (new field not yet in production)');
-  }
-  if (painFlag && !painFlag.agent_id) {
-    issues.push('pain_flag missing agent_id (new field not yet in production)');
-  }
 
   // Check if queue items have session_id/agent_id
   const queue = loadProductionEvolutionQueue();
@@ -268,7 +204,6 @@ export function validateProductionCompatibility() {
     compatible: issues.length === 0,
     issues,
     productionData: {
-      painFlag,
       queueCount: queue.length,
     },
   };
