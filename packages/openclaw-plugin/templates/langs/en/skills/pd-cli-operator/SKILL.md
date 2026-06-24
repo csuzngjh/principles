@@ -1,6 +1,6 @@
 ---
 name: pd-cli-operator
-description: Use this skill when operating the Principles Disciple `pd` CLI: probing runtime health, manually recording pain, inspecting tasks/runs/candidates/artifacts, intaking candidates, viewing flow policy, or cleaning legacy state. It routes CLI commands safely and forbids direct `.state/.pain_flag` writes.
+description: Use this skill when operating the Principles Disciple `pd` CLI: probing runtime health, manually recording pain, inspecting tasks/runs/candidates/artifacts, intaking candidates, viewing flow policy, or tracing pain-to-ledger chains. It routes CLI commands safely and forbids direct `.state/.pain_flag` writes.
 disable-model-invocation: false
 ---
 
@@ -36,6 +36,25 @@ Flow policy:
 pd runtime flow show --workspace "<workspace>" --json
 ```
 
+## Trace Pain-To-Ledger Chain (PRI-455 promoted)
+
+Trace the full evidence chain from pain signal to principle ledger:
+```bash
+pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
+```
+
+## Activation Management (PRI-455 promoted)
+
+List active activations:
+```bash
+pd activation list --workspace "<workspace>" --json
+```
+
+Deactivate (rollback) an activation:
+```bash
+pd activation deactivate --activation-id "<activationId>" --workspace "<workspace>" --json
+```
+
 ## Inspect Runtime V2 Objects
 
 Tasks and runs:
@@ -55,13 +74,3 @@ Manual intake:
 ```bash
 pd candidate intake --candidate-id "<candidateId>" --workspace "<workspace>" --json
 ```
-
-## Legacy Admin
-
-Only when explicitly cleaning old state:
-```bash
-pd legacy cleanup --workspace "<workspace>" --dry-run
-pd legacy cleanup --workspace "<workspace>" --apply
-```
-
-Never use legacy cleanup as a diagnosis trigger.

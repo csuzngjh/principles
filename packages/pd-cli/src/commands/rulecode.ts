@@ -381,7 +381,7 @@ export async function handleRulecodeReplay(opts: ReplayOptions): Promise<void> {
  */
 export function registerRulecodeCommand(parentCmd: Command): Command {
   const rulecodeCmd = parentCmd
-    .command('rulecode')
+    .command('rulecode', { hidden: true })
     .description('RuleCode dialect spec, static validation, and sandbox replay (read-only)');
 
   // spec — no code input needed

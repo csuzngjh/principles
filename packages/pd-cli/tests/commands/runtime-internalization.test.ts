@@ -46,8 +46,8 @@ describe('CLI command tree: pd runtime internalization', () => {
     expect(output).toContain('--json');
   });
 
-  it('runtime subcommand list includes internalization', () => {
+  it('runtime subcommand list does NOT include internalization (PRI-455: hidden from --help)', () => {
     const output = runPdHelp(['runtime', '--help']);
-    expect(output).toMatch(/internalization\s/);
+    expect(output).not.toMatch(/internalization\s/);
   });
 });
