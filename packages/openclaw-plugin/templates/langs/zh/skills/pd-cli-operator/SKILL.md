@@ -1,6 +1,6 @@
 ---
 name: pd-cli-operator
-description: 操作 Principles Disciple `pd` CLI 时使用：运行时健康检查、手动记录痛苦、查看 task/run/candidate/artifact、intake candidate、查看 flow policy、清理 legacy state。本技能提供安全 CLI 路由，并禁止直接写 `.state/.pain_flag`。
+description: 操作 Principles Disciple `pd` CLI 时使用：运行时健康检查、手动记录痛苦、查看 task/run/candidate/artifact、intake candidate、查看 flow policy、追踪痛苦到原则的证据链。本技能提供安全 CLI 路由，并禁止直接写 `.state/.pain_flag`。
 disable-model-invocation: false
 ---
 
@@ -36,6 +36,25 @@ pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
 pd runtime flow show --workspace "<workspace>" --json
 ```
 
+## 追踪痛苦到原则链（PRI-455 提升）
+
+追踪从痛苦信号到原则账本的完整证据链：
+```bash
+pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
+```
+
+## 激活管理（PRI-455 提升）
+
+列出当前激活：
+```bash
+pd activation list --workspace "<workspace>" --json
+```
+
+停用（回滚）激活：
+```bash
+pd activation deactivate --activation-id "<activationId>" --workspace "<workspace>" --json
+```
+
 ## 查看 Runtime V2 对象
 
 Tasks 和 runs：
@@ -55,13 +74,3 @@ pd artifact show --artifact-id "<artifactId>" --workspace "<workspace>" --json
 ```bash
 pd candidate intake --candidate-id "<candidateId>" --workspace "<workspace>" --json
 ```
-
-## Legacy 管理
-
-只有在明确清理旧状态时使用：
-```bash
-pd legacy cleanup --workspace "<workspace>" --dry-run
-pd legacy cleanup --workspace "<workspace>" --apply
-```
-
-不要把 legacy cleanup 当作诊断触发入口。

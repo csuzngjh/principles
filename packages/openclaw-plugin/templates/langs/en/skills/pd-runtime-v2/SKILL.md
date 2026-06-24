@@ -38,6 +38,16 @@ Flow policy:
 pd runtime flow show --workspace "<workspace>" --json
 ```
 
+Trace pain-to-ledger chain (PRI-455 promoted):
+```bash
+pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
+```
+
+Activation status (PRI-455 promoted):
+```bash
+pd activation list --workspace "<workspace>" --json
+```
+
 Candidates:
 ```bash
 pd candidate list --workspace "<workspace>" --json

@@ -38,6 +38,16 @@ pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
 pd runtime flow show --workspace "<workspace>" --json
 ```
 
+追踪痛苦到原则链（PRI-455 提升）：
+```bash
+pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
+```
+
+激活状态（PRI-455 提升）：
+```bash
+pd activation list --workspace "<workspace>" --json
+```
+
 候选原则：
 ```bash
 pd candidate list --workspace "<workspace>" --json
