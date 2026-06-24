@@ -183,4 +183,27 @@ describe('Gate Block Helper — PROFILE Resilience', () => {
     expect(result).toBeDefined();
     expect(result.block).toBe(true);
   });
+
+  it('does NOT call recordPainEvent (SDK observability path handles trajectory.db)', async () => {
+    // PRI-453: Legacy recordPainEvent was removed to avoid double-write.
+    // SDK observability path (emitPainDetectedEvent with default recordObservability: true)
+    // handles all writes: events_*.jsonl + evolution.jsonl + trajectory.db.
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const { recordGateBlockAndReturn } = await import('../../src/hooks/gate-block-helper.js');
+    const wctx = makeTestWctx() as any;
+
+    recordGateBlockAndReturn(
+      wctx,
+      {
+        filePath: 'src/danger.ts',
+        reason: 'Test block',
+        toolName: 'write',
+        sessionId,
+      },
+      { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    );
+
+    expect(wctx.trajectory.recordPainEvent).not.toHaveBeenCalled();
+  });
 });

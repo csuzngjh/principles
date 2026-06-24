@@ -58,7 +58,8 @@ function read(relativePath: string): string {
  * do not prematurely terminate the match (ERR-009 false-positive guard).
  */
 function extractGateBlockObject(source: string): string | null {
-  const marker = /painId:\s*`gate_[^`]+`/.exec(source);
+  // PRI-453: painId is now a variable reference (gatePainId), not inline template
+  const marker = /painId:\s*gatePainId/.exec(source);
   if (!marker) return null;
   const start = source.lastIndexOf('{', marker.index);
   if (start === -1) return null;
@@ -271,8 +272,11 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
   describe('gate-block-helper.ts emit site', () => {
     const source = read(GATE_BLOCK_HELPER);
 
-    it('uses painId format: gate_${Date.now()}_${random}', () => {
-      expect(source).toMatch(/painId:\s*`gate_\$\{Date\.now\(\)\}_\$\{Math\.random\(\)\.toString\(36\)\.slice\(2,\s*10\)\}`/);
+    it('uses painId format: gate_${Date.now()}_${random} via gatePainId variable', () => {
+      // PRI-453: painId is now generated early as `const gatePainId = `gate_...``
+      // and referenced as `painId: gatePainId` in the emit data block.
+      expect(source).toMatch(/const\s+gatePainId\s*=\s*`gate_\$\{Date\.now\(\)\}_\$\{Math\.random\(\)\.toString\(36\)\.slice\(2,\s*10\)\}`/);
+      expect(source).toMatch(/painId:\s*gatePainId/);
     });
 
     it('sets painType to "user_frustration"', () => {
