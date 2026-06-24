@@ -35,11 +35,10 @@ describe('safeStringifyPreview', () => {
   });
 
   it('handles BigInt values', () => {
-    const obj = { big: BigInt(12345678901234567890) };
+    const obj = { big: BigInt('12345678901234567890') };
     const result = safeStringifyPreview(obj);
     expect(result).toContain('<bigint:');
-    // BigInt precision may be lost in JavaScript, so just check the format
-    expect(result).toMatch(/<bigint:\d+>/);
+    expect(result).toContain('12345678901234567890');
   });
 
   it('handles circular references', () => {

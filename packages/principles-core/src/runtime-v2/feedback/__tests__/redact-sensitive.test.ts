@@ -23,7 +23,6 @@ import {
   REDACTED_PATH,
   REDACTED_VALUE,
   NO_STACK,
-  type RedactResult,
 } from '../redact-sensitive.js';
 
 // ── redactAbsolutePaths ─────────────────────────────────────────────────────
@@ -72,9 +71,12 @@ describe('redactAbsolutePaths', () => {
   });
 
   it('returns non-string input unchanged', () => {
-    expect(redactAbsolutePaths(null as unknown as string)).toBe(null);
-    expect(redactAbsolutePaths(undefined as unknown as string)).toBe(undefined);
-    expect(redactAbsolutePaths(42 as unknown as string)).toBe(42);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactAbsolutePaths(null)).toBe(null);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactAbsolutePaths(undefined)).toBe(undefined);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactAbsolutePaths(42)).toBe(42);
   });
 
   it('handles empty string', () => {
@@ -144,7 +146,8 @@ describe('redactTokenLikeValues', () => {
   });
 
   it('returns non-string input unchanged', () => {
-    expect(redactTokenLikeValues(null as unknown as string)).toBe(null);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactTokenLikeValues(null)).toBe(null);
   });
 
   it('handles empty string', () => {
@@ -192,7 +195,8 @@ describe('redactEnvLikeValues', () => {
   });
 
   it('returns non-string input unchanged', () => {
-    expect(redactEnvLikeValues(null as unknown as string)).toBe(null);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactEnvLikeValues(null)).toBe(null);
   });
 
   it('handles empty string', () => {
@@ -232,7 +236,8 @@ describe('redactStackTrace', () => {
   });
 
   it('returns NO_STACK for non-string', () => {
-    expect(redactStackTrace(null as unknown as string)).toBe(NO_STACK);
+    // @ts-expect-error - testing non-string input for runtime type guard
+    expect(redactStackTrace(null)).toBe(NO_STACK);
   });
 
   it('preserves error name and first 3 frames by default', () => {
@@ -400,7 +405,7 @@ describe('redactSensitiveFields', () => {
     const result = redactSensitiveFields(arr);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const value = result.value as Array<Record<string, unknown>>;
+      const value = result.value as Record<string, unknown>[];
       expect(value[0]?.password).toBe(REDACTED_VALUE);
       expect(value[1]?.password).toBe(REDACTED_VALUE);
     }
@@ -471,7 +476,7 @@ describe('redactSensitiveFields', () => {
   });
 
   it('handles BigInt values', () => {
-    const obj = { big: BigInt(12345678901234567890) };
+    const obj = { big: BigInt('12345678901234567890') };
     const result = redactSensitiveFields(obj);
     expect(result.ok).toBe(true);
     if (result.ok) {

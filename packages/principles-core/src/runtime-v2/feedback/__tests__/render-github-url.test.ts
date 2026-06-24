@@ -16,7 +16,6 @@ import {
   MAX_URL_BODY_LENGTH,
   GITHUB_REPO,
 } from '../render-github-url.js';
-import { REDACTED_VALUE, REDACTED_PATH } from '../redact-sensitive.js';
 
 describe('buildGitHubIssueDraftUrl', () => {
   it('builds valid URL for bug feedback', () => {
@@ -74,7 +73,8 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns error for non-string title', () => {
-    const result = buildGitHubIssueDraftUrl(null as unknown as string, 'bug', 'Summary');
+    // @ts-expect-error - testing non-string title for runtime validation
+    const result = buildGitHubIssueDraftUrl(null, 'bug', 'Summary');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('title must be a string');
@@ -82,7 +82,8 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns error for non-string shortSummary', () => {
-    const result = buildGitHubIssueDraftUrl('Title', 'bug', null as unknown as string);
+    // @ts-expect-error - testing non-string shortSummary for runtime validation
+    const result = buildGitHubIssueDraftUrl('Title', 'bug', null);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('shortSummary must be a string');
@@ -248,7 +249,7 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns error for number feedback type', () => {
-    const result = buildGitHubIssueDraftUrl('Title', 42 as unknown as string, 'Summary');
+    const result = buildGitHubIssueDraftUrl('Title', 42, 'Summary');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('invalid feedback type');
@@ -256,7 +257,7 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns error for object feedback type', () => {
-    const result = buildGitHubIssueDraftUrl('Title', {} as unknown as string, 'Summary');
+    const result = buildGitHubIssueDraftUrl('Title', {}, 'Summary');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('invalid feedback type');
@@ -264,7 +265,7 @@ describe('buildGitHubIssueDraftUrl', () => {
   });
 
   it('returns error for undefined feedback type', () => {
-    const result = buildGitHubIssueDraftUrl('Title', undefined as unknown as string, 'Summary');
+    const result = buildGitHubIssueDraftUrl('Title', undefined, 'Summary');
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('invalid feedback type');
