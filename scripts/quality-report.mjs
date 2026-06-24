@@ -24,11 +24,42 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
+
+/**
+ * Resolves the graphify cache directory path.
+ * If .git is a directory, returns .git/graphify.
+ * If .git is a file (e.g. in a worktree), reads the gitdir path and returns <gitdir>/graphify.
+ * Fallback to .git-fallback-graphify in case .git is not found.
+ */
+function getGraphifyDir(rootDir) {
+  const gitPath = join(rootDir, '.git');
+  if (existsSync(gitPath)) {
+    try {
+      const stats = statSync(gitPath);
+      if (stats.isDirectory()) {
+        return join(gitPath, 'graphify');
+      } else if (stats.isFile()) {
+        const content = readFileSync(gitPath, 'utf8').trim();
+        const match = /^gitdir:\s*(.+)$/.exec(content);
+        if (match) {
+          let gitDir = match[1].trim();
+          if (!isAbsolute(gitDir)) {
+            gitDir = resolve(rootDir, gitDir);
+          }
+          return join(gitDir, 'graphify');
+        }
+      }
+    } catch {
+      // ignore and fallback
+    }
+  }
+  return join(rootDir, '.git-fallback-graphify');
+}
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -355,7 +386,8 @@ function main() {
     return { package: pkg, coverage: readCoverage(coveragePath) };
   });
 
-  const graphPath = join(ROOT, 'graphify-out', 'graph.json');
+  const graphifyDir = getGraphifyDir(ROOT);
+  const graphPath = join(graphifyDir, 'graph.json');
   const graphStats = readGraphStats(graphPath);
 
   // Generate report
