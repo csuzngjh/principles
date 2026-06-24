@@ -16,6 +16,8 @@
  * 5. `emitPainDetectedEvent` signature accepts optional options parameter.
  * 6. painId is generated before recordPainEvent (lineage consistency).
  * 7. Observer path uses same painId for recordPainEvent and emit (ERR-004/ERR-008).
+ * 8. gate-block-helper does NOT have a legacy recordPainEvent call
+ *    (SDK observability path handles all writes, avoiding double-write).
  *
  * ERR refs:
  * - ERR-004/ERR-008 (lineage consistency): same painId for trajectory + emit
@@ -141,6 +143,15 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       const source = read(LIFECYCLE);
       expect(source).not.toMatch(/recordObservability:\s*false/);
     });
+
+    it('gate-block-helper.ts generates painId before emitPainDetectedEvent', () => {
+      const source = read(GATE_BLOCK_HELPER);
+      const painIdLine = source.indexOf('const gatePainId = `gate_');
+      const emitLine = source.indexOf('void emitPainDetectedEvent(wctx, {');
+      expect(painIdLine).toBeGreaterThan(-1);
+      expect(emitLine).toBeGreaterThan(-1);
+      expect(painIdLine).toBeLessThan(emitLine);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -208,6 +219,23 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/painId:\s*observerPainId/);
       // There should be NO separate observerEmitPainId variable (lineage gap fixed)
       expect(source).not.toMatch(/observerEmitPainId/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Invariant 8: gate-block-helper does NOT have legacy recordPainEvent
+  // (SDK observability path handles all writes, avoiding double-write)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('gate-block-helper has no legacy recordPainEvent (no double-write)', () => {
+    it('gate-block-helper.ts does NOT call recordPainEvent directly', () => {
+      const source = read(GATE_BLOCK_HELPER);
+      expect(source).not.toMatch(/wctx\.trajectory\?\.recordPainEvent/);
+    });
+
+    it('gate-block-helper.ts uses gatePainId for emitted painId (SDK path writes canonicalPainId)', () => {
+      const source = read(GATE_BLOCK_HELPER);
+      expect(source).toMatch(/painId:\s*gatePainId/);
     });
   });
 });
