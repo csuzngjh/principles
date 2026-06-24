@@ -27,30 +27,6 @@ export function computePainScore(rc: number, isSpiral: boolean, missingTestComma
   return Math.min(100, score);
 }
 
-export function painSeverityLabel(painScore: number, isSpiral = false, projectDir?: string): string {
-  if (isSpiral) {
-    return "critical";
-  }
-
-  const stateDir = projectDir ? resolvePdPath(projectDir, 'STATE_DIR') : undefined;
-  const config = stateDir ? ConfigService.get(stateDir) : null;
-  const thresholds = config ? config.get('severity_thresholds') : {
-    high: 70,
-    medium: 40,
-    low: 20
-  };
-
-  if (painScore >= thresholds.high) {
-    return "high";
-  } else if (painScore >= thresholds.medium) {
-    return "medium";
-  } else if (painScore >= thresholds.low) {
-    return "low";
-  } else {
-    return "info";
-  }
-}
-
 /**
  * Track principle value metrics when a pain signal is written.
  * This is observation-only — it does NOT affect the pain flag write flow.

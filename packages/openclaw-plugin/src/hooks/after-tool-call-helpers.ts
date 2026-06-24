@@ -537,11 +537,15 @@ export function emitPainIfAdmitted(
   sessionId: string,
   agentId: string | undefined,
   workspaceDir: string,
-  emitPainDetectedEvent: (wctx: WorkspaceContext, event: import('../core/evolution-types.js').EvolutionLoopEvent) => Promise<void>,
+  emitPainDetectedEvent: (wctx: WorkspaceContext, event: import('../core/evolution-types.js').EvolutionLoopEvent, options?: { recordObservability?: boolean }) => Promise<void>,
 ): void {
   if (!admission.admitted) return;
 
   const failureSource = outcome.failureSource ?? 'tool_failure';
+
+  // PRI-453: Generate painId early so it can be passed as canonicalPainId to
+  // recordPainEvent, enabling dedup between legacy trajectory write and SDK path.
+  const painId = `pain_${Date.now()}_${observation.errorHash.slice(0, 8)}`;
 
   // Record to trajectory before Runtime V2 diagnosis
   wctx.trajectory?.recordPainEvent({
@@ -552,6 +556,7 @@ export function emitPainIfAdmitted(
     severity: observation.painScore >= 70 ? 'severe' : observation.painScore >= 40 ? 'moderate' : 'mild',
     origin: 'system_infer',
     text: sanitizeForEvidence(observation.params.text ?? observation.params.content, workspaceDir) || undefined,
+    canonicalPainId: painId,
   });
 
   // Observe: track which principles would have prevented this pain (observation-only)
@@ -614,7 +619,7 @@ export function emitPainIfAdmitted(
   });
 
   // Create painId inline (matches original createPainId)
-  const painId = `pain_${Date.now()}_${observation.errorHash.slice(0, 8)}`;
+  // PRI-453: painId is now generated early (above) to pass as canonicalPainId.
 
   emitPainDetectedEvent(wctx, {
     ts: new Date().toISOString(),
@@ -631,7 +636,7 @@ export function emitPainIfAdmitted(
       provenance: 'automatic_hook',
       evidence: buildTrajectoryEvidence(wctx, sessionId),
     },
-  });
+  }, { recordObservability: false });
 }
 
 // ── Shared Helpers ──────────────────────────────────────────────────────────

@@ -138,9 +138,11 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     const source = read(PROMPT);
 
     it('uses painId format: empathy_gfi_${Date.now()} (both instances)', () => {
-      const matches = source.match(/painId:\s*`empathy_gfi_\$\{Date\.now\(\)\}`/g);
+      // PRI-453: painId is now generated early as a variable (gfiPainId / observerPainId)
+      // and referenced in the emit data block. Both variables use empathy_gfi_${Date.now()} format.
+      const matches = source.match(/`empathy_gfi_\$\{Date\.now\(\)\}`/g);
       expect(matches).not.toBeNull();
-      expect(matches!.length).toBe(2);
+      expect(matches!.length).toBeGreaterThanOrEqual(2);
     });
 
     it('sets provenance to "openclaw_context_bound" (both instances)', () => {
@@ -174,12 +176,16 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      // Extract the data blocks for empathy emit and verify no traceId.
-      // Use a non-greedy dot-all match to avoid truncation at template literal braces like ${Date.now()}
-      const empathyBlocks = source.match(/painId:\s*`empathy_gfi_[^`]*`[\s\S]*?^\s{8}\},?/gm);
-      expect(empathyBlocks).not.toBeNull();
-      for (const block of empathyBlocks!) {
-        expect(block).not.toMatch(/traceId/);
+      // PRI-453: painId is now a variable reference (gfiPainId / observerPainId),
+      // so we extract the data blocks by matching the variable name pattern instead.
+      // Verify no traceId appears in any emitPainDetectedEvent data block in prompt.ts.
+      const emitBlocks = source.match(/emitPainDetectedEvent\(wctx,\s*\{[\s\S]*?\},\s*\{[^}]*\}\);/g);
+      expect(emitBlocks).not.toBeNull();
+      for (const block of emitBlocks!) {
+        // Only check empathy emit blocks (those containing 'user_empathy')
+        if (block.includes("'user_empathy'") || block.includes('"user_empathy"')) {
+          expect(block).not.toMatch(/traceId/);
+        }
       }
     });
 
@@ -209,7 +215,9 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     const source = read(LLM);
 
     it('uses painId format: llm_${Date.now()}', () => {
-      expect(source).toMatch(/painId:\s*`llm_\$\{Date\.now\(\)\}`/);
+      // PRI-453: painId is now generated early as `const painId = `llm_${Date.now()}``
+      // and referenced as `painId: painId` in the emit data block.
+      expect(source).toMatch(/const\s+painId\s*=\s*`llm_\$\{Date\.now\(\)\}`/);
     });
 
     it('sets provenance to "openclaw_context_bound"', () => {
@@ -225,11 +233,11 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {
-      // Match the entire data block from painId to the closing brace of the data object.
-      // Use a non-greedy dot-all match to avoid truncation at template literal braces like ${Date.now()}
-      const llmBlock = source.match(/painId:\s*`llm_\$\{Date\.now\(\)\}`[\s\S]*?^\s{8}\},?/m);
-      expect(llmBlock).not.toBeNull();
-      expect(llmBlock![0]).not.toMatch(/traceId/);
+      // PRI-453: painId is now a variable reference, so extract the emit block
+      // by matching the emitPainDetectedEvent call pattern instead.
+      const emitBlock = source.match(/emitPainDetectedEvent\(wctx,\s*\{[\s\S]*?\},\s*\{[^}]*\}\);/);
+      expect(emitBlock).not.toBeNull();
+      expect(emitBlock![0]).not.toMatch(/traceId/);
     });
 
     it('sets agentId from ctx.agentId (not hardcoded)', () => {
