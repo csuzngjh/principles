@@ -153,7 +153,7 @@ PD 系统有 5 类组件：
 | `ScribeRunner` | 🟢 Runner | core | `runtime-v2/internalization/scribe-runner.ts` | PhilosopherOutput | PIArtifact(principle) | ✅ MVP-Core |
 | `ArtificerRunner` | 🟢 Runner | core | `runtime-v2/internalization/artificer-runner.ts` | ScribeOutput | PIArtifact(rule) | ✅ MVP-Core |
 | `EvaluatorRunner` | 🟡 Runner | core | `runtime-v2/internalization/evaluator-runner.ts` | ArtificerOutput | PIArtifact(rule) | ✅ MVP-Quiet (default off; MVP-Core for RuleHost per ADR-0014 amendment) |
-| `RolloutReviewerRunner` | 🟡 Runner | core | `runtime-v2/internalization/rollout-reviewer-runner.ts` | EvaluatorOutput | PIArtifact(rule) + 触发 ActivationDispatcher | ⚠️ MVP-Quiet (default off) |
+| `RolloutReviewerRunner` | 🟡 Runner | core | `runtime-v2/internalization/rollout-reviewer-runner.ts` | EvaluatorOutput | PIArtifact(rule) + 触发 ActivationDispatcher | ✅ MVP-Quiet (default off) |
 | `TrainerRunner` | 🟢 Runner | core | `runtime-v2/internalization/trainer-runner.ts` | RolloutReviewerOutput | PIArtifact(training_data) | Deferred |
 
 #### 3.2.3 Runner 输出 Validator（每 Runner 一个）

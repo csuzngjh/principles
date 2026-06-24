@@ -2085,6 +2085,21 @@ describe('PRI-111 ArtificerRunner boundary', () => {
   });
 });
 
+// ── PRI-458: PhilosopherRunner barrel boundary (MVP-Quiet) ─────────────────────
+
+describe('PRI-458 PhilosopherRunner barrel boundary', () => {
+  it('BARREL_EXPORTS: internalization/index.ts does NOT export PhilosopherRunner (PRI-458 MVP-Quiet)', async () => {
+    // PRI-458: PhilosopherRunner is de-surfaced from the internal barrel (MVP-Quiet).
+    // It remains in runtime-v2/index.ts (public barrel) because rulehost-pipeline-runner.ts
+    // imports it from there (EP-02 exception).
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).not.toContain("from './philosopher-runner.js'");
+    expect(src).not.toContain("from './philosopher-output.js'");
+  });
+});
+
 // ── PRI-EVAL: EvaluatorRunner boundary guards ──────────────────────────────────
 
 describe('PRI-EVAL EvaluatorRunner boundary', () => {
@@ -2131,9 +2146,18 @@ describe('PRI-EVAL EvaluatorRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  // PRI-458: BARREL_EXPORTS assertion for EvaluatorRunner removed — de-surfaced from
-  // internalization/index.ts (MVP-Quiet). The runner remains in runtime-v2/index.ts
-  // (public barrel) because rulehost-pipeline-runner.ts imports it (EP-02 exception).
+  it('BARREL_EXPORTS: internalization/index.ts does NOT export EvaluatorRunner (PRI-458 MVP-Quiet)', async () => {
+    // PRI-458: EvaluatorRunner is de-surfaced from the internal barrel (MVP-Quiet).
+    // It remains in runtime-v2/index.ts (public barrel) because rulehost-pipeline-runner.ts
+    // imports it from there (EP-02 exception). These negative assertions lock the boundary:
+    // if someone re-aggregates the evaluator exports into this barrel, the test will fail.
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).not.toContain("from './evaluator-runner.js'");
+    expect(src).not.toContain("from './evaluator-output.js'");
+    expect(src).not.toContain("from './evaluator-prompt-builder.js'");
+  });
 
   it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers evaluator-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
@@ -2190,10 +2214,17 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     expect(src).not.toContain('node:cron');
   });
 
-  // PRI-458: BARREL_EXPORTS assertion for RolloutReviewerRunner removed — de-surfaced from
-  // internalization/index.ts (MVP-Quiet). The runner remains in runtime-v2/index.ts
-  // (public barrel) because runtime-internalization-run-once.ts imports it and
-  // package.json has no deep import path available.
+  it('BARREL_EXPORTS: internalization/index.ts does NOT export RolloutReviewerRunner (PRI-458 MVP-Quiet)', async () => {
+    // PRI-458: RolloutReviewerRunner is de-surfaced from the internal barrel (MVP-Quiet).
+    // It remains in runtime-v2/index.ts (public barrel) because runtime-internalization-run-once.ts
+    // imports it from there and package.json has no deep import path available (EP-02 exception).
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).not.toContain("from './rollout-reviewer-runner.js'");
+    expect(src).not.toContain("from './rollout-reviewer-output.js'");
+    expect(src).not.toContain("from './rollout-reviewer-prompt-builder.js'");
+  });
 
   it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers rollout-reviewer-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
