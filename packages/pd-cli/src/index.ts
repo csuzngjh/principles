@@ -15,7 +15,6 @@ import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
 import { handleHealth } from './commands/health.js';
-import { handleCentralSync } from './commands/central-sync.js';
 import { handleTaskShow, registerTaskListCommand } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
@@ -117,7 +116,7 @@ painCmd
   });
 
 const samplesCmd = program
-  .command('samples')
+  .command('samples', { hidden: true })
   .description('Correction sample management');
 
 samplesCmd
@@ -143,7 +142,7 @@ samplesCmd
   });
 
 const evolutionCmd = program
-  .command('evolution')
+  .command('evolution', { hidden: true })
   .description('Evolution task management');
 
 const tasksCmd = evolutionCmd
@@ -178,17 +177,6 @@ program
     await handleHealth(opts);
   });
 
-const centralCmd = program
-  .command('central')
-  .description('Central server management');
-
-centralCmd
-  .command('sync')
-  .description('Trigger a sync cycle and report results')
-  .action(async () => {
-    await handleCentralSync();
-  });
-
 // ── Runtime v2 task/run commands ──────────────────────────────────────────────鈹€鈹€鈹€鈹€鈹€鈹€
 
 const rtTaskCmd = program
@@ -207,7 +195,7 @@ rtTaskCmd
   });
 
 const rtRunCmd = program
-  .command('run')
+  .command('run', { hidden: true })
   .description('Runtime v2 run inspection');
 
 rtRunCmd
@@ -227,7 +215,7 @@ rtRunCmd
 // ── Runtime v2 trajectory/history/context commands ────────────────────────────鈹€鈹€
 
 const trajectoryCmd = program
-  .command('trajectory')
+  .command('trajectory', { hidden: true })
   .description('Runtime v2 trajectory location');
 
 trajectoryCmd
@@ -244,7 +232,7 @@ trajectoryCmd
   });
 
 const historyCmd = program
-  .command('history')
+  .command('history', { hidden: true })
   .description('Runtime v2 history query');
 
 historyCmd
@@ -261,7 +249,7 @@ historyCmd
   });
 
 const contextCmd = program
-  .command('context')
+  .command('context', { hidden: true })
   .description('Runtime v2 context assembly');
 
 contextCmd
@@ -276,7 +264,7 @@ contextCmd
 // ── Legacy import command ──────────────────────────────────────────────────────鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const legacyCmd = program
-  .command('legacy')
+  .command('legacy', { hidden: true })
   .description('Legacy data management (import and cleanup)');
 
 const importCmd = legacyCmd.command('import');
@@ -337,7 +325,7 @@ const runtimeCmd = program
   .description('Runtime inspection and health checks');
 
 runtimeCmd
-  .command('canary')
+  .command('canary', { hidden: true })
   .description('One-shot control plane health canary')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
@@ -346,7 +334,7 @@ runtimeCmd
   });
 
 const synthCmd = runtimeCmd
-  .command('synthetic')
+  .command('synthetic', { hidden: true })
   .description('Synthetic workload baseline commands');
 
 synthCmd
@@ -402,6 +390,48 @@ runtimeCmd
     });
   });
 
+// ── PRI-455: Promoted owner commands (trace + activation) ────────────────────
+// These are promoted from runtime subcommands to top-level for discoverability.
+// The old paths (pd runtime trace show, pd runtime activation list) remain as
+// hidden aliases — they still work but are not shown in --help.
+
+const traceTopCmd = program
+  .command('trace')
+  .description('Trace full pain-to-ledger chain (Story A\' Step 6: Observe)');
+
+traceTopCmd
+  .command('show')
+  .description('Show full trace for a pain ID')
+  .requiredOption('--pain-id <id>', 'Pain ID to trace')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTraceShow({ painId: opts.painId, workspace: opts.workspace, json: opts.json });
+  });
+
+const activationTopCmd = program
+  .command('activation')
+  .description('Activation management — list active activations, deactivate (Story A\' Steps 5-6)');
+
+activationTopCmd
+  .command('list')
+  .description('List all activations for a workspace')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationList({ workspace: opts.workspace, json: opts.json });
+  });
+
+activationTopCmd
+  .command('deactivate')
+  .description('Deactivate an activation by activation ID')
+  .requiredOption('--activation-id <id>', 'Activation ID to deactivate')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationDeactivate({ activationId: opts.activationId, workspace: opts.workspace, json: opts.json });
+  });
+
 const configCmd = program
   .command('config')
   .description('PD configuration discovery and diagnosis');
@@ -416,7 +446,7 @@ configCmd
   });
 
 const demoCmd = program
-  .command('demo')
+  .command('demo', { hidden: true })
   .description('Demo scenarios for MVP validation');
 
 demoCmd
@@ -436,7 +466,7 @@ demoCmd
 registerRuntimeProbeCommand(runtimeCmd);
 
 const flowCmd = runtimeCmd
-  .command('flow')
+  .command('flow', { hidden: true })
   .description('Workflow funnel inspection');
 
 flowCmd
@@ -449,8 +479,8 @@ flowCmd
   });
 
 const traceCmd = runtimeCmd
-  .command('trace')
-  .description('Trace full pain-to-ledger chain');
+  .command('trace', { hidden: true })
+  .description('Trace full pain-to-ledger chain (hidden alias — use pd trace show)');
 
 traceCmd
   .command('show')
@@ -463,7 +493,7 @@ traceCmd
   });
 
 runtimeCmd
-  .command('uat')
+  .command('uat', { hidden: true })
   .description('Runtime V2 chain UAT baseline runner')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--count <n>', 'Number of iterations (default: 5, max: 50)', parseInt)
@@ -481,7 +511,7 @@ runtimeCmd
   });
 
 const runtimeHealthCmd = runtimeCmd
-  .command('health')
+  .command('health', { hidden: true })
   .description('Runtime V2 health inspection');
 
 runtimeHealthCmd
@@ -503,7 +533,7 @@ runtimeHealthCmd
   });
 
 const internalizationCmd = runtimeCmd
-  .command('internalization')
+  .command('internalization', { hidden: true })
   .description('Internalization Engine operator visibility');
 
 internalizationCmd
@@ -573,8 +603,8 @@ internalizationCmd
   });
 
 const activationCmd = runtimeCmd
-  .command('activation')
-  .description('Activation dispatch operations');
+  .command('activation', { hidden: true })
+  .description('Activation dispatch operations (hidden — use pd activation for list/deactivate)');
 
 activationCmd
   .command('dispatch')
@@ -652,11 +682,11 @@ activationCmd
   });
 
 const diagnosticsCmd = runtimeCmd
-  .command('diagnostics')
+  .command('diagnostics', { hidden: true })
   .description('Control plane diagnostic bundle operations');
 
 const recoveryCmd = runtimeCmd
-  .command('recovery')
+  .command('recovery', { hidden: true })
   .description('Runtime V2 lease recovery operations');
 
 recoveryCmd
@@ -699,7 +729,7 @@ diagnosticsCmd
   });
 
 const pruningCmd = runtimeCmd
-  .command('pruning')
+  .command('pruning', { hidden: true })
   .description('Non-destructive pruning metrics and health signals');
 
 pruningCmd
@@ -882,7 +912,7 @@ candidateInternalizationCmd
 // ── Artifact inspection commands ──────────────────────────────────────────────
 
 const artifactCmd = program
-  .command('artifact')
+  .command('artifact', { hidden: true })
   .description('Artifact registry inspection');
 
 artifactCmd
@@ -936,7 +966,7 @@ registerRulecodeCommand(program);
 
 const consoleCmd = program
   .command('console')
-  .description('Start the pd-console web UI for principle review (default: legacy launcher)')
+  .description('Start the pd-console web UI for principle review (default: fallback launcher)')
   .passThroughOptions()
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
@@ -998,7 +1028,7 @@ consoleCmd.action(async (opts) => {
 // ─── Quality Scorecard (PRI-361) ──────────────────────────────────
 
 const qualityCmd = program
-  .command('quality')
+  .command('quality', { hidden: true })
   .description('Quality scoring and evaluation');
 
 qualityCmd
