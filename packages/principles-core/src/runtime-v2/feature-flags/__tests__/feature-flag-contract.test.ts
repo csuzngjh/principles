@@ -229,6 +229,11 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'internalization_core_grounding') continue;
       if (flag.id === 'internalization_auto_consumer') continue;
       if (flag.id === 'story_a_approval_completion') continue;
+      // PRI-454: painEvidenceAdmission + painEvidenceAdmissionDefault flipped to default-on
+      if (flag.id === 'painEvidenceAdmission') continue;
+      if (flag.id === 'pain_evidence_admission') continue;
+      if (flag.id === 'painEvidenceAdmissionDefault') continue;
+      if (flag.id === 'pain_evidence_admission_default') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -360,24 +365,44 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     }
   });
 
-  it('PEAT-B1: painEvidenceAdmission is registered as quiet, default-off', () => {
+  it('PEAT-B1: painEvidenceAdmission is registered as quiet, default-on (PRI-454 flip)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'painEvidenceAdmission');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('painEvidenceAdmission flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-06-06');
     expect(flag.description).toContain('PEAT-B1');
   });
 
-  it('PRI-404: pain_evidence_admission snake_case alias is registered as quiet, default-off', () => {
+  it('PRI-404: pain_evidence_admission snake_case alias is registered as quiet, default-on (PRI-454 flip)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'pain_evidence_admission');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('pain_evidence_admission flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-06-15');
     expect(flag.description).toContain('Snake-case');
+  });
+
+  it('PRI-454: painEvidenceAdmissionDefault is registered as quiet, default-on', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'painEvidenceAdmissionDefault');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('painEvidenceAdmissionDefault flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(true);
+    expect(flag.since).toBe('2026-06-24');
+    expect(flag.description).toContain('PRI-454');
+  });
+
+  it('PRI-454: pain_evidence_admission_default snake_case alias is registered as quiet, default-on', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'pain_evidence_admission_default');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('pain_evidence_admission_default flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(true);
+    expect(flag.since).toBe('2026-06-24');
+    expect(flag.description).toContain('PRI-454');
   });
 
   it('PRI-404: pain_evidence_admission is recognized by computeEffectiveFlags (no unknown warning)', () => {
