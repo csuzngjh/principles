@@ -17,6 +17,8 @@ export {
   resolveSourceKind,
   buildToolFailureObservation,
   buildLlmDetectionObservation,
+  buildEmpathyObservation,
+  buildManualPainObservation,
 } from '@principles/core/runtime-v2';
 
 // Re-export RawObservation for plugin consumers

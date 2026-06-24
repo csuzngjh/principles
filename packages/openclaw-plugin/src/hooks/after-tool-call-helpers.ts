@@ -23,7 +23,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
-import { isCooldownActive as isTriggerCooldownActive, markEpisodeAsDiagnosed, clearCooldownState } from './trigger-cooldown-tracker.js';
+import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed, resetSharedCooldownForTest } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
 import { resolveSourceKind, buildToolFailureObservation, type RawObservation } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
@@ -398,16 +398,6 @@ export function handleProbationFeedback(
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
 /**
- * Cooldown map for trigger controller decisions.
- *
- * PRI-363: This replaces the hidden map in PainDiagnosticGate.
- * Core trigger-controller is stateless; plugin layer owns cooldown state.
- *
- * EP-05: Loop state freshness — each check reads fresh state from this map.
- */
-const TRIGGER_COOLDOWN_MAP = new Map<string, number>();
-
-/**
  * Evaluate whether a tool failure should trigger pain diagnosis.
  *
  * PRI-363: Single-gate architecture — only TriggerController decides.
@@ -442,12 +432,11 @@ export function evaluatePainAdmissionForToolCall(
 
   const failureSource = outcome.failureSource ?? 'tool_failure';
 
-  // Check cooldown before calling trigger controller
-  const cooldownActive = isTriggerCooldownActive(
+  // Check cooldown before calling trigger controller (PRI-454: shared Map)
+  const cooldownActive = isSharedCooldownActive(
     failureSource,
     sessionId,
     latestFailureState?.lastErrorHash,
-    TRIGGER_COOLDOWN_MAP,
   );
 
   // PRI-360 S1: Build RawObservation for unified source mapping
@@ -493,13 +482,12 @@ export function evaluatePainAdmissionForToolCall(
     path: observation.relPath,
   }));
 
-  // If trigger controller says yes, mark cooldown and admit
+  // If trigger controller says yes, mark cooldown and admit (PRI-454: shared Map)
   if (triggerDecision.shouldCreateDiagnosticTask) {
-    markEpisodeAsDiagnosed(
+    markSharedEpisodeAsDiagnosed(
       failureSource,
       sessionId,
       latestFailureState?.lastErrorHash,
-      TRIGGER_COOLDOWN_MAP,
     );
     return {
       admitted: true,
@@ -645,9 +633,10 @@ export { buildTrajectoryEvidence } from './trajectory-evidence.js';
 
 /**
  * Reset trigger cooldown state (for tests).
+ * PRI-454: Delegates to shared cooldown Map reset.
  */
 export function resetTriggerCooldownForTest(): void {
-  clearCooldownState(TRIGGER_COOLDOWN_MAP);
+  resetSharedCooldownForTest();
 }
 
 // ── Source Classification ────────────────────────────────────────────────────

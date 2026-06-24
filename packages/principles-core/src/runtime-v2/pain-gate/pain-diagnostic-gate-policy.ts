@@ -1,6 +1,17 @@
 /**
  * Pain Diagnostic Gate Policy — PRI-446 (migrated from the plugin adapter)
  *
+ * @deprecated PRI-454 — Gate A (PainDiagnosticGate) is superseded by Gate B
+ * (TriggerController + EvidenceTriage). This module remains as the rollback
+ * path when `painEvidenceAdmission` or `painEvidenceAdmissionDefault` flags
+ * are OFF. Do not add new callers. New admission logic must use
+ * `evaluateTriggerController` from runtime-v2/evidence-triage.
+ *
+ * Disposition: Archive (do not delete) per PRI-454 plan step 6.
+ * Removal conditions: Both flags confirmed ON in production for 30 days,
+ * and all 5 MVP paths verified on Gate B. See
+ * docs/plans/2026-06-pain-evidence-admission-track.md.
+ *
  * Pure decision logic for pain-diagnostic cooldown and gate evaluation.
  *
  * This module is the single source of truth for the gate's threshold decision
