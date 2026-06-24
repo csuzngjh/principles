@@ -812,13 +812,13 @@ routing_policy:
 | IntakeToInternalizationBridge | ✅ | 已解决断点 ①：probation/candidate → root dreamer task |
 | RoutingPolicy | ✅ | 可能需要扩展 channel mapping |
 | InternalizationOrchestrator | ✅ | |
-| DreamerRunner | ✅ | |
-| PhilosopherRunner | ✅ | |
-| ScribeRunner | ✅ | |
-| ArtificerRunner | ✅ | |
-| EvaluatorRunner | ✅ | |
-| RolloutReviewerRunner | ✅ | 增加 ActivationDispatcher 调用 |
-| TrainerRunner | ✅ | 仅 model_training 通道 |
+| DreamerRunner | ✅ MVP-Core | |
+| PhilosopherRunner | ✅ MVP-Quiet | default off; not auto-dispatched |
+| ScribeRunner | ✅ MVP-Core | |
+| ArtificerRunner | ✅ MVP-Core | |
+| EvaluatorRunner | ✅ MVP-Quiet | default off; MVP-Core for RuleHost per ADR-0014 amendment |
+| RolloutReviewerRunner | ✅ MVP-Quiet | default off; excluded from MVP_CORE_TASK_KINDS |
+| TrainerRunner | Deferred | 仅 model_training 通道 |
 | **触发** | | |
 | IdleTrigger | ⚠️ Deprecated | 现存 core 策略为退役对象；不得建立 plugin 宿主适配，改由 PD-owned explicit scheduling |
 | **Stage 3 (Activation)** | | |
