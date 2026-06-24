@@ -81,6 +81,7 @@ const AFTER_TOOL_CALL_HELPERS = 'packages/openclaw-plugin/src/hooks/after-tool-c
 const PROMPT = 'packages/openclaw-plugin/src/hooks/prompt.ts';
 const LLM = 'packages/openclaw-plugin/src/hooks/llm.ts';
 const GATE_BLOCK_HELPER = 'packages/openclaw-plugin/src/hooks/gate-block-helper.ts';
+const PAIN = 'packages/openclaw-plugin/src/hooks/pain.ts';
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -190,9 +191,20 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       }
     });
 
-    it('uses evaluatePainDiagnosticGate as gate (not evaluateTriggerController)', () => {
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
       expect(source).toMatch(/evaluatePainDiagnosticGate/);
-      expect(source).not.toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
     });
 
     it('gates emit on gate.shouldDiagnose being true', () => {
@@ -245,8 +257,20 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/agentId:\s*ctx\.agentId/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate', () => {
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
       expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult (not sourceKind) for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
     });
 
     it('gates emit on gate.shouldDiagnose being true', () => {
@@ -314,8 +338,20 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(gateBlock).not.toMatch(/traceId/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate', () => {
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
       expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
     });
 
     it('gates emit on gate.shouldDiagnose being true', () => {
@@ -327,9 +363,86 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/loadFeatureFlagFromConfig/);
     });
 
+    it('passes consecutiveErrors and isRisky to evaluateEvidenceTriage in Gate B path (PRI-454 P2-1)', () => {
+      // Regression: Gate B path must pass consecutiveErrors and isRisky so
+      // Rule 3 (consecutiveErrors >= 4 → admit) can fire for non-risky
+      // repeated gate blocks. Without these, only isUnsafeHighConfidence
+      // was passed, dropping the repeated-failure upgrade rule.
+      const triageCall = source.match(/evaluateEvidenceTriage\([^)]+\)/s);
+      expect(triageCall).not.toBeNull();
+      expect(triageCall![0]).toMatch(/consecutiveErrors/);
+      expect(triageCall![0]).toMatch(/isRisky/);
+    });
+
     it('calls emitPainDetectedEvent with void + .catch() (fire-and-forget with error handler)', () => {
       expect(source).toMatch(/void\s+emitPainDetectedEvent/);
       expect(source).toMatch(/\.catch\(\(emitErr\)/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section 4b: pain.ts — manual pain path (path 5)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('pain.ts manual pain emit site (PRI-454)', () => {
+    const source = read(PAIN);
+
+    it('uses painId format: pain_${Date.now()}_${hash.slice(0,8)} via createPainId', () => {
+      expect(source).toMatch(/function\s+createPainId\(sessionId:\s*string\)/);
+      expect(source).toMatch(/`pain_\$\{Date\.now\(\)\}_\$\{computeHash\(sessionId\)\.slice\(0,\s*8\)\}`/);
+    });
+
+    it('sets painType to "user_frustration"', () => {
+      expect(source).toMatch(/painType:\s*'user_frustration'/);
+    });
+
+    it('sets source to event.toolName (manual pain)', () => {
+      expect(source).toMatch(/source:\s*event\.toolName/);
+    });
+
+    it('sets score to 100 (manual pain max score)', () => {
+      expect(source).toMatch(/score:\s*100/);
+    });
+
+    it('includes traceId field', () => {
+      expect(source).toMatch(/traceId,/);
+    });
+
+    it('includes evidence field via buildTrajectoryEvidence', () => {
+      expect(source).toMatch(/evidence:\s*buildTrajectoryEvidence\(wctx,\s*sessionId\)/);
+    });
+
+    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
+      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    });
+
+    it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
+      expect(source).toMatch(/evaluateTriggerController/);
+    });
+
+    it('uses triageResult for evaluateTriggerController (PRI-454)', () => {
+      expect(source).toMatch(/triageResult:\s*triage/);
+    });
+
+    it('uses isOwnerManual: true for manual pain (PRI-454)', () => {
+      expect(source).toMatch(/isOwnerManual:\s*true/);
+    });
+
+    it('uses buildManualPainObservation (PRI-454)', () => {
+      expect(source).toMatch(/buildManualPainObservation/);
+    });
+
+    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
+      expect(source).toMatch(/painEvidenceAdmissionDefault/);
+    });
+
+    it('gates emit on gate.shouldDiagnose or triggerDecision.shouldCreateDiagnosticTask', () => {
+      expect(source).toMatch(/gate\.shouldDiagnose|triggerDecision\.shouldCreateDiagnosticTask/);
+    });
+
+    it('calls emitPainDetectedEvent (not legacy APIs)', () => {
+      expect(source).toMatch(/emitPainDetectedEvent\(wctx,/);
+      expect(source).not.toMatch(/\bwritePainFlag\b/);
     });
   });
 
@@ -338,8 +451,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('cross-site consistency (documents known inconsistencies)', () => {
-    it('all 4 sites call emitPainDetectedEvent (not legacy APIs)', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites call emitPainDetectedEvent (not legacy APIs)', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/emitPainDetectedEvent/);
@@ -348,85 +461,95 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       }
     });
 
-    it('all 4 sites emit type: "pain_detected"', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites emit type: "pain_detected"', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/type:\s*'pain_detected'/);
       }
     });
 
-    it('all 4 sites include ts: new Date().toISOString()', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites include ts: new Date().toISOString()', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/ts:\s*new Date\(\)\.toISOString\(\)/);
       }
     });
 
-    it('all 4 sites include sessionId field', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites include sessionId field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/sessionId,/);
       }
     });
 
-    it('all 4 sites include score field', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites include score field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/score:/);
       }
     });
 
-    it('all 4 sites include reason field', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites include reason field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/reason:/);
       }
     });
 
-    it('all 4 sites include source field', () => {
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+    it('all 5 sites include source field', () => {
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/source:/);
       }
     });
 
-    it('all 4 sites include painId field', () => {
+    it('all 5 sites include painId field', () => {
       // after-tool-call-helpers uses shorthand `painId,`; others use `painId:`
-      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER];
+      const files = [AFTER_TOOL_CALL_HELPERS, PROMPT, LLM, GATE_BLOCK_HELPER, PAIN];
       for (const file of files) {
         const src = read(file);
         expect(src).toMatch(/painId[,:]/);
       }
     });
 
-    it('documents: only after-tool-call-helpers uses evaluateTriggerController', () => {
+    it('documents: all 5 sites use evaluateTriggerController (PRI-454 Gate B)', () => {
       const atc = read(AFTER_TOOL_CALL_HELPERS);
       const prompt = read(PROMPT);
       const llm = read(LLM);
       const gate = read(GATE_BLOCK_HELPER);
+      const pain = read(PAIN);
 
       expect(atc).toMatch(/evaluateTriggerController/);
-      expect(prompt).not.toMatch(/evaluateTriggerController/);
-      expect(llm).not.toMatch(/evaluateTriggerController/);
-      expect(gate).not.toMatch(/evaluateTriggerController/);
+      // PRI-454: prompt.ts now uses evaluateTriggerController when Gate B is active
+      expect(prompt).toMatch(/evaluateTriggerController/);
+      // PRI-454: llm.ts now uses evaluateTriggerController when Gate B is active
+      expect(llm).toMatch(/evaluateTriggerController/);
+      // PRI-454: gate-block-helper now uses evaluateTriggerController when Gate B is active
+      expect(gate).toMatch(/evaluateTriggerController/);
+      // PRI-454: pain.ts now uses evaluateTriggerController when Gate B is active
+      expect(pain).toMatch(/evaluateTriggerController/);
     });
 
-    it('documents: 3 of 4 sites use evaluatePainDiagnosticGate (not after-tool-call-helpers)', () => {
+    it('documents: 4 of 5 sites use evaluatePainDiagnosticGate as rollback (not after-tool-call-helpers)', () => {
       const atc = read(AFTER_TOOL_CALL_HELPERS);
       const prompt = read(PROMPT);
       const llm = read(LLM);
       const gate = read(GATE_BLOCK_HELPER);
+      const pain = read(PAIN);
 
+      // after-tool-call-helpers never had Gate A — it was born on Gate B
       expect(atc).not.toMatch(/evaluatePainDiagnosticGate/);
+      // PRI-454: prompt.ts, llm.ts, gate-block-helper, pain.ts all retain Gate A as rollback
       expect(prompt).toMatch(/evaluatePainDiagnosticGate/);
       expect(llm).toMatch(/evaluatePainDiagnosticGate/);
       expect(gate).toMatch(/evaluatePainDiagnosticGate/);
+      expect(pain).toMatch(/evaluatePainDiagnosticGate/);
     });
   });
 });

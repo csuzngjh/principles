@@ -110,10 +110,17 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
-  { id: 'painEvidenceAdmission', category: 'quiet', enabled: false, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1)' },
+  // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
+  // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
+  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },
   // PRI-404: snake_case alias for painEvidenceAdmission — config.yaml uses snake_case convention;
   // registering both avoids "unknown flag accepted" warning while production code references camelCase key
-  { id: 'pain_evidence_admission', category: 'quiet', enabled: false, since: '2026-06-15', description: 'Snake-case alias for painEvidenceAdmission — same functionality, matches config.yaml key convention' },
+  { id: 'pain_evidence_admission', category: 'quiet', enabled: true, since: '2026-06-15', description: 'Snake-case alias for painEvidenceAdmission — same functionality, matches config.yaml key convention. PRI-454: default-on.' },
+  // PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B owns admission.
+  // When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated on all paths.
+  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
+  // PRI-454: snake_case alias for painEvidenceAdmissionDefault
+  { id: 'pain_evidence_admission_default', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Snake-case alias for painEvidenceAdmissionDefault — global kill switch, matches config.yaml key convention' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },

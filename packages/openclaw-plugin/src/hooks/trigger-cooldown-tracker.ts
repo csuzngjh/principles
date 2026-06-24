@@ -80,3 +80,41 @@ export function getCooldownTimestamp(
   const episodeKey = buildEpisodeKey(source, sessionId, errorHash);
   return cooldownMap.get(episodeKey);
 }
+
+// ── Shared Cooldown Map (PRI-454) ───────────────────────────────────────────
+//
+// Module-level singleton Map shared across all Gate B paths.
+// Replaces the per-file TRIGGER_COOLDOWN_MAP in after-tool-call-helpers.ts.
+// All paths (gate-block, llm, empathy, manual pain) use this single Map
+// to ensure unified cooldown state.
+
+const SHARED_COOLDOWN_MAP = new Map<string, number>();
+
+/**
+ * Check whether cooldown is currently active using the shared Map.
+ */
+export function isSharedCooldownActive(
+  source: string,
+  sessionId: string | undefined,
+  errorHash: string | undefined,
+): boolean {
+  return isCooldownActive(source, sessionId, errorHash, SHARED_COOLDOWN_MAP);
+}
+
+/**
+ * Mark an episode as diagnosed using the shared Map.
+ */
+export function markSharedEpisodeAsDiagnosed(
+  source: string,
+  sessionId: string | undefined,
+  errorHash: string | undefined,
+): void {
+  markEpisodeAsDiagnosed(source, sessionId, errorHash, SHARED_COOLDOWN_MAP);
+}
+
+/**
+ * Clear all shared cooldown state (for tests).
+ */
+export function resetSharedCooldownForTest(): void {
+  SHARED_COOLDOWN_MAP.clear();
+}
