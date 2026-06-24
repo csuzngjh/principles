@@ -1,23 +1,20 @@
 /**
  * Production Compatibility Tests
- * 
+ *
  * These tests validate that new code works correctly with production data patterns.
  * Run with: npm test -- tests/fixtures/production-compatibility.test.ts
- * 
+ *
  * NOTE: These tests require access to ~/.openclaw directory (production data)
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  loadProductionPainFlag,
   loadProductionEvolutionQueue,
   loadProductionPainCandidates,
   generateTestFixtureFromProduction,
   validateProductionCompatibility,
   createMockQueueItem,
-  createMockPainFlag,
   PRODUCTION_FIXTURES,
 } from './production-mock-generator.js';
 
@@ -26,20 +23,10 @@ const hasProductionData = fs.existsSync(PRODUCTION_FIXTURES.STATE_DIR);
 
 describe.skipIf(!hasProductionData)('Production Data Compatibility', () => {
   describe('Data Loading', () => {
-    it('should load production pain_flag', () => {
-      const painFlag = loadProductionPainFlag();
-      // May be null if no active pain
-      if (painFlag) {
-        expect(painFlag).toHaveProperty('score');
-        expect(painFlag).toHaveProperty('source');
-        expect(painFlag).toHaveProperty('reason');
-      }
-    });
-
     it('should load production evolution_queue', () => {
       const queue = loadProductionEvolutionQueue();
       expect(Array.isArray(queue)).toBe(true);
-      
+
       if (queue.length > 0) {
         const item = queue[0];
         expect(item).toHaveProperty('id');
@@ -56,23 +43,16 @@ describe.skipIf(!hasProductionData)('Production Data Compatibility', () => {
   });
 
   describe('New Field Compatibility', () => {
-    it('should detect missing session_id in pain_flag (expected: fails until production updated)', () => {
+    it('should report queue field compatibility', () => {
       const result = validateProductionCompatibility();
-      
-      // This test documents the current state - not a failure
+
       console.log('Compatibility issues:', result.issues);
       console.log('Production data:', result.productionData);
-      
-      // New fields are expected to be missing in production
-      if (!result.compatible) {
-        console.log('⚠️  Production data does not have new fields (session_id, agent_id)');
-        console.log('   This is expected after code changes. Production will be updated on next pain event.');
-      }
     });
 
     it('should handle queue items without session_id gracefully', () => {
       const queue = loadProductionEvolutionQueue();
-      
+
       for (const item of queue.slice(0, 5)) {
         // Code should handle missing session_id/agent_id
         expect(() => {
@@ -90,10 +70,10 @@ describe.skipIf(!hasProductionData)('Production Data Compatibility', () => {
   describe('Pattern Extraction', () => {
     it('should extract patterns from production data', () => {
       const fixture = generateTestFixtureFromProduction();
-      
+
       expect(fixture.patterns).toBeDefined();
       expect(fixture.patterns.painSources.length).toBeGreaterThanOrEqual(0);
-      
+
       console.log('Pain sources:', fixture.patterns.painSources);
       console.log('Score distribution:', fixture.patterns.scoreDistribution);
       console.log('Status distribution:', fixture.patterns.statusDistribution);
@@ -111,17 +91,6 @@ describe.skipIf(!hasProductionData)('Production Data Compatibility', () => {
       expect(item.agent_id).toBe('main');
       expect(item.id).toBeDefined();
       expect(item.timestamp).toBeDefined();
-    });
-
-    it('should create realistic mock pain flags', () => {
-      const flag = createMockPainFlag({
-        session_id: 'test-session-456',
-        agent_id: 'builder',
-      });
-
-      expect(flag.session_id).toBe('test-session-456');
-      expect(flag.agent_id).toBe('builder');
-      expect(flag.time).toBeDefined();
     });
   });
 });

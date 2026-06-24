@@ -5,7 +5,6 @@ import * as path from 'path';
 import { EventLogService } from '../../src/core/event-log.js';
 import { clearSession, trackFriction } from '../../src/core/session-tracker.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
-import { serializeKvLines } from '../../src/utils/io.js';
 import { RuntimeSummaryService } from '../../src/service/runtime-summary-service.js';
 
 const tempDirs: string[] = [];
@@ -70,15 +69,6 @@ describe('RuntimeSummaryService', () => {
         b: {},
       },
     });
-    fs.writeFileSync(
-      path.join(workspace, '.state', '.pain_flag'),
-      serializeKvLines({
-        source: 'tool_failure',
-        score: '50',
-        time: '2026-03-20T10:00:00Z',
-      }),
-      'utf8'
-    );
     writeSession(workspace, 's1', {
       currentGfi: 45,
       dailyGfiPeak: 78,
@@ -115,8 +105,6 @@ describe('RuntimeSummaryService', () => {
     expect(summary.evolution.directive.exists).toBe(false);
     expect(summary.evolution.directive.active).toBeNull();
     expect(summary.evolution.dataQuality).toBe('authoritative');
-    expect(summary.pain.activeFlag).toBe(true);
-    expect(summary.pain.activeFlagSource).toBe('tool_failure');
     expect(summary.pain.candidates).toBe(2);
     expect(summary.pain.lastSignal?.source).toBe('tool_failure');
     expect(summary.gate.recentBypasses).toBe(1);

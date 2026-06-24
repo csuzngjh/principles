@@ -37,7 +37,6 @@ const STATE_DIR = path.join(WORKSPACE_DIR, '.state');
 const QUEUE_PATH = path.join(STATE_DIR, 'EVOLUTION_QUEUE');
 const LEDGER_PATH = path.join(STATE_DIR, 'principle_training_state.json');
 const DB_PATH = path.join(STATE_DIR, 'subagent_workflows.db');
-const PAIN_FLAG_PATH = path.join(STATE_DIR, '.pain_flag');
 const SAMPLES_DIR = path.join(STATE_DIR, 'nocturnal', 'samples');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -310,11 +309,6 @@ async function main() {
   logStep('BASELINE', 'Capturing current state before validation');
   const queueBefore = safeReadJson(QUEUE_PATH) as QueueItem[] | null;
   logData('EVOLUTION_QUEUE (before)', queueBefore?.length ?? 0);
-  if (fs.existsSync(PAIN_FLAG_PATH)) {
-    logData('.pain_flag', 'EXISTS — ' + fs.readFileSync(PAIN_FLAG_PATH, 'utf8').slice(0, 100));
-  } else {
-    logData('.pain_flag', 'not present');
-  }
   if (fs.existsSync(SAMPLES_DIR)) {
     const samplesBefore = fs.readdirSync(SAMPLES_DIR).length;
     logData('nocturnal/samples/', `${samplesBefore} files`);
@@ -430,18 +424,6 @@ async function main() {
         } else {
           logData('new artifacts', 'none created in last 60s');
         }
-      }
-
-      // Check pain_flag cleanup
-      if (fs.existsSync(PAIN_FLAG_PATH)) {
-        const flagContent = fs.readFileSync(PAIN_FLAG_PATH, 'utf8');
-        if (flagContent.includes('[object Object]')) {
-          logStep('⚠️ WARNING', 'pain_flag is corrupted ([object Object])');
-        } else {
-          logData('.pain_flag (after)', `still exists, ${flagContent.length} bytes`);
-        }
-      } else {
-        logData('.pain_flag (after)', 'cleaned up (file removed)');
       }
 
       if (result.resolution === 'MISSING' || result.resolution === 'expired') {

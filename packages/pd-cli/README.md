@@ -12,7 +12,7 @@ npm install -g @principles/pd-cli
 
 ### `pd pain record`
 
-Record a pain signal to the workspace's `.pain_flag` file.
+Record a pain signal to the workspace's trajectory database via `PainToPrincipleService`.
 
 ```bash
 pd pain record --reason "edited file without reading first" --score 75
@@ -81,10 +81,10 @@ node packages/pd-cli/dist/index.js runtime pruning orphans --workspace "D:\.open
 
 Only add `--confirm` after reviewing the dry-run output. Never run remediation without understanding what it will change.
 
-## Migration from openclaw tools
+## Pain Recording Architecture
 
-The `pd pain record` CLI and the existing `write_pain_flag` tool write to the same pain flag file (`.state/.pain_flag`). They can coexist safely:
+The `pd pain record` CLI records pain signals directly to the workspace's trajectory database via `PainToPrincipleService` (Runtime V2). The legacy `.state/.pain_flag` file is no longer written or read by the active runtime — all pain events flow through `emitPainDetectedEvent` → `PainSignalBridge` → `trajectory.db`.
 
-- **Concurrency**: `recordPainSignal` in the SDK uses an in-process async queue lock to serialize writes within a single process. For cross-process safety (e.g., simultaneous tool + CLI calls), both paths rely on atomic file rename via `atomicWriteFileSync`.
-- **Progressive migration**: Agents using openclaw tools can migrate to `pd pain record` incrementally — both paths write the same format and are processed identically by the evolution system.
-- **No dual-write data loss**: The pain flag is a point-in-time snapshot; each write is atomic. Conflicting concurrent writes result in last-write-wins on the flag content, which is acceptable for pain signals.
+- **Single source of truth**: Pain events are stored in `trajectory.db` (SQLite), not in flat files.
+- **No file-based concurrency concerns**: SQLite handles concurrent access; the legacy `atomicWriteFileSync` file-locking path is retired.
+- **Runtime V2 pipeline**: Pain signals enter the diagnostician pipeline through `PainToPrincipleService.recordPain()`, which creates diagnostic tasks in the task store.
