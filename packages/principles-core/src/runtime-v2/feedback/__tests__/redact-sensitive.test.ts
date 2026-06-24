@@ -401,8 +401,8 @@ describe('redactSensitiveFields', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const value = result.value as Array<Record<string, unknown>>;
-      expect(value[0].password).toBe(REDACTED_VALUE);
-      expect(value[1].password).toBe(REDACTED_VALUE);
+      expect(value[0]?.password).toBe(REDACTED_VALUE);
+      expect(value[1]?.password).toBe(REDACTED_VALUE);
     }
   });
 
