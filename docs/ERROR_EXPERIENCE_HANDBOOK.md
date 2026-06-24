@@ -166,6 +166,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-068 | Used `pnpm install` in an `npm ci` repo — package-lock.json not synced, all CI jobs fail | PRI-419 / PR #953 |
 | ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
 | ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
+| ERR-078 | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification | PRI-454 / PR #1043 |
 
 ---
 
@@ -730,7 +731,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 77 |
+| Total lessons | 78 |
 | Last updated | 2026-06-24 |
 | Top category | Schema & Type |
 | Recurring errors | 34 |
@@ -1120,6 +1121,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any PR that replaces one function call with another (API migration), add a characterization test that asserts the new function receives all parameters the old function received. The test should grep the source for the new function call and verify each expected parameter name appears in the call arguments.
 - **Regression guard**: Static characterization test: for each migration site, assert the new API call includes all parameter names from the old API call. In PRI-454, the test `passes consecutiveErrors and isRisky to evaluateEvidenceTriage in Gate B path` was added as the regression guard.
 - **Related ERRs**: ERR-073 (characterization tests don't cover call-site-specific behavior equivalence — same pattern group: migration/refactoring tests must verify behavior parity, not just happy path)
+- **Source**: PRI-454 / PR #1043
+- **Date**: 2026-06-24
+- **Recurrence**: None
+
+---
+
+**[ERR-078]** | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification
+
+- **What happened**: During PRI-454 (PR #1043), the assistant's PR body claimed the failing `gate-no-path-write-tool.test.ts` test was "pre-existing on main, unrelated to PRI-454". In reality the failure was introduced by the PR itself: the PR flipped `painEvidenceAdmission`'s default from `enabled:false` to `enabled:true`, which activated the Gate B path in `gate-block-helper.ts`. That path calls `wctx.resolve('PROFILE')`, but the pre-existing test's mock `WorkspaceContext` fixture did not implement `resolve()`, so the block-handling code threw `TypeError: wctx.resolve is not a function`. `gate.ts`'s catch block then degraded to "allow conservatively", silently downgrading the expected block to allow and failing the assertion. On `main`, the flag was OFF so the Gate B branch never ran and the test passed.
+- **Why it's wrong**: A "pre-existing on main" claim in a PR body is a load-bearing assertion that downstream reviewers and merge-gate logic rely on. When it is false, a real regression ships with a false exoneration attached. The reviewer cannot distinguish "author verified this on main" from "author guessed" without re-running the verification themselves — which inverts the whole point of the self-report. The root cause is asserting a CI failure's provenance without doing the diff/reproduce step that would have proven it.
+- **Generalized failure mode**: When an assistant classifies a CI test failure as "pre-existing", "unrelated", or "flaky" in a PR body, it must verify the claim by (a) confirming the failing test file is NOT in the PR diff, AND (b) reproducing the failure on the base branch (or proving the changed files cannot reach the failing code path) — otherwise the classification is an unverified guess that misleads reviewers.
+- **Correct approach**: Before writing "pre-existing on main" in a PR body: (1) `gh pr diff <PR> --name-only` and confirm the failing test file is absent; (2) reproduce the failure on the base branch (`git fetch origin main && git worktree add <path> origin/main && npx vitest run <failing-test>`), or prove by diff that the PR's changed files cannot execute the failing code path; (3) if neither holds, the failure is a PR-introduced regression — fix it instead of labeling it pre-existing. In this incident the flag-flip changed the default execution path of `gate-block-helper.ts`, which is reachable from the failing test — so step (2) would have immediately shown the test passing on main.
+- **How to prevent**: Treat any "pre-existing / unrelated / flaky" label in a PR body or self-review as a finding that must be backed by evidence (a base-branch reproduction run, or a proven-unreachable diff), not a conclusion. If a PR flips a feature flag default ON/OFF, assume every test that mocks the gated module's dependencies is potentially affected and re-run the full package test suite before asserting any failure is pre-existing. Add the base-branch reproduction to the PR body as evidence ("verified failing on `origin/main` via `<command>`").
+- **Regression guard**: Reviewer checklist — for every "pre-existing" claim in a PR body, run the named failing test against the PR's merge-base; if it passes there, the claim is false and the finding is a PR-introduced regression. Static target: when a PR changes any value in `DEFAULT_FEATURE_FLAGS` (or any `enabled:` default), the self-review must explicitly enumerate which tests mock the gated code paths and confirm they still pass.
+- **Related ERRs**: ERR-066 (self-review marked "no real issues" without running the failure path — same pattern group: self-reports must be backed by execution evidence, not assertion), ERR-012 (stale-main rollback), ERR-052 (PR cross-contamination)
 - **Source**: PRI-454 / PR #1043
 - **Date**: 2026-06-24
 - **Recurrence**: None
