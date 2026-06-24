@@ -70,6 +70,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-070 | New public types/classes not exported from barrel index.ts — module consumers cannot import the new API surface | PRI-424 |
 | ERR-071 | Async cleanup not `await`ed in finally; test resources not in try-finally; `process.env` not restored | PRI-428 |
 | ERR-073 | Refactoring characterization tests cover shared logic happy path, not call-site-specific behavior equivalence | PRI-431 |
+| ERR-077 | API migration silently drops input parameters — characterization tests don't verify parameter parity | PRI-454 |
 
 ---
 
@@ -729,8 +730,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 76 |
-| Last updated | 2026-06-23 |
+| Total lessons | 77 |
+| Last updated | 2026-06-24 |
 | Top category | Schema & Type |
 | Recurring errors | 34 |
 
@@ -1106,4 +1107,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-001 (as cast on untrusted), ERR-013 (Object.hasOwn for untrusted keys), ERR-024 (validator not wired into production)
 - **Source**: PRI-437 / PR #986 (adversarial self-review)
 - **Date**: 2026-06-20
+- **Recurrence**: None
+
+---
+
+**[ERR-077]** | API migration silently drops input parameters — characterization tests don't verify parameter parity
+
+- **What happened**: When migrating `gate-block-helper.ts` from Gate A (`evaluatePainDiagnosticGate`) to Gate B (`evaluateEvidenceTriage` + `evaluateTriggerController`) in PRI-454 Step 4a, the assistant passed only `isUnsafeHighConfidence` to `evaluateEvidenceTriage` but omitted `consecutiveErrors` and `isRisky`. Gate A's input included `consecutiveErrors: session?.consecutiveErrors ?? 0`, which drove Rule 3 (consecutiveErrors >= 4 → admit). Gate B's triage call silently dropped this parameter, so non-risky repeated gate blocks (4+ consecutive errors) never triggered diagnosis — Gate B was less sensitive than Gate A.
+- **Why it's wrong**: When replacing one API call with another, every input parameter from the old API must have a corresponding parameter in the new API. Silently dropping a parameter changes behavior without any test failure or error signal. The characterization test checked that `evaluateEvidenceTriage` was called but didn't verify which parameters were passed.
+- **Generalized failure mode**: When migrating from one API to another, assistants must audit ALL input parameters from the old API and verify each has a corresponding parameter in the new API, otherwise the migration silently drops behavior.
+- **Correct approach**: Before completing an API migration, create a parameter audit table: list every input to the old API call, and for each, identify the corresponding parameter in the new API. Any parameter without a corresponding new API input must be explicitly documented as intentionally dropped (with reason) or forwarded. Add a characterization test that asserts the new API receives all forwarded parameters.
+- **How to prevent**: For any PR that replaces one function call with another (API migration), add a characterization test that asserts the new function receives all parameters the old function received. The test should grep the source for the new function call and verify each expected parameter name appears in the call arguments.
+- **Regression guard**: Static characterization test: for each migration site, assert the new API call includes all parameter names from the old API call. In PRI-454, the test `passes consecutiveErrors and isRisky to evaluateEvidenceTriage in Gate B path` was added as the regression guard.
+- **Related ERRs**: ERR-073 (characterization tests don't cover call-site-specific behavior equivalence — same pattern group: migration/refactoring tests must verify behavior parity, not just happy path)
+- **Source**: PRI-454 / PR #1043
+- **Date**: 2026-06-24
 - **Recurrence**: None
