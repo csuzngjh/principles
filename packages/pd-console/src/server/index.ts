@@ -3,10 +3,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import {
-  loadWorkspaceFeatureFlags,
-  buildFeedbackChannelFlags,
-} from './config/feature-flags.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from './config/pd-config-store.js';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
@@ -240,11 +237,15 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   const configStore = new WorkspaceConfigStore();
   const workspaceService = new WorkspaceService(configStore);
 
-  // Load feature flags — fail-closed: on error, feedback_channel is disabled
-  const flagLoadResult = loadWorkspaceFeatureFlags(workspaceDir);
-  const feedbackFlags = buildFeedbackChannelFlags(flagLoadResult);
-  if (!flagLoadResult.ok) {
-    console.warn('[pd-console] Feature flag loading failed (feedback channel disabled):', flagLoadResult.reason);
+  // Load feature flags from canonical .pd/config.yaml — fail-closed: on error, feedback_channel uses defaults
+  const configResult = loadPdConfig(workspaceDir);
+  const pdFlags = computeFlagsFromLoadResult(configResult);
+  const feedbackChannelEnabled = pdFlags.flags.feedback_channel?.enabled ?? false;
+  const feedbackFlags: Record<string, { enabled: boolean }> = {
+    feedback_channel: { enabled: feedbackChannelEnabled },
+  };
+  if (!configResult.ok) {
+    console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
   }
 
   return {

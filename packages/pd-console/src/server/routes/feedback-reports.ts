@@ -123,7 +123,7 @@ export async function handleFeedbackReportsRoute(
             res,
             403,
             'feedback_channel_disabled',
-            'feedback_channel feature flag is disabled. Enable feedback_channel in .pd/feature-flags.yaml to use feedback reports.',
+            'feedback_channel feature flag is disabled. Enable feedback_channel in .pd/config.yaml to use feedback reports.',
           );
           return;
         }

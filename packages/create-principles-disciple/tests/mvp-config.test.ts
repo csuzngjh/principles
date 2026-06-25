@@ -7,13 +7,11 @@ import {
   MVP_CHANNELS,
   MVP_QUIET_FLAGS,
   MVP_GONE_FLAGS,
-  generateFeatureFlagsYamlContent,
   validateMvpChannels,
   parseChannelsOption,
   validateOpenClawConfig,
   buildSuccessOutput,
   buildFailureOutput,
-  getFeatureFlagsPath,
   isMvpChannel,
   getHomeDir,
   getOpenClawDir,
@@ -21,7 +19,6 @@ import {
   getInstalledPdCliDir,
   getInstalledBinDir,
   isWindows,
-  readEnabledChannelsFromDisk,
   generateConfigYamlContent,
   getConfigYamlPath,
   validateConfigYamlFull,
@@ -80,104 +77,6 @@ describe('Windows .cmd verification contract', () => {
     const binDir = getInstalledBinDir();
     const expected = isWindows() ? path.join(binDir, 'pd.cmd') : path.join(binDir, 'pd');
     expect(expected.endsWith(isWindows() ? 'pd.cmd' : 'pd')).toBe(true);
-  });
-});
-
-describe('generateFeatureFlagsYamlContent', () => {
-  it('produces valid YAML', () => {
-    const content = generateFeatureFlagsYamlContent();
-    const parsed = yaml.load(content);
-    expect(typeof parsed).toBe('object');
-    expect(parsed).not.toBeNull();
-  });
-
-  it('core flags are enabled by default (no channels arg)', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
-    for (const ch of MVP_CHANNELS) {
-      const flag = parsed[ch] as Record<string, unknown> | undefined;
-      expect(flag).toBeDefined();
-      expect(flag?.enabled).toBe(true);
-      expect(flag?.category).toBe('core');
-    }
-  });
-
-  it('gone flags are disabled by default', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
-    for (const gone of MVP_GONE_FLAGS) {
-      const flag = parsed[gone] as Record<string, unknown> | undefined;
-      expect(flag).toBeDefined();
-      expect(flag?.enabled).toBe(false);
-      expect(flag?.category).toBe('gone');
-    }
-  });
-
-  it('quiet flags are disabled by default', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
-    for (const quiet of MVP_QUIET_FLAGS) {
-      const flag = parsed[quiet] as Record<string, unknown> | undefined;
-      expect(flag).toBeDefined();
-      expect(flag?.enabled).toBe(false);
-      expect(flag?.category).toBe('quiet');
-    }
-  });
-
-  it('does not contain skill channel', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
-    expect(Object.hasOwn(parsed, 'skill')).toBe(false);
-  });
-
-  it('only MVP channels are enabled by default', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
-    const enabledFlags: string[] = [];
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'object' && value !== null && Object.hasOwn(value, 'enabled')) {
-        const flag = value as Record<string, unknown>;
-        if (flag.enabled === true) enabledFlags.push(key);
-      }
-    }
-    expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'prompt']);
-  });
-
-  it('core flags are always enabled regardless of channels parameter', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    for (const ch of MVP_CHANNELS) {
-      const flag = parsed[ch] as Record<string, unknown> | undefined;
-      expect(flag).toBeDefined();
-      expect(flag?.enabled).toBe(true);
-      expect(flag?.category).toBe('core');
-    }
-  });
-
-  it('core flags are always enabled even with empty channels', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent([])) as Record<string, unknown>;
-    for (const ch of MVP_CHANNELS) {
-      const flag = parsed[ch] as Record<string, unknown> | undefined;
-      expect(flag?.enabled).toBe(true);
-    }
-  });
-
-  it('preserves category and since metadata for core flags', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
-    expect(codeToolFlag.enabled).toBe(true);
-    expect(codeToolFlag.category).toBe('core');
-    expect(typeof codeToolFlag.since).toBe('string');
-  });
-
-  it('written to temp workspace is loadable', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-yaml-test-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), generateFeatureFlagsYamlContent(), 'utf8');
-      const raw = fs.readFileSync(path.join(configDir, 'feature-flags.yaml'), 'utf8');
-      const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
-      expect(Object.hasOwn(parsed, 'prompt')).toBe(true);
-      expect(Object.hasOwn(parsed, 'code_tool_hook')).toBe(true);
-      expect(Object.hasOwn(parsed, 'defer_archive')).toBe(true);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
   });
 });
 
@@ -344,19 +243,6 @@ describe('buildFailureOutput', () => {
   });
 });
 
-describe('getFeatureFlagsPath', () => {
-  it('returns .pd/feature-flags.yaml under workspace', () => {
-    const result = getFeatureFlagsPath('/tmp/ws');
-    expect(result.endsWith(path.join('.pd', 'feature-flags.yaml'))).toBe(true);
-  });
-
-  it('does not hardcode user-specific paths', () => {
-    const result = getFeatureFlagsPath('/tmp/test-workspace');
-    expect(result).not.toContain('Administrator');
-    expect(result).not.toContain('D:\\');
-  });
-});
-
 describe('isMvpChannel', () => {
   it('returns true for MVP channels', () => {
     expect(isMvpChannel('prompt')).toBe(true);
@@ -395,74 +281,6 @@ describe('Path helpers', () => {
 
   it('isWindows returns boolean', () => {
     expect(typeof isWindows()).toBe('boolean');
-  });
-});
-
-describe('Rerun --channels updates feature-flags.yaml', () => {
-  it('fresh install with all channels enables all', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const configPath = path.join(configDir, 'feature-flags.yaml');
-
-      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt', 'code_tool_hook', 'defer_archive']), 'utf8');
-      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
-      expect(typeof parsed).toBe('object');
-      expect(parsed).not.toBeNull();
-      const flags = parsed as Record<string, unknown>;
-      for (const ch of MVP_CHANNELS) {
-        const flag = flags[ch] as Record<string, unknown>;
-        expect(flag.enabled).toBe(true);
-      }
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('rerun with --channels prompt still enables all core channels', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const configPath = path.join(configDir, 'feature-flags.yaml');
-
-      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt', 'code_tool_hook', 'defer_archive']), 'utf8');
-
-      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt']), 'utf8');
-
-      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
-      expect(typeof parsed).toBe('object');
-      expect(parsed).not.toBeNull();
-      const flags = parsed as Record<string, unknown>;
-      for (const ch of MVP_CHANNELS) {
-        const flag = flags[ch] as Record<string, unknown>;
-        expect(flag.enabled).toBe(true);
-      }
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('rerun preserves category and since metadata for core channels', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const configPath = path.join(configDir, 'feature-flags.yaml');
-
-      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt']), 'utf8');
-      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
-      expect(typeof parsed).toBe('object');
-      expect(parsed).not.toBeNull();
-      const flags = parsed as Record<string, unknown>;
-      const codeToolFlag = flags['code_tool_hook'] as Record<string, unknown>;
-      expect(codeToolFlag.enabled).toBe(true);
-      expect(codeToolFlag.category).toBe('core');
-      expect(typeof codeToolFlag.since).toBe('string');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
   });
 });
 
@@ -749,36 +567,6 @@ describe('Core channels are never partially disabled (P1 fix)', () => {
     const result = parseChannelsOption(null);
     expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
   });
-
-  it('generateFeatureFlagsYamlContent with subset channels still enables all core', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    const promptFlag = parsed['prompt'] as Record<string, unknown>;
-    expect(promptFlag.enabled).toBe(true);
-    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
-    expect(codeToolFlag.enabled).toBe(true);
-    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
-    expect(deferFlag.enabled).toBe(true);
-  });
-
-  it('YAML output matches runtime behavior — no core flag can be disabled', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    const coreFlags = Object.entries(parsed).filter(([, v]) => {
-      if (typeof v !== 'object' || v === null) return false;
-      const flag = v as Record<string, unknown>;
-      return flag.category === 'core';
-    });
-    for (const [, v] of coreFlags) {
-      const flag = v as Record<string, unknown>;
-      expect(flag.enabled).toBe(true);
-    }
-  });
-
-  it('quiet flag remains disabled when not in channels', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    const gfiFlag = parsed['gfi'] as Record<string, unknown>;
-    expect(gfiFlag.enabled).toBe(false);
-    expect(gfiFlag.category).toBe('quiet');
-  });
 });
 
 describe('openclaw.json null vs undefined (P2 fix)', () => {
@@ -858,14 +646,16 @@ describe('Installer has no @principles/core runtime dependency (P1 fix)', () => 
     expect(content).not.toContain('@principles/core');
   });
 
-  it('inlined DEFAULT_FEATURE_FLAGS matches core definition', () => {
+  it('generateConfigYamlContent inlines core flag definitions matching core schema', () => {
     const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
     const content = fs.readFileSync(mvpConfigPath, 'utf-8');
-    expect(content).toContain("'prompt', category: 'core'");
-    expect(content).toContain("'code_tool_hook', category: 'core'");
-    expect(content).toContain("'defer_archive', category: 'core'");
-    expect(content).toContain("'gfi', category: 'quiet'");
-    expect(content).toContain("'nocturnal', category: 'gone'");
+    // PRI-460: DEFAULT_FEATURE_FLAGS array was removed; the canonical source is
+    // generateConfigYamlContent, which must still inline the core/quiet/gone categories.
+    expect(content).toContain("prompt:             { category: 'core',  enabled: true }");
+    expect(content).toContain("code_tool_hook:     { category: 'core',  enabled: true }");
+    expect(content).toContain("defer_archive:      { category: 'core',  enabled: true }");
+    expect(content).toContain("gfi:                { category: 'quiet', enabled: false }");
+    expect(content).toContain("nocturnal:          { category: 'gone',  enabled: false }");
   });
 });
 
@@ -983,106 +773,6 @@ describe('Bundle integration test (requires sibling build)', () => {
   });
 });
 
-describe('readEnabledChannelsFromDisk fail loud (Fix C)', () => {
-  it('returns empty array when file does not exist (first install)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const result = readEnabledChannelsFromDisk(tmpDir);
-      expect(result).toEqual([]);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on malformed YAML content', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '{{invalid yaml: [}', 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on invalid object shape (root is string)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '"just a string"', 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on invalid object shape (root is array)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '- item1\n- item2', 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns channels for valid YAML', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), generateFeatureFlagsYamlContent(), 'utf8');
-      const result = readEnabledChannelsFromDisk(tmpDir);
-      expect(result).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on MVP channel with invalid entry (string instead of object)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: 'not-an-object', code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid entry/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on MVP channel with null entry', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: null, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid entry/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on MVP channel missing enabled field', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: { category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' is missing required 'enabled' field/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('verified_local_only nextAction quoting (P2 fix)', () => {
   const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
 
@@ -1158,47 +848,6 @@ describe('Structured failure reason reflects actual failure (P2 fix)', () => {
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
     expect(result.reason).toContain('cli_skipped');
-  });
-});
-
-describe('enabled field must be boolean (P1-3 fix)', () => {
-  it('throws on enabled: "true" (string instead of boolean)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: { enabled: 'true', category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got string/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on enabled: 1 (number instead of boolean)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: { enabled: 1, category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got number/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on enabled: null', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
-    try {
-      const configDir = path.join(tmpDir, '.pd');
-      fs.mkdirSync(configDir, { recursive: true });
-      const badYaml = yaml.dump({ prompt: { enabled: null, category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
-      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
-      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got null/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
   });
 });
 
