@@ -47,7 +47,6 @@
     "lint": "eslint \"src/**/*.ts\"",
     "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
     "compile-principles": "node scripts/compile-principles.mjs",
-    "validate-live-path": "tsx scripts/validate-live-path.ts",
     "sync-plugin": "node scripts/sync-plugin.mjs"
   },
   "devDependencies": {

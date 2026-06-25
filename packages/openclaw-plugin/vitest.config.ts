@@ -31,8 +31,6 @@ export const integrationTests = [
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies
   'tests/hooks/gate-rule-host-pipeline.test.ts',
-  // Script tests with DB
-  'tests/scripts/validate-live-path.test.ts',
   // Integration test directory
   'tests/integration/**/*.test.ts',
   'tests/integration/**/*.test.tsx',
