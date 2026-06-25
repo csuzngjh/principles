@@ -4,6 +4,21 @@ import eslint from '@eslint/js';
 import tsparser from '@typescript-eslint/parser';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import globals from 'globals';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// ── PRI-462: Load the I/O seam registry (single source of truth) ─────────────
+// The registry lives at packages/principles-core/io-seam-registry.json and is
+// also consumed by architecture-regression.test.ts. Both guards derive from it
+// so there is no hand-maintained shadow list that can drift.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ioSeamRegistry = JSON.parse(
+  readFileSync(join(__dirname, 'packages/principles-core/io-seam-registry.json'), 'utf-8'),
+);
+const coreIoExemptFiles = ioSeamRegistry.seams
+  .flatMap((s) => s.files)
+  .map((f) => `packages/principles-core/src/${f}`);
 
 export default defineConfig(
   // Global ignores (first config object with only ignores)
@@ -144,34 +159,21 @@ export default defineConfig(
             'path', 'path/*',
             'node:path', 'node:path/*',
           ],
-          message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 architecture-regression.test.ts 的白名单。',
+          message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 packages/principles-core/io-seam-registry.json。',
         }],
       }],
     },
   },
 
-  // PRI-450: Exempt whitelisted I/O files and test files from the fs/path ban.
-  // The whitelist mirrors ALLOWED_IO_FILES in architecture-regression.test.ts.
+  // PRI-450 / PRI-462: Exempt whitelisted I/O files and test files from the fs/path ban.
+  // The file list is DERIVED from io-seam-registry.json (single source of truth).
+  // To add a new I/O file, update the registry — both this exemption and the
+  // architecture-regression test update automatically.
   {
     files: [
       'packages/principles-core/src/**/*.test.ts',
       'packages/principles-core/src/**/*.spec.ts',
-      'packages/principles-core/src/principle-tree-ledger.ts',
-      'packages/principles-core/src/evolution-store.ts',
-      'packages/principles-core/src/trajectory-store.ts',
-      'packages/principles-core/src/workflow-funnel-loader.ts',
-      'packages/principles-core/src/runtime-v2/store/sqlite-connection.ts',
-      'packages/principles-core/src/runtime-v2/store/runtime-state-manager.ts',
-      'packages/principles-core/src/runtime-v2/adapter/openclaw-cli-runtime-adapter.ts',
-      'packages/principles-core/src/runtime-v2/candidate-audit.ts',
-      'packages/principles-core/src/runtime-v2/pain-signal-observability.ts',
-      'packages/principles-core/src/runtime-v2/internalization-chain-integrity-read-model.ts',
-      'packages/principles-core/src/runtime-v2/internalization-integrity-remediation.ts',
-      'packages/principles-core/src/runtime-v2/operator-health-read-model.ts',
-      'packages/principles-core/src/runtime-v2/pain-chain-read-model.ts',
-      'packages/principles-core/src/runtime-v2/pruning-read-model.ts',
-      'packages/principles-core/src/runtime-v2/pruning-review-log.ts',
-      'packages/principles-core/src/runtime-v2/schema-conformance-read-model.ts',
+      ...coreIoExemptFiles,
     ],
     rules: {
       'no-restricted-imports': 'off',

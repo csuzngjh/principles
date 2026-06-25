@@ -3663,34 +3663,58 @@ describe('PRI-443: pure module boundary guards', () => {
   });
 });
 
-// ── PRI-450: Core I/O whitelist guard ──────────────────────────────────────────
+// ── PRI-450 / PRI-462: Core I/O seam registry guard ───────────────────────────
 //
-// Scans all production (.ts, non-test) files under packages/principles-core/src/
-// for fs/path imports and verifies they match an explicit whitelist. Any new file
-// that needs I/O must be added to ALLOWED_IO_FILES here — otherwise CI fails.
-// This forces developers to explain "why does this file need I/O?" in their PR.
+// The single source of truth for core I/O files is
+// `packages/principles-core/io-seam-registry.json` (PRI-462). It groups every
+// whitelisted file into a named seam with a description explaining WHY the I/O
+// is allowed. Both this test and `eslint.config.js` derive their exemption
+// lists from that registry — there is no second hand-maintained list.
+//
+// To add a new I/O file: add it to the appropriate seam in the registry JSON.
+// Both the architecture-regression test and the ESLint exemption update
+// automatically. This forces developers to explain "which seam does this
+// belong to and why?" in their PR.
 
-describe('PRI-450: core I/O whitelist guard', () => {
-  // Whitelist of production files allowed to import fs/path.
-  // Paths are relative to packages/principles-core/src/.
-  const ALLOWED_IO_FILES: ReadonlySet<string> = new Set([
-    'principle-tree-ledger.ts',
-    'evolution-store.ts',
-    'trajectory-store.ts',
-    'workflow-funnel-loader.ts',
-    'runtime-v2/store/sqlite-connection.ts',
-    'runtime-v2/store/runtime-state-manager.ts',
-    'runtime-v2/adapter/openclaw-cli-runtime-adapter.ts',
-    'runtime-v2/candidate-audit.ts',
-    'runtime-v2/pain-signal-observability.ts',
-    'runtime-v2/internalization-chain-integrity-read-model.ts',
-    'runtime-v2/internalization-integrity-remediation.ts',
-    'runtime-v2/operator-health-read-model.ts',
-    'runtime-v2/pain-chain-read-model.ts',
-    'runtime-v2/pruning-read-model.ts',
-    'runtime-v2/pruning-review-log.ts',
-    'runtime-v2/schema-conformance-read-model.ts',
-  ]);
+interface IoSeam {
+  name: string;
+  description: string;
+  files: string[];
+}
+
+interface IoSeamRegistry {
+  seams: IoSeam[];
+}
+
+describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
+  // Registry lives at packages/principles-core/io-seam-registry.json
+  // (3 levels up from __tests__: __tests__ → runtime-v2 → src → principles-core)
+  const registryPath = pathSync.resolve(__dirname, '..', '..', '..', 'io-seam-registry.json');
+  const registryRaw = fsSync.readFileSync(registryPath, 'utf-8');
+  const registry: unknown = JSON.parse(registryRaw);
+
+  // Runtime-validate the registry shape (Runtime Contract Rule 1+2: treat
+  // parsed JSON as unknown, validate with typeof/Array.isArray before access).
+  // `as` is used only for type narrowing AFTER runtime checks, not to bypass them.
+  function isValidRegistry(v: unknown): v is IoSeamRegistry {
+    if (typeof v !== 'object' || v === null || !Object.hasOwn(v, 'seams')) return false;
+    const { seams } = v as { seams: unknown };
+    if (!Array.isArray(seams)) return false;
+    return seams.every((s) =>
+      typeof s === 'object' && s !== null &&
+      typeof (s as Record<string, unknown>).name === 'string' &&
+      typeof (s as Record<string, unknown>).description === 'string' &&
+      Array.isArray((s as Record<string, unknown>).files) &&
+      (s as { files: unknown[] }).files.every((f) => typeof f === 'string')
+    );
+  }
+
+  // Flatten all registry files into a Set (relative to packages/principles-core/src/).
+  const ALLOWED_IO_FILES: ReadonlySet<string> = new Set(
+    isValidRegistry(registry)
+      ? registry.seams.flatMap((s) => s.files)
+      : []
+  );
 
   // Extract all import module paths from source code.
   // Handles: import ... from 'mod', import 'mod' (side-effect), and multiline imports.
@@ -3734,7 +3758,55 @@ describe('PRI-450: core I/O whitelist guard', () => {
     }
   }
 
-  it('core/src/ production files: only whitelisted files import fs/path', () => {
+  // ── Registry validity (PRI-462) ───────────────────────────────────────────
+
+  it('io-seam-registry.json is valid: seams array with name/description/files', () => {
+    expect(isValidRegistry(registry)).toBe(true);
+    if (!isValidRegistry(registry)) return; // type narrowing
+    expect(registry.seams.length).toBeGreaterThan(0);
+    for (const seam of registry.seams) {
+      expect(seam.name.length).toBeGreaterThan(0);
+      expect(seam.description.length).toBeGreaterThan(0);
+      expect(seam.files.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('registry has no duplicate files across seams', () => {
+    if (!isValidRegistry(registry)) {
+      // isValidRegistry test above will fail with details; skip here.
+      expect(isValidRegistry(registry)).toBe(true);
+      return;
+    }
+    const seen = new Set<string>();
+    const dupes: string[] = [];
+    for (const seam of registry.seams) {
+      for (const f of seam.files) {
+        if (seen.has(f)) dupes.push(f);
+        seen.add(f);
+      }
+    }
+    expect(dupes).toEqual([]);
+  });
+
+  it('every seam description explains why the I/O is allowed (non-trivial)', () => {
+    if (!isValidRegistry(registry)) {
+      expect(isValidRegistry(registry)).toBe(true);
+      return;
+    }
+    const weak: string[] = [];
+    for (const seam of registry.seams) {
+      // Description must be at least 20 chars — a single word like "legacy" is
+      // not an explanation. This forces maintainers to write a real rationale.
+      if (seam.description.trim().length < 20) {
+        weak.push(`${seam.name}: "${seam.description}"`);
+      }
+    }
+    expect(weak).toEqual([]);
+  });
+
+  // ── Registry ↔ production files (PRI-450, EP-02) ──────────────────────────
+
+  it('core/src/ production files: only registry-listed files import fs/path', () => {
     const coreSrcDir = pathSync.resolve(__dirname, '..', '..');
     const allFiles: string[] = [];
     collectTsFiles(coreSrcDir, allFiles);
@@ -3750,10 +3822,16 @@ describe('PRI-450: core I/O whitelist guard', () => {
       }
     }
 
-    expect(violations).toEqual([]);
+    if (violations.length > 0) {
+      throw new Error(
+        `Found ${violations.length} file(s) importing fs/path that are NOT in io-seam-registry.json.\n` +
+        `Add them to the appropriate seam in packages/principles-core/io-seam-registry.json.\n` +
+        `Violations:\n  ` + violations.join('\n  ')
+      );
+    }
   });
 
-  it('ALLOWED_IO_FILES whitelist entries all exist on disk', () => {
+  it('registry-listed files all exist on disk', () => {
     const coreSrcDir = pathSync.resolve(__dirname, '..', '..');
     const missing: string[] = [];
     for (const relPath of ALLOWED_IO_FILES) {
@@ -3764,6 +3842,22 @@ describe('PRI-450: core I/O whitelist guard', () => {
     }
     expect(missing).toEqual([]);
   });
+
+  // ── Registry ↔ ESLint exemption (PRI-462, EP-06 single source of truth) ───
+  //
+  // ESLint's no-restricted-imports exemption list must be DERIVED from the
+  // registry, not hand-maintained. This test verifies eslint.config.js
+  // references the registry file, proving the two stay in sync.
+
+  it('eslint.config.js derives fs/path exemption from the registry (no shadow list)', () => {
+    const eslintPath = pathSync.resolve(__dirname, '..', '..', '..', '..', '..', 'eslint.config.js');
+    const eslintSrc = fsSync.readFileSync(eslintPath, 'utf-8');
+    // The eslint config must read the registry JSON — if this reference is
+    // removed, someone has reintroduced a hand-maintained shadow list.
+    expect(eslintSrc).toContain('io-seam-registry.json');
+  });
+
+  // ── Helper unit tests ─────────────────────────────────────────────────────
 
   it('importsFsOrPath detects sub-path imports (fs/promises) and side-effect imports', () => {
     // Sub-path import
