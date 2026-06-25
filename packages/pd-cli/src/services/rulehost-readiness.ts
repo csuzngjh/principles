@@ -216,7 +216,15 @@ export function resolveRuleHostReadiness(
   const { effective } = configLoadResult;
 
   // ── Step 2: Check required agents (dreamer, philosopher, scribe) ──
-  const agentStatuses: Record<string, AgentReadiness> = {};
+  // Build agentStatuses with all 5 keys from the start to avoid `as` casts.
+  const unchecked: AgentReadiness = { status: 'not_ready', reason: 'not checked' };
+  const agentStatuses: RuleHostReadinessResult['agentStatuses'] = {
+    dreamer: unchecked,
+    philosopher: unchecked,
+    scribe: unchecked,
+    artificer: unchecked,
+    evaluator: unchecked,
+  };
   const requiredFailures: string[] = [];
 
   for (const agentName of REQUIRED_AGENTS) {
@@ -231,7 +239,7 @@ export function resolveRuleHostReadiness(
     const reason = `required_agents_not_ready: ${requiredFailures.join('; ')}`;
     const nextAction = `Fix the following agent issues in .pd/config.yaml: ${requiredFailures.join('; ')}. RuleHost requires dreamer, philosopher, and scribe agents to be enabled with pi-ai runtime profiles and valid API keys.`;
     return buildRefusedResult(reason, nextAction, {
-      agentStatuses: agentStatuses as RuleHostReadinessResult['agentStatuses'],
+      agentStatuses,
       codeRuleCapability: { enabled: false, disabledReason: 'required_agents_not_ready' },
     });
   }
@@ -246,7 +254,7 @@ export function resolveRuleHostReadiness(
       agentStatuses[agentName] = checkAgentReadiness(effective, agentName, getEnvVar);
     }
     return buildTextPrincipleOnlyResult(reason, nextAction, {
-      agentStatuses: agentStatuses as RuleHostReadinessResult['agentStatuses'],
+      agentStatuses,
       codeRuleCapability: { enabled: false, disabledReason: reason },
     });
   }
@@ -266,7 +274,7 @@ export function resolveRuleHostReadiness(
     const reason = `code_rule_agents_not_ready: ${codeRuleFailures.join('; ')}`;
     const nextAction = `Fix the following agent issues to enable code-rule capability: ${codeRuleFailures.join('; ')}. Text-principle-only mode is available with the current configuration.`;
     return buildTextPrincipleOnlyResult(reason, nextAction, {
-      agentStatuses: agentStatuses as RuleHostReadinessResult['agentStatuses'],
+      agentStatuses,
       codeRuleCapability: { enabled: false, disabledReason: reason },
     });
   }
@@ -276,7 +284,7 @@ export function resolveRuleHostReadiness(
     status: 'ready',
     reason: 'All agents ready with pi-ai profiles and valid API keys. Code-rule capability is ON.',
     nextAction: 'Pass --confirm to run the full pipeline.',
-    agentStatuses: agentStatuses as RuleHostReadinessResult['agentStatuses'],
+    agentStatuses,
     codeRuleCapability: { enabled: true },
   };
 }
