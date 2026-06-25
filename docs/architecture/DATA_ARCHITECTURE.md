@@ -813,7 +813,7 @@ flowchart TD
 |------|-----|
 | Store modularization | `@principles/core/store/` 重组（PRI-47）|
 | Pruning Action 写入路径 | 独立 issue 推进 |
-| Cross-workspace 同步 | `central-sync-service` 已有基础 |
+| Cross-workspace 同步 | 暂无基础（PRI-455 已删除 central-sync，post-MVP 重启条件见 post-mvp-conditional-roadmap.md） |
 
 ---
 

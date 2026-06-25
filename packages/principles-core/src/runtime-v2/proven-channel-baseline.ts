@@ -138,7 +138,7 @@ function makeSandboxAlwaysPass(): RefinerRuleHostGateDeps {
   };
 }
 
-const LEGACY_KEYWORDS = ['nocturnal', 'idle_trigger', 'plugin_discovery'];
+const LEGACY_KEYWORDS = ['idle_trigger', 'plugin_discovery'];
 
 function hasLegacyKeyword(text: string): boolean {
   const lower = text.toLowerCase();
