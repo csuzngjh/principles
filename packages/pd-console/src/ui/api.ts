@@ -28,6 +28,7 @@ import {
   validateApprovalsGrouped,
   validateEvidenceChain,
   validateTrajectoryData,
+  validateIntentSummary,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -55,6 +56,7 @@ import type {
   ApprovalsGroupedData,
   EvidenceChainData,
   TrajectoryData,
+  IntentSummaryData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -394,6 +396,12 @@ async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
   return request<EvidenceChainData>('/api/v1/evidence-chain', undefined, validateEvidenceChain);
 }
 
+
+// ── Intent Summary (PRI-466) ─────────────────────────────────────────────────
+
+async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
+  return request<IntentSummaryData>('/api/v1/intent', undefined, validateIntentSummary);
+}
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -433,6 +441,7 @@ export {
   applyUpdate,
   rollbackUpdate,
   fetchEvidenceChain,
+  fetchIntentSummary,
 };
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
@@ -468,6 +477,9 @@ export type {
   EvidenceChainStateData,
   TrajectoryData,
   TrajectoryStageData,
+  IntentSummaryData,
+  IntentSectionsData,
+  IntentDocWarningData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

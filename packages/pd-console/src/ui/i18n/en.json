@@ -640,6 +640,48 @@
       "filesUpdated": "Updated {{count}} files",
       "networkErrorHint": "Please check your network connection and try again.",
       "retry": "Retry"
+    },
+    "intent": {
+      "eyebrow": "Owner Intent",
+      "title": "Owner Intent Document",
+      "subtitle": "A single-page anchor for what the owner wants, what must not be violated, and where to escalate. Read by PD only when the intent_engineering flag is on.",
+      "flagDisabled": {
+        "title": "Intent Engineering is off",
+        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state.",
+        "nextAction": "To enable, set features.intent_engineering.enabled=true in .pd/config.yaml and restart pd-console."
+      },
+      "notFound": {
+        "title": "No INTENT.md found",
+        "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
+        "nextAction": "Create .principles/INTENT.md using the template below."
+      },
+      "oversized": {
+        "title": "INTENT.md exceeds 32KB",
+        "description": "The file is larger than the 32KB cap. PD refuses to read oversized files to keep intent parsing deterministic and bounded.",
+        "nextAction": "Trim INTENT.md to under 32KB. Move long-form strategy to a separate doc."
+      },
+      "sections": {
+        "why": "Why",
+        "desiredOutcome": "Desired Outcome",
+        "nonNegotiables": "Non-negotiables",
+        "stopEscalation": "Stop / Escalation",
+        "currentStrategicFocus": "Current Strategic Focus"
+      },
+      "warnings": {
+        "title": "Health Warnings",
+        "empty": "No warnings. INTENT.md is well-formed.",
+        "missing_section": "Missing section",
+        "empty_section": "Empty section",
+        "too_vague": "Section too vague (under 10 characters)"
+      },
+      "meta": {
+        "lastEditedAt": "Last edited",
+        "contentHash": "Content hash",
+        "templateTitle": "INTENT.md Template",
+        "templateDescription": "Copy this into .principles/INTENT.md. Replace placeholders with your intent."
+      },
+      "loadError": "Failed to load intent document",
+      "validationError": "Data format validation failed, please refresh and retry"
     }
   },
   "components": {
@@ -699,7 +741,8 @@
       "settings": "Settings",
       "update": "Updates",
       "pendingApprovalsAria": "{{count}} pending approvals",
-      "degradedSignalsAria": "{{count}} degraded signals"
+      "degradedSignalsAria": "{{count}} degraded signals",
+      "intent": "Owner Intent"
     },
     "approvalCard": {
       "confidence": {
