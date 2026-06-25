@@ -440,7 +440,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
   describe('classifyLegacyDependency', () => {
     it('returns true for canActivateResult with legacy reason', () => {
       const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
-      const canActivateResult = { ok: false, reason: 'nocturnal_dependency_detected', riskLevel: 'high' as const };
+      const canActivateResult = { ok: false, reason: 'idle_trigger_dependency_detected', riskLevel: 'high' as const };
       expect(classifyLegacyDependency(decision, canActivateResult)).toBe(true);
     });
 

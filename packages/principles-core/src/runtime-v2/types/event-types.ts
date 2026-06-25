@@ -24,10 +24,6 @@ export type EventType =
   | 'diagnostician_report' // Diagnostician completed and wrote report
   | 'principle_candidate'  // Principle candidate created from report
   | 'rule_enforced'       // Rule enforced (matched) during tool call
-      // C: Nocturnal funnel stage events (PD-FUNNEL-2.3)
-      | 'nocturnal_dreamer_completed'
-      | 'nocturnal_artifact_persisted'
-      | 'nocturnal_code_candidate_created'
       // C: RuleHost funnel events (PD-FUNNEL-2.4)
       | 'rulehost_evaluated'
       | 'rulehost_blocked'
@@ -56,9 +52,6 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('diagnostician_report'),
   Type.Literal('principle_candidate'),
   Type.Literal('rule_enforced'),
-  Type.Literal('nocturnal_dreamer_completed'),
-  Type.Literal('nocturnal_artifact_persisted'),
-  Type.Literal('nocturnal_code_candidate_created'),
   Type.Literal('rulehost_evaluated'),
   Type.Literal('rulehost_blocked'),
   Type.Literal('rulehost_requireApproval'),
@@ -415,7 +408,7 @@ export type DiagnosticianReportEventDataStatic = Static<typeof DiagnosticianRepo
 export interface PrincipleCandidateEventData {
   principleId: string;
   taskId: string;
-  source: 'diagnostician' | 'nocturnal' | 'manual';
+  source: 'diagnostician' | 'manual';
 }
 
 export const PrincipleCandidateEventDataSchema = Type.Object({
@@ -423,7 +416,6 @@ export const PrincipleCandidateEventDataSchema = Type.Object({
   taskId: Type.String(),
   source: Type.Union([
     Type.Literal('diagnostician'),
-    Type.Literal('nocturnal'),
     Type.Literal('manual'),
   ]),
 });
@@ -810,10 +802,6 @@ export interface EventEvolutionStats {
   reportsIncompleteFields: number;
   principleCandidatesCreated: number;
   rulesEnforced: number;
-  nocturnalDreamerCompleted: number;
-  nocturnalTrinityCompleted: number;
-  nocturnalArtifactPersisted: number;
-  nocturnalCodeCandidateCreated: number;
   rulehostEvaluated: number;
   rulehostBlocked: number;
   rulehostRequireApproval: number;
@@ -836,10 +824,6 @@ export const EventEvolutionStatsSchema = Type.Object({
   reportsIncompleteFields: Type.Number(),
   principleCandidatesCreated: Type.Number(),
   rulesEnforced: Type.Number(),
-  nocturnalDreamerCompleted: Type.Number(),
-  nocturnalTrinityCompleted: Type.Number(),
-  nocturnalArtifactPersisted: Type.Number(),
-  nocturnalCodeCandidateCreated: Type.Number(),
   rulehostEvaluated: Type.Number(),
   rulehostBlocked: Type.Number(),
   rulehostRequireApproval: Type.Number(),
@@ -1002,10 +986,6 @@ export function createEmptyDailyStats(date: string): DailyStats {
       reportsIncompleteFields: 0,
       principleCandidatesCreated: 0,
       rulesEnforced: 0,
-      nocturnalDreamerCompleted: 0,
-      nocturnalTrinityCompleted: 0,
-      nocturnalArtifactPersisted: 0,
-      nocturnalCodeCandidateCreated: 0,
       rulehostEvaluated: 0,
       rulehostBlocked: 0,
       rulehostRequireApproval: 0,

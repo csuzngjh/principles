@@ -24,11 +24,11 @@ import type { RuntimeKind } from './runtime-v2/runtime-protocol.js';
 export interface WorkflowStage {
   /** Stage name within the funnel (e.g., 'dreamer_completed') */
   name: string;
-  /** Event type string (e.g., 'nocturnal_dreamer_completed') */
+  /** Event type string (e.g., 'rulehost_evaluated') */
   eventType: string;
   /** Event category (e.g., 'completed', 'created', 'blocked') */
   eventCategory: string;
-  /** Dot-path to stats field (e.g., 'evolution.nocturnalDreamerCompleted') */
+  /** Dot-path to stats field (e.g., 'evolution.rulehostEvaluated') */
   statsField: string;
   /** Optional per-stage timeout in milliseconds (overrides funnel-level timeout) */
   timeoutMs?: number;
