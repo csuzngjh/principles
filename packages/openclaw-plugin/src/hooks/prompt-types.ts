@@ -61,6 +61,14 @@ export interface EvolutionPrincipleEntry extends CorePrincipleEntry {
 export interface AppendSystemContextParts {
   behavioralConstraints?: string;
   projectContext?: string;
+  /**
+   * PRI-467: Intent Engineering friction block. Bounded + escaped INTENT.md
+   * reference. Positioned after projectContext (stable reference data, lower
+   * priority than principles) and before workingMemory (volatile per-session
+   * state). Only populated when intent_engineering flag is on and INTENT.md
+   * is valid.
+   */
+  intentBlock?: string;
   workingMemory?: string;
   thinkingOs?: string;
   evolutionPrinciples?: string;

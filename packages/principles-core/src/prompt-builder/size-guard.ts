@@ -8,6 +8,7 @@
  *
  * Priority stripping order (diagnosticianMode):
  *   1. project_context (always stripped first when over limit)
+ *   1.5. intent_block (PRI-467: always stripped, sits between project_context and thinking_os)
  *   2. thinking_os (only in diag mode)
  *   3. evolution_principles (only in diag mode)
  *   4. reflection_log (only in diag mode)
@@ -74,6 +75,27 @@ export function truncateInjectionToBudget(
   }
 
   // Exit early if within budget
+  if (totalSize <= budget) {
+    return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
+  }
+
+  // Step 1.5 — strip intent_block (PRI-467: always stripped, not gated on diag mode)
+  // INTENT block is injected in the regular prompt hook path, so it must be
+  // strippable without diagnosticianMode. The block spans <intent_anchor>…
+  // </intent_friction> (three sub-tags). Exact-match replacement when content is
+  // provided; regex fallback from <intent_anchor> to </intent_friction>.
+  if (blocks?.intentBlockContent && ac.includes('<intent_anchor>')) {
+    if (ac.includes(blocks.intentBlockContent)) {
+      ac = ac.replace(blocks.intentBlockContent, '[stripped: intent_block]');
+      truncationLog.push('intent_block');
+      totalSize = ps.length + pc.length + ac.length;
+    }
+  } else if (ac.includes('<intent_anchor>')) {
+    ac = ac.replace(/<intent_anchor>[\s\S]*?<\/intent_friction>/, '[stripped: intent_block]');
+    truncationLog.push('intent_block');
+    totalSize = ps.length + pc.length + ac.length;
+  }
+
   if (totalSize <= budget) {
     return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
   }
