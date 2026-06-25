@@ -66,9 +66,9 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 - **Use when**: adding redaction, command blocking, path handling, shell execution, or security validators.
 - **Failure mode**: a security control is placed at the wrong layer, matches the wrong scope, or is bypassed by interpolation/substrings.
-- **Must check**: enforcement input is not prematurely redacted; persistence output is redacted; shell arguments are passed as argv; path checks use segment boundaries.
-- **Representative ERRs**: ERR-003, ERR-024, ERR-030, ERR-045, ERR-051, ERR-055, ERR-056, ERR-058.
-- **Automation target**: tests for composite sensitive keys, value-based redaction, raw enforcement input, and sibling path false positives.
+- **Must check**: enforcement input is not prematurely redacted; persistence output is redacted; shell arguments are passed as argv; path checks use segment boundaries; **size bounds on content that undergoes a length-increasing transformation (XML/HTML escaping, URL encoding, base64) are applied to the POST-transformation output, not the pre-transformation input (ERR-080: bounding raw content then escaping it lets entity expansion `&`→`&amp;` 5x blow the budget)**.
+- **Representative ERRs**: ERR-003, ERR-024, ERR-030, ERR-045, ERR-051, ERR-055, ERR-056, ERR-058, ERR-080.
+- **Automation target**: tests for composite sensitive keys, value-based redaction, raw enforcement input, and sibling path false positives; regression test with expandable chars (`&`.repeat(N)) for any escape-then-bound pipeline.
 
 ### EP-09 Test Reality Gap
 
