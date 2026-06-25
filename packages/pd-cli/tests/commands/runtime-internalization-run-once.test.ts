@@ -41,14 +41,22 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-// PRI-431: Mock feature-flag-loader so the shared resolver's L2 dreamer sub-branch
-// doesn't call the real loadEffectiveFeatureFlags (which needs computeEffectiveFlags
-// from @principles/core/runtime-v2 — not included in the mock above).
-vi.mock('../../src/services/feature-flag-loader.js', () => ({
-  loadEffectiveFeatureFlags: vi.fn().mockReturnValue({
-    flags: {},
+// PRI-460: Mock pd-config-loader so the shared resolver's L2 dreamer sub-branch
+// doesn't call the real loadPdConfig (which needs fs access).
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: vi.fn().mockReturnValue({
+    ok: true,
+    effective: {},
+    source: 'defaults',
+    configPath: '/fake/workspace/.pd/config.yaml',
     warnings: [],
-    configPath: '/fake/workspace/.pd/feature-flags.yaml',
+    legacyFilesDetected: [],
+    legacyFileNextActions: [],
+  }),
+  computeFlagsFromLoadResult: vi.fn().mockReturnValue({
+    flags: {},
+    enabledChannels: [],
+    warnings: [],
   }),
 }));
 

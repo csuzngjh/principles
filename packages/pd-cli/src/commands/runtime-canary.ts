@@ -2,7 +2,7 @@ import * as path from 'path';
 import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
 export interface CanaryCheck {
   name: string;
@@ -60,7 +60,7 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
       case 'gfi_snapshot': {
         const gfiDetails = check.details as { warnings?: string[]; configPath?: string } | undefined;
         if (gfiDetails && gfiDetails.warnings && gfiDetails.warnings.length > 0) {
-          actions.push(`Review .pd/feature-flags.yaml and rerun \`pd runtime features --workspace <path> --json\`.`);
+          actions.push(`Review .pd/config.yaml and rerun \`pd runtime features --workspace <path> --json\`.`);
         } else {
           actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
         }
@@ -100,6 +100,10 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
 export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutput> {
   const generatedAt = new Date().toISOString();
 
+  // Single canonical config load — shared across gfi_snapshot and internalization_queue checks (PRI-460).
+  const pdConfigResult = loadPdConfig(workspaceDir);
+  const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
+
   const checkPromises: Promise<CanaryCheck>[] = [
     (async (): Promise<CanaryCheck> => {
       try {
@@ -137,15 +141,14 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
-        const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
-        const gfiFlag = featureFlags.flags.gfi;
+        const gfiFlag = pdFlags.flags.gfi;
         if (!gfiFlag || !gfiFlag.enabled) {
-          if (featureFlags.warnings.length > 0) {
+          if (pdFlags.warnings.length > 0) {
             return {
               name: 'gfi_snapshot',
               status: 'degraded',
-              summary: `GFI disabled but config has warnings: ${featureFlags.warnings.join('; ')}`,
-              details: { warnings: featureFlags.warnings, configPath: featureFlags.configPath },
+              summary: `GFI disabled but config has warnings: ${pdFlags.warnings.join('; ')}`,
+              details: { warnings: pdFlags.warnings, configPath: pdConfigResult.configPath },
             };
           }
           return {
@@ -208,12 +211,7 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
-        const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
-        const enabledChannels = new Set(
-          Object.values(featureFlags.flags)
-            .filter(f => f.enabled)
-            .map(f => f.id),
-        );
+        const enabledChannels = new Set(pdFlags.enabledChannels);
         const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, readonly: true, enabledChannels });
         try {
           const snapshot: InternalizationQueueSnapshot = await readModel.getSnapshot();
