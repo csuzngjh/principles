@@ -37,7 +37,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
   const PLUGIN_IO_FILES = [
     // Thin adapter candidates
     'principle-internalization/principle-lifecycle-service.ts',
-    'principle-tree-ledger-adapter.ts',
+    // principle-tree-ledger-adapter.ts removed — orphan duplicate of the canonical
+    // @principles/core/runtime-v2 adapter (PRI-459 consolidation completed).
     'principle-compiler/ledger-registrar.ts',
     'principle-compiler/code-validator.ts',
     'pd-task-service.ts',
