@@ -476,10 +476,14 @@ describe('handleUpdateRoute', () => {
 
       // doCheckForUpdates catches the error and returns hasUpdate:false with error message
       expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; data: { hasUpdate: boolean; error: string } }>(res);
+      const body = parseResponseBody<{ success: boolean; data: { hasUpdate: boolean; latestVersion: string; error: string } }>(res);
       expect(body.success).toBe(true);
       expect(body.data.hasUpdate).toBe(false);
       expect(body.data.error).toContain('Network timeout');
+      // Regression guard: latestVersion must always be present as a string so
+      // the UI's validateUpdateStatus doesn't reject the response shape and
+      // crash the whole page on registry/network failures.
+      expect(typeof body.data.latestVersion).toBe('string');
     });
 
     it('POST /apply should return failure when fetch returns non-ok status', async () => {
