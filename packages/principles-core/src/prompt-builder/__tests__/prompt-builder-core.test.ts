@@ -345,4 +345,70 @@ describe('truncateInjectionToBudget', () => {
     expect(result.appendSystemContext).not.toContain('[stripped: thinking_os]');
     expect(result.truncationLog).toEqual(['project_context']);
   });
+
+  // ── PRI-467: intent_block stripping tests ────────────────────────────────
+
+  // Helper to create appendSystemContext with intent_block
+  const withIntentBlock = (content: string) =>
+    `<intent_anchor>\nanchor text\n</intent_anchor>\n<intent_doc>\n${content}\n</intent_doc>\n<intent_friction>\nfriction text\n</intent_friction>`;
+
+  it('PRI-467: strips intent_block (regex fallback) when over budget after project_context strip', () => {
+    const ps = '<system>id</system>';
+    const pc = 'dir';
+    // After stripping project_context (~35 chars remain), intent_block must
+    // push total over 9000. intent_block content: 9100 chars.
+    const ac = withProjectContext('x'.repeat(100)) + '\n' + withIntentBlock('y'.repeat(9100));
+    const result = truncateInjectionToBudget(ps, pc, ac);
+    expect(result.appendSystemContext).toContain('[stripped: intent_block]');
+    expect(result.appendSystemContext).not.toContain('<intent_anchor>');
+    expect(result.truncationLog).toContain('project_context');
+    expect(result.truncationLog).toContain('intent_block');
+  });
+
+  it('PRI-467: strips intent_block using exact content replacement when intentBlockContent provided', () => {
+    const ps = '<system>id</system>';
+    const pc = 'dir';
+    // Must exceed budget: 9000 - 17 - 3 = 8980. Use ~9200 chars of intent content.
+    const intentContent = 'exact-intent-content-here'.repeat(400); // ~9200 chars
+    const intentBlock = withIntentBlock(intentContent);
+    const ac = withProjectContext('x'.repeat(100)) + '\n' + intentBlock;
+    const result = truncateInjectionToBudget(ps, pc, ac, {
+      blocks: { intentBlockContent: intentBlock },
+    });
+    expect(result.appendSystemContext).toContain('[stripped: intent_block]');
+    expect(result.appendSystemContext).not.toContain('<intent_anchor>');
+    expect(result.truncationLog).toContain('intent_block');
+  });
+
+  it('PRI-467: does NOT strip intent_block when within budget', () => {
+    const ps = '<system>id</system>';
+    const pc = 'dir';
+    // Total well under 9000 — intent_block must be preserved
+    const ac = withIntentBlock('small intent content');
+    const result = truncateInjectionToBudget(ps, pc, ac);
+    expect(result.appendSystemContext).toContain('<intent_anchor>');
+    expect(result.appendSystemContext).toContain('<intent_doc>');
+    expect(result.truncated).toBe(false);
+    expect(result.truncationLog).toEqual([]);
+  });
+
+  it('PRI-467: intent_block is stripped BEFORE thinking_os (priority order)', () => {
+    const ps = '<system>id</system>';
+    const pc = 'dir';
+    // intent_block is large (9100 chars) to push total over 9000 after
+    // project_context strip. thinking_os is small (100 chars) so that after
+    // intent_block strip, total is under budget — proving intent_block strips
+    // first and thinking_os is preserved.
+    const ac =
+      withProjectContext('x'.repeat(100)) + '\n' +
+      withIntentBlock('y'.repeat(9100)) + '\n' +
+      withThinkingOs('z'.repeat(100));
+    const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
+    expect(result.truncationLog).toContain('project_context');
+    expect(result.truncationLog).toContain('intent_block');
+    // thinking_os should NOT be stripped because intent_block strip was sufficient
+    expect(result.truncationLog).not.toContain('thinking_os');
+    expect(result.appendSystemContext).not.toContain('<intent_anchor>');
+    expect(result.appendSystemContext).toContain('<thinking_os>');
+  });
 });

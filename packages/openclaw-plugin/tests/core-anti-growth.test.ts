@@ -107,6 +107,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'surface-guard.ts',
     'pd-config-loader.ts',
     'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
+    // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime
+    // cache, delegates parsing/validation/hashing to @principles/core. Never throws.
+    'intent-doc-reader.ts',
   ] as const;
 
   // Category 6: Test files
