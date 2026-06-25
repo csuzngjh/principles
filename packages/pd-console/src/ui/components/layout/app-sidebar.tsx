@@ -8,6 +8,7 @@ import {
   BookOpen,
   Zap,
   Archive,
+  Compass,
   Settings,
   MessageSquare,
   RefreshCw,
@@ -42,6 +43,7 @@ const mainNavItems = [
   { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen, shortcut: "Alt+5" },
   { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap, shortcut: "Alt+6" },
   { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive, shortcut: "Alt+7" },
+  { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass, shortcut: "" },
 ];
 
 const toolNavItems = [
