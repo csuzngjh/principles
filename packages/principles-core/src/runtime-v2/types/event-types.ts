@@ -8,7 +8,6 @@ import { Type, type Static } from '@sinclair/typebox';
 export type EventType =
   | 'tool_call'
   | 'pain_signal'
-  | 'rule_match'
   | 'rule_promotion'
   | 'hook_execution'
   | 'gate_block'
@@ -37,7 +36,6 @@ export type EventType =
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
   Type.Literal('pain_signal'),
-  Type.Literal('rule_match'),
   Type.Literal('rule_promotion'),
   Type.Literal('hook_execution'),
   Type.Literal('gate_block'),
@@ -211,21 +209,6 @@ export const PainSignalEventDataSchema = Type.Object({
   calibrated_score: Type.Optional(Type.Number()),
 });
 export type PainSignalEventDataStatic = Static<typeof PainSignalEventDataSchema>;
-
-export interface RuleMatchEventData {
-  ruleId: string;
-  layer: 'L1' | 'L2' | 'L3';
-  severity: number;
-  textPreview: string;
-}
-
-export const RuleMatchEventDataSchema = Type.Object({
-  ruleId: Type.String(),
-  layer: Type.Union([Type.Literal('L1'), Type.Literal('L2'), Type.Literal('L3')]),
-  severity: Type.Number(),
-  textPreview: Type.String(),
-});
-export type RuleMatchEventDataStatic = Static<typeof RuleMatchEventDataSchema>;
 
 export interface RulePromotionEventData {
   fingerprint: string;
