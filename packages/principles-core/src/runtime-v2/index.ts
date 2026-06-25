@@ -1661,3 +1661,17 @@ export type {
 } from './detection/index.js';
 export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 
+
+// Intent Engineering MVP (PRI-465 / PRI-466) — pure logic: parser, hasher, validator
+export {
+  INTENT_MAX_BYTES,
+  INTENT_DOC_TEMPLATE,
+  parseIntentDocSections,
+  computeIntentContentHash,
+  validateIntentDocSections,
+} from './intent/index.js';
+export type {
+  IntentDocSections,
+  IntentDocWarning,
+  IntentDocWarningCode,
+} from './intent/index.js';
