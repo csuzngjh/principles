@@ -37,6 +37,7 @@ import type {
   RuntimeConfig,
   RuntimeConfigResult,
 } from '../pain-signal-runtime-factory.js';
+import type { FeatureFlagsResult } from '../config/pd-config-feature-flags.js';
 import { loadLedger } from '../../principle-tree-ledger.js';
 
 // ── Injected I/O seam types ─────────────────────────────────────────────────
@@ -45,41 +46,39 @@ import { loadLedger } from '../../principle-tree-ledger.js';
 // is structurally compatible — no cross-package import required.
 
 /**
- * Minimal view of a PD config load result consumed by the resolver. The
- * concrete PdConfigLoadResult in pd-cli / PluginConfigLoadResult in the plugin
- * both satisfy this structurally (effective/defaults + ok flag).
- */
-export interface ResolverPdConfigLoadResult {
-  ok: boolean;
-  /** Effective config when ok, fallback defaults when not. */
-  effective?: unknown;
-  /** Fallback defaults available even when the file is malformed. */
-  defaults?: unknown;
-}
-
-/**
  * Minimal view of the resolved-runtime-from-config object. The resolver only
  * reads .result (the RuntimeConfigResult) and passes the whole object to the
- * optional onConfigResolved callback.
+ * optional onConfigResolved callback. Concrete packages (pd-cli's
+ * ResolvedRuntimeFromPdConfig, plugin's equivalent) are supersets — they
+ * add legacyWarnings / configLoadResult / runtimeProfileId, etc. — and are
+ * assignable to this base type. Call sites that need the extra fields pass
+ * a concrete type via the TResolved type parameter (see ResolveAdapterOptions).
  */
 export interface ResolverResolvedRuntime {
   result: RuntimeConfigResult;
-  [key: string]: unknown;
 }
 
-/** Feature-flags bag shape consumed by the L2 dreamer gate. */
-export interface ResolverFeatureFlagsResult {
-  flags: Record<string, { enabled: boolean } | undefined>;
-}
+/**
+ * Feature-flags bag shape consumed by the L2 dreamer gate. Reuses the real
+ * core FeatureFlagsResult so pd-cli's computeFlagsFromLoadResult (which
+ * returns FeatureFlagsResult) is assignable without a cast.
+ */
+export type ResolverFeatureFlagsResult = FeatureFlagsResult;
 
-/** Injected I/O callbacks. Each call site supplies its package's real loaders. */
-export interface ResolverIoDeps {
+/**
+ * Injected I/O callbacks. Generic over the package-specific config-load
+ * result type TLoad (pd-cli's PdConfigLoadResult, the plugin's
+ * PluginConfigLoadResult) so each package's real loaders are assignable
+ * without casts. The resolver itself only forwards the load result into
+ * computeFlagsFromLoadResult, so it never inspects TLoad's shape.
+ */
+export interface ResolverIoDeps<TLoad = unknown, TResolved extends ResolverResolvedRuntime = ResolverResolvedRuntime> {
   /** Load + validate .pd/config.yaml. Pure-shell; concrete impl owns fs. */
-  loadPdConfig: (workspaceDir: string) => ResolverPdConfigLoadResult;
+  loadPdConfig: (workspaceDir: string) => TLoad;
   /** Compute effective feature flags from a load result. */
-  computeFlagsFromLoadResult: (result: ResolverPdConfigLoadResult) => ResolverFeatureFlagsResult;
+  computeFlagsFromLoadResult: (result: TLoad) => ResolverFeatureFlagsResult;
   /** Resolve runtime config from .pd/config.yaml (returns RuntimeConfigResult + metadata). */
-  resolveRuntimeFromPdConfig: (workspaceDir: string) => ResolverResolvedRuntime;
+  resolveRuntimeFromPdConfig: (workspaceDir: string) => TResolved;
 }
 
 // ── Error class ─────────────────────────────────────────────────────────────
@@ -117,7 +116,7 @@ export class ConfigResolutionError extends Error {
 
 // ── Options interface ───────────────────────────────────────────────────────
 
-export interface ResolveAdapterOptions {
+export interface ResolveAdapterOptions<TResolved extends ResolverResolvedRuntime = ResolverResolvedRuntime> {
   /** Runtime kind: 'test-double' | 'pi-ai' | 'openclaw-cli' | 'config' */
   runtimeKind: string;
   /** Workspace directory (for config resolution + feature flags) */
@@ -136,7 +135,7 @@ export interface ResolveAdapterOptions {
    * Required when runtimeKind === 'test-double' and allowTestDouble === true.
    * Receives the full opts object so the builder can access taskId, runnerKind, etc.
    */
-  testDoublePayloadBuilder?: (opts: ResolveAdapterOptions) => PDRuntimeAdapter;
+  testDoublePayloadBuilder?: (opts: ResolveAdapterOptions<TResolved>) => PDRuntimeAdapter;
   /**
    * CLI overrides for pi-ai runtime (from --provider, --model, etc. flags).
    * When provided, these take precedence over config values.
@@ -197,7 +196,7 @@ export interface ResolveAdapterOptions {
    * NOT called for test-double branch (no config resolution).
    * Called even when config returns error IF configOptional is true.
    */
-  onConfigResolved?: (resolved: ResolverResolvedRuntime) => void;
+  onConfigResolved?: (resolved: TResolved) => void;
 }
 
 // ── Resolver function ───────────────────────────────────────────────────────
@@ -209,9 +208,12 @@ export interface ResolveAdapterOptions {
  * (loadPdConfig, computeFlagsFromLoadResult, resolveRuntimeFromPdConfig).
  * Call sites pass their package's real implementations; tests pass mocks.
  */
-export function resolveRuntimeAdapterFromConfig(
-  opts: ResolveAdapterOptions,
-  io: ResolverIoDeps,
+export function resolveRuntimeAdapterFromConfig<
+  TLoad = unknown,
+  TResolved extends ResolverResolvedRuntime = ResolverResolvedRuntime,
+>(
+  opts: ResolveAdapterOptions<TResolved>,
+  io: ResolverIoDeps<TLoad, TResolved>,
 ): PDRuntimeAdapter {
   // ── test-double branch ──────────────────────────────────────────────────
   if (opts.runtimeKind === 'test-double') {

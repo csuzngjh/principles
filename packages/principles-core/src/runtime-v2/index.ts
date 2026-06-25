@@ -229,6 +229,20 @@ export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-ru
 export { PiAiRuntimeAdapter } from './adapter/index.js';
 export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.js';
 
+// candidate ⑥: shared runtime-adapter resolver (pure logic, I/O injected).
+export {
+  resolveRuntimeAdapterFromConfig,
+  ConfigResolutionError,
+} from './adapter/index.js';
+export type {
+  ResolveAdapterOptions,
+  ResolverIoDeps,
+  ResolverResolvedRuntime,
+  ResolverFeatureFlagsResult,
+  ConfigResolutionErrorKind,
+  ConfigResolutionErrorDetails,
+} from './adapter/index.js';
+
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
 

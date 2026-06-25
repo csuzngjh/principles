@@ -13,7 +13,6 @@ export { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from './runtim
 export type {
   ResolveAdapterOptions,
   ResolverIoDeps,
-  ResolverPdConfigLoadResult,
   ResolverResolvedRuntime,
   ResolverFeatureFlagsResult,
   ConfigResolutionErrorKind,
