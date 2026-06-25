@@ -303,7 +303,7 @@ export function IntentPage() {
             {/* Meta */}
             <section className="mt-8" aria-labelledby="section-meta">
               <SectionTitle id="section-meta">
-                {t("pages.intent.meta.lastEditedAt")}
+                {t("pages.intent.meta.title")}
               </SectionTitle>
               <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
                 {summary.lastEditedAt && (

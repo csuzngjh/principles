@@ -46,7 +46,7 @@ const INTENT_FILENAME = 'INTENT.md';
 // ── Output types ─────────────────────────────────────────────────────────────
 
 export interface IntentInitOutput {
-  status: 'ok' | 'skipped' | 'dry_run';
+  status: 'ok' | 'skipped' | 'dry_run' | 'read_error';
   path: string;
   overwritten: boolean;
   reason?: string;
@@ -134,9 +134,31 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
     return;
   }
 
-  const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  const filePath = getIntentFilePath(workspaceDir);
-  const dir = path.dirname(filePath);
+  // CLI Gate rule 6: workspace resolution inside try/catch so failures emit
+  // structured JSON with reason + nextAction instead of an uncaught stack trace.
+  let workspaceDir: string;
+  let filePath: string;
+  let dir: string;
+  try {
+    workspaceDir = resolveWorkspaceDir(opts.workspace);
+    filePath = getIntentFilePath(workspaceDir);
+    dir = path.dirname(filePath);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const output: IntentInitOutput = {
+      status: 'read_error',
+      path: '',
+      overwritten: false,
+      reason,
+      nextAction: 'Provide a valid --workspace <path> argument.',
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
 
   // CLI Gate rule 4: state-mutating command defaults to dry-run unless --confirm.
   const isDryRun = opts.dryRun === true || opts.confirm !== true;
@@ -187,17 +209,18 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    if (opts.json) {
-      console.log(JSON.stringify({
-        status: 'read_error',
-        ok: false,
-        reason,
-        nextAction: `Check filesystem permissions for ${filePath}`,
-      }, null, 2));
-    } else {
-      console.error(`Error: ${reason}`);
-      console.error(`Next action: Check filesystem permissions for ${filePath}`);
-    }
+    // CLI Gate rule 1: route through emitResult for consistent IntentInitOutput shape.
+    const output: IntentInitOutput = {
+      status: 'read_error',
+      path: filePath,
+      overwritten: false,
+      reason,
+      nextAction: `Check filesystem permissions for ${filePath}`,
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
     process.exitCode = 1;
   }
 }
@@ -208,7 +231,27 @@ export interface IntentShowOptions {
 }
 
 export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // CLI Gate rule 6: workspace resolution inside try/catch for structured errors.
+  let workspaceDir: string;
+  try {
+    workspaceDir = resolveWorkspaceDir(opts.workspace);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const output: IntentShowOutput = {
+      status: 'read_error',
+      flagEnabled: false,
+      found: false,
+      warnings: [],
+      reason,
+      nextAction: 'Provide a valid --workspace <path> argument.',
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
 
   // Flag check — flag-off short-circuits without fs access
   const configResult = loadPdConfig(workspaceDir);

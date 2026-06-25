@@ -1479,7 +1479,10 @@ export function validateIntentWarning(v: unknown): IntentDocWarningData | null {
   if (!(VALID_INTENT_WARNING_CODES as readonly string[]).includes(v.code)) return null;
   if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
   const result: IntentDocWarningData = { code: v.code, message: v.message };
-  if (Object.hasOwn(v, 'section') && isString(v.section)) {
+  // Runtime Contract Rule #3: fail loud on wrong-type optional fields,
+  // consistent with validateIntentSummary's optional-field handling.
+  if (Object.hasOwn(v, 'section')) {
+    if (!isString(v.section)) return null;
     result.section = v.section;
   }
   return result;
@@ -1488,18 +1491,16 @@ export function validateIntentWarning(v: unknown): IntentDocWarningData | null {
 export function validateIntentSections(v: unknown): IntentSectionsData | null {
   if (!isObject(v)) return null;
   const result: IntentSectionsData = {};
-  let hasAny = false;
   for (const key of VALID_INTENT_SECTION_KEYS) {
     if (Object.hasOwn(v, key)) {
       const val = v[key];
       if (val !== null && !isString(val)) return null;
       if (isString(val)) {
         result[key] = val;
-        hasAny = true;
       }
     }
   }
-  return hasAny ? result : result;
+  return result;
 }
 
 export function validateIntentSummary(v: unknown): IntentSummaryData | null {

@@ -190,6 +190,26 @@ describe('handleIntentInit', () => {
     expect(fs.existsSync(dir)).toBe(true);
     expect(fs.existsSync(getIntentPath())).toBe(true);
   });
+
+  it('emits structured read_error JSON when workspace path is invalid (CLI Gate rule 6)', async () => {
+    // resolveWorkspaceDir throws on paths with null bytes or other invalid chars.
+    // The error must be caught and emitted as a structured IntentInitOutput,
+    // not an uncaught stack trace.
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    process.exitCode = undefined;
+    await handleIntentInit({ workspace: 'invalid\0path', confirm: true, json: true });
+
+    expect(process.exitCode).toBe(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string) as Record<string, unknown>;
+    expect(jsonOutput.status).toBe('read_error');
+    expect(jsonOutput.reason).toBeDefined();
+    expect(jsonOutput.nextAction).toBeDefined();
+    // Must NOT include the ad-hoc `ok` field that the old code emitted
+    expect(jsonOutput.ok).toBeUndefined();
+
+    process.exitCode = undefined;
+    logSpy.mockRestore();
+  });
 });
 
 // ── handleIntentShow ─────────────────────────────────────────────────────────

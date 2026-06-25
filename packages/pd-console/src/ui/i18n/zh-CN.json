@@ -665,7 +665,7 @@
       "notFound": {
         "title": "未找到 INTENT.md",
         "description": "PD 在 .principles/ 目录中未找到 INTENT.md 文件。缺少此锚点时，基于意图的诊断无法运行。",
-        "nextAction": "请使用下方模板在 .principles/INTENT.md 创建文件。"
+        "nextAction": "运行：pd intent init --confirm --workspace <path>"
       },
       "oversized": {
         "title": "INTENT.md 超过 32KB",
@@ -689,11 +689,12 @@
         "parse_failed": "章节解析失败"
       },
       "meta": {
+        "title": "文档元信息",
         "lastEditedAt": "上次编辑",
         "contentHash": "内容哈希",
         "path": "路径",
         "templateTitle": "INTENT.md 模板",
-        "templateDescription": "将以下内容复制到 .principles/INTENT.md，将占位符替换为你的意图。"
+        "templateDescription": "将其复制到 .principles/INTENT.md，替换占位符为你的意图。"
       },
       "loadError": "加载意图文档失败",
       "validationError": "数据格式校验失败，请刷新后重试"

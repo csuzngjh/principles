@@ -665,7 +665,7 @@
       "notFound": {
         "title": "No INTENT.md found",
         "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
-        "nextAction": "Create .principles/INTENT.md using the template below."
+        "nextAction": "Run: pd intent init --confirm --workspace <path>"
       },
       "oversized": {
         "title": "INTENT.md exceeds 32KB",
@@ -689,6 +689,7 @@
         "parse_failed": "Section failed to parse"
       },
       "meta": {
+        "title": "Document Metadata",
         "lastEditedAt": "Last edited",
         "contentHash": "Content hash",
         "path": "Path",

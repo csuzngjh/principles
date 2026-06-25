@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, computeIntentContentHash, validateIntentDocSections, type IntentDocWarning } from '../intent-doc.js';
+import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, computeIntentContentHash, validateIntentDocSections, type IntentDocWarning, type IntentDocSections } from '../intent-doc.js';
 
 const VALID = `# INTENT.md
 
@@ -74,6 +74,15 @@ describe('validateIntentDocSections', () => {
     const raw = `## 1. Why\n\nshort\n## 2. Desired Outcome\n\nValid outcome here.\n## 3. Non-negotiables\n\nValid NN.\n## 4. Stop / Escalation\n\nValid stop.\n## 5. Current Strategic Focus\n\nValid focus.\n`;
     const w = validateIntentDocSections(parseIntentDocSections(raw));
     expect(w.some((x: IntentDocWarning) => x.code === 'too_vague' && x.section === 'why')).toBe(true);
+  });
+  it('parse_failed for non-string section value (CodeRabbit coverage nitpick)', () => {
+    // validateIntentDocSections is exported and can receive a directly-constructed
+    // sections object where a key holds a non-string value. parseIntentDocSections
+    // always returns string|undefined, so this branch is only reachable via direct
+    // calls — covering it locks the defensive contract.
+    const malformed = { why: 123 as unknown as string } as IntentDocSections;
+    const w = validateIntentDocSections(malformed);
+    expect(w.some((x: IntentDocWarning) => x.code === 'parse_failed' && x.section === 'why')).toBe(true);
   });
 });
 

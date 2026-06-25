@@ -91,7 +91,10 @@ export class IntentPageModel {
         lastEditedAt: stat.mtime.toISOString(),
         sections: sectionRecord,
       };
-    } catch {
+    } catch (err) {
+      // Runtime Contract Rule #9: log underlying error for observability
+      // while preserving the never-throws contract.
+      console.error('[IntentPageModel] failed to read INTENT.md:', err);
       return {
         ok: false,
         found: false,

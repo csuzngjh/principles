@@ -74,16 +74,10 @@ describe('validateIntentWarning', () => {
     expect(validateIntentWarning({ code: 'missing_section', message: 42 })).toBeNull();
   });
 
-  it('silently ignores non-string section (current lenient behavior)', () => {
-    // Note: validateIntentWarning currently silently omits a non-string `section`
-    // rather than failing loud (unlike validateIntentSummary optional fields).
-    // This test pins the current behavior; if the implementation is tightened to
-    // fail loud per Runtime Contract Rule #3, update this test to expect null.
-    const result = validateIntentWarning({ code: 'missing_section', message: 'msg', section: 123 });
-    expect(result).not.toBeNull();
-    expect(result?.code).toBe('missing_section');
-    expect(result?.message).toBe('msg');
-    expect(result?.section).toBeUndefined();
+  it('rejects non-string section when present (Runtime Contract Rule #3)', () => {
+    // Fail loud on wrong-type optional fields, consistent with the file's
+    // validate-on-present pattern (CodeRabbit review finding).
+    expect(validateIntentWarning({ code: 'missing_section', message: 'msg', section: 123 })).toBeNull();
   });
 });
 
