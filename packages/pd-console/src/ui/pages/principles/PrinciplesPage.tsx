@@ -5,6 +5,7 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
+import { ShinyText } from "../../components/ui/shiny-text.js";
 import {
   fetchPrinciples,
   fetchApprovalsGrouped,
@@ -253,9 +254,14 @@ export function PrinciplesPage() {
     <PageShell>
       {/* Header */}
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <ShinyText 
+        className="text-[29px] font-semibold tracking-tight mb-2"
+        duration={4.5}
+        brightness={0.5}
+        disabled={!(filterMode === 'actionable' && (categories?.owner_actionable ?? 0) > 0)}
+      >
         {t("principles.reviewSubtitle")}
-      </h1>
+      </ShinyText>
       <p className="text-ink-3 text-[14px] leading-relaxed mb-6">
         {t("principles.reviewDescription")}
       </p>
