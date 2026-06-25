@@ -111,6 +111,7 @@ function resolvePiAiAgentAdapter(
 function resolveRunRuleHostRuntime(
   workspaceDir: string,
   timeoutMs: number | undefined,
+  readiness: RuleHostReadinessResult,
 ): ResolvedRunRuleHostRuntime {
   const { configLoadResult } = resolveRuntimeFromPdConfig(workspaceDir);
 
@@ -128,6 +129,14 @@ function resolveRunRuleHostRuntime(
     philosopher: philosopher.profileId,
     scribe: scribe.profileId,
   };
+  if (readiness.status === 'text_principle_only') {
+    return {
+      agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
+      agentRuntimeProfiles,
+      capability: { enabled: false, disabledReason: readiness.reason },
+      capabilityStatus: `code_rule_capability: OFF (${readiness.reason})`,
+    };
+  }
   const featureFlags = computeFeatureFlagsFromConfig(effective);
   if (!isFeatureEnabled(featureFlags, 'code_rule_capability')) {
     return {
@@ -353,7 +362,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   // ── Resolve each executed agent from canonical config ──
   let resolvedRuntime: ResolvedRunRuleHostRuntime;
   try {
-    resolvedRuntime = resolveRunRuleHostRuntime(workspaceDir, opts.timeoutMs);
+    resolvedRuntime = resolveRunRuleHostRuntime(workspaceDir, opts.timeoutMs, readiness);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json) {
@@ -375,7 +384,8 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         painId: opts.painId,
         workspace: workspaceDir,
         channel,
-        readiness: readiness.status,
+        readiness,
+        readinessStatus: readiness.status,
         capabilityStatus: resolvedRuntime.capabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
         codeRuleCapability: { enabled: resolvedRuntime.capability.enabled, disabledReason: resolvedRuntime.capability.disabledReason },

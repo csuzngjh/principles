@@ -324,6 +324,35 @@ function writeTextPrincipleOnlyConfig(workspaceDir: string): void {
   fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
 }
 
+function writeEvaluatorDisabledConfig(workspaceDir: string): void {
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: false, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
 function writeRefusedConfig(workspaceDir: string): void {
   // dreamer disabled → required agent missing → refused
   const configDir = path.join(workspaceDir, '.pd');
@@ -378,7 +407,13 @@ describe('handleRunRuleHost — PRI-461 readiness integration', () => {
     );
     const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('dry_run');
-    expect(payload.readiness).toBe('ready');
+    expect(payload.readinessStatus).toBe('ready');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('ready');
     expect(exitCode).toBeUndefined();
   });
 
@@ -399,7 +434,34 @@ describe('handleRunRuleHost — PRI-461 readiness integration', () => {
     );
     const payload = parseJsonObject(stdout.trim());
     expect(payload.status).toBe('dry_run');
-    expect(payload.readiness).toBe('text_principle_only');
+    expect(payload.readinessStatus).toBe('text_principle_only');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('text_principle_only');
+    expect(typeof readiness.reason).toBe('string');
+    expect(typeof readiness.nextAction).toBe('string');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('does not reclassify evaluator-disabled text_principle_only as runtime resolution failure', async () => {
+    writeEvaluatorDisabledConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('dry_run');
+    expect(payload.readinessStatus).toBe('text_principle_only');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('text_principle_only');
+    expect(String(readiness.reason)).toContain('evaluator');
+    expect(String(payload.capabilityStatus)).toContain('evaluator');
     expect(exitCode).toBeUndefined();
   });
 

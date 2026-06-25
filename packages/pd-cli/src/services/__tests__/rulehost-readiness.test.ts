@@ -143,19 +143,20 @@ function writeMalformedConfig(workspaceDir: string): void {
   fs.writeFileSync(path.join(configDir, 'config.yaml'), 'this: is: not: valid: yaml: [', 'utf8');
 }
 
+function envLookup(env: Record<string, string | undefined>): (name: string) => string | undefined {
+  return (name) => env[name];
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────
 
 describe('resolveRuleHostReadiness', () => {
   let workspaceDir: string;
-  let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
     workspaceDir = mkTmpDir();
-    savedEnv = { ...process.env };
   });
 
   afterEach(() => {
-    process.env = savedEnv;
     try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
@@ -163,7 +164,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when config is malformed', () => {
     writeMalformedConfig(workspaceDir);
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({}));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/config/i);
     expect(result.nextAction).toBeDefined();
@@ -174,8 +175,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when dreamer is disabled', () => {
     writeConfig(workspaceDir, { agentEnabled: { dreamer: false } });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/dreamer/i);
     expect(result.nextAction).toBeDefined();
@@ -183,8 +183,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when philosopher is disabled', () => {
     writeConfig(workspaceDir, { agentEnabled: { philosopher: false } });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/philosopher/i);
     expect(result.nextAction).toBeDefined();
@@ -192,8 +191,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when scribe is disabled', () => {
     writeConfig(workspaceDir, { agentEnabled: { scribe: false } });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/scribe/i);
     expect(result.nextAction).toBeDefined();
@@ -201,7 +199,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when dreamer uses openclaw profile (not pi-ai)', () => {
     writeConfig(workspaceDir, { profileType: 'openclaw' });
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({}));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/pi-ai|openclaw|profile/i);
     expect(result.nextAction).toBeDefined();
@@ -210,7 +208,7 @@ describe('resolveRuleHostReadiness', () => {
   it('returns refused when API key env var is not set', () => {
     writeConfig(workspaceDir, { apiKeyEnv: 'MISSING_API_KEY' });
     // Do NOT set MISSING_API_KEY in env
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({}));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/API key|apiKeyEnv|MISSING_API_KEY/i);
     expect(result.nextAction).toBeDefined();
@@ -218,8 +216,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused when API key env var is set but empty', () => {
     writeConfig(workspaceDir, { apiKeyEnv: 'EMPTY_API_KEY' });
-    process.env.EMPTY_API_KEY = '';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ EMPTY_API_KEY: '' }));
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/API key|apiKeyEnv|EMPTY_API_KEY/i);
     expect(result.nextAction).toBeDefined();
@@ -229,8 +226,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns text_principle_only when code_rule_capability flag is OFF', () => {
     writeConfig(workspaceDir, { codeRuleCapabilityEnabled: false });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('text_principle_only');
     expect(result.reason).toMatch(/code_rule_capability|feature flag/i);
     expect(result.nextAction).toBeDefined();
@@ -239,8 +235,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns text_principle_only when evaluator is disabled', () => {
     writeConfig(workspaceDir, { agentEnabled: { evaluator: false } });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('text_principle_only');
     expect(result.reason).toMatch(/evaluator/i);
     expect(result.nextAction).toBeDefined();
@@ -249,8 +244,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns text_principle_only when artificer is disabled', () => {
     writeConfig(workspaceDir, { agentEnabled: { artificer: false } });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('text_principle_only');
     expect(result.reason).toMatch(/artificer/i);
     expect(result.nextAction).toBeDefined();
@@ -291,9 +285,8 @@ describe('resolveRuleHostReadiness', () => {
     };
     fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
 
-    process.env.MAIN_API_KEY = 'sk-main';
     // Do NOT set ARTIFICER_API_KEY
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ MAIN_API_KEY: 'sk-main' }));
     expect(result.status).toBe('text_principle_only');
     expect(result.reason).toMatch(/artificer|ARTIFICER_API_KEY/i);
     expect(result.nextAction).toBeDefined();
@@ -304,8 +297,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns ready when all agents enabled with pi-ai profiles and API keys set', () => {
     writeConfig(workspaceDir, {});
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.status).toBe('ready');
     expect(result.codeRuleCapability.enabled).toBe(true);
   });
@@ -314,7 +306,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('returns refused for the default installed config (openclaw profiles, philosopher/evaluator disabled)', () => {
     writeDefaultInstalledConfig(workspaceDir);
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({}));
     // Default config uses openclaw profiles — dreamer/scribe can't get pi-ai adapters.
     // Philosopher is also disabled. So the status is refused.
     expect(result.status).toBe('refused');
@@ -328,8 +320,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('includes per-agent statuses in the result', () => {
     writeConfig(workspaceDir, {});
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.agentStatuses).toBeDefined();
     expect(result.agentStatuses.dreamer).toBeDefined();
     expect(result.agentStatuses.philosopher).toBeDefined();
@@ -340,8 +331,7 @@ describe('resolveRuleHostReadiness', () => {
 
   it('includes codeRuleCapability in the result', () => {
     writeConfig(workspaceDir, { codeRuleCapabilityEnabled: false });
-    process.env.TEST_API_KEY = 'sk-test';
-    const result = resolveRuleHostReadiness(workspaceDir);
+    const result = resolveRuleHostReadiness(workspaceDir, envLookup({ TEST_API_KEY: 'sk-test' }));
     expect(result.codeRuleCapability).toBeDefined();
     expect(result.codeRuleCapability.enabled).toBe(false);
     expect(result.codeRuleCapability.disabledReason).toBeDefined();

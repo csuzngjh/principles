@@ -52,6 +52,18 @@ function writeConfig(workspaceDir: string, content: object): void {
   );
 }
 
+/** Type guard: narrows `unknown` to `Record<string, unknown>` without `as`. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`${label} is not a record`);
+  }
+  return value;
+}
+
 /** Config with both artificer+evaluator enabled, pi-ai profile, API key env set. */
 function makeCapabilityOnConfig(workspaceDir: string): object {
   return {
@@ -90,17 +102,19 @@ function makeCapabilityOnConfig(workspaceDir: string): object {
 
 /** Config with artificer disabled (capability must be OFF). */
 function makeArtificerDisabledConfig(workspaceDir: string): object {
-  const cfg = makeCapabilityOnConfig(workspaceDir) as Record<string, unknown>;
-  const internalAgents = cfg.internalAgents as { agents: Record<string, { enabled: boolean; runtimeProfile?: string }> };
-  internalAgents.agents.artificer = { enabled: false };
+  const cfg = makeCapabilityOnConfig(workspaceDir);
+  const internalAgents = requireRecord(Reflect.get(cfg, 'internalAgents'), 'internalAgents');
+  const agents = requireRecord(Reflect.get(internalAgents, 'agents'), 'internalAgents.agents');
+  Reflect.set(agents, 'artificer', { enabled: false });
   return cfg;
 }
 
 /** Config with evaluator disabled (capability must be OFF). */
 function makeEvaluatorDisabledConfig(workspaceDir: string): object {
-  const cfg = makeCapabilityOnConfig(workspaceDir) as Record<string, unknown>;
-  const internalAgents = cfg.internalAgents as { agents: Record<string, { enabled: boolean; runtimeProfile?: string }> };
-  internalAgents.agents.evaluator = { enabled: false };
+  const cfg = makeCapabilityOnConfig(workspaceDir);
+  const internalAgents = requireRecord(Reflect.get(cfg, 'internalAgents'), 'internalAgents');
+  const agents = requireRecord(Reflect.get(internalAgents, 'agents'), 'internalAgents.agents');
+  Reflect.set(agents, 'evaluator', { enabled: false });
   return cfg;
 }
 
@@ -158,15 +172,11 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
   }
 
   /** Extract the single JSON object written to stdout. Fails if not exactly one write. */
-  function parseJsonOutput(): unknown {
+  function parseJsonOutput(): Record<string, unknown> {
     expect(stdoutSpy).toHaveBeenCalledTimes(1);
     const raw = stdoutSpy.mock.calls[0][0] as string;
-    return JSON.parse(raw);
-  }
-
-  /** Type guard: narrows `unknown` to `Record<string, unknown>` without `as`. */
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
+    const parsed: unknown = JSON.parse(raw);
+    return requireRecord(parsed, 'stdout JSON');
   }
 
   // ── Capability ON: both agents enabled, API key set ──────────────────────
@@ -183,14 +193,11 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    expect(typeof output).toBe('object');
-    expect(output).not.toBeNull();
-    const obj = output as { status: string; codeRuleCapability?: { enabled: boolean; disabledReason?: string }; capabilityStatus?: string };
-    expect(obj.status).toBe('dry_run');
-    expect(obj.codeRuleCapability).toBeDefined();
-    expect(obj.codeRuleCapability?.enabled).toBe(true);
-    expect(obj.codeRuleCapability?.disabledReason).toBeUndefined();
-    expect(obj.capabilityStatus).toContain('ON');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
+    expect(codeRuleCapability.enabled).toBe(true);
+    expect(codeRuleCapability.disabledReason).toBeUndefined();
+    expect(String(output.capabilityStatus)).toContain('ON');
     // exitCode must NOT be set for dry_run success
     expect(process.exitCode).toBeUndefined();
   });
@@ -208,16 +215,13 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({ workspace, painId: 'pain-flag-default', dryRun: true, json: true });
 
     const output = parseJsonOutput();
-    // PRI-435 (CodeRabbit P3): narrow unknown before property access
-    expect(typeof output).toBe('object');
-    expect(output).not.toBeNull();
-    const obj = output as { status: string; codeRuleCapability?: { enabled: boolean; disabledReason?: string }; capabilityStatus?: string };
-    expect(obj.status).toBe('dry_run');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
     // PRI-435: code_rule_capability is now a core flag — defaults ON even when omitted from config.
     // It cannot be disabled by config. The capability is ON when artificer+evaluator are configured.
-    expect(obj.codeRuleCapability).toEqual(expect.objectContaining({ enabled: true }));
-    expect(obj.codeRuleCapability?.disabledReason).toBeUndefined();
-    expect(String(obj.capabilityStatus)).toContain('ON');
+    expect(codeRuleCapability).toEqual(expect.objectContaining({ enabled: true }));
+    expect(codeRuleCapability.disabledReason).toBeUndefined();
+    expect(String(output.capabilityStatus)).toContain('ON');
   });
 
   it('PRI-435: explicit emergency disable via code_rule_capability.enabled=false is observable', async () => {
@@ -234,16 +238,13 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({ workspace, painId: 'pain-emergency-disable', dryRun: true, json: true });
 
     const output = parseJsonOutput();
-    // PRI-435 (CodeRabbit P3): narrow unknown before property access
-    expect(typeof output).toBe('object');
-    expect(output).not.toBeNull();
-    const obj = output as { status: string; codeRuleCapability?: { enabled: boolean; disabledReason?: string }; capabilityStatus?: string };
-    expect(obj.status).toBe('dry_run');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
     // PRI-435: Emergency disable via code_rule_capability.enabled=false is preserved.
     // The capability is OFF with a structured reason.
-    expect(obj.codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
-    expect(String(obj.codeRuleCapability?.disabledReason)).toContain('feature flag');
-    expect(String(obj.capabilityStatus)).toContain('OFF');
+    expect(codeRuleCapability).toEqual(expect.objectContaining({ enabled: false }));
+    expect(String(codeRuleCapability.disabledReason)).toContain('feature flag');
+    expect(String(output.capabilityStatus)).toContain('OFF');
   });
 
   it('reports the resolved runtime profile for every executed agent', async () => {
@@ -320,10 +321,10 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; codeRuleCapability: { enabled: boolean; disabledReason?: string } };
-    expect(obj.status).toBe('dry_run');
-    expect(obj.codeRuleCapability.enabled).toBe(false);
-    expect(obj.codeRuleCapability.disabledReason).toContain('artificer');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
+    expect(codeRuleCapability.enabled).toBe(false);
+    expect(String(codeRuleCapability.disabledReason)).toContain('artificer');
   });
 
   // ── Capability OFF: evaluator disabled ───────────────────────────────────
@@ -340,10 +341,10 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; codeRuleCapability: { enabled: boolean; disabledReason?: string } };
-    expect(obj.status).toBe('dry_run');
-    expect(obj.codeRuleCapability.enabled).toBe(false);
-    expect(obj.codeRuleCapability.disabledReason).toContain('evaluator');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
+    expect(codeRuleCapability.enabled).toBe(false);
+    expect(String(codeRuleCapability.disabledReason)).toContain('evaluator');
   });
 
   // ── Capability OFF: API key not set ──────────────────────────────────────
@@ -405,10 +406,11 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; codeRuleCapability: { enabled: boolean; disabledReason?: string } };
-    expect(obj.status).toBe('dry_run');
-    expect(obj.codeRuleCapability.enabled).toBe(false);
-    expect(obj.codeRuleCapability.disabledReason).toContain('apiKeyEnv');
+    const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
+    expect(output.status).toBe('dry_run');
+    expect(codeRuleCapability.enabled).toBe(false);
+    expect(String(codeRuleCapability.disabledReason)).toContain('TEST_RULEHOST_ARTIFICER_KEY');
+    expect(String(codeRuleCapability.disabledReason)).toContain('not set');
   });
 
   // ── CLI gate: mutual exclusivity ─────────────────────────────────────────
@@ -426,10 +428,9 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; reason: string; nextAction: string };
-    expect(obj.status).toBe('failed');
-    expect(obj.reason).toContain('mutually exclusive');
-    expect(obj.nextAction).toBeTruthy();
+    expect(output.status).toBe('failed');
+    expect(String(output.reason)).toContain('mutually exclusive');
+    expect(output.nextAction).toBeTruthy();
     expect(process.exitCode).toBe(1);
   });
 
@@ -447,10 +448,9 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; reason: string; nextAction: string };
-    expect(obj.status).toBe('failed');
-    expect(obj.reason).toContain('painId');
-    expect(obj.nextAction).toBeTruthy();
+    expect(output.status).toBe('failed');
+    expect(String(output.reason)).toContain('painId');
+    expect(output.nextAction).toBeTruthy();
     expect(process.exitCode).toBe(1);
   });
 
@@ -492,8 +492,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string };
-    expect(obj.status).toBe('dry_run');
+    expect(output.status).toBe('dry_run');
     // Must NOT set exitCode for dry_run
     expect(process.exitCode).toBeUndefined();
   });
@@ -513,10 +512,9 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     });
 
     const output = parseJsonOutput();
-    const obj = output as { status: string; reason: string; nextAction: string };
-    expect(obj.status).toBe('failed');
-    expect(obj.reason).toContain('unsupported channel');
-    expect(obj.nextAction).toBeTruthy();
+    expect(output.status).toBe('failed');
+    expect(String(output.reason)).toContain('unsupported channel');
+    expect(output.nextAction).toBeTruthy();
     expect(process.exitCode).toBe(1);
   });
 });
