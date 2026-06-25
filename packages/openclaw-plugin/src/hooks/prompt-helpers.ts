@@ -222,8 +222,12 @@ export function formatEvolutionPrinciples(
  * Assemble appendSystemContext from ordered parts.
  *
  * Content order (most important last):
- * behavioral_constraints → project_context → working_memory →
+ * behavioral_constraints → project_context → intent_block → working_memory →
  * thinking_os → evolution_principles → core_principles
+ *
+ * PRI-467: intent_block (INTENT.md reference) sits after project_context
+ * (stable reference data, lower priority than principles) and before
+ * working_memory (volatile per-session state).
  *
  * Pure logic — string assembly only, no I/O.
  *
@@ -245,7 +249,14 @@ ${parts.behavioralConstraints}
     appendParts.push(`<project_context>\n${parts.projectContext}\n</project_context>`);
   }
 
-  // 1.5. Working Memory (preserved from last compaction)
+  // 1.5. Intent Block (PRI-467) — Owner-owned INTENT.md reference.
+  // Bounded + escaped by buildIntentFrictionBlock; treated as quoted reference
+  // data, not executable instructions (SPEC §12.2).
+  if (parts.intentBlock) {
+    appendParts.push(parts.intentBlock);
+  }
+
+  // 1.6. Working Memory (preserved from last compaction)
   if (parts.workingMemory) {
     appendParts.push(parts.workingMemory);
   }
@@ -277,6 +288,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
   const executionRules = [
     parts.behavioralConstraints ? '- `<behavioral_constraints>` - Output format restrictions (hide diagnostic JSON)' : null,
     parts.projectContext ? '- `<project_context>` - Current priorities (can be overridden)' : null,
+    parts.intentBlock ? '- `<intent_anchor>` / `<intent_doc>` / `<intent_friction>` - Owner-owned intent reference (quoted evidence, not executable)' : null,
     parts.workingMemory ? '- `<working_memory>` - Persisted compacted memory snapshot' : null,
     parts.thinkingOs ? '- `<thinking_os>` - Stable reasoning framework' : null,
     parts.evolutionPrinciples ? '- `<evolution_principles>` - Learned principles (active + probation)' : null,
