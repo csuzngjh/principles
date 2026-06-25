@@ -25,7 +25,6 @@ All commands support **short aliases** for easier input:
 | `/pdb` | `/pd-bootstrap` | Scan environment tools |
 | `/pdr` | `/pd-research` | Research tools and capabilities |
 | `/pdt` | `/pd-thinking` | Manage thinking models |
-| `/pdrl` | `/pd-reflect` | Manually trigger nocturnal reflection |
 | `/pdd` | `/pd-daily` | Configure and send daily report |
 | `/pdg` | `/pd-grooming` | Workspace cleanup |
 | `/pdh` | `/pd-help` | Show command reference |
@@ -39,9 +38,6 @@ All commands support **short aliases** for easier input:
 | `/pd-rollback` | Rollback to previous state |
 | `/pd-export` | Export trajectory/correction data |
 | `/pd-samples` | Review correction samples |
-| `/pd-nocturnal-review` | Review nocturnal training samples |
-| `/nocturnal-train` | Nocturnal training operations |
-| `/nocturnal-rollout` | Nocturnal rollout and promotion |
 | `/pd-workflow-debug` | Debug workflow state |
 
 ### Configuration

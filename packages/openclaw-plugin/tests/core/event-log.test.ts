@@ -218,8 +218,7 @@ describe('EventLog', () => {
             diagnosticianReportsWritten: 1,  // legacy success:true counted here
             reportsMissingJson: 0, reportsIncompleteFields: 0,
             principleCandidatesCreated: 0, rulesEnforced: 0,
-            nocturnalDreamerCompleted: 0, nocturnalArtifactPersisted: 0,
-            nocturnalCodeCandidateCreated: 0, rulehostEvaluated: 0,
+            rulehostEvaluated: 0,
             rulehostBlocked: 0, rulehostRequireApproval: 0,
           },
         },

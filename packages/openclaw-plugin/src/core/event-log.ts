@@ -9,8 +9,6 @@ import type {
   EmpathyEventStats,
   ToolCallEventData,
   PainSignalEventData,
-  // RuleMatchEventData import removed (PRI-451 Wave 1.5): the rule_match handler
-  // that consumed it is gone (recordRuleMatch deleted in Wave 1.1).
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
@@ -115,10 +113,7 @@ export class EventLog {
   recordPainSignal(sessionId: string | undefined, data: PainSignalEventData): void {
     this.record('pain_signal', 'detected', sessionId, data);
   }
-  
-  // recordRuleMatch removed (PRI-451 Wave 1): dead code. Its only effect was
-  // incrementing stats.pain.rulesMatched (also dead, removed in Wave 1.5).
-  
+
   recordRulePromotion(data: RulePromotionEventData): void {
     this.record('rule_promotion', 'promoted', undefined, data);
   }
@@ -426,9 +421,6 @@ export class EventLog {
       stats.empathy.rollbackCount++;
       stats.empathy.rolledBackScore += data.originalScore || 0;
     }
-    // rule_match handler removed (PRI-451 Wave 1.5): recordRuleMatch is gone
-    // (Wave 1.1), so no rule_match events are emitted; stats.pain.rulesMatched
-    // was its only consumer and is also removed.
     else if (entry.type === 'rule_promotion') {
       // stats.pain.candidatesPromoted removed (PRI-451 Wave 1.5): dead counter.
       stats.evolution.rulesPromoted++;

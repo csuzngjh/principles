@@ -8,7 +8,7 @@
 - [x] `verify-merge` 通过：`npm run verify:merge`
   - check:generated-artifacts PASS / check:error-handbook OK (with warnings) / check:repo-hygiene PASS / lint PASS (0 errors, 1 warning) / build PASS / typecheck PASS
 - [x] `lint` 通过：`npm run lint`
-  - 0 errors, 1 warning (unused eslint-disable directive in validate-live-path.ts)
+  - 0 errors, 0 warnings (validate-live-path.ts deleted as dead nocturnal code)
 - [x] `check:error-handbook` 通过：`npm run check:error-handbook`
   - OK (with warnings): 76 ERR entries, 181.2KB. Warnings about size and recurrence field length, non-blocking.
 - [x] CI `test-principles-core` 通过（含架构回归测试）

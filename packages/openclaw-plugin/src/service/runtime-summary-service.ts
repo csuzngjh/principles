@@ -194,7 +194,7 @@ function pushWarning(warnings: string[], message: string): void {
 }
 
 /**
- * YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats.
+ * YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.rulehostEvaluated') from dailyStats.
  * Returns { count, resolvable } to distinguish "field not found / non-numeric" from "legitimate zero".
  */
 function resolveStatsField(stats: unknown, dotPath: string): { count: number; resolvable: boolean } {

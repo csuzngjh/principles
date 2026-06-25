@@ -7,7 +7,6 @@ import { Type, type Static } from '@sinclair/typebox';
 import type {
   ToolCallEventData,
   PainSignalEventData,
-  RuleMatchEventData,
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
@@ -22,7 +21,6 @@ import { EventCategorySchema } from './event-types.js';
 export type EventLogEntry =
   | { ts: string; date: string; type: 'tool_call'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: ToolCallEventData }
   | { ts: string; date: string; type: 'pain_signal'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: PainSignalEventData }
-  | { ts: string; date: string; type: 'rule_match'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: RuleMatchEventData }
   | { ts: string; date: string; type: 'rule_promotion'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: RulePromotionEventData }
   | { ts: string; date: string; type: 'hook_execution'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: HookExecutionEventData }
   | { ts: string; date: string; type: 'gate_block'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBlockEventData }
@@ -41,10 +39,6 @@ export function isToolCallEventEntry(entry: EventLogEntry): entry is Extract<Eve
 
 export function isPainSignalEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'pain_signal' }> {
   return entry.type === 'pain_signal';
-}
-
-export function isRuleMatchEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'rule_match' }> {
-  return entry.type === 'rule_match';
 }
 
 export function isRulePromotionEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'rule_promotion' }> {
@@ -90,15 +84,6 @@ export const DiscriminatedEventLogEntrySchema = Type.Union([
     ts: Type.String(),
     date: Type.String(),
     type: Type.Literal('pain_signal'),
-    category: EventCategorySchema,
-    sessionId: Type.Optional(Type.String()),
-    workspaceDir: Type.Optional(Type.String()),
-    data: Type.Record(Type.String(), Type.Any()),
-  }),
-  Type.Object({
-    ts: Type.String(),
-    date: Type.String(),
-    type: Type.Literal('rule_match'),
     category: EventCategorySchema,
     sessionId: Type.Optional(Type.String()),
     workspaceDir: Type.Optional(Type.String()),

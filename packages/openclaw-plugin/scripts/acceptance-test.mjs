@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Nocturnal Pipeline — End-to-End Acceptance Test
+ * PD Pipeline — End-to-End Acceptance Test
  *
- * Verifies that all components of the Nocturnal reflection pipeline
+ * Verifies that all components of the PD reflection pipeline
  * work correctly in a real environment (not unit tests).
  *
  * Usage:
@@ -71,7 +71,7 @@ function main() {
     process.exit(1);
   }
 
-  console.log('\n🧪 Nocturnal Pipeline Acceptance Test');
+  console.log('\n🧪 PD Pipeline Acceptance Test');
   console.log('═'.repeat(55));
   console.log(`Workspace: ${workspaceDir}`);
   console.log(`Database:  ${dbPath}\n`);
