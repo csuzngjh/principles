@@ -33,7 +33,8 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
-import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
+import type { Implementation } from '../core/principle-tree-ledger.js';
+import type { ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 

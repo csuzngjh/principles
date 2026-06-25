@@ -19,7 +19,8 @@ import {
   updateImplementation,
   getAllowedTransitions,
 } from '../core/principle-tree-ledger.js';
-import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
+import type { Implementation } from '../core/principle-tree-ledger.js';
+import type { ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';

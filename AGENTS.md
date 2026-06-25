@@ -17,11 +17,20 @@ If a Linear issue or earlier doc instructs you to implement **Attribution Pipeli
 
 ### MVP Three Questions (mandatory for every new issue)
 
-Before opening a new Linear issue or starting a non-MVP-listed PR, answer all three:
+Before opening a new Linear issue or starting a non-MVP-listed PR, answer all four:
 
 1. **What happens if we DON'T do this?** Will anyone bring it up again 30 days from now? If you cannot answer, the issue is rejected.
 2. **How is it observed?** After implementation, how does the user verify it works? UI? CLI command? Log? If there is no observable path, the issue is rejected.
 3. **How is it disabled?** If after deployment we discover it's wrong, what's the disable path? Feature flag? PR revert? **Anything that requires PR revert MUST ship with a feature flag from day one.**
+4. **What emotional value does it deliver?** Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md). Which negative emotion does this feature reduce (失控感 / 疲惫感 / 不信任感 / 信息过载)? What positive feeling does it create (安心感 / 掌控感 / 沉淀感 / 清醒感)? If the feature only proves "it works" but cannot explain how it improves the Owner's psychological state, the feature design is incomplete.
+
+### Emotional Value Alignment
+
+[`docs/product/emotional-value.md`](docs/product/emotional-value.md) is PD's canonical emotional-value design guideline. Every agent working on PD features, PRDs, or spec designs MUST read it before writing proposals or code.
+
+Core promise: **把 Owner 面对 Agent 时的失控感、疲惫感、重复纠正感，转化为安心感、掌控感、沉淀感和清醒感。**
+
+Every feature design or PR must include an emotional-value assessment (see emotional-value.md §7). If this section is missing, the PR is incomplete.
 
 ### MVP-Core / MVP-Quiet / MVP-Gone Triage
 

@@ -5,58 +5,86 @@
  * from filesystem operations. This module has zero fs/path imports and
  * can be consumed by any layer without pulling in I/O dependencies.
  *
- * IMPORTANT: The Principle/Rule/Implementation/PrincipleValueMetrics types
- * defined here are the LEDGER versions (simpler, file-based). They differ
- * from the richer principle-schema.ts versions used by lifecycle computation.
- * They are intentionally separate to avoid coupling the ledger to schema
- * requirements that the file-based store does not enforce.
+ * PRI-459: The ledger `Principle` and its enums are now re-exported from the
+ * rich `principle-schema.ts` / `principle-enums.ts` SSOT. Historically the
+ * ledger declared its own narrower copy and the openclaw-plugin's
+ * `LedgerPrinciple` was built on the rich schema, so consumers (e.g.
+ * evolution-worker reading `compilationRetryCount`) depended on rich fields
+ * that the narrow ledger type silently lacked at the type level (the values
+ * survived at runtime via the codec's `{...value}` spread). Aligning the
+ * ledger type with the rich schema removes that drift: one Principle type,
+ * matching what the file actually stores. Rule/Implementation/PrincipleValue
+ * Metrics remain ledger-specific shapes.
  */
 
-export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
-export type PrinciplePriority = 'P0' | 'P1' | 'P2';
-export type PrincipleScope = 'general' | 'domain';
-export type PrincipleEvaluability = 'manual_only' | 'deterministic' | 'weak_heuristic';
+// Single source of truth for enums (principle-enums.ts) and the Principle
+// entity (principle-schema.ts). Principle is aligned with the rich schema
+// (PRI-459) because consumers read rich-only fields like compilationRetryCount.
+// Rule / Implementation / PrincipleValueMetrics stay ledger-specific narrow
+// shapes — they are intentionally looser than the rich schema (a candidate
+// implementation created at intake only has id/ruleId/lifecycleState), so the
+// codec can store partial entities.
+export type {
+  PrincipleStatus,
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  ImplementationLifecycleState,
+} from './principle-enums.js';
+export type { Principle } from './principle-schema.js';
 
-export interface Principle {
-  id: string;
-  version: number;
-  text: string;
-  triggerPattern: string;
-  action: string;
-  status: PrincipleStatus;
-  priority: PrinciplePriority;
-  scope: PrincipleScope;
-  evaluability: PrincipleEvaluability;
-  valueScore: number;
-  adherenceRate: number;
-  painPreventedCount: number;
-  derivedFromPainIds: string[];
-  ruleIds: string[];
-  conflictsWithPrincipleIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
+// Re-import for local use below (LedgerPrinciple extends Principle;
+// Implementation.lifecycleState uses ImplementationLifecycleState).
+import type { Principle } from './principle-schema.js';
+import type { ImplementationLifecycleState } from './principle-enums.js';
 
 export interface Rule {
   id: string;
   principleId: string;
-  ruleIds: string[];
+  // ruleIds = child rules (nesting). Leaf rules (the common case, e.g. a
+  // compiled gate) have none, so this is optional. parseRules in the codec
+  // normalizes absent → [].
+  ruleIds?: string[];
   implementationIds: string[];
   type?: string;
   status?: string;
   lifecycleState?: string;
   createdAt?: string;
   updatedAt?: string;
+  // PRI-459: rich-schema Rule fields that ledger consumers (bootstrap-rules,
+  // ledger-registrar, principle-lifecycle-service) write. Kept optional so the
+  // narrow ledger shape still allows minimal rule creation.
+  version?: number;
+  name?: string;
+  description?: string;
+  triggerCondition?: string;
+  enforcement?: string;
+  action?: string;
+  coverageRate?: number;
+  falsePositiveRate?: number;
 }
 
 export interface Implementation {
   id: string;
   ruleId: string;
   type?: string;
-  lifecycleState?: string;
+  lifecycleState?: ImplementationLifecycleState;
+  // PRI-459: rich-schema Implementation fields that ledger consumers
+  // (promote/rollback/archive/disable commands) read. Optional because a
+  // candidate implementation created at intake does not carry all of them.
+  previousActive?: string;
+  version?: string;
+  disabledReason?: string;
+  disabledAt?: string;
+  disabledBy?: string;
   [key: string]: unknown;
 }
 
+// NOTE: ledger PrincipleValueMetrics is intentionally PARTIAL (all metric
+// fields optional) — unlike the richer principle-value-metrics.ts version
+// used by lifecycle computation. A principle may have no metrics recorded
+// yet, so parseMetrics builds a partial object and the file stores whatever
+// subset exists. Do NOT align this with the required-field rich version.
 export interface PrincipleValueMetrics {
   principleId: string;
   painPreventedCount?: number;
@@ -73,6 +101,11 @@ export interface PrincipleValueMetrics {
 export interface LedgerPrinciple extends Principle {
   suggestedRules?: string[];
   lastTriggeredAt?: string;
+  // PRI-459: detector metadata is written by the evolution reducer and lives
+  // as a plugin-side structure (PrincipleDetectorSpec). Kept as unknown here so
+  // the core ledger type does not couple to the plugin type; the codec's
+  // {...value} spread preserves it on disk regardless.
+  detectorMetadata?: unknown;
 }
 
 export interface LedgerRule extends Rule {
