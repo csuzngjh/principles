@@ -205,6 +205,11 @@ async function doCheckForUpdates(currentVersion: string) {
     return {
       hasUpdate: false,
       currentVersion,
+      // Contract with the UI (UpdatePage.tsx) requires latestVersion to be a
+      // string. When the registry check fails we don't know the latest version,
+      // so emit an empty string to keep the response shape stable and let the
+      // UI surface `error` instead of crashing the whole page.
+      latestVersion: '',
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }

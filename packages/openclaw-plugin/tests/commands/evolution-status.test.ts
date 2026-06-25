@@ -231,16 +231,16 @@ describe('evolution commands', () => {
     const workflowsYaml = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
-      - name: dreamer_completed
-        eventType: nocturnal_dreamer_completed
-        eventCategory: completed
-        statsField: evolution.nocturnalDreamerCompleted
-      - name: artifact_persisted
-        eventType: nocturnal_artifact_persisted
-        eventCategory: completed
-        statsField: evolution.nocturnalArtifactPersisted
+      - name: diagnosis_task
+        eventType: diagnosis_task
+        eventCategory: written
+        statsField: evolution.diagnosisTasksWritten
+      - name: diagnostician_report
+        eventType: diagnostician_report
+        eventCategory: written
+        statsField: evolution.diagnosticianReportsWritten
   - workflowId: rulehost
     stages:
       - name: evaluated
@@ -255,8 +255,8 @@ funnels:
     writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
       [today]: {
         evolution: {
-          nocturnalDreamerCompleted: 3,
-          nocturnalArtifactPersisted: 2,
+          diagnosisTasksWritten: 3,
+          diagnosticianReportsWritten: 2,
           rulehostEvaluated: 15,
         },
       },
@@ -266,9 +266,9 @@ funnels:
       config: { workspaceDir: workspace, language: 'en' },
     } as any);
 
-    expect(result.text).toContain('Workflow Funnel: nocturnal');
-    expect(result.text).toMatch(/dreamer_completed: 3/);
-    expect(result.text).toMatch(/artifact_persisted: 2/);
+    expect(result.text).toContain('Workflow Funnel: diagnostician');
+    expect(result.text).toMatch(/diagnosis_task: 3/);
+    expect(result.text).toMatch(/diagnostician_report: 2/);
     expect(result.text).toContain('Workflow Funnel: rulehost');
     expect(result.text).toMatch(/evaluated: 15/);
   });
@@ -295,7 +295,7 @@ funnels:
     const badYaml = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
       - name: "unclosed string
 `;
@@ -318,19 +318,19 @@ funnels:
     const workflowsYaml = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
-      - name: 做梦完成
-        eventType: nocturnal_dreamer_completed
-        eventCategory: completed
-        statsField: evolution.nocturnalDreamerCompleted
+      - name: 诊断任务
+        eventType: diagnosis_task
+        eventCategory: written
+        statsField: evolution.diagnosisTasksWritten
 `;
     fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
 
     const today = new Date().toISOString().slice(0, 10);
     writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
       [today]: {
-        evolution: { nocturnalDreamerCompleted: 7 },
+        evolution: { diagnosisTasksWritten: 7 },
       },
     });
 
@@ -338,8 +338,8 @@ funnels:
       config: { workspaceDir: workspace, language: 'zh' },
     } as any);
 
-    expect(result.text).toContain('Workflow 漏斗: nocturnal');
-    expect(result.text).toMatch(/做梦完成: 7/);
+    expect(result.text).toContain('Workflow 漏斗: diagnostician');
+    expect(result.text).toMatch(/诊断任务: 7/);
   });
 });
 
@@ -357,16 +357,16 @@ describe('YAML funnel E2E integration tests', () => {
     const workflowsYaml = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
-      - name: dreamer_completed
-        eventType: nocturnal_dreamer_completed
-        eventCategory: completed
-        statsField: evolution.nocturnalDreamerCompleted
-      - name: artifact_persisted
-        eventType: nocturnal_artifact_persisted
-        eventCategory: completed
-        statsField: evolution.nocturnalArtifactPersisted
+      - name: diagnosis_task
+        eventType: diagnosis_task
+        eventCategory: written
+        statsField: evolution.diagnosisTasksWritten
+      - name: diagnostician_report
+        eventType: diagnostician_report
+        eventCategory: written
+        statsField: evolution.diagnosticianReportsWritten
   - workflowId: rulehost
     stages:
       - name: evaluated
@@ -382,8 +382,8 @@ funnels:
     writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
       [today]: {
         evolution: {
-          nocturnalDreamerCompleted: 3,
-          nocturnalArtifactPersisted: 2,
+          diagnosisTasksWritten: 3,
+          diagnosticianReportsWritten: 2,
           rulehostEvaluated: 15,
         },
       },
@@ -398,15 +398,15 @@ funnels:
     // Assert workflowFunnels structure
     expect(summary.workflowFunnels).toBeDefined();
     expect(summary.workflowFunnels!.length).toBe(2);
-    expect(summary.workflowFunnels![0].funnelKey).toBe('nocturnal');
-    expect(summary.workflowFunnels![0].stages[0].label).toBe('dreamer_completed');
+    expect(summary.workflowFunnels![0].funnelKey).toBe('diagnostician');
+    expect(summary.workflowFunnels![0].stages[0].label).toBe('diagnosis_task');
     expect(summary.workflowFunnels![0].stages[0].count).toBe(3);
-    expect(summary.workflowFunnels![0].stages[1].label).toBe('artifact_persisted');
+    expect(summary.workflowFunnels![0].stages[1].label).toBe('diagnostician_report');
     expect(summary.workflowFunnels![0].stages[1].count).toBe(2);
     expect(summary.workflowFunnels![1].funnelKey).toBe('rulehost');
     expect(summary.workflowFunnels![1].stages[0].label).toBe('evaluated');
     expect(summary.workflowFunnels![1].stages[0].count).toBe(15);
-    expect(summary.workflowFunnels![0].funnelLabel).toBe('nocturnal');
+    expect(summary.workflowFunnels![0].funnelLabel).toBe('diagnostician');
 
     // DEGRADED-01: valid YAML + valid stats → status ok, no funnel-related warnings
     expect(summary.metadata.status).toBe('ok');
@@ -460,12 +460,12 @@ funnels:
     const workflowsYamlV1 = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
       - name: original_label
-        eventType: nocturnal_dreamer_completed
-        eventCategory: completed
-        statsField: evolution.nocturnalDreamerCompleted
+        eventType: diagnosis_task
+        eventCategory: written
+        statsField: evolution.diagnosisTasksWritten
 `;
     const yamlPath = path.join(stateDir, 'workflows.yaml');
     fs.writeFileSync(yamlPath, workflowsYamlV1, 'utf8');
@@ -473,7 +473,7 @@ funnels:
 
     const today = new Date().toISOString().slice(0, 10);
     writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
-      [today]: { evolution: { nocturnalDreamerCompleted: 5 } },
+      [today]: { evolution: { diagnosisTasksWritten: 5 } },
     });
 
     // First call — should show original_label
@@ -488,12 +488,12 @@ funnels:
     const workflowsYamlV2 = `
 version: "1.0"
 funnels:
-  - workflowId: nocturnal
+  - workflowId: diagnostician
     stages:
       - name: modified_label
-        eventType: nocturnal_dreamer_completed
-        eventCategory: completed
-        statsField: evolution.nocturnalDreamerCompleted
+        eventType: diagnosis_task
+        eventCategory: written
+        statsField: evolution.diagnosisTasksWritten
 `;
     fs.writeFileSync(yamlPath, workflowsYamlV2, 'utf8');
     loader.load(); // trigger hot-reload manually
