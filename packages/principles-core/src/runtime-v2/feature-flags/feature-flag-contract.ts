@@ -139,6 +139,9 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // before invoking the pipeline; misconfigured agents fail the readiness gate.
   { id: 'code_rule_capability', category: 'core', enabled: true, since: '2026-06-18', description: 'Code-rule capability (atomic: ArtificerL2 + Evaluator) for RuleHost pipeline — MVP-Core, default ON (PRI-435)' },
 
+
+  // PRI-465: Intent Engineering MVP — default off; quiet flag.
+  { id: 'intent_engineering', category: 'quiet', enabled: false, since: '2026-06-25', description: 'INTENT.md-grounded constructive friction and Stage-A intent tension diagnosis (PRI-465). Default off; flag-off = no INTENT read, no prompt injection, no intentTension.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
