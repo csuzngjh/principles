@@ -46,22 +46,17 @@ vi.mock('@principles/core/runtime-v2', () => ({
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
-vi.mock('../../src/services/feature-flag-loader.js', () => ({
-  loadEffectiveFeatureFlags: vi.fn().mockReturnValue({
-    source: 'defaults',
-    configPath: '/fake/workspace/.pd/feature-flags.yaml',
-    flags: {
-      prompt: { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24' },
-      code_tool_hook: { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24' },
-      defer_archive: { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24' },
-      gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
-    },
-    warnings: [],
-  }),
+const { mockLoadPdConfig, mockComputeFlagsFromLoadResult } = vi.hoisted(() => ({
+  mockLoadPdConfig: vi.fn(),
+  mockComputeFlagsFromLoadResult: vi.fn(),
+}));
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: mockLoadPdConfig,
+  computeFlagsFromLoadResult: mockComputeFlagsFromLoadResult,
 }));
 
 import { runCanaryChecks } from '../../src/commands/runtime-canary.js';
-import { loadEffectiveFeatureFlags } from '../../src/services/feature-flag-loader.js';
 
 const WS = '/fake/workspace';
 
@@ -126,6 +121,26 @@ describe('runCanaryChecks', () => {
     mockAuditConsistency.mockResolvedValue({ status: 'ok', consumedCount: 0, orphanCandidateCount: 0, missingLedgerCount: 0 });
     mockBuildGfiSnapshot.mockReturnValue(healthyGfiSnapshot());
     mockClassifyGfiHealth.mockReturnValue({ status: 'healthy', reason: '0 active, 0 stale sessions', staleGfiDegradedThreshold: 40 });
+    // Default: GFI enabled, no warnings (canonical config loader)
+    mockLoadPdConfig.mockReturnValue({
+      ok: true,
+      effective: {},
+      source: 'defaults',
+      configPath: `${WS}/.pd/config.yaml`,
+      warnings: [],
+      legacyFilesDetected: [],
+      legacyFileNextActions: [],
+    });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
+      flags: {
+        prompt: { id: 'prompt', category: 'core', enabled: true },
+        code_tool_hook: { id: 'code_tool_hook', category: 'core', enabled: true },
+        defer_archive: { id: 'defer_archive', category: 'core', enabled: true },
+        gfi: { id: 'gfi', category: 'quiet', enabled: true },
+      },
+      enabledChannels: ['prompt', 'code_tool_hook', 'defer_archive'],
+      warnings: [],
+    });
   });
 
   it('returns healthy when all checks are healthy', async () => {
@@ -275,12 +290,11 @@ describe('runCanaryChecks', () => {
 
   describe('GFI config warning degraded status', () => {
     it('returns healthy when GFI disabled with no warnings', async () => {
-      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
-        source: 'defaults',
-        configPath: `${WS}/.pd/feature-flags.yaml`,
+      mockComputeFlagsFromLoadResult.mockReturnValue({
         flags: {
-          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+          gfi: { id: 'gfi', category: 'quiet', enabled: false },
         },
+        enabledChannels: [],
         warnings: [],
       });
 
@@ -292,13 +306,12 @@ describe('runCanaryChecks', () => {
     });
 
     it('returns degraded when GFI disabled but config has warnings (malformed YAML)', async () => {
-      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
-        source: 'defaults',
-        configPath: `${WS}/.pd/feature-flags.yaml`,
+      mockComputeFlagsFromLoadResult.mockReturnValue({
         flags: {
-          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+          gfi: { id: 'gfi', category: 'quiet', enabled: false },
         },
-        warnings: ['feature-flags.yaml: YAML parse error, using defaults'],
+        enabledChannels: [],
+        warnings: ['.pd/config.yaml: YAML parse error, using defaults'],
       });
 
       const result = await runCanaryChecks(WS);
@@ -307,16 +320,15 @@ describe('runCanaryChecks', () => {
       expect(gfiCheck?.status).toBe('degraded');
       expect(gfiCheck?.summary).toContain('warnings');
       expect(gfiCheck?.details).toBeDefined();
-      expect(result.recommendedNextActions.some(a => a.includes('feature-flags.yaml'))).toBe(true);
+      expect(result.recommendedNextActions.some(a => a.includes('config.yaml'))).toBe(true);
     });
 
     it('returns degraded when GFI disabled but config has malformed override warning', async () => {
-      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
-        source: 'workspace_file',
-        configPath: `${WS}/.pd/feature-flags.yaml`,
+      mockComputeFlagsFromLoadResult.mockReturnValue({
         flags: {
-          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+          gfi: { id: 'gfi', category: 'quiet', enabled: false },
         },
+        enabledChannels: [],
         warnings: ["flag 'gfi': malformed override kept default (enabled must be boolean)"],
       });
 
@@ -324,16 +336,15 @@ describe('runCanaryChecks', () => {
       const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
 
       expect(gfiCheck?.status).toBe('degraded');
-      expect(result.recommendedNextActions.some(a => a.includes('feature-flags.yaml') || a.includes('pd runtime features'))).toBe(true);
+      expect(result.recommendedNextActions.some(a => a.includes('config.yaml') || a.includes('pd runtime features'))).toBe(true);
     });
 
     it('runs GFI snapshot when flag enabled with no warnings', async () => {
-      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
-        source: 'workspace_file',
-        configPath: `${WS}/.pd/feature-flags.yaml`,
+      mockComputeFlagsFromLoadResult.mockReturnValue({
         flags: {
-          gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
+          gfi: { id: 'gfi', category: 'quiet', enabled: true },
         },
+        enabledChannels: [],
         warnings: [],
       });
 
@@ -346,12 +357,11 @@ describe('runCanaryChecks', () => {
     });
 
     it('recommends session lifecycle review for GFI session issues (not config)', async () => {
-      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
-        source: 'defaults',
-        configPath: `${WS}/.pd/feature-flags.yaml`,
+      mockComputeFlagsFromLoadResult.mockReturnValue({
         flags: {
-          gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
+          gfi: { id: 'gfi', category: 'quiet', enabled: true },
         },
+        enabledChannels: [],
         warnings: [],
       });
       mockClassifyGfiHealth.mockReturnValue({

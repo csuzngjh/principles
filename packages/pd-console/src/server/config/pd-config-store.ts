@@ -20,6 +20,7 @@ import yaml from 'js-yaml';
 import {
   validatePdConfig,
   computeEffectivePdConfig,
+  computeFeatureFlagsFromConfig,
   redactPdConfig,
   checkAgentRuntimeReadiness,
   resolveAgentRuntimeBinding,
@@ -32,6 +33,7 @@ import type {
   InternalAgentName,
   AgentRuntimeReadinessResult,
   RuntimeProfile,
+  FeatureFlagsResult,
 } from '@principles/core/runtime-v2';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -313,6 +315,18 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
     configPath,
     warnings: effective.warnings,
   };
+}
+
+// ── Feature Flags from Config ────────────────────────────────────────────────
+
+/**
+ * Compute feature flags from the loaded PD config (PRI-460).
+ * Works with both ok and error results (uses defaults for errors).
+ * Replaces the legacy `loadWorkspaceFeatureFlags` + `buildFeedbackChannelFlags` path.
+ */
+export function computeFlagsFromLoadResult(result: ConfigLoadResult): FeatureFlagsResult {
+  const effective = result.ok ? result.effective : result.defaults;
+  return computeFeatureFlagsFromConfig(effective);
 }
 
 // ── Get Redacted Summary ─────────────────────────────────────────────────────
