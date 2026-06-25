@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as yaml from 'js-yaml';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleIntentRoute, disposeIntentModels } from '../../../src/server/routes/intent.js';
+import * as pdConfigStore from '../../../src/server/config/pd-config-store.js';
 
 let workspaceDir: string;
 let pdDir: string;
@@ -185,5 +186,56 @@ describe('Intent route — flag-on', () => {
     expect(parsed.data.ok).toBe(true);
     const warnings = parsed.data.warnings as unknown[];
     expect(warnings.length).toBe(4);
+  });
+});
+
+describe('Intent route — model cache', () => {
+  it('returns cached model on second request within TTL', async () => {
+    writeConfig(true);
+    writeIntent(VALID_INTENT);
+    // First request — cache miss, creates model
+    const res1 = makeRes();
+    await handleIntentRoute(makeReq('GET'), res1, workspaceDir);
+    const parsed1 = parseBody(res1);
+    expect(parsed1.data.ok).toBe(true);
+
+    // Second request — cache hit (same workspaceDir, within TTL)
+    const res2 = makeRes();
+    await handleIntentRoute(makeReq('GET'), res2, workspaceDir);
+    const parsed2 = parseBody(res2);
+    expect(parsed2.data.ok).toBe(true);
+    expect(parsed2.data.contentHash).toBe(parsed1.data.contentHash);
+  });
+});
+
+describe('Intent route — error path (catch block)', () => {
+  it('returns 500 when loadPdConfig throws an Error', async () => {
+    const spy = vi.spyOn(pdConfigStore, 'loadPdConfig');
+    spy.mockImplementation(() => { throw new Error('config corruption'); });
+    try {
+      const res = makeRes();
+      await handleIntentRoute(makeReq('GET'), res, workspaceDir);
+      expect(getStatus(res)).toBe(500);
+      const body = JSON.parse(getBody(res)) as { error: string; message: string };
+      expect(body.error).toBe('intent_route_error');
+      expect(body.message).toContain('config corruption');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('returns 500 with "Unknown error" for non-Error throw', async () => {
+    const spy = vi.spyOn(pdConfigStore, 'loadPdConfig');
+    spy.mockImplementation(() => { throw 'string error'; });
+    try {
+      const res = makeRes();
+      await handleIntentRoute(makeReq('GET'), res, workspaceDir);
+      expect(getStatus(res)).toBe(500);
+      const body = JSON.parse(getBody(res)) as { error: string; message: string };
+      expect(body.error).toBe('intent_route_error');
+      expect(body.message).toBe('Unknown error');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

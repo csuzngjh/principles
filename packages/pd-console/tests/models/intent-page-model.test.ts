@@ -139,4 +139,18 @@ describe('IntentPageModel — never-throws contract', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBeDefined();
   });
+
+  it('returns read_error when INTENT.md is a directory (readFileSync throws EISDIR)', async () => {
+    // Create a directory at the INTENT.md path: existsSync returns true,
+    // statSync succeeds (small size), but readFileSync throws EISDIR.
+    // This triggers the catch block in getSummary().
+    fs.mkdirSync(path.join(principlesDir, 'INTENT.md'), { recursive: true });
+    const model = new IntentPageModel(workspaceDir);
+    const result = await model.getSummary(true);
+    expect(result.ok).toBe(false);
+    expect(result.found).toBe(false);
+    expect(result.flagEnabled).toBe(true);
+    expect(result.reason).toBe('read_error');
+    expect(result.nextAction).toBeDefined();
+  });
 });
