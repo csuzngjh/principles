@@ -1027,14 +1027,16 @@ export async function handleBeforePromptBuild(
 
   // ──── 8. SIZE GUARD ────
   // Delegates to @principles/core/prompt-builder/truncateInjectionToBudget
-  // which handles priority stripping: project_context → thinking_os →
-  // evolution_principles → reflection_log → reason: truncation → fallback.
+  // which handles priority stripping: project_context → intent_block →
+  // thinking_os → evolution_principles → reflection_log → reason: truncation → fallback.
+  // PRI-467: intentBlockContent is passed so the guard can strip INTENT by
+  // exact match before falling back to the nuclear option.
   const result = truncateInjectionToBudget(
     prependSystemContext,
     prependContext,
     appendSystemContext,
     {
-      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
+      blocks: { projectContextContent, intentBlockContent, thinkingOsContent, evolutionPrinciplesContent },
     }
   );
 

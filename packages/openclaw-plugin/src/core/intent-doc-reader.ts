@@ -212,6 +212,24 @@ export function safeReadIntentDoc(
     }
 
     const raw = fs.readFileSync(filePath, 'utf8');
+
+    // PRI-467 review fix (P2): TOCTOU guard — re-check actual byte length
+    // after readFileSync. The file may have grown between statSync() and
+    // readFileSync(), bypassing the stat.size oversized check. Without this,
+    // an oversized file would enter parse/hash/cache as ok:true.
+    const actualBytes = Buffer.byteLength(raw, 'utf8');
+    if (actualBytes > INTENT_MAX_BYTES) {
+      _intentDocCache.delete(workspaceDir);
+      return {
+        ok: false,
+        found: true,
+        flagEnabled: true,
+        reason: 'oversized',
+        nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${actualBytes} bytes after read). Reduce content.`,
+        warnings: [],
+      };
+    }
+
     const doc = buildDocFromRaw(raw, filePath, new Date(now).toISOString());
 
     // Update cache

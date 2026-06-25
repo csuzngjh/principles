@@ -151,10 +151,29 @@ vi.mock('../../src/hooks/message-sanitize.js', () => ({
 }));
 
 vi.mock('../../src/core/runtime-v2-prompt-activation-reader.js', () => ({
+  // PRI-467 review fix (P2): production code calls readActivatedPrinciples(),
+  // not readActivations(). The previous mock name mismatch silently passed
+  // because the prompt hook catch-and-continue masked the undefined method.
   PromptActivationReader: vi.fn().mockImplementation(() => ({
-    readActivations: vi.fn().mockReturnValue({ principles: [], warnings: [] }),
+    readActivatedPrinciples: vi.fn().mockResolvedValue({ principles: [], warnings: [], source: 'runtime_v2' }),
   })),
 }));
+
+// PRI-467 review fix (P3): partially mock intent-doc-reader so the flag-off
+// test can assert safeReadIntentDoc was never called (SPEC §5: flag off → no
+// fs access). importOriginal preserves the real implementation for flag-on
+// tests that need real fs reads.
+const _safeReadIntentDocCalls: Array<{ workspaceDir: string; flagEnabledHint?: boolean }> = [];
+vi.mock('../../src/core/intent-doc-reader.js', async (importOriginal) => {
+  const actual = await importOriginal() as typeof import('../../src/core/intent-doc-reader.js');
+  return {
+    ...actual,
+    safeReadIntentDoc: (workspaceDir: string, options?: { logger?: unknown }) => {
+      _safeReadIntentDocCalls.push({ workspaceDir });
+      return actual.safeReadIntentDoc(workspaceDir, options);
+    },
+  };
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -246,9 +265,16 @@ afterEach(async () => {
 
 describe('PRI-467: INTENT.md prompt injection production path', () => {
   // SPEC §23.11 case 2: flag off → does not call safeReadIntentDoc
-  it('flag off: no <intent_anchor> in output, no fs access to INTENT.md', async () => {
+  it('flag off: no <intent_anchor> in output, safeReadIntentDoc not called', async () => {
     writeConfig(workspaceDir, false);
     // Do NOT write INTENT.md — proves flag off short-circuits before fs
+    // PRI-467 review fix (P3): the prompt hook has an outer flag check at
+    // line 984 (loadFeatureFlagFromConfig). When flag is off, safeReadIntentDoc
+    // must NOT be called at all — not even its own internal flag check.
+    // This test asserts the outer guard works. Without this assertion, even
+    // if the outer guard were deleted, safeReadIntentDoc's own flag_disabled
+    // return would make the test pass (false positive).
+    _safeReadIntentDocCalls.length = 0;
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(
       makeEvent() as never,
@@ -258,6 +284,13 @@ describe('PRI-467: INTENT.md prompt injection production path', () => {
     expect(combined).not.toContain('<intent_anchor>');
     expect(combined).not.toContain('<intent_doc>');
     expect(combined).not.toContain('<intent_friction>');
+    // SPEC §5: flag off → safeReadIntentDoc must NOT be called.
+    // The prompt hook's outer flag check (loadFeatureFlagFromConfig) must
+    // short-circuit before reaching the reader.
+    const callsForThisWorkspace = _safeReadIntentDocCalls.filter(
+      (c) => c.workspaceDir === workspaceDir,
+    );
+    expect(callsForThisWorkspace).toHaveLength(0);
   });
 
   // SPEC §23.11 case 3: flag on + missing INTENT.md → no injection, no crash
