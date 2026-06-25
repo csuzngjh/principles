@@ -233,15 +233,8 @@ export function resolveRuleHostReadiness(
   const { effective } = configLoadResult;
 
   // ── Step 2: Check required agents (dreamer, philosopher, scribe) ──
-  // Build agentStatuses with all 5 keys from the start to avoid `as` casts.
-  const unchecked: AgentReadiness = { status: 'not_ready', reason: 'not checked' };
-  const agentStatuses: AgentStatusesMap = {
-    dreamer: unchecked,
-    philosopher: unchecked,
-    scribe: unchecked,
-    artificer: unchecked,
-    evaluator: unchecked,
-  };
+  // Start with all 5 keys set to 'not checked'; updated as each agent is checked.
+  const agentStatuses: AgentStatusesMap = emptyAgentStatuses();
   const requiredFailures: string[] = [];
 
   for (const agentName of REQUIRED_AGENTS) {
