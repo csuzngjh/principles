@@ -48,7 +48,6 @@ import { CorrectionObserverService } from './service/correction-observer-service
 import { InternalizationAutoConsumerService } from './service/internalization-auto-consumer-service.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
-import { CentralSyncService } from './service/central-sync-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { migrateStaleWorkspaceGuidance } from './core/workspace-guidance-migrator.js';
@@ -512,8 +511,6 @@ const plugin = {
       if (guardedTrajectory) api.registerService(guardedTrajectory);
       const guardedPdTask = guardService('service:pd-task', PDTaskService, api.logger);
       if (guardedPdTask) api.registerService(guardedPdTask);
-      const guardedCentralSync = guardService('service:central-sync', CentralSyncService, api.logger);
-      if (guardedCentralSync) api.registerService(guardedCentralSync);
       const guardedAutoConsumer = guardService('service:internalization-auto-consumer', InternalizationAutoConsumerService, api.logger);
       if (guardedAutoConsumer) api.registerService(guardedAutoConsumer);
     } catch (err) {
@@ -842,7 +839,10 @@ const plugin = {
   }
 };
 
-export { PrincipleTreeLedgerAdapter } from './core/principle-tree-ledger-adapter.js';
+// PrincipleTreeLedgerAdapter is exported from @principles/core/runtime-v2 (canonical,
+// consolidated in PRI-459). The plugin-local duplicate was removed; re-export the core
+// symbol so any external consumer importing from the plugin still resolves it.
+export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 /* istanbul ignore next — test exports for evolution worker gate */
 export { loadFeatureFlagFromWorkspace, isRecord };
 
