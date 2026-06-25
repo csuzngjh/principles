@@ -377,7 +377,6 @@ PD 系统有 5 类组件：
 | `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（历史策略） | 空闲检测策略 + wakeOnce 决策 | ⚠️ 退役目标；不再建设 plugin 宿主适配 |
 | `TrajectoryService` | 🔵 Service | plugin | `service/trajectory-service.ts` | 轨迹存储 | ✅ |
 | `PDTaskService` | 🔵 Service | plugin | `core/pd-task-service.ts` | 后台任务调度 | ⚠️ 部分实现 |
-| `CentralSyncService` | 🔵 Service | plugin | `service/central-sync-service.ts` | 跨工作区同步 | ✅ |
 | `KeywordOptimizationService` | 🔵 Service | plugin | `service/keyword-optimization-service.ts` | empathy 关键词优化 | ✅ |
 | `MonitoringQueryService` | 🔵 Service | plugin | `service/monitoring-query-service.ts` | 监控查询 | ✅ |
 | `RuntimeSummaryService` | 🔵 Service | plugin | `service/runtime-summary-service.ts` | 运行时摘要 | ✅ |
@@ -451,7 +450,7 @@ PD 系统有 5 类组件：
 | `pd activation status` | `pd-cli/commands/activation.ts` | artifactId | activation status | ❌ 待建 |
 | `pd legacy-import` | `pd-cli/commands/legacy-import.ts` | nocturnal artifacts | imported count | ✅ |
 | `pd legacy-cleanup` | `pd-cli/commands/legacy-cleanup.ts` | n/a | cleaned count | ✅ |
-| `pd central-sync` | `pd-cli/commands/central-sync.ts` | n/a | sync result | ❌ MVP-Gone (PRI-455: CLI command removed; service code retained as MVP-Quiet) |
+| `pd central-sync` | `pd-cli/commands/central-sync.ts` | n/a | sync result | ❌ MVP-Gone (PRI-455: CLI command + service deleted; cross-workspace sync not in MVP scope) |
 | `pd samples list / review` | `pd-cli/commands/samples-*.ts` | filter | samples | ✅ |
 | `pd remediation output` | `pd-cli/commands/remediation-output.ts` | n/a | remediation list | ✅ |
 | `pd evolution-tasks list / show` | `pd-cli/commands/evolution-tasks-*.ts` | n/a | evolution tasks | ✅ |

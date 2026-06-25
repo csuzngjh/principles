@@ -146,7 +146,6 @@ describe('PRI-294: Surface registry coverage audit', () => {
     'service:correction-observer',
     'service:trajectory',
     'service:pd-task',
-    'service:central-sync',
   ];
 
   for (const surfaceId of USED_SURFACE_IDS) {

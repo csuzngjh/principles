@@ -8,7 +8,6 @@
 import { EventLogService } from '../src/core/event-log.js';
 import { disposeAllEvolutionLoggers } from '../src/core/evolution-logger.js';
 import { disposeAllEvolutionEngines } from '../src/core/evolution-engine.js';
-import { resetCentralDatabase } from '../src/service/central-database.js';
 import { WorkspaceContext } from '../src/core/workspace-context.js';
 import { TrajectoryRegistry } from '../src/core/trajectory.js';
 
@@ -25,9 +24,6 @@ export default function globalSetup() {
 
     // Close all EvolutionEngine instances
     disposeAllEvolutionEngines();
-
-    // Reset CentralDatabase singleton
-    resetCentralDatabase();
 
     // Clear WorkspaceContext cache (closes TrajectoryDatabase instances)
     WorkspaceContext.clearCache();

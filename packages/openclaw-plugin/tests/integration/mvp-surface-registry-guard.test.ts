@@ -242,7 +242,6 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
 
       const registeredIds = registrations.map(r => r.surfaceId).sort();
       const expectedIds = [
-        'service:central-sync',
         'service:correction-observer',
         'service:internalization-auto-consumer',
         'service:pd-task',
@@ -313,13 +312,6 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
         expect(hook.category).toBe('quiet');
         expect(hook.enabledByDefault).toBe(false);
       }
-    });
-
-    it('central-sync service is MVP-Quiet (ADR-0014 §2.5: single workspace)', () => {
-      const centralSync = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:central-sync');
-      expect(centralSync).toBeDefined();
-      expect(centralSync!.category).toBe('quiet');
-      expect(centralSync!.enabledByDefault).toBe(false);
     });
   });
 

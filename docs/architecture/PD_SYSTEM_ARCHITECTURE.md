@@ -270,7 +270,6 @@ packages/openclaw-plugin/src/
 │   ├── idle-trigger.ts              ← legacy retirement target；不新增宿主调度适配
 │   ├── evolution-worker.ts          ← legacy cutover/delete target
 │   ├── trajectory-service.ts
-│   ├── central-sync-service.ts
 │   ├── monitoring-query-service.ts
 │   ├── workflow-watchdog.ts
 │   ├── runtime-summary-service.ts
@@ -372,7 +371,6 @@ packages/pd-cli/src/
 │   ├── activation.ts                ★ 待建（pd activation list/status）
 │   ├── evolution-tasks-*.ts
 │   ├── remediation-output.ts
-│   ├── central-sync.ts
 │   ├── legacy-import.ts             ← 历史数据迁移
 │   └── legacy-cleanup.ts
 └── legacy/                          ← 待清理的旧代码
