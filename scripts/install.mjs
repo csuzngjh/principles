@@ -340,28 +340,39 @@ function installPdConsole(args) {
     process.exit(1);
   }
 
-  // Clean existing installation
-  if (existsSync(INSTALL_CONSOLE_DIR) && args.force) {
-    rmSync(INSTALL_CONSOLE_DIR, { recursive: true, force: true });
-  } else if (existsSync(INSTALL_CONSOLE_DIR)) {
-    const installedVersion = getVersion(INSTALL_CONSOLE_DIR);
-    const sourceVersion = getVersion(PD_CONSOLE_SOURCE_DIR);
-    if (installedVersion && sourceVersion && installedVersion !== sourceVersion) {
-      console.log(`\n⚠️  pd-console already installed: v${installedVersion}, source: v${sourceVersion}`);
-      console.log('   Use --force to overwrite');
-      console.log('   Skipping pd-console installation');
-      return;
-    }
-  }
-
   mkdirSync(INSTALL_CONSOLE_DIR, { recursive: true });
   mkdirSync(INSTALL_BIN_DIR, { recursive: true });
 
-  // Copy dist
+  // Copy dist with Windows EPERM resilience
   const sourceDist = join(PD_CONSOLE_SOURCE_DIR, 'dist');
   const targetDist = join(INSTALL_CONSOLE_DIR, 'dist');
-  if (existsSync(targetDist)) rmSync(targetDist, { recursive: true, force: true });
-  cpSync(sourceDist, targetDist, { recursive: true });
+
+  // Best-effort cleanup: EPERM can't block installation — will overwrite in place
+  try {
+    if (existsSync(targetDist)) rmSync(targetDist, { recursive: true, force: true });
+  } catch {
+    console.log('  ⚠️  Could not remove old dist (EPERM), will overwrite in place.');
+  }
+
+  // Retry loop for cpSync (Windows file lock resilience)
+  const maxRetries = 3;
+  let copied = false;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      cpSync(sourceDist, targetDist, { recursive: true });
+      copied = true;
+      break;
+    } catch (e) {
+      if (attempt < maxRetries) {
+        console.log(`  ⚠️  Copy attempt ${attempt}/${maxRetries} failed, retrying in 2s...`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+      }
+    }
+  }
+  if (!copied) {
+    console.error('❌ Failed to copy pd-console dist after 3 retries');
+    process.exit(1);
+  }
   console.log('  📄 dist/');
 
   // Copy minimal package.json (for reference only)
@@ -446,14 +457,15 @@ function installPdConsole(args) {
 
 function verifyPdConsole() {
   const serverEntry = join(INSTALL_CONSOLE_DIR, 'dist', 'server.js');
-  if (!existsSync(serverEntry)) {
-    console.error('❌ pd-console server entry not found after installation');
+  if (!existsSync(serverEntry) || lstatSync(serverEntry).size === 0) {
+    console.error('❌ pd-console server entry not found or empty after installation');
     process.exit(1);
   }
 
-  // Verify UI dist
-  if (!existsSync(join(INSTALL_CONSOLE_DIR, 'dist', 'web', 'index.html'))) {
-    console.error('❌ pd-console UI dist not found');
+  // Verify UI dist is non-empty
+  const indexPath = join(INSTALL_CONSOLE_DIR, 'dist', 'web', 'index.html');
+  if (!existsSync(indexPath) || lstatSync(indexPath).size === 0) {
+    console.error('❌ pd-console UI dist not found or empty');
     process.exit(1);
   }
 
@@ -496,6 +508,15 @@ function main() {
   if (!args.skipConsole) {
     installPdConsole(args);
     verifyPdConsole();
+
+    // Post-restart safety net: Gateway restart (inside sync-plugin.mjs, before console install)
+    // releases Windows file locks asynchronously. Verify console survived the restart.
+    const serverEntry = join(INSTALL_CONSOLE_DIR, 'dist', 'server.js');
+    if (!existsSync(serverEntry) || lstatSync(serverEntry).size === 0) {
+      console.log('\n⚠️  Console dist missing after Gateway restart — reinstalling...');
+      installPdConsole({ ...args, force: true });
+      verifyPdConsole();
+    }
   }
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
