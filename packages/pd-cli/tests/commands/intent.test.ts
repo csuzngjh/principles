@@ -89,8 +89,8 @@ Validate the smallest loop: Pain to Principle to Delta.
 // ── handleIntentInit ─────────────────────────────────────────────────────────
 
 describe('handleIntentInit', () => {
-  it('creates INTENT.md from template', async () => {
-    await handleIntentInit({ workspace: workspaceDir, json: false });
+  it('creates INTENT.md from template with --confirm', async () => {
+    await handleIntentInit({ workspace: workspaceDir, confirm: true, json: false });
 
     const intentPath = getIntentPath();
     expect(fs.existsSync(intentPath)).toBe(true);
@@ -100,13 +100,54 @@ describe('handleIntentInit', () => {
     expect(content).toContain('## 5. Current Strategic Focus');
   });
 
+  it('defaults to dry-run (does not write) when no --confirm', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await handleIntentInit({ workspace: workspaceDir, json: true });
+
+    expect(logSpy).toHaveBeenCalled();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.status).toBe('dry_run');
+    expect(jsonOutput.path).toContain('INTENT.md');
+    expect(jsonOutput.reason).toBe('dry_run');
+    expect(jsonOutput.nextAction).toContain('--confirm');
+
+    // File must NOT be created
+    expect(fs.existsSync(getIntentPath())).toBe(false);
+
+    logSpy.mockRestore();
+  });
+
+  it('dry-run with --dry-run flag produces same dry-run output', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await handleIntentInit({ workspace: workspaceDir, dryRun: true, json: true });
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.status).toBe('dry_run');
+
+    expect(fs.existsSync(getIntentPath())).toBe(false);
+    logSpy.mockRestore();
+  });
+
+  it('rejects --dry-run and --confirm together (CLI Gate rule 4)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    await handleIntentInit({ workspace: workspaceDir, dryRun: true, confirm: true, json: true });
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    // File must NOT be created
+    expect(fs.existsSync(getIntentPath())).toBe(false);
+
+    process.exitCode = undefined;
+    exitSpy.mockRestore();
+  });
+
   it('skips when file exists and --force is not set', async () => {
     // Pre-create the file
     fs.mkdirSync(path.dirname(getIntentPath()), { recursive: true });
     fs.writeFileSync(getIntentPath(), 'existing content', 'utf8');
 
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    await handleIntentInit({ workspace: workspaceDir, force: false, json: false });
+    await handleIntentInit({ workspace: workspaceDir, force: false, confirm: true, json: false });
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
 
@@ -118,20 +159,20 @@ describe('handleIntentInit', () => {
     exitSpy.mockRestore();
   });
 
-  it('overwrites when --force is set', async () => {
+  it('overwrites when --force and --confirm are set', async () => {
     fs.mkdirSync(path.dirname(getIntentPath()), { recursive: true });
     fs.writeFileSync(getIntentPath(), 'existing content', 'utf8');
 
-    await handleIntentInit({ workspace: workspaceDir, force: true, json: false });
+    await handleIntentInit({ workspace: workspaceDir, force: true, confirm: true, json: false });
 
     const content = fs.readFileSync(getIntentPath(), 'utf8');
     expect(content).toContain('# INTENT.md');
     expect(content).not.toContain('existing content');
   });
 
-  it('outputs JSON when --json is set', async () => {
+  it('outputs JSON when --json is set with --confirm', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    await handleIntentInit({ workspace: workspaceDir, json: true });
+    await handleIntentInit({ workspace: workspaceDir, confirm: true, json: true });
 
     expect(logSpy).toHaveBeenCalled();
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
@@ -143,7 +184,7 @@ describe('handleIntentInit', () => {
   });
 
   it('creates .principles directory if it does not exist', async () => {
-    await handleIntentInit({ workspace: workspaceDir, json: false });
+    await handleIntentInit({ workspace: workspaceDir, confirm: true, json: false });
 
     const dir = path.join(workspaceDir, '.principles');
     expect(fs.existsSync(dir)).toBe(true);

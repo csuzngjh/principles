@@ -645,6 +645,18 @@
       "eyebrow": "Owner Intent",
       "title": "Owner Intent Document",
       "subtitle": "A single-page anchor for what the owner wants, what must not be violated, and where to escalate. Read by PD only when the intent_engineering flag is on.",
+      "flagStatus": {
+        "enabled": "Flag on",
+        "disabled": "Flag off",
+        "ariaLabel": "intent_engineering feature flag status"
+      },
+      "editEntry": {
+        "heading": "Edit INTENT.md",
+        "title": "Owner-owned document",
+        "description": "PD never modifies this file. Edit it in your own editor to declare or revise your intent.",
+        "copy": "Copy path",
+        "copyAriaLabel": "Copy INTENT.md file path to clipboard"
+      },
       "flagDisabled": {
         "title": "Intent Engineering is off",
         "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state.",
@@ -672,11 +684,14 @@
         "empty": "No warnings. INTENT.md is well-formed.",
         "missing_section": "Missing section",
         "empty_section": "Empty section",
-        "too_vague": "Section too vague (under 10 characters)"
+        "too_vague": "Section too vague (under 10 characters)",
+        "oversized": "Document exceeds 32KB cap",
+        "parse_failed": "Section failed to parse"
       },
       "meta": {
         "lastEditedAt": "Last edited",
         "contentHash": "Content hash",
+        "path": "Path",
         "templateTitle": "INTENT.md Template",
         "templateDescription": "Copy this into .principles/INTENT.md. Replace placeholders with your intent."
       },

@@ -645,6 +645,18 @@
       "eyebrow": "拥有者意图",
       "title": "拥有者意图文档",
       "subtitle": "单页锚点，记录拥有者的目标、不可违背的边界、以及何时应当停止并升级。仅当 intent_engineering 标志开启时，PD 才会读取此文档。",
+      "flagStatus": {
+        "enabled": "标志已开启",
+        "disabled": "标志已关闭",
+        "ariaLabel": "intent_engineering 功能标志状态"
+      },
+      "editEntry": {
+        "heading": "编辑 INTENT.md",
+        "title": "拥有者自有文档",
+        "description": "PD 不会修改此文件。请在自己的编辑器中编辑，以声明或修订你的意图。",
+        "copy": "复制路径",
+        "copyAriaLabel": "复制 INTENT.md 文件路径到剪贴板"
+      },
       "flagDisabled": {
         "title": "意图工程已关闭",
         "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。",
@@ -672,11 +684,14 @@
         "empty": "无告警。INTENT.md 格式良好。",
         "missing_section": "缺失章节",
         "empty_section": "章节为空",
-        "too_vague": "章节过于简略（少于 10 个字符）"
+        "too_vague": "章节过于简略（少于 10 个字符）",
+        "oversized": "文档超过 32KB 上限",
+        "parse_failed": "章节解析失败"
       },
       "meta": {
         "lastEditedAt": "上次编辑",
         "contentHash": "内容哈希",
+        "path": "路径",
         "templateTitle": "INTENT.md 模板",
         "templateDescription": "将以下内容复制到 .principles/INTENT.md，将占位符替换为你的意图。"
       },

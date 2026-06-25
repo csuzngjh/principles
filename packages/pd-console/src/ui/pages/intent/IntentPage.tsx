@@ -12,6 +12,65 @@ type PageState = "loading" | "loaded" | "error";
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function FlagStatusBadge({ enabled }: { enabled: boolean }) {
+  const { t } = useTranslation();
+  // SPEC §22.1.1: Intent Page must show intent_engineering flag status.
+  // Badge has a text label, not color-only (SPEC §23.14.10).
+  const label = enabled
+    ? t("pages.intent.flagStatus.enabled")
+    : t("pages.intent.flagStatus.disabled");
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[3px] text-[11px] font-mono border ${
+        enabled
+          ? "border-emerald/40 text-emerald bg-emerald/5"
+          : "border-line text-ink-3 bg-surface"
+      }`}
+      role="status"
+      aria-label={t("pages.intent.flagStatus.ariaLabel")}
+    >
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${enabled ? "bg-emerald" : "bg-ink-4"}`}
+        aria-hidden="true"
+      />
+      {label}
+    </span>
+  );
+}
+
+function EditEntry({ filePath }: { filePath: string }) {
+  const { t } = useTranslation();
+  // SPEC §22.1.1 line 1402: Intent Page must show "edit INTENT.md 入口".
+  // INTENT.md is Owner-owned; PD never auto-modifies it. This entry only
+  // surfaces the file path so the Owner can edit it in their own editor.
+  return (
+    <div className="bg-panel border border-line rounded-[6px] p-4">
+      <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+        {t("pages.intent.editEntry.title")}
+      </h3>
+      <p className="text-ink-3 text-[13px] leading-relaxed mb-2">
+        {t("pages.intent.editEntry.description")}
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-2 py-1 break-all">
+          {filePath}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            // Copy to clipboard — Owner pastes into their editor.
+            void navigator.clipboard?.writeText(filePath);
+          }}
+          className="shrink-0 border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[11px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          aria-label={t("pages.intent.editEntry.copyAriaLabel")}
+        >
+          {t("pages.intent.editEntry.copy")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FlagDisabledBanner() {
   const { t } = useTranslation();
   return (
@@ -65,15 +124,17 @@ function OversizedBanner() {
 
 function WarningItem({ warning }: { warning: IntentDocWarningData }) {
   const { t } = useTranslation();
+  // SPEC: warnings are rendered as governance hints via i18n code key,
+  // not raw server-side English message text (P2 i18n fix).
+  const labelKey = `pages.intent.warnings.${warning.code}`;
   return (
     <li className="flex items-start gap-2 text-ink-2 text-[13px]">
       <span className="text-amber shrink-0 mt-0.5" aria-hidden="true">!</span>
       <span>
-        <span className="font-medium">{t(`pages.intent.warnings.${warning.code}`)}</span>
+        <span className="font-medium">{t(labelKey)}</span>
         {warning.section && (
           <span className="text-ink-3 font-mono ml-2">[{warning.section}]</span>
         )}
-        <span className="text-ink-3 ml-2">{warning.message}</span>
       </span>
     </li>
   );
@@ -173,13 +234,18 @@ export function IntentPage() {
   return (
     <PageShell>
       <div className="animate-[pdFadeIn_400ms_ease-out]">
-        {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
+        {/* Layer 1: Conclusion — eyebrow + title + subtitle + flag badge */}
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.intent.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
-          {t("pages.intent.title")}
-        </h1>
+        <div className="flex items-center gap-3 mb-2">
+          <h1 className="text-[29px] font-semibold tracking-tight text-ink">
+            {t("pages.intent.title")}
+          </h1>
+          {summary && (
+            <FlagStatusBadge enabled={summary.flagEnabled} />
+          )}
+        </div>
         <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
           {t("pages.intent.subtitle")}
         </p>
@@ -247,10 +313,20 @@ export function IntentPage() {
                   <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
                 )}
                 {summary.path && (
-                  <MetaRow label="Path" value={summary.path} />
+                  <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
                 )}
               </div>
             </section>
+
+            {/* Edit entry — SPEC §22.1.1 line 1402 */}
+            {summary.path && (
+              <section className="mt-8" aria-labelledby="section-edit">
+                <SectionTitle id="section-edit">
+                  {t("pages.intent.editEntry.heading")}
+                </SectionTitle>
+                <EditEntry filePath={summary.path} />
+              </section>
+            )}
           </>
         )}
 

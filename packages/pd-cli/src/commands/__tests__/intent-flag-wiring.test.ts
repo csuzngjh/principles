@@ -54,7 +54,7 @@ describe('pd intent — command registration', () => {
 });
 
 describe('pd intent init — option metadata', () => {
-  it('has --workspace (-w), --force, and --json options', () => {
+  it('has --workspace (-w), --force, --dry-run, --confirm, and --json options', () => {
     const program = freshProgram();
     registerIntentCommand(program);
     const intentCmd = requireCmd(program.commands.find((c) => c.name() === 'intent'), 'intent');
@@ -63,6 +63,8 @@ describe('pd intent init — option metadata', () => {
     expect(initCmd.options.find((o) => o.long === '--workspace')).toBeDefined();
     expect(initCmd.options.find((o) => o.long === '--workspace')?.short).toBe('-w');
     expect(initCmd.options.find((o) => o.long === '--force')).toBeDefined();
+    expect(initCmd.options.find((o) => o.long === '--dry-run')).toBeDefined();
+    expect(initCmd.options.find((o) => o.long === '--confirm')).toBeDefined();
     expect(initCmd.options.find((o) => o.long === '--json')).toBeDefined();
   });
 
@@ -141,6 +143,30 @@ describe('pd intent init — parser-level dispatch', () => {
     expect(captured.opts).not.toBeNull();
     expect(captured.opts?.json).toBeUndefined();
     expect(captured.opts?.force).toBeUndefined();
+  });
+
+  it('parses --dry-run as true', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const initCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'init'), 'init');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(initCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'init', '--dry-run']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.dryRun).toBe(true);
+  });
+
+  it('parses --confirm as true', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const initCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'init'), 'init');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(initCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'init', '--confirm']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.confirm).toBe(true);
   });
 });
 

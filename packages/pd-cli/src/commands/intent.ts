@@ -46,7 +46,7 @@ const INTENT_FILENAME = 'INTENT.md';
 // ── Output types ─────────────────────────────────────────────────────────────
 
 export interface IntentInitOutput {
-  status: 'ok' | 'skipped';
+  status: 'ok' | 'skipped' | 'dry_run';
   path: string;
   overwritten: boolean;
   reason?: string;
@@ -112,12 +112,34 @@ export interface IntentInitOptions {
   workspace?: string;
   force?: boolean;
   json?: boolean;
+  dryRun?: boolean;
+  confirm?: boolean;
 }
 
 export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
+  // CLI Gate rule 4: --dry-run and --confirm must be mutually exclusive.
+  if (opts.dryRun && opts.confirm) {
+    const output: IntentInitOutput = {
+      status: 'skipped',
+      path: '',
+      overwritten: false,
+      reason: 'flag_conflict',
+      nextAction: 'Use either --dry-run or --confirm, not both.',
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const filePath = getIntentFilePath(workspaceDir);
   const dir = path.dirname(filePath);
+
+  // CLI Gate rule 4: state-mutating command defaults to dry-run unless --confirm.
+  const isDryRun = opts.dryRun === true || opts.confirm !== true;
 
   try {
     if (fs.existsSync(filePath) && !opts.force) {
@@ -126,13 +148,28 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
         path: filePath,
         overwritten: false,
         reason: 'file_exists',
-        nextAction: `Use --force to overwrite: pd intent init --force --workspace "${workspaceDir}"`,
+        nextAction: `Use --force to overwrite: pd intent init --force --confirm --workspace "${workspaceDir}"`,
       };
       emitResult(output, {
         json: opts.json ?? false,
         formatText: (o) => `INTENT.md already exists at ${o.path}\n→ ${o.nextAction}`,
       });
       process.exitCode = 1;
+      return;
+    }
+
+    if (isDryRun) {
+      const output: IntentInitOutput = {
+        status: 'dry_run',
+        path: filePath,
+        overwritten: opts.force === true,
+        reason: 'dry_run',
+        nextAction: `Confirm write: pd intent init --confirm${opts.force ? ' --force' : ''} --workspace "${workspaceDir}"`,
+      };
+      emitResult(output, {
+        json: opts.json ?? false,
+        formatText: (o) => `[dry-run] Would create INTENT.md at ${o.path}${o.overwritten ? ' (overwritten)' : ''}\n→ ${o.nextAction}`,
+      });
       return;
     }
 
@@ -279,12 +316,16 @@ export function registerIntentCommand(parentCmd: Command): Command {
     .description('Create .principles/INTENT.md from the canonical template')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--force', 'Overwrite existing INTENT.md')
+    .option('--dry-run', 'Show what would happen without writing (default)')
+    .option('--confirm', 'Actually write the file (required to create INTENT.md)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleIntentInit({
         workspace: opts.workspace,
         force: opts.force === true,
         json: opts.json === true,
+        dryRun: opts.dryRun === true,
+        confirm: opts.confirm === true,
       });
     });
 
