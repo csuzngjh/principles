@@ -62,9 +62,11 @@ vi.mock('@principles/core/principle-tree-ledger', () => ({
   loadLedger: vi.fn().mockReturnValue({ tree: { principles: {} } }),
 }));
 
-const mockLoadEffectiveFeatureFlags = vi.fn();
-vi.mock('../feature-flag-loader.js', () => ({
-  loadEffectiveFeatureFlags: mockLoadEffectiveFeatureFlags,
+const mockLoadPdConfig = vi.fn();
+const mockComputeFlagsFromLoadResult = vi.fn();
+vi.mock('../pd-config-loader.js', () => ({
+  loadPdConfig: mockLoadPdConfig,
+  computeFlagsFromLoadResult: mockComputeFlagsFromLoadResult,
 }));
 
 const mockResolveRuntimeFromPdConfig = vi.fn();
@@ -136,8 +138,10 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
       // no-op: valid config
     });
     // Default: feature flags have l2_dreamer disabled
-    mockLoadEffectiveFeatureFlags.mockReturnValue({
+    mockLoadPdConfig.mockReturnValue({ ok: true, effective: {}, source: 'defaults' });
+    mockComputeFlagsFromLoadResult.mockReturnValue({
       flags: {},
+      enabledChannels: [],
       warnings: [],
     });
   });
@@ -288,8 +292,9 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
     it('returns L2AgentLoopAdapter when runnerKind=dreamer + l2ArtifactReader + l2StateDir + flag enabled', () => {
       const config = makeValidPiAiConfig();
       mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-      mockLoadEffectiveFeatureFlags.mockReturnValue({
-        flags: { l2_dreamer: { enabled: true } },
+      mockComputeFlagsFromLoadResult.mockReturnValue({
+        flags: { l2_dreamer: { id: 'l2_dreamer', enabled: true, category: 'quiet' } },
+        enabledChannels: [],
         warnings: [],
       });
       const fakeArtifactReader = { readArtifact: vi.fn() };
@@ -310,8 +315,9 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
     it('falls back to PiAiRuntimeAdapter when l2_dreamer flag is disabled', () => {
       const config = makeValidPiAiConfig();
       mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-      mockLoadEffectiveFeatureFlags.mockReturnValue({
-        flags: { l2_dreamer: { enabled: false } },
+      mockComputeFlagsFromLoadResult.mockReturnValue({
+        flags: { l2_dreamer: { id: 'l2_dreamer', enabled: false, category: 'quiet' } },
+        enabledChannels: [],
         warnings: [],
       });
 
@@ -330,8 +336,9 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
     it('falls back to PiAiRuntimeAdapter when l2ArtifactReader is missing', () => {
       const config = makeValidPiAiConfig();
       mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-      mockLoadEffectiveFeatureFlags.mockReturnValue({
-        flags: { l2_dreamer: { enabled: true } },
+      mockComputeFlagsFromLoadResult.mockReturnValue({
+        flags: { l2_dreamer: { id: 'l2_dreamer', enabled: true, category: 'quiet' } },
+        enabledChannels: [],
         warnings: [],
       });
 
@@ -349,8 +356,9 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
     it('falls back to PiAiRuntimeAdapter when runnerKind is not dreamer', () => {
       const config = makeValidPiAiConfig();
       mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-      mockLoadEffectiveFeatureFlags.mockReturnValue({
-        flags: { l2_dreamer: { enabled: true } },
+      mockComputeFlagsFromLoadResult.mockReturnValue({
+        flags: { l2_dreamer: { id: 'l2_dreamer', enabled: true, category: 'quiet' } },
+        enabledChannels: [],
         warnings: [],
       });
 

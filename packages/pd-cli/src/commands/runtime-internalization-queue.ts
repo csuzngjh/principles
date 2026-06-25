@@ -11,7 +11,6 @@ import * as path from 'path';
 import { createInternalizationQueueReadModel } from '@principles/core/runtime-v2';
 import type { InternalizationQueueSnapshot } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
 interface QueueOptions {
@@ -95,28 +94,24 @@ function formatTextOutput(snap: InternalizationQueueSnapshot, workspaceDir: stri
 export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
-  const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
-  const enabledChannels = new Set(
-    Object.values(featureFlags.flags)
-      .filter(f => f.enabled)
-      .map(f => f.id),
-  );
+  // Single canonical config load — replaces split-brain legacy + canonical reads (PRI-460).
+  const pdConfigResult = loadPdConfig(workspaceDir);
+  if (!pdConfigResult.ok) {
+    const configWarning = JSON.stringify({
+      level: 'warning',
+      source: 'pd_config',
+      errors: pdConfigResult.errors.map(e => ({ reason: e.reason, nextAction: e.nextAction })),
+    });
+    process.stderr.write(`${configWarning}\n`);
+  }
+  const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
+  const enabledChannels = new Set(pdFlags.enabledChannels);
+  const autoConsumerEnabled = pdFlags.flags.internalization_auto_consumer?.enabled ?? false;
+
   const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, enabledChannels });
 
   try {
     const snapshot = await readModel.getSnapshot();
-
-    const pdConfigResult = loadPdConfig(workspaceDir);
-    if (!pdConfigResult.ok) {
-      const configWarning = JSON.stringify({
-        level: 'warning',
-        source: 'pd_config',
-        errors: pdConfigResult.errors.map(e => ({ reason: e.reason, nextAction: e.nextAction })),
-      });
-      process.stderr.write(`${configWarning}\n`);
-    }
-    const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
-    const autoConsumerEnabled = pdFlags.flags.internalization_auto_consumer?.enabled ?? false;
 
     if (opts.json) {
       const output: Record<string, unknown> = { ...snapshot };
