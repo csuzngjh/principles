@@ -38,6 +38,8 @@ import {
 } from '@principles/core/runtime-v2';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
+import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
+import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
 
 export interface RunRuleHostOptions {
   workspace?: string;
@@ -234,16 +236,35 @@ function formatTextOutput(result: RuleHostPipelineResult): string {
   return lines.join('\n');
 }
 
-function formatDryRunOutput(opts: RunRuleHostOptions, capabilityStatus: string, workspaceDir: string): string {
+interface DryRunFormatInput {
+  readonly opts: RunRuleHostOptions;
+  readonly capabilityStatus: string;
+  readonly workspaceDir: string;
+  readonly readiness: RuleHostReadinessResult;
+}
+
+function formatDryRunOutput(input: DryRunFormatInput): string {
+  const { opts, capabilityStatus, workspaceDir, readiness } = input;
   const lines: string[] = [];
   lines.push('RuleHost Pipeline (PRI-429) — DRY RUN');
   lines.push(`pain: ${opts.painId}`);
   lines.push(`workspace: ${workspaceDir}`);
   lines.push(`channel: ${opts.channel ?? 'code_tool_hook'}`);
+  lines.push(`readiness: ${readiness.status.toUpperCase()}`);
+  if (readiness.status !== 'ready') {
+    lines.push(`  reason: ${readiness.reason}`);
+    lines.push(`  nextAction: ${readiness.nextAction}`);
+  }
   lines.push(capabilityStatus);
   lines.push('');
   lines.push('No tasks created, no LLM calls made, no artifacts written.');
-  lines.push('Next: pass --confirm to actually run the pipeline.');
+  if (readiness.status === 'ready') {
+    lines.push('Next: pass --confirm to actually run the pipeline.');
+  } else if (readiness.status === 'text_principle_only') {
+    lines.push('Next: pass --confirm to run in text-principle-only mode, or fix the issues above to enable full pipeline.');
+  } else {
+    lines.push('Next: fix the readiness issues above before running the pipeline.');
+  }
   return lines.join('\n');
 }
 
@@ -303,6 +324,32 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
 
   const workspaceDir = resolveWorkspace(opts);
 
+  // ── Readiness check (PRI-461) ──
+  // Check all preconditions BEFORE constructing adapters. This produces a
+  // structured ready/text_principle_only/refused status instead of an opaque
+  // agent_runtime_resolution_failed error.
+  const readiness = resolveRuleHostReadiness(workspaceDir);
+
+  // If refused, emit structured error and exit (CLI gate rule 2 + rule 5).
+  // Refused means the pipeline cannot run at all — do NOT attempt adapter
+  // construction or pipeline execution.
+  if (readiness.status === 'refused') {
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        status: 'refused',
+        reason: readiness.reason,
+        nextAction: readiness.nextAction,
+        readiness,
+      }) + '\n');
+    } else {
+      console.error(`RuleHost readiness: REFUSED`);
+      console.error(`  reason: ${readiness.reason}`);
+      console.error(`  nextAction: ${readiness.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   // ── Resolve each executed agent from canonical config ──
   let resolvedRuntime: ResolvedRunRuleHostRuntime;
   try {
@@ -310,7 +357,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ status: 'failed', reason: 'agent_runtime_resolution_failed', message, nextAction: 'check internalAgents and runtimeProfiles in .pd/config.yaml; run pd config doctor' }) + '\n');
+      process.stdout.write(JSON.stringify({ status: 'failed', reason: 'agent_runtime_resolution_failed', message, nextAction: 'check internalAgents and runtimeProfiles in .pd/config.yaml; run pd config doctor', readiness }) + '\n');
     } else {
       console.error(`Error: ${message}`);
     }
@@ -328,13 +375,18 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         painId: opts.painId,
         workspace: workspaceDir,
         channel,
+        readiness: readiness.status,
         capabilityStatus: resolvedRuntime.capabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
         codeRuleCapability: { enabled: resolvedRuntime.capability.enabled, disabledReason: resolvedRuntime.capability.disabledReason },
-        nextAction: 'pass --confirm to actually run the pipeline',
+        nextAction: readiness.status === 'ready'
+          ? 'pass --confirm to run the full pipeline'
+          : readiness.status === 'text_principle_only'
+            ? 'pass --confirm to run in text-principle-only mode (code-rule capability OFF), or fix the issues above to enable full pipeline'
+            : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      process.stdout.write(formatDryRunOutput(opts, resolvedRuntime.capabilityStatus, workspaceDir) + '\n');
+      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: resolvedRuntime.capabilityStatus, workspaceDir, readiness }) + '\n');
     }
     return;
   }

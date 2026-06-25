@@ -271,10 +271,13 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
 
     await handleRunRuleHost({ workspace, painId: 'pain-disabled-philosopher', confirm: true, json: true });
 
+    // PRI-461: readiness gate catches disabled required agents BEFORE adapter
+    // construction, returning status='refused' with a structured reason instead
+    // of the old opaque 'agent_runtime_resolution_failed' error.
     const output = parseJsonOutput();
-    expect(output.status).toBe('failed');
-    expect(output.reason).toBe('agent_runtime_resolution_failed');
-    expect(String(output.message)).toContain('philosopher');
+    expect(output.status).toBe('refused');
+    expect(String(output.reason)).toContain('philosopher');
+    expect(typeof output.nextAction).toBe('string');
     expect(process.exitCode).toBe(1);
     expect(fs.existsSync(path.join(workspace, '.state', 'runtime-v2.sqlite'))).toBe(false);
   });
