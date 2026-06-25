@@ -443,6 +443,30 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.category).toBe('quiet');
     expect(flag.enabled).toBe(true);
   });
+
+  it('PRI-419: l2_dreamer is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'l2_dreamer');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('l2_dreamer flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-06-16');
+    expect(flag.description).toContain('L2 multi-turn agent loop');
+    expect(flag.description).toContain('PRI-419');
+  });
+
+  it('PRI-419: l2_dreamer can be explicitly enabled via config', () => {
+    const userFlags = {
+      l2_dreamer: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const l2Flag = result.flags.l2_dreamer;
+    expect(l2Flag).toBeDefined();
+    if (l2Flag) {
+      expect(l2Flag.enabled).toBe(true);
+    }
+    expect(result.warnings.some(w => w.includes('l2_dreamer') && w.includes('unknown'))).toBe(false);
+  });
 });
 
 describe('VALID_CATEGORIES', () => {
