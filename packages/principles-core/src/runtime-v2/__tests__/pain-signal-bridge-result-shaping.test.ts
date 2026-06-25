@@ -481,3 +481,124 @@ describe('PRI-456: buildExistingResult result-shaping characterization', () => {
     expect(result.message).toBe('Task already succeeded');
   });
 });
+
+// ── Edge cases and boundary conditions ───────────────────────────────────────
+
+describe('PRI-456: shapeBridgeResult edge cases', () => {
+  it('fresh path: runId and artifactId undefined when no candidates', async () => {
+    const deps = makeMockDeps({ candidates: [], output: makeHighConfidenceOutput() });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeHighConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.runId).toBe(RUN_ID); // runId comes from getRunsByTask mock
+    expect(result.artifactId).toBeUndefined(); // no candidates → no artifactId
+  });
+
+  it('fresh path: artifactId comes from first candidate', async () => {
+    const candidates = [
+      makeCandidate('c-first', 'principle'),
+      makeCandidate('c-second', 'principle'),
+    ];
+    const deps = makeMockDeps({ candidates, output: makeHighConfidenceOutput() });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeHighConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.artifactId).toBe('artifact-c-first'); // first candidate's artifactId
+  });
+
+  it('fresh path: admissionResults includes needs_evidence decision', async () => {
+    const candidates = [makeCandidate('c-needs-evidence', 'principle')];
+    const deps = makeMockDeps({ candidates, output: makeLowConfidenceOutput() });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: makeLowConfidenceOutput(),
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 0, // low evidence count
+    });
+
+    expect(result.status).toBe('degraded');
+    expect(result.admissionResults).toBeDefined();
+    expect(result.admissionResults?.[0]?.admission.decision).toBe('needs_evidence');
+    expect(result.message).toContain('all_candidates_gated');
+  });
+
+  it('existing path: runId undefined when no runs', async () => {
+    const candidates = [makeCandidate('c1', 'principle')];
+    const ledgerEntries = new Map<string, LedgerPrincipleEntry>([['c1', makeLedgerEntry('c1')]]);
+    const deps = makeMockDeps({
+      candidates,
+      ledgerEntries,
+      getTaskFn: async () => ({ taskId: TASK_ID, status: 'succeeded' }),
+    });
+    // Override getRunsByTask to return empty array
+    deps.stateManager = {
+      ...deps.stateManager,
+      getRunsByTask: async () => [],
+    } as unknown as RuntimeStateManager;
+    const bridge = createBridge(deps);
+
+    const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.runId).toBeUndefined();
+  });
+
+  it('fresh path: multiple admission decisions in message', async () => {
+    // Mix of admitted and deferred candidates
+    const candidates = [
+      makeCandidate('c-admit', 'principle'),
+      makeCandidate('c-defer', 'defer'),
+      makeCandidate('c-gated', 'principle'),
+    ];
+    // High confidence for principle, defer always deferred, low confidence for gated
+    const output: DiagnosticianOutputV1 = {
+      valid: true,
+      diagnosisId: 'diag-mix',
+      summary: 'Mixed admission',
+      rootCause: 'Test',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'test', note: 'Evidence' }],
+      recommendations: [
+        { kind: 'principle', description: 'Principle 1' },
+        { kind: 'defer', description: 'Defer 1' },
+        { kind: 'principle', description: 'Principle 2' },
+      ],
+      confidence: 0.85,
+    };
+    const deps = makeMockDeps({ candidates, output });
+    const bridge = createBridge(deps);
+
+    const result = await bridge.onDiagnosisComplete({
+      taskId: TASK_ID,
+      diagnosticianOutput: output,
+      painId: PAIN_ID,
+      provenance: PROVENANCE,
+      inputEvidenceCount: 1,
+    });
+
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('partial_admission');
+  });
+});
