@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "title": "principles-core I/O seam registry (PRI-462)",
+  "description": "Single source of truth for production files in packages/principles-core/src/ that are allowed to import fs/path. Both architecture-regression.test.ts and eslint.config.js derive their exemption lists from this file. To add a new I/O file, add it to the appropriate seam below — both guards update automatically.",
+  "seams": [
+    {
+      "name": "ledger-tree",
+      "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code.",
+      "files": [
+        "principle-tree-ledger.ts"
+      ]
+    },
+    {
+      "name": "sdk-store",
+      "description": "Standalone SDK store primitives exposed as package subpaths (evolution-store, trajectory-store, workflow-funnel-loader). Each reads SQLite or YAML directly so SDK consumers do not need the full openclaw-plugin runtime.",
+      "files": [
+        "evolution-store.ts",
+        "trajectory-store.ts",
+        "workflow-funnel-loader.ts"
+      ]
+    },
+    {
+      "name": "sqlite-state-store",
+      "description": "Runtime V2 state.db connection factory and the RuntimeStateManager integration layer that wires all SQLite stores. Owns the DB lifecycle (open, pragma, close) for task/run/candidate/commit/artifact stores.",
+      "files": [
+        "runtime-v2/store/sqlite-connection.ts",
+        "runtime-v2/store/runtime-state-manager.ts"
+      ]
+    },
+    {
+      "name": "cli-runtime-adapter",
+      "description": "PDRuntimeAdapter implementation that spawns the openclaw CLI process. Uses node:fs/promises for temp-dir scratch space and node:path for tmpdir joins. Cannot live in plugin because core runners depend on the adapter interface.",
+      "files": [
+        "runtime-v2/adapter/openclaw-cli-runtime-adapter.ts"
+      ]
+    },
+    {
+      "name": "read-model",
+      "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pruning, schema conformance, internalization chain integrity). No writes — pure read paths exposed for CLI and console reuse.",
+      "files": [
+        "runtime-v2/operator-health-read-model.ts",
+        "runtime-v2/pain-chain-read-model.ts",
+        "runtime-v2/pruning-read-model.ts",
+        "runtime-v2/schema-conformance-read-model.ts",
+        "runtime-v2/internalization-chain-integrity-read-model.ts"
+      ]
+    },
+    {
+      "name": "audit-observability",
+      "description": "Candidate/ledger consistency audit and pain-signal observability writers. These write trajectory.db pain events and events_*.jsonl for CLI and gate-block paths that lack the legacy SDK observability writers, closing the observability gap without importing openclaw-plugin.",
+      "files": [
+        "runtime-v2/candidate-audit.ts",
+        "runtime-v2/pain-signal-observability.ts"
+      ]
+    },
+    {
+      "name": "remediation-review",
+      "description": "Internalization integrity remediation (reads state.db, writes corrective task records) and the pruning review audit log (append-only JSONL at .state/pruning_reviews.jsonl). Both own file/DB writes that core runners and CLI commands trigger directly.",
+      "files": [
+        "runtime-v2/internalization-integrity-remediation.ts",
+        "runtime-v2/pruning-review-log.ts"
+      ]
+    }
+  ]
+}
