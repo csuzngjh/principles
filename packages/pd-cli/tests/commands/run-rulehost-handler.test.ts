@@ -71,6 +71,11 @@ function parseJsonObject(text: string): Record<string, unknown> {
   return parsed;
 }
 
+/** Type guard: narrows `unknown` to `Record<string, unknown>` without `as`. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function captureStdio(fn: () => Promise<void>): Promise<StdIoState> {
   return new Promise((resolve, reject) => {
     const origExitCode = process.exitCode;
@@ -249,5 +254,277 @@ describe('handleRunRuleHost — dry-run mode output shape (with minimal pd-confi
       // Channel gate passed — exitCode should not be 1 for supported channels.
       expect(exitCode).toBeUndefined();
     }
+  });
+});
+
+// ── PRI-461: readiness integration tests ──────────────────────────────────
+//
+// Verifies the handler emits the three readiness statuses (ready /
+// text_principle_only / refused) with the correct exit codes and JSON shape.
+// These tests exercise the full path: config → resolveRuleHostReadiness →
+// handler output, ensuring the readiness gate is wired into production code
+// (EP-02) and that refused statuses fail loud with reason + nextAction (EP-03).
+
+function writeFullReadyConfig(workspaceDir: string): void {
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: true, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
+function writeTextPrincipleOnlyConfig(workspaceDir: string): void {
+  // code_rule_capability explicitly OFF → text_principle_only
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: false },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: true, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
+function writeEvaluatorDisabledConfig(workspaceDir: string): void {
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: false, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
+function writeRefusedConfig(workspaceDir: string): void {
+  // dreamer disabled → required agent missing → refused
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: false, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: true, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
+describe('handleRunRuleHost — PRI-461 readiness integration', () => {
+  let workspaceDir: string;
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    workspaceDir = mkTmpDir();
+    savedEnv = { ...process.env };
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  // ── ready ───────────────────────────────────────────────────────────────
+
+  it('emits readiness=ready in --json dry-run when all agents and code-rule capability are ON', async () => {
+    writeFullReadyConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('dry_run');
+    expect(payload.readinessStatus).toBe('ready');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('ready');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('emits readiness=ready in plain-text dry-run output', async () => {
+    writeFullReadyConfig(workspaceDir);
+    const { stdout } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, workspace: workspaceDir }),
+    );
+    expect(stdout).toMatch(/readiness:\s*READY/i);
+  });
+
+  // ── text_principle_only ─────────────────────────────────────────────────
+
+  it('emits readiness=text_principle_only in --json dry-run when code_rule_capability is OFF', async () => {
+    writeTextPrincipleOnlyConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('dry_run');
+    expect(payload.readinessStatus).toBe('text_principle_only');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('text_principle_only');
+    expect(typeof readiness.reason).toBe('string');
+    expect(typeof readiness.nextAction).toBe('string');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('does not reclassify evaluator-disabled text_principle_only as runtime resolution failure', async () => {
+    writeEvaluatorDisabledConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('dry_run');
+    expect(payload.readinessStatus).toBe('text_principle_only');
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('text_principle_only');
+    expect(String(readiness.reason)).toContain('evaluator');
+    expect(String(payload.capabilityStatus)).toContain('evaluator');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('emits readiness=text_principle_only in plain-text dry-run output', async () => {
+    writeTextPrincipleOnlyConfig(workspaceDir);
+    const { stdout } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, workspace: workspaceDir }),
+    );
+    expect(stdout).toMatch(/readiness:\s*TEXT_PRINCIPLE_ONLY/i);
+  });
+
+  // ── refused ─────────────────────────────────────────────────────────────
+
+  it('exits with code=1 and emits status=refused in --json when dreamer is disabled', async () => {
+    writeRefusedConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('refused');
+    expect(typeof payload.reason).toBe('string');
+    expect(typeof payload.nextAction).toBe('string');
+    expect(exitCode).toBe(1);
+  });
+
+  it('exits with code=1 and emits REFUSED in plain-text when dreamer is disabled', async () => {
+    writeRefusedConfig(workspaceDir);
+    const { stderr, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, workspace: workspaceDir }),
+    );
+    expect(stderr).toMatch(/REFUSED/i);
+    expect(stderr).toMatch(/dreamer/i);
+    expect(exitCode).toBe(1);
+  });
+
+  it('refused status includes the full readiness object in --json output', async () => {
+    writeRefusedConfig(workspaceDir);
+    const { stdout } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.readiness).toBeDefined();
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
+    expect(readiness.status).toBe('refused');
+    expect(readiness.agentStatuses).toBeDefined();
+  });
+
+  it('refused status does NOT attempt pipeline execution or adapter construction', async () => {
+    // If the handler tried to construct adapters with a disabled dreamer,
+    // resolveRunRuleHostRuntime would throw. The readiness gate must prevent
+    // that by exiting before resolveRunRuleHostRuntime is called.
+    writeRefusedConfig(workspaceDir);
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', dryRun: true, json: true, workspace: workspaceDir }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    // Must be 'refused', NOT 'failed' with 'agent_runtime_resolution_failed'
+    expect(payload.status).toBe('refused');
+    expect(payload.reason).not.toMatch(/agent_runtime_resolution_failed/);
+    expect(exitCode).toBe(1);
   });
 });
