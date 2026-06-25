@@ -16,6 +16,7 @@ import { handleActivationsRoute, disposeActivationsModels } from './routes/activ
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
+import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
@@ -267,6 +268,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeActivationsModels();
   disposeGovernanceModels();
   disposeEvidenceChainModels();
+  disposeIntentModels();
   services.workspaceService.dispose();
 }
 
@@ -386,6 +388,12 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // CR8: GET /api/v1/governance/queue
       if (urlPath === '/api/v1/governance/queue') {
         asyncHandler(() => handleGovernanceRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // PRI-466: GET /api/v1/intent
+      if (urlPath === '/api/v1/intent') {
+        asyncHandler(() => handleIntentRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 

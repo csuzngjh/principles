@@ -22,6 +22,7 @@ import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
+import { IntentPage } from "./pages/intent/IntentPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 
 // Vite replaces import.meta.env.DEV with a boolean literal at build time.
@@ -171,6 +172,7 @@ function AuthRoutes() {
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
+                    <Route path="/intent" element={<IntentPage />} />
                     {IS_DEV && (
                       <Route path="/design-system" element={<DesignSystemPage />} />
                     )}
