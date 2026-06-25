@@ -49,9 +49,7 @@ packages/
 ├── pd-cli/              # PD CLI tool
 ├── pd-console/          # PD Console WebUI
 ├── create-principles-disciple/  # Installer CLI
-└── graphify-out/        # Knowledge graph output (generated)
-
-conductor/               # Product guidelines, tracks, workflow docs
+└── conductor/               # Product guidelines, tracks, workflow docs
 phases/                  # Phase definitions and tracking
 docs/                    # Architecture docs, design documents, maps
 ```
@@ -265,7 +263,7 @@ Include in the PR body or completion report:
 
 ## graphify
 
-This project has a graphify knowledge graph at `graphify-out/` (git hook auto-rebuilds on commit).
+This project has a graphify knowledge graph at `.git/graphify/` (git hook auto-rebuilds on commit).
 
 ### When to use the graph (NOT raw files)
 
@@ -284,7 +282,7 @@ This project has a graphify knowledge graph at `graphify-out/` (git hook auto-re
 
 ### Workflow
 
-1. **On session start**: If answering architecture/codebase questions, check if `graphify-out/graph.json` is recent (updated after last `git commit`). If stale, run `/graphify --update .` first.
+1. **On session start**: If answering architecture/codebase questions, check if `.git/graphify/graph.json` is recent (updated after last `git commit`). If stale, run `/graphify --update .` first.
 
 2. **Before exploring new module**: Run `/graphify query "<module or concept>"` to see how it connects before diving into files.
 
@@ -293,10 +291,10 @@ This project has a graphify knowledge graph at `graphify-out/` (git hook auto-re
 4. **Graph is the map, files are the terrain**: Use the graph to navigate, use raw files for precision.
 
 ### Key files
-- `graphify-out/GRAPH_REPORT.md` — God nodes, surprising connections, suggested questions
-- `graphify-out/graph.json` — Full graph data
-- `graphify-out/graph.html` — Interactive browser visualization
-- `graphify-out/wiki/index.md` — Community-structured notes (if `--wiki` was used)
+- `.git/graphify/GRAPH_REPORT.md` — God nodes, surprising connections, suggested questions
+- `.git/graphify/graph.json` — Full graph data
+- `.git/graphify/graph.html` — Interactive browser visualization
+- `.git/graphify/wiki/index.md` — Community-structured notes (if `--wiki` was used)
 
 ## Agent skills
 
