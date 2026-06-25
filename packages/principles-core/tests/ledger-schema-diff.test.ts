@@ -122,10 +122,38 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       expect(normalizedHits).toEqual(['runtime-v2/types/ledger-store.ts']);
     });
 
-    it('LegacyPrincipleTrainingState is defined in core runtime-v2/types/ledger-store.ts', () => {
-      // core types module is the sole definition site for the legacy training
-      // state interface. (ledger-codec and principle-tree-ledger consume it.)
-      expect(coreTypesSource).toContain('interface LegacyPrincipleTrainingState');
+    it('LegacyPrincipleTrainingState is defined only in runtime-v2/types/ledger-store.ts', async () => {
+      // Same SSOT guarantee as HybridLedgerStore above: scan the whole core
+      // src tree and assert exactly one definition. The previous
+      // coreTypesSource.contains() check only proved the intended file had it
+      // — it could not catch a duplicate definition re-introduced elsewhere.
+      const { readdirSync, statSync } = await import('node:fs');
+      const { join } = await import('node:path');
+
+      const coreSrcDir = resolve(__dirname, '..', 'src');
+      const legacyHits: string[] = [];
+
+      function scanDir(dir: string): void {
+        for (const entry of readdirSync(dir)) {
+          const full = join(dir, entry);
+          const stat = statSync(full);
+          if (stat.isDirectory()) {
+            if (entry === 'node_modules' || entry === '__tests__') continue;
+            scanDir(full);
+          } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
+            const content = readFileSync(full, 'utf-8');
+            if (/export\s+interface\s+LegacyPrincipleTrainingState\s*\{/.test(content)) {
+              legacyHits.push(full.replace(coreSrcDir + '\\', '').replace(coreSrcDir + '/', ''));
+            }
+          }
+        }
+      }
+
+      scanDir(coreSrcDir);
+
+      const normalized = legacyHits.map((f: string) => f.replace(/\\/g, '/'));
+      expect(normalized).toContain('runtime-v2/types/ledger-store.ts');
+      expect(normalized).toEqual(['runtime-v2/types/ledger-store.ts']);
     });
   });
 

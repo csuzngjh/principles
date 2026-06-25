@@ -190,6 +190,10 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function isErrnoException(value: unknown): value is NodeJS.ErrnoException {
+  return typeof value === 'object' && value !== null && Object.hasOwn(value, 'code');
+}
+
 function tryAcquireLock(lockPath: string, pid: number): boolean {
   try {
     const lockDir = path.dirname(lockPath);
@@ -203,7 +207,10 @@ function tryAcquireLock(lockPath: string, pid: number): boolean {
     fs.closeSync(fd);
     return true;
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+    // Runtime Contract Rule #2: never `as` to bypass validation on caught
+    // unknown. A non-object `err` would throw on `.code` access and mask the
+    // original EEXIST (EP-01 / ERR-001).
+    if (isErrnoException(err) && err.code === 'EEXIST') {
       return false;
     }
     throw err;
@@ -231,13 +238,17 @@ function safeReleaseLock(lockPath: string, expectedPid: number): void {
   }
 }
 
-function cleanupStaleLock(lockPath: string, staleMs: number): boolean {
+function cleanupStaleLock(lockPath: string, _staleMs: number): boolean {
+  // PRI-459 review: reclaim ONLY when the holder is dead/unknown. The file
+  // age must NEVER be the sole eviction signal — a legitimately long write
+  // that exceeds lockStaleMs would otherwise let a second writer steal the
+  // lock and re-introduce the lost-update class this PR exists to eliminate.
+  // PID liveness is the sole authority. `_staleMs` is retained on the
+  // signature for back-compat with callers but is intentionally unused.
   try {
-    const stat = fs.statSync(lockPath);
     const pid = readLockPid(lockPath);
-    const isStale = Date.now() - stat.mtimeMs > staleMs;
     const isDead = pid === null || !isProcessAlive(pid);
-    if (isStale || isDead) {
+    if (isDead) {
       try {
         fs.unlinkSync(lockPath);
         return true;
@@ -258,10 +269,13 @@ function calculateBackoff(attempt: number, baseMs: number, maxMs: number): numbe
 }
 
 function sleepSync(ms: number): void {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    // bounded busy-wait for synchronous retry
-  }
+  // Non-spinning blocking sleep. Atomics.wait parks the thread instead of
+  // busy-polling Date.now(), so lock-contention retries don't burn a CPU
+  // core for the whole backoff window. Returns immediately when ms <= 0
+  // (Atomics.wait requires a positive timeout).
+  if (ms <= 0) return;
+  const shared = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(shared, 0, 0, ms);
 }
 
 function tryAcquireWithStaleCleanup(
@@ -327,8 +341,11 @@ function releaseLock(ctx: LockContext): void {
  * Run `fn` while holding the ledger file lock. FAIL-LOUD: if the lock cannot
  * be acquired after bounded retries, throws LockAcquisitionError carrying the
  * file + lock path (EP-03 / ERR-009 — no silent fallback).
+ *
+ * Exported so tests and integrators can drive the lock primitive directly with
+ * a tight retry budget (the public mutators use production defaults).
  */
-function withLock<T>(filePath: string, fn: () => T, options?: LockOptions): T {
+export function withLock<T>(filePath: string, fn: () => T, options?: LockOptions): T {
   const ctx = acquireLock(filePath, options);
   try {
     return fn();
@@ -463,6 +480,11 @@ export function createRule(stateDir: string, rule: LedgerRule): LedgerRule {
     if (!principle) {
       throw new Error(`Cannot create rule "${rule.id}" for missing principle "${rule.principleId}".`);
     }
+    if (Object.hasOwn(store.tree.rules, rule.id)) {
+      // Fail loud: overwriting would orphan the old parent's ruleIds link.
+      // Use updateRule for intentional replacement (EP-09 / ERR-009).
+      throw new Error(`Cannot create rule "${rule.id}": it already exists. Use updateRule instead.`);
+    }
     const nextRule: LedgerRule = {
       ...rule,
       implementationIds: uniqueStrings(rule.implementationIds),
@@ -478,6 +500,11 @@ export function createImplementation(stateDir: string, implementation: Implement
     const rule = store.tree.rules[implementation.ruleId];
     if (!rule) {
       throw new Error(`Cannot create implementation "${implementation.id}" for missing rule "${implementation.ruleId}".`);
+    }
+    if (Object.hasOwn(store.tree.implementations, implementation.id)) {
+      // Fail loud: overwriting would orphan the old rule's implementationIds link.
+      // Use updateImplementation for intentional replacement (EP-09 / ERR-009).
+      throw new Error(`Cannot create implementation "${implementation.id}": it already exists. Use updateImplementation instead.`);
     }
     store.tree.implementations[implementation.id] = implementation;
     rule.implementationIds = uniqueStrings([...rule.implementationIds, implementation.id]);
@@ -695,7 +722,10 @@ export function listRuleImplementationsByState(
   state: ImplementationLifecycleState,
 ): Implementation[] {
   const implementations = listImplementationsForRule(stateDir, ruleId);
-  return implementations.filter((impl) => impl.lifecycleState === state);
+  // Match transitionImplementationState: a missing lifecycleState is treated
+  // as 'candidate'. Filtering on strict equality would silently drop
+  // historical/minimal records from candidate queries (EP-09 consistency).
+  return implementations.filter((impl) => (impl.lifecycleState ?? 'candidate') === state);
 }
 
 export function findActiveImplementation(stateDir: string, ruleId: string): Implementation | null {

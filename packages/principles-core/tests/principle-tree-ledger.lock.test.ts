@@ -28,9 +28,15 @@ import {
   saveLedger,
   addPrincipleToLedger,
   getLedgerFilePathPublic,
+  withLock,
+  LockAcquisitionError,
 } from '../src/principle-tree-ledger.js';
 import { createEmptyTree } from '../src/runtime-v2/principle-tree/ledger-codec.js';
 import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
+
+// Tight retry budget for contention tests — proves fail-loud without waiting
+// on the production 50-retry exponential backoff.
+const FAST_LOCK_OPTIONS = { maxRetries: 2, baseRetryDelayMs: 1, maxRetryDelayMs: 2 };
 
 function makePrinciple(id: string): LedgerPrinciple {
   return {
@@ -107,5 +113,36 @@ describe('PRI-459 Stage 1.1 — ledger file lock', () => {
     const ledger = loadLedger(stateDir);
     expect(ledger.tree.principles).toEqual({});
     expect(ledger.trainingStore).toEqual({});
+  });
+
+  it('a second writer fails LOUD while the lock is held by another owner', () => {
+    // PRI-459 review: the file header claims "lock acquisition failure fails
+    // LOUD". Pre-create a lock owned by the CURRENT (live) PID. cleanupStaleLock
+    // must NOT reclaim it (the holder is alive), so a second acquisition must
+    // throw LockAcquisitionError carrying the file path — not silently proceed
+    // and risk a lost update. Driven via withLock with a tight retry budget so
+    // the test fails fast instead of waiting on production backoff.
+    const ledgerPath = getLedgerFilePathPublic(stateDir);
+    const lockPath = ledgerPath + '.lock';
+    fs.writeFileSync(lockPath, String(process.pid), 'utf8'); // live owner
+
+    expect(() => withLock(ledgerPath, () => 'should-not-run', FAST_LOCK_OPTIONS)).toThrow(LockAcquisitionError);
+    // The original live-owned lock is untouched (we did not steal it).
+    expect(fs.existsSync(lockPath)).toBe(true);
+  });
+
+  it('a live PID whose lock age exceeds lockStaleMs is NOT reclaimed as stale', () => {
+    // PRI-459 review: age alone must never evict a live holder (that would
+    // re-open the lost-update class this PR exists to eliminate). Backdate the
+    // lock mtime beyond the stale threshold but keep the PID live — a second
+    // acquisition must still fail.
+    const ledgerPath = getLedgerFilePathPublic(stateDir);
+    const lockPath = ledgerPath + '.lock';
+    fs.writeFileSync(lockPath, String(process.pid), 'utf8'); // live owner
+    const oldTime = new Date(Date.now() - 60_000).getTime() / 1000; // 60s ago
+    fs.utimesSync(lockPath, oldTime, oldTime);
+
+    expect(() => withLock(ledgerPath, () => 'should-not-run', FAST_LOCK_OPTIONS)).toThrow(LockAcquisitionError);
+    expect(fs.existsSync(lockPath)).toBe(true);
   });
 });

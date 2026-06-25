@@ -101,6 +101,17 @@ describe('PRI-459 Stage 1.2 — Rule/Implementation CRUD', () => {
       // Failure path must not mutate state (CLI gate rule 5 / no-side-effect-on-failure).
       expect(loadLedger(stateDir).tree.rules['rx']).toBeUndefined();
     });
+
+    it('throws (fail loud) when the rule id already exists', () => {
+      // PRI-459 review: createRule must not silently overwrite — that would
+      // orphan the old parent's ruleIds link. Use updateRule to replace.
+      createRule(stateDir, makeRule('dup', 'p1'));
+      expect(() => createRule(stateDir, makeRule('dup', 'p1'))).toThrow(/already exists.*updateRule/);
+      // The original record is untouched.
+      expect(loadLedger(stateDir).tree.rules['dup']!.principleId).toBe('p1');
+      // And no duplicate parent link was appended.
+      expect(loadLedger(stateDir).tree.principles['p1']!.ruleIds.filter((id) => id === 'dup')).toHaveLength(1);
+    });
   });
 
   describe('createImplementation', () => {
@@ -120,6 +131,19 @@ describe('PRI-459 Stage 1.2 — Rule/Implementation CRUD', () => {
         createImplementation(stateDir, { id: 'implX', ruleId: 'missing-rule' }),
       ).toThrow(/missing rule "missing-rule"/);
       expect(loadLedger(stateDir).tree.implementations['implX']).toBeUndefined();
+    });
+
+    it('throws (fail loud) when the implementation id already exists', () => {
+      // PRI-459 review: createImplementation must not silently overwrite —
+      // that would orphan the old rule's implementationIds link.
+      createImplementation(stateDir, { id: 'dup-impl', ruleId: 'r1', lifecycleState: 'candidate' });
+      expect(() =>
+        createImplementation(stateDir, { id: 'dup-impl', ruleId: 'r1', lifecycleState: 'active' }),
+      ).toThrow(/already exists.*updateImplementation/);
+      // The original record is untouched (still candidate).
+      expect(loadLedger(stateDir).tree.implementations['dup-impl']!.lifecycleState).toBe('candidate');
+      // And no duplicate parent link was appended.
+      expect(loadLedger(stateDir).tree.rules['r1']!.implementationIds.filter((id) => id === 'dup-impl')).toHaveLength(1);
     });
   });
 
@@ -182,6 +206,15 @@ describe('PRI-459 Stage 1.2 — Rule/Implementation CRUD', () => {
     it('listRuleImplementationsByState filters by state', () => {
       const active = listRuleImplementationsByState(stateDir, 'r1', 'active');
       expect(active.map((i) => i.id)).toEqual(['implA']);
+    });
+
+    it('listRuleImplementationsByState treats a missing lifecycleState as candidate', () => {
+      // PRI-459 review: transitionImplementationState defaults a missing state
+      // to 'candidate'; the query must agree, or historical/minimal records
+      // silently drop out of candidate queries.
+      createImplementation(stateDir, { id: 'implNoState', ruleId: 'r1' /* no lifecycleState */ });
+      const candidates = listRuleImplementationsByState(stateDir, 'r1', 'candidate');
+      expect(candidates.map((i) => i.id)).toContain('implNoState');
     });
 
     it('findActiveImplementation returns the active one', () => {
