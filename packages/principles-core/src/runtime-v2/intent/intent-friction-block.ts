@@ -78,15 +78,20 @@ export function buildIntentFrictionBlock(
     return '';
   }
 
-  // SPEC §12.2 — bound the content before escaping
-  let bounded = raw;
-  if (bounded.length > INTENT_INJECT_MAX_CHARS) {
-    bounded = bounded.slice(0, INTENT_INJECT_MAX_CHARS) + INTENT_TRUNCATION_MARKER;
-  }
-
   // SPEC §12.2 — escape XML/markdown boundaries so the content cannot
   // break out of the <intent_doc> block or inject live XML tags.
-  const escaped = escapeXml(bounded);
+  // CodeRabbit P2 fix: escape FIRST, then bound the escaped content, so
+  // entity expansion (& → &amp; = 5x) cannot blow the injection budget.
+  let escaped = escapeXml(raw);
+
+  // SPEC §12.2 — bound the ESCAPED content to INTENT_INJECT_MAX_CHARS.
+  // The truncation marker is appended after the budget cut; it is short
+  // (~60 chars), contains no XML special chars, and the prompt hook's
+  // 9000-char size guard provides a hard upper bound on the total block.
+  if (escaped.length > INTENT_INJECT_MAX_CHARS) {
+    const budget = INTENT_INJECT_MAX_CHARS - INTENT_TRUNCATION_MARKER.length;
+    escaped = escaped.slice(0, Math.max(0, budget)) + INTENT_TRUNCATION_MARKER;
+  }
 
   // SPEC §13.2 — INTENT Anchor Block (verbatim text from SPEC)
   const anchorBlock = `<intent_anchor>
