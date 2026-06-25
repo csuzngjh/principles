@@ -106,7 +106,7 @@ export function parseRules(raw: unknown): Record<string, LedgerRule> {
       id,
       principleId: typeof value.principleId === 'string' ? value.principleId : '',
       implementationIds: stringArray(value.implementationIds),
-    } as LedgerRule;
+    };
   }
   return rules;
 }

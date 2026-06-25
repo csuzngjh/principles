@@ -317,6 +317,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'empathy-keyword-matcher.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
+  // PRI-459: now a thin re-export adapter over @principles/core/principle-tree-ledger.
+  // Kept in the plugin baseline so existing relative imports (./principle-tree-ledger.js)
+  // still resolve. No parsing/serialization/mutation logic may live here — enforced by
+  // tests/ledger-schema-diff.test.ts.
   'principle-tree-ledger.ts',
   'evolution-logger.ts',
   'evolution-engine.ts',

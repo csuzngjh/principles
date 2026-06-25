@@ -18,14 +18,15 @@ import {
     updatePrinciple,
     updatePrincipleValueMetrics,
     type PrincipleSubtree,
+    type LedgerPrinciple,
+    type PrincipleValueMetrics,
 } from './principle-tree-ledger.js';
-import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-schema.js';
 import type { Principle as ActivePrinciple } from './evolution-types.js';
 
- 
+
 interface PrincipleTreeLedgerAccessor {
     getPrincipleSubtree(_principleId: string): PrincipleSubtree | undefined;
-    updatePrinciple(_principleId: string, updates: Partial<Principle>): Principle;
+    updatePrinciple(_principleId: string, updates: Partial<LedgerPrinciple>): LedgerPrinciple;
     updatePrincipleValueMetrics(principleId: string, _metrics: PrincipleValueMetrics): PrincipleValueMetrics;
 }
  
@@ -123,7 +124,7 @@ export class WorkspaceContext {
         if (!this._principleTreeLedger) {
             this._principleTreeLedger = {
                 getPrincipleSubtree: (principleId: string) => getPrincipleSubtree(this.stateDir, principleId),
-                updatePrinciple: (principleId: string, updates: Partial<Principle>) =>
+                updatePrinciple: (principleId: string, updates: Partial<LedgerPrinciple>) =>
                     updatePrinciple(this.stateDir, principleId, updates),
                 updatePrincipleValueMetrics: (principleId: string, metrics: PrincipleValueMetrics) =>
                     updatePrincipleValueMetrics(this.stateDir, principleId, metrics),

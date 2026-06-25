@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getImplementationAssetRoot } from './code-implementation-storage.js';
 import { loadLedger } from './principle-tree-ledger.js';
-import type { Implementation } from '../types/principle-tree-schema.js';
+import type { Implementation } from './principle-tree-ledger.js';
 import type { ReplayReport, ClassificationSummary, ReplayResult } from '@principles/core/runtime-v2';
 
 export type { ReplayReport, ClassificationSummary, ReplayResult };
