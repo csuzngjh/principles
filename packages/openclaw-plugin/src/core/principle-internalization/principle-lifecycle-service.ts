@@ -3,8 +3,8 @@ import {
   updatePrinciple,
   updatePrincipleValueMetrics,
   updateRule,
+  type PrincipleValueMetrics,
 } from '../principle-tree-ledger.js';
-import type { PrincipleValueMetrics } from '../../types/principle-tree-schema.js';
 import { buildLifecycleReadModel, type LifecycleReadModel, type PrincipleLifecycleEvidence } from './lifecycle-read-model.js';
 import { FilesystemLifecycleDatasource } from './filesystem-lifecycle-datasource.js';
 import {

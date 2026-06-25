@@ -1,9 +1,8 @@
 import { loadLedger, type LedgerPrinciple } from '../principle-tree-ledger.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
-import type { Principle } from '../../types/principle-tree-schema.js';
 
 export interface ReflectionContext {
-  principle: Principle;
+  principle: LedgerPrinciple;
   painEvents: Array<{ source: string; score: number; severity: string | null; reason: string | null; createdAt: string }>;
   sessionSnapshot: {
     toolCalls: Array<{

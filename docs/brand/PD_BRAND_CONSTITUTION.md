@@ -90,6 +90,8 @@ PD 是：
 
 > “我又多了一个需要管理的复杂系统。”
 
+> 关于情绪价值的完整框架——每个功能解决 Owner 什么负面情绪、提供什么正向感受——请参见 [docs/product/emotional-value.md](../product/emotional-value.md)。
+
 ---
 
 ## 1.4 品牌叙事
@@ -1377,9 +1379,13 @@ Read the Principles
 3. 它如何保护 Owner 注意力？
 4. 它如何体现证据、审查、回滚、行为变化？
 5. 它是否避免了廉价 AI 感？
+6. 它解决了 Owner 的哪种负面情绪，提供了哪种正向感受？
+   （参见 docs/product/emotional-value.md §2）
 ```
 
 如果答不出来，不要开始设计。
+
+> 当设计 PD 功能而非品牌物料时，必须先阅读 [docs/product/emotional-value.md](../product/emotional-value.md) 并在设计方案中加入"情绪价值评审"（见该文档 §7）。
 
 ---
 
@@ -1643,6 +1649,8 @@ docs/
     PD_MARKETING_TEMPLATES.md   ← 营销模板（待拆分）
     PD_SCREENSHOT_GUIDELINES.md ← 产品截图规范（待拆分）
     PD_BRAND_REVIEW_CHECKLIST.md ← 品牌审查清单（待拆分）
+  product/
+    emotional-value.md          ← 情绪价值设计准则（功能设计的心理目标框架）
 ```
 
 MVP 阶段保留 PD_BRAND_CONSTITUTION.md 和 PD_UX_PRINCIPLES.md 两个文档。
