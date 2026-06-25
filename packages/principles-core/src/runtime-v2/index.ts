@@ -1662,16 +1662,21 @@ export type {
 export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 
 
-// Intent Engineering MVP (PRI-465 / PRI-466) — pure logic: parser, hasher, validator
+// Intent Engineering MVP (PRI-465 / PRI-466 / PRI-467) — pure logic: parser,
+// hasher, validator, and the bounded+escaped friction block builder.
 export {
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
+  INTENT_INJECT_MAX_CHARS,
+  INTENT_TRUNCATION_MARKER,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
+  buildIntentFrictionBlock,
 } from './intent/index.js';
 export type {
   IntentDocSections,
   IntentDocWarning,
   IntentDocWarningCode,
+  IntentFrictionBlockInput,
 } from './intent/index.js';

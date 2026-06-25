@@ -333,6 +333,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
   'config-health.ts',
+  // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime cache,
+  // delegates parsing/validation/hashing to @principles/core. Never throws.
+  'intent-doc-reader.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -381,7 +384,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (97 files)', async () => {
+  it('known baseline count is self-consistent (93 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
@@ -395,7 +398,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-446: pain-diagnostic-gate.ts and detection-funnel.ts remain at 92 —
     // they are now thin adapters delegating pure logic to core, but still live
     // in plugin src/core/ and own I/O side effects, so they stay classified.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
+    // PRI-467: Added intent-doc-reader.ts (92 → 93) — plugin I/O boundary for
+    // reading .principles/INTENT.md with TTL+mtime cache for prompt injection.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 

@@ -29,6 +29,8 @@ import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-
 import { buildEmpathyObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
+import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
   detectCorrectionCue as coreDetectCorrectionCue,
@@ -135,9 +137,11 @@ export function resetPromptStateForTest(workspaceDir?: string): void {
   if (workspaceDir) {
     _staticFileCache.delete(workspaceDir);
     _empathyState.delete(workspaceDir);
+    resetIntentDocCacheForTest(workspaceDir);
   } else {
     _staticFileCache.clear();
     _empathyState.clear();
+    resetIntentDocCacheForTest();
   }
 }
 
@@ -971,11 +975,39 @@ export async function handleBeforePromptBuild(
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
   }
 
+  // ── PRI-467: Intent Engineering — INTENT.md friction block injection ──
+  // SPEC §5: flag off → no fs access, no cache access, no injection, no telemetry.
+  // SPEC §13.1: inject only when flag on + INTENT.md exists + safeReadIntentDoc ok=true.
+  // SPEC §14.1 Mode A: prompt-only — no output-hook capture, no check_emitted counter.
+  let intentBlockContent: string | undefined;
+  try {
+    const intentFlag = loadFeatureFlagFromConfig(workspaceDir, 'intent_engineering', logger);
+    if (intentFlag.enabled) {
+      const intentResult = safeReadIntentDoc(workspaceDir, { logger });
+      if (intentResult.ok && intentResult.doc) {
+        const block = buildIntentFrictionBlock({ rawIntentMd: intentResult.doc.raw });
+        if (block.length > 0) {
+          intentBlockContent = block;
+        }
+      } else if (!intentResult.ok && intentResult.reason !== 'not_found') {
+        // SPEC §13.1: missing file is silent (no debug noise). Other degraded
+        // paths (oversized, read_error, flag_disabled) log a debug reason.
+        logger?.debug?.(
+          `[PD:Intent] INTENT.md injection skipped: reason=${intentResult.reason ?? 'unknown'}, nextAction=${intentResult.nextAction ?? 'none'}`
+        );
+      }
+    }
+  } catch (intentErr) {
+    // ERR-002 — fail-open: never let INTENT injection break the prompt hook.
+    logger?.warn?.(`[PD:Intent] INTENT injection failed, skipping: ${String(intentErr)}`);
+  }
+
   // Build appendSystemContext with recency effect
-  // Content order (most important last): behavioral_constraints -> project_context -> working_memory -> reflection_log -> thinking_os -> principles
+  // Content order (most important last): behavioral_constraints -> project_context -> intent_block -> working_memory -> reflection_log -> thinking_os -> principles
   appendSystemContext = assembleAppendSystemContext({
     behavioralConstraints: shouldInjectBehavioralConstraints ? empathySilenceConstraint : undefined,
     projectContext: projectContextContent || undefined,
+    intentBlock: intentBlockContent,
     workingMemory: workingMemoryContent || undefined,
     thinkingOs: thinkingOsContent || undefined,
     evolutionPrinciples: evolutionPrinciplesContent || undefined,
@@ -995,14 +1027,16 @@ export async function handleBeforePromptBuild(
 
   // ──── 8. SIZE GUARD ────
   // Delegates to @principles/core/prompt-builder/truncateInjectionToBudget
-  // which handles priority stripping: project_context → thinking_os →
-  // evolution_principles → reflection_log → reason: truncation → fallback.
+  // which handles priority stripping: project_context → intent_block →
+  // thinking_os → evolution_principles → reflection_log → reason: truncation → fallback.
+  // PRI-467: intentBlockContent is passed so the guard can strip INTENT by
+  // exact match before falling back to the nuclear option.
   const result = truncateInjectionToBudget(
     prependSystemContext,
     prependContext,
     appendSystemContext,
     {
-      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
+      blocks: { projectContextContent, intentBlockContent, thinkingOsContent, evolutionPrinciplesContent },
     }
   );
 
