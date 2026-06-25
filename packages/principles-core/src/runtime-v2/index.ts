@@ -1375,6 +1375,7 @@ export type {
   EventLogEntry,
   ToolCallEventData,
   PainSignalEventData,
+  RuleMatchEventData,
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
