@@ -391,8 +391,9 @@ export function ActivationPage() {
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.activation.eyebrow")}
       </div>
-      <ShinyText 
-        className="text-[29px] font-semibold tracking-tight mb-2"
+      <ShinyText
+        as="h1"
+        className="text-[29px] font-semibold tracking-tight text-ink mb-2"
         duration={4.5}
         brightness={0.5}
         disabled={activeActivations.length === 0}

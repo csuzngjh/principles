@@ -110,8 +110,9 @@ export function PainPage() {
         <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">
           {t('pages.pain.eyebrow')}
         </div>
-        <ShinyText 
-          className="text-[29px] font-semibold tracking-tight mt-3 mb-2"
+        <ShinyText
+          as="h1"
+          className="text-[29px] font-semibold tracking-tight text-ink mt-3 mb-2"
           duration={4.5}
           brightness={0.5}
           disabled={state.status !== 'loaded' || state.data.records.length === 0}

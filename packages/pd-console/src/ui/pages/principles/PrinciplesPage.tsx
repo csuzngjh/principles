@@ -254,8 +254,9 @@ export function PrinciplesPage() {
     <PageShell>
       {/* Header */}
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
-      <ShinyText 
-        className="text-[29px] font-semibold tracking-tight mb-2"
+      <ShinyText
+        as="h1"
+        className="text-[29px] font-semibold tracking-tight text-ink mb-2"
         duration={4.5}
         brightness={0.5}
         disabled={!(filterMode === 'actionable' && (categories?.owner_actionable ?? 0) > 0)}
