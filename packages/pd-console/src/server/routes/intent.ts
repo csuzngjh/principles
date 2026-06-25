@@ -41,7 +41,7 @@ export async function handleIntentRoute(
     const summary = await model.getSummary(flagEnabled);
     sendSuccess(res, summary);
   } catch (err) {
-    sendError(res, 500, 'intent_route_error', (err as Error).message);
+    sendError(res, 500, 'intent_route_error', err instanceof Error ? err.message : 'Unknown error');
   }
 }
 
