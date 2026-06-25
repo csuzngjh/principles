@@ -9,23 +9,6 @@ export type MvpChannel = (typeof MVP_CHANNELS)[number];
 export const MVP_QUIET_FLAGS = ['gfi'] as const;
 export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger'] as const;
 
-export interface FeatureFlagDefinition {
-  id: string;
-  category: string;
-  enabled: boolean;
-  since: string;
-  description?: string;
-}
-
-const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
-  { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
-  { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
-  { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
-  { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
-  { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
-  { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
-];
-
 export interface ComponentStatus {
   plugin: 'verified' | 'failed' | 'skipped';
   cli: 'verified' | 'verified_local_only' | 'failed' | 'skipped';
@@ -59,29 +42,6 @@ export interface InstallFailureOutput {
 }
 
 export type InstallOutput = InstallSuccessOutput | InstallFailureOutput;
-
-export function generateFeatureFlagsYamlContent(channels?: string[]): string {
-  const enabledSet = new Set<string>(channels ?? MVP_CHANNELS);
-  for (const core of MVP_CHANNELS) {
-    enabledSet.add(core);
-  }
-  const flags: Record<string, { enabled: boolean; category: string; since: string; description?: string }> = {};
-
-  for (const flag of DEFAULT_FEATURE_FLAGS) {
-    const isEnabled = flag.category === 'core' ? true : enabledSet.has(flag.id);
-    const entry: { enabled: boolean; category: string; since: string; description?: string } = {
-      enabled: isEnabled,
-      category: flag.category,
-      since: flag.since,
-    };
-    if (flag.description) {
-      entry.description = flag.description;
-    }
-    flags[flag.id] = entry;
-  }
-
-  return yaml.dump(flags, { lineWidth: -1, quotingType: '"' });
-}
 
 export function validateMvpChannels(channels: unknown): {
   valid: MvpChannel[];
@@ -231,10 +191,6 @@ export function buildFailureOutput(reason: string, nextAction: string): InstallF
   };
 }
 
-export function getFeatureFlagsPath(workspaceDir: string): string {
-  return path.join(workspaceDir, '.pd', 'feature-flags.yaml');
-}
-
 export function isMvpChannel(value: string): value is MvpChannel {
   return (MVP_CHANNELS as readonly string[]).includes(value);
 }
@@ -268,37 +224,6 @@ export function getInstalledConsoleDir(): string {
 
 export function isWindows(): boolean {
   return process.platform === 'win32';
-}
-
-export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
-  const configPath = getFeatureFlagsPath(workspaceDir);
-  if (!existsSync(configPath)) return [];
-
-  const rawYaml = readFileSync(configPath, 'utf-8');
-  const parsed: unknown = (() => { try { return yaml.load(rawYaml); } catch (e) { throw new Error(`feature-flags.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e }); } })();
-
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`feature-flags.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
-  }
-
-  const enabled: string[] = [];
-  for (const [key, value] of Object.entries(parsed)) {
-    if (!isMvpChannel(key)) continue;
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
-    }
-    if (!Object.hasOwn(value, 'enabled')) {
-      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
-    }
-    const flag = value as Record<string, unknown>;
-    if (typeof flag.enabled !== 'boolean') {
-      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' value (expected boolean, got ${flag.enabled === null ? 'null' : typeof flag.enabled}). Delete the file and re-run the installer.`);
-    }
-    if (flag.enabled === true) {
-      enabled.push(key);
-    }
-  }
-  return enabled;
 }
 
 /**

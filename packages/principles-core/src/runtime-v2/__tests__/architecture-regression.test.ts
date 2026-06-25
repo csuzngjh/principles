@@ -3386,7 +3386,7 @@ describe('PRI-225: No unsafe type assertions on untrusted metadata arrays', () =
 // ── PRI-239: Feature flag registry architecture boundary ──────────────────
 //
 // Core: packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts
-// I/O Loader: packages/pd-cli/src/services/feature-flag-loader.ts
+// I/O Loader: packages/pd-cli/src/services/pd-config-loader.ts (PRI-460: replaced feature-flag-loader.ts)
 // CLI Command: packages/pd-cli/src/commands/runtime-features.ts
 // Consumption: packages/pd-cli/src/commands/runtime-canary.ts (GFI check)
 
@@ -3411,11 +3411,11 @@ describe('PRI-239: Feature flag registry architecture boundary', () => {
     expect(src).not.toContain('SqliteConnection');
   });
 
-  it('IO_LOADER_OUTSIDE_CORE: I/O loader exists at pd-cli/src/services/feature-flag-loader.ts', async () => {
+  it('IO_LOADER_OUTSIDE_CORE: I/O loader exists at pd-cli/src/services/pd-config-loader.ts', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     expect(existsSync(
-      resolve(__dirname, '../../../../pd-cli/src/services/feature-flag-loader.ts'),
+      resolve(__dirname, '../../../../pd-cli/src/services/pd-config-loader.ts'),
     )).toBe(true);
   });
 
@@ -3436,12 +3436,12 @@ describe('PRI-239: Feature flag registry architecture boundary', () => {
     expect(src).not.toContain('nocturnal-service');
   });
 
-  it('CONSUMPTION_WIRED: runtime-canary.ts imports feature flag loader', async () => {
+  it('CONSUMPTION_WIRED: runtime-canary.ts imports canonical PD config loader', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '../../../../pd-cli/src/commands/runtime-canary.ts'), 'utf-8');
-    expect(src).toContain('feature-flag-loader');
-    expect(src).toContain('loadEffectiveFeatureFlags');
+    expect(src).toContain('pd-config-loader');
+    expect(src).toContain('loadPdConfig');
   });
 });
 

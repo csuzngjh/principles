@@ -13,7 +13,7 @@
  * - CLI-gate concerns (process.exit, telemetry, help text) stay at call sites.
  *   This resolver throws structured `ConfigResolutionError` that handlers translate.
  * - Lives in pd-cli/services (NOT core) because it constructs adapters and reads
- *   CLI feature flags via `loadEffectiveFeatureFlags`, which is a pd-cli service.
+ *   PD config via `loadPdConfig` + `computeFlagsFromLoadResult`, which are pd-cli services.
  *
  * ERR refs:
  * - ERR-001 (no any): all types explicit
@@ -34,7 +34,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import { loadEffectiveFeatureFlags } from './feature-flag-loader.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from './pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
 import type { ResolvedRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
 
@@ -255,7 +255,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     // dreamer runner, route through the L2 multi-turn agent loop adapter.
     // Other runners (philosopher/scribe/...) stay on L1.
     if (opts.runnerKind === 'dreamer' && opts.l2ArtifactReader && opts.l2StateDir) {
-      const effectiveFlags = loadEffectiveFeatureFlags(opts.workspaceDir);
+      const effectiveFlags = computeFlagsFromLoadResult(loadPdConfig(opts.workspaceDir));
       const l2FlagDef = Object.hasOwn(effectiveFlags.flags, 'l2_dreamer')
         ? effectiveFlags.flags.l2_dreamer
         : undefined;

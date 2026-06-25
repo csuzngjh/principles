@@ -24,7 +24,7 @@ import {
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
-import { loadWorkspaceFeatureFlags } from '../config/feature-flags.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -260,17 +260,9 @@ export class ApprovalsConsoleModel {
     // Feature flag gate (Contract F): when story_a_approval_completion is disabled,
     // the new orchestrator is deactivated without damaging existing data.
     // The approval remains in 'approved' status; only activation is skipped.
-    const flagResult = loadWorkspaceFeatureFlags(this.workspaceDir);
-    if (!flagResult.ok) {
-      return {
-        decision: 'refused' as const,
-        reason: `feature_flag_load_failed: ${flagResult.reason}`,
-        nextAction: 'fix feature flag config or manually dispatch via pd runtime activation dispatch',
-        channel: existing.channel,
-        riskLevel: existing.riskLevel,
-      };
-    }
-    const completionFlag = flagResult.flags.flags.story_a_approval_completion;
+    const configResult = loadPdConfig(this.workspaceDir);
+    const pdFlags = computeFlagsFromLoadResult(configResult);
+    const completionFlag = pdFlags.flags.story_a_approval_completion;
     if (!completionFlag || !completionFlag.enabled) {
       // Flag disabled — return undefined so the caller knows activation was skipped.
       // The approval record itself is not rolled back (Contract F: no data damage).
