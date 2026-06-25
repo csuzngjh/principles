@@ -358,4 +358,19 @@ describe('resolveRuleHostReadiness', () => {
     });
     expect(result.status).toBe('ready');
   });
+
+  // ── Runtime Contract #9: graceful degradation with reason ────────────────
+
+  it('returns refused when getEnvVar throws (Runtime Contract #9: never throws)', () => {
+    writeConfig(workspaceDir, { apiKeyEnv: 'TEST_KEY' });
+    const throwingGetEnv = (): string => {
+      throw new Error('env access failed');
+    };
+    const result = resolveRuleHostReadiness(workspaceDir, throwingGetEnv);
+    expect(result.status).toBe('refused');
+    expect(result.reason).toContain('readiness_resolution_failed');
+    expect(result.reason).toContain('env access failed');
+    expect(result.nextAction).toBeDefined();
+    expect(result.codeRuleCapability.enabled).toBe(false);
+  });
 });

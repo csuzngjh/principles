@@ -71,6 +71,11 @@ function parseJsonObject(text: string): Record<string, unknown> {
   return parsed;
 }
 
+/** Type guard: narrows `unknown` to `Record<string, unknown>` without `as`. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function captureStdio(fn: () => Promise<void>): Promise<StdIoState> {
   return new Promise((resolve, reject) => {
     const origExitCode = process.exitCode;
@@ -437,7 +442,11 @@ describe('handleRunRuleHost — PRI-461 readiness integration', () => {
     );
     const payload = parseJsonObject(stdout.trim());
     expect(payload.readiness).toBeDefined();
-    const readiness = payload.readiness as Record<string, unknown>;
+    const readiness = payload.readiness;
+    expect(isRecord(readiness)).toBe(true);
+    if (!isRecord(readiness)) {
+      throw new Error('readiness is not a record');
+    }
     expect(readiness.status).toBe('refused');
     expect(readiness.agentStatuses).toBeDefined();
   });

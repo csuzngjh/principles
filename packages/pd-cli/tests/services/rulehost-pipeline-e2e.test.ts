@@ -164,6 +164,11 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     return JSON.parse(raw);
   }
 
+  /** Type guard: narrows `unknown` to `Record<string, unknown>` without `as`. */
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
   // ── Capability ON: both agents enabled, API key set ──────────────────────
 
   it('dry-run reports code_rule_capability: ON when artificer+evaluator enabled and API key set', async () => {
@@ -275,6 +280,10 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     // construction, returning status='refused' with a structured reason instead
     // of the old opaque 'agent_runtime_resolution_failed' error.
     const output = parseJsonOutput();
+    expect(isRecord(output)).toBe(true);
+    if (!isRecord(output)) {
+      throw new Error('output is not a record');
+    }
     expect(output.status).toBe('refused');
     expect(String(output.reason)).toContain('philosopher');
     expect(typeof output.nextAction).toBe('string');

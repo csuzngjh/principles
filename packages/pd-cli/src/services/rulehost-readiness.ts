@@ -202,20 +202,9 @@ function buildTextPrincipleOnlyResult(
   };
 }
 
-/**
- * Resolve RuleHost readiness from the workspace's .pd/config.yaml.
- *
- * This is the production entry point called by the `run-rulehost` handler
- * BEFORE constructing any adapters. It returns a structured result so the
- * handler can emit a clear status instead of an opaque adapter-resolution failure.
- *
- * @param workspaceDir - The workspace directory containing .pd/config.yaml
- * @param getEnvVar - Env var accessor, defaults to process.env. Injected for testability.
- * @returns Structured readiness result. Never throws.
- */
-export function resolveRuleHostReadiness(
+function resolveRuleHostReadinessUnchecked(
   workspaceDir: string,
-  getEnvVar: (name: string) => string | undefined = (name) => process.env[name],
+  getEnvVar: (name: string) => string | undefined,
 ): RuleHostReadinessResult {
   // ── Step 1: Load config ──
   const { configLoadResult } = resolveRuntimeFromPdConfig(workspaceDir, getEnvVar);
@@ -297,4 +286,41 @@ export function resolveRuleHostReadiness(
     agentStatuses,
     codeRuleCapability: { enabled: true },
   };
+}
+
+/**
+ * Resolve RuleHost readiness from the workspace's .pd/config.yaml.
+ *
+ * This is the production entry point called by the `run-rulehost` handler
+ * BEFORE constructing any adapters. It returns a structured result so the
+ * handler can emit a clear status instead of an opaque adapter-resolution failure.
+ *
+ * This function NEVER throws. Any unexpected exception from config loading,
+ * feature-flag computation, agent checks, or getEnvVar is caught and converted
+ * to a `refused` result with reason + nextAction (Runtime Contract #9).
+ *
+ * @param workspaceDir - The workspace directory containing .pd/config.yaml
+ * @param getEnvVar - Env var accessor, defaults to process.env. Injected for testability.
+ * @returns Structured readiness result. Never throws.
+ */
+export function resolveRuleHostReadiness(
+  workspaceDir: string,
+  getEnvVar: (name: string) => string | undefined = (name) => process.env[name],
+): RuleHostReadinessResult {
+  try {
+    return resolveRuleHostReadinessUnchecked(workspaceDir, getEnvVar);
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error && error.message.length > 0
+        ? error.message
+        : 'unknown readiness resolution error';
+    return buildRefusedResult(
+      `readiness_resolution_failed: ${message}`,
+      'Fix the readiness resolution error and retry. Run `pd config doctor` for diagnostics.',
+      {
+        agentStatuses: emptyAgentStatuses(),
+        codeRuleCapability: { enabled: false, disabledReason: 'readiness_resolution_failed' },
+      },
+    );
+  }
 }
