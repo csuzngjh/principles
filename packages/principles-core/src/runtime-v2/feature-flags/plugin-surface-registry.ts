@@ -123,15 +123,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     disabledReason: 'Disabled by default: pd-task service is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
-    id: 'service:central-sync',
-    kind: 'service',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Cross-workspace central sync service',
-    disabledReason: 'Disabled by default: cross-workspace central sync is opt-in for multi-workspace deployments; default off per ADR-0014 §2.4 (preserved in plugin code, not active in production).',
-  },
-  {
     id: 'service:internalization-auto-consumer',
     kind: 'service',
     category: 'core',
