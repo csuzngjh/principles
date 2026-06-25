@@ -16,6 +16,7 @@ import { PageLoading } from '../../components/layout/page-loading.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
+import { ShinyText } from '../../components/ui/shiny-text.js';
 import { fetchEvidenceChain } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
 import { formatDate } from '../../utils/format.js';
@@ -109,9 +110,15 @@ export function PainPage() {
         <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">
           {t('pages.pain.eyebrow')}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mt-3 mb-2">
+        <ShinyText
+          as="h1"
+          className="text-[29px] font-semibold tracking-tight text-ink mt-3 mb-2"
+          duration={4.5}
+          brightness={0.5}
+          disabled={state.status !== 'loaded' || state.data.records.length === 0}
+        >
           {t('pages.pain.title')}
-        </h1>
+        </ShinyText>
         <p className="text-ink-3 text-sm leading-relaxed max-w-[712px]">
           {t('pages.pain.description')}
         </p>
