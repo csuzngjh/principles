@@ -39,6 +39,14 @@ Supported MVP activation outcomes are `prompt`, `code_tool_hook` / RuleHost, and
 
 MVP success is an owner observing a better-aligned response in a comparable later scenario. It is not statistical attribution, autonomous learning infrastructure, or a new activation channel.
 
+## Emotional Value
+
+PD features must deliver measurable emotional value to the Owner. Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md) for the full framework.
+
+Core promise: **把 Owner 面对 Agent 时的失控感、疲惫感、重复纠正感，转化为安心感、掌控感、沉淀感和清醒感。**
+
+Every feature design must answer: which negative emotion does it reduce, and what positive feeling does it create? A feature that only proves "it works" without explaining how it improves the Owner's psychological state is incomplete.
+
 ## Decision Gate
 
 For a new issue, surfaced subsystem, user journey, or product/architecture change, answer:
@@ -47,5 +55,6 @@ For a new issue, surfaced subsystem, user journey, or product/architecture chang
 2. What owner-visible evidence verifies it?
 3. How is it disabled, rolled back, or deferred?
 4. Does it duplicate a host/runtime capability?
+5. What emotional value does it deliver? (See emotional-value.md — which negative emotion does it reduce, what positive feeling does it create?)
 
 If these cannot be answered, do not add the work to MVP scope. Use ADR-0014 and the post-MVP conditional roadmap for deferred work; use architecture documents only for implementation structure.
