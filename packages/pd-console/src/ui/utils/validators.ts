@@ -1439,3 +1439,113 @@ export function validateTrajectoryData(v: unknown): TrajectoryData | null {
 
   return result;
 }
+
+// ── Intent Page (PRI-466) ────────────────────────────────────────────────────
+
+const VALID_INTENT_REASONS = ['flag_disabled', 'not_found', 'read_error', 'parse_error', 'oversized'] as const;
+const VALID_INTENT_WARNING_CODES = ['missing_section', 'empty_section', 'too_vague', 'oversized', 'parse_failed'] as const;
+const VALID_INTENT_SECTION_KEYS = ['why', 'desiredOutcome', 'nonNegotiables', 'stopEscalation', 'currentStrategicFocus'] as const;
+
+export interface IntentDocWarningData {
+  code: string;
+  section?: string;
+  message: string;
+}
+
+export interface IntentSectionsData {
+  why?: string;
+  desiredOutcome?: string;
+  nonNegotiables?: string;
+  stopEscalation?: string;
+  currentStrategicFocus?: string;
+}
+
+export interface IntentSummaryData {
+  ok: boolean;
+  found: boolean;
+  flagEnabled: boolean;
+  reason?: string;
+  nextAction?: string;
+  path?: string;
+  contentHash?: string;
+  lastEditedAt?: string;
+  sections?: IntentSectionsData;
+  warnings: IntentDocWarningData[];
+}
+
+export function validateIntentWarning(v: unknown): IntentDocWarningData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'code') || !isString(v.code)) return null;
+  if (!(VALID_INTENT_WARNING_CODES as readonly string[]).includes(v.code)) return null;
+  if (!Object.hasOwn(v, 'message') || !isString(v.message)) return null;
+  const result: IntentDocWarningData = { code: v.code, message: v.message };
+  // Runtime Contract Rule #3: fail loud on wrong-type optional fields,
+  // consistent with validateIntentSummary's optional-field handling.
+  if (Object.hasOwn(v, 'section')) {
+    if (!isString(v.section)) return null;
+    result.section = v.section;
+  }
+  return result;
+}
+
+export function validateIntentSections(v: unknown): IntentSectionsData | null {
+  if (!isObject(v)) return null;
+  const result: IntentSectionsData = {};
+  for (const key of VALID_INTENT_SECTION_KEYS) {
+    if (Object.hasOwn(v, key)) {
+      const val = v[key];
+      if (val !== null && !isString(val)) return null;
+      if (isString(val)) {
+        result[key] = val;
+      }
+    }
+  }
+  return result;
+}
+
+export function validateIntentSummary(v: unknown): IntentSummaryData | null {
+  if (!isObject(v)) return null;
+  // Required fields
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok)) return null;
+  if (!Object.hasOwn(v, 'found') || !isBoolean(v.found)) return null;
+  if (!Object.hasOwn(v, 'flagEnabled') || !isBoolean(v.flagEnabled)) return null;
+  if (!Object.hasOwn(v, 'warnings') || !Array.isArray(v.warnings)) return null;
+  const warnings = validateArray(v.warnings, validateIntentWarning);
+  if (warnings === null) return null;
+
+  const result: IntentSummaryData = {
+    ok: v.ok,
+    found: v.found,
+    flagEnabled: v.flagEnabled,
+    warnings,
+  };
+
+  // Optional fields — validate type if present, fail loud on wrong type
+  if (Object.hasOwn(v, 'reason')) {
+    if (!isString(v.reason)) return null;
+    if (!(VALID_INTENT_REASONS as readonly string[]).includes(v.reason)) return null;
+    result.reason = v.reason;
+  }
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+  if (Object.hasOwn(v, 'path')) {
+    if (!isString(v.path)) return null;
+    result.path = v.path;
+  }
+  if (Object.hasOwn(v, 'contentHash')) {
+    if (!isString(v.contentHash)) return null;
+    result.contentHash = v.contentHash;
+  }
+  if (Object.hasOwn(v, 'lastEditedAt')) {
+    if (!isString(v.lastEditedAt)) return null;
+    result.lastEditedAt = v.lastEditedAt;
+  }
+  if (Object.hasOwn(v, 'sections')) {
+    const sections = validateIntentSections(v.sections);
+    if (sections === null) return null;
+    result.sections = sections;
+  }
+  return result;
+}

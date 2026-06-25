@@ -53,6 +53,7 @@ import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
 import { registerMvpCommands } from './commands/mvp-smoke.js';
 import { registerRulecodeCommand } from './commands/rulecode.js';
+import { registerIntentCommand } from './commands/intent.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -970,6 +971,11 @@ registerMvpCommands(program);
 // Read-only commands: spec, validate, replay. No DB mutation, no artifact writes.
 
 registerRulecodeCommand(program);
+
+// ─── Intent Engineering (PRI-466) ───────────────────────────────────────────
+// Owner-authored INTENT.md management: init (create), show (read-only summary).
+
+registerIntentCommand(program);
 
 const consoleCmd = program
   .command('console')
