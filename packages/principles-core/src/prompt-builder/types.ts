@@ -16,6 +16,8 @@ export interface SizeGuardOptions {
   /** Content strings for exact-match replacement (matching plugin behavior) */
   blocks?: {
     projectContextContent?: string;
+    /** PRI-467: intent block content (full buildIntentFrictionBlock output) for exact-match stripping */
+    intentBlockContent?: string;
     thinkingOsContent?: string;
     evolutionPrinciplesContent?: string;
   };
