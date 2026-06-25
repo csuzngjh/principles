@@ -27,7 +27,6 @@ import {
 } from '@principles/core/runtime-v2';
 import type {
   EffectivePdConfig,
-  InternalAgentName,
   RuntimeProfile,
 } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
@@ -63,19 +62,37 @@ export interface RuleHostReadinessResult {
   readonly codeRuleCapability: CodeRuleCapabilityReadiness;
 }
 
+/**
+ * The 5 internal agents that RuleHost readiness checks.
+ * Narrowed from InternalAgentName so array iteration indexes a known-shape map.
+ */
+type RuleHostAgentName = 'dreamer' | 'philosopher' | 'scribe' | 'artificer' | 'evaluator';
+
+/**
+ * Mutable builder type for agentStatuses during construction.
+ * The readonly RuleHostReadinessResult['agentStatuses'] is assigned from this.
+ */
+interface AgentStatusesMap {
+  dreamer: AgentReadiness;
+  philosopher: AgentReadiness;
+  scribe: AgentReadiness;
+  artificer: AgentReadiness;
+  evaluator: AgentReadiness;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /**
  * Agents required for the text-principle path (dreamer → philosopher → scribe).
  * If any of these is not ready, the pipeline cannot produce even text principles.
  */
-const REQUIRED_AGENTS: readonly InternalAgentName[] = ['dreamer', 'philosopher', 'scribe'];
+const REQUIRED_AGENTS: readonly RuleHostAgentName[] = ['dreamer', 'philosopher', 'scribe'];
 
 /**
  * Agents required for the code-rule capability (artificer + evaluator).
  * Both must be ready for the adversarial loop to run.
  */
-const CODE_RULE_AGENTS: readonly InternalAgentName[] = ['artificer', 'evaluator'];
+const CODE_RULE_AGENTS: readonly RuleHostAgentName[] = ['artificer', 'evaluator'];
 
 // ── Implementation ────────────────────────────────────────────────────────────
 
@@ -92,7 +109,7 @@ const CODE_RULE_AGENTS: readonly InternalAgentName[] = ['artificer', 'evaluator'
  */
 function checkAgentReadiness(
   effective: EffectivePdConfig,
-  agentName: InternalAgentName,
+  agentName: RuleHostAgentName,
   getEnvVar: (name: string) => string | undefined,
 ): AgentReadiness {
   const binding = resolveAgentRuntimeBinding(effective, agentName);
@@ -142,11 +159,11 @@ function checkAgentReadiness(
 // ── Helpers (defined before public function to satisfy no-use-before-define) ──
 
 interface ReadinessResultParts {
-  readonly agentStatuses: RuleHostReadinessResult['agentStatuses'];
+  readonly agentStatuses: AgentStatusesMap;
   readonly codeRuleCapability: CodeRuleCapabilityReadiness;
 }
 
-function emptyAgentStatuses(): RuleHostReadinessResult['agentStatuses'] {
+function emptyAgentStatuses(): AgentStatusesMap {
   const empty: AgentReadiness = { status: 'not_ready', reason: 'not checked' };
   return {
     dreamer: empty,
@@ -218,7 +235,7 @@ export function resolveRuleHostReadiness(
   // ── Step 2: Check required agents (dreamer, philosopher, scribe) ──
   // Build agentStatuses with all 5 keys from the start to avoid `as` casts.
   const unchecked: AgentReadiness = { status: 'not_ready', reason: 'not checked' };
-  const agentStatuses: RuleHostReadinessResult['agentStatuses'] = {
+  const agentStatuses: AgentStatusesMap = {
     dreamer: unchecked,
     philosopher: unchecked,
     scribe: unchecked,
