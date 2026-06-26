@@ -103,6 +103,34 @@ describe('FollowUpActions component structure', () => {
 // 2. SPEC §22.1.4 — ownerAction routing
 // ════════════════════════════════════════════════════════════════════════════
 
+describe('OwnerDecisionPanel — SPEC §22.1.3 + §24.5 primary action by source', () => {
+  it('defines a PRIMARY_ACTION_BY_SOURCE mapping', () => {
+    expect(painPageSrc).toMatch(/PRIMARY_ACTION_BY_SOURCE/);
+  });
+
+  it('maps action_drift → confirm_drift (primary)', () => {
+    expect(painPageSrc).toMatch(/action_drift:\s*['"]confirm_drift['"]/);
+  });
+
+  it('maps intent_suspect → revise_intent (primary)', () => {
+    expect(painPageSrc).toMatch(/intent_suspect:\s*['"]revise_intent['"]/);
+  });
+
+  it('maps healthy_tension → observe (primary)', () => {
+    expect(painPageSrc).toMatch(/healthy_tension:\s*['"]observe['"]/);
+  });
+
+  it('applies variant="default" to the primary button and "outline" to others', () => {
+    // The conditional variant assignment must be present
+    expect(painPageSrc).toMatch(/isPrimary\s*\?/);
+    expect(painPageSrc).toMatch(/['"]default['"]\s*:\s*['"]outline['"]/);
+  });
+
+  it('resolves isPrimary from tension.source via the mapping', () => {
+    expect(painPageSrc).toMatch(/PRIMARY_ACTION_BY_SOURCE\[tension\.source\]\s*===\s*action/);
+  });
+});
+
 describe('FollowUpActions — SPEC §22.1.4 ownerAction routing', () => {
   it('returns null for observe (no follow-up actions)', () => {
     // Look for the early return guard

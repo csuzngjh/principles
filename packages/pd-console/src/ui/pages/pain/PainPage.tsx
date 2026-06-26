@@ -755,6 +755,23 @@ const OWNER_ACTION_BUTTONS: ReadonlyArray<{
 ];
 
 /**
+ * SPEC §22.1.3 + §24.5: each `source` value has exactly ONE primary action.
+ * - action_drift     → Confirm Drift (primary)
+ * - intent_suspect   → Revise Intent (primary)
+ * - healthy_tension  → Observe (primary)
+ * - none             → (no decision panel rendered — handled by shouldRenderIntentTensionPanel)
+ *
+ * The primary button uses `variant="default"` (the Button component's primary
+ * style: bg-gov text-paper); all others use `variant="outline"`.
+ * This satisfies §24.5 acceptance criterion 4: "primary action 不相同，且每种状态只有一个 primary".
+ */
+const PRIMARY_ACTION_BY_SOURCE: Record<string, string> = {
+  action_drift: 'confirm_drift',
+  intent_suspect: 'revise_intent',
+  healthy_tension: 'observe',
+};
+
+/**
  * OwnerDecisionPanel — renders the Owner decision flow for an intent tension.
  *
  * State machine: 'idle' | 'submitting' | 'recorded' | 'error'
@@ -898,19 +915,23 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidate
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
-            {OWNER_ACTION_BUTTONS.map(({ action, labelKey }) => (
-              <Button
-                key={action}
-                variant="outline"
-                size="sm"
-                disabled={panelState === 'submitting'}
-                onClick={() => void handleSubmit(action)}
-              >
-                {panelState === 'submitting'
-                  ? t('pages.pain.ownerDecisionSubmitting')
-                  : t(labelKey)}
-              </Button>
-            ))}
+            {OWNER_ACTION_BUTTONS.map(({ action, labelKey }) => {
+              // SPEC §22.1.3: the source determines which single button is primary.
+              const isPrimary = PRIMARY_ACTION_BY_SOURCE[tension.source] === action;
+              return (
+                <Button
+                  key={action}
+                  variant={isPrimary ? 'default' : 'outline'}
+                  size="sm"
+                  disabled={panelState === 'submitting'}
+                  onClick={() => void handleSubmit(action)}
+                >
+                  {panelState === 'submitting'
+                    ? t('pages.pain.ownerDecisionSubmitting')
+                    : t(labelKey)}
+                </Button>
+              );
+            })}
           </div>
         </>
       )}
