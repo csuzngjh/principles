@@ -163,6 +163,14 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     const store = new SqliteApprovalQueueStore(sqliteConn);
     approvalQueue = new ApprovalQueue(store);
 
+    // P1-3: Seed parent pi_artifact records for FK validation before enqueue.
+    // approvalQueue.enqueue() rejects artifact_id references to non-existent
+    // pi_artifacts (ERR-009/ERR-010/ERR-002). seedPrincipleArtifact uses
+    // upsertArtifact (no tasks FK check), so it is safe to reuse here.
+    for (const ch of PROVEN_CHANNELS) {
+      await seedPrincipleArtifact(`artifact-proven-${ch}`);
+    }
+
     // Seed proven-channel approvals
     for (const ch of PROVEN_CHANNELS) {
       await approvalQueue.enqueue({
