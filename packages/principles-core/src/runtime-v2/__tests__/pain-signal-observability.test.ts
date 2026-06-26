@@ -114,7 +114,7 @@ describe('recordPainSignalObservability', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
         source TEXT NOT NULL,
-        score INTEGER NOT NULL,
+        score REAL NOT NULL,
         reason TEXT,
         severity TEXT,
         origin TEXT,

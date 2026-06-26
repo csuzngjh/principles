@@ -326,6 +326,14 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     // Persist artifacts to real workspace DB
     const principleRecord = makePrincipleArtifactRecord(runId);
     const ruleRecord = makeRuleArtifactRecord(runId, principleRecord);
+    // P1-3: Seed parent task record for FK validation. Both demo artifacts share
+    // sourceTaskId = `task-demo-${runId}`; createArtifact rejects it unless the
+    // task exists in the tasks table (ERR-009/ERR-010/ERR-002).
+    const demoTaskId = principleRecord.sourceTaskId;
+    stateManager.connection.getDb().prepare(
+      "INSERT OR IGNORE INTO tasks (task_id, task_kind, status, created_at, updated_at)" +
+      " VALUES (?, 'diagnosis', 'pending', ?, ?)",
+    ).run(demoTaskId, principleRecord.createdAt, principleRecord.createdAt);
     await stateManager.piArtifactStore.createArtifact(principleRecord);
     await stateManager.piArtifactStore.createArtifact(ruleRecord);
 

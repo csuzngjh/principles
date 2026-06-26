@@ -189,6 +189,31 @@ function makeArtifactReadModel(artifacts: PIArtifactSnapshot[]): {
   };
 }
 
+// P1-3: Seed artifact to DB for FK validation (approvals.artifact_id → pi_artifacts).
+// Tests use in-memory artifactReadModel for the dispatcher, but the SQLite
+// approvalStore.enqueue() now checks pi_artifacts table at FK level.
+function seedArtifactToDb(ws: TestWorkspace, artifact: PIArtifactSnapshot): void {
+  const db = ws.connection.getDb();
+  db.prepare(
+    "INSERT OR IGNORE INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'diagnosis', 'pending', ?, ?)",
+  ).run(artifact.sourceTaskId, artifact.createdAt, artifact.createdAt);
+  db.prepare(
+    `INSERT OR IGNORE INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    artifact.artifactId,
+    artifact.artifactKind,
+    artifact.sourceTaskId,
+    artifact.sourcePrincipleId ?? null,
+    artifact.sourceRuleId ?? null,
+    JSON.stringify(artifact.lineageArtifactIds),
+    artifact.validationStatus,
+    artifact.contentJson,
+    artifact.createdAt,
+    artifact.updatedAt,
+  );
+}
+
 // ── Acceptance Tests ────────────────────────────────────────────────────────
 
 describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', () => {
@@ -209,6 +234,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
       // Step 1: Capture pain (simulated as a validated principle artifact)
       const principleArtifact = createPrincipleArtifact();
       const artifactReadModel = makeArtifactReadModel([principleArtifact]);
+      seedArtifactToDb(ws, principleArtifact);
 
       // Step 2: Compress to understandable principle (artifact already represents this)
       // Step 3: Owner approves
@@ -282,6 +308,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
       // Step 1-2: Pain → principle → rule artifact (validated)
       const ruleArtifact = createRuleArtifact();
       const artifactReadModel = makeArtifactReadModel([ruleArtifact]);
+      seedArtifactToDb(ws, ruleArtifact);
 
       // Step 3: Owner approves (code_tool_hook is high-risk, requires approval)
       const enqueued = await ws.approvalStore.enqueue({
@@ -342,6 +369,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
     it('rejected approval cannot be activated by ApprovalCompletionService', async () => {
       const artifact = createPrincipleArtifact();
       const artifactReadModel = makeArtifactReadModel([artifact]);
+      seedArtifactToDb(ws, artifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: artifact.artifactId,
@@ -383,9 +411,12 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
       const originalArtifact = createPrincipleArtifact({ artifactId: 'art-original' });
       const editedArtifact = createPrincipleArtifact({
         artifactId: 'art-edited',
+        sourceTaskId: 'task-pain-001-edit',
         contentJson: JSON.stringify({ text: 'Edited: Always read first', language: 'en' }),
       });
       const artifactReadModel = makeArtifactReadModel([originalArtifact, editedArtifact]);
+      seedArtifactToDb(ws, originalArtifact);
+      seedArtifactToDb(ws, editedArtifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: originalArtifact.artifactId,
@@ -444,6 +475,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
     it('calling completeApproval twice produces only one activation', async () => {
       const artifact = createPrincipleArtifact();
       const artifactReadModel = makeArtifactReadModel([artifact]);
+      seedArtifactToDb(ws, artifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: artifact.artifactId,
@@ -520,6 +552,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
         sourcePrincipleId: 'principle-B',
       });
       const artifactReadModel = makeArtifactReadModel([artifact1, artifact2]);
+      seedArtifactToDb(ws, artifact1);
 
       // Approve and activate artifact1
       const enqueued1 = await ws.approvalStore.enqueue({
@@ -560,6 +593,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
         contentJson: '{invalid json content',
       });
       const artifactReadModel = makeArtifactReadModel([malformedArtifact]);
+      seedArtifactToDb(ws, malformedArtifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: malformedArtifact.artifactId,
@@ -597,6 +631,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
     it('after rollback, listCodeToolHookActivations excludes the deactivated rule', async () => {
       const ruleArtifact = createRuleArtifact();
       const artifactReadModel = makeArtifactReadModel([ruleArtifact]);
+      seedArtifactToDb(ws, ruleArtifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: ruleArtifact.artifactId,
@@ -649,6 +684,7 @@ describe('Story A Acceptance Test (PRI-408) — unsplippable production loop', (
     it('approval record artifactId matches the activated artifact', async () => {
       const artifact = createPrincipleArtifact();
       const artifactReadModel = makeArtifactReadModel([artifact]);
+      seedArtifactToDb(ws, artifact);
 
       const enqueued = await ws.approvalStore.enqueue({
         artifactId: artifact.artifactId,
