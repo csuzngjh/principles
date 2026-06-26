@@ -292,8 +292,9 @@ export class HealthCheckModel {
           const latestSignal = signals.length > 0 ? signals[0] : null;
           lastPrincipleAdded = latestSignal?.updatedAt ?? null;
         }
-      } catch {
-        // Pruning not available — leave as null
+      } catch (e) {
+        // Pruning not available — leave as null, but log for observability (ERR-002)
+        console.warn('HealthCheckModel.getPipelineTimestamps: pruning read failed, lastPrincipleAdded left null:', e);
       }
 
       return {
@@ -302,7 +303,8 @@ export class HealthCheckModel {
         lastCandidateGenerated,
         lastPrincipleAdded,
       };
-    } catch {
+    } catch (e) {
+      console.warn('HealthCheckModel.getPipelineTimestamps: failed to read pipeline timestamps, returning all null:', e);
       return {
         lastPainSignal: null,
         lastTaskCreated: null,

@@ -1,10 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { OperatorHealthReadModel, PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
+import type { OperatorHealthSnapshot } from '@principles/core/runtime-v2';
 import { HealthCheckModel } from '../../src/server/models/HealthCheckModel.js';
 import {
   createTestWorkspace,
   cleanupTestWorkspace,
+  sampleTrainingState,
   type TestWorkspace,
 } from '../test-utils.js';
 
@@ -12,6 +15,7 @@ describe('HealthCheckModel', () => {
   let ws: TestWorkspace | null = null;
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (ws) {
       cleanupTestWorkspace(ws);
       ws = null;
@@ -125,5 +129,425 @@ describe('HealthCheckModel', () => {
     expect(() => model.dispose()).not.toThrow();
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('checkGfiHealth returns error when getSnapshot throws', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
+      .mockRejectedValue(new Error('DB connection lost'));
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
+      expect(gfiCheck).toBeDefined();
+      expect(gfiCheck!.status).toBe('error');
+      expect(gfiCheck!.message).toContain('DB connection lost');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('getPipelineTimestamps returns lastPrincipleAdded with active principles', async () => {
+    ws = await createTestWorkspace({
+      trainingState: sampleTrainingState(),
+    });
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      // With an active principle seeded, lastPrincipleAdded should be non-null
+      expect(health.pipeline.lastPrincipleAdded).not.toBeNull();
+    } finally {
+      model.dispose();
+    }
+  });
+
+  it('getPipelineTimestamps returns nulls when runtime listTasks throws', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockRejectedValue(new Error('DB connection error'));
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      // All pipeline timestamps should be null because the outer catch
+      // in getPipelineTimestamps returns defaults when listTasks throws
+      expect(health.pipeline.lastPainSignal).toBeNull();
+      expect(health.pipeline.lastTaskCreated).toBeNull();
+      expect(health.pipeline.lastCandidateGenerated).toBeNull();
+      expect(health.pipeline.lastPrincipleAdded).toBeNull();
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkPrincipleTree returns error when getHealthSummary throws', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const spy = vi.spyOn(PruningReadModel.prototype, 'getHealthSummary')
+      .mockImplementation(() => { throw new Error('DB locked'); });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const treeCheck = health.checks.find(c => c.id === 'principle_tree');
+      expect(treeCheck).toBeDefined();
+      expect(treeCheck!.status).toBe('error');
+      expect(treeCheck!.message).toContain('DB locked');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkGfiHealth returns error when GFI exceeds critical threshold', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const mockSnapshot: OperatorHealthSnapshot = {
+      generatedAt: new Date().toISOString(),
+      workspace: 'test',
+      painChain: { lastSuccessfulChain: null, failureCategory: null },
+      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
+      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
+      gfi: {
+        active: {
+          currentGfi: 90,
+          stage: 'elevated',
+          sources: {},
+          dominantSource: null,
+          consecutiveErrors: 0,
+          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
+          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
+        },
+        staleSessionCount: 0,
+        staleGfiRange: null,
+        totalSessionCount: 1,
+        activeSessionCount: 1,
+        generatedAt: new Date().toISOString(),
+      },
+      overallStatus: 'degraded',
+      recommendedActions: [],
+      totalTaskCount: 0,
+    };
+
+    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
+      .mockResolvedValue(mockSnapshot);
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
+      expect(gfiCheck).toBeDefined();
+      expect(gfiCheck!.status).toBe('error');
+      expect(gfiCheck!.message).toContain('GFI 过高中');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkGfiHealth returns warning when GFI exceeds 80% of threshold', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const mockSnapshot: OperatorHealthSnapshot = {
+      generatedAt: new Date().toISOString(),
+      workspace: 'test',
+      painChain: { lastSuccessfulChain: null, failureCategory: null },
+      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
+      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
+      gfi: {
+        active: {
+          currentGfi: 60,
+          stage: 'elevated',
+          sources: {},
+          dominantSource: null,
+          consecutiveErrors: 0,
+          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
+          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
+        },
+        staleSessionCount: 0,
+        staleGfiRange: null,
+        totalSessionCount: 1,
+        activeSessionCount: 1,
+        generatedAt: new Date().toISOString(),
+      },
+      overallStatus: 'degraded',
+      recommendedActions: [],
+      totalTaskCount: 0,
+    };
+
+    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
+      .mockResolvedValue(mockSnapshot);
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
+      expect(gfiCheck).toBeDefined();
+      expect(gfiCheck!.status).toBe('warning');
+      expect(gfiCheck!.message).toContain('GFI 偏高');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkGfiHealth returns healthy when GFI is low', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const mockSnapshot: OperatorHealthSnapshot = {
+      generatedAt: new Date().toISOString(),
+      workspace: 'test',
+      painChain: { lastSuccessfulChain: null, failureCategory: null },
+      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
+      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
+      gfi: {
+        active: {
+          currentGfi: 10,
+          stage: 'stable',
+          sources: {},
+          dominantSource: null,
+          consecutiveErrors: 0,
+          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
+          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
+        },
+        staleSessionCount: 0,
+        staleGfiRange: null,
+        totalSessionCount: 1,
+        activeSessionCount: 1,
+        generatedAt: new Date().toISOString(),
+      },
+      overallStatus: 'healthy',
+      recommendedActions: [],
+      totalTaskCount: 0,
+    };
+
+    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
+      .mockResolvedValue(mockSnapshot);
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
+      expect(gfiCheck).toBeDefined();
+      expect(gfiCheck!.status).toBe('healthy');
+      expect(gfiCheck!.message).toContain('正常');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkPainChainFlow returns healthy with recent activity', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const now = new Date().toISOString();
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockImplementation(async (filter) => {
+        if (filter?.taskKind === 'pain_collector' || filter?.taskKind === 'diagnostician') {
+          return [{
+            taskId: 'task-1',
+            taskKind: filter?.taskKind ?? 'diagnostician',
+            status: 'succeeded' as const,
+            createdAt: now,
+            updatedAt: now,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        if (filter?.status === 'succeeded') {
+          return [{
+            taskId: 'candidate-1',
+            taskKind: 'principle_candidate_intake',
+            status: 'succeeded' as const,
+            createdAt: now,
+            updatedAt: now,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        return [];
+      });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const painCheck = health.checks.find(c => c.id === 'pain_chain_flow');
+      expect(painCheck).toBeDefined();
+      expect(painCheck!.status).toBe('healthy');
+      expect(painCheck!.message).toContain('流动正常');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkTaskQueue returns error when failed tasks exceed 20', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockImplementation(async (filter) => {
+        if (filter?.status === 'failed') {
+          return Array.from({ length: 21 }, (_, i) => ({
+            taskId: `failed-${i}`,
+            taskKind: 'diagnostician',
+            status: 'failed' as const,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            attemptCount: 3,
+            maxAttempts: 3,
+          }));
+        }
+        return [];
+      });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const queueCheck = health.checks.find(c => c.id === 'task_queue');
+      expect(queueCheck).toBeDefined();
+      expect(queueCheck!.status).toBe('error');
+      expect(queueCheck!.message).toContain('失败任务过多');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkTaskQueue returns warning when pending tasks exceed 50', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockImplementation(async (filter) => {
+        if (filter?.status === 'pending') {
+          return Array.from({ length: 51 }, (_, i) => ({
+            taskId: `pending-${i}`,
+            taskKind: 'diagnostician',
+            status: 'pending' as const,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            attemptCount: 0,
+            maxAttempts: 3,
+          }));
+        }
+        return [];
+      });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const queueCheck = health.checks.find(c => c.id === 'task_queue');
+      expect(queueCheck).toBeDefined();
+      expect(queueCheck!.status).toBe('warning');
+      expect(queueCheck!.message).toContain('待处理任务积压');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkPainChainFlow returns error when activity is over 60 minutes old', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const oldTimestamp = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockImplementation(async (filter) => {
+        if (filter?.taskKind === 'pain_collector' || filter?.taskKind === 'diagnostician') {
+          return [{
+            taskId: 'old-task',
+            taskKind: filter?.taskKind ?? 'diagnostician',
+            status: 'succeeded' as const,
+            createdAt: oldTimestamp,
+            updatedAt: oldTimestamp,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        if (filter?.status === 'succeeded') {
+          return [{
+            taskId: 'old-candidate',
+            taskKind: 'principle_candidate_intake',
+            status: 'succeeded' as const,
+            createdAt: oldTimestamp,
+            updatedAt: oldTimestamp,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        return [];
+      });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const painCheck = health.checks.find(c => c.id === 'pain_chain_flow');
+      expect(painCheck).toBeDefined();
+      expect(painCheck!.status).toBe('error');
+      expect(painCheck!.message).toContain('分钟无活动');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
+  });
+
+  it('checkPainChainFlow returns warning when activity is between 30-60 minutes old', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    const semiOldTimestamp = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const spy = vi.spyOn(RuntimeStateManager.prototype, 'listTasks')
+      .mockImplementation(async (filter) => {
+        if (filter?.taskKind === 'pain_collector' || filter?.taskKind === 'diagnostician') {
+          return [{
+            taskId: 'semi-old-task',
+            taskKind: filter?.taskKind ?? 'diagnostician',
+            status: 'succeeded' as const,
+            createdAt: semiOldTimestamp,
+            updatedAt: semiOldTimestamp,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        if (filter?.status === 'succeeded') {
+          return [{
+            taskId: 'semi-old-candidate',
+            taskKind: 'principle_candidate_intake',
+            status: 'succeeded' as const,
+            createdAt: semiOldTimestamp,
+            updatedAt: semiOldTimestamp,
+            attemptCount: 1,
+            maxAttempts: 3,
+          }];
+        }
+        return [];
+      });
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      const painCheck = health.checks.find(c => c.id === 'pain_chain_flow');
+      expect(painCheck).toBeDefined();
+      expect(painCheck!.status).toBe('warning');
+      expect(painCheck!.message).toContain('活动较慢');
+    } finally {
+      spy.mockRestore();
+      model.dispose();
+    }
   });
 });

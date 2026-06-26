@@ -96,7 +96,8 @@ export class WorkspaceConfigStore {
         return [];
       }
       return parsed as WorkspaceEntry[];
-    } catch {
+    } catch (e) {
+      console.warn('WorkspaceConfigStore: failed to parse workspaces.json, returning empty list:', e);
       return [];
     }
   }

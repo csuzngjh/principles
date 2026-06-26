@@ -67,7 +67,8 @@ export class WorkspaceService {
           gfi: snapshot.gfi.active?.currentGfi ?? 0,
           principleCount: (byStatus.active ?? 0) + (byStatus.candidate ?? 0),
         });
-      } catch {
+      } catch (e) {
+        console.warn('WorkspaceService.getCentralOverview: workspace health check failed:', e);
         results.push({
           name: ws.name,
           path: ws.path,
@@ -115,7 +116,8 @@ export class WorkspaceService {
           activePrinciples: (byStatus.active ?? 0) + (byStatus.candidate ?? 0),
           pendingTasks: pendingTasks.length,
         });
-      } catch {
+      } catch (e) {
+        console.warn('WorkspaceService.getCentralHealth: workspace health check failed:', e);
         overallStatus = 'error';
         results.push({
           name: ws.name,
