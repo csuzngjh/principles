@@ -351,9 +351,9 @@ describe('extractPhrasesFromReason', () => {
   });
 
   it('returns at most 3 phrases', () => {
-    const reason = 'A，B，C，D，E，F';
+    const reason = '挫败感，不满，困惑，疲劳，放弃';
     const result = extractPhrasesFromReason(reason, 'zh');
-    expect(result.length).toBeLessThanOrEqual(3);
+    expect(result).toEqual(['挫败感', '不满', '困惑']);
   });
 
   it('deduplicates repeated phrases', () => {

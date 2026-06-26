@@ -557,7 +557,7 @@ export async function handleBeforePromptBuild(
                     if (phrases.length > 0) {
                       const updates: Record<string, { action: 'add'; weight: number; falsePositiveRate: number; reasoning: string }> = {};
                       for (const phrase of phrases) {
-                        if (!keywordStore.terms[phrase]) {
+                        if (!Object.hasOwn(keywordStore.terms, phrase)) {
                           updates[phrase] = {
                             action: 'add',
                             weight: 0.4,
