@@ -1,6 +1,6 @@
 // E2E 服务器启动脚本：创建临时工作区 + 启动 tsx 服务器
 // 跨平台兼容（Node API 而非 shell），被 playwright.config.ts 的 webServer.command 调用
-import { mkdtempSync, existsSync } from 'fs';
+import { mkdtempSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
@@ -25,13 +25,30 @@ const child = spawn(
   },
 );
 
-// 信号转发与清理（确保 Playwright 停止 webServer 时子进程正确退出）
+// 清理临时工作区（best-effort，不阻塞退出）
+function cleanupWorkspace() {
+  try {
+    rmSync(workspaceDir, { recursive: true, force: true });
+  } catch {
+    // best-effort — 临时目录最终会被 OS 清理
+  }
+}
+
+// 信号转发与清理（确保 Playwright 停止 webServer 时子进程正确退出 + 临时目录清理）
 process.on('SIGTERM', () => {
   child.kill('SIGTERM');
+  cleanupWorkspace();
   process.exit(0);
 });
 process.on('SIGINT', () => {
   child.kill('SIGINT');
+  cleanupWorkspace();
   process.exit(0);
 });
-child.on('exit', (code) => process.exit(code ?? 0));
+process.on('exit', () => {
+  cleanupWorkspace();
+});
+child.on('exit', (code) => {
+  cleanupWorkspace();
+  process.exit(code ?? 0);
+});
