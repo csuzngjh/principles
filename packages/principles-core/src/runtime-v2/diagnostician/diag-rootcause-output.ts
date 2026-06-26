@@ -59,6 +59,112 @@ export const DiagRootCauseEvidenceSchema = Type.Object({
 /** Evidence entry linking a source reference to an explanatory note. */
 export type DiagRootCauseEvidence = Static<typeof DiagRootCauseEvidenceSchema>;
 
+// ── Intent Tension sub-schemas (PRI-468, SPEC §16) ──────────────────────────
+
+/**
+ * Intent tension source enum (SPEC §16.5).
+ *
+ * - `none` — no tension detected
+ * - `action_drift` — Agent's action appears to drift from INTENT
+ * - `intent_suspect` — INTENT itself may be stale, ambiguous, or contradictory
+ * - `healthy_tension` — genuine strategic trade-off, no drift
+ */
+export const IntentTensionSourceSchema = Type.Union([
+  Type.Literal('none'),
+  Type.Literal('action_drift'),
+  Type.Literal('intent_suspect'),
+  Type.Literal('healthy_tension'),
+]);
+
+/** Intent tension source: none | action_drift | intent_suspect | healthy_tension */
+export type IntentTensionSource = Static<typeof IntentTensionSourceSchema>;
+
+/**
+ * Evidence strength enum (SPEC §16.6).
+ *
+ * Coarse three-level scale; intentionally NOT a numeric confidence
+ * (SPEC §16.3 forbids `intentTension.confidence`).
+ */
+export const EvidenceStrengthSchema = Type.Union([
+  Type.Literal('weak'),
+  Type.Literal('moderate'),
+  Type.Literal('strong'),
+]);
+
+/** Evidence strength: weak | moderate | strong */
+export type EvidenceStrength = Static<typeof EvidenceStrengthSchema>;
+
+/**
+ * Related INTENT.md field enum (SPEC §16.7).
+ *
+ * Snake_case keys mirror the INTENT.md section identifiers used in the
+ * prompt block. The LLM picks one or more fields that the tension
+ * relates to.
+ */
+export const IntentRelatedFieldSchema = Type.Union([
+  Type.Literal('why'),
+  Type.Literal('desired_outcome'),
+  Type.Literal('non_negotiables'),
+  Type.Literal('stop_escalation'),
+  Type.Literal('current_strategic_focus'),
+]);
+
+/** Related INTENT field: why | desired_outcome | non_negotiables | stop_escalation | current_strategic_focus */
+export type IntentRelatedField = Static<typeof IntentRelatedFieldSchema>;
+
+/**
+ * Suggested Owner action enum (SPEC §21).
+ *
+ * PD surfaces tension; the Owner decides value. This field is a
+ * SUGGESTION — never auto-applied. The Owner must record a
+ * IntentDecisionRecord (PRI-470) before any follow-up action executes.
+ */
+export const SuggestedOwnerActionSchema = Type.Union([
+  Type.Literal('confirm_drift'),
+  Type.Literal('revise_intent'),
+  Type.Literal('observe'),
+  Type.Literal('dismiss'),
+  Type.Literal('promote_to_principle'),
+  Type.Literal('promote_to_rulehost'),
+]);
+
+/** Suggested Owner action: confirm_drift | revise_intent | observe | dismiss | promote_to_principle | promote_to_rulehost */
+export type SuggestedOwnerAction = Static<typeof SuggestedOwnerActionSchema>;
+
+/**
+ * IntentTension schema (SPEC §16.2).
+ *
+ * Optional object produced by Stage A when the Agent detects a tension
+ * between its action and the Owner-authored INTENT.md.
+ *
+ * CRITICAL (SPEC §16.3): this object MUST NOT carry a `confidence`
+ * field. The Stage A `confidence` (rootCause-level) is the only
+ * diagnostician confidence. To enforce this, `additionalProperties: false`
+ * is set so any extra property (including `confidence`) is rejected by
+ * `Value.Check`.
+ *
+ * Lineage (SPEC §16.2): `intentDocHash` is optional but, when present,
+ * MUST match the hash of the INTENT.md that was injected into the
+ * prompt. The Stage A runner enforces this invariant (PRI-468).
+ */
+export const IntentTensionSchema = Type.Object({
+  source: IntentTensionSourceSchema,
+  evidenceStrength: EvidenceStrengthSchema,
+  relatedIntentFields: Type.Array(IntentRelatedFieldSchema),
+  evidence: Type.Array(Type.String(), { maxItems: 3 }),
+  explanation: Type.String({ minLength: 1 }),
+  suggestedOwnerAction: SuggestedOwnerActionSchema,
+  intentDocHash: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+
+/**
+ * IntentTension — optional Stage A output describing a tension between
+ * the Agent's action and the Owner-authored INTENT.md.
+ *
+ * `confidence` is forbidden on this object (SPEC §16.3).
+ */
+export type IntentTension = Static<typeof IntentTensionSchema>;
+
 // ── Main output schema ───────────────────────────────────────────────────────
 
 /**
@@ -84,6 +190,16 @@ export const DiagRootCauseOutputV1Schema = Type.Object({
   evidence: Type.Array(DiagRootCauseEvidenceSchema),
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
+  /**
+   * Optional intent tension (PRI-468, SPEC §16). Present only when:
+   *   1. The `intent_engineering` flag is on, AND
+   *   2. The Stage A prompt was built with the INTENT context injected, AND
+   *   3. The LLM chose to emit a tension.
+   *
+   * When absent (flag off or LLM omitted), Stage C passthrough must NOT
+   * synthesize one (SPEC §18 — additive only, never generates).
+   */
+  intentTension: Type.Optional(IntentTensionSchema),
 });
 
 /** Typed output of the Root Cause stage (Stage A). */
@@ -217,6 +333,24 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
         }
         if (typeof ev.note !== 'string' || ev.note.trim() === '') {
           errors.push(`evidence[${i}].note must be a non-empty string`);
+        }
+      }
+    }
+
+    // ── Step 6b: intentTension element-level checks (PRI-468, SPEC §16) ─────
+    // Provide clearer error messages than the TypeBox fallback for the most
+    // critical SPEC §16.3 violation (forbidden `confidence` field) and for
+    // non-object intentTension. The TypeBox schema (with additionalProperties:
+    // false) catches these as well, but the explicit check produces a
+    // human-readable message that references the SPEC clause.
+    if (Object.hasOwn(record, 'intentTension')) {
+      const tension = record.intentTension;
+      if (tension === null || typeof tension !== 'object') {
+        errors.push('intentTension must be an object when present');
+      } else {
+        const tensionRecord = tension as Record<string, unknown>;
+        if (Object.hasOwn(tensionRecord, 'confidence')) {
+          errors.push('intentTension.confidence is forbidden (SPEC §16.3); use rootCause-level confidence instead');
         }
       }
     }

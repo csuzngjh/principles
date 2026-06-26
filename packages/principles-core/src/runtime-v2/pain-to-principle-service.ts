@@ -15,6 +15,7 @@ import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvid
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
+import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 
 export type FailureCategory =
   | 'runtime_unavailable'
@@ -42,6 +43,11 @@ export interface PainToPrincipleServiceOptions {
   /** PRI-369: When true, recordPain returns immediately after task creation (status='submitted').
    *  The diagnosis runs in background via orchestrator wakeOnce/recovery-sweep. */
   asyncMode?: boolean;
+  /**
+   * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
+   * Plugin layer supplies the concrete I/O adapter; core only consumes the port.
+   */
+  intentDocReader?: IntentDocReader;
 }
 
 export interface PainToPrincipleInput {
@@ -142,6 +148,7 @@ export class PainToPrincipleService {
           autoIntakeEnabled: false, // No intake in async mode — intake happens after diagnosis completes
           effectiveConfig: this.opts.effectiveConfig,
           getEnvVar: this.opts.getEnvVar,
+          intentDocReader: this.opts.intentDocReader,
         });
 
         // Create task as pending (does not run diagnosis)
@@ -182,6 +189,7 @@ export class PainToPrincipleService {
         autoIntakeEnabled: this.opts.autoIntakeEnabled,
         effectiveConfig: this.opts.effectiveConfig,
         getEnvVar: this.opts.getEnvVar,
+        intentDocReader: this.opts.intentDocReader,
       });
 
       const bridgeResult = await bridge.onPainDetected(painData);
