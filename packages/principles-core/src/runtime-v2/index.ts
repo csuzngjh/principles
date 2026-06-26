@@ -1695,6 +1695,7 @@ export {
   validateIntentDocSections,
   buildIntentFrictionBlock,
   NullIntentDocReader,
+  generateIntentPatchProposal,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -1710,6 +1711,8 @@ export type {
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   IntentDecisionStore,
+  FollowUpPatch,
+  IntentPatchProposal,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).

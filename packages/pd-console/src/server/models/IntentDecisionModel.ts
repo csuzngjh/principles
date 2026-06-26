@@ -30,6 +30,7 @@ import type {
   IntentDecisionRecord,
   IntentDecisionRecordResult,
   IntentDecisionSummary,
+  FollowUpPatch,
 } from '@principles/core/runtime-v2';
 
 function stateDbExists(workspaceDir: string): boolean {
@@ -44,6 +45,20 @@ function isMissingTableError(err: unknown): boolean {
 export type IntentDecisionRecordResultModel =
   | { ok: true; record: IntentDecisionRecord; created: boolean }
   | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Result of a follow-up dispatch (PRI-471, SPEC §22.1.4).
+ *
+ * - ok:true + record — the existing record was updated with the follow-up
+ *   field (e.g. `patchProposalId`, `resultingCandidateId`).
+ * - ok:false + reason 'decision_not_found' — no IntentDecisionRecord with
+ *   the given id exists; the route maps this to 404.
+ * - ok:false + reason 'state_db_not_found' / 'intent_decisions_table_missing'
+ *   — same degradation as the record() path.
+ */
+export type FollowUpDispatchResultModel =
+  | { ok: true; record: IntentDecisionRecord }
+  | { ok: false; reason: 'decision_not_found' | 'state_db_not_found' | 'intent_decisions_table_missing'; nextAction: string };
 
 function emptySummary(): IntentDecisionSummary {
   return {
@@ -139,6 +154,48 @@ export class IntentDecisionModel {
       return await store.getSummary();
     } catch (err: unknown) {
       if (isMissingTableError(err)) return emptySummary();
+      throw err;
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
+   * Update follow-up action fields on an existing IntentDecisionRecord
+   * (PRI-471, SPEC §22.1.4).
+   *
+   * Called by the follow-up route after the Owner decision has been
+   * persisted. Only fields present in `patch` are written; the rest stay
+   * unchanged. Returns the updated record or a structured failure.
+   */
+  async updateFollowUp(id: string, patch: FollowUpPatch): Promise<FollowUpDispatchResultModel> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return {
+        ok: false,
+        reason: 'state_db_not_found',
+        nextAction: 'Initialize the workspace with PD (run a diagnosis or pd config) before dispatching follow-up actions.',
+      };
+    }
+    const connection = new SqliteConnection({ workspaceDir: this.workspaceDir });
+    try {
+      const store = new SqliteIntentDecisionStore(connection);
+      const record = await store.updateFollowUp(id, patch);
+      if (record === null) {
+        return {
+          ok: false,
+          reason: 'decision_not_found',
+          nextAction: 'Intent decision ' + id + ' does not exist. Refresh the page and try again.',
+        };
+      }
+      return { ok: true, record };
+    } catch (err: unknown) {
+      if (isMissingTableError(err)) {
+        return {
+          ok: false,
+          reason: 'intent_decisions_table_missing',
+          nextAction: 'Run pd config doctor or re-initialize the workspace so the intent_decisions table is created.',
+        };
+      }
       throw err;
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
