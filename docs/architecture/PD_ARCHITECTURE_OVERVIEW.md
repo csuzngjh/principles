@@ -9,7 +9,7 @@
 >
 > **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
 >
-> **产品定义锚点**: 产品边界以仓库根目录的 [`PRODUCT_IDENTITY.md`](../../PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
+> **产品定义锚点**: 产品边界以 [`docs/product/PRODUCT_IDENTITY.md`](../../product/PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
 
 本文档回答四个问题：
 1. PD 是什么？

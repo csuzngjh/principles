@@ -8,6 +8,19 @@
  */
 
 import { Type } from '@sinclair/typebox';
+import {
+  IntentTensionSchema,
+  type IntentTension,
+  type IntentTensionSource,
+  type EvidenceStrength,
+  type IntentRelatedField,
+  type SuggestedOwnerAction,
+} from '../diagnostician/diag-rootcause-output.js';
+
+// PRI-469: re-export IntentTension so consumers can import it from the
+// evidence-chain module without reaching into the diagnostician package.
+// The canonical definition lives in diag-rootcause-output.ts (PRI-468, SPEC §16).
+export type { IntentTension };
 
 // ── Types and Schemas ─────────────────────────────────────────────────────────
 
@@ -76,6 +89,18 @@ export interface EvidenceChainRecord {
   runtimeTaskId?: string;
   /** PRI-406: How this record was linked — 'canonical' (precise via canonical_pain_id) or 'legacy' (timestamp/content heuristic). */
   linkMode?: 'canonical' | 'legacy';
+  /**
+   * PRI-469: Optional intent tension surfaced from the diagnostician artifact
+   * (Stage A output, SPEC §16). Present only when:
+   *   1. The `intent_engineering` flag was on at diagnosis time, AND
+   *   2. The Stage A LLM chose to emit an intentTension, AND
+   *   3. The artifact content_json validated successfully.
+   *
+   * This field is for Owner-facing display only (SPEC §22.1.2). It MUST NOT
+   * directly create rules or modify ledger principle status (SPEC §22).
+   * `confidence` is forbidden on this object (SPEC §16.3).
+   */
+  intentTension?: IntentTension;
 }
 
 export const EvidenceChainRecordSchema = Type.Object({
@@ -103,6 +128,10 @@ export const EvidenceChainRecordSchema = Type.Object({
   canonicalPainId: Type.Optional(Type.String()),
   runtimeTaskId: Type.Optional(Type.String()),
   linkMode: Type.Optional(Type.Union([Type.Literal('canonical'), Type.Literal('legacy')])),
+  // PRI-469: optional intent tension from diagnostician artifact (SPEC §16).
+  // `confidence` is forbidden on this object (SPEC §16.3); enforced by
+  // IntentTensionSchema's additionalProperties:false and by validateIntentTension.
+  intentTension: Type.Optional(IntentTensionSchema),
 });
 
 export interface EvidenceChainResponse {
@@ -150,6 +179,131 @@ function coerceToString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return '';
+}
+
+// ── PRI-469: Intent Tension validation (SPEC §16) ────────────────────────────
+//
+// Pure helper that validates an untrusted `intentTension` object read from the
+// diagnostician artifact's content_json. Returns the validated IntentTension
+// (with evidence truncated to max 3 per SPEC §16.4) or `undefined` when the
+// data is malformed. The caller is responsible for setting a degradedReason
+// when validation fails (ERR-002: graceful degradation must include a reason).
+//
+// SPEC §16.3: `confidence` is FORBIDDEN on intentTension. The Stage A
+// rootCause-level confidence is the only diagnostician confidence. This helper
+// explicitly rejects any object carrying a `confidence` field, in addition to
+// the TypeBox schema's additionalProperties:false guard — defense in depth
+// (ERR-001: untrusted data from DB artifacts).
+
+const VALID_INTENT_TENSION_SOURCES = new Set<string>([
+  'none',
+  'action_drift',
+  'intent_suspect',
+  'healthy_tension',
+]);
+
+const VALID_EVIDENCE_STRENGTHS = new Set<string>(['weak', 'moderate', 'strong']);
+
+const VALID_INTENT_RELATED_FIELDS = new Set<string>([
+  'why',
+  'desired_outcome',
+  'non_negotiables',
+  'stop_escalation',
+  'current_strategic_focus',
+]);
+
+const VALID_SUGGESTED_OWNER_ACTIONS = new Set<string>([
+  'confirm_drift',
+  'revise_intent',
+  'observe',
+  'dismiss',
+  'promote_to_principle',
+  'promote_to_rulehost',
+]);
+
+/** SPEC §16.4: evidence array is capped at 3 items to limit Owner review burden. */
+const INTENT_TENSION_EVIDENCE_MAX = 3;
+
+/**
+ * Validate an untrusted `intentTension` value from a diagnostician artifact.
+ *
+ * @returns The validated IntentTension (evidence truncated to max 3), or
+ *          `undefined` when the value is malformed. Never throws.
+ *
+ * Runtime Contract rules applied:
+ *   - Rule 1: input is `unknown`, validated before use (ERR-001)
+ *   - Rule 2: no `as` bypass — all fields checked with typeof / Set.has (ERR-001/005)
+ *   - Rule 4: array element types validated element-wise (ERR-005/007)
+ *   - Rule 5: Object.hasOwn used for key checks (ERR-013)
+ *   - Rule 9: callers must set a degradedReason when this returns undefined (ERR-002)
+ */
+export function validateIntentTension(value: unknown): IntentTension | undefined {
+  if (!isRecord(value)) return undefined;
+
+  // SPEC §16.3: confidence is forbidden on intentTension.
+  if (Object.hasOwn(value, 'confidence')) return undefined;
+
+  const source = getOwnValue(value, 'source');
+  if (typeof source !== 'string' || !VALID_INTENT_TENSION_SOURCES.has(source)) {
+    return undefined;
+  }
+
+  const evidenceStrength = getOwnValue(value, 'evidenceStrength');
+  if (typeof evidenceStrength !== 'string' || !VALID_EVIDENCE_STRENGTHS.has(evidenceStrength)) {
+    return undefined;
+  }
+
+  // relatedIntentFields: must be an array of valid enum strings (ERR-005/007).
+  const relatedIntentFieldsRaw = getOwnValue(value, 'relatedIntentFields');
+  if (!Array.isArray(relatedIntentFieldsRaw)) return undefined;
+  const relatedIntentFields: IntentRelatedField[] = [];
+  for (const f of relatedIntentFieldsRaw) {
+    // Runtime-validated against the enum Set; the `as` cast below is AFTER
+    // validation, which is the correct pattern (Rule 2 forbids using `as`
+    // INSTEAD of validation, not after it).
+    if (typeof f !== 'string' || !VALID_INTENT_RELATED_FIELDS.has(f)) return undefined;
+    relatedIntentFields.push(f as IntentRelatedField);
+  }
+
+  // evidence: must be an array of strings. Truncate to max 3 (SPEC §16.4,
+  // graceful degradation — keep the first 3 rather than dropping the whole
+  // tension, so the Owner still sees the signal).
+  const evidenceRaw = getOwnValue(value, 'evidence');
+  if (!Array.isArray(evidenceRaw)) return undefined;
+  const evidence: string[] = [];
+  for (const e of evidenceRaw) {
+    if (typeof e !== 'string') return undefined;
+    evidence.push(e);
+  }
+  const truncatedEvidence = evidence.slice(0, INTENT_TENSION_EVIDENCE_MAX);
+
+  const explanation = getOwnValue(value, 'explanation');
+  if (typeof explanation !== 'string' || explanation.length === 0) return undefined;
+
+  const suggestedOwnerAction = getOwnValue(value, 'suggestedOwnerAction');
+  if (
+    typeof suggestedOwnerAction !== 'string' ||
+    !VALID_SUGGESTED_OWNER_ACTIONS.has(suggestedOwnerAction)
+  ) {
+    return undefined;
+  }
+
+  // intentDocHash: optional string.
+  const intentDocHash = getOwnValue(value, 'intentDocHash');
+  if (intentDocHash !== undefined && typeof intentDocHash !== 'string') return undefined;
+
+  const result: IntentTension = {
+    source: source as IntentTensionSource,
+    evidenceStrength: evidenceStrength as EvidenceStrength,
+    relatedIntentFields,
+    evidence: truncatedEvidence,
+    explanation,
+    suggestedOwnerAction: suggestedOwnerAction as SuggestedOwnerAction,
+  };
+  if (typeof intentDocHash === 'string') {
+    result.intentDocHash = intentDocHash;
+  }
+  return result;
 }
 
 // ── Mapping & State Resolution ────────────────────────────────────────────────
@@ -410,6 +564,10 @@ export interface TaskMapEntry {
   rootCauseSummary?: string;
   diagnosticJsonDegraded?: boolean;
   inputRef?: string;
+  /** PRI-469: intent tension extracted from the diagnostician artifact (Stage A output). */
+  intentTension?: IntentTension;
+  /** PRI-469: set when the artifact content_json could not be parsed or intentTension was malformed. */
+  artifactDegraded?: boolean;
 }
 
 export function crossReferenceByTimestamp(
@@ -702,6 +860,19 @@ export function assembleEvidenceChain(params: {
   stateDbAvailable: boolean;
   degradedReasons?: string[];
   degradedNextActions?: string[];
+  /**
+   * PRI-469: Diagnostician artifacts (rows from the `artifacts` table where
+   * artifact_kind = 'diagnostician_output'). Each row is treated as untrusted
+   * `unknown` and must have `task_id` (string) and `content_json` (string of
+   * JSON containing the DiagnosticianOutputV1 with optional `rootCause` and
+   * `intentTension`).
+   *
+   * Production architecture: DiagnosticianCommitter writes the full Stage C
+   * output to the artifacts table, NOT to tasks.diagnostic_json. The artifact
+   * is the canonical source for both rootCause and intentTension.
+   * tasks.diagnostic_json remains as a test-fixture fallback only.
+   */
+  diagnosticArtifacts?: unknown[];
 }): EvidenceChainResponse {
   const {
     workspaceDir,
@@ -712,6 +883,7 @@ export function assembleEvidenceChain(params: {
     ledgerPrinciples,
     trajectoryDbAvailable,
     stateDbAvailable,
+    diagnosticArtifacts: rawDiagnosticArtifacts,
   } = params;
 
   const generatedAt = new Date().toISOString();
@@ -724,6 +896,22 @@ export function assembleEvidenceChain(params: {
   const tasks = rawTasks.filter(isRecord);
   const candidates = rawCandidates.filter(isRecord);
   const dreamerTasks = rawDreamerTasks.filter(isRecord);
+  const diagnosticArtifacts = (rawDiagnosticArtifacts ?? []).filter(isRecord);
+
+  // PRI-469: Build artifact lookup by task_id. Each artifact row has
+  // { task_id: string, content_json: string }. content_json holds the
+  // DiagnosticianOutputV1 JSON (including rootCause and optional intentTension).
+  // Artifact is the CANONICAL source; tasks.diagnostic_json is a fallback.
+  const artifactByTaskId = new Map<string, Record<string, unknown>>();
+  for (const artifact of diagnosticArtifacts) {
+    const taskId = readOwnString(artifact, 'task_id');
+    if (!taskId) continue;
+    // First artifact wins — duplicate task_ids should not happen, but if they
+    // do we keep the first to avoid silent data swapping (ERR-015).
+    if (!artifactByTaskId.has(taskId)) {
+      artifactByTaskId.set(taskId, artifact);
+    }
+  }
 
   // 1. Process tasks into a map
   const taskMap = new Map<string, TaskMapEntry>();
@@ -739,17 +927,75 @@ export function assembleEvidenceChain(params: {
       painId = taskId.startsWith('diagnosis_') ? taskId.slice('diagnosis_'.length) : taskId;
     }
 
+    // PRI-469: Extract rootCause and intentTension from the diagnostician
+    // artifact (canonical source). Artifact takes precedence over
+    // tasks.diagnostic_json, which is kept only as a test-fixture fallback.
     let rootCauseSummary: string | undefined;
+    let intentTension: IntentTension | undefined;
+    let artifactDegraded = false;
     let diagnosticJsonDegraded = false;
-    const dj = getOwnValue(task, 'diagnostic_json');
-    if (isString(dj)) {
-      try {
-        const parsed = JSON.parse(dj);
-        if (isRecord(parsed) && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
-          rootCauseSummary = parsed.rootCause;
+
+    const artifact = taskId ? artifactByTaskId.get(taskId) : undefined;
+    if (artifact) {
+      const contentJson = readOwnString(artifact, 'content_json');
+      if (typeof contentJson === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(contentJson);
+          if (isRecord(parsed)) {
+            // rootCause from artifact (canonical, takes precedence).
+            // The artifact stores DiagnosticianOutputV1 where rootCause is an
+            // object: { summary: string, confidence: number, ... }. Legacy
+            // test fixtures may store rootCause as a plain string. Handle both.
+            const artifactRootCause = getOwnValue(parsed, 'rootCause');
+            if (typeof artifactRootCause === 'string') {
+              rootCauseSummary = artifactRootCause;
+            } else if (isRecord(artifactRootCause)) {
+              const rootCauseSummaryValue = getOwnValue(artifactRootCause, 'summary');
+              if (typeof rootCauseSummaryValue === 'string') {
+                rootCauseSummary = rootCauseSummaryValue;
+              }
+            }
+            // intentTension from artifact — validated with runtime guards.
+            // Only extract when the key is present (optional field).
+            if (Object.hasOwn(parsed, 'intentTension')) {
+              const validated = validateIntentTension(getOwnValue(parsed, 'intentTension'));
+              if (validated) {
+                intentTension = validated;
+              } else {
+                // intentTension was present but malformed — degrade visibly
+                // (ERR-002). rootCause may still be valid, so we do NOT clobber
+                // it; we only flag the artifact as partially degraded.
+                artifactDegraded = true;
+              }
+            }
+          } else {
+            // content_json parsed but not an object — degrade.
+            artifactDegraded = true;
+          }
+        } catch {
+          // content_json is not valid JSON — degrade. rootCause and
+          // intentTension both unavailable from the artifact.
+          artifactDegraded = true;
         }
-      } catch {
-        diagnosticJsonDegraded = true;
+      } else {
+        // content_json missing or not a string — degrade.
+        artifactDegraded = true;
+      }
+    }
+
+    // Fallback: tasks.diagnostic_json (test-fixture compat). Only used when
+    // the artifact did not provide a rootCause.
+    if (rootCauseSummary === undefined) {
+      const dj = getOwnValue(task, 'diagnostic_json');
+      if (isString(dj)) {
+        try {
+          const parsed = JSON.parse(dj);
+          if (isRecord(parsed) && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
+            rootCauseSummary = parsed.rootCause;
+          }
+        } catch {
+          diagnosticJsonDegraded = true;
+        }
       }
     }
 
@@ -761,6 +1007,8 @@ export function assembleEvidenceChain(params: {
       rootCauseSummary,
       diagnosticJsonDegraded,
       inputRef,
+      intentTension,
+      artifactDegraded,
     });
   }
 
@@ -958,6 +1206,16 @@ export function assembleEvidenceChain(params: {
       if (linkedTask.diagnosticJsonDegraded) {
         record.degradedReason = 'Diagnostic data for this record could not be parsed';
       }
+      // PRI-469: surface intentTension from the diagnostician artifact.
+      if (linkedTask.intentTension) {
+        record.intentTension = linkedTask.intentTension;
+      }
+      // PRI-469: artifact degraded (content_json unparseable or intentTension
+      // malformed) — degrade visibly (ERR-002). Do not clobber an existing
+      // degradedReason from diagnosticJsonDegraded; append instead.
+      if (linkedTask.artifactDegraded && !record.degradedReason) {
+        record.degradedReason = 'Diagnostician artifact for this record could not be fully parsed; intentTension may be unavailable.';
+      }
     }
 
     if (dreamerInfo) {
@@ -1139,6 +1397,10 @@ export function assembleEvidenceChain(params: {
     if (crossRefTask.rootCauseSummary) {
       record.rootCauseSummary = crossRefTask.rootCauseSummary;
     }
+    // PRI-469: surface intentTension from the cross-referenced task's artifact.
+    if (crossRefTask.intentTension) {
+      record.intentTension = crossRefTask.intentTension;
+    }
 
     if (crossRefTask.lastError && (state === 'diagnosis-failed' || state === 'diagnosis-retry-wait')) {
       record.failureReason = crossRefTask.lastError;
@@ -1157,6 +1419,10 @@ export function assembleEvidenceChain(params: {
 
     if (crossRefTask.diagnosticJsonDegraded) {
       record.degradedReason = 'Diagnostic data for this record could not be parsed';
+    }
+    // PRI-469: artifact degraded — degrade visibly (ERR-002).
+    if (crossRefTask.artifactDegraded && !record.degradedReason) {
+      record.degradedReason = 'Diagnostician artifact for this record could not be fully parsed; intentTension may be unavailable.';
     }
 
     records.push(record);
@@ -1229,6 +1495,10 @@ export function assembleEvidenceChain(params: {
     if (task.rootCauseSummary) {
       record.rootCauseSummary = task.rootCauseSummary;
     }
+    // PRI-469: surface intentTension from the task's diagnostician artifact.
+    if (task.intentTension) {
+      record.intentTension = task.intentTension;
+    }
 
     if (task.lastError && (state === 'diagnosis-failed' || state === 'diagnosis-retry-wait')) {
       record.failureReason = task.lastError;
@@ -1247,6 +1517,10 @@ export function assembleEvidenceChain(params: {
 
     if (task.diagnosticJsonDegraded) {
       record.degradedReason = 'Diagnostic data for this record could not be parsed';
+    }
+    // PRI-469: artifact degraded — degrade visibly (ERR-002).
+    if (task.artifactDegraded && !record.degradedReason) {
+      record.degradedReason = 'Diagnostician artifact for this record could not be fully parsed; intentTension may be unavailable.';
     }
 
     records.push(record);

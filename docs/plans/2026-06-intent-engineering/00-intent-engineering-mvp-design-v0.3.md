@@ -3,7 +3,7 @@
 **版本**：v0.3（取代 v0.1、v0.2）
 **状态**：Draft（待 maintainer 评审）
 **目标周期**：2–3 周验证
-**前置阅读**：`PRODUCT_IDENTITY.md`、`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`、`docs/plans/2026-06-diagnostician-split/00-diagnostician-refactor-plan.md`、`docs/architecture/unified-friction-observer.md`
+**前置阅读**：`docs/product/PRODUCT_IDENTITY.md`、`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`、`docs/plans/2026-06-diagnostician-split/00-diagnostician-refactor-plan.md`、`docs/architecture/unified-friction-observer.md`
 
 > **v0.3 修正要点**：v0.2 曾提议把意图合并进 `CURRENT_FOCUS.md`。经代码核查，这是错误的——
 > `CURRENT_FOCUS.md` 是易失的工作记忆（自动压缩、被 agent 回写、机械版本号），其

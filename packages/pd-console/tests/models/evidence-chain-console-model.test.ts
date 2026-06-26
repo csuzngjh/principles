@@ -175,6 +175,40 @@ function insertCandidate(db: Database.Database, candidate: {
   );
 }
 
+// PRI-469: Artifacts table helpers for diagnostician_output reading.
+
+function createArtifactsTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      artifact_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      artifact_kind TEXT NOT NULL,
+      content_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+}
+
+function insertDiagnosticianArtifact(db: Database.Database, artifact: {
+  artifactId: string;
+  runId?: string;
+  taskId: string;
+  contentJson: string;
+  createdAt?: string;
+}): void {
+  db.prepare(
+    'INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    artifact.artifactId,
+    artifact.runId ?? 'run-test-001',
+    artifact.taskId,
+    'diagnostician_output',
+    artifact.contentJson,
+    artifact.createdAt ?? '2026-06-07T10:00:01.000Z',
+  );
+}
+
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-evidence-chain-'));
   workspaceDir = tempDir;
@@ -1907,5 +1941,271 @@ describe('PRI-406: Canonical pain identity linkage', () => {
     const legacyRecord = result.records.find(r => r.id === 'pain_1');
     expect(legacyRecord).toBeDefined();
     expect(legacyRecord!.canonicalPainId).toBeUndefined();
+  });
+});
+
+// ── PRI-469: Artifacts table → intentTension + rootCause surfacing ───────────
+
+describe('PRI-469: EvidenceChainConsoleModel — artifacts table reading', () => {
+  it('surfaces intentTension from artifacts.content_json (canonical source)', async () => {
+    const taskId = 'diagnosis_pain_1';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent optimized presentation before validating learning loop',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, { taskId, status: 'succeeded' });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-001',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Optimized presentation before learning validation', confidence: 0.8 },
+        intentTension: {
+          source: 'action_drift',
+          evidenceStrength: 'strong',
+          relatedIntentFields: ['current_strategic_focus', 'non_negotiables'],
+          evidence: ['e1', 'e2', 'e3'],
+          explanation: 'The work optimized presentation completeness before validating the learning loop.',
+          suggestedOwnerAction: 'confirm_drift',
+          intentDocHash: 'sha256:abc123',
+        },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.records).toHaveLength(1);
+    const record = result.records[0];
+    expect(record.intentTension).toBeDefined();
+    expect(record.intentTension!.source).toBe('action_drift');
+    expect(record.intentTension!.evidenceStrength).toBe('strong');
+    expect(record.intentTension!.relatedIntentFields).toEqual(['current_strategic_focus', 'non_negotiables']);
+    expect(record.intentTension!.evidence).toHaveLength(3);
+    expect(record.intentTension!.explanation).toContain('presentation completeness');
+    expect(record.intentTension!.suggestedOwnerAction).toBe('confirm_drift');
+    expect(record.intentTension!.intentDocHash).toBe('sha256:abc123');
+  });
+
+  it('reads rootCause from artifacts (GAP #1 fix — canonical source)', async () => {
+    const taskId = 'diagnosis_pain_1';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Agent modified config without approval',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, { taskId, status: 'succeeded' });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-002',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Config modification without approval check', confidence: 0.85 },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records[0];
+    // rootCause should come from the artifact, not tasks.diagnostic_json
+    expect(record.rootCauseSummary).toBe('Config modification without approval check');
+    // No intentTension in this artifact
+    expect(record.intentTension).toBeUndefined();
+  });
+
+  it('gracefully handles missing artifacts table (older workspace)', async () => {
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    // Note: no artifacts table created
+    insertTask(stateDb, { taskId: 'diagnosis_pain_1', status: 'pending' });
+    stateDb.close();
+
+    // Should not throw
+    const result = await model.getEvidenceChain();
+    expect(result.records).toHaveLength(1);
+    // No intentTension (no artifacts table)
+    expect(result.records[0].intentTension).toBeUndefined();
+    // Should NOT add a degraded reason for missing artifacts table
+    // (it's expected in older workspaces)
+    expect(result.degradedReason).toBeFalsy();
+  });
+
+  it('rejects intentTension with confidence field (SPEC §16.3)', async () => {
+    const taskId = 'diagnosis_pain_1';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, { taskId, status: 'succeeded' });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-003',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Root cause', confidence: 0.8 },
+        intentTension: {
+          source: 'action_drift',
+          evidenceStrength: 'strong',
+          relatedIntentFields: ['why'],
+          evidence: ['e1'],
+          explanation: 'explanation',
+          suggestedOwnerAction: 'observe',
+          // SPEC §16.3: confidence is FORBIDDEN in intentTension
+          confidence: 0.92,
+        },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records[0];
+    // intentTension with confidence must be rejected entirely
+    expect(record.intentTension).toBeUndefined();
+    // rootCause should still be present (rootCause-level confidence is OK)
+    expect(record.rootCauseSummary).toBe('Root cause');
+  });
+
+  it('artifact takes precedence over tasks.diagnostic_json', async () => {
+    const taskId = 'diagnosis_pain_1';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, {
+      taskId,
+      status: 'succeeded',
+      diagnosticJson: JSON.stringify({ rootCause: 'Legacy root cause from diagnostic_json' }),
+    });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-004',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Canonical root cause from artifact', confidence: 0.9 },
+        intentTension: {
+          source: 'healthy_tension',
+          evidenceStrength: 'moderate',
+          relatedIntentFields: ['why'],
+          evidence: ['e1'],
+          explanation: 'From artifact',
+          suggestedOwnerAction: 'observe',
+        },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records[0];
+    // Artifact rootCause should take precedence
+    expect(record.rootCauseSummary).toBe('Canonical root cause from artifact');
+    expect(record.intentTension).toBeDefined();
+    expect(record.intentTension!.source).toBe('healthy_tension');
+  });
+
+  it('truncates evidence to max 3 items (SPEC §16.4)', async () => {
+    const taskId = 'diagnosis_pain_1';
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, { taskId, status: 'succeeded' });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-005',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Root cause', confidence: 0.8 },
+        intentTension: {
+          source: 'action_drift',
+          evidenceStrength: 'strong',
+          relatedIntentFields: ['why'],
+          evidence: ['e1', 'e2', 'e3', 'e4', 'e5'],
+          explanation: 'Too much evidence',
+          suggestedOwnerAction: 'confirm_drift',
+        },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records[0];
+    expect(record.intentTension).toBeDefined();
+    // SPEC §16.4: evidence max 3 items
+    expect(record.intentTension!.evidence).toHaveLength(3);
+  });
+
+  it('sanitizes intentTension free-text fields', async () => {
+    const taskId = 'diagnosis_pain_1';
+    const workspacePath = workspaceDir; // capture for assertion
+
+    const trajDb = createTrajectoryDb();
+    insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    createArtifactsTable(stateDb);
+    insertTask(stateDb, { taskId, status: 'succeeded' });
+    insertDiagnosticianArtifact(stateDb, {
+      artifactId: 'art-006',
+      taskId,
+      contentJson: JSON.stringify({
+        rootCause: { summary: 'Root cause', confidence: 0.8 },
+        intentTension: {
+          source: 'action_drift',
+          evidenceStrength: 'weak',
+          relatedIntentFields: ['why'],
+          evidence: [`Error at ${workspacePath}/secret/file.ts`],
+          explanation: `Stack trace from ${workspacePath}/.env`,
+          suggestedOwnerAction: 'dismiss',
+        },
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    const record = result.records[0];
+    expect(record.intentTension).toBeDefined();
+    // Free-text fields should be sanitized — workspace paths removed
+    expect(record.intentTension!.explanation).not.toContain(workspacePath);
+    expect(record.intentTension!.evidence[0]).not.toContain(workspacePath);
   });
 });

@@ -5,6 +5,8 @@
  * No React dependency, no I/O. All functions are pure.
  */
 
+import type { IntentTensionData } from '../../utils/validators.js';
+
 // ── Confidence mapping ────────────────────────────────────────────────────────
 
 export type ConfidenceLabel = 'high' | 'mid' | 'low';
@@ -42,6 +44,12 @@ export interface Layer2Data {
   degradedReason: string | null;
   /** next action guidance */
   nextAction: string | null;
+  /**
+   * PRI-469: optional intent tension from the diagnostician artifact.
+   * Present only when the record carries a validated intentTension.
+   * The UI renders an IntentTensionPanel when this is non-null (SPEC §22.1.2).
+   */
+  intentTension: IntentTensionData | null;
 }
 
 export interface Layer3Data {
@@ -84,6 +92,8 @@ export interface RecordData {
   /** PRI-380: internalization task linkage */
   internalizationTaskId?: string;
   dreamerTaskStatus?: string;
+  /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
+  intentTension?: IntentTensionData;
 }
 
 /**
@@ -109,6 +119,8 @@ export function buildCardLayers(record: RecordData): CardLayers {
     failureReason: record.failureReason ?? null,
     degradedReason: record.degradedReason ?? null,
     nextAction: record.nextAction ?? null,
+    // PRI-469: pass intentTension through to Layer 2 for the IntentTensionPanel.
+    intentTension: record.intentTension ?? null,
   };
 
   const layer3: Layer3Data = {
@@ -169,5 +181,42 @@ export function isLayer2EffectivelyEmpty(record: RecordData): boolean {
   // placeholder, the card visually looks empty.
   const summary = record.summary?.trim();
   if (!summary) return true;
+  return false;
+}
+
+// ── PRI-469: Intent Tension panel rendering helpers (SPEC §22.1) ─────────────
+
+/**
+ * Whether the IntentTensionPanel should render a high-salience decision panel.
+ *
+ * SPEC §22.1.3: when `source = none`, do NOT render a high-salience decision
+ * panel. The tension may still be shown in technical details as "no intent
+ * tension", but it must not compete for the Owner's attention.
+ *
+ * This helper is pure and tested independently of the React component.
+ */
+export function shouldRenderIntentTensionPanel(tension: IntentTensionData | null | undefined): tension is IntentTensionData {
+  if (!tension) return false;
+  // source='none' means no tension detected — suppress the high-salience panel.
+  if (tension.source === 'none') return false;
+  return true;
+}
+
+/**
+ * Whether follow-up actions (precipitate candidate principle, promote to
+ * RuleHost, view Intent Patch Proposal) should be visible.
+ *
+ * SPEC §22.1.4: follow-up actions are NOT the first-layer decision. They only
+ * appear after the Owner has confirmed a decision. In PRI-469 (this slice),
+ * we do NOT implement the Owner decision flow yet — that is PRI-471. So this
+ * helper always returns false here, and the follow-up actions UI is not
+ * rendered. The helper exists so the UI code can call it without conditional
+ * imports when PRI-471 lands.
+ *
+ * PRI-471 will replace this stub with a real check against IntentDecisionRecord.
+ */
+export function shouldRenderFollowUpActions(): boolean {
+  // PRI-469: follow-up actions are out of scope. PRI-471 will implement the
+  // Owner decision flow and replace this stub.
   return false;
 }

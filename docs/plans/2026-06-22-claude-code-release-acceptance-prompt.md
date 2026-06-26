@@ -5,7 +5,7 @@
 开始前完整阅读：
 
 1. `D:\Code\principles\AGENTS.md`
-2. `D:\Code\principles\PRODUCT_IDENTITY.md`
+2. `D:\Code\principles\docs\product\PRODUCT_IDENTITY.md`
 3. `D:\Code\principles\docs\ERROR_PATTERN_INDEX.md`
 4. `D:\Code\principles\docs\superpowers\specs\2026-06-22-seed-release-dual-agent-acceptance-design.md`
 5. `D:\Code\principles\docs\superpowers\plans\2026-06-22-seed-release-dual-agent-acceptance.md`

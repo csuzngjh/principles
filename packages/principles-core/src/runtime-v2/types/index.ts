@@ -258,6 +258,8 @@ export type {
   CandidateInfo as EvidenceCandidateInfo,
   DreamerTaskInfo as EvidenceDreamerTaskInfo,
   LedgerPrinciple as EvidenceLedgerPrinciple,
+  // PRI-469: re-exported from diag-rootcause-output via evidence-chain-contract.
+  IntentTension as EvidenceChainIntentTension,
 } from './evidence-chain-contract.js';
 
 export {
@@ -272,6 +274,8 @@ export {
   normalizeDiagnosticianTaskId,
   crossReferenceByTimestamp,
   assembleEvidenceChain,
+  // PRI-469: pure validator for untrusted intentTension from artifacts.
+  validateIntentTension,
 } from './evidence-chain-contract.js';
 
 

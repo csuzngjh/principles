@@ -2,7 +2,7 @@
 
 > **Status**: Proposed
 > **Date**: 2026-05-30
-> **Related**: ADR-0010 (GAP, deferred by ADR-0014), ADR-0014 (MVP Pivot), PRODUCT_IDENTITY.md, DOMAIN_MODEL.md, Series 03 (Biological Forward Pass)
+> **Related**: ADR-0010 (GAP, deferred by ADR-0014), ADR-0014 (MVP Pivot), docs/product/PRODUCT_IDENTITY.md, DOMAIN_MODEL.md, Series 03 (Biological Forward Pass)
 
 ## 1. Context
 
