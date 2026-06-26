@@ -221,6 +221,19 @@ describe('SqlitePIArtifactStore contract (PRI-84)', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pi-art-sqlite-'));
     connection = new SqliteConnection(tmpDir);
     store = new SqlitePIArtifactStore(connection);
+    // P1-3: Seed parent task records for FK validation.
+    // Each test's sourceTaskId must exist in tasks table before createArtifact.
+    const db = connection.getDb();
+    const taskIds = [
+      'task-001', 'task-upsert', 'task-s', 'task-other',
+      'task-p', 'task-c', 'task-dup', 'task-persist',
+    ];
+    const insertTask = db.prepare(
+      "INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'diagnosis', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    );
+    for (const taskId of taskIds) {
+      insertTask.run(taskId);
+    }
   });
 
   afterEach(() => {
