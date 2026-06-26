@@ -304,3 +304,31 @@ ${executionRules.join('\n')}
 `;
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Block H: Observer feedback → keyword phrase extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts short, distinct keyword phrases from an EmpathyObserver reason string.
+ *
+ * Used to feed newly detected expressions back into the keyword store, so the
+ * keyword-based fast path can catch them on future turns without re-running
+ * the more expensive observer.
+ *
+ * Pure function — no I/O, no side effects. Fully unit-testable.
+ *
+ * @param reason - observer's reason string (e.g., "用户表达了强烈的挫败感，提到反复尝试失败")
+ * @param lang - UI locale for minimum length threshold (zh=2 chars, en=3 chars)
+ * @returns deduplicated array of up to 3 candidate phrases
+ */
+export function extractPhrasesFromReason(reason: string, lang: 'zh' | 'en'): string[] {
+  const MAX_PHRASES = 3;
+  const MIN_LENGTH = lang === 'zh' ? 2 : 3;
+  const MAX_LENGTH = 20;
+  const segments = reason
+    .split(/[,，。.！!？?、\n；;]/)
+    .map(s => s.trim())
+    .filter(s => s.length >= MIN_LENGTH && s.length <= MAX_LENGTH);
+  return [...new Set(segments)].slice(0, MAX_PHRASES);
+}

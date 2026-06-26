@@ -197,6 +197,11 @@ The `record-error` skill handles: classify → number → Linear comment → tag
 
 Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
 
+**PR template (MANDATORY on create)**
+- When creating a PR via `gh pr create`, **first** read `.github/PULL_REQUEST_TEMPLATE.md` and fill out all agent-sections (`agent 填`) before passing `--body`.
+- **Do NOT** pass a custom body without the template structure. `gh pr create` does NOT auto-inject the template — you must read it and compose the body manually.
+- After creation, use `gh pr edit <PR> --body-file <file>` if the body needs correction.
+
 **Review convergence and throughput**
 - The implementation agent performs one adversarial self-review before the first handoff. It must check the applicable Runtime Contract and CLI / Operator gates against the whole diff and fix all in-scope P0/P1/P2 findings together.
 - The first external review is the only full-scope review pass for the PR. It should report all currently visible in-scope P0/P1/P2 findings in one batch.
