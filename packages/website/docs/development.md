@@ -20,7 +20,8 @@ principles/
 ├── docs/
 │   ├── architecture/        # Architecture decision records & models
 │   └── adr/                 # Architecture Decision Records
-├── PRODUCT_IDENTITY.md      # Canonical product boundary
+│   ├── product/
+│   │   └── PRODUCT_IDENTITY.md # Canonical product boundary
 └── CONTRIBUTING.md          # Contribution guidelines
 ```
 
@@ -210,7 +211,7 @@ Before making architectural changes, read these:
 | `docs/architecture/ACTIVATION_CHANNELS.md` | 5-channel activation design |
 | `docs/architecture/INTERNALIZATION_PIPELINE.md` | Internalization pipeline design |
 | `docs/architecture/SECURITY_ARCHITECTURE.md` | Security model |
-| `PRODUCT_IDENTITY.md` | Canonical product boundary and MVP contract |
+| `docs/product/PRODUCT_IDENTITY.md` | Canonical product boundary and MVP contract |
 | `docs/adr/0014-mvp-first-strategy-and-product-pivot.md` | MVP strategy and scope |
 
 ## Reporting Issues
