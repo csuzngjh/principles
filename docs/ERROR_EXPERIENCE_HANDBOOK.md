@@ -172,6 +172,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
 | ERR-078 | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification | PRI-454 / PR #1043 |
 | ERR-083 | Tightening shared store contract by adding rejection guard (FK check) without auditing cross-package callers — downstream packages break | PRI-473 / PR #1066 |
+| ERR-084 | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA | PR #1068 |
 
 ---
 
@@ -735,7 +736,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 83 |
+| Total lessons | 84 |
 | Last updated | 2026-06-26 |
 | Top category | Schema & Type |
 | Recurring errors | 37 |
@@ -1210,13 +1211,28 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 **[ERR-083]** | Tightening shared store contract by adding rejection guard (FK check) without auditing cross-package callers — downstream packages break
 
-- **What happened**: In PRI-473, P1-3 application-layer FK validation (rejection guards that `throw` if parent records don't exist) was added to three shared store methods in `principles-core`: `SqlitePIArtifactStore.createArtifact()` (checks `tasks` table), `SqliteApprovalStore.enqueue()` (checks `pi_artifacts` table), and `SqliteActivationStateStore.recordActivation()` (checks `pi_artifacts` table). Tests were added in the same package (`pi-artifact-store.test.ts`) that seed the parent records. But cross-package callers were NOT audited: `pd-cli`'s `demo-story-a-runner.ts` called `createArtifact()` without seeding the parent task; `pd-console`'s `approvals-api.test.ts` called `approvalQueue.enqueue()` without seeding parent `pi_artifacts`; `openclaw-plugin`'s `runtime-v2-prompt-activation.test.ts` intentionally inserted a dangling activation to test graceful degradation but the store's new FK check threw before the hook could demonstrate graceful handling. This caused 5 CI failures across 4 downstream packages (pd-cli, pd-console, create-principles-disciple, openclaw-plugin).
-- **Why it's wrong**: Shared store methods in `principles-core` are consumed across package boundaries (openclaw-plugin, pd-cli, pd-console, create-principles-disciple). Adding a rejection guard (precondition that throws) tightens the contract: every existing caller must now satisfy the new precondition. Testing only within the same package proves the guard works in isolation but does not prove cross-package production paths still work. This is the EP-02 (Production Path Wiring) family — isolated tests pass while real cross-package paths break — but the mechanism is contract tightening rather than a component never being called.
-- **Generalized failure mode**: When tightening a shared store/API contract by adding a rejection guard, precondition, or FK check that throws, assistants must audit ALL cross-package callers and update them to satisfy the new precondition, otherwise downstream packages break at runtime/CI. Isolated tests in the same package are insufficient because they don't exercise cross-package production paths.
-- **Correct approach**: Before adding a rejection guard to a shared store method: (1) grep all cross-package call sites of the method; (2) for each caller, verify it satisfies the new precondition or update it to seed the parent record; (3) run cross-package tests (not just the same-package test suite) to confirm no downstream breakage.
-- **How to prevent**: When adding a `throw new Error(...)` guard (FK check, precondition, validation) to any method in `principles-core` consumed by other packages, the PR must: (1) include a grep of all cross-package callers in the PR description, (2) confirm each caller satisfies the new precondition, (3) run at least one test in each consuming package that exercises the changed method. Review trigger: any new `throw` or `if (!exists) throw` in a `principles-core/src/**/sqlite-*-store.ts` file — check that cross-package callers were audited.
-- **Regression guard**: Cross-package CI tests now seed parent records: `pd-cli` `demo-story-a.test.ts` (seeds `tasks` row before `createArtifact`), `pd-console` `approvals-api.test.ts` (seeds `pi_artifacts` via `seedPrincipleArtifact` before `enqueue`), `openclaw-plugin` `runtime-v2-prompt-activation.test.ts` (direct DB insert bypasses store FK check for the intentional dangling-activation graceful-degradation test). These tests fail if the FK guard is re-added without caller updates.
-- **Related ERRs**: ERR-070 (new public types not exported from barrel — downstream consumers can't access API surface), ERR-077 (API migration silently drops parameters — audit all callers), EP-02 (Production Path Wiring — isolated tests pass, production path breaks)
+- **What happened**: In PRI-473, FK validation guards (throw if parent records missing) were added to three `principles-core` store methods (`createArtifact`, `enqueue`, `recordActivation`). Same-package tests seeded parent records, but cross-package callers were NOT audited — `pd-cli`, `pd-console`, and `openclaw-plugin` tests called these methods without seeding parents, causing 5 CI failures across 4 packages.
+- **Why it's wrong**: Adding a rejection guard tightens the contract: every existing caller must satisfy the new precondition. Same-package tests don't prove cross-package paths still work. EP-02 family — isolated tests pass while real paths break.
+- **Generalized failure mode**: When tightening a shared store/API contract by adding a rejection guard that throws, assistants must audit ALL cross-package callers, otherwise downstream packages break at runtime/CI.
+- **Correct approach**: Before adding a rejection guard: (1) grep all cross-package call sites; (2) verify each caller satisfies the new precondition; (3) run cross-package tests.
+- **How to prevent**: When adding `throw` guards to `principles-core` store methods consumed by other packages, the PR must grep all cross-package callers, confirm each satisfies the precondition, and run tests in each consuming package. Review trigger: new `throw` in `sqlite-*-store.ts` — check cross-package callers audited.
+- **Regression guard**: Cross-package CI tests now seed parent records in `pd-cli`, `pd-console`, and `openclaw-plugin`. Tests fail if FK guard is re-added without caller updates.
+- **Related ERRs**: ERR-070, ERR-077, EP-02
 - **Source**: PRI-473 / PR #1066
+- **Date**: 2026-06-26
+- **Recurrence**: None
+
+---
+
+**[ERR-084]** | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA
+
+- **What happened**: In `packages/pd-console/scripts/e2e-start.mjs` (PR #1068), `spawn('npx', [...], { shell: true })` launched a tsx server. Signal handlers called `child.kill()` then `process.exit(0)`. On CI, `shell: true` wraps in `/bin/sh`, so `child.kill()` only kills the shell — tsx is orphaned with port 3100 bound. `process.exit(0)` prevents `child.on('exit')` cleanup. Also, `.github/workflows/pd-console-e2e.yml` used `@v4` tags instead of commit SHAs, violating zizmor policy.
+- **Why it's wrong**: `shell: true` inserts a shell between parent and command; signals reach the shell, not the subprocess. `process.exit()` in handlers short-circuits `child.on('exit')`. Actions version tags are mutable; SHA pinning prevents supply-chain attacks.
+- **Generalized failure mode**: When spawning child processes for test lifecycle, assistants must NOT use `shell: true` with `child.kill()`, must NOT call `process.exit()` in signal handlers, and must pin all GitHub Actions `uses:` to commit SHAs matching existing conventions.
+- **Correct approach**: (1) `shell: process.platform === 'win32'`. (2) Let `child.on('exit')` drive parent exit. (3) Pin Actions to commit SHAs.
+- **How to prevent**: (1) Remove `shell: true` unless platform-required. (2) Verify signal handlers don't call `process.exit()`. (3) `grep "uses: actions/" .github/workflows/ci.yml` before creating new workflows.
+- **Regression guard**: Playwright E2E CI job verifies clean shutdown. zizmor catches unpinned Actions.
+- **Related ERRs**: ERR-022, ERR-045, ERR-068
+- **Source**: PR #1068
 - **Date**: 2026-06-26
 - **Recurrence**: None
