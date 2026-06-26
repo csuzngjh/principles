@@ -203,6 +203,10 @@ const REQUIRED_SOURCE_FILES = [
   'pain-gate/index.ts',
   'detection/detection-funnel-policy.ts',
   'detection/index.ts',
+  // PRI-470: IntentDecisionRecord durable store + types (SPEC §21.7)
+  'intent/intent-decision-record.ts',
+  'store/intent/sqlite-intent-decision-store.ts',
+  'store/intent/index.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -489,6 +493,9 @@ const REQUIRED_TEST_FILES = [
   'build-l2-principle-reader.test.ts',
   // PRI-469
   'evidence-chain-intent-tension.test.ts',
+  // PRI-470: IntentDecisionRecord types + SQLite store
+  '../intent/__tests__/intent-decision-record.test.ts',
+  '../store/intent/__tests__/sqlite-intent-decision-store.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -561,6 +568,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'buildL2PrincipleReaderFromLedger',
     // LLM output hardening — shared utility
     'stripFabricatedCorePrincipleIds',
+    // PRI-470: IntentDecisionRecord durable SQLite store
+    'SqliteIntentDecisionStore',
   ];
 
   for (const name of REQUIRED_EXPORTS) {

@@ -4,9 +4,11 @@ import {
   buildCardLayers,
   shouldRenderIntentTensionPanel,
   shouldRenderFollowUpActions,
+  buildIntentDecisionPayload,
+  type IntentDecisionContext,
   type RecordData,
 } from '../../src/ui/pages/pain/pain-card-helpers.js';
-import type { IntentTensionData } from '../../src/ui/utils/validators.js';
+import type { IntentTensionData, IntentDecisionRecordData } from '../../src/ui/utils/validators.js';
 
 /**
  * PRI-344: Pure-function tests for the EvidenceChainCard refactoring.
@@ -291,10 +293,148 @@ describe('PRI-469: shouldRenderIntentTensionPanel (SPEC §22.1.3)', () => {
   });
 });
 
-// ── PRI-469: shouldRenderFollowUpActions (SPEC §22.1.4, stub for PRI-471) ─────
+// ── PRI-470: shouldRenderFollowUpActions (SPEC §22.1.4) ───────────────────────
 
-describe('PRI-469: shouldRenderFollowUpActions (stub for PRI-471)', () => {
-  it('always returns false in PRI-469 (follow-up actions not yet implemented)', () => {
-    expect(shouldRenderFollowUpActions()).toBe(false);
+function validDecisionRecord(overrides?: Partial<IntentDecisionRecordData>): IntentDecisionRecordData {
+  return {
+    id: 'decision_001',
+    source: 'action_drift',
+    evidenceStrength: 'strong',
+    relatedIntentFields: ['current_strategic_focus'],
+    ownerAction: 'confirm_drift',
+    evidenceRefs: ['e1', 'e2'],
+    createdAt: '2026-06-26T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('PRI-470: shouldRenderFollowUpActions (SPEC §22.1.4)', () => {
+  it('returns false for null', () => {
+    expect(shouldRenderFollowUpActions(null)).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(shouldRenderFollowUpActions(undefined)).toBe(false);
+  });
+
+  it('returns false for an empty array', () => {
+    expect(shouldRenderFollowUpActions([])).toBe(false);
+  });
+
+  it('returns true for a non-empty decisions array', () => {
+    expect(shouldRenderFollowUpActions([validDecisionRecord()])).toBe(true);
+  });
+
+  it('returns true for an array with multiple decisions', () => {
+    expect(shouldRenderFollowUpActions([
+      validDecisionRecord({ id: 'd1' }),
+      validDecisionRecord({ id: 'd2' }),
+    ])).toBe(true);
+  });
+});
+
+// ── PRI-470: buildIntentDecisionPayload (SPEC §22.1) ──────────────────────────
+
+describe('PRI-470: buildIntentDecisionPayload', () => {
+  it('builds a full payload with all optional fields', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = {
+      recordId: 'pain_abc',
+      painId: 'pain_abc',
+      taskId: 'task_123',
+      intentDocHash: 'sha256:abc',
+    };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'confirm_drift', note: 'my note' });
+    expect(payload.taskId).toBe('task_123');
+    expect(payload.source).toBe('action_drift');
+    expect(payload.evidenceStrength).toBe('strong');
+    expect(payload.relatedIntentFields).toEqual(['current_strategic_focus', 'non_negotiables']);
+    expect(payload.evidence).toEqual(['e1', 'e2', 'e3']);
+    expect(payload.explanation).toBe(tension.explanation);
+    expect(payload.suggestedAction).toBe('confirm_drift');
+    expect(payload.ownerAction).toBe('confirm_drift');
+    expect(payload.painId).toBe('pain_abc');
+    expect(payload.intentDocHash).toBe('sha256:abc');
+    expect(payload.note).toBe('my note');
+  });
+
+  it('falls back to recordId when taskId is undefined', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = {
+      recordId: 'pain_abc',
+    };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    expect(payload.taskId).toBe('pain_abc');
+  });
+
+  it('omits empty optional fields (empty painId, empty intentDocHash)', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = {
+      recordId: 'pain_abc',
+      painId: '',
+      intentDocHash: '',
+    };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    expect(payload.painId).toBeUndefined();
+    expect(payload.intentDocHash).toBeUndefined();
+  });
+
+  it('omits painId and intentDocHash when not provided in context', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = {
+      recordId: 'pain_abc',
+    };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    expect(payload.painId).toBeUndefined();
+    expect(payload.intentDocHash).toBeUndefined();
+  });
+
+  it('trims the note before including it', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe', note: '  trimmed note  ' });
+    expect(payload.note).toBe('trimmed note');
+  });
+
+  it('omits note when it is empty after trimming', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe', note: '   ' });
+    expect(payload.note).toBeUndefined();
+  });
+
+  it('omits note when note is undefined', () => {
+    const tension = validIntentTension();
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    expect(payload.note).toBeUndefined();
+  });
+
+  it('ownerAction overrides suggestedAction (different from suggested)', () => {
+    const tension = validIntentTension({ suggestedOwnerAction: 'confirm_drift' });
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'revise_intent' });
+    // suggestedAction preserves the tension's suggestion
+    expect(payload.suggestedAction).toBe('confirm_drift');
+    // ownerAction is the Owner's chosen action, which may differ
+    expect(payload.ownerAction).toBe('revise_intent');
+    expect(payload.ownerAction).not.toBe(payload.suggestedAction);
+  });
+
+  it('evidence is NOT truncated (truncation is backend job)', () => {
+    const longEvidence = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7'];
+    const tension = validIntentTension({ evidence: longEvidence });
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    // All 7 evidence items are preserved — frontend does not truncate
+    expect(payload.evidence).toHaveLength(7);
+    expect(payload.evidence).toEqual(longEvidence);
+  });
+
+  it('preserves empty evidence array as-is', () => {
+    const tension = validIntentTension({ evidence: [] });
+    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
+    expect(payload.evidence).toEqual([]);
   });
 });
