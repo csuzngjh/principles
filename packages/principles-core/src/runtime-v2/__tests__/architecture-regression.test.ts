@@ -487,6 +487,8 @@ const REQUIRED_TEST_FILES = [
   '../internalization/__tests__/diag-chain-e2e.test.ts',
   // PRI-431
   'build-l2-principle-reader.test.ts',
+  // PRI-469
+  'evidence-chain-intent-tension.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];

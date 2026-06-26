@@ -14,13 +14,13 @@
 
 MVP 阶段的执行约束，以 ADR-0014 为准。
 
-本文是战略级思考资产，不是工程指令。任何实现层面的工作，如果与 PRODUCT_IDENTITY.md 或 ADR-0014 冲突，应以后两者为准。
+本文是战略级思考资产，不是工程指令。任何实现层面的工作，如果与 docs/product/PRODUCT_IDENTITY.md 或 ADR-0014 冲突，应以后两者为准。
 
 ---
 
 ## 产品定义锚点
 
-PD 的稳定产品定义以仓库根目录的 PRODUCT_IDENTITY.md 为准：
+PD 的稳定产品定义以仓库中 `docs/product/PRODUCT_IDENTITY.md` 为准：
 
 > PD 是由拥有者治理的行为原则内化系统，不是任务执行引擎、通用记忆层或通用工具修复框架。
 
@@ -1593,7 +1593,7 @@ PD 的价值不只是做一个工具，而是用真实工程实践回答一个�
 | 文档                              | 视角                 | 何时读                      |
 | ------------------------------- | ------------------ | ------------------------ |
 | 本文                              | 拥有者 / 思想骨架 / 系统建模  | 想看清 PD 本质、风险、演化路径时       |
-| PRODUCT_IDENTITY.md             | 产品边界 / 决策门         | 任何新功能、新 issue、新工作引入前     |
+| docs/product/PRODUCT_IDENTITY.md             | 产品边界 / 决策门         | 任何新功能、新 issue、新工作引入前     |
 | ADR-0014                        | MVP 战略约束           | 任何执行决策之前                 |
 | PD_Pain_Signal_Audit.md         | 痛苦信号层事实图           | 想看清当前 sensing coverage 时 |
 | PD_System_Dynamics_Model.md     | 工程师 / 系统蓝图         | 需要把概念落到工程不变量时            |

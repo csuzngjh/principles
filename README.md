@@ -33,7 +33,7 @@ It is built for agents first.
 Agents are the daily users.
 Humans are the operators, supervisors, and risk owners.
 
-**Canonical product definition:** [PRODUCT_IDENTITY.md](PRODUCT_IDENTITY.md)
+**Canonical product definition:** [PRODUCT_IDENTITY.md](docs/product/PRODUCT_IDENTITY.md)
 
 [English](README.md) | [中文](README_ZH.md)
 

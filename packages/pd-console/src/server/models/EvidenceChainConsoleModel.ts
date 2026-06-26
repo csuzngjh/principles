@@ -233,6 +233,7 @@ export class EvidenceChainConsoleModel {
     let tasks: unknown[] = [];
     let dreamerTasks: unknown[] = [];
     let candidates: unknown[] = [];
+    let diagnosticArtifacts: unknown[] = [];
     let stateDbAvailable = false;
 
     if (fs.existsSync(stateDbPath)) {
@@ -292,6 +293,28 @@ export class EvidenceChainConsoleModel {
           }
         }
 
+        // PRI-469: Read diagnostician artifacts from the artifacts table.
+        // In production, DiagnosticianCommitter writes Stage C output (rootCause +
+        // intentTension) to artifacts.content_json with artifact_kind =
+        // 'diagnostician_output'. This is the canonical source for intentTension.
+        // The tasks.diagnostic_json column is kept as a fallback for test fixtures.
+        // Graceful degradation: if the artifacts table is missing (older workspace),
+        // we simply skip it — assembleEvidenceChain falls back to diagnostic_json.
+        try {
+          diagnosticArtifacts = db.prepare(
+            "SELECT task_id, content_json FROM artifacts WHERE artifact_kind = 'diagnostician_output' ORDER BY created_at DESC",
+          ).all();
+        } catch (artifactsErr) {
+          if (isMissingTableError(artifactsErr)) {
+            // Artifacts table not present in older workspaces — not an error,
+            // just no intentTension data available from artifacts.
+          } else {
+            // ERR-002: degrade with reason for unexpected errors.
+            degradedReasons.push('Failed to read diagnostician artifacts table');
+            degradedNextActions.push('Check state database artifacts table integrity.');
+          }
+        }
+
         stateDbAvailable = true;
       } catch (err) {
         if (isMissingTableError(err)) {
@@ -329,6 +352,7 @@ export class EvidenceChainConsoleModel {
       stateDbAvailable,
       degradedReasons,
       degradedNextActions,
+      diagnosticArtifacts,
     });
 
     // ── 5. Sanitize strings in place ─────────────────────────────────
@@ -345,6 +369,20 @@ export class EvidenceChainConsoleModel {
       }
       if (record.candidateSummary) {
         record.candidateSummary = sanitizeString(record.candidateSummary, this.workspaceDir);
+      }
+      // PRI-469: Sanitize intentTension free-text fields.
+      // Enum fields (source, evidenceStrength, suggestedOwnerAction) and
+      // relatedIntentFields are controlled vocabularies validated by the core,
+      // so they don't need sanitization. The explanation, evidence items,
+      // and intentDocHash may contain user/system-generated text.
+      if (record.intentTension) {
+        record.intentTension.explanation = sanitizeString(record.intentTension.explanation, this.workspaceDir);
+        record.intentTension.evidence = record.intentTension.evidence.map(
+          (item) => sanitizeString(item, this.workspaceDir),
+        );
+        if (record.intentTension.intentDocHash) {
+          record.intentTension.intentDocHash = sanitizeString(record.intentTension.intentDocHash, this.workspaceDir);
+        }
       }
     }
 

@@ -10,7 +10,7 @@
 
 > ⚠️ **执行限制与立场说明**：
 >
-> 1. 本文是**战略级思考资产**，不是工程派工计划。F1-F5 / E1-E6 / R1-R3 的命名是分析框架，不是 issue 编号或工单。每一项是否进入 MVP 必须与 [`PRODUCT_IDENTITY.md`](../../PRODUCT_IDENTITY.md) 的 Decision Gate 和 [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md) 逐项对照后再决定。
+> 1. 本文是**战略级思考资产**，不是工程派工计划。F1-F5 / E1-E6 / R1-R3 的命名是分析框架，不是 issue 编号或工单。每一项是否进入 MVP 必须与 [`docs/product/PRODUCT_IDENTITY.md`](../../product/PRODUCT_IDENTITY.md) 的 Decision Gate 和 [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md) 逐项对照后再决定。
 > 2. **PD 不是 agent 自主进化系统**。"感知带宽决定智慧上限"是分析视角，不是产品定位。**感知带宽的任何扩张都必须由拥有者驱动并审批**——是拥有者决定哪些行为证据值得被捕获、哪条原则值得被部署、哪种通道是可回滚的。本文的所有改进建议如果与拥有者治理路径冲突，以 PRODUCT_IDENTITY 为准。
 > 3. **本文所有数字基线、跨学科类比、生物隐喻都是启发性的，不是命题性的**。具体见各小节内的 disclaimer。
 
