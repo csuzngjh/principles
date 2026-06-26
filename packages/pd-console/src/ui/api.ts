@@ -33,6 +33,7 @@ import {
   validateIntentDecisionList,
   validateIntentDecisionResult,
   validateIntentDecisionSummary,
+  validateFollowUpResponse,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -64,6 +65,7 @@ import type {
   IntentDecisionRecordData,
   IntentDecisionResultData,
   IntentDecisionSummaryData,
+  FollowUpResponseData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -414,16 +416,15 @@ async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
 
 /**
  * Frontend-friendly payload for recording an Owner decision on an intent tension.
- * The `evidence` field is mapped to `evidenceRefs` in the API request body.
+ * Field names match the server's `IntentDecisionInput` contract (SPEC §21.7).
  */
 export interface IntentDecisionInputPayload {
+  id: string;
   taskId: string;
   source: string;
   evidenceStrength: string;
   relatedIntentFields: string[];
-  evidence: string[];
-  explanation?: string;
-  suggestedAction: string;
+  evidenceRefs: string[];
   ownerAction: string;
   painId?: string;
   intentDocHash?: string;
@@ -480,6 +481,39 @@ async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionS
     validateIntentDecisionSummary,
   );
 }
+
+// ── Intent Decision Follow-up (PRI-471) ──────────────────────────────────────
+
+/**
+ * Payload for dispatching a governed follow-up action after an Owner decision
+ * has been persisted (SPEC §22.1.4).
+ *
+ * - `link_candidate`: link an existing principle candidate to this decision.
+ *   `candidateId` is required.
+ * - `guide_rulehost`: get CLI guidance for promoting to RuleHost. No DB write.
+ * - `generate_patch_proposal`: generate a read-only Intent Patch Proposal.
+ *
+ * The server validates `type` and `candidateId` (when required); the frontend
+ * trusts the server to fail loud on invalid input (Rule 3).
+ */
+export interface FollowUpPayload {
+  type: 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal';
+  candidateId?: string;
+}
+
+async function dispatchFollowUp(
+  decisionId: string,
+  payload: FollowUpPayload,
+): Promise<ApiResponse<FollowUpResponseData>> {
+  return request<FollowUpResponseData>(
+    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}/follow-up`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    validateFollowUpResponse,
+  );
+}
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -525,6 +559,7 @@ export {
   listIntentDecisionsByTaskId,
   getIntentDecision,
   fetchIntentDecisionSummary,
+  dispatchFollowUp,
 };
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
@@ -566,6 +601,10 @@ export type {
   IntentDecisionRecordData,
   IntentDecisionResultData,
   IntentDecisionSummaryData,
+  FollowUpResponseData,
+  LinkCandidateFollowUpData,
+  GuideRulehostFollowUpData,
+  GeneratePatchProposalFollowUpData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

@@ -171,12 +171,14 @@ describe('IntentDecisions route — POST create', () => {
     expect(getStatus(res)).toBe(201);
     const parsed = parseBody(res);
     expect(parsed.success).toBe(true);
-    expect(parsed.data.id).toBe('idr-001');
-    expect(parsed.data.painId).toBe('pain-001');
-    expect(parsed.data.source).toBe('action_drift');
-    expect(parsed.data.ownerAction).toBe('confirm_drift');
-    expect(parsed.data.evidenceRefs).toEqual(['ev-1', 'ev-2']);
-    expect(parsed.data.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // P0 fix (PRI-471): response envelope is { record, created }
+    expect(parsed.data.created).toBe(true);
+    expect(parsed.data.record.id).toBe('idr-001');
+    expect(parsed.data.record.painId).toBe('pain-001');
+    expect(parsed.data.record.source).toBe('action_drift');
+    expect(parsed.data.record.ownerAction).toBe('confirm_drift');
+    expect(parsed.data.record.evidenceRefs).toEqual(['ev-1', 'ev-2']);
+    expect(parsed.data.record.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('returns 200 with created=false on idempotent replay', async () => {
@@ -203,7 +205,8 @@ describe('IntentDecisions route — POST create', () => {
     const parsed = parseBody(res2);
     expect(parsed.success).toBe(true);
     // Idempotent replay returns the ORIGINAL record (idr-001), not the new id.
-    expect(parsed.data.id).toBe('idr-001');
+    expect(parsed.data.created).toBe(false);
+    expect(parsed.data.record.id).toBe('idr-001');
   });
 
   it('truncates evidenceRefs to 3 items', async () => {
@@ -221,7 +224,7 @@ describe('IntentDecisions route — POST create', () => {
     );
     expect(getStatus(res)).toBe(201);
     const parsed = parseBody(res);
-    expect(parsed.data.evidenceRefs).toEqual(['ev-1', 'ev-2', 'ev-3']);
+    expect(parsed.data.record.evidenceRefs).toEqual(['ev-1', 'ev-2', 'ev-3']);
   });
 });
 
@@ -550,5 +553,338 @@ describe('IntentDecisions route — unknown sub-path', () => {
       '',
     );
     expect(getStatus(res)).toBe(404);
+  });
+});
+
+// ── PRI-471: POST /:id/follow-up (SPEC §22.1.4) ────────────────────────────
+
+describe('IntentDecisions route — POST /:id/follow-up', () => {
+  async function seedDecision(overrides: Partial<typeof VALID_INPUT> = {}): Promise<string> {
+    const input = { ...VALID_INPUT, ...overrides };
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq('/api/v1/intent-decisions', input),
+      res,
+      workspaceDir,
+      '',
+    );
+    expect(getStatus(res)).toBe(201);
+    const parsed = parseBody(res);
+    // P0 fix (PRI-471): response envelope is { record, created }
+    return parsed.data.record.id as string;
+  }
+
+  // ── guide_rulehost ──────────────────────────────────────────────────────
+  it('guide_rulehost returns 200 with CLI command + note (no DB write)', async () => {
+    const id = await seedDecision({ ownerAction: 'promote_to_rulehost' });
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'guide_rulehost' }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(200);
+    const parsed = parseBody(res);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.type).toBe('guide_rulehost');
+    expect(parsed.data.decisionId).toBe(id);
+    expect(typeof parsed.data.cliCommand).toBe('string');
+    expect(parsed.data.cliCommand.length).toBeGreaterThan(0);
+    expect(typeof parsed.data.note).toBe('string');
+    // The note should mention that an approval will be created.
+    expect(parsed.data.note.toLowerCase()).toContain('approval');
+  });
+
+  it('guide_rulehost returns 404 when the decision does not exist', async () => {
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', { type: 'guide_rulehost' }),
+      res,
+      workspaceDir,
+      '/nonexistent/follow-up',
+    );
+    expect(getStatus(res)).toBe(404);
+  });
+
+  // ── generate_patch_proposal ─────────────────────────────────────────────
+  it('generate_patch_proposal returns 200 with markdown + sets patchProposalId on the record', async () => {
+    const id = await seedDecision({ ownerAction: 'revise_intent' });
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(200);
+    const parsed = parseBody(res);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.type).toBe('generate_patch_proposal');
+    expect(parsed.data.decisionId).toBe(id);
+    expect(parsed.data.record.id).toBe(id);
+    // patchProposalId is set on the updated record (deterministic id from decisionId).
+    expect(parsed.data.record.patchProposalId).toBe(`patch-${id}`);
+    // The patch proposal markdown contains the SPEC §10 sections.
+    expect(typeof parsed.data.patchProposal.markdown).toBe('string');
+    expect(parsed.data.patchProposal.markdown).toContain('Intent Patch Proposal');
+    expect(parsed.data.patchProposal.markdown).toContain('Display only');
+    // The proposal id is deterministic.
+    expect(parsed.data.patchProposal.id).toBe(`patch-${id}`);
+  });
+
+  it('generate_patch_proposal returns 404 when the decision does not exist', async () => {
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', { type: 'generate_patch_proposal' }),
+      res,
+      workspaceDir,
+      '/nonexistent/follow-up',
+    );
+    expect(getStatus(res)).toBe(404);
+  });
+
+  it('generate_patch_proposal persists patchProposalId across a fresh GET', async () => {
+    const id = await seedDecision({ ownerAction: 'revise_intent' });
+    // Dispatch follow-up
+    const dispatchRes = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
+      dispatchRes,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(dispatchRes)).toBe(200);
+
+    // Fresh GET — the persisted patchProposalId must be there (EP-07 / ERR-015).
+    const getRes = makeRes();
+    await handleIntentDecisionsRoute(
+      makeGetReq(`/api/v1/intent-decisions/${id}`),
+      getRes,
+      workspaceDir,
+      `/${id}`,
+    );
+    expect(getStatus(getRes)).toBe(200);
+    const parsed = parseBody(getRes);
+    expect(parsed.data.patchProposalId).toBe(`patch-${id}`);
+  });
+
+  // ── link_candidate ──────────────────────────────────────────────────────
+  it('link_candidate returns 200 with the linked candidate id + sets resultingCandidateId', async () => {
+    const id = await seedDecision({ ownerAction: 'confirm_drift' });
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+        type: 'link_candidate',
+        candidateId: 'cand-from-evidence',
+      }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(200);
+    const parsed = parseBody(res);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.type).toBe('link_candidate');
+    expect(parsed.data.decisionId).toBe(id);
+    expect(parsed.data.record.id).toBe(id);
+    expect(parsed.data.record.resultingCandidateId).toBe('cand-from-evidence');
+    expect(parsed.data.linkedCandidateId).toBe('cand-from-evidence');
+  });
+
+  it('link_candidate returns 400 when candidateId is missing', async () => {
+    const id = await seedDecision({ ownerAction: 'confirm_drift' });
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'link_candidate' }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(400);
+    const body = parseError(res);
+    expect(body.message).toContain('candidateId');
+  });
+
+  it('link_candidate returns 400 when candidateId is an empty string', async () => {
+    const id = await seedDecision({ ownerAction: 'confirm_drift' });
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+        type: 'link_candidate',
+        candidateId: '',
+      }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(400);
+  });
+
+  it('link_candidate returns 404 when the decision does not exist', async () => {
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', {
+        type: 'link_candidate',
+        candidateId: 'cand-x',
+      }),
+      res,
+      workspaceDir,
+      '/nonexistent/follow-up',
+    );
+    expect(getStatus(res)).toBe(404);
+  });
+
+  // ── validation ──────────────────────────────────────────────────────────
+  it('returns 400 when type is missing', async () => {
+    const id = await seedDecision();
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { candidateId: 'c-1' }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).message).toContain('type');
+  });
+
+  it('returns 400 when type is an unknown value', async () => {
+    const id = await seedDecision();
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'bogus_type' }),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).message).toContain('type');
+  });
+
+  it('returns 400 when body is invalid JSON', async () => {
+    const id = await seedDecision();
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, '{not valid'),
+      res,
+      workspaceDir,
+      `/${id}/follow-up`,
+    );
+    expect(getStatus(res)).toBe(400);
+  });
+
+  // ── feature flag ────────────────────────────────────────────────────────
+  it('returns 403 when intent_engineering is disabled', async () => {
+    writeConfig(false);
+    const res = makeRes();
+    await handleIntentDecisionsRoute(
+      makePostReq('/api/v1/intent-decisions/some-id/follow-up', { type: 'guide_rulehost' }),
+      res,
+      workspaceDir,
+      '/some-id/follow-up',
+    );
+    expect(getStatus(res)).toBe(403);
+    expect(parseError(res).reason).toBe('flag_disabled');
+  });
+
+  // ── degradation paths (EP-03: every degraded branch carries a reason) ──
+  // These exercise sendFollowUpModelFailure + IntentDecisionModel.updateFollowUp
+  // degradation returns that the happy-path tests above never reach.
+  describe('degradation paths', () => {
+    it('returns 409 workspace_not_initialized when state.db is absent (link_candidate)', async () => {
+      // Remove state.db so stateDbExists() returns false. The link_candidate
+      // branch calls model.updateFollowUp directly (no getById precheck), so it
+      // reaches the model's state_db_not_found degradation → 409.
+      fs.unlinkSync(path.join(pdDir, 'state.db'));
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq('/api/v1/intent-decisions/any/follow-up', {
+          type: 'link_candidate',
+          candidateId: 'cand-1',
+        }),
+        res,
+        workspaceDir,
+        '/any/follow-up',
+      );
+      expect(getStatus(res)).toBe(409);
+      const body = parseError(res);
+      expect(body.reason).toBe('state_db_not_found');
+      expect(body.nextAction).toMatch(/initialize/i);
+    });
+
+    it('returns 404 (not 409) for generate_patch_proposal when state.db is absent', async () => {
+      // generate_patch_proposal prechecks existence via model.getById, which
+      // returns null when state.db is absent → the route maps to 404, never
+      // reaching the updateFollowUp degradation. This documents that contract.
+      fs.unlinkSync(path.join(pdDir, 'state.db'));
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq('/api/v1/intent-decisions/any/follow-up', { type: 'generate_patch_proposal' }),
+        res,
+        workspaceDir,
+        '/any/follow-up',
+      );
+      expect(getStatus(res)).toBe(404);
+    });
+
+    // NOTE: the intent_decisions_table_missing degradation (model catch block →
+    // route 500) is not reachable via the route because SqliteConnection
+    // re-runs initSchema on open, re-creating the table. That branch is
+    // defensive-only and is covered by the model's unit tests instead.
+  });
+
+  // ── EP-01: server-side trust-boundary normalization of candidateId ──
+  describe('candidateId trust-boundary normalization (EP-01)', () => {
+    it('trims and persists a candidateId with leading/trailing whitespace', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: '  cand-trimmed  ',
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(200);
+      const parsed = parseBody(res);
+      // The audit trail must hold the trimmed value, not the raw input.
+      expect(parsed.data.record.resultingCandidateId).toBe('cand-trimmed');
+      expect(parsed.data.linkedCandidateId).toBe('cand-trimmed');
+    });
+
+    it('returns 400 when candidateId is whitespace-only', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: '   ',
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(400);
+      expect(parseError(res).message).toContain('candidateId');
+    });
+
+    it('returns 400 when candidateId is not a string', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: 123,
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(400);
+      expect(parseError(res).message).toContain('candidateId');
+    });
   });
 });

@@ -1436,6 +1436,111 @@ export function validateIntentDecisionSummary(v: unknown): IntentDecisionSummary
   };
 }
 
+// ── PRI-471: Follow-up action response validators (SPEC §22.1.4) ──────────────
+
+export type FollowUpResponseType = 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal';
+
+const FOLLOW_UP_RESPONSE_TYPES: ReadonlySet<FollowUpResponseType> = new Set([
+  'link_candidate',
+  'guide_rulehost',
+  'generate_patch_proposal',
+]);
+
+/**
+ * Response for `link_candidate` follow-up.
+ * - `record` is the updated IntentDecisionRecord with `resultingCandidateId` set.
+ * - `linkedCandidateId` echoes the candidate id that was linked.
+ */
+export interface LinkCandidateFollowUpData {
+  type: 'link_candidate';
+  decisionId: string;
+  record: IntentDecisionRecordData;
+  linkedCandidateId: string;
+}
+
+/**
+ * Response for `guide_rulehost` follow-up.
+ * - `cliCommand` is the command the Owner should run in their terminal.
+ * - `note` explains what happens next (RuleHost approval will be created).
+ *
+ * No DB write occurs for this follow-up type — the response is pure guidance.
+ */
+export interface GuideRulehostFollowUpData {
+  type: 'guide_rulehost';
+  decisionId: string;
+  cliCommand: string;
+  note: string;
+}
+
+/**
+ * Response for `generate_patch_proposal` follow-up.
+ * - `record` is the updated IntentDecisionRecord with `patchProposalId` set.
+ * - `patchProposal.markdown` is the SPEC §10 formatted proposal text.
+ *
+ * The proposal is read-only — PD never auto-applies it to `.principles/INTENT.md`.
+ */
+export interface GeneratePatchProposalFollowUpData {
+  type: 'generate_patch_proposal';
+  decisionId: string;
+  record: IntentDecisionRecordData;
+  patchProposal: { id: string; markdown: string };
+}
+
+export type FollowUpResponseData =
+  | LinkCandidateFollowUpData
+  | GuideRulehostFollowUpData
+  | GeneratePatchProposalFollowUpData;
+
+/**
+ * Validate the POST /api/v1/intent-decisions/:id/follow-up response.
+ *
+ * The response is a discriminated union on the `type` field. Each branch has
+ * its own required fields (Rule 3: fail loud on missing required fields).
+ *
+ * Common required fields: `type`, `decisionId`.
+ * - link_candidate: + `record` (IntentDecisionRecordData), `linkedCandidateId`
+ * - guide_rulehost: + `cliCommand`, `note`
+ * - generate_patch_proposal: + `record`, `patchProposal: { id, markdown }`
+ */
+export function validateFollowUpResponse(v: unknown): FollowUpResponseData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'type') || !isString(v.type)) return null;
+  if (!FOLLOW_UP_RESPONSE_TYPES.has(v.type as FollowUpResponseType)) return null;
+  if (!Object.hasOwn(v, 'decisionId') || !isString(v.decisionId)) return null;
+
+  const typedType = v.type as FollowUpResponseType;
+  const { decisionId } = v;
+
+  if (typedType === 'link_candidate') {
+    if (!Object.hasOwn(v, 'record')) return null;
+    const record = validateIntentDecisionRecord(v.record);
+    if (record === null) return null;
+    if (!Object.hasOwn(v, 'linkedCandidateId') || !isString(v.linkedCandidateId)) return null;
+    return { type: 'link_candidate', decisionId, record, linkedCandidateId: v.linkedCandidateId };
+  }
+
+  if (typedType === 'guide_rulehost') {
+    if (!Object.hasOwn(v, 'cliCommand') || !isString(v.cliCommand)) return null;
+    if (!Object.hasOwn(v, 'note') || !isString(v.note)) return null;
+    return { type: 'guide_rulehost', decisionId, cliCommand: v.cliCommand, note: v.note };
+  }
+
+  // generate_patch_proposal
+  if (!Object.hasOwn(v, 'record')) return null;
+  const record = validateIntentDecisionRecord(v.record);
+  if (record === null) return null;
+  if (!Object.hasOwn(v, 'patchProposal') || !isObject(v.patchProposal)) return null;
+  const pp = v.patchProposal;
+  if (!Object.hasOwn(pp, 'id') || !isString(pp.id)) return null;
+  if (!Object.hasOwn(pp, 'markdown') || !isString(pp.markdown)) return null;
+  return {
+    type: 'generate_patch_proposal',
+    decisionId,
+    record,
+    patchProposal: { id: pp.id, markdown: pp.markdown },
+  };
+}
+
 function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
   if (!isObject(v)) return null;
   // Required fields (ERR-009: fail loud when missing)

@@ -226,10 +226,12 @@ export function shouldRenderFollowUpActions(
 
 /**
  * Context needed to build an IntentDecisionInputPayload from a tension.
- * `recordId` is the evidence chain record ID used as a fallback when taskId
- * is not available. `painId` and `intentDocHash` are optional.
+ * `id` is a caller-supplied UUID for the decision record. `recordId` is the
+ * evidence chain record ID used as a fallback when taskId is not available.
+ * `painId` and `intentDocHash` are optional.
  */
 export interface IntentDecisionContext {
+  id: string;
   recordId: string;
   painId?: string;
   taskId?: string;
@@ -250,13 +252,20 @@ export interface IntentDecisionChoice {
  * Build an IntentDecisionInputPayload from an IntentTension and the Owner's
  * chosen action. The payload is sent to POST /api/v1/intent-decisions.
  *
+ * - `id` is the caller-supplied decision UUID (P0 fix: server requires this).
  * - `taskId` falls back to `recordId` when not provided.
  * - Optional fields (painId, intentDocHash, note) are omitted when empty.
  * - `note` is trimmed before being included.
- * - `evidence` is passed through as-is; truncation is the backend's job
+ * - `evidenceRefs` is passed through as-is; truncation is the backend's job
  *   (the frontend must not silently drop evidence the Owner might rely on).
  * - `ownerAction` overrides `tension.suggestedOwnerAction` — the Owner may
  *   choose a different action than the one PD suggested.
+ *
+ * P0 fix (PRI-471): the previous payload used `evidence` + `explanation` +
+ * `suggestedAction` and omitted `id`, which did not match the server's
+ * `IntentDecisionInput` contract (SPEC §21.7). The server requires `id` and
+ * `evidenceRefs`, and does not accept `explanation` or `suggestedAction` —
+ * those are snapshot fields the server persists from the tension, not inputs.
  */
 export function buildIntentDecisionPayload(
   tension: IntentTensionData,
@@ -265,13 +274,12 @@ export function buildIntentDecisionPayload(
 ): IntentDecisionInputPayload {
   const { ownerAction, note } = choice;
   const payload: IntentDecisionInputPayload = {
+    id: context.id,
     taskId: context.taskId ?? context.recordId,
     source: tension.source,
     evidenceStrength: tension.evidenceStrength,
     relatedIntentFields: tension.relatedIntentFields,
-    evidence: tension.evidence,
-    explanation: tension.explanation,
-    suggestedAction: tension.suggestedOwnerAction,
+    evidenceRefs: tension.evidence,
     ownerAction,
   };
   if (context.painId !== undefined && context.painId.length > 0) {

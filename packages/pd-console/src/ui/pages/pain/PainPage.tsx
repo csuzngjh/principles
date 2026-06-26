@@ -17,8 +17,8 @@ import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { ShinyText } from '../../components/ui/shiny-text.js';
-import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId } from '../../api.js';
-import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData } from '../../api.js';
+import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
+import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData, FollowUpResponseData } from '../../api.js';
 import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format.js';
 import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, type IntentDecisionContext } from './pain-card-helpers.js';
@@ -452,6 +452,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             recordId={record.id}
             painId={record.id}
             taskId={record.linkedTaskId ?? undefined}
+            linkedCandidateId={record.linkedCandidateId ?? undefined}
             t={t}
           />
         )}
@@ -615,6 +616,7 @@ interface IntentTensionPanelProps {
   recordId: string;
   painId?: string;
   taskId?: string;
+  linkedCandidateId?: string;
   t: (key: string) => string;
 }
 
@@ -624,17 +626,16 @@ interface IntentTensionPanelProps {
  * This panel is rendered only when shouldRenderIntentTensionPanel returns true
  * (i.e., tension is non-null AND source !== 'none' per SPEC §22.1.3).
  *
- * Follow-up actions (SPEC §22.1.4) are NOT rendered in PRI-469 — they require
- * an Owner decision written to IntentDecisionRecord first (PRI-471 scope).
- * shouldRenderFollowUpActions() is called here as a stub so the UI structure
- * is in place for PRI-471.
+ * Follow-up actions (SPEC §22.1.4) appear only after a decision is persisted
+ * (PRI-471). The FollowUpActions component is rendered inside OwnerDecisionPanel
+ * when shouldRenderFollowUpActions returns true.
  *
  * Accessibility (EP-09):
  * - Uses semantic <section> with aria-label
  * - Uses <dl>/<dt>/<dd> for label-value pairs
  * - Color is not the only indicator (text labels always present)
  */
-function IntentTensionPanel({ tension, recordId, painId, taskId, t }: IntentTensionPanelProps) {
+function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidateId, t }: IntentTensionPanelProps) {
   const sourceLabel = intentTensionEnumLabel(tension.source, 'source', t);
   const strengthLabel = intentTensionEnumLabel(tension.evidenceStrength, 'evidenceStrength', t);
   const actionLabel = intentTensionEnumLabel(tension.suggestedOwnerAction, 'suggestedAction', t);
@@ -720,6 +721,7 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, t }: IntentTens
         recordId={recordId}
         painId={painId}
         taskId={taskId}
+        linkedCandidateId={linkedCandidateId}
         t={t}
       />
     </section>
@@ -733,6 +735,7 @@ interface OwnerDecisionPanelProps {
   recordId: string;
   painId?: string;
   taskId?: string;
+  linkedCandidateId?: string;
   t: (key: string) => string;
 }
 
@@ -752,6 +755,23 @@ const OWNER_ACTION_BUTTONS: ReadonlyArray<{
 ];
 
 /**
+ * SPEC §22.1.3 + §24.5: each `source` value has exactly ONE primary action.
+ * - action_drift     → Confirm Drift (primary)
+ * - intent_suspect   → Revise Intent (primary)
+ * - healthy_tension  → Observe (primary)
+ * - none             → (no decision panel rendered — handled by shouldRenderIntentTensionPanel)
+ *
+ * The primary button uses `variant="default"` (the Button component's primary
+ * style: bg-gov text-paper); all others use `variant="outline"`.
+ * This satisfies §24.5 acceptance criterion 4: "primary action 不相同，且每种状态只有一个 primary".
+ */
+const PRIMARY_ACTION_BY_SOURCE: Record<string, string> = {
+  action_drift: 'confirm_drift',
+  intent_suspect: 'revise_intent',
+  healthy_tension: 'observe',
+};
+
+/**
  * OwnerDecisionPanel — renders the Owner decision flow for an intent tension.
  *
  * State machine: 'idle' | 'submitting' | 'recorded' | 'error'
@@ -764,7 +784,7 @@ const OWNER_ACTION_BUTTONS: ReadonlyArray<{
  * - Uses semantic <section> with aria-label
  * - Buttons have descriptive text labels
  */
-function OwnerDecisionPanel({ tension, recordId, painId, taskId, t }: OwnerDecisionPanelProps) {
+function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidateId, t }: OwnerDecisionPanelProps) {
   const [panelState, setPanelState] = useState<DecisionPanelState>('idle');
   const [loadState, setLoadState] = useState<DecisionLoadState>('loading');
   const [existingDecisions, setExistingDecisions] = useState<IntentDecisionRecordData[]>([]);
@@ -801,7 +821,14 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, t }: OwnerDecis
   const handleSubmit = async (ownerAction: string) => {
     setPanelState('submitting');
     setErrorMsg(null);
+    // P0 fix (PRI-471): server requires a caller-supplied decision id.
+    // Use crypto.randomUUID() — available in modern browsers and Node 19+.
+    // Fallback to a timestamp-based id if crypto is unavailable (defensive).
+    const decisionId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : 'decision-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
     const context: IntentDecisionContext = {
+      id: decisionId,
       recordId,
       painId,
       taskId,
@@ -821,6 +848,9 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, t }: OwnerDecis
 
   const hasExisting = existingDecisions.length > 0;
   const showFollowUp = shouldRenderFollowUpActions(existingDecisions);
+  // PRI-471: the most recent decision drives which follow-up actions are shown.
+  // Decisions are sorted DESC by createdAt (server side), so [0] is the latest.
+  const latestDecision = existingDecisions[0];
 
   return (
     <div className="mt-4 pt-3 border-t border-line">
@@ -885,30 +915,283 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, t }: OwnerDecis
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
-            {OWNER_ACTION_BUTTONS.map(({ action, labelKey }) => (
-              <Button
-                key={action}
-                variant="outline"
-                size="sm"
-                disabled={panelState === 'submitting'}
-                onClick={() => void handleSubmit(action)}
-              >
-                {panelState === 'submitting'
-                  ? t('pages.pain.ownerDecisionSubmitting')
-                  : t(labelKey)}
-              </Button>
-            ))}
+            {OWNER_ACTION_BUTTONS.map(({ action, labelKey }) => {
+              // SPEC §22.1.3: the source determines which single button is primary.
+              const isPrimary = PRIMARY_ACTION_BY_SOURCE[tension.source] === action;
+              return (
+                <Button
+                  key={action}
+                  variant={isPrimary ? 'default' : 'outline'}
+                  size="sm"
+                  disabled={panelState === 'submitting'}
+                  onClick={() => void handleSubmit(action)}
+                >
+                  {panelState === 'submitting'
+                    ? t('pages.pain.ownerDecisionSubmitting')
+                    : t(labelKey)}
+                </Button>
+              );
+            })}
           </div>
         </>
       )}
 
-      {/* Follow-up actions placeholder (SPEC §22.1.4) */}
-      {showFollowUp && (
-        <div className="mt-4 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
-          <p className="text-ink-3 text-[12px] italic">
-            {t('pages.pain.ownerDecisionFollowUpPlaceholder')}
+      {/* PRI-471: Follow-up actions (SPEC §22.1.4)
+          Rendered only after a decision is persisted (showFollowUp gate).
+          The latest decision's ownerAction determines which actions appear. */}
+      {showFollowUp && latestDecision && (
+        <FollowUpActions
+          decision={latestDecision}
+          linkedCandidateId={linkedCandidateId}
+          onDecisionUpdated={(updated) => {
+            // Replace the updated decision in the list (idempotent on id).
+            setExistingDecisions((prev) =>
+              prev.map((d) => (d.id === updated.id ? updated : d)),
+            );
+          }}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── PRI-471: Follow-up Actions (SPEC §22.1.4) ────────────────────────────────
+
+interface FollowUpActionsProps {
+  decision: IntentDecisionRecordData;
+  /** The candidate id linked to this pain record (from evidence chain), if any. */
+  linkedCandidateId?: string;
+  /** Callback invoked after a successful follow-up dispatch updates the record. */
+  onDecisionUpdated: (updated: IntentDecisionRecordData) => void;
+  t: (key: string) => string;
+}
+
+type FollowUpBusyState = 'idle' | 'dispatching' | 'dispatched' | 'error';
+
+/**
+ * FollowUpActions — renders the governed follow-up actions available after an
+ * Owner decision has been persisted (SPEC §22.1.4).
+ *
+ * Which actions are shown depends on the decision's `ownerAction`:
+ * - `confirm_drift` → "Link Existing Candidate" (links to the evidence chain's
+ *   linkedCandidateId, or prompts the Owner to enter one if not available).
+ * - `promote_to_rulehost` → "View RuleHost Guidance" (returns CLI command).
+ * - `revise_intent` → "View Intent Patch Proposal" (returns read-only markdown).
+ * - `observe` / `dismiss` → no follow-up actions rendered (SPEC §22.1.4).
+ *
+ * Boundaries respected:
+ * - No new activation channel — `link_candidate` only records an audit link.
+ * - No SkillFileWriter, no auto-modification of INTENT.md — the patch proposal
+ *   is display-only.
+ * - No direct rule creation — `guide_rulehost` only returns CLI guidance.
+ *
+ * Accessibility (EP-09):
+ * - Uses semantic <section> with aria-label
+ * - Buttons have descriptive text labels
+ * - Status messages use role="status" for screen readers
+ */
+function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: FollowUpActionsProps) {
+  const [busyState, setBusyState] = useState<FollowUpBusyState>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [response, setResponse] = useState<FollowUpResponseData | null>(null);
+  const [candidateIdInput, setCandidateIdInput] = useState(linkedCandidateId ?? '');
+
+  const ownerAction = decision.ownerAction;
+  // SPEC §22.1.4: observe and dismiss record decisions without follow-up actions.
+  if (ownerAction === 'observe' || ownerAction === 'dismiss') {
+    return null;
+  }
+
+  const handleDispatch = async (type: 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal') => {
+    setBusyState('dispatching');
+    setErrorMsg(null);
+    setResponse(null);
+    // Trim the candidate id so leading/trailing whitespace never reaches the
+    // audit trail (the disable-check already trims; the payload must match it).
+    // The server re-trims as the trust-boundary authority (EP-01).
+    const payload = type === 'link_candidate'
+      ? { type, candidateId: candidateIdInput.trim() }
+      : { type };
+    const result = await dispatchFollowUp(decision.id, payload);
+    if (!result.success) {
+      setBusyState('error');
+      setErrorMsg(result.error ?? t('pages.pain.followUpDispatchFailed'));
+      return;
+    }
+    setBusyState('dispatched');
+    setResponse(result.data);
+    // For follow-up types that update the record (link_candidate,
+    // generate_patch_proposal), propagate the updated record up so the
+    // parent's existingDecisions list stays in sync.
+    if (result.data.type === 'link_candidate' || result.data.type === 'generate_patch_proposal') {
+      onDecisionUpdated(result.data.record);
+    }
+  };
+
+  const isDispatching = busyState === 'dispatching';
+
+  return (
+    <div className="mt-4 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
+      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-2">
+        {t('pages.pain.followUpActionsTitle')}
+      </div>
+
+      {/* confirm_drift → link candidate */}
+      {ownerAction === 'confirm_drift' && (
+        <div className="space-y-2">
+          <p className="text-ink-2 text-[13px] leading-relaxed">
+            {t('pages.pain.followUpLinkCandidateDescription')}
           </p>
+          {/* If the evidence chain already has a linked candidate, prefill and
+              show a one-click "Link" button. Otherwise let the Owner paste one. */}
+          <div className="flex gap-2 items-start">
+            <input
+              type="text"
+              value={candidateIdInput}
+              onChange={(e) => setCandidateIdInput(e.target.value)}
+              placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
+              aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
+              disabled={isDispatching}
+              className="flex-1 px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isDispatching || candidateIdInput.trim() === ''}
+              onClick={() => void handleDispatch('link_candidate')}
+            >
+              {isDispatching
+                ? t('pages.pain.followUpDispatching')
+                : t('pages.pain.followUpLinkCandidateButton')}
+            </Button>
+          </div>
+          {linkedCandidateId && (
+            <p className="text-ink-4 text-[11px] italic">
+              {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+            </p>
+          )}
+          {/* After successful link, show the linked candidate id */}
+          {busyState === 'dispatched' && response?.type === 'link_candidate' && (
+            <p role="status" className="text-emerald text-[12px] font-medium">
+              {t('pages.pain.followUpLinkedSuccess')}: <span className="font-mono">{response.linkedCandidateId}</span>
+            </p>
+          )}
         </div>
+      )}
+
+      {/* promote_to_rulehost → view CLI guidance */}
+      {ownerAction === 'promote_to_rulehost' && (
+        <div className="space-y-2">
+          <p className="text-ink-2 text-[13px] leading-relaxed">
+            {t('pages.pain.followUpGuideRulehostDescription')}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isDispatching}
+            onClick={() => void handleDispatch('guide_rulehost')}
+          >
+            {isDispatching
+              ? t('pages.pain.followUpDispatching')
+              : t('pages.pain.followUpGuideRulehostButton')}
+          </Button>
+          {busyState === 'dispatched' && response?.type === 'guide_rulehost' && (
+            <div role="status" className="mt-2 p-2 bg-surface border border-line rounded-[var(--radius-sm)]">
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.followUpCliCommandLabel')}
+              </div>
+              <pre className="font-mono text-[12px] text-ink-2 whitespace-pre-wrap break-all">{response.cliCommand}</pre>
+              <p className="text-ink-3 text-[12px] mt-2 leading-relaxed">{response.note}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* revise_intent → view patch proposal */}
+      {ownerAction === 'revise_intent' && (
+        <div className="space-y-2">
+          <p className="text-ink-2 text-[13px] leading-relaxed">
+            {t('pages.pain.followUpPatchProposalDescription')}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isDispatching}
+            onClick={() => void handleDispatch('generate_patch_proposal')}
+          >
+            {isDispatching
+              ? t('pages.pain.followUpDispatching')
+              : t('pages.pain.followUpViewPatchProposalButton')}
+          </Button>
+          {busyState === 'dispatched' && response?.type === 'generate_patch_proposal' && (
+            <div role="status" className="mt-2 p-2 bg-surface border border-line rounded-[var(--radius-sm)]">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t('pages.pain.followUpPatchProposalLabel')}
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  {t('pages.pain.followUpPatchProposalReadOnlyBadge')}
+                </Badge>
+              </div>
+              <pre className="font-mono text-[11px] text-ink-2 whitespace-pre-wrap break-all bg-paper-2 p-2 rounded-[var(--radius-sm)] border border-line max-h-80 overflow-y-auto">
+                {response.patchProposal.markdown}
+              </pre>
+              <p className="text-amber text-[11px] mt-2 italic">
+                {t('pages.pain.followUpPatchProposalWarning')}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* promote_to_principle → same as confirm_drift (link candidate) */}
+      {/* SPEC §22.1.4: promote_to_principle follows the same candidate/approval
+          chain as confirm_drift. We render the same link-candidate UI. */}
+      {ownerAction === 'promote_to_principle' && (
+        <div className="space-y-2">
+          <p className="text-ink-2 text-[13px] leading-relaxed">
+            {t('pages.pain.followUpPromoteToPrincipleDescription')}
+          </p>
+          <div className="flex gap-2 items-start">
+            <input
+              type="text"
+              value={candidateIdInput}
+              onChange={(e) => setCandidateIdInput(e.target.value)}
+              placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
+              aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
+              disabled={isDispatching}
+              className="flex-1 px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isDispatching || candidateIdInput.trim() === ''}
+              onClick={() => void handleDispatch('link_candidate')}
+            >
+              {isDispatching
+                ? t('pages.pain.followUpDispatching')
+                : t('pages.pain.followUpLinkCandidateButton')}
+            </Button>
+          </div>
+          {linkedCandidateId && (
+            <p className="text-ink-4 text-[11px] italic">
+              {t('pages.pain.followUpPrefilledFromEvidenceChain')}
+            </p>
+          )}
+          {busyState === 'dispatched' && response?.type === 'link_candidate' && (
+            <p role="status" className="text-emerald text-[12px] font-medium">
+              {t('pages.pain.followUpLinkedSuccess')}: <span className="font-mono">{response.linkedCandidateId}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Error message */}
+      {busyState === 'error' && errorMsg && (
+        <p role="alert" className="text-danger text-[12px] mt-2">
+          {t('pages.pain.followUpDispatchFailed')}: {errorMsg}
+        </p>
       )}
     </div>
   );
