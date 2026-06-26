@@ -19,6 +19,7 @@ import {
   matchEmpathyKeywords,
   loadKeywordStore,
   saveKeywordStore,
+  applyKeywordUpdates,
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
@@ -368,6 +369,8 @@ export async function handleBeforePromptBuild(
         // Increment turn counter (Finding #3: session.turnCount doesn't exist)
         empathyState.turnCounter++;
         const turnCount = empathyState.turnCounter;
+        const painTrigger = wctx.config.get('thresholds.pain_trigger') || 40;
+        const highGfiThreshold = Math.max(wctx.config.get('severity_thresholds.high') || 70, painTrigger + 30);
 
         if (matchResult.matched) {
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
@@ -380,8 +383,6 @@ export async function handleBeforePromptBuild(
 
           const currentSession = getSession(sessionId);
           const currentGfi = currentSession?.currentGfi ?? 0;
-          const painTrigger = wctx.config.get('thresholds.pain_trigger') || 40;
-          const highGfiThreshold = Math.max(wctx.config.get('severity_thresholds.high') || 70, painTrigger + 30);
 
           if (currentGfi >= highGfiThreshold) {
             const gfiPainScore = Math.min(Math.round(currentGfi), 60);
@@ -518,7 +519,8 @@ export async function handleBeforePromptBuild(
             }
           }
 
-          // Trigger asynchronous background Empathy Observer deep analysis (Zero Latency)
+        } else {
+          // ── Pipeline: Observer only runs when keyword matcher misses ──
           const observer = resolveEmpathyObserver(wctx, logger);
           if (observer) {
             const scheduler = new AgentScheduler();
@@ -528,16 +530,16 @@ export async function handleBeforePromptBuild(
               runner: observer,
             });
 
-            logger?.info?.(`[PD:Empathy] Triggering background Empathy Observer deep analysis for message: "${msgPreview}"`);
-            
+            logger?.info?.(`[PD:Empathy] Pipeline: Triggering background Empathy Observer for unmatched message: "${msgPreview}"`);
+
             void scheduler.dispatch('empathy-observer', { userMessage: latestUserMessage })
               .then(async (result) => {
                 if (result.damageDetected) {
-                  logger?.info?.(`[PD:Empathy] Background Empathy Observer detected damage. Severity: ${result.severity}, Reason: ${result.reason}`);
+                  logger?.info?.(`[PD:Empathy] Pipeline: Background Empathy Observer detected damage. Severity: ${result.severity}, Reason: ${result.reason}`);
 
                   // ── Persistence Contract ──
                   const painScore = scoreFromSeverityForSpec(result.severity, wctx);
-                  
+
                   trackFriction(
                     sessionId,
                     painScore,
@@ -545,6 +547,31 @@ export async function handleBeforePromptBuild(
                     workspaceDir,
                     { source: 'user_empathy' }
                   );
+
+                  // ── Pipeline: feed back newly detected expressions into keyword store ──
+                  if (result.reason) {
+                    const phrases = extractPhrasesFromReason(result.reason, wctx.config.get('language') as 'zh' | 'en' || 'zh');
+                    if (phrases.length > 0) {
+                      const updates: Record<string, { action: 'add'; weight: number; falsePositiveRate: number; reasoning: string }> = {};
+                      for (const phrase of phrases) {
+                        if (!keywordStore.terms[phrase]) {
+                          updates[phrase] = {
+                            action: 'add',
+                            weight: 0.4,
+                            falsePositiveRate: 0.3,
+                            reasoning: `Discovered by empathy observer: ${result.reason.substring(0, 100)}`,
+                          };
+                        }
+                      }
+                      if (Object.keys(updates).length > 0) {
+                        const { added } = applyKeywordUpdates(keywordStore, updates);
+                        if (added > 0) {
+                          saveKeywordStore(wctx.stateDir, keywordStore);
+                          logger?.info?.(`[PD:Empathy] Pipeline: added ${added} new terms from observer feedback`);
+                        }
+                      }
+                    }
+                  }
 
                   const eventId = `emp_obs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
                   wctx.eventLog.recordPainSignal(sessionId, {
@@ -604,7 +631,7 @@ export async function handleBeforePromptBuild(
                       const sourceKind = resolveSourceKind(rawObs);
                       const triage = evaluateEvidenceTriage(sourceKind, freshGfiPainScore);
                       if (triage.decision !== 'admit') {
-                        logger?.info?.(`[PD:Empathy] Observer triage ${triage.decision}: ${triage.reason}`);
+                        logger?.info?.(`[PD:Empathy] Pipeline observer triage ${triage.decision}: ${triage.reason}`);
                       } else {
                         const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'empathy_gfi_observer');
                         const triggerDecision = evaluateTriggerController({
@@ -617,7 +644,7 @@ export async function handleBeforePromptBuild(
                         });
                         if (triggerDecision.shouldCreateDiagnosticTask) {
                           markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'empathy_gfi_observer');
-                          logger?.info?.(`[PD:Empathy] Gate B approved (observer), calling emitPainDetectedEvent...`);
+                          logger?.info?.(`[PD:Empathy] Pipeline Gate B approved (observer), calling emitPainDetectedEvent...`);
                           try {
                             const evidence = buildTrajectoryEvidence(wctx, sessionId);
                             // PRI-453: Reuse observerPainId for lineage consistency —
@@ -640,10 +667,10 @@ export async function handleBeforePromptBuild(
                               },
                             }, { recordObservability: false });
                           } catch (emitErr) {
-                            logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                            logger?.error?.(`[PD:Empathy] Pipeline FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
                           }
                         } else {
-                          logger?.info?.(`[PD:Empathy] Gate B skipped (observer): ${triggerDecision.reason}`);
+                          logger?.info?.(`[PD:Empathy] Pipeline Gate B skipped (observer): ${triggerDecision.reason}`);
                         }
                       }
                     } else {
@@ -663,7 +690,7 @@ export async function handleBeforePromptBuild(
                       });
 
                       if (gate.shouldDiagnose) {
-                        logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
+                        logger?.info?.(`[PD:Empathy] Pipeline GFI threshold crossed after background observer. Emitting pain signal...`);
                         try {
                           const evidence = buildTrajectoryEvidence(wctx, sessionId);
                           // PRI-453: Reuse observerPainId for lineage consistency —
@@ -686,20 +713,20 @@ export async function handleBeforePromptBuild(
                             },
                           }, { recordObservability: false });
                         } catch (emitErr) {
-                          logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                          logger?.error?.(`[PD:Empathy] Pipeline FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
                         }
                       }
                     }
                   }
                 } else {
-                  logger?.info?.(`[PD:Empathy] Background Empathy Observer did not detect any damage.`);
+                  logger?.info?.(`[PD:Empathy] Pipeline: Background Empathy Observer did not detect any damage.`);
                 }
               })
               .catch((err) => {
-                logger?.warn?.(`[PD:Empathy] Background analysis failed or rejected: ${String(err)}`);
+                logger?.warn?.(`[PD:Empathy] Pipeline: Background analysis failed or rejected: ${String(err)}`);
               });
           }
-        } else {
+
           // Log unmatched messages periodically for coverage analysis
           if (turnCount > 0 && turnCount % 50 === 0) {
             const sampleMsg = latestUserMessage.substring(0, 80).replace(/\n/g, ' ');
@@ -1113,4 +1140,15 @@ function resolveEmpathyObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogg
     logger?.warn?.(`[PD:Empathy] Failed to resolve EmpathyObserver: ${String(err)}`);
     return null;
   }
+}
+
+function extractPhrasesFromReason(reason: string, lang: 'zh' | 'en'): string[] {
+  const MAX_PHRASES = 3;
+  const MIN_LENGTH = lang === 'zh' ? 2 : 3;
+  const MAX_LENGTH = 20;
+  const segments = reason
+    .split(/[,，。.！!？?、\n；;]/)
+    .map(s => s.trim())
+    .filter(s => s.length >= MIN_LENGTH && s.length <= MAX_LENGTH);
+  return [...new Set(segments)].slice(0, MAX_PHRASES);
 }
