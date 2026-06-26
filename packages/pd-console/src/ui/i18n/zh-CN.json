@@ -249,7 +249,24 @@
       "intentTensionSuggestedActionPromoteToRulehost": "提升为 RuleHost",
       "intentTensionIntentDocHashLabel": "INTENT 文档哈希",
       "intentTensionNoTension": "未检测到意图张力",
-      "intentTensionArtifactDegraded": "此记录的诊断器产物无法完整解析，意图张力可能不可用。"
+      "intentTensionArtifactDegraded": "此记录的诊断器产物无法完整解析，意图张力可能不可用。",
+      "ownerDecisionPanelTitle": "拥有者决策",
+      "ownerDecisionPanelSubtitle": "记录您对此意图张力的决策。后续操作仅在决策持久化后才会显示。",
+      "ownerDecisionNoteLabel": "备注（可选）",
+      "ownerDecisionNotePlaceholder": "为此决策添加上下文",
+      "ownerDecisionSubmitConfirmDrift": "确认漂移",
+      "ownerDecisionSubmitReviseIntent": "修订意图",
+      "ownerDecisionSubmitObserve": "观察",
+      "ownerDecisionSubmitDismiss": "驳回",
+      "ownerDecisionSubmitPromoteToPrinciple": "沉淀为原则",
+      "ownerDecisionSubmitPromoteToRulehost": "转为 RuleHost",
+      "ownerDecisionSubmitting": "正在记录决策…",
+      "ownerDecisionRecorded": "决策已记录",
+      "ownerDecisionFailed": "记录决策失败",
+      "ownerDecisionExisting": "此张力已存在决策",
+      "ownerDecisionFollowUpPlaceholder": "决策记录后，后续操作将显示在此处。",
+      "ownerDecisionLoadingExisting": "正在加载已有决策…",
+      "ownerDecisionLoadFailed": "加载已有决策失败"
     },
     "principles": {
       "title": "原则",
@@ -720,7 +737,20 @@
         "templateDescription": "将其复制到 .principles/INTENT.md，替换占位符为你的意图。"
       },
       "loadError": "加载意图文档失败",
-      "validationError": "数据格式校验失败，请刷新后重试"
+      "validationError": "数据格式校验失败，请刷新后重试",
+      "decisions": {
+        "sectionTitle": "拥有者决策",
+        "sectionSubtitle": "基于 IntentDecisionRecord 的轻量审计摘要，非仪表盘。",
+        "countConfirmDrift": "确认漂移",
+        "countReviseIntent": "修订意图",
+        "countObserve": "观察",
+        "countDismiss": "驳回",
+        "countPromoteToPrinciple": "沉淀为原则",
+        "countPromoteToRulehost": "转为 RuleHost",
+        "lastDecisionAtLabel": "最近决策",
+        "noDecisions": "暂无决策记录",
+        "loadError": "加载决策摘要失败"
+      }
     }
   },
   "components": {

@@ -1258,6 +1258,184 @@ export function validateIntentTension(v: unknown): IntentTensionData | null {
   return result;
 }
 
+// ── Intent Decision Record (PRI-470) ─────────────────────────────────────────
+//
+// Frontend mirror of the core IntentDecisionRecord type. Used by the Owner
+// Decision panel in PainPage and the Decision Summary section in IntentPage.
+// Validates untrusted JSON from the API before any UI code touches it (ERR-001).
+
+export interface IntentDecisionRecordData {
+  id: string;
+  painId?: string;
+  taskId?: string;
+  runId?: string;
+  intentDocHash?: string;
+  source: string;
+  evidenceStrength: string;
+  relatedIntentFields: string[];
+  ownerAction: string;
+  evidenceRefs: string[];
+  resultingCandidateId?: string;
+  resultingRuleCandidateId?: string;
+  patchProposalId?: string;
+  createdAt: string;
+}
+
+/**
+ * Validate an untrusted IntentDecisionRecord object from the API.
+ * Returns null when malformed (Rule 3: fail loud on missing/wrong-type fields).
+ *
+ * Enum fields (source, evidenceStrength, ownerAction) are validated against
+ * the same sets used by validateIntentTension. relatedIntentFields elements
+ * are validated against VALID_INTENT_RELATED_FIELDS.
+ */
+export function validateIntentDecisionRecord(v: unknown): IntentDecisionRecordData | null {
+  if (!isObject(v)) return null;
+
+  // Required fields (ERR-009: fail loud when missing or wrong type)
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  if (!(VALID_INTENT_TENSION_SOURCES as readonly string[]).includes(v.source)) return null;
+
+  if (!Object.hasOwn(v, 'evidenceStrength') || !isString(v.evidenceStrength)) return null;
+  if (!(VALID_EVIDENCE_STRENGTHS as readonly string[]).includes(v.evidenceStrength)) return null;
+
+  if (!Object.hasOwn(v, 'relatedIntentFields') || !Array.isArray(v.relatedIntentFields)) return null;
+  const relatedIntentFields: string[] = [];
+  for (const f of v.relatedIntentFields) {
+    if (typeof f !== 'string') return null;
+    if (!(VALID_INTENT_RELATED_FIELDS as readonly string[]).includes(f)) return null;
+    relatedIntentFields.push(f);
+  }
+
+  if (!Object.hasOwn(v, 'ownerAction') || !isString(v.ownerAction)) return null;
+  if (!(VALID_SUGGESTED_OWNER_ACTIONS as readonly string[]).includes(v.ownerAction)) return null;
+
+  if (!Object.hasOwn(v, 'evidenceRefs') || !Array.isArray(v.evidenceRefs)) return null;
+  const evidenceRefs: string[] = [];
+  for (const e of v.evidenceRefs) {
+    if (typeof e !== 'string') return null;
+    evidenceRefs.push(e);
+  }
+
+  if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
+
+  const result: IntentDecisionRecordData = {
+    id: v.id,
+    source: v.source,
+    evidenceStrength: v.evidenceStrength,
+    relatedIntentFields,
+    ownerAction: v.ownerAction,
+    evidenceRefs,
+    createdAt: v.createdAt,
+  };
+
+  // Optional fields — fail loud when present but wrong type (ERR-009)
+  if (Object.hasOwn(v, 'painId')) {
+    if (!isString(v.painId)) return null;
+    result.painId = v.painId;
+  }
+  if (Object.hasOwn(v, 'taskId')) {
+    if (!isString(v.taskId)) return null;
+    result.taskId = v.taskId;
+  }
+  if (Object.hasOwn(v, 'runId')) {
+    if (!isString(v.runId)) return null;
+    result.runId = v.runId;
+  }
+  if (Object.hasOwn(v, 'intentDocHash')) {
+    if (!isString(v.intentDocHash)) return null;
+    result.intentDocHash = v.intentDocHash;
+  }
+  if (Object.hasOwn(v, 'resultingCandidateId')) {
+    if (!isString(v.resultingCandidateId)) return null;
+    result.resultingCandidateId = v.resultingCandidateId;
+  }
+  if (Object.hasOwn(v, 'resultingRuleCandidateId')) {
+    if (!isString(v.resultingRuleCandidateId)) return null;
+    result.resultingRuleCandidateId = v.resultingRuleCandidateId;
+  }
+  if (Object.hasOwn(v, 'patchProposalId')) {
+    if (!isString(v.patchProposalId)) return null;
+    result.patchProposalId = v.patchProposalId;
+  }
+
+  return result;
+}
+
+/**
+ * Validate a list of IntentDecisionRecord objects. Returns null if any
+ * element is malformed (ERR-005/007: validate array element types).
+ */
+export function validateIntentDecisionList(v: unknown): IntentDecisionRecordData[] | null {
+  return validateArray(v, validateIntentDecisionRecord);
+}
+
+export interface IntentDecisionResultData {
+  record: IntentDecisionRecordData;
+  created: boolean;
+}
+
+/**
+ * Validate the POST /api/v1/intent-decisions response envelope.
+ * Shape: { record: IntentDecisionRecord, created: boolean }
+ */
+export function validateIntentDecisionResult(v: unknown): IntentDecisionResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'record')) return null;
+  const record = validateIntentDecisionRecord(v.record);
+  if (record === null) return null;
+  if (!Object.hasOwn(v, 'created') || !isBoolean(v.created)) return null;
+  return { record, created: v.created };
+}
+
+export interface IntentDecisionSummaryData {
+  counts: {
+    confirm_drift: number;
+    revise_intent: number;
+    observe: number;
+    dismiss: number;
+    promote_to_principle: number;
+    promote_to_rulehost: number;
+  };
+  lastDecisionAt: string | null;
+}
+
+/**
+ * Validate the GET /api/v1/intent-decisions/summary response.
+ * All 6 count keys must be present with non-negative finite numbers.
+ * lastDecisionAt: null is valid, string is valid, anything else returns null.
+ */
+export function validateIntentDecisionSummary(v: unknown): IntentDecisionSummaryData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'counts') || !isObject(v.counts)) return null;
+  const { counts } = v;
+  // Explicit per-key checks so isNumber type guards narrow each property.
+  if (!Object.hasOwn(counts, 'confirm_drift') || !isNumber(counts.confirm_drift) || counts.confirm_drift < 0) return null;
+  if (!Object.hasOwn(counts, 'revise_intent') || !isNumber(counts.revise_intent) || counts.revise_intent < 0) return null;
+  if (!Object.hasOwn(counts, 'observe') || !isNumber(counts.observe) || counts.observe < 0) return null;
+  if (!Object.hasOwn(counts, 'dismiss') || !isNumber(counts.dismiss) || counts.dismiss < 0) return null;
+  if (!Object.hasOwn(counts, 'promote_to_principle') || !isNumber(counts.promote_to_principle) || counts.promote_to_principle < 0) return null;
+  if (!Object.hasOwn(counts, 'promote_to_rulehost') || !isNumber(counts.promote_to_rulehost) || counts.promote_to_rulehost < 0) return null;
+
+  // lastDecisionAt: null or string
+  if (!Object.hasOwn(v, 'lastDecisionAt')) return null;
+  const { lastDecisionAt } = v;
+  if (lastDecisionAt !== null && !isString(lastDecisionAt)) return null;
+
+  return {
+    counts: {
+      confirm_drift: counts.confirm_drift,
+      revise_intent: counts.revise_intent,
+      observe: counts.observe,
+      dismiss: counts.dismiss,
+      promote_to_principle: counts.promote_to_principle,
+      promote_to_rulehost: counts.promote_to_rulehost,
+    },
+    lastDecisionAt,
+  };
+}
+
 function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
   if (!isObject(v)) return null;
   // Required fields (ERR-009: fail loud when missing)

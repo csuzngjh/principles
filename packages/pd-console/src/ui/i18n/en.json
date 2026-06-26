@@ -249,7 +249,24 @@
       "intentTensionSuggestedActionPromoteToRulehost": "Promote to RuleHost",
       "intentTensionIntentDocHashLabel": "INTENT doc hash",
       "intentTensionNoTension": "No intent tension detected",
-      "intentTensionArtifactDegraded": "Diagnostician artifact for this record could not be fully parsed; intent tension may be unavailable."
+      "intentTensionArtifactDegraded": "Diagnostician artifact for this record could not be fully parsed; intent tension may be unavailable.",
+      "ownerDecisionPanelTitle": "Owner Decision",
+      "ownerDecisionPanelSubtitle": "Record your decision on this intent tension. Follow-up actions appear only after a decision is persisted.",
+      "ownerDecisionNoteLabel": "Note (optional)",
+      "ownerDecisionNotePlaceholder": "Add context for this decision",
+      "ownerDecisionSubmitConfirmDrift": "Confirm Drift",
+      "ownerDecisionSubmitReviseIntent": "Revise Intent",
+      "ownerDecisionSubmitObserve": "Observe",
+      "ownerDecisionSubmitDismiss": "Dismiss",
+      "ownerDecisionSubmitPromoteToPrinciple": "Promote to Principle",
+      "ownerDecisionSubmitPromoteToRulehost": "Promote to RuleHost",
+      "ownerDecisionSubmitting": "Recording decision…",
+      "ownerDecisionRecorded": "Decision recorded",
+      "ownerDecisionFailed": "Failed to record decision",
+      "ownerDecisionExisting": "A decision already exists for this tension",
+      "ownerDecisionFollowUpPlaceholder": "Follow-up actions will appear here after the decision is recorded.",
+      "ownerDecisionLoadingExisting": "Loading existing decisions…",
+      "ownerDecisionLoadFailed": "Failed to load existing decisions"
     },
     "principles": {
       "title": "Principles",
@@ -720,7 +737,20 @@
         "templateDescription": "Copy this into .principles/INTENT.md. Replace placeholders with your intent."
       },
       "loadError": "Failed to load intent document",
-      "validationError": "Data format validation failed, please refresh and retry"
+      "validationError": "Data format validation failed, please refresh and retry",
+      "decisions": {
+        "sectionTitle": "Owner Decisions",
+        "sectionSubtitle": "Lightweight audit summary derived from IntentDecisionRecord. Not a dashboard.",
+        "countConfirmDrift": "Confirm drift",
+        "countReviseIntent": "Revise intent",
+        "countObserve": "Observe",
+        "countDismiss": "Dismiss",
+        "countPromoteToPrinciple": "Promote to principle",
+        "countPromoteToRulehost": "Promote to RuleHost",
+        "lastDecisionAtLabel": "Last decision",
+        "noDecisions": "No decisions recorded yet",
+        "loadError": "Failed to load decision summary"
+      }
     }
   },
   "components": {
