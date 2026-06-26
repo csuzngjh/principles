@@ -64,11 +64,11 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-08 Security Boundary Placement
 
-- **Use when**: adding redaction, command blocking, path handling, shell execution, or security validators.
-- **Failure mode**: a security control is placed at the wrong layer, matches the wrong scope, or is bypassed by interpolation/substrings.
-- **Must check**: enforcement input is not prematurely redacted; persistence output is redacted; shell arguments are passed as argv; path checks use segment boundaries; **size bounds on content that undergoes a length-increasing transformation (XML/HTML escaping, URL encoding, base64) are applied to the POST-transformation output, not the pre-transformation input (ERR-080: bounding raw content then escaping it lets entity expansion `&`→`&amp;` 5x blow the budget)**.
-- **Representative ERRs**: ERR-003, ERR-024, ERR-030, ERR-045, ERR-051, ERR-055, ERR-056, ERR-058, ERR-080.
-- **Automation target**: tests for composite sensitive keys, value-based redaction, raw enforcement input, and sibling path false positives; regression test with expandable chars (`&`.repeat(N)) for any escape-then-bound pipeline.
+- **Use when**: adding redaction, command blocking, path handling, shell execution, security validators, prompt budget guards, or file size caps.
+- **Failure mode**: a security control is placed at the wrong layer, matches the wrong scope, is bypassed by interpolation/substrings, **applies its bound to the wrong input (raw vs. escaped, metadata vs. actual content)**, or has a TOCTOU window between check and use.
+- **Must check**: enforcement input is not prematurely redacted; persistence output is redacted; shell arguments are passed as argv; path checks use segment boundaries; **size/budget bounds are applied to the POST-transform output (escaped/encoded), not the pre-transform input**; **file size caps via statSync are re-verified with `Buffer.byteLength` after readFileSync**.
+- **Representative ERRs**: ERR-003, ERR-024, ERR-030, ERR-045, ERR-051, ERR-055, ERR-056, ERR-058, ERR-080, ERR-081.
+- **Automation target**: tests for composite sensitive keys, value-based redaction, raw enforcement input, sibling path false positives, escape-then-truncate ordering, and post-read byte re-verification.
 
 ### EP-09 Test Reality Gap
 
