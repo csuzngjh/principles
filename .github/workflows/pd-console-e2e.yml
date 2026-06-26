@@ -1,0 +1,48 @@
+name: pd-console E2E
+
+on:
+  pull_request:
+    paths:
+      - 'packages/pd-console/**'
+      - '.github/workflows/pd-console-e2e.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Build core
+        run: npm run build
+
+      - name: Build pd-console UI
+        run: cd packages/pd-console && npm run build:ui
+
+      - name: Install Playwright browsers
+        run: cd packages/pd-console && npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: cd packages/pd-console && npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pd-console-playwright-report
+          path: packages/pd-console/playwright-report/
+          retention-days: 14
