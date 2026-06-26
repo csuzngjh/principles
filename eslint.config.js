@@ -101,6 +101,14 @@ export default defineConfig(
       // Disable complexity — pre-existing in 94+ functions, refactoring is out of scope
       complexity: 'off',
 
+      // Runtime Contract Rule 5 (rc-5-object-hasown-not-in): warn on `in` operator for untrusted keys.
+      // Warn-level only (not error) to avoid false positives on legitimate `in` usage (e.g., 'length' in arr).
+      // Developers should use Object.hasOwn() for untrusted object key checks. Ref: ERR-013.
+      'no-restricted-syntax': ['warn', {
+        selector: "BinaryExpression[operator='in']",
+        message: 'Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013',
+      }],
+
       // Disable core rules that TypeScript handles better
       'no-redeclare': 'off',
       'no-shadow': 'off',
