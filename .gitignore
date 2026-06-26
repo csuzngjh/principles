@@ -175,3 +175,8 @@ evidence/*
 .codex-output/
 .hermes-reports/
 .omo/
+
+# Playwright
+packages/pd-console/playwright-report/
+packages/pd-console/test-results/
+packages/pd-console/playwright/.cache/
