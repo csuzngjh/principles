@@ -541,6 +541,8 @@ export {
   normalizeDiagnosticianTaskId,
   crossReferenceByTimestamp,
   assembleEvidenceChain,
+  // PRI-469: pure validator for untrusted intentTension from artifacts.
+  validateIntentTension,
 } from './types/index.js';
 
 

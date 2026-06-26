@@ -6,7 +6,7 @@
 
 Read the strategic documents below before creating or reprioritizing an issue, or changing product scope, architecture, roadmap, ADRs, user journeys, surfaced functionality, activation channels, or public product copy:
 
-0. [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) (canonical product boundary)
+0. [`PRODUCT_IDENTITY.md`](docs/product/PRODUCT_IDENTITY.md) (canonical product boundary)
 1. [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
 2. [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
 3. [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
@@ -121,7 +121,7 @@ After code review (if a real bug is found):
 
 ## Project Overview
 
-**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, npm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
+**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, npm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`docs/product/PRODUCT_IDENTITY.md`](docs/product/PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
 
 ## Critical Rules
 

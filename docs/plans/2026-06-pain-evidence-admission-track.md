@@ -548,7 +548,7 @@ Repository: D:\Code\principles
 Do not modify files. Do not write to D:\.openclaw\workspace except temporary files under a clearly named scratch directory, and delete them before finishing. Do not create PR.
 
 Read:
-- PRODUCT_IDENTITY.md
+- docs/product/PRODUCT_IDENTITY.md
 - docs/adr/0014-mvp-first-strategy-and-product-pivot.md
 - docs/adr/0015-pain-signal-model-unification.md
 - docs/adr/0010-goal-aligned-pain-signal.md

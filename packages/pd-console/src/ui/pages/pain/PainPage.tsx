@@ -19,8 +19,9 @@ import { Button } from '../../components/ui/button.js';
 import { ShinyText } from '../../components/ui/shiny-text.js';
 import { fetchEvidenceChain } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
+import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format.js';
-import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty } from './pain-card-helpers.js';
+import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
 // ── State grouping ─────────────────────────────────────────────────────────────
@@ -440,6 +441,18 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           )}
         </div>
 
+        {/* PRI-469: Intent Tension panel (SPEC §22.1.2)
+            Rendered only when shouldRenderIntentTensionPanel returns true.
+            SPEC §22.1.3: source='none' is suppressed (no high-salience panel).
+            SPEC §22.1.4: follow-up actions are NOT shown in PRI-469 (stub returns false).
+            The panel is a distinct visual block between Layer 2 and Layer 3. */}
+        {shouldRenderIntentTensionPanel(layers.layer2.intentTension) && (
+          <IntentTensionPanel
+            tension={layers.layer2.intentTension}
+            t={t}
+          />
+        )}
+
         {/* Layer 3: Debug IDs — hidden by default; copy button is primary action */}
         <div className="mt-4 pt-3 border-t border-line">
           <div className="flex items-center gap-3 flex-wrap">
@@ -558,4 +571,150 @@ function stateToVariant(state: EvidenceChainStateData): 'default' | 'amber' | 'g
     default:
       return 'secondary';
   }
+}
+
+// ── PRI-469: Intent Tension panel (SPEC §22.1) ───────────────────────────────
+
+/**
+ * Convert a snake_case enum value to a PascalCase suffix for i18n keys.
+ * E.g. 'action_drift' → 'ActionDrift', 'none' → 'None'.
+ */
+function snakeToPascal(value: string): string {
+  return value
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+}
+
+/**
+ * Resolve an intentTension enum value to its localized label.
+ * kind determines the i18n key prefix:
+ * - 'source' → pages.pain.intentTensionSource{Pascal}
+ * - 'evidenceStrength' → pages.pain.intentTensionEvidenceStrength{Pascal}
+ * - 'suggestedAction' → pages.pain.intentTensionSuggestedAction{Pascal}
+ */
+function intentTensionEnumLabel(
+  value: string,
+  kind: 'source' | 'evidenceStrength' | 'suggestedAction',
+  t: (key: string) => string,
+): string {
+  const keyPrefix =
+    kind === 'source'
+      ? 'intentTensionSource'
+      : kind === 'evidenceStrength'
+        ? 'intentTensionEvidenceStrength'
+        : 'intentTensionSuggestedAction';
+  return t(`pages.pain.${keyPrefix}${snakeToPascal(value)}`);
+}
+
+interface IntentTensionPanelProps {
+  tension: IntentTensionData;
+  t: (key: string) => string;
+}
+
+/**
+ * IntentTensionPanel — renders the intent tension decision panel (SPEC §22.1.2).
+ *
+ * This panel is rendered only when shouldRenderIntentTensionPanel returns true
+ * (i.e., tension is non-null AND source !== 'none' per SPEC §22.1.3).
+ *
+ * Follow-up actions (SPEC §22.1.4) are NOT rendered in PRI-469 — they require
+ * an Owner decision written to IntentDecisionRecord first (PRI-471 scope).
+ * shouldRenderFollowUpActions() is called here as a stub so the UI structure
+ * is in place for PRI-471.
+ *
+ * Accessibility (EP-09):
+ * - Uses semantic <section> with aria-label
+ * - Uses <dl>/<dt>/<dd> for label-value pairs
+ * - Color is not the only indicator (text labels always present)
+ */
+function IntentTensionPanel({ tension, t }: IntentTensionPanelProps) {
+  const sourceLabel = intentTensionEnumLabel(tension.source, 'source', t);
+  const strengthLabel = intentTensionEnumLabel(tension.evidenceStrength, 'evidenceStrength', t);
+  const actionLabel = intentTensionEnumLabel(tension.suggestedOwnerAction, 'suggestedAction', t);
+
+  return (
+    <section
+      className="mt-4 p-4 border border-line rounded-[var(--radius-sm)] bg-paper-2"
+      aria-label={t('pages.pain.intentTensionTitle')}
+    >
+      {/* Panel title */}
+      <h4 className="text-[13px] font-semibold text-ink mb-3 flex items-center gap-2">
+        <span aria-hidden="true" className="inline-block w-1.5 h-1.5 rounded-full bg-amber" />
+        {t('pages.pain.intentTensionTitle')}
+      </h4>
+
+      {/* Label-value pairs */}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+        <dt className="font-mono text-ink-4">{t('pages.pain.intentTensionSourceLabel')}</dt>
+        <dd className="text-ink-2">{sourceLabel}</dd>
+
+        <dt className="font-mono text-ink-4">{t('pages.pain.intentTensionEvidenceStrengthLabel')}</dt>
+        <dd className="text-ink-2">{strengthLabel}</dd>
+
+        <dt className="font-mono text-ink-4">{t('pages.pain.intentTensionSuggestedActionLabel')}</dt>
+        <dd className="text-ink-2 font-medium">{actionLabel}</dd>
+      </dl>
+
+      {/* Related INTENT fields */}
+      {tension.relatedIntentFields.length > 0 && (
+        <div className="mt-3">
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+            {t('pages.pain.intentTensionRelatedIntentFieldsLabel')}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {tension.relatedIntentFields.map((field, idx) => (
+              <Badge key={`${field}-${idx}`} variant="outline">
+                {field}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Evidence list */}
+      {tension.evidence.length > 0 && (
+        <div className="mt-3">
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+            {t('pages.pain.intentTensionEvidenceLabel')}
+          </div>
+          <ul className="text-ink-2 text-sm leading-relaxed space-y-1">
+            {tension.evidence.map((item, idx) => (
+              <li key={`${idx}-${item.slice(0, 12)}`} className="pl-3 relative before:content-[''] before:absolute before:left-0 before:top-2 before:w-1 before:h-1 before:rounded-full before:bg-ink-4">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Explanation */}
+      <div className="mt-3">
+        <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+          {t('pages.pain.intentTensionExplanationLabel')}
+        </div>
+        <p className="text-ink-2 text-sm leading-relaxed">{tension.explanation}</p>
+      </div>
+
+      {/* Optional INTENT doc hash */}
+      {tension.intentDocHash && (
+        <div className="mt-3">
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+            {t('pages.pain.intentTensionIntentDocHashLabel')}
+          </div>
+          <p className="font-mono text-[11px] text-ink-3 break-all">{tension.intentDocHash}</p>
+        </div>
+      )}
+
+      {/* PRI-471: Follow-up actions (SPEC §22.1.4)
+          NOT rendered in PRI-469. shouldRenderFollowUpActions() returns false.
+          PRI-471 will replace the stub and render action buttons after the
+          Owner decision is written to IntentDecisionRecord. */}
+      {shouldRenderFollowUpActions() && (
+        <div className="mt-4 pt-3 border-t border-line">
+          {/* PRI-471 will add follow-up action buttons here */}
+        </div>
+      )}
+    </section>
+  );
 }

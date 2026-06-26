@@ -39,7 +39,7 @@ export interface SourceDescriptor {
 /**
  * Source kind descriptors. Order does not matter — lookup is by kind.
  *
- * Design rationale per PRODUCT_IDENTITY.md and ADR-0014:
+ * Design rationale per docs/product/PRODUCT_IDENTITY.md and ADR-0014:
  * - PD owns owner-relevant behavior evidence, not tool repair.
  * - Manual/owner-reported pain has highest confidence.
  * - Tool failures are infrastructure noise (OpenClaw's job, not PD's).

@@ -14,8 +14,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateEvidenceChain,
+  validateIntentTension,
   type EvidenceChainData,
   type EvidenceChainRecordData,
+  type IntentTensionData,
 } from '../../src/ui/utils/validators.js';
 
 // ── Valid record factory ───────────────────────────────────────────────────────
@@ -301,6 +303,153 @@ describe('validateEvidenceChainRecord', () => {
     // Summary should not contain absolute paths
     expect(result!.records[0].summary).not.toContain('C:\\');
     expect(result!.records[0].summary).not.toContain('/home/');
+  });
+});
+
+// ── PRI-469: intentTension validation ─────────────────────────────────────────
+
+function validIntentTension(overrides?: Partial<IntentTensionData>): Record<string, unknown> {
+  return {
+    source: 'action_drift',
+    evidenceStrength: 'strong',
+    relatedIntentFields: ['current_strategic_focus', 'non_negotiables'],
+    evidence: ['e1', 'e2', 'e3'],
+    explanation: 'The work optimized presentation completeness before validating the learning loop.',
+    suggestedOwnerAction: 'confirm_drift',
+    intentDocHash: 'sha256:abc123',
+    ...overrides,
+  };
+}
+
+describe('validateIntentTension (PRI-469)', () => {
+  it('accepts a valid intentTension', () => {
+    const result = validateIntentTension(validIntentTension());
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe('action_drift');
+    expect(result!.evidenceStrength).toBe('strong');
+    expect(result!.relatedIntentFields).toEqual(['current_strategic_focus', 'non_negotiables']);
+    expect(result!.evidence).toHaveLength(3);
+    expect(result!.suggestedOwnerAction).toBe('confirm_drift');
+    expect(result!.intentDocHash).toBe('sha256:abc123');
+  });
+
+  it('rejects intentTension.confidence (SPEC §16.3)', () => {
+    const malicious = validIntentTension();
+    (malicious as Record<string, unknown>).confidence = 0.92;
+    expect(validateIntentTension(malicious)).toBeNull();
+  });
+
+  it('rejects null and non-object input', () => {
+    expect(validateIntentTension(null)).toBeNull();
+    expect(validateIntentTension('string')).toBeNull();
+    expect(validateIntentTension(42)).toBeNull();
+    expect(validateIntentTension([])).toBeNull();
+  });
+
+  it('rejects missing required source', () => {
+    const noSource = validIntentTension();
+    delete (noSource as Record<string, unknown>).source;
+    expect(validateIntentTension(noSource)).toBeNull();
+  });
+
+  it('rejects invalid source enum', () => {
+    expect(validateIntentTension(validIntentTension({ source: 'definitely_drift' }))).toBeNull();
+  });
+
+  it('rejects invalid evidenceStrength enum', () => {
+    expect(validateIntentTension(validIntentTension({ evidenceStrength: 'very_strong' }))).toBeNull();
+  });
+
+  it('rejects invalid suggestedOwnerAction enum', () => {
+    expect(validateIntentTension(validIntentTension({ suggestedOwnerAction: 'auto_apply' }))).toBeNull();
+  });
+
+  it('rejects non-array relatedIntentFields', () => {
+    const malformed = validIntentTension();
+    (malformed as Record<string, unknown>).relatedIntentFields = 'not an array';
+    expect(validateIntentTension(malformed)).toBeNull();
+  });
+
+  it('rejects relatedIntentFields with invalid enum element', () => {
+    const malformed = validIntentTension();
+    (malformed as Record<string, unknown>).relatedIntentFields = ['why', 'invalid_field'];
+    expect(validateIntentTension(malformed)).toBeNull();
+  });
+
+  it('rejects non-array evidence', () => {
+    const malformed = validIntentTension();
+    (malformed as Record<string, unknown>).evidence = 'not an array';
+    expect(validateIntentTension(malformed)).toBeNull();
+  });
+
+  it('rejects evidence with non-string element', () => {
+    const malformed = validIntentTension();
+    (malformed as Record<string, unknown>).evidence = ['e1', 42, 'e3'];
+    expect(validateIntentTension(malformed)).toBeNull();
+  });
+
+  it('truncates evidence to max 3 items (SPEC §16.4)', () => {
+    const oversized = validIntentTension();
+    (oversized as Record<string, unknown>).evidence = ['e1', 'e2', 'e3', 'e4', 'e5'];
+    const result = validateIntentTension(oversized);
+    expect(result).not.toBeNull();
+    expect(result!.evidence).toHaveLength(3);
+    expect(result!.evidence).toEqual(['e1', 'e2', 'e3']);
+  });
+
+  it('rejects empty explanation', () => {
+    expect(validateIntentTension(validIntentTension({ explanation: '' }))).toBeNull();
+  });
+
+  it('accepts intentTension without optional intentDocHash', () => {
+    const noHash = validIntentTension();
+    delete (noHash as Record<string, unknown>).intentDocHash;
+    const result = validateIntentTension(noHash);
+    expect(result).not.toBeNull();
+    expect(result!.intentDocHash).toBeUndefined();
+  });
+
+  it('rejects non-string intentDocHash when present', () => {
+    const malformed = validIntentTension();
+    (malformed as Record<string, unknown>).intentDocHash = 123;
+    expect(validateIntentTension(malformed)).toBeNull();
+  });
+});
+
+describe('validateEvidenceChainRecord with intentTension (PRI-469)', () => {
+  it('accepts a record with valid intentTension', () => {
+    const record = validRecord({
+      state: 'diagnosis-succeeded',
+      intentTension: validIntentTension() as unknown as IntentTensionData,
+    });
+    const input = validResponse({ records: [record] });
+    const result = validateEvidenceChain(input);
+    expect(result).not.toBeNull();
+    expect(result!.records[0].intentTension).toBeDefined();
+    expect(result!.records[0].intentTension!.source).toBe('action_drift');
+  });
+
+  it('drops intentTension when malformed but keeps the rest of the record', () => {
+    const malformedTension = validIntentTension();
+    (malformedTension as Record<string, unknown>).confidence = 0.5; // SPEC §16.3 violation
+    const record = validRecord({
+      state: 'diagnosis-succeeded',
+      intentTension: malformedTension as unknown as IntentTensionData,
+    });
+    const input = validResponse({ records: [record] });
+    const result = validateEvidenceChain(input);
+    // Record is still valid — just without intentTension
+    expect(result).not.toBeNull();
+    expect(result!.records[0].id).toBe('pain_1');
+    expect(result!.records[0].intentTension).toBeUndefined();
+  });
+
+  it('accepts a record without intentTension (backward compat)', () => {
+    const record = validRecord({ state: 'recorded-only' });
+    const input = validResponse({ records: [record] });
+    const result = validateEvidenceChain(input);
+    expect(result).not.toBeNull();
+    expect(result!.records[0].intentTension).toBeUndefined();
   });
 });
 
