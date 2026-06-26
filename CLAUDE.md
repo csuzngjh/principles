@@ -98,31 +98,18 @@ For work subject to the product-boundary gate above, read `docs/product/PRODUCT_
 
 ### Error Handbook Gate
 
-Before implementation:
-
-1. Read `docs/ERROR_PATTERN_INDEX.md`.
-2. Select the relevant pattern cards for the current task.
-3. Read the detailed `docs/ERROR_EXPERIENCE_HANDBOOK.md` entries referenced by those cards.
-4. List the relevant ERR entries for the current task (minimum 3). Reference specific IDs and titles.
-5. State how this PR avoids recurrence of each listed ERR. Write this in your implementation brief.
-6. If fixing a bug: note which known ERR class the bug belongs to.
-
-After code review (if a real bug is found):
-
-1. **New error class**: Create a new ERR entry in the handbook with full details.
-2. **Recurring error class**: Update the existing entry's Recurrence field with the new date and issue.
-3. Tag the Linear issue with `lesson-learned` label.
-4. If the finding changes a recurring pattern, update `docs/ERROR_PATTERN_INDEX.md`.
-5. Run `npm run check:error-handbook`.
-6. Mention handbook updates in the PR body.
+> **See [AGENTS.md](AGENTS.md) > Error Handbook Gate**
+>
+> 实施前必读 `docs/ERROR_PATTERN_INDEX.md`,匹配 1-3 个 EP 卡片,读取对应 ERR 详细条目;
+> 列出至少 3 条相关 ERR ID 并说明本 PR 如何避免每条;
+> 修复 bug 时归类到已知 ERR class。
 
 ### Error Recording (MANDATORY)
 
-**Rule**: Any code review (pr-review skill, self-review, or ad-hoc review) that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke `record-error` before closing.
-
-You MUST invoke the `record-error` skill immediately. This is not optional — even if the fix was trivial. The skill handles the full workflow: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
-
-**Do NOT skip this step** with excuses like "the fix was trivial" or "I'll do it later". Without recording, the same class of error will recur across sessions.
+> **See [AGENTS.md](AGENTS.md) > Error Recording (MANDATORY)**
+>
+> 任何代码评审发现真实问题(bug / 类型安全违规 / 架构违规 / 逻辑错误)必须立即触发 `record-error` skill。
+> 流程: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR。
 
 ## Critical Boundaries
 
@@ -149,33 +136,17 @@ These rules prevent architectural drift. Violating them will break the project.
 
 ## Runtime Contract Rules
 
-All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJson`, artifact metadata) must follow these 9 rules. Each rule maps to real error patterns in the Error Experience Handbook. Review these rules during implementation AND during code review.
-
-| # | Rule | Key constraint | ERR ref |
-|---|------|----------------|---------|
-| 1 | Treat parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata as `unknown` | Never use `any`; require runtime validation before use | ERR-001 |
-| 2 | Do not use `as` to bypass runtime validation | Use `typeof`, `Array.isArray()`, or type guards for runtime checks | ERR-001, ERR-005 |
-| 3 | Required fields must fail loud when missing or malformed | Use `if (!valid) { error }` pattern, not `if (valid) { skip }` | ERR-009, ERR-010 |
-| 4 | Validate array element types | Use `filter(isString)` or element-wise `typeof` on unknown arrays | ERR-005, ERR-007 |
-| 5 | Use `Object.hasOwn()`, not `in`, for untrusted object keys | `in` matches inherited properties (toString, constructor) | ERR-013 |
-| 6 | Lineage and evidence fields must come from the same source; add mismatch tests | sourceTaskId/sourceRunIds/sourcePainId must be internally consistent | ERR-004, ERR-008 |
-| 7 | Retry/repair loops must distinguish current, next, and recorded state | Get fresh errors each iteration; record with current-iteration data | ERR-015, ERR-018, ERR-019 |
-| 8 | Preview and telemetry paths must be bounded and use safe serialization | Use `safeStringifyPreview`; never raw `JSON.stringify` on unknown values | ERR-014, ERR-016, ERR-017 |
-| 9 | Graceful degradation must include a reason via structured error, notes, telemetry, or logs | Silent fallback = bug. Observability is mandatory. | ERR-002 |
-
-**Enforcement**: Code review must check every rule that applies to the changed code. If a rule doesn't apply, state why.
+> **See [AGENTS.md](AGENTS.md) > Runtime Contract Rules** (`rc-1` to `rc-9`)
+>
+> 处理不可信数据（parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata）的 9 条规则。
+> 规则带稳定 ID（`rc-1-treat-as-unknown` 到 `rc-9-no-silent-fallback`），映射到 Error Experience Handbook。
+> 代码评审必须检查每条适用规则；N/A 必须说明理由。
 
 ## CLI / Operator Command Gate
 
-Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI registration, remediation commands, queue/run commands, or operator workflows.
-
-1. **JSON mode is strict**: `--json` output must be exactly one parseable JSON object on stdout. No banners, headings, explanatory text, or mixed stdout logs.
-2. **Exit paths must stop execution**: after `process.exit(...)` inside an async handler, immediately `return` or throw. Tests that stub `process.exit` must prove no later DB/ledger/artifact side effects happen.
-3. **Negated flags need parser tests**: Commander `--no-*` flags must be registered as `--no-name` and read as `opts.name === false`. Add parser-level tests, not only handler tests.
-4. **Dry-run/confirm semantics are mandatory**: commands that can mutate state must default to dry-run unless the established command contract says otherwise. `--dry-run` and `--confirm` must be mutually exclusive when both exist.
-5. **Failure paths must not mutate state**: failed diagnoses, failed validation, unsupported runners, missing input, and non-succeeded upstream stages must not intake, enqueue, write artifacts, update ledger, or create successors.
-6. **Operator output needs next action**: every degraded/refused/failed CLI result must include a structured reason and next action in JSON output.
-7. **Test the real command wiring**: when behavior depends on Commander options, add a command-registration or parser test that exercises the actual flags.
+> **See [AGENTS.md](AGENTS.md) > CLI / Operator Command Gate** (`cli-1` to `cli-7`)
+>
+> 适用于 `packages/pd-cli/src/commands/**` 的 7 条规则，带稳定 ID（`cli-1-strict-json` 到 `cli-7-test-wiring`）。
 
 ## Key Conventions
 
@@ -202,47 +173,14 @@ Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI 
 
 ## PR Pre-Review Gate
 
-Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
-
-**Review convergence and throughput**
-- Perform one adversarial self-review before first handoff. Check every applicable Runtime Contract rule and CLI / Operator rule against the entire diff, then fix all in-scope P0/P1/P2 findings in one batch.
-- The first external review is the single broad review pass. When responding to review fixes, verify the named blockers and modified regression surface only; do not expand into unrelated improvements.
-- Block merge only for P0/P1 issues or P2 issues that violate the current Linear issue acceptance criteria. Capture other observations as follow-up issues without modifying this PR.
-- When multiple findings share a root cause, update the Error Handbook once after the fix cycle rather than generating one lesson per comment.
-- During review iterations run targeted tests for changed behavior; before handoff run the required merge gate once. Avoid expanding the test matrix for unrelated observations.
-
-**Self-review/fix loop**
-- A PR is not ready just because code was pushed. It is ready only after the fetch → fix → verify → re-fetch loop has no valid unresolved P0/P1/P2 findings and required checks are green.
-- After every push that addresses review feedback, fetch PR reviews/comments/checks again. Do not ask the user to relay comments unless GitHub API access fails after at least 2 retries.
-- Classify each review comment as: fixed, deferred with reason, duplicate, or misunderstanding with evidence. Put this classification in the PR comment or completion report.
-- If a real bug was found, run the Error Recording workflow before final handoff.
-
-**Fetch and resolve PR comments**
-- `gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup`
-- `gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`
-- `gh api repos/:owner/:repo/issues/<PR>/comments --paginate`
-- Fetch ALL comments (not just the first page). Retry at least 2 times on API failure.
-- Fix every valid P0/P1/P2 finding. For each handled comment, note the fix.
-- If a comment cannot be fixed, explain why in the PR body.
-
-**Check diff scope**
-- `gh pr diff <PR> --name-only` (or `git diff origin/main --name-only`)
-- Confirm no unrelated files were modified.
-- Confirm no stale-main rollback of already-merged code (see ERR-012).
-
-**Run tests**
-- `cd packages/principles-core && npm run test`
-- `cd packages/openclaw-plugin && npm run test`
-- `npm run lint` (if available)
-- `npm run verify:merge` (if available)
-
-**Final summary**
-Include in the PR body or completion report:
-- Relevant ERR checklist (which ERR entries were considered and how avoided)
-- PR comments handled (total fetched, valid fixed, deferred, duplicates/misunderstandings)
-- Tests run (which commands, what results)
-- For CLI/operator changes: JSON-mode check, exit-path check, flag-wiring tests, and mutation/no-mutation evidence
-- Remaining risk (known issues, skipped coverage, trade-offs)
+> **See [AGENTS.md](AGENTS.md) > PR Pre-Review Gate**
+>
+> 6 个子段(Review convergence / Self-review loop / Fetch comments / Diff scope / Run tests / Final summary)的完整规则在 AGENTS.md。
+> 关键约束:
+> - 一次对抗式自检 → 一次广审 → 一次修复收敛(避免反复扩审)
+> - 阻塞合并仅限 P0/P1 或违反 issue 验收标准的 P2
+> - 多个 finding 共享根因时,Error Handbook 只更新一次
+> - 评审输出使用中文
 
 ## Key Files
 
