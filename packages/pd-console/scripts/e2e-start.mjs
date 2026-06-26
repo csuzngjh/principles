@@ -16,12 +16,14 @@ if (!existsSync(webRoot)) {
 }
 
 // 启动 tsx 服务器（--no-auth 免认证，强制 loopback 绑定）
+// shell:true 在 CI 上会导致 SIGTERM 只杀死 shell 而 tsx 成为孤儿进程；
+// Windows 上 npx.cmd 仍需 shell 解析，故按平台条件开启。
 const child = spawn(
   'npx',
   ['tsx', 'src/server/index.ts', '--no-auth', '--port', '3100', '--workspace', workspaceDir],
   {
     stdio: 'inherit',
-    shell: true,
+    shell: process.platform === 'win32',
   },
 );
 
@@ -34,16 +36,13 @@ function cleanupWorkspace() {
   }
 }
 
-// 信号转发与清理（确保 Playwright 停止 webServer 时子进程正确退出 + 临时目录清理）
+// 信号转发：只把信号传给子进程，不立即退出父进程。
+// 由 child.on('exit') 驱动父进程退出，避免子进程被孤儿化后端口残留。
 process.on('SIGTERM', () => {
   child.kill('SIGTERM');
-  cleanupWorkspace();
-  process.exit(0);
 });
 process.on('SIGINT', () => {
   child.kill('SIGINT');
-  cleanupWorkspace();
-  process.exit(0);
 });
 process.on('exit', () => {
   cleanupWorkspace();
