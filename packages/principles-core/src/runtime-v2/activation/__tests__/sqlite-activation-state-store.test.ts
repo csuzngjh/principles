@@ -176,7 +176,11 @@ describe('SqliteActivationStateStore', () => {
   describe('recordActivation', () => {
     it('inserts activation record with INSERT OR REPLACE', async () => {
       const mockRun = vi.fn();
-      mockDb.prepare.mockReturnValue({ run: mockRun });
+      const mockGet = vi.fn().mockReturnValue({ exists: 1 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT 1 FROM pi_artifacts')) return { get: mockGet };
+        return { run: mockRun };
+      });
 
       const record: ActivationStatusRecord = {
         activationId: 'act_001',
@@ -207,7 +211,11 @@ describe('SqliteActivationStateStore', () => {
 
     it('handles different channel types correctly', async () => {
       const mockRun = vi.fn();
-      mockDb.prepare.mockReturnValue({ run: mockRun });
+      const mockGet = vi.fn().mockReturnValue({ exists: 1 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT 1 FROM pi_artifacts')) return { get: mockGet };
+        return { run: mockRun };
+      });
 
       const record: ActivationStatusRecord = {
         activationId: 'act_003',

@@ -118,7 +118,21 @@ let store!: SqliteApprovalQueueStore;
    
   let tmpDir!: string;  
 
-  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'approval-test-')); connection = new SqliteConnection(path.join(tmpDir, 'test.db')); store = new SqliteApprovalQueueStore(connection); });
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'approval-test-'));
+    connection = new SqliteConnection(path.join(tmpDir, 'test.db'));
+    store = new SqliteApprovalQueueStore(connection);
+    // P1-3: Seed parent records for FK validation (task + pi_artifacts art-0..art-6)
+    // Each artifact uses a distinct source_task_id to satisfy the unique index
+    // idx_pi_artifacts_idempotency (source_task_id, artifact_kind).
+    const db = connection.getDb();
+    for (let i = 0; i <= 6; i++) {
+      const taskId = 'task-' + i;
+      const artId = 'art-' + i;
+      db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'diagnosis', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run(taskId);
+      db.prepare("INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?, 'principle', ?, '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run(artId, taskId);
+    }
+  });
   afterEach(() => { connection.close(); fs.rmSync(tmpDir, { recursive: true, force: true }); });
   describe('listAll', () => {
     it('returns all records regardless of status', async () => {

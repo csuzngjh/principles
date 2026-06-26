@@ -366,7 +366,25 @@ describe('Runtime V2 prompt activation injection', () => {
     const artifactId = 'art-v2-missing-005';
     const principleId = 'princ-v2-missing-005';
 
-    await insertPromptActivation({ artifactId, principleId });
+    // P1-3: Insert a dangling activation directly via DB, bypassing the store's
+    // FK check (recordActivation rejects non-existent pi_artifact). This test
+    // verifies the hook handles a legacy/dangling activation gracefully, so the
+    // activation must reference an artifact that does NOT exist in pi_artifacts.
+    const now = new Date().toISOString();
+    sqliteConn.getDb().prepare(`
+      INSERT OR REPLACE INTO activations
+        (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      `act_prompt_${principleId}`,
+      `${artifactId}::prompt`,
+      artifactId,
+      'prompt',
+      'prompt_activate',
+      `ledger://${principleId}`,
+      now,
+      null,
+    );
 
     const infoSpy = vi.fn();
     const ctx = {
