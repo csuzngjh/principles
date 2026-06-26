@@ -15,6 +15,7 @@ import {
   formatCorePrinciples,
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
+  extractPhrasesFromReason,
 } from '../../src/hooks/prompt-helpers.js';
 
 // ─── extractUserMessageFromPrompt ───────────────────────────────────────────
@@ -325,5 +326,93 @@ describe('assembleAppendSystemContext', () => {
     // The actual <project_context> section tag should not appear (only in footer docs)
     expect(result).not.toContain('<project_context>\n');
     expect(result).toContain('<core_principles>\nCP\n</core_principles>');
+  });
+});
+
+// ─── extractPhrasesFromReason ──────────────────────────────────────────────
+
+describe('extractPhrasesFromReason', () => {
+  it('extracts Chinese phrases from comma-separated reason', () => {
+    const reason = '用户表达了强烈的挫败感，反复尝试仍然失败，情绪低落';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result).toContain('用户表达了强烈的挫败感');
+    expect(result).toContain('反复尝试仍然失败');
+    expect(result).toContain('情绪低落');
+  });
+
+  it('extracts English phrases from comma-separated reason', () => {
+    const reason = 'user frustrated, repeated failures, giving up';
+    const result = extractPhrasesFromReason(reason, 'en');
+    expect(result).toHaveLength(3);
+    expect(result).toContain('user frustrated');
+    expect(result).toContain('repeated failures');
+    expect(result).toContain('giving up');
+  });
+
+  it('returns at most 3 phrases', () => {
+    const reason = 'A，B，C，D，E，F';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result.length).toBeLessThanOrEqual(3);
+  });
+
+  it('deduplicates repeated phrases', () => {
+    const reason = '挫败感，挫败感，用户不满';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result).toHaveLength(2);
+    expect(result).toContain('挫败感');
+    expect(result).toContain('用户不满');
+  });
+
+  it('filters out segments shorter than MIN_LENGTH (zh=2)', () => {
+    const reason = 'A，好，完成，任务执行失败';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    // 'A' (1 char) and '好' (1 char) filtered out
+    expect(result).not.toContain('A');
+    expect(result).not.toContain('好');
+    expect(result).toContain('完成');
+    expect(result).toContain('任务执行失败');
+  });
+
+  it('filters out segments shorter than MIN_LENGTH (en=3)', () => {
+    const reason = 'no, ok, yes, task failed completely';
+    const result = extractPhrasesFromReason(reason, 'en');
+    // 'no' (2 chars), 'ok' (2 chars), 'yes' (3 chars) - yes passes
+    expect(result).not.toContain('no');
+    expect(result).not.toContain('ok');
+  });
+
+  it('filters out segments longer than MAX_LENGTH (20)', () => {
+    const reason = 'this is a very long segment that exceeds the maximum allowed length';
+    const result = extractPhrasesFromReason(reason, 'en');
+    expect(result).toHaveLength(0);
+  });
+
+  it('handles empty reason string', () => {
+    const result = extractPhrasesFromReason('', 'zh');
+    expect(result).toEqual([]);
+  });
+
+  it('splits on multiple delimiter types (caps at MAX_PHRASES=3)', () => {
+    const reason = '挫败感。不满！困惑？疲劳；反复尝试\n最终放弃';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result.length).toBeLessThanOrEqual(3);
+    expect(result).toContain('挫败感');
+    expect(result).toContain('不满');
+    expect(result).toContain('困惑');
+  });
+
+  it('handles reason with only delimiters and no valid phrases', () => {
+    const reason = '，。！';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result).toEqual([]);
+  });
+
+  it('trims whitespace from segments', () => {
+    const reason = '  挫败感  ，  不满  ';
+    const result = extractPhrasesFromReason(reason, 'zh');
+    expect(result).toContain('挫败感');
+    expect(result).toContain('不满');
+    expect(result.every(p => p === p.trim())).toBe(true);
   });
 });

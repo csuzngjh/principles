@@ -48,6 +48,7 @@ import {
   formatCorePrinciples,
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
+  extractPhrasesFromReason,
 } from './prompt-helpers.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
@@ -1142,13 +1143,3 @@ function resolveEmpathyObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogg
   }
 }
 
-function extractPhrasesFromReason(reason: string, lang: 'zh' | 'en'): string[] {
-  const MAX_PHRASES = 3;
-  const MIN_LENGTH = lang === 'zh' ? 2 : 3;
-  const MAX_LENGTH = 20;
-  const segments = reason
-    .split(/[,，。.！!？?、\n；;]/)
-    .map(s => s.trim())
-    .filter(s => s.length >= MIN_LENGTH && s.length <= MAX_LENGTH);
-  return [...new Set(segments)].slice(0, MAX_PHRASES);
-}
