@@ -48,10 +48,10 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-06 Source of Truth and Generated Artifacts
 
-- **Use when**: editing bundled packages, generated copies, package manifests, installer payloads, lockfiles, or files under `packages/create-principles-disciple`.
+- **Use when**: editing bundled packages, generated copies, package manifests, installer payloads, lockfiles, files under `packages/create-principles-disciple`, creating GitHub Actions workflows, or writing test infrastructure scripts (e.g., Playwright webServer launchers).
 - **Failure mode**: fixes are applied to generated copies or source-tree tests pass while the published artifact is incomplete; or the wrong package manager's lockfile is updated so CI's install step fails.
-- **Must check**: edit the source of truth and rerun the generator; package runtime dependencies are declared in the package that imports them; the lockfile CI consumes is the one updated; smoke tests install from packed output.
-- **Representative ERRs**: ERR-040, ERR-041, ERR-050, ERR-068.
+- **Must check**: edit the source of truth and rerun the generator; package runtime dependencies are declared in the package that imports them; the lockfile CI consumes is the one updated; smoke tests install from packed output; **when creating new GitHub Actions workflows, grep existing workflows (e.g., ci.yml) for the `uses:` pinning convention and match it (commit SHA with `# vX` comment); when using `child_process.spawn()` in test scripts, avoid `shell: true` on Linux/CI (signals only kill the shell wrapper, orphaning the subprocess) and never call `process.exit()` in signal handlers before `child.on('exit')` fires**.
+- **Representative ERRs**: ERR-040, ERR-041, ERR-050, ERR-068, ERR-084.
 - **Automation target**: generated-artifact checks plus clean `npm pack` install smoke tests; CI lockfile-consistency gate.
 
 ### EP-07 Runtime State Source Alignment
