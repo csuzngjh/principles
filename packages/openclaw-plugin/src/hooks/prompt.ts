@@ -551,7 +551,9 @@ export async function handleBeforePromptBuild(
 
                   // ── Pipeline: feed back newly detected expressions into keyword store ──
                   if (result.reason) {
-                    const phrases = extractPhrasesFromReason(result.reason, wctx.config.get('language') as 'zh' | 'en' || 'zh');
+                    const rawLang = wctx.config.get('language');
+                    const lang: 'zh' | 'en' = rawLang === 'en' ? 'en' : 'zh';
+                    const phrases = extractPhrasesFromReason(result.reason, lang);
                     if (phrases.length > 0) {
                       const updates: Record<string, { action: 'add'; weight: number; falsePositiveRate: number; reasoning: string }> = {};
                       for (const phrase of phrases) {
