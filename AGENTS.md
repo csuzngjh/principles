@@ -17,12 +17,12 @@ If a Linear issue or earlier doc instructs you to implement **Attribution Pipeli
 
 ### MVP Three Questions (mandatory for every new issue)
 
-Before opening a new Linear issue or starting a non-MVP-listed PR, answer all four:
+Before opening a new Linear issue or starting a non-MVP-listed PR, answer all four (referenced by stable ID `mvp-q-*`):
 
-1. **What happens if we DON'T do this?** Will anyone bring it up again 30 days from now? If you cannot answer, the issue is rejected.
-2. **How is it observed?** After implementation, how does the user verify it works? UI? CLI command? Log? If there is no observable path, the issue is rejected.
-3. **How is it disabled?** If after deployment we discover it's wrong, what's the disable path? Feature flag? PR revert? **Anything that requires PR revert MUST ship with a feature flag from day one.**
-4. **What emotional value does it deliver?** Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md). Which negative emotion does this feature reduce (失控感 / 疲惫感 / 不信任感 / 信息过载)? What positive feeling does it create (安心感 / 掌控感 / 沉淀感 / 清醒感)? If the feature only proves "it works" but cannot explain how it improves the Owner's psychological state, the feature design is incomplete.
+1. **`mvp-q-1-what-if-skip`** — What happens if we DON'T do this? Will anyone bring it up again 30 days from now? If you cannot answer, the issue is rejected.
+2. **`mvp-q-2-how-observed`** — How is it observed? After implementation, how does the user verify it works? UI? CLI command? Log? If there is no observable path, the issue is rejected.
+3. **`mvp-q-3-how-disabled`** — How is it disabled? If after deployment we discover it's wrong, what's the disable path? Feature flag? PR revert? **Anything that requires PR revert MUST ship with a feature flag from day one.**
+4. **`mvp-q-4-emotional-value`** — What emotional value does it deliver? Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md). Which negative emotion does this feature reduce (失控感 / 疲惫感 / 不信任感 / 信息过载)? What positive feeling does it create (安心感 / 掌控感 / 沉淀感 / 清醒感)? If the feature only proves "it works" but cannot explain how it improves the Owner's psychological state, the feature design is incomplete.
 
 ### Emotional Value Alignment
 
@@ -59,15 +59,15 @@ Registration counts only when the production loader and a test exercise the flag
 
 ### Anti-pattern Triggers
 
-The following phrases in an issue or PR description are **automatic stop signals**. Verify with maintainer before proceeding:
+The following phrases in an issue or PR description are **automatic stop signals** (referenced by stable ID `antipattern-*`). Verify with maintainer before proceeding:
 
-- "为未来铺路" / "for future extensibility"
-- "为完整性" / "for completeness"
-- "AHE 论文又出了新进展" / "based on new research"
-- "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
-- "review 时觉得这块缺失" / "during review I noticed X is missing"
-- "为下个 Phase 准备" / "prep for next Phase"
-- "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, update the whitelist in `architecture-regression.test.ts` and the exemption list in `eslint.config.js` (PRI-450).
+- `antipattern-future-extensibility` — "为未来铺路" / "for future extensibility"
+- `antipattern-completeness` — "为完整性" / "for completeness"
+- `antipattern-new-research` — "AHE 论文又出了新进展" / "based on new research"
+- `antipattern-adr-accepted` — "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
+- `antipattern-review-missing` — "review 时觉得这块缺失" / "during review I noticed X is missing"
+- `antipattern-prep-next-phase` — "为下个 Phase 准备" / "prep for next Phase"
+- `antipattern-core-io` — "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, update the whitelist in `architecture-regression.test.ts` and the exemption list in `eslint.config.js` (PRI-450).
 
 These are **maintainer-driven completeness anxiety**, not external user signal. PD does not act on them during MVP stage.
 
@@ -136,33 +136,33 @@ After code review (if a real bug is found):
 
 ## Runtime Contract Rules
 
-All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJson`, artifact metadata) must follow these 9 rules. Each rule maps to real error patterns in the Error Experience Handbook.
+All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJson`, artifact metadata) must follow these 9 rules (referenced by stable ID `rc-*`). Each rule maps to real error patterns in the Error Experience Handbook.
 
-| # | Rule | Key constraint | ERR ref |
-|---|------|----------------|---------|
-| 1 | Treat parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata as `unknown` | Never use `any`; require runtime validation before use | ERR-001 |
-| 2 | Do not use `as` to bypass runtime validation | Use `typeof`, `Array.isArray()`, or type guards for runtime checks | ERR-001, ERR-005 |
-| 3 | Required fields must fail loud when missing or malformed | Use `if (!valid) { error }` pattern, not `if (valid) { skip }` | ERR-009, ERR-010 |
-| 4 | Validate array element types | Use `filter(isString)` or element-wise `typeof` on unknown arrays | ERR-005, ERR-007 |
-| 5 | Use `Object.hasOwn()`, not `in`, for untrusted object keys | `in` matches inherited properties (toString, constructor) | ERR-013 |
-| 6 | Lineage and evidence fields must come from the same source; add mismatch tests | sourceTaskId/sourceRunIds/sourcePainId must be internally consistent | ERR-004, ERR-008 |
-| 7 | Retry/repair loops must distinguish current, next, and recorded state | Get fresh errors each iteration; record with current-iteration data | ERR-015, ERR-018, ERR-019 |
-| 8 | Preview and telemetry paths must be bounded and use safe serialization | Use `safeStringifyPreview`; never raw `JSON.stringify` on unknown values | ERR-014, ERR-016, ERR-017 |
-| 9 | Graceful degradation must include a reason via structured error, notes, telemetry, or logs | Silent fallback = bug. Observability is mandatory. | ERR-002 |
+| # | ID | Rule | Key constraint | ERR ref |
+|---|-----|------|----------------|---------|
+| 1 | `rc-1-treat-as-unknown` | Treat parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata as `unknown` | Never use `any`; require runtime validation before use | ERR-001 |
+| 2 | `rc-2-no-as-bypass` | Do not use `as` to bypass runtime validation | Use `typeof`, `Array.isArray()`, or type guards for runtime checks | ERR-001, ERR-005 |
+| 3 | `rc-3-fail-loud-missing` | Required fields must fail loud when missing or malformed | Use `if (!valid) { error }` pattern, not `if (valid) { skip }` | ERR-009, ERR-010 |
+| 4 | `rc-4-validate-array-elements` | Validate array element types | Use `filter(isString)` or element-wise `typeof` on unknown arrays | ERR-005, ERR-007 |
+| 5 | `rc-5-object-hasown-not-in` | Use `Object.hasOwn()`, not `in`, for untrusted object keys | `in` matches inherited properties (toString, constructor) | ERR-013 |
+| 6 | `rc-6-lineage-consistency` | Lineage and evidence fields must come from the same source; add mismatch tests | sourceTaskId/sourceRunIds/sourcePainId must be internally consistent | ERR-004, ERR-008 |
+| 7 | `rc-7-loop-state-freshness` | Retry/repair loops must distinguish current, next, and recorded state | Get fresh errors each iteration; record with current-iteration data | ERR-015, ERR-018, ERR-019 |
+| 8 | `rc-8-safe-serialization` | Preview and telemetry paths must be bounded and use safe serialization | Use `safeStringifyPreview`; never raw `JSON.stringify` on unknown values | ERR-014, ERR-016, ERR-017 |
+| 9 | `rc-9-no-silent-fallback` | Graceful degradation must include a reason via structured error, notes, telemetry, or logs | Silent fallback = bug. Observability is mandatory. | ERR-002 |
 
 **Enforcement**: Code review must check every rule that applies to the changed code. If a rule is N/A, state why.
 
 ## CLI / Operator Command Gate
 
-Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI registration, remediation commands, queue/run commands, or operator workflows.
+Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI registration, remediation commands, queue/run commands, or operator workflows (referenced by stable ID `cli-*`).
 
-1. **JSON mode is strict**: `--json` output must be exactly one parseable JSON object on stdout. No banners, headings, explanatory text, or mixed stdout logs.
-2. **Exit paths must stop execution**: after `process.exit(...)` inside an async handler, immediately `return` or throw. Tests that stub `process.exit` must prove no later DB/ledger/artifact side effects happen.
-3. **Negated flags need parser tests**: Commander `--no-*` flags must be registered as `--no-name` and read as `opts.name === false`. Add parser-level tests, not only handler tests.
-4. **Dry-run/confirm semantics are mandatory**: commands that can mutate state must default to dry-run unless the established command contract says otherwise. `--dry-run` and `--confirm` must be mutually exclusive when both exist.
-5. **Failure paths must not mutate state**: failed diagnoses, failed validation, unsupported runners, missing input, and non-succeeded upstream stages must not intake, enqueue, write artifacts, update ledger, or create successors.
-6. **Operator output needs next action**: every degraded/refused/failed CLI result must include a structured reason and next action in JSON output.
-7. **Test the real command wiring**: when behavior depends on Commander options, add a command-registration or parser test that exercises the actual flags.
+1. **`cli-1-strict-json`** — JSON mode is strict: `--json` output must be exactly one parseable JSON object on stdout. No banners, headings, explanatory text, or mixed stdout logs.
+2. **`cli-2-exit-stops`** — Exit paths must stop execution: after `process.exit(...)` inside an async handler, immediately `return` or throw. Tests that stub `process.exit` must prove no later DB/ledger/artifact side effects happen.
+3. **`cli-3-negated-flags-parser-tests`** — Negated flags need parser tests: Commander `--no-*` flags must be registered as `--no-name` and read as `opts.name === false`. Add parser-level tests, not only handler tests.
+4. **`cli-4-dry-run-confirm-mutex`** — Dry-run/confirm semantics are mandatory: commands that can mutate state must default to dry-run unless the established command contract says otherwise. `--dry-run` and `--confirm` must be mutually exclusive when both exist.
+5. **`cli-5-failure-no-mutation`** — Failure paths must not mutate state: failed diagnoses, failed validation, unsupported runners, missing input, and non-succeeded upstream stages must not intake, enqueue, write artifacts, update ledger, or create successors.
+6. **`cli-6-output-next-action`** — Operator output needs next action: every degraded/refused/failed CLI result must include a structured reason and next action in JSON output.
+7. **`cli-7-test-wiring`** — Test the real command wiring: when behavior depends on Commander options, add a command-registration or parser test that exercises the actual flags.
 
 ## Build & Test
 
