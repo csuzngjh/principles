@@ -115,7 +115,7 @@ export function applyKeywordUpdates(
   for (const [term, update] of Object.entries(updates)) {
     switch (update.action) {
       case 'add':
-        if (!store.terms[term]) {
+        if (!Object.hasOwn(store.terms, term)) {
           store.terms[term] = {
             weight: update.weight ?? 0.5,
             source: 'llm_discovered',
@@ -129,22 +129,24 @@ export function applyKeywordUpdates(
         break;
 
       case 'update':
-        if (store.terms[term]) {
+        if (Object.hasOwn(store.terms, term)) {
+          const entry = store.terms[term];
+          if (!entry) break; // unreachable at runtime, satisfies TS narrowing
           if (update.weight !== undefined) {
-            store.terms[term].weight = update.weight;
+            entry.weight = update.weight;
           }
           if (update.falsePositiveRate !== undefined) {
-            store.terms[term].falsePositiveRate = update.falsePositiveRate;
+            entry.falsePositiveRate = update.falsePositiveRate;
           }
           if (update.examples) {
-            store.terms[term].examples = update.examples;
+            entry.examples = update.examples;
           }
           updated++;
         }
         break;
 
       case 'remove':
-        if (store.terms[term]) {
+        if (Object.hasOwn(store.terms, term)) {
           delete store.terms[term];
           removed++;
         }
