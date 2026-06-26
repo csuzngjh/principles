@@ -1,13 +1,23 @@
 # PD 数据架构（Data Architecture）
 
 > **状态**: Active（2026-05-15 修订版）
-> **最后更新**: 2026-05-23（与 ADR-0005 / ADR-0006 / ADR-0007 / ADR-0012 对齐）
+> **最后更新**: 2026-06-26（P1-5 实现状态标注，与 ADR-0014 MVP-First 对齐）
+> **前次更新**: 2026-05-23（与 ADR-0005 / ADR-0006 / ADR-0007 / ADR-0012 对齐）
 
 > **ADR-0012 修订**: Nocturnal 数据仅在证明存在历史读取/导出需求时保留 read-only adapter；不得为了兼容旧数据保留 Nocturnal 业务执行或 OpenClaw idle/night 调度。新的运行配置和 workspace resolution 应属于 PD-owned config/SDK boundary。
 > **取代**: 2026-05-09 版（已归档）
 > **关联**: `PD_ARCHITECTURE_OVERVIEW.md`, `DOMAIN_MODEL.md`, `VERSIONING_AND_COMPATIBILITY.md`
 
 本文档定义 PD 系统的**数据存储架构、读写分离策略、并发协调、迁移路径**。
+
+> **实现状态标注**（P1-5，PRI-473）：
+> - ✅ **已实现**：当前 MVP 范围内已落地（ADR-0014）
+> - ⏸️ **未实现 (post-MVP)**：文档记录但代码未落地，参见 [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md)
+> - ❌ **已废弃**：已从代码中删除或标记为 legacy_retire
+>
+> 权威源：`packages/principles-core/src/runtime-v2/store/sqlite-connection.ts`（state.db）和
+> `packages/openclaw-plugin/src/core/schema/schema-definitions.ts`（trajectory.db / central.db）。
+> 本文档如与代码冲突，以代码为准。
 
 ---
 
@@ -100,74 +110,100 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 
 ### 3.1 主要表清单
 
+> 实现状态：✅ = 已实现（MVP 范围内）｜⏸️ = 未实现（post-MVP）｜❌ = 已废弃
+
 ```
 state.db
 ├── 任务调度
-│   ├── tasks                          PITaskRecord 主表（含 mission_id / priority / depends_on）
-│   ├── runs                           RunRecord 主表
-│   └── leases (隐式：在 tasks 中通过 leaseOwner / leaseExpiresAt 字段)
+│   ├── tasks                          ✅ PITaskRecord 主表
+│   ├── runs                           ✅ RunRecord 主表
+│   └── leases (隐式：在 tasks 中通过 leaseOwner / leaseExpiresAt 字段)  ✅
 ├── Diagnostician 子系统
-│   ├── candidates                     PrincipleCandidate
-│   ├── artifacts                      Diagnostician artifact
-│   └── commits                        DiagnosticianCommit
+│   ├── candidates                     ✅ PrincipleCandidate（principle_candidates 表）
+│   ├── artifacts                      ✅ Diagnostician artifact
+│   └── commits                        ✅ DiagnosticianCommit
 ├── Internalization 子系统
-│   └── pi_artifacts                   PIArtifact（含 shadow_eval_results）
-├── Activation 子系统（新增 — ADR-0006）
-│   ├── approvals                      ApprovalRecord
-│   └── rejection_feedbacks            RejectionFeedback
-├── Goals 子系统（新增 — ADR-0010）
-│   ├── objectives                     Objective（OKR 季度目标）
-│   ├── key_results                    KeyResult（可量化关键结果）
-│   ├── missions                       Mission（长程任务）
-│   └── agent_session_checkpoints      LRAS 检查点（ADR-0009）
+│   └── pi_artifacts                   ✅ PIArtifact
+├── Activation 子系统（ADR-0006）
+│   ├── approvals                      ✅ ApprovalRecord
+│   ├── activations                    ✅ ActivationStateRecord（activation 状态追踪）
+│   └── rejection_feedbacks            ⏸️ post-MVP（ADR-0006，未实现）
+├── Goals 子系统（ADR-0010）
+│   ├── objectives                     ⏸️ post-MVP（ADR-0010，未实现）
+│   ├── key_results                    ⏸️ post-MVP（ADR-0010，未实现）
+│   ├── missions                       ⏸️ post-MVP（ADR-0010，未实现）
+│   └── agent_session_checkpoints      ⏸️ post-MVP（ADR-0009，未实现）
 ├── 历史与查询
-│   ├── history (各子表)
-│   └── trajectory (各子表)
+│   ├── history (各子表)               ✅ 在 trajectory.db 中
+│   └── trajectory (各子表)            ✅ 在 trajectory.db 中
 ├── 可观测性
-│   ├── events                         TelemetryEvent
-│   ├── correction_audit_events        CorrectionProposal 审计 (ADR-0004)
-│   └── (可选) metrics_*               指标聚合
-└── 元数据
-    └── schema_migrations               迁移版本
+│   ├── events                         ✅ TelemetryEvent（trajectory.db）
+│   ├── correction_audit_events        ⏸️ post-MVP（ADR-0004，未实现）
+│   └── (可选) metrics_*               ⏸️ post-MVP
+├── 元数据
+│   ├── schema_version                 ✅ P2-10：state.db 用精简版（core 实现）
+│   └── schema_migrations              ❌ 命名已校正为 schema_version
+└── 已废弃
+    └── confirm_first_state            ❌ 已 DROP（PRI-473 / P3-12，SqliteConfirmFirstStateStore 已删除）
+
+trajectory.db（由 plugin MigrationRunner 管理）
+├── events                             ✅ TelemetryEvent
+├── pain_signals                       ✅ PainSignal
+├── pain_evidence                      ✅ PainEvidence
+├── thinking_model_events              ✅ ThinkingModelEvent
+└── schema_version                     ✅ 完整版（plugin MigrationRunner 管理）
 ```
 
 ### 3.2 关键表 Schema（新增表）
 
 #### 3.2.1 approvals（ADR-0006）
 
+> **权威源**：`packages/principles-core/src/runtime-v2/store/sqlite-connection.ts`。本文档如与之冲突以代码为准。
+
 ```sql
 CREATE TABLE approvals (
   approval_id TEXT PRIMARY KEY,
   artifact_id TEXT NOT NULL,
-  channel TEXT NOT NULL,                      -- prompt / skill / code_tool_hook / model_training / defer_archive
+  channel TEXT NOT NULL,                      -- prompt / skill / code_tool_hook / defer_archive
   risk_level TEXT NOT NULL,                   -- medium / high / critical
-  status TEXT NOT NULL,                       -- pending / approved / rejected / cancelled（当前生产状态）；awaiting_second_confirmation / expired 为 ADR-0006 目标状态，尚未落地
+  status TEXT NOT NULL DEFAULT 'pending',     -- pending / approved / rejected
+  confidence REAL,
   requested_at TEXT NOT NULL,
-  requested_by_kind TEXT NOT NULL,            -- system / agent / human
-  requested_by_id TEXT,                       -- agentId / userId
   decided_at TEXT,
   decided_by TEXT,
-  reason TEXT,
-  requires_second_confirmation INTEGER DEFAULT 0,
-  second_confirmed_at TEXT,
-  second_confirmed_by TEXT,
-  cooldown_expires_at TEXT,                   -- ISO 8601, model_training 用
-  metadata_json TEXT NOT NULL,
-  FOREIGN KEY (artifact_id) REFERENCES pi_artifacts(artifact_id)
+  decision_note TEXT,
+  rejection_reason TEXT,
+  -- context columns (idempotent migration, added on schema upgrade)
+  summary TEXT,
+  trigger_reason TEXT,
+  confidence_explanation TEXT,
+  effect_description TEXT,
+  rejection_effect TEXT,
+  edited_at TEXT,
+  edited_by TEXT,
+  edit_reason TEXT,
+  previous_artifact_id TEXT
 );
 
-CREATE INDEX idx_approvals_status ON approvals(status, channel);
-CREATE INDEX idx_approvals_artifact ON approvals(artifact_id);
-CREATE INDEX idx_approvals_requested_at ON approvals(requested_at);
+CREATE INDEX idx_approvals_status ON approvals(status);
+CREATE INDEX idx_approvals_channel ON approvals(channel);
 ```
 
 **约束**：
 - 同一个 `artifact_id` 在 `pending` 状态下只能有一条记录（应用层强制）
 - `decided_at` 必须晚于 `requested_at`
-- `second_confirmed_by != decided_by`（应用层强制 APR-1）
-- `model_training` 通道时 `requires_second_confirmation = 1` 强制为 1（应用层）
+- `edit` 操作原子更新 `previous_artifact_id = artifact_id, artifact_id = ?`（防 ERR-004/ERR-008 lineage drift）
 
-#### 3.2.2 rejection_feedbacks（ADR-0006）
+**未落地的 ADR-0006 目标字段**（post-MVP）：
+- `requested_by_kind` / `requested_by_id`
+- `requires_second_confirmation` / `second_confirmed_at` / `second_confirmed_by`
+- `cooldown_expires_at`
+- `metadata_json`
+- `FOREIGN KEY (artifact_id) REFERENCES pi_artifacts(artifact_id)` — 当前为应用层校验（见 P1-3 修复，PRI-473）
+
+#### 3.2.2 rejection_feedbacks（ADR-0006） ⏸️ post-MVP
+
+> **实现状态**: ⏸️ 未实现（post-MVP）。表 DDL 文档记录但代码未落地。参见 [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md)。
 
 ```sql
 CREATE TABLE rejection_feedbacks (
@@ -191,7 +227,9 @@ CREATE INDEX idx_rejection_feedbacks_action ON rejection_feedbacks(feedback_acti
 - **Append-only**：不允许 UPDATE / DELETE
 - 用于触发 retry 任务（feedback_action = retry_with_correction）
 
-#### 3.2.3 correction_audit_events（ADR-0004）
+#### 3.2.3 correction_audit_events（ADR-0004） ⏸️ post-MVP
+
+> **实现状态**: ⏸️ 未实现（post-MVP）。表 DDL 文档记录但代码未落地。参见 [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md)。
 
 ```sql
 CREATE TABLE correction_audit_events (
@@ -218,7 +256,9 @@ CREATE INDEX idx_correction_audit_timestamp ON correction_audit_events(timestamp
 - 用于排查误杀
 - 永久保留（合规需要）
 
-#### 3.2.4 Goals 子系统表（ADR-0010）
+#### 3.2.4 Goals 子系统表（ADR-0010） ⏸️ post-MVP
+
+> **实现状态**: ⏸️ 未实现（post-MVP）。objectives / key_results / missions / agent_session_checkpoints 表 DDL 文档记录但代码未落地。参见 [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md)。
 
 ```sql
 -- Objective（OKR 季度目标）
@@ -270,7 +310,9 @@ CREATE INDEX idx_missions_objective ON missions(objective_id);
 -- ALTER TABLE tasks ADD COLUMN depends_on TEXT;  -- JSON array of taskId
 ```
 
-#### 3.2.5 agent_session_checkpoints（ADR-0009）
+#### 3.2.5 agent_session_checkpoints（ADR-0009） ⏸️ post-MVP
+
+> **实现状态**: ⏸️ 未实现（post-MVP）。表 DDL 文档记录但代码未落地。参见 [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md)。
 
 ```sql
 CREATE TABLE agent_session_checkpoints (
@@ -297,6 +339,17 @@ CREATE INDEX idx_checkpoints_task ON agent_session_checkpoints(task_id);
 ### 3.3 已有表（无变更）
 
 详见 `@principles/core/runtime-v2/store/` 下的各 `sqlite-*.ts`。本文档不重复 schema 定义，仅总览。
+
+**state.db 已实现表**（✅ MVP 范围内）：
+- `tasks` / `runs` / `artifacts` / `commits` / `principle_candidates`（Diagnostician 子系统）
+- `pi_artifacts`（Internalization 子系统）
+- `approvals` / `activations`（Activation 子系统，ADR-0006）
+- `schema_version`（P2-10，精简版，core 实现）
+- ❌ `confirm_first_state`：已 DROP（PRI-473 / P3-12）
+
+**trajectory.db 已实现表**（✅ 由 plugin schema-definitions.ts 管理）：
+- `events` / `pain_signals` / `pain_evidence` / `thinking_model_events`
+- `schema_version`（完整版，plugin MigrationRunner 管理）
 
 ---
 
@@ -672,16 +725,20 @@ async approveAndActivate(approvalId): Promise<void> {
 
 ### 8.1 SQLite Migration（forward-only）
 
+> **实现状态**：state.db 当前用 `PRAGMA table_info` 做内联迁移（`sqlite-connection.ts` 的 `initSchema()` / `migrateSchema()`），P2-10 增加精简版 `schema_version` 表作为版本追踪基础设施。trajectory.db 由 plugin `MigrationRunner` 管理，有完整版本化迁移。下方列出的版本化 SQL 文件均为 post-MVP 计划。
+
 ```
-@principles/core/runtime-v2/store/migrations/
+@principles/core/runtime-v2/store/migrations/   ⏸️ post-MVP
 ├── 001-initial.sql
 ├── 002-add-pi-artifacts.sql
-├── 003-add-approvals.sql              ★ 待建（ADR-0006）
-├── 004-add-rejection-feedbacks.sql    ★ 待建（ADR-0006）
-└── 005-add-correction-audit-events.sql ★ 待建（ADR-0004）
+├── 003-add-approvals.sql              ⏸️ post-MVP（ADR-0006，approvals 已用内联迁移实现）
+├── 004-add-rejection-feedbacks.sql    ⏸️ post-MVP（ADR-0006，未实现）
+└── 005-add-correction-audit-events.sql ⏸️ post-MVP（ADR-0004，未实现）
 ```
 
-启动时由 `migration-runner.ts` 自动应用。
+- state.db 启动时由 `sqlite-connection.ts` 的 `initSchema()` + `migrateSchema()` 自动应用（PRAGMA table_info 检测 + ALTER TABLE）。
+- trajectory.db 启动时由 plugin `migration-runner.ts` 自动应用（基于 `schema_version` 表的版本化迁移）。
+- post-MVP 计划：将 state.db 迁移也改为版本化 SQL 文件，由 core 层精简版 `schema_version` 表追踪。
 
 ### 8.2 Ledger Migration
 

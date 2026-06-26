@@ -67,6 +67,14 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
   async recordActivation(record: ActivationStatusRecord): Promise<void> {
     const db = this.connection.getDb();
+    // P1-3: Application-layer FK check (DB-layer FK deferred to post-MVP table rebuild).
+    // Fail loud if artifact_id references non-existent pi_artifact (ERR-009/ERR-010/ERR-002).
+    const artifactExists = db.prepare('SELECT 1 FROM pi_artifacts WHERE artifact_id = ?').get(record.artifactId);
+    if (!artifactExists) {
+      throw new Error(
+        `activations.artifact_id references non-existent pi_artifact: ${record.artifactId}`,
+      );
+    }
     db.prepare(`
       INSERT OR REPLACE INTO activations
         (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
