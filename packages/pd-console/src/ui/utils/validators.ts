@@ -1156,6 +1156,106 @@ export interface EvidenceChainRecordData {
   /** PRI-380: internalization task linkage */
   internalizationTaskId?: string;
   dreamerTaskStatus?: string;
+  /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
+  intentTension?: IntentTensionData;
+}
+
+// ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────
+//
+// Frontend mirror of the core IntentTension type. `confidence` is forbidden
+// (SPEC §16.3) — validateIntentTension rejects any object carrying it.
+// This validator is the Console's trust boundary: untrusted JSON from the API
+// is narrowed here before any UI code touches it (ERR-001).
+
+const VALID_INTENT_TENSION_SOURCES = ['none', 'action_drift', 'intent_suspect', 'healthy_tension'] as const;
+const VALID_EVIDENCE_STRENGTHS = ['weak', 'moderate', 'strong'] as const;
+const VALID_INTENT_RELATED_FIELDS = [
+  'why',
+  'desired_outcome',
+  'non_negotiables',
+  'stop_escalation',
+  'current_strategic_focus',
+] as const;
+const VALID_SUGGESTED_OWNER_ACTIONS = [
+  'confirm_drift',
+  'revise_intent',
+  'observe',
+  'dismiss',
+  'promote_to_principle',
+  'promote_to_rulehost',
+] as const;
+
+export interface IntentTensionData {
+  source: string;
+  evidenceStrength: string;
+  relatedIntentFields: string[];
+  evidence: string[];
+  explanation: string;
+  suggestedOwnerAction: string;
+  intentDocHash?: string;
+}
+
+/**
+ * Validate an untrusted `intentTension` object from the EvidenceChain API
+ * response. Returns `null` when malformed; the caller (validateEvidenceChainRecord)
+ * treats a `null` intentTension as "not present" so the record is still usable.
+ *
+ * SPEC §16.3: `confidence` is forbidden — explicitly rejected here.
+ * SPEC §16.4: evidence is capped at 3 items; we accept up to 3 and reject
+ * arrays with non-string elements (ERR-005/007).
+ */
+export function validateIntentTension(v: unknown): IntentTensionData | null {
+  if (!isObject(v)) return null;
+  // SPEC §16.3: confidence is forbidden on intentTension.
+  if (Object.hasOwn(v, 'confidence')) return null;
+
+  // Required fields (ERR-009: fail loud when missing or wrong type)
+  if (!Object.hasOwn(v, 'source') || !isString(v.source)) return null;
+  if (!(VALID_INTENT_TENSION_SOURCES as readonly string[]).includes(v.source)) return null;
+
+  if (!Object.hasOwn(v, 'evidenceStrength') || !isString(v.evidenceStrength)) return null;
+  if (!(VALID_EVIDENCE_STRENGTHS as readonly string[]).includes(v.evidenceStrength)) return null;
+
+  if (!Object.hasOwn(v, 'relatedIntentFields') || !Array.isArray(v.relatedIntentFields)) return null;
+  const relatedIntentFields: string[] = [];
+  for (const f of v.relatedIntentFields) {
+    if (typeof f !== 'string') return null;
+    if (!(VALID_INTENT_RELATED_FIELDS as readonly string[]).includes(f)) return null;
+    relatedIntentFields.push(f);
+  }
+
+  if (!Object.hasOwn(v, 'evidence') || !Array.isArray(v.evidence)) return null;
+  const evidence: string[] = [];
+  for (const e of v.evidence) {
+    if (typeof e !== 'string') return null;
+    evidence.push(e);
+  }
+  // SPEC §16.4: cap at 3. Server-side already truncates, but the frontend
+  // must not trust that — enforce the cap here too (defense in depth).
+  const truncatedEvidence = evidence.slice(0, 3);
+
+  if (!Object.hasOwn(v, 'explanation') || !isString(v.explanation)) return null;
+  if (v.explanation.length === 0) return null;
+
+  if (!Object.hasOwn(v, 'suggestedOwnerAction') || !isString(v.suggestedOwnerAction)) return null;
+  if (!(VALID_SUGGESTED_OWNER_ACTIONS as readonly string[]).includes(v.suggestedOwnerAction)) return null;
+
+  const result: IntentTensionData = {
+    source: v.source,
+    evidenceStrength: v.evidenceStrength,
+    relatedIntentFields,
+    evidence: truncatedEvidence,
+    explanation: v.explanation,
+    suggestedOwnerAction: v.suggestedOwnerAction,
+  };
+
+  // Optional: intentDocHash
+  if (Object.hasOwn(v, 'intentDocHash')) {
+    if (!isString(v.intentDocHash)) return null;
+    result.intentDocHash = v.intentDocHash;
+  }
+
+  return result;
 }
 
 function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null {
@@ -1244,6 +1344,21 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
   if (Object.hasOwn(v, 'dreamerTaskStatus')) {
     if (!isString(v.dreamerTaskStatus)) return null;
     result.dreamerTaskStatus = v.dreamerTaskStatus;
+  }
+
+  // PRI-469: intentTension (optional). When present but malformed, we DROP
+  // the intentTension field but keep the rest of the record (the Owner still
+  // sees the pain evidence). This matches the core's graceful-degradation
+  // behavior where a malformed intentTension is omitted rather than failing
+  // the entire record. The degradedReason on the record (if any) explains
+  // what happened.
+  if (Object.hasOwn(v, 'intentTension')) {
+    const tension = validateIntentTension(v.intentTension);
+    if (tension !== null) {
+      result.intentTension = tension;
+    }
+    // If tension === null, we intentionally do NOT return null here — the
+    // record is still valid, just without intentTension.
   }
 
   return result;

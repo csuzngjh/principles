@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   mapConfidenceLabel,
   buildCardLayers,
+  shouldRenderIntentTensionPanel,
+  shouldRenderFollowUpActions,
   type RecordData,
 } from '../../src/ui/pages/pain/pain-card-helpers.js';
+import type { IntentTensionData } from '../../src/ui/utils/validators.js';
 
 /**
  * PRI-344: Pure-function tests for the EvidenceChainCard refactoring.
@@ -205,5 +208,93 @@ describe('PRI-344 applicability field', () => {
   it('returns null when neither is present', () => {
     const { layer2 } = buildCardLayers(MINIMAL_RECORD);
     expect(layer2.applicability).toBeNull();
+  });
+});
+
+// ── PRI-469: intentTension in buildCardLayers ─────────────────────────────────
+
+function validIntentTension(overrides?: Partial<IntentTensionData>): IntentTensionData {
+  return {
+    source: 'action_drift',
+    evidenceStrength: 'strong',
+    relatedIntentFields: ['current_strategic_focus', 'non_negotiables'],
+    evidence: ['e1', 'e2', 'e3'],
+    explanation: 'The work optimized presentation completeness before validating the learning loop.',
+    suggestedOwnerAction: 'confirm_drift',
+    intentDocHash: 'sha256:abc123',
+    ...overrides,
+  };
+}
+
+describe('PRI-469: buildCardLayers maps intentTension to Layer 2', () => {
+  it('maps intentTension to layer2.intentTension when present', () => {
+    const record: RecordData = {
+      ...MINIMAL_RECORD,
+      intentTension: validIntentTension(),
+    };
+    const { layer2 } = buildCardLayers(record);
+    expect(layer2.intentTension).not.toBeNull();
+    expect(layer2.intentTension!.source).toBe('action_drift');
+    expect(layer2.intentTension!.evidenceStrength).toBe('strong');
+    expect(layer2.intentTension!.suggestedOwnerAction).toBe('confirm_drift');
+  });
+
+  it('sets layer2.intentTension to null when absent (backward compat)', () => {
+    const { layer2 } = buildCardLayers(MINIMAL_RECORD);
+    expect(layer2.intentTension).toBeNull();
+  });
+
+  it('does not leak intentTension into Layer 1 or Layer 3', () => {
+    const record: RecordData = {
+      ...MINIMAL_RECORD,
+      intentTension: validIntentTension({ intentDocHash: 'leak-check-hash' }),
+    };
+    const { layer1, layer3 } = buildCardLayers(record);
+    const layer1Text = JSON.stringify(layer1);
+    const layer3Text = JSON.stringify(layer3);
+    expect(layer1Text).not.toContain('intentTension');
+    expect(layer1Text).not.toContain('action_drift');
+    expect(layer3Text).not.toContain('intentTension');
+    expect(layer3Text).not.toContain('leak-check-hash');
+  });
+});
+
+// ── PRI-469: shouldRenderIntentTensionPanel (SPEC §22.1.3) ────────────────────
+
+describe('PRI-469: shouldRenderIntentTensionPanel (SPEC §22.1.3)', () => {
+  it('returns false for null tension', () => {
+    expect(shouldRenderIntentTensionPanel(null)).toBe(false);
+  });
+
+  it('returns false for undefined tension', () => {
+    expect(shouldRenderIntentTensionPanel(undefined)).toBe(false);
+  });
+
+  it('returns false for source=none (SPEC §22.1.3 suppression)', () => {
+    const tension = validIntentTension({ source: 'none' });
+    expect(shouldRenderIntentTensionPanel(tension)).toBe(false);
+  });
+
+  it('returns true for source=action_drift', () => {
+    const tension = validIntentTension({ source: 'action_drift' });
+    expect(shouldRenderIntentTensionPanel(tension)).toBe(true);
+  });
+
+  it('returns true for source=intent_suspect', () => {
+    const tension = validIntentTension({ source: 'intent_suspect' });
+    expect(shouldRenderIntentTensionPanel(tension)).toBe(true);
+  });
+
+  it('returns true for source=healthy_tension', () => {
+    const tension = validIntentTension({ source: 'healthy_tension' });
+    expect(shouldRenderIntentTensionPanel(tension)).toBe(true);
+  });
+});
+
+// ── PRI-469: shouldRenderFollowUpActions (SPEC §22.1.4, stub for PRI-471) ─────
+
+describe('PRI-469: shouldRenderFollowUpActions (stub for PRI-471)', () => {
+  it('always returns false in PRI-469 (follow-up actions not yet implemented)', () => {
+    expect(shouldRenderFollowUpActions()).toBe(false);
   });
 });
