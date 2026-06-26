@@ -411,6 +411,34 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         }
         output.confidence = stageBConfidence;
       }
+
+      // PRI-468: intentTension ← Stage A (additive passthrough, SPEC §18)
+      //
+      // Stage C MUST NOT generate intentTension when Stage A omitted it
+      // (SPEC §18.2). Only copy it through when Stage A actually produced
+      // a defined value. If Stage A did not produce one (absent or
+      // undefined), strip any LLM-hallucinated intentTension.
+      const stageAIntentTension = context.rootCauseOutput.intentTension;
+      if (stageAIntentTension !== undefined) {
+        // Passthrough: copy Stage A intentTension to Stage C output.
+        // If LLM also produced one, override with Stage A (source of truth).
+        if (output.intentTension !== undefined) {
+          this.emitEvent('invariant_override', taskId, {
+            field: 'intentTension',
+            reason: 'LLM output had intentTension — overridden with Stage A passthrough value (SPEC §18.1)',
+          });
+        }
+        output.intentTension = stageAIntentTension;
+      }
+      // When Stage A did NOT produce intentTension, we do NOT add one.
+      // If LLM hallucinated one, strip it to enforce SPEC §18.2.
+      else if (output.intentTension !== undefined) {
+        this.emitEvent('invariant_override', taskId, {
+          field: 'intentTension',
+          reason: 'LLM output had intentTension but Stage A did not produce one — stripped (SPEC §18.2: additive only, never generates)',
+        });
+        delete output.intentTension;
+      }
     }
   }
 

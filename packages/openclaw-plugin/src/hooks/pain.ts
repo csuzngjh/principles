@@ -28,6 +28,7 @@ import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js'
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { createIntentDocReader } from '../core/intent-doc-reader-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
@@ -60,6 +61,10 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     autoIntakeEnabled: true,
     effectiveConfig: configResult.effective,
     getEnvVar: (name: string) => process.env[name],
+    // PRI-468: wire INTENT.md reader so Stage A can produce intentTension
+    // when intent_engineering flag is on. Adapter performs no I/O beyond
+    // delegating to safeReadIntentDoc (which owns the flag-first check).
+    intentDocReader: createIntentDocReader(wctx.workspaceDir),
   });
 }
 

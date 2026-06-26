@@ -39,6 +39,7 @@ import { storeEmitter } from './store/event-emitter.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
+import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 import {
   resolveAgentRuntimeBinding,
   checkAgentRuntimeReadiness,
@@ -57,6 +58,17 @@ export interface PainSignalRuntimeFactoryOptions {
   effectiveConfig?: EffectivePdConfig;
   /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
   getEnvVar?: (name: string) => string | undefined;
+  /**
+   * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
+   *
+   * Provided by the plugin layer (which owns filesystem I/O). When present
+   * AND `intent_engineering` flag is on, Stage A reads INTENT.md and
+   * injects it into the prompt. When absent, intent_engineering degrades
+   * silently to off (telemetry emitted by the runner).
+   *
+   * Core never performs filesystem I/O — it only consumes the port.
+   */
+  intentDocReader?: IntentDocReader;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -489,7 +501,7 @@ export async function createPainSignalBridge(
     // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
 
     const rootCauseRunner = new DiagRootCauseRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
       { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
     );
     const distillerRunner = new DiagDistillerRunner(

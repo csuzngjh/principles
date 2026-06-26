@@ -26,6 +26,7 @@ import type { DiagnosticianContextPayload } from '../context-payload.js';
 import type { ContextAssembler } from '../store/context/context-assembler.js';
 import type { TaskRecord } from '../task-status.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RootCausePromptBuilder } from '../diagnostician/rootcause-prompt-builder.js';
@@ -53,6 +54,17 @@ interface DiagRootCauseContext {
 export interface DiagRootCauseRunnerDeps extends PeerRunnerDeps {
   readonly validator: DiagRootCauseValidator;
   readonly contextAssembler: ContextAssembler;
+  /**
+   * PRI-468: Optional INTENT.md reader for Stage A intent tension check.
+   *
+   * When provided AND `intent_engineering` flag is on, the runner reads
+   * INTENT.md and injects it into the Stage A prompt as reference context
+   * for the LLM to optionally produce `intentTension`.
+   *
+   * When absent or flag off, the runner behaves as before (byte-identical
+   * prompt — EP-03: no silent fallback).
+   */
+  readonly intentDocReader?: IntentDocReader;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -77,6 +89,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
   private readonly validator: DiagRootCauseValidator;
   private readonly contextAssembler: ContextAssembler;
   private readonly effectiveConfig?: EffectivePdConfig;
+  private readonly intentDocReader?: IntentDocReader;
 
   constructor(deps: DiagRootCauseRunnerDeps, options: DiagRootCauseRunnerOptions) {
     super(deps, options, {
@@ -88,6 +101,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     this.validator = deps.validator;
     this.contextAssembler = deps.contextAssembler;
     this.effectiveConfig = options.effectiveConfig;
+    this.intentDocReader = deps.intentDocReader;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -141,15 +155,54 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
   async invokeRuntime(taskId: string, context: DiagRootCauseContext): Promise<RunHandle> {
     // T-E (PRI-371): Read diagnostician_core_grounding flag from effective config.
     let coreGrounding = false;
+    // PRI-468: Read intent_engineering flag from effective config.
+    let intentGrounding = false;
     if (this.effectiveConfig) {
       const featureFlags = computeFeatureFlagsFromConfig(this.effectiveConfig);
       coreGrounding = isFeatureEnabled(featureFlags, 'diagnostician_core_grounding');
+      intentGrounding = isFeatureEnabled(featureFlags, 'intent_engineering');
+    }
+
+    // PRI-468: When intent_engineering is on AND a reader is configured,
+    // attempt to read INTENT.md. On any degraded path (not_found, oversized,
+    // read_error, flag_disabled, or no reader configured), intentGrounding
+    // is downgraded to false and the prompt is byte-identical to the
+    // pre-PRI-468 prompt (EP-03 / ERR-002: graceful degradation with
+    // observable telemetry).
+    let intentDoc: { raw: string; contentHash: string; path: string } | undefined;
+    if (intentGrounding && !this.intentDocReader) {
+      // Flag on but no reader wired — downgrade silently (factory misconfiguration
+      // is not a per-task event; it's a startup-time issue). The prompt stays
+      // byte-identical to pre-PRI-468.
+      intentGrounding = false;
+    } else if (intentGrounding && this.intentDocReader) {
+      const readResult = this.intentDocReader.readIntentDoc();
+      if (readResult.ok && readResult.doc) {
+        intentDoc = {
+          raw: readResult.doc.raw,
+          contentHash: readResult.doc.contentHash,
+          path: readResult.doc.path,
+        };
+      } else {
+        // EP-03 / ERR-002: degrade gracefully but observably.
+        // Flag stays on in config, but we do not inject INTENT — emit
+        // telemetry so the operator can see why INTENT was not injected.
+        this.emitEvent('intent_doc_read_failed', taskId, {
+          reason: readResult.reason ?? 'unknown',
+          nextAction: readResult.nextAction ?? 'Check INTENT.md configuration.',
+          flagEnabled: readResult.flagEnabled,
+          found: readResult.found,
+        });
+        intentGrounding = false;
+      }
     }
 
     const builder = new RootCausePromptBuilder();
     const { message } = builder.buildPrompt(context.painPayload, {
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
+      intentGrounding,
+      intentDoc,
     });
 
     return this.runtimeAdapter.startRun({
