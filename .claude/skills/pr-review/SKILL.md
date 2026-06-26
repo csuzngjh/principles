@@ -79,6 +79,22 @@ Summarize:
 
 **Do NOT merge the PR.** User merges manually.
 
+### Phase 8: Proactive Guideline Update（主动 Review Loop）
+
+评审输出使用中文。在 Phase 7 报告后，主动评估是否需要更新治理资产：
+
+1. **发现值得重复的好决策** → 建议创建 exemplar
+   - 路径：`docs/exemplars/pr-{name}.md`
+   - 格式见 `docs/exemplars/README.md`
+   - 引用规则 ID：`rc-*` / `cli-*` / `mvp-q-*` / `antipattern-*`
+
+2. **发现规则缺失或过时** → 建议更新 AGENTS.md 对应段
+   - 例如：某场景反复出现但无对应规则 → 提议新增 `rc-*` 或 `antipattern-*`
+
+3. **发现错误** → 触发 `record-error` skill（现有流程，见下方 Integration）
+
+**注意**：Phase 8 是建议性的，不阻塞 PR 合并。仅在报告中提出建议，由 owner 决定是否采纳。
+
 ## Integration with record-error
 
 When Phase 2 or 3 identifies an AI coding error:
@@ -96,3 +112,4 @@ When Phase 2 or 3 identifies an AI coding error:
 - [ ] CI gate passes
 - [ ] Report delivered
 - [ ] If AI error found → `record-error` invoked
+- [ ] Phase 8: 评估是否需要创建 exemplar 或更新 guideline（建议性）

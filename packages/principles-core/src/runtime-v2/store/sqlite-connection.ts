@@ -394,6 +394,40 @@ export class SqliteConnection {
       DROP INDEX IF EXISTS idx_confirm_first_state_last_seen;
     `);
 
+    // PRI-470: IntentDecisionRecord durable store (SPEC §21.7).
+    // Stores immutable snapshots of source / evidenceStrength /
+    // relatedIntentFields / evidenceRefs so the audit trail stays accurate
+    // even if the underlying artifact is later modified.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS intent_decisions (
+        id TEXT PRIMARY KEY,
+        pain_id TEXT,
+        task_id TEXT NOT NULL,
+        run_id TEXT,
+        intent_doc_hash TEXT,
+        source TEXT NOT NULL,
+        evidence_strength TEXT NOT NULL,
+        related_intent_fields TEXT NOT NULL,
+        owner_action TEXT NOT NULL,
+        evidence_refs TEXT NOT NULL,
+        note TEXT,
+        source_snapshot TEXT NOT NULL,
+        evidence_strength_snapshot TEXT NOT NULL,
+        related_intent_fields_snapshot TEXT NOT NULL,
+        evidence_refs_snapshot TEXT NOT NULL,
+        resulting_candidate_id TEXT,
+        resulting_rule_candidate_id TEXT,
+        patch_proposal_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_intent_decisions_pain_id ON intent_decisions(pain_id);
+      CREATE INDEX IF NOT EXISTS idx_intent_decisions_task_id ON intent_decisions(task_id);
+      CREATE INDEX IF NOT EXISTS idx_intent_decisions_owner_action ON intent_decisions(owner_action);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_decisions_pain_hash_action
+        ON intent_decisions(pain_id, intent_doc_hash, owner_action)
+        WHERE pain_id IS NOT NULL;
+    `);
+
     // P2-10: Minimal schema_version table for state.db migration tracking.
     // core cannot import plugin's MigrationRunner (dependency direction),
     // so this is a lightweight version that records schema version history.

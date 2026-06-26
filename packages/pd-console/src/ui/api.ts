@@ -29,6 +29,10 @@ import {
   validateEvidenceChain,
   validateTrajectoryData,
   validateIntentSummary,
+  validateIntentDecisionRecord,
+  validateIntentDecisionList,
+  validateIntentDecisionResult,
+  validateIntentDecisionSummary,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -57,6 +61,9 @@ import type {
   EvidenceChainData,
   TrajectoryData,
   IntentSummaryData,
+  IntentDecisionRecordData,
+  IntentDecisionResultData,
+  IntentDecisionSummaryData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -402,6 +409,77 @@ async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
 async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
   return request<IntentSummaryData>('/api/v1/intent', undefined, validateIntentSummary);
 }
+
+// ── Intent Decisions (PRI-470) ───────────────────────────────────────────────
+
+/**
+ * Frontend-friendly payload for recording an Owner decision on an intent tension.
+ * The `evidence` field is mapped to `evidenceRefs` in the API request body.
+ */
+export interface IntentDecisionInputPayload {
+  taskId: string;
+  source: string;
+  evidenceStrength: string;
+  relatedIntentFields: string[];
+  evidence: string[];
+  explanation?: string;
+  suggestedAction: string;
+  ownerAction: string;
+  painId?: string;
+  intentDocHash?: string;
+  note?: string;
+}
+
+async function recordIntentDecision(
+  payload: IntentDecisionInputPayload,
+): Promise<ApiResponse<IntentDecisionResultData>> {
+  return request<IntentDecisionResultData>(
+    '/api/v1/intent-decisions',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    validateIntentDecisionResult,
+  );
+}
+
+async function listIntentDecisionsByPainId(
+  painId: string,
+): Promise<ApiResponse<IntentDecisionRecordData[]>> {
+  return request<IntentDecisionRecordData[]>(
+    `/api/v1/intent-decisions?painId=${encodeURIComponent(painId)}`,
+    undefined,
+    validateIntentDecisionList,
+  );
+}
+
+async function listIntentDecisionsByTaskId(
+  taskId: string,
+): Promise<ApiResponse<IntentDecisionRecordData[]>> {
+  return request<IntentDecisionRecordData[]>(
+    `/api/v1/intent-decisions?taskId=${encodeURIComponent(taskId)}`,
+    undefined,
+    validateIntentDecisionList,
+  );
+}
+
+async function getIntentDecision(
+  decisionId: string,
+): Promise<ApiResponse<IntentDecisionRecordData>> {
+  return request<IntentDecisionRecordData>(
+    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}`,
+    undefined,
+    validateIntentDecisionRecord,
+  );
+}
+
+async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionSummaryData>> {
+  return request<IntentDecisionSummaryData>(
+    '/api/v1/intent-decisions/summary',
+    undefined,
+    validateIntentDecisionSummary,
+  );
+}
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -442,6 +520,11 @@ export {
   rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,
+  recordIntentDecision,
+  listIntentDecisionsByPainId,
+  listIntentDecisionsByTaskId,
+  getIntentDecision,
+  fetchIntentDecisionSummary,
 };
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
@@ -480,6 +563,9 @@ export type {
   IntentSummaryData,
   IntentSectionsData,
   IntentDocWarningData,
+  IntentDecisionRecordData,
+  IntentDecisionResultData,
+  IntentDecisionSummaryData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

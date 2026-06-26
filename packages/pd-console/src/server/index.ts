@@ -17,6 +17,7 @@ import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './ro
 import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
+import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './routes/intent-decisions.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
@@ -269,6 +270,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeGovernanceModels();
   disposeEvidenceChainModels();
   disposeIntentModels();
+  disposeIntentDecisionModels();
   services.workspaceService.dispose();
 }
 
@@ -394,6 +396,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // PRI-466: GET /api/v1/intent
       if (urlPath === '/api/v1/intent') {
         asyncHandler(() => handleIntentRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // PRI-470: IntentDecisionRecord (POST/GET /api/v1/intent-decisions, /:id, /summary)
+      if (urlPath === '/api/v1/intent-decisions' || urlPath.startsWith('/api/v1/intent-decisions/')) {
+        const subPath = urlPath.slice('/api/v1/intent-decisions'.length);
+        asyncHandler(() => handleIntentDecisionsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
