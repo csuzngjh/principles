@@ -110,6 +110,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime
     // cache, delegates parsing/validation/hashing to @principles/core. Never throws.
     'intent-doc-reader.ts',
+    // PRI-468: Plugin adapter implementing core IntentDocReader port — pure type
+    // mapping from safeReadIntentDoc result to core IntentDocReadResult. No new I/O.
+    'intent-doc-reader-adapter.ts',
   ] as const;
 
   // Category 6: Test files

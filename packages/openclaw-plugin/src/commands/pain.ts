@@ -8,6 +8,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import { computeHash } from '../utils/hashing.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
+import { createIntentDocReader } from '../core/intent-doc-reader-adapter.js';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -321,6 +322,7 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       autoIntakeEnabled: true,
       effectiveConfig: configResult.effective,
       getEnvVar: (name: string) => process.env[name],
+      intentDocReader: createIntentDocReader(wctx.workspaceDir),
     });
 
     const result = await service.recordPain({

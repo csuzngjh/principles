@@ -26,6 +26,22 @@ export interface BuildPromptOptions {
   outputLanguage?: OutputLanguage;
   /** T-E (PRI-371): Inject core axiom grounding as PHASE 3.5 (default: false) */
   coreGrounding?: boolean;
+  /** PRI-468: Inject intent tension check as PHASE 3.6 (default: false) */
+  intentGrounding?: boolean;
+  /**
+   * PRI-468: INTENT.md reference to include in the prompt payload.
+   *
+   * When provided (along with `intentGrounding: true`), the `raw` content
+   * is included in the prompt as `intentDoc.raw` so the LLM can reference
+   * it. The `contentHash` is the lineage link for `intentTension.intentDocHash`.
+   *
+   * When absent, the prompt is byte-identical to the pre-PRI-468 prompt.
+   */
+  intentDoc?: {
+    readonly raw: string;
+    readonly contentHash: string;
+    readonly path: string;
+  };
 }
 
 /**
@@ -63,6 +79,22 @@ export interface PromptInput {
   diagnosticInstruction: string;
   /** Warnings added during truncation (e.g., conversationWindow entries removed) */
   truncationWarnings?: string[];
+  /**
+   * PRI-468: Optional INTENT.md reference for Stage A intent tension check.
+   *
+   * Present only when `intent_engineering` flag is on AND INTENT.md was
+   * successfully read. The `raw` content is included verbatim (unescaped)
+   * so the LLM can use it as a stable reference for judging intent tension.
+   * The `contentHash` is the lineage link for `intentTension.intentDocHash`.
+   *
+   * When absent (flag off or read failed), the prompt is byte-identical to
+   * the pre-PRI-468 prompt (EP-03: no silent fallback).
+   */
+  intentDoc?: {
+    readonly raw: string;
+    readonly contentHash: string;
+    readonly path: string;
+  };
 }
 
 /** Size limits for buildPrompt() to prevent token overflow. */

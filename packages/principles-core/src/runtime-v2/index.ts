@@ -215,6 +215,20 @@ export { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js'
 export { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
 export { DiagRouterRunner } from './internalization/diag-router-runner.js';
 export { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
+export {
+  IntentTensionSchema,
+  IntentTensionSourceSchema,
+  EvidenceStrengthSchema,
+  IntentRelatedFieldSchema,
+  SuggestedOwnerActionSchema,
+} from './diagnostician/diag-rootcause-output.js';
+export type {
+  IntentTension,
+  IntentTensionSource,
+  EvidenceStrength,
+  IntentRelatedField,
+  SuggestedOwnerAction,
+} from './diagnostician/diag-rootcause-output.js';
 export { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 export { DisabledDiagnosticianRunner } from './pain-signal-runtime-factory.js';
 // Runtime Adapter (M4)
@@ -1662,8 +1676,9 @@ export type {
 export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 
 
-// Intent Engineering MVP (PRI-465 / PRI-466 / PRI-467) — pure logic: parser,
-// hasher, validator, and the bounded+escaped friction block builder.
+// Intent Engineering MVP (PRI-465 / PRI-466 / PRI-467 / PRI-468) — pure logic:
+// parser, hasher, validator, the bounded+escaped friction block builder, and
+// the IntentDocReader port interface (core-owned, plugin-implemented).
 export {
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
@@ -1673,10 +1688,15 @@ export {
   computeIntentContentHash,
   validateIntentDocSections,
   buildIntentFrictionBlock,
+  NullIntentDocReader,
 } from './intent/index.js';
 export type {
   IntentDocSections,
   IntentDocWarning,
   IntentDocWarningCode,
   IntentFrictionBlockInput,
+  IntentDocReader,
+  IntentDocReadResult,
+  IntentDocReference,
+  IntentDocReadReason,
 } from './intent/index.js';
