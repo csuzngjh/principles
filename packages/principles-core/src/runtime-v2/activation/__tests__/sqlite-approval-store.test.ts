@@ -17,6 +17,14 @@ describe('SqliteApprovalQueueStore', () => {
   beforeEach(() => {
     connection = createTestConnection();
     store = new SqliteApprovalQueueStore(connection);
+    // P1-3: Seed parent records for FK validation (task + pi_artifacts)
+    // Each artifact uses a distinct source_task_id to satisfy the unique index
+    // idx_pi_artifacts_idempotency (source_task_id, artifact_kind).
+    const db = connection.getDb();
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-1', 'diagnosis', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run();
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-2', 'diagnosis', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run();
+    db.prepare("INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('art-1', 'principle', 'task-1', '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run();
+    db.prepare("INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('art-2', 'principle', 'task-2', '[]', 'pending', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')").run();
   });
 
   afterEach(() => {
