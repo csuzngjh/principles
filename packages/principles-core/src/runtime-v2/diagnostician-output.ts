@@ -9,6 +9,7 @@
  */
 import { Type, type Static } from '@sinclair/typebox';
 import type { DiagnosticianContextPayload } from './context-payload.js';
+import { IntentTensionSchema } from './diagnostician/diag-rootcause-output.js';
 
 // ── Diagnostician Output V1 ──
 
@@ -57,6 +58,21 @@ export const DiagnosticianOutputV1Schema = Type.Object({
   recommendations: Type.Array(DiagnosticianRecommendationSchema),
   confidence: Type.Number({ minimum: 0, maximum: 1, description: 'A number between 0.0 and 1.0 (NOT a string, NOT a percentage)' }),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
+  /**
+   * PRI-468: Optional intent tension passed through from Stage A.
+   *
+   * Present only when:
+   *   1. The `intent_engineering` flag is on, AND
+   *   2. Stage A emitted an intentTension, AND
+   *   3. Stage C additive passthrough copied it here.
+   *
+   * Stage C MUST NOT generate intentTension when Stage A omitted it
+   * (SPEC §18.2 — additive only, never generates).
+   *
+   * This field is additive — existing consumers that don't know about
+   * intentTension will ignore it (SPEC §18.3 — don't break downstream).
+   */
+  intentTension: Type.Optional(IntentTensionSchema),
 });
  
 export type DiagnosticianOutputV1 = Static<typeof DiagnosticianOutputV1Schema>;

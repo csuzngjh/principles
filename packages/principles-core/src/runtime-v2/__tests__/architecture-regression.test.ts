@@ -336,6 +336,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime cache,
   // delegates parsing/validation/hashing to @principles/core. Never throws.
   'intent-doc-reader.ts',
+  // PRI-468: Plugin adapter implementing core IntentDocReader port — pure type
+  // mapping from safeReadIntentDoc result to the core-owned IntentDocReadResult.
+  // No new I/O; delegates to intent-doc-reader.ts above.
+  'intent-doc-reader-adapter.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -400,7 +404,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // in plugin src/core/ and own I/O side effects, so they stay classified.
     // PRI-467: Added intent-doc-reader.ts (92 → 93) — plugin I/O boundary for
     // reading .principles/INTENT.md with TTL+mtime cache for prompt injection.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // PRI-468: Added intent-doc-reader-adapter.ts (93 → 94) — plugin adapter
+    // implementing core IntentDocReader port (pure type mapping, no new I/O).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 
