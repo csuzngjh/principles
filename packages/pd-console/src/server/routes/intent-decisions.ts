@@ -261,11 +261,18 @@ function validateFollowUpInput(parsed: Record<string, unknown>, res: ServerRespo
       return null;
     }
     const { candidateId } = parsed;
-    if (typeof candidateId !== 'string' || candidateId === '') {
+    if (typeof candidateId !== 'string') {
+      sendBadRequest(res, 'candidateId must be a string when type is link_candidate');
+      return null;
+    }
+    // Normalize at the trust boundary (EP-01): trim, then reject
+    // whitespace-only ids so they cannot pollute the audit trail.
+    const trimmed = candidateId.trim();
+    if (trimmed === '') {
       sendBadRequest(res, 'candidateId must be a non-empty string when type is link_candidate');
       return null;
     }
-    return { type: typedType, candidateId };
+    return { type: typedType, candidateId: trimmed };
   }
 
   // For other types, candidateId is optional and ignored if present.

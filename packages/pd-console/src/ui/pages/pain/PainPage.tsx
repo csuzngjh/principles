@@ -1007,8 +1007,11 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
     setBusyState('dispatching');
     setErrorMsg(null);
     setResponse(null);
+    // Trim the candidate id so leading/trailing whitespace never reaches the
+    // audit trail (the disable-check already trims; the payload must match it).
+    // The server re-trims as the trust-boundary authority (EP-01).
     const payload = type === 'link_candidate'
-      ? { type, candidateId: candidateIdInput }
+      ? { type, candidateId: candidateIdInput.trim() }
       : { type };
     const result = await dispatchFollowUp(decision.id, payload);
     if (!result.success) {

@@ -787,4 +787,104 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     expect(getStatus(res)).toBe(403);
     expect(parseError(res).reason).toBe('flag_disabled');
   });
+
+  // ── degradation paths (EP-03: every degraded branch carries a reason) ──
+  // These exercise sendFollowUpModelFailure + IntentDecisionModel.updateFollowUp
+  // degradation returns that the happy-path tests above never reach.
+  describe('degradation paths', () => {
+    it('returns 409 workspace_not_initialized when state.db is absent (link_candidate)', async () => {
+      // Remove state.db so stateDbExists() returns false. The link_candidate
+      // branch calls model.updateFollowUp directly (no getById precheck), so it
+      // reaches the model's state_db_not_found degradation → 409.
+      fs.unlinkSync(path.join(pdDir, 'state.db'));
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq('/api/v1/intent-decisions/any/follow-up', {
+          type: 'link_candidate',
+          candidateId: 'cand-1',
+        }),
+        res,
+        workspaceDir,
+        '/any/follow-up',
+      );
+      expect(getStatus(res)).toBe(409);
+      const body = parseError(res);
+      expect(body.reason).toBe('state_db_not_found');
+      expect(body.nextAction).toMatch(/initialize/i);
+    });
+
+    it('returns 404 (not 409) for generate_patch_proposal when state.db is absent', async () => {
+      // generate_patch_proposal prechecks existence via model.getById, which
+      // returns null when state.db is absent → the route maps to 404, never
+      // reaching the updateFollowUp degradation. This documents that contract.
+      fs.unlinkSync(path.join(pdDir, 'state.db'));
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq('/api/v1/intent-decisions/any/follow-up', { type: 'generate_patch_proposal' }),
+        res,
+        workspaceDir,
+        '/any/follow-up',
+      );
+      expect(getStatus(res)).toBe(404);
+    });
+
+    // NOTE: the intent_decisions_table_missing degradation (model catch block →
+    // route 500) is not reachable via the route because SqliteConnection
+    // re-runs initSchema on open, re-creating the table. That branch is
+    // defensive-only and is covered by the model's unit tests instead.
+  });
+
+  // ── EP-01: server-side trust-boundary normalization of candidateId ──
+  describe('candidateId trust-boundary normalization (EP-01)', () => {
+    it('trims and persists a candidateId with leading/trailing whitespace', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: '  cand-trimmed  ',
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(200);
+      const parsed = parseBody(res);
+      // The audit trail must hold the trimmed value, not the raw input.
+      expect(parsed.data.record.resultingCandidateId).toBe('cand-trimmed');
+      expect(parsed.data.linkedCandidateId).toBe('cand-trimmed');
+    });
+
+    it('returns 400 when candidateId is whitespace-only', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: '   ',
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(400);
+      expect(parseError(res).message).toContain('candidateId');
+    });
+
+    it('returns 400 when candidateId is not a string', async () => {
+      const id = await seedDecision({ ownerAction: 'confirm_drift' });
+      const res = makeRes();
+      await handleIntentDecisionsRoute(
+        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+          type: 'link_candidate',
+          candidateId: 123,
+        }),
+        res,
+        workspaceDir,
+        `/${id}/follow-up`,
+      );
+      expect(getStatus(res)).toBe(400);
+      expect(parseError(res).message).toContain('candidateId');
+    });
+  });
 });

@@ -192,6 +192,12 @@ describe('FollowUpActions — SPEC §22.1.4 boundaries', () => {
     expect(painPageSrc).not.toMatch(/createCandidate\(/);
   });
 
+  it('trims candidateIdInput before building the link_candidate payload (EP-01)', () => {
+    // The payload construction must trim so leading/trailing whitespace never
+    // reaches the audit trail. CodeRabbit finding (PR #1072).
+    expect(painPageSrc).toMatch(/candidateId:\s*candidateIdInput\.trim\(\)/);
+  });
+
   it('onDecisionUpdated propagates the updated record up (no direct state mutation)', () => {
     // The callback replaces the updated decision in the list
     expect(painPageSrc).toMatch(/onDecisionUpdated\(result\.data\.record\)/);
