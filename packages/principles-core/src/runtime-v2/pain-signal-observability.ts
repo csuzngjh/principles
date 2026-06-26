@@ -71,7 +71,7 @@ function ensurePainEventsSchema(db: Database.Database): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
         source TEXT NOT NULL,
-        score INTEGER NOT NULL,
+        score REAL NOT NULL,
         reason TEXT,
         severity TEXT,
         origin TEXT,
@@ -98,7 +98,8 @@ function ensurePainEventsSchema(db: Database.Database): void {
         );
       `);
     }
-    // NO migration, NO ALTER, NO DROP —两种 schema 都能工作
+    // Schema MUST stay in sync with packages/openclaw-plugin/src/core/schema/schema-definitions.ts pain_events.
+    // core cannot import plugin schema (dependency direction), so DDL is duplicated intentionally.
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');

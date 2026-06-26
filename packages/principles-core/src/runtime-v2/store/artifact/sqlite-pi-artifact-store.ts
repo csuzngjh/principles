@@ -34,6 +34,14 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
 
   async createArtifact(record: PIArtifactRecord): Promise<PIArtifactRecord> {
     const db = this.connection.getDb();
+    // P1-3: Application-layer FK check (DB-layer FK deferred to post-MVP table rebuild).
+    // Fail loud if source_task_id references non-existent task (ERR-009/ERR-010/ERR-002).
+    const taskExists = db.prepare('SELECT 1 FROM tasks WHERE task_id = ?').get(record.sourceTaskId);
+    if (!taskExists) {
+      throw new Error(
+        `pi_artifacts.source_task_id references non-existent task: ${record.sourceTaskId}`,
+      );
+    }
     const lineageJson = JSON.stringify(record.lineageArtifactIds);
     try {
       db.prepare(`
