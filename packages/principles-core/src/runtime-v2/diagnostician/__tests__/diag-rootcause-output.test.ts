@@ -1,24 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseOutputV1Schema, DefaultDiagRootCauseValidator } from '../diag-rootcause-output.js';
+import type { IntentTension } from '../diag-rootcause-output.js';
+
+// Module-scope fixture so all describe blocks can share it.
+const validOutput = {
+  valid: true,
+  diagnosisId: 'diag-001',
+  taskId: 'task-001',
+  summary: 'Test summary',
+  causalChain: [
+    { why: 1, statement: 'First why', evidenceRefs: ['ref1'] },
+    { why: 2, statement: 'Second why', evidenceRefs: ['ref1'] },
+  ],
+  rootCause: 'Design: Poor error handling',
+  rootCauseCategory: 'Design',
+  evidence: [{ sourceRef: 'src1', note: 'note1' }],
+  confidence: 0.8,
+  ambiguityNotes: ['note1'],
+};
 
 describe('DiagRootCauseOutputV1Schema', () => {
-  const validOutput = {
-    valid: true,
-    diagnosisId: 'diag-001',
-    taskId: 'task-001',
-    summary: 'Test summary',
-    causalChain: [
-      { why: 1, statement: 'First why', evidenceRefs: ['ref1'] },
-      { why: 2, statement: 'Second why', evidenceRefs: ['ref1'] },
-    ],
-    rootCause: 'Design: Poor error handling',
-    rootCauseCategory: 'Design',
-    evidence: [{ sourceRef: 'src1', note: 'note1' }],
-    confidence: 0.8,
-    ambiguityNotes: ['note1'],
-  };
-
   it('valid root cause output passes Value.Check', () => {
     expect(Value.Check(DiagRootCauseOutputV1Schema, validOutput)).toBe(true);
   });
@@ -272,5 +274,142 @@ describe('DiagRootCauseOutputV1Schema', () => {
     const result = await validator.validate(output, 'task-001');
     expect(result.valid).toBe(false);
     expect(result.errors.some((e: string) => e.includes('People|Design|Assumption|Tooling'))).toBe(true);
+  });
+});
+
+// ── PRI-468: intentTension on DiagRootCauseOutputV1Schema ────────────────────
+
+describe('DiagRootCauseOutputV1Schema — intentTension (PRI-468)', () => {
+  const validIntentTension: IntentTension = {
+    source: 'action_drift',
+    evidenceStrength: 'moderate',
+    relatedIntentFields: ['current_strategic_focus', 'non_negotiables'],
+    evidence: [
+      'INTENT says current focus is validating the smallest Pain → Principle loop.',
+      'Agent designed a heavy dashboard.',
+      'Owner correction says the result increased review burden.',
+    ],
+    explanation:
+      'The work may be useful later, but it optimized presentation completeness before validating the current learning loop.',
+    suggestedOwnerAction: 'confirm_drift',
+    intentDocHash: 'sha256:abc123',
+  };
+
+  it('accepts output without intentTension (optional)', () => {
+    expect(Value.Check(DiagRootCauseOutputV1Schema, validOutput)).toBe(true);
+  });
+
+  it('accepts output with valid intentTension', () => {
+    const output = { ...validOutput, intentTension: validIntentTension };
+    expect(Value.Check(DiagRootCauseOutputV1Schema, output)).toBe(true);
+  });
+
+  it('Value.Clean strips intentTension.confidence from nested object', () => {
+    const output = {
+      ...validOutput,
+      intentTension: { ...validIntentTension, confidence: 0.8 },
+    };
+    const cleaned = Value.Clean(DiagRootCauseOutputV1Schema, output) as Record<string, unknown>;
+    const cleanedTension = cleaned.intentTension as Record<string, unknown> | undefined;
+    expect(cleanedTension).toBeDefined();
+    expect(Object.hasOwn(cleanedTension as Record<string, unknown>, 'confidence')).toBe(false);
+  });
+
+  it('rejects output with intentTension.confidence (additionalProperties: false)', () => {
+    const output = {
+      ...validOutput,
+      intentTension: { ...validIntentTension, confidence: 0.8 },
+    };
+    expect(Value.Check(DiagRootCauseOutputV1Schema, output)).toBe(false);
+  });
+
+  it('rejects output with intentTension.source = invalid', () => {
+    const output = {
+      ...validOutput,
+      intentTension: { ...validIntentTension, source: 'definitely_drift' },
+    };
+    expect(Value.Check(DiagRootCauseOutputV1Schema, output)).toBe(false);
+  });
+
+  it('rejects output with intentTension.evidence > 3 items', () => {
+    const output = {
+      ...validOutput,
+      intentTension: {
+        ...validIntentTension,
+        evidence: ['one', 'two', 'three', 'four'],
+      },
+    };
+    expect(Value.Check(DiagRootCauseOutputV1Schema, output)).toBe(false);
+  });
+});
+
+// ── PRI-468: DefaultDiagRootCauseValidator with intentTension ───────────────
+
+describe('DefaultDiagRootCauseValidator — intentTension (PRI-468)', () => {
+  const validIntentTension: IntentTension = {
+    source: 'action_drift',
+    evidenceStrength: 'moderate',
+    relatedIntentFields: ['current_strategic_focus'],
+    evidence: ['Agent added a dashboard.', 'Owner said focus was the loop.'],
+    explanation: 'Action optimized presentation over the current learning loop.',
+    suggestedOwnerAction: 'confirm_drift',
+    intentDocHash: 'sha256:abc123',
+  };
+
+  it('accepts valid output with intentTension', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, intentTension: validIntentTension };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects intentTension with confidence field', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = {
+      ...validOutput,
+      intentTension: { ...validIntentTension, confidence: 0.8 },
+    };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((e: string) => e.includes('intentTension') || e.includes('confidence') || e.includes('Additional')),
+    ).toBe(true);
+  });
+
+  it('rejects intentTension with invalid source', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = {
+      ...validOutput,
+      intentTension: { ...validIntentTension, source: 'definitely_drift' },
+    };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects intentTension with evidence > 3 items', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = {
+      ...validOutput,
+      intentTension: {
+        ...validIntentTension,
+        evidence: ['one', 'two', 'three', 'four'],
+      },
+    };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects intentTension that is not an object', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = { ...validOutput, intentTension: 'not an object' };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('intentTension'))).toBe(true);
+  });
+
+  it('still accepts output without intentTension (backward compat)', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const result = await validator.validate(validOutput, 'task-001');
+    expect(result.valid).toBe(true);
   });
 });

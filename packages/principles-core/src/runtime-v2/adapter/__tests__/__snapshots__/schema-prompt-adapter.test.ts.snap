@@ -67,5 +67,6 @@ exports[`generateConstraints() > generateConstraints matches snapshot 1`] = `
     Conditional: "rule" kind → triggerPattern and action are required
     Conditional: "principle" kind → abstractedPrinciple is required
   confidence: number {description: A number between 0.0 and 1.0 (NOT a string, NOT a percentage), min: 0, max: 1} (required)
-  ambiguityNotes: string[] (optional)"
+  ambiguityNotes: string[] (optional)
+  intentTension: object (optional)"
 `;

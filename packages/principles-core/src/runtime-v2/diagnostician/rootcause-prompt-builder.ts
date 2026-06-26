@@ -40,6 +40,58 @@ import type { PromptInput } from '../diagnostician-prompt-builder.js';
 // ── Options ──────────────────────────────────────────────────────────────────
 
 /**
+ * Build the PHASE 3.6 — Intent Tension Check block (PRI-468, SPEC §17).
+ *
+ * When `intentGrounding` is true, returns the SPEC §17 verbatim text that
+ * instructs the LLM to optionally produce an `intentTension` field.
+ *
+ * When false/undefined, returns `''` (empty string) so that
+ * `${phase35Block}${phase36Block}CRITICAL:` is byte-identical to
+ * `${phase35Block}CRITICAL:` — preserving the pre-PRI-468 prompt output
+ * (EP-03: no silent fallback).
+ *
+ * This is a pure function — no I/O, no side effects, never throws.
+ */
+function buildIntentTensionBlock(intentGrounding?: boolean): string {
+  if (!intentGrounding) {
+    return '';
+  }
+
+  // SPEC §17 — verbatim text. The LLM is told:
+  // - INTENT.md is optional reference, not a hard rule system
+  // - source='none' / evidenceStrength='weak' when evidence is insufficient
+  // - intent_suspect only for contradiction, vagueness, outdatedness, or
+  //   repeated challenge — not for strategic preference
+  // - intentTension is an optional additive field
+  // - PD surfaces tension; Owner decides value
+  return `
+PHASE 3.6 — Intent Tension Check:
+You may be given an optional Owner-owned INTENT.md.
+
+Use it only as a stable reference for judging whether the pain indicates tension between:
+- the Owner's stated long-term intent
+- the current focus
+- the Agent's actions
+- the Owner's correction
+
+Do not assume every failure is intent drift.
+
+Do not treat INTENT.md as a hard rule system.
+Hard runtime boundaries belong to RuleHost.
+
+If evidence is insufficient, use source='none' or evidenceStrength='weak'.
+
+Only mark intent_suspect when INTENT.md is contradictory, vague, outdated, or repeatedly challenged by confirmed Pain evidence.
+Do not mark intent_suspect merely because you prefer another strategy.
+
+Return intentTension as an optional additive field.
+
+PD surfaces tension.
+Owner decides value.
+`;
+}
+
+/**
  * Options for RootCausePromptBuilder constructor and buildRootCauseInstruction.
  *
  * Uses an opts-object pattern to satisfy @typescript-eslint/max-params.
@@ -55,6 +107,14 @@ export interface RootCausePromptBuilderOptions {
   outputLanguage?: OutputLanguage;
   /** T-E (PRI-371): Inject core axiom grounding as PHASE 3.5 (default: false) */
   coreGrounding?: boolean;
+  /**
+   * PRI-468: Inject intent tension check as PHASE 3.6 (default: false).
+   *
+   * When true, inserts the SPEC §17 text instructing the LLM to optionally
+   * produce an `intentTension` field. When false/undefined, the prompt is
+   * byte-identical to the pre-PRI-468 prompt (EP-03: no silent fallback).
+   */
+  intentGrounding?: boolean;
 }
 
 // ── Instruction builder ──────────────────────────────────────────────────────
@@ -77,7 +137,7 @@ export function buildRootCauseProtocolInstruction(
 ): string {
   const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
   const schema = opts.schema ?? DiagRootCauseOutputV1Schema;
-  const { outputLanguage, coreGrounding } = opts;
+  const { outputLanguage, coreGrounding, intentGrounding } = opts;
 
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
@@ -95,6 +155,13 @@ export function buildRootCauseProtocolInstruction(
     outputLanguage,
     fallback: '\n',
   });
+
+  // PRI-468: When intentGrounding is true, insert PHASE 3.6.
+  // When false or undefined, output is byte-identical to the pre-PRI-468
+  // prompt (EP-03: no silent fallback). The fallback is '' (empty string)
+  // so that `${phase35Block}${phase36Block}CRITICAL:` produces the same
+  // string as `${phase35Block}CRITICAL:` when intentGrounding is off.
+  const phase36Block = buildIntentTensionBlock(intentGrounding);
 
   return `You are a root cause analysis expert. Follow this protocol:
 
@@ -123,7 +190,7 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Design: architecture defects, missing gates, process gaps
 - Assumption: wrong assumptions about env/versions/deps
 - Tooling: tool misconfiguration, API changes
-${phase35Block}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
+${phase35Block}${phase36Block}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
 ${example}
@@ -180,6 +247,7 @@ export class RootCausePromptBuilder {
       schema: opts.schema ?? this.schema,
       outputLanguage: opts.outputLanguage,
       coreGrounding: opts.coreGrounding,
+      intentGrounding: opts.intentGrounding,
     });
   }
 
@@ -200,7 +268,7 @@ export class RootCausePromptBuilder {
     opts: BuildPromptOptions = {},
   ): PromptBuildResult {
     const limits = opts.limits ?? DEFAULT_PROMPT_BUILDER_LIMITS;
-    const { outputLanguage, coreGrounding } = opts;
+    const { outputLanguage, coreGrounding, intentGrounding, intentDoc } = opts;
 
     const truncationWarnings: string[] = [];
 
@@ -233,9 +301,13 @@ export class RootCausePromptBuilder {
     const diagnosticInstruction = this.buildRootCauseInstruction({
       outputLanguage,
       coreGrounding,
+      intentGrounding,
     });
 
     // DPB-04: Explicit top-level fields at the prompt level
+    // PRI-468: Only include `intentDoc` when intentGrounding is on AND a doc
+    // was successfully read. When absent, the prompt is byte-identical to
+    // the pre-PRI-468 prompt (EP-03: no silent fallback).
     const promptInput: PromptInput = {
       taskId: payload.taskId,
       contextHash: payload.contextHash,
@@ -245,6 +317,7 @@ export class RootCausePromptBuilder {
       context: compactContext,
       diagnosticInstruction,
       ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
+      ...(intentGrounding && intentDoc ? { intentDoc } : {}),
     };
 
     // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
