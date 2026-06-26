@@ -30,6 +30,7 @@ import type {
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   IntentDecisionStore,
+  FollowUpPatch,
 } from '../../intent/intent-decision-record.js';
 import type {
   IntentTensionSource,
@@ -310,5 +311,61 @@ export class SqliteIntentDecisionStore implements IntentDecisionStore {
     }
 
     return { counts, lastDecisionAt };
+  }
+
+  /**
+   * Update follow-up action fields on an existing record (PRI-471, SPEC §22.1.4).
+   *
+   * Only fields present in `patch` are written; absent fields are left unchanged.
+   * Returns the updated record, or null if no record exists with the given id.
+   *
+   * ERR checklist:
+   * - EP-01 / ERR-001: the patch fields are typed via the `FollowUpPatch`
+   *   interface; we still re-check string-ness before binding to defend
+   *   against a caller that constructed the patch from untrusted input.
+   * - EP-03 / ERR-002: write failures throw (fail loud).
+   * - EP-07 / ERR-015: re-reads the row after UPDATE so the returned record
+   *   reflects fresh DB state, not optimistic in-memory mutation.
+   */
+  async updateFollowUp(id: string, patch: FollowUpPatch): Promise<IntentDecisionRecord | null> {
+    const db = this.connection.getDb();
+
+    // Build the SET clause dynamically based on which fields are present.
+    // Each field is checked for `!== undefined` so callers can explicitly
+    // set a field to null (clearing it) by passing `null` — but the
+    // FollowUpPatch type uses optional strings, so we treat undefined as
+    // "leave unchanged" and any string (including '') as a real value.
+    const sets: string[] = [];
+    const values: (string | null)[] = [];
+
+    if (patch.resultingCandidateId !== undefined) {
+      sets.push('resulting_candidate_id = ?');
+      values.push(patch.resultingCandidateId);
+    }
+    if (patch.resultingRuleCandidateId !== undefined) {
+      sets.push('resulting_rule_candidate_id = ?');
+      values.push(patch.resultingRuleCandidateId);
+    }
+    if (patch.patchProposalId !== undefined) {
+      sets.push('patch_proposal_id = ?');
+      values.push(patch.patchProposalId);
+    }
+
+    // No fields to update — return the existing record (or null) without writing.
+    if (sets.length === 0) {
+      return await this.getById(id);
+    }
+
+    values.push(id);
+
+    const result = db.prepare(
+      `UPDATE intent_decisions SET ${sets.join(', ')} WHERE id = ?`,
+    ).run(...values);
+
+    // changes === 0 means no row matched the WHERE clause — record not found.
+    if (result.changes === 0) return null;
+
+    // Re-read the row to return fresh state (EP-07 / ERR-015).
+    return await this.getById(id);
   }
 }

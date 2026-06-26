@@ -2,11 +2,21 @@
  * IntentDecisions route — HTTP surface for IntentDecisionRecord (PRI-470, SPEC §21.7).
  *
  * Endpoints (all gated by the `intent_engineering` feature flag):
- * - POST   /api/v1/intent-decisions            → create (201) or idempotent replay (200)
- * - GET    /api/v1/intent-decisions?painId=…   → list by painId
- * - GET    /api/v1/intent-decisions?taskId=…   → list by taskId
- * - GET    /api/v1/intent-decisions/summary    → tallied summary (MUST precede /:id)
- * - GET    /api/v1/intent-decisions/:id        → single record
+ * - POST   /api/v1/intent-decisions                       → create (201) or idempotent replay (200)
+ * - GET    /api/v1/intent-decisions?painId=…              → list by painId
+ * - GET    /api/v1/intent-decisions?taskId=…              → list by taskId
+ * - GET    /api/v1/intent-decisions/summary               → tallied summary (MUST precede /:id)
+ * - GET    /api/v1/intent-decisions/:id                   → single record
+ * - POST   /api/v1/intent-decisions/:id/follow-up         → dispatch governed follow-up (PRI-471)
+ *
+ * PRI-471 follow-up types (SPEC §22.1.4):
+ * - link_candidate         — record which existing principle candidate the Owner
+ *                            chose to link. Does NOT create a candidate.
+ * - guide_rulehost         — returns the CLI guidance for promoting to RuleHost.
+ *                            Does NOT create a rule or approval directly.
+ * - generate_patch_proposal — generates a read-only Intent Patch Proposal and
+ *                            records its id on the decision. Does NOT modify
+ *                            `.principles/INTENT.md`.
  *
  * Runtime Contract rules applied:
  * - Rule 1: parsed JSON body treated as `unknown` (ERR-001)
@@ -22,12 +32,14 @@ import {
   isEvidenceStrength,
   isIntentRelatedField,
   isSuggestedOwnerAction,
+  generateIntentPatchProposal,
 } from '@principles/core/runtime-v2';
 import type {
   IntentDecisionInput,
   IntentRelatedField,
+  FollowUpPatch,
 } from '@principles/core/runtime-v2';
-import { IntentDecisionModel, type IntentDecisionRecordResultModel } from '../models/IntentDecisionModel.js';
+import { IntentDecisionModel, type IntentDecisionRecordResultModel, type FollowUpDispatchResultModel } from '../models/IntentDecisionModel.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
@@ -205,6 +217,81 @@ function sendModelFailure(res: ServerResponse, result: Extract<IntentDecisionRec
   }
 }
 
+// ── PRI-471 follow-up input validation ────────────────────────────────────────
+
+type FollowUpType = 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal';
+
+interface FollowUpInput {
+  type: FollowUpType;
+  candidateId: string; // only meaningful when type === 'link_candidate'
+}
+
+const FOLLOW_UP_TYPES: ReadonlySet<FollowUpType> = new Set([
+  'link_candidate',
+  'guide_rulehost',
+  'generate_patch_proposal',
+]);
+
+/**
+ * Validate the body of POST /api/v1/intent-decisions/:id/follow-up.
+ *
+ * Body shape: `{ type: 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal', candidateId?: string }`
+ *
+ * - `type` is required and must be one of the three allowed values (Rule 2).
+ * - `candidateId` is REQUIRED when `type === 'link_candidate'` (Rule 3: fail loud).
+ * - `candidateId` is IGNORED for other types (not an error — the frontend may
+ *   send it as part of a generic payload).
+ */
+function validateFollowUpInput(parsed: Record<string, unknown>, res: ServerResponse): FollowUpInput | null {
+  if (!Object.hasOwn(parsed, 'type')) {
+    sendBadRequest(res, 'type is required');
+    return null;
+  }
+  const { type } = parsed;
+  if (typeof type !== 'string' || !FOLLOW_UP_TYPES.has(type as FollowUpType)) {
+    sendBadRequest(res, 'type must be one of: link_candidate, guide_rulehost, generate_patch_proposal');
+    return null;
+  }
+  const typedType = type as FollowUpType;
+
+  // candidateId: required for link_candidate, optional otherwise.
+  if (typedType === 'link_candidate') {
+    if (!Object.hasOwn(parsed, 'candidateId')) {
+      sendBadRequest(res, 'candidateId is required when type is link_candidate');
+      return null;
+    }
+    const { candidateId } = parsed;
+    if (typeof candidateId !== 'string' || candidateId === '') {
+      sendBadRequest(res, 'candidateId must be a non-empty string when type is link_candidate');
+      return null;
+    }
+    return { type: typedType, candidateId };
+  }
+
+  // For other types, candidateId is optional and ignored if present.
+  // We do not validate its type here — it is simply not read.
+  return { type: typedType, candidateId: '' };
+}
+
+/**
+ * Map a follow-up model-level failure to an HTTP error with reason + nextAction (Rule 9).
+ */
+function sendFollowUpModelFailure(res: ServerResponse, result: Extract<FollowUpDispatchResultModel, { ok: false }>): void {
+  if (result.reason === 'decision_not_found') {
+    sendNotFound(res, result.nextAction);
+  } else if (result.reason === 'state_db_not_found') {
+    sendError(res, 409, 'workspace_not_initialized', result.reason, {
+      reason: result.reason,
+      nextAction: result.nextAction,
+    });
+  } else {
+    sendError(res, 500, 'intent_decision_follow_up_store_error', result.reason, {
+      reason: result.reason,
+      nextAction: result.nextAction,
+    });
+  }
+}
+
 /* eslint-disable @typescript-eslint/max-params */
 export async function handleIntentDecisionsRoute(
   req: IncomingMessage,
@@ -230,12 +317,16 @@ export async function handleIntentDecisionsRoute(
         sendModelFailure(res, result);
         return;
       }
+      // Response envelope matches IntentDecisionResultData: { record, created }.
+      // The `created` flag lets the frontend distinguish a fresh write from a
+      // replay (200 vs 201 HTTP status also conveys this).
+      const responseData = { record: result.record, created: result.created };
       if (result.created) {
         // Fresh create → 201 (sendJson with explicit status; sendSuccess is 200-only).
-        sendJson(res, 201, { success: true, data: result.record });
+        sendJson(res, 201, { success: true, data: responseData });
       } else {
         // Idempotent replay → 200 with the pre-existing record.
-        sendSuccess(res, result.record);
+        sendSuccess(res, responseData);
       }
     } catch (err: unknown) {
       const message = getErrorMessage(err);
@@ -320,6 +411,115 @@ export async function handleIntentDecisionsRoute(
       sendSuccess(res, record);
     } catch (err: unknown) {
       sendError(res, 500, 'intent_decision_detail_error', getErrorMessage(err));
+    }
+    return;
+  }
+
+  // POST /api/v1/intent-decisions/:id/follow-up — PRI-471 governed follow-up
+  // (SPEC §22.1.4). MUST be matched before the catch-all 404 below.
+  const followUpMatch = /^[/]([^/]+)[/]follow-up$/.exec(subPath);
+  if (req.method === 'POST' && followUpMatch) {
+    try {
+      const [, rawId] = followUpMatch;
+      if (!rawId) {
+        sendError(res, 400, 'invalid_id', 'Intent decision id is missing');
+        return;
+      }
+      let decisionId: string;
+      try {
+        decisionId = decodeURIComponent(rawId);
+      } catch {
+        sendError(res, 400, 'invalid_id', 'Intent decision id contains invalid URI encoding');
+        return;
+      }
+      const body = await readBody(req);
+      const parsed = parseJsonBody(body, res);
+      if (!parsed) return;
+      const followUpInput = validateFollowUpInput(parsed, res);
+      if (!followUpInput) return;
+
+      // ── guide_rulehost: pure guidance, no DB write ──────────────────────
+      // SPEC §22.1.4: promote_to_rulehost goes through the existing RuleHost
+      // candidate/approval path. PD does NOT create a rule or approval here —
+      // the Owner runs the CLI command, which enqueues a code_tool_hook
+      // approval that the Owner can review in the Governance Queue.
+      if (followUpInput.type === 'guide_rulehost') {
+        // Verify the decision exists so we don't return guidance for a
+        // non-existent record (fail loud, ERR-009).
+        const existing = await model.getById(decisionId);
+        if (!existing) {
+          sendNotFound(res, 'Intent decision ' + decisionId + ' not found');
+          return;
+        }
+        sendSuccess(res, {
+          type: 'guide_rulehost',
+          cliCommand: 'pd runtime rulehost',
+          note: 'Run this command in your workspace terminal. PD will create a RuleHost approval that you can review in the Governance Queue. After approval, the resulting rule candidate id can be linked back to this decision.',
+          decisionId,
+        });
+        return;
+      }
+
+      // ── generate_patch_proposal: pure function + DB write ───────────────
+      // SPEC §10 + §22.1.4: revise_intent creates a read-only patch proposal
+      // that the Owner can review and manually apply. PD does NOT auto-apply
+      // the patch to .principles/INTENT.md.
+      if (followUpInput.type === 'generate_patch_proposal') {
+        const existing = await model.getById(decisionId);
+        if (!existing) {
+          sendNotFound(res, 'Intent decision ' + decisionId + ' not found');
+          return;
+        }
+        const proposal = generateIntentPatchProposal(existing);
+        const patch: FollowUpPatch = { patchProposalId: proposal.id };
+        const result = await model.updateFollowUp(decisionId, patch);
+        if (!result.ok) {
+          sendFollowUpModelFailure(res, result);
+          return;
+        }
+        sendSuccess(res, {
+          type: 'generate_patch_proposal',
+          decisionId,
+          record: result.record,
+          patchProposal: { id: proposal.id, markdown: proposal.markdown },
+        });
+        return;
+      }
+
+      // ── link_candidate: record which candidate the Owner chose ─────────
+      // SPEC §22.1.4: confirm_drift can link to an existing principle
+      // candidate. PD does NOT create a candidate here — candidates are
+      // created by the diagnostician committer during normal pain →
+      // diagnosis flow. The Owner links an existing candidate so the audit
+      // trail records which candidate the Owner chose to sediment this
+      // decision into.
+      if (followUpInput.type === 'link_candidate') {
+        const { candidateId } = followUpInput;
+        const patch: FollowUpPatch = { resultingCandidateId: candidateId };
+        const result = await model.updateFollowUp(decisionId, patch);
+        if (!result.ok) {
+          sendFollowUpModelFailure(res, result);
+          return;
+        }
+        sendSuccess(res, {
+          type: 'link_candidate',
+          decisionId,
+          record: result.record,
+          linkedCandidateId: candidateId,
+        });
+        return;
+      }
+
+      // Unreachable: validateFollowUpInput already narrowed the union.
+      // Defensive guard for future enum additions.
+      sendBadRequest(res, 'Unknown follow-up type: ' + String(followUpInput.type));
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      if (message === 'Request body too large') {
+        sendError(res, 413, 'payload_too_large', message);
+      } else {
+        sendError(res, 500, 'intent_decision_follow_up_error', message);
+      }
     }
     return;
   }

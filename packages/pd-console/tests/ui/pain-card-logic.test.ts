@@ -339,28 +339,34 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
   it('builds a full payload with all optional fields', () => {
     const tension = validIntentTension();
     const context: IntentDecisionContext = {
+      id: 'decision-uuid-1',
       recordId: 'pain_abc',
       painId: 'pain_abc',
       taskId: 'task_123',
       intentDocHash: 'sha256:abc',
     };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'confirm_drift', note: 'my note' });
+    // P0 fix (PRI-471): payload now uses server contract fields
+    expect(payload.id).toBe('decision-uuid-1');
     expect(payload.taskId).toBe('task_123');
     expect(payload.source).toBe('action_drift');
     expect(payload.evidenceStrength).toBe('strong');
     expect(payload.relatedIntentFields).toEqual(['current_strategic_focus', 'non_negotiables']);
-    expect(payload.evidence).toEqual(['e1', 'e2', 'e3']);
-    expect(payload.explanation).toBe(tension.explanation);
-    expect(payload.suggestedAction).toBe('confirm_drift');
+    expect(payload.evidenceRefs).toEqual(['e1', 'e2', 'e3']);
     expect(payload.ownerAction).toBe('confirm_drift');
     expect(payload.painId).toBe('pain_abc');
     expect(payload.intentDocHash).toBe('sha256:abc');
     expect(payload.note).toBe('my note');
+    // Removed fields: explanation and suggestedAction are NOT in the payload
+    // (P0 fix: server does not accept them — they are snapshot fields).
+    expect((payload as Record<string, unknown>).explanation).toBeUndefined();
+    expect((payload as Record<string, unknown>).suggestedAction).toBeUndefined();
   });
 
   it('falls back to recordId when taskId is undefined', () => {
     const tension = validIntentTension();
     const context: IntentDecisionContext = {
+      id: 'decision-uuid-2',
       recordId: 'pain_abc',
     };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
@@ -370,6 +376,7 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
   it('omits empty optional fields (empty painId, empty intentDocHash)', () => {
     const tension = validIntentTension();
     const context: IntentDecisionContext = {
+      id: 'decision-uuid-3',
       recordId: 'pain_abc',
       painId: '',
       intentDocHash: '',
@@ -382,6 +389,7 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
   it('omits painId and intentDocHash when not provided in context', () => {
     const tension = validIntentTension();
     const context: IntentDecisionContext = {
+      id: 'decision-uuid-4',
       recordId: 'pain_abc',
     };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
@@ -391,50 +399,49 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
 
   it('trims the note before including it', () => {
     const tension = validIntentTension();
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-5', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe', note: '  trimmed note  ' });
     expect(payload.note).toBe('trimmed note');
   });
 
   it('omits note when it is empty after trimming', () => {
     const tension = validIntentTension();
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-6', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe', note: '   ' });
     expect(payload.note).toBeUndefined();
   });
 
   it('omits note when note is undefined', () => {
     const tension = validIntentTension();
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-7', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
     expect(payload.note).toBeUndefined();
   });
 
-  it('ownerAction overrides suggestedAction (different from suggested)', () => {
+  it('ownerAction is the Owner\'s chosen action (may differ from tension.suggestedOwnerAction)', () => {
     const tension = validIntentTension({ suggestedOwnerAction: 'confirm_drift' });
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-8', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'revise_intent' });
-    // suggestedAction preserves the tension's suggestion
-    expect(payload.suggestedAction).toBe('confirm_drift');
-    // ownerAction is the Owner's chosen action, which may differ
+    // ownerAction is the Owner's chosen action, which may differ from the tension's suggestion
     expect(payload.ownerAction).toBe('revise_intent');
-    expect(payload.ownerAction).not.toBe(payload.suggestedAction);
+    // P0 fix: suggestedAction is no longer in the payload (server doesn't accept it).
+    expect((payload as Record<string, unknown>).suggestedAction).toBeUndefined();
   });
 
-  it('evidence is NOT truncated (truncation is backend job)', () => {
+  it('evidenceRefs is NOT truncated (truncation is backend job)', () => {
     const longEvidence = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7'];
     const tension = validIntentTension({ evidence: longEvidence });
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-9', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
     // All 7 evidence items are preserved — frontend does not truncate
-    expect(payload.evidence).toHaveLength(7);
-    expect(payload.evidence).toEqual(longEvidence);
+    expect(payload.evidenceRefs).toHaveLength(7);
+    expect(payload.evidenceRefs).toEqual(longEvidence);
   });
 
   it('preserves empty evidence array as-is', () => {
     const tension = validIntentTension({ evidence: [] });
-    const context: IntentDecisionContext = { recordId: 'pain_abc' };
+    const context: IntentDecisionContext = { id: 'decision-uuid-10', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
-    expect(payload.evidence).toEqual([]);
+    expect(payload.evidenceRefs).toEqual([]);
   });
 });

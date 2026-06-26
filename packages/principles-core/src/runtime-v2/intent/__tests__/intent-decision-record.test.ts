@@ -171,7 +171,7 @@ describe('IntentDecisionSummary type contract', () => {
 });
 
 describe('IntentDecisionStore interface contract', () => {
-  it('exposes the five SPEC §21.7 methods', () => {
+  it('exposes the six SPEC §21.7 methods (record + 4 reads + updateFollowUp)', () => {
     const store: IntentDecisionStore = {
       record: async () => ({ record: {} as IntentDecisionRecord, created: true }),
       getById: async () => null,
@@ -184,12 +184,14 @@ describe('IntentDecisionStore interface contract', () => {
         },
         lastDecisionAt: null,
       }),
+      updateFollowUp: async () => null,
     };
     expect(typeof store.record).toBe('function');
     expect(typeof store.getById).toBe('function');
     expect(typeof store.listByPainId).toBe('function');
     expect(typeof store.listByTaskId).toBe('function');
     expect(typeof store.getSummary).toBe('function');
+    expect(typeof store.updateFollowUp).toBe('function');
   });
 
   it('record returns IntentDecisionRecordResult', () => {
