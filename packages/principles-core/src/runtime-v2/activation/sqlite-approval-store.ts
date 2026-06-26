@@ -70,6 +70,14 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
 
   async enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord> {
     const db = this.connection.getDb();
+    // P1-3: Application-layer FK check (DB-layer FK deferred to post-MVP table rebuild).
+    // Fail loud if artifact_id references non-existent pi_artifact (ERR-009/ERR-010/ERR-002).
+    const artifactExists = db.prepare('SELECT 1 FROM pi_artifacts WHERE artifact_id = ?').get(input.artifactId);
+    if (!artifactExists) {
+      throw new Error(
+        `approvals.artifact_id references non-existent pi_artifact: ${input.artifactId}`,
+      );
+    }
     const approvalId = makeApprovalId(input.artifactId, input.channel);
     db.prepare(
       'INSERT OR IGNORE INTO approvals' +
@@ -143,33 +151,33 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
 
   async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
-    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
-    if (!existing) return { ok: false, error: 'not_found' };
-    if (existing.status !== 'pending') { return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus }; }
     const now = new Date().toISOString();
-    const updateResult = db.prepare("UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ? WHERE approval_id = ? AND status = 'pending'").run(now, decidedBy, note ?? null, approvalId);
-    if (updateResult.changes === 0) {
+    // Single atomic statement: UPDATE + RETURNING eliminates the race window
+    // between UPDATE and subsequent SELECT (ERR-015 stale state pattern).
+    const row = db.prepare(
+      "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
+    ).get(now, decidedBy, note ?? null, approvalId) as ApprovalRow | undefined;
+    if (!row) {
       const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
       if (!fresh) return { ok: false, error: 'not_found' };
       return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
     }
-    const row = db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }
 
   async reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
-    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
-    if (!existing) return { ok: false, error: 'not_found' };
-    if (existing.status !== 'pending') { return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus }; }
     const now = new Date().toISOString();
-    const updateResult = db.prepare("UPDATE approvals SET status = 'rejected', decided_at = ?, decided_by = ?, rejection_reason = ? WHERE approval_id = ? AND status = 'pending'").run(now, decidedBy, reason, approvalId);
-    if (updateResult.changes === 0) {
+    // Single atomic statement: UPDATE + RETURNING eliminates the race window
+    // between UPDATE and subsequent SELECT (ERR-015 stale state pattern).
+    const row = db.prepare(
+      "UPDATE approvals SET status = 'rejected', decided_at = ?, decided_by = ?, rejection_reason = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
+    ).get(now, decidedBy, reason, approvalId) as ApprovalRow | undefined;
+    if (!row) {
       const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
       if (!fresh) return { ok: false, error: 'not_found' };
       return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
     }
-    const row = db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }
 
@@ -184,22 +192,18 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
 
   async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
-    const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
-    if (!existing) return { ok: false, error: 'not_found' };
-    if (existing.status !== 'pending') {
-      return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
-    }
-    // Atomic UPDATE: derive previous_artifact_id from the current DB value
-    // to prevent lineage drift during concurrent edits (ERR-004/ERR-008).
-    const updateResult = db.prepare(
-      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending'"
-    ).run(input.newArtifactId, input.now, input.editedBy, input.editReason, input.approvalId);
-    if (updateResult.changes === 0) {
+    // Single atomic statement: UPDATE + RETURNING eliminates the race window
+    // between UPDATE and subsequent SELECT (ERR-015 stale state pattern).
+    // Derives previous_artifact_id from current DB value to prevent lineage
+    // drift during concurrent edits (ERR-004/ERR-008).
+    const row = db.prepare(
+      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
+    ).get(input.newArtifactId, input.now, input.editedBy, input.editReason, input.approvalId) as ApprovalRow | undefined;
+    if (!row) {
       const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;
       if (!fresh) return { ok: false, error: 'not_found' };
       return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
     }
-    const row = db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(input.approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }
 }

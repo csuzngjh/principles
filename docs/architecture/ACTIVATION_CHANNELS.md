@@ -221,30 +221,38 @@ interface ApprovalRecord {
 
 **存储**：`state.db: approvals` 表（新建）
 
+> **权威源**：`packages/principles-core/src/runtime-v2/store/sqlite-connection.ts`。本文档如与之冲突以代码为准。
+
 ```sql
 CREATE TABLE approvals (
   approval_id TEXT PRIMARY KEY,
   artifact_id TEXT NOT NULL,
   channel TEXT NOT NULL,
   risk_level TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  confidence REAL,
   requested_at TEXT NOT NULL,
-  requested_by_kind TEXT NOT NULL,
-  requested_by_id TEXT,
   decided_at TEXT,
   decided_by TEXT,
-  reason TEXT,
-  requires_second_confirmation INTEGER DEFAULT 0,
-  second_confirmed_at TEXT,
-  second_confirmed_by TEXT,
-  cooldown_expires_at TEXT,
-  metadata_json TEXT NOT NULL,
-  FOREIGN KEY (artifact_id) REFERENCES pi_artifacts(artifact_id)
+  decision_note TEXT,
+  rejection_reason TEXT,
+  -- context columns (idempotent migration, added on schema upgrade)
+  summary TEXT,
+  trigger_reason TEXT,
+  confidence_explanation TEXT,
+  effect_description TEXT,
+  rejection_effect TEXT,
+  edited_at TEXT,
+  edited_by TEXT,
+  edit_reason TEXT,
+  previous_artifact_id TEXT
 );
 
-CREATE INDEX idx_approvals_status ON approvals(status, channel);
-CREATE INDEX idx_approvals_artifact ON approvals(artifact_id);
+CREATE INDEX idx_approvals_status ON approvals(status);
+CREATE INDEX idx_approvals_channel ON approvals(channel);
 ```
+
+**未落地的 ADR-0006 目标字段**（post-MVP）：`requested_by_kind`、`requested_by_id`、`requires_second_confirmation`、`second_confirmed_at`、`second_confirmed_by`、`cooldown_expires_at`、`metadata_json`、`FOREIGN KEY (artifact_id) REFERENCES pi_artifacts(artifact_id)`。
 
 ### 2.4 RejectionFeedback
 
