@@ -17,11 +17,11 @@ import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { ShinyText } from '../../components/ui/shiny-text.js';
-import { fetchEvidenceChain } from '../../api.js';
-import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData } from '../../api.js';
+import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId } from '../../api.js';
+import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData } from '../../api.js';
 import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format.js';
-import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions } from './pain-card-helpers.js';
+import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, type IntentDecisionContext } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
 // ── State grouping ─────────────────────────────────────────────────────────────
@@ -449,6 +449,9 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
         {shouldRenderIntentTensionPanel(layers.layer2.intentTension) && (
           <IntentTensionPanel
             tension={layers.layer2.intentTension}
+            recordId={record.id}
+            painId={record.id}
+            taskId={record.linkedTaskId ?? undefined}
             t={t}
           />
         )}
@@ -609,6 +612,9 @@ function intentTensionEnumLabel(
 
 interface IntentTensionPanelProps {
   tension: IntentTensionData;
+  recordId: string;
+  painId?: string;
+  taskId?: string;
   t: (key: string) => string;
 }
 
@@ -628,7 +634,7 @@ interface IntentTensionPanelProps {
  * - Uses <dl>/<dt>/<dd> for label-value pairs
  * - Color is not the only indicator (text labels always present)
  */
-function IntentTensionPanel({ tension, t }: IntentTensionPanelProps) {
+function IntentTensionPanel({ tension, recordId, painId, taskId, t }: IntentTensionPanelProps) {
   const sourceLabel = intentTensionEnumLabel(tension.source, 'source', t);
   const strengthLabel = intentTensionEnumLabel(tension.evidenceStrength, 'evidenceStrength', t);
   const actionLabel = intentTensionEnumLabel(tension.suggestedOwnerAction, 'suggestedAction', t);
@@ -706,15 +712,204 @@ function IntentTensionPanel({ tension, t }: IntentTensionPanelProps) {
         </div>
       )}
 
-      {/* PRI-471: Follow-up actions (SPEC §22.1.4)
-          NOT rendered in PRI-469. shouldRenderFollowUpActions() returns false.
-          PRI-471 will replace the stub and render action buttons after the
-          Owner decision is written to IntentDecisionRecord. */}
-      {shouldRenderFollowUpActions() && (
-        <div className="mt-4 pt-3 border-t border-line">
-          {/* PRI-471 will add follow-up action buttons here */}
+      {/* PRI-470: Owner Decision Panel (SPEC §22.1.4)
+          Renders the Owner decision flow. Follow-up actions appear only
+          after a decision is persisted (shouldRenderFollowUpActions). */}
+      <OwnerDecisionPanel
+        tension={tension}
+        recordId={recordId}
+        painId={painId}
+        taskId={taskId}
+        t={t}
+      />
+    </section>
+  );
+}
+
+// ── PRI-470: Owner Decision Panel (SPEC §22.1.4) ─────────────────────────────
+
+interface OwnerDecisionPanelProps {
+  tension: IntentTensionData;
+  recordId: string;
+  painId?: string;
+  taskId?: string;
+  t: (key: string) => string;
+}
+
+type DecisionPanelState = 'idle' | 'submitting' | 'recorded' | 'error';
+type DecisionLoadState = 'loading' | 'loaded' | 'error';
+
+const OWNER_ACTION_BUTTONS: ReadonlyArray<{
+  action: string;
+  labelKey: string;
+}> = [
+  { action: 'confirm_drift', labelKey: 'pages.pain.ownerDecisionSubmitConfirmDrift' },
+  { action: 'revise_intent', labelKey: 'pages.pain.ownerDecisionSubmitReviseIntent' },
+  { action: 'observe', labelKey: 'pages.pain.ownerDecisionSubmitObserve' },
+  { action: 'dismiss', labelKey: 'pages.pain.ownerDecisionSubmitDismiss' },
+  { action: 'promote_to_principle', labelKey: 'pages.pain.ownerDecisionSubmitPromoteToPrinciple' },
+  { action: 'promote_to_rulehost', labelKey: 'pages.pain.ownerDecisionSubmitPromoteToRulehost' },
+];
+
+/**
+ * OwnerDecisionPanel — renders the Owner decision flow for an intent tension.
+ *
+ * State machine: 'idle' | 'submitting' | 'recorded' | 'error'
+ * - On mount, fetches existing decisions by painId (or taskId fallback).
+ * - Shows 6 action buttons + optional note input.
+ * - On submit, calls buildIntentDecisionPayload + recordIntentDecision.
+ * - Follow-up actions placeholder appears when existingDecisions is non-empty.
+ *
+ * Accessibility (EP-09):
+ * - Uses semantic <section> with aria-label
+ * - Buttons have descriptive text labels
+ */
+function OwnerDecisionPanel({ tension, recordId, painId, taskId, t }: OwnerDecisionPanelProps) {
+  const [panelState, setPanelState] = useState<DecisionPanelState>('idle');
+  const [loadState, setLoadState] = useState<DecisionLoadState>('loading');
+  const [existingDecisions, setExistingDecisions] = useState<IntentDecisionRecordData[]>([]);
+  const [note, setNote] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Fetch existing decisions on mount — use painId when available, fall back to taskId.
+  useEffect(() => {
+    let cancelled = false;
+    const loadExisting = async () => {
+      setLoadState('loading');
+      const hasPainId = painId !== undefined && painId.length > 0;
+      const hasTaskId = taskId !== undefined && taskId.length > 0;
+      if (!hasPainId && !hasTaskId) {
+        // Nothing to query by — skip loading, treat as empty.
+        if (!cancelled) setLoadState('loaded');
+        return;
+      }
+      const result = hasPainId
+        ? await listIntentDecisionsByPainId(painId!)
+        : await listIntentDecisionsByTaskId(taskId!);
+      if (cancelled) return;
+      if (!result.success) {
+        setLoadState('error');
+        return;
+      }
+      setExistingDecisions(result.data);
+      setLoadState('loaded');
+    };
+    void loadExisting();
+    return () => { cancelled = true; };
+  }, [painId, taskId]);
+
+  const handleSubmit = async (ownerAction: string) => {
+    setPanelState('submitting');
+    setErrorMsg(null);
+    const context: IntentDecisionContext = {
+      recordId,
+      painId,
+      taskId,
+      intentDocHash: tension.intentDocHash,
+    };
+    const payload = buildIntentDecisionPayload(tension, context, { ownerAction, note });
+    const result = await recordIntentDecision(payload);
+    if (!result.success) {
+      setPanelState('error');
+      setErrorMsg(result.error ?? t('pages.pain.ownerDecisionFailed'));
+      return;
+    }
+    setPanelState('recorded');
+    // Add the new decision so follow-up actions appear.
+    setExistingDecisions([result.data.record, ...existingDecisions]);
+  };
+
+  const hasExisting = existingDecisions.length > 0;
+  const showFollowUp = shouldRenderFollowUpActions(existingDecisions);
+
+  return (
+    <div className="mt-4 pt-3 border-t border-line">
+      <h5 className="text-[13px] font-semibold text-ink mb-1">
+        {t('pages.pain.ownerDecisionPanelTitle')}
+      </h5>
+      <p className="text-ink-3 text-[12px] leading-relaxed mb-3">
+        {t('pages.pain.ownerDecisionPanelSubtitle')}
+      </p>
+
+      {/* Loading existing decisions */}
+      {loadState === 'loading' && (
+        <p className="text-ink-4 text-[12px] italic">
+          {t('pages.pain.ownerDecisionLoadingExisting')}
+        </p>
+      )}
+
+      {/* Failed to load existing decisions */}
+      {loadState === 'error' && (
+        <p className="text-amber text-[12px]">
+          {t('pages.pain.ownerDecisionLoadFailed')}
+        </p>
+      )}
+
+      {/* Existing decision banner */}
+      {loadState === 'loaded' && hasExisting && panelState !== 'recorded' && (
+        <p className="text-ink-3 text-[12px] mb-3 italic">
+          {t('pages.pain.ownerDecisionExisting')}
+        </p>
+      )}
+
+      {/* Recorded success message */}
+      {panelState === 'recorded' && (
+        <p className="text-emerald text-[12px] mb-3 font-medium">
+          {t('pages.pain.ownerDecisionRecorded')}
+        </p>
+      )}
+
+      {/* Error message */}
+      {panelState === 'error' && errorMsg && (
+        <p className="text-danger text-[12px] mb-3">
+          {t('pages.pain.ownerDecisionFailed')}: {errorMsg}
+        </p>
+      )}
+
+      {/* Note input (optional) — disabled during submission or after recorded */}
+      {panelState !== 'recorded' && loadState === 'loaded' && (
+        <>
+          <div className="mb-3">
+            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              {t('pages.pain.ownerDecisionNoteLabel')}
+            </label>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={t('pages.pain.ownerDecisionNotePlaceholder')}
+              disabled={panelState === 'submitting'}
+              className="w-full px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50"
+            />
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2">
+            {OWNER_ACTION_BUTTONS.map(({ action, labelKey }) => (
+              <Button
+                key={action}
+                variant="outline"
+                size="sm"
+                disabled={panelState === 'submitting'}
+                onClick={() => void handleSubmit(action)}
+              >
+                {panelState === 'submitting'
+                  ? t('pages.pain.ownerDecisionSubmitting')
+                  : t(labelKey)}
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Follow-up actions placeholder (SPEC §22.1.4) */}
+      {showFollowUp && (
+        <div className="mt-4 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
+          <p className="text-ink-3 text-[12px] italic">
+            {t('pages.pain.ownerDecisionFollowUpPlaceholder')}
+          </p>
         </div>
       )}
-    </section>
+    </div>
   );
 }

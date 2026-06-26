@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary } from "../../api.js";
-import type { IntentSummaryData, IntentDocWarningData } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary } from "../../api.js";
+import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
 
@@ -160,6 +160,99 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       </span>
       <span className="text-ink-2 text-[12px] font-mono break-all">{value}</span>
     </div>
+  );
+}
+
+// ── Decision Summary Section (SPEC §22.1.1) ──────────────────────────────────
+// Lightweight audit summary derived from IntentDecisionRecord. NOT a dashboard.
+// Only aggregate counts per ownerAction + lastDecisionAt are shown.
+// SPEC forbids displaying metrics that cannot be traced back to IntentDecisionRecord.
+
+type DecisionSummaryState = "loading" | "loaded" | "error";
+
+// Static mapping from ownerAction enum value to its i18n label key.
+// Avoids dynamic string construction so i18n extraction tools can find keys.
+const DECISION_COUNT_LABEL_KEYS: ReadonlyArray<{
+  action: keyof IntentDecisionSummaryData["counts"];
+  labelKey: string;
+}> = [
+  { action: "confirm_drift", labelKey: "pages.intent.decisions.countConfirmDrift" },
+  { action: "revise_intent", labelKey: "pages.intent.decisions.countReviseIntent" },
+  { action: "observe", labelKey: "pages.intent.decisions.countObserve" },
+  { action: "dismiss", labelKey: "pages.intent.decisions.countDismiss" },
+  { action: "promote_to_principle", labelKey: "pages.intent.decisions.countPromoteToPrinciple" },
+  { action: "promote_to_rulehost", labelKey: "pages.intent.decisions.countPromoteToRulehost" },
+];
+
+function DecisionSummarySection() {
+  const { t } = useTranslation();
+  const [state, setState] = useState<DecisionSummaryState>("loading");
+  const [summary, setSummary] = useState<IntentDecisionSummaryData | null>(null);
+
+  const loadSummary = useCallback(async () => {
+    setState("loading");
+    const result = await fetchIntentDecisionSummary();
+    if (!result.success) {
+      // ERR-002: graceful degradation with reason; section collapses to a single line.
+      setState("error");
+      return;
+    }
+    setSummary(result.data);
+    setState("loaded");
+  }, []);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
+
+  return (
+    <section className="mt-8" aria-labelledby="section-decisions">
+      <SectionTitle id="section-decisions">
+        {t("pages.intent.decisions.sectionTitle")}
+      </SectionTitle>
+      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+        {t("pages.intent.decisions.sectionSubtitle")}
+      </p>
+      {state === "loading" && (
+        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-[13px]">
+          {t("common.loading")}
+        </div>
+      )}
+      {state === "error" && (
+        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-[13px]">
+          {t("pages.intent.decisions.loadError")}
+        </div>
+      )}
+      {state === "loaded" && summary && (
+        <div className="bg-panel border border-line rounded-[6px] p-4">
+          {/* Counts per ownerAction — SPEC §22.1.1: zero counts are still rendered (audit clarity). */}
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+            {DECISION_COUNT_LABEL_KEYS.map(({ action, labelKey }) => {
+              const count = summary.counts[action];
+              return (
+                <div key={action} className="flex items-baseline gap-2">
+                  <dt className="text-ink-3 text-[12px]">{t(labelKey)}</dt>
+                  <dd className="text-ink font-mono text-[13px]">{count}</dd>
+                </div>
+              );
+            })}
+          </dl>
+          {/* lastDecisionAt — null means "no decisions recorded yet" */}
+          <div className="mt-4 pt-3 border-t border-line">
+            {summary.lastDecisionAt === null ? (
+              <p className="text-ink-4 text-[12px]">{t("pages.intent.decisions.noDecisions")}</p>
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+                  {t("pages.intent.decisions.lastDecisionAtLabel")}
+                </span>
+                <span className="text-ink-2 text-[12px] font-mono break-all">{summary.lastDecisionAt}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -345,6 +438,13 @@ export function IntentPage() {
               </p>
             )}
           </div>
+        )}
+
+        {/* Decision Summary — SPEC §22.1.1: bottom section, shown when flag is on.
+            Decisions are persisted independently of INTENT.md state, so this
+            section appears regardless of whether INTENT.md was found/OK. */}
+        {summary && summary.flagEnabled && (
+          <DecisionSummarySection />
         )}
       </div>
     </PageShell>

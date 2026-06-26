@@ -131,6 +131,35 @@ export const SuggestedOwnerActionSchema = Type.Union([
 /** Suggested Owner action: confirm_drift | revise_intent | observe | dismiss | promote_to_principle | promote_to_rulehost */
 export type SuggestedOwnerAction = Static<typeof SuggestedOwnerActionSchema>;
 
+// ── Type guards for intent enums (PRI-470) ──────────────────────────────────
+// Runtime-safe guards so untrusted JSON (HTTP body, DB rows, artifact metadata)
+// can be validated without `as` bypasses (ERR-001, ERR-005).
+
+const INTENT_TENSION_SOURCES: readonly IntentTensionSource[] = ['none', 'action_drift', 'intent_suspect', 'healthy_tension'];
+const EVIDENCE_STRENGTHS: readonly EvidenceStrength[] = ['weak', 'moderate', 'strong'];
+const INTENT_RELATED_FIELDS: readonly IntentRelatedField[] = ['why', 'desired_outcome', 'non_negotiables', 'stop_escalation', 'current_strategic_focus'];
+const SUGGESTED_OWNER_ACTIONS: readonly SuggestedOwnerAction[] = ['confirm_drift', 'revise_intent', 'observe', 'dismiss', 'promote_to_principle', 'promote_to_rulehost'];
+
+/** Type guard: is `value` a valid IntentTensionSource? */
+export function isIntentTensionSource(value: unknown): value is IntentTensionSource {
+  return typeof value === 'string' && (INTENT_TENSION_SOURCES as readonly string[]).includes(value);
+}
+
+/** Type guard: is `value` a valid EvidenceStrength? */
+export function isEvidenceStrength(value: unknown): value is EvidenceStrength {
+  return typeof value === 'string' && (EVIDENCE_STRENGTHS as readonly string[]).includes(value);
+}
+
+/** Type guard: is `value` a valid IntentRelatedField? */
+export function isIntentRelatedField(value: unknown): value is IntentRelatedField {
+  return typeof value === 'string' && (INTENT_RELATED_FIELDS as readonly string[]).includes(value);
+}
+
+/** Type guard: is `value` a valid SuggestedOwnerAction? */
+export function isSuggestedOwnerAction(value: unknown): value is SuggestedOwnerAction {
+  return typeof value === 'string' && (SUGGESTED_OWNER_ACTIONS as readonly string[]).includes(value);
+}
+
 /**
  * IntentTension schema (SPEC §16.2).
  *
