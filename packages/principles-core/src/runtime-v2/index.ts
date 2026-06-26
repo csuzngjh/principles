@@ -221,6 +221,10 @@ export {
   EvidenceStrengthSchema,
   IntentRelatedFieldSchema,
   SuggestedOwnerActionSchema,
+  isIntentTensionSource,
+  isEvidenceStrength,
+  isIntentRelatedField,
+  isSuggestedOwnerAction,
 } from './diagnostician/diag-rootcause-output.js';
 export type {
   IntentTension,
@@ -1701,4 +1705,12 @@ export type {
   IntentDocReadResult,
   IntentDocReference,
   IntentDocReadReason,
+  IntentDecisionRecord,
+  IntentDecisionInput,
+  IntentDecisionRecordResult,
+  IntentDecisionSummary,
+  IntentDecisionStore,
 } from './intent/index.js';
+
+// PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
+export { SqliteIntentDecisionStore } from './store/intent/index.js';

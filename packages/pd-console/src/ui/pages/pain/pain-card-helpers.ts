@@ -5,7 +5,8 @@
  * No React dependency, no I/O. All functions are pure.
  */
 
-import type { IntentTensionData } from '../../utils/validators.js';
+import type { IntentTensionData, IntentDecisionRecordData } from '../../utils/validators.js';
+import type { IntentDecisionInputPayload } from '../../api.js';
 
 // ── Confidence mapping ────────────────────────────────────────────────────────
 
@@ -207,16 +208,80 @@ export function shouldRenderIntentTensionPanel(tension: IntentTensionData | null
  * RuleHost, view Intent Patch Proposal) should be visible.
  *
  * SPEC §22.1.4: follow-up actions are NOT the first-layer decision. They only
- * appear after the Owner has confirmed a decision. In PRI-469 (this slice),
- * we do NOT implement the Owner decision flow yet — that is PRI-471. So this
- * helper always returns false here, and the follow-up actions UI is not
- * rendered. The helper exists so the UI code can call it without conditional
- * imports when PRI-471 lands.
+ * appear after the Owner has confirmed a decision (an IntentDecisionRecord
+ * has been persisted for this tension).
  *
- * PRI-471 will replace this stub with a real check against IntentDecisionRecord.
+ * PRI-470: replaced the PRI-469 stub. Now returns true only when a non-empty
+ * decisions array exists — i.e., at least one IntentDecisionRecord has been
+ * persisted for this tension.
  */
-export function shouldRenderFollowUpActions(): boolean {
-  // PRI-469: follow-up actions are out of scope. PRI-471 will implement the
-  // Owner decision flow and replace this stub.
-  return false;
+export function shouldRenderFollowUpActions(
+  decisions?: IntentDecisionRecordData[] | null,
+): boolean {
+  if (!Array.isArray(decisions)) return false;
+  return decisions.length > 0;
+}
+
+// ── PRI-470: Owner decision payload builder (SPEC §22.1) ─────────────────────
+
+/**
+ * Context needed to build an IntentDecisionInputPayload from a tension.
+ * `recordId` is the evidence chain record ID used as a fallback when taskId
+ * is not available. `painId` and `intentDocHash` are optional.
+ */
+export interface IntentDecisionContext {
+  recordId: string;
+  painId?: string;
+  taskId?: string;
+  intentDocHash?: string;
+}
+
+/**
+ * The Owner's decision on an intent tension. `ownerAction` overrides
+ * `tension.suggestedOwnerAction` — the Owner may choose a different action
+ * than the one PD suggested. `note` is an optional trimmed annotation.
+ */
+export interface IntentDecisionChoice {
+  ownerAction: string;
+  note?: string;
+}
+
+/**
+ * Build an IntentDecisionInputPayload from an IntentTension and the Owner's
+ * chosen action. The payload is sent to POST /api/v1/intent-decisions.
+ *
+ * - `taskId` falls back to `recordId` when not provided.
+ * - Optional fields (painId, intentDocHash, note) are omitted when empty.
+ * - `note` is trimmed before being included.
+ * - `evidence` is passed through as-is; truncation is the backend's job
+ *   (the frontend must not silently drop evidence the Owner might rely on).
+ * - `ownerAction` overrides `tension.suggestedOwnerAction` — the Owner may
+ *   choose a different action than the one PD suggested.
+ */
+export function buildIntentDecisionPayload(
+  tension: IntentTensionData,
+  context: IntentDecisionContext,
+  choice: IntentDecisionChoice,
+): IntentDecisionInputPayload {
+  const { ownerAction, note } = choice;
+  const payload: IntentDecisionInputPayload = {
+    taskId: context.taskId ?? context.recordId,
+    source: tension.source,
+    evidenceStrength: tension.evidenceStrength,
+    relatedIntentFields: tension.relatedIntentFields,
+    evidence: tension.evidence,
+    explanation: tension.explanation,
+    suggestedAction: tension.suggestedOwnerAction,
+    ownerAction,
+  };
+  if (context.painId !== undefined && context.painId.length > 0) {
+    payload.painId = context.painId;
+  }
+  if (context.intentDocHash !== undefined && context.intentDocHash.length > 0) {
+    payload.intentDocHash = context.intentDocHash;
+  }
+  if (note !== undefined && note.trim().length > 0) {
+    payload.note = note.trim();
+  }
+  return payload;
 }
