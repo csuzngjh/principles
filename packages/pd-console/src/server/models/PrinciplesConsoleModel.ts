@@ -231,7 +231,8 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
       trainingStore: {},
       tree: parseTree(treeRaw),
     };
-  } catch {
+  } catch (e) {
+    console.warn('PrinciplesConsoleModel: failed to parse principle_training_state.json, returning empty tree:', e);
     return { trainingStore: {}, tree: createEmptyTree() };
   }
 }

@@ -47,7 +47,6 @@ function AuthRoutes() {
     if (authed !== true) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      console.log('handleKeyDown event:', e.key, 'altKey:', e.altKey);
       if (!e.altKey) return;
 
       const target = e.target as HTMLElement | null;
@@ -58,7 +57,6 @@ function AuthRoutes() {
          target.tagName === "SELECT" ||
          target.isContentEditable)
       ) {
-        console.log('handleKeyDown ignored: input focused');
         return;
       }
 
@@ -89,21 +87,17 @@ function AuthRoutes() {
           targetPath = "/settings";
           break;
         default:
-          console.log('handleKeyDown: key mismatch:', e.key);
           return;
       }
 
       if (targetPath) {
-        console.log('handleKeyDown navigating to:', targetPath);
         e.preventDefault();
         navigate(targetPath);
       }
     };
 
-    console.log('Registering handleKeyDown listener');
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      console.log('Removing handleKeyDown listener');
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [authed, navigate]);
