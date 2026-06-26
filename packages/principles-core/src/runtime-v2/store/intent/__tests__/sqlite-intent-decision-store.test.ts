@@ -232,4 +232,86 @@ describe('SqliteIntentDecisionStore', () => {
       expect(summary.lastDecisionAt).not.toBeNull();
     });
   });
+
+  // ── PRI-471: updateFollowUp() (SPEC §22.1.4) ─────────────────────────────
+  describe('updateFollowUp()', () => {
+    it('writes patchProposalId and returns the updated record', async () => {
+      const created = await store.record(makeInput({ id: 'rec-patch', ownerAction: 'revise_intent' }));
+      expect(created.record.patchProposalId).toBeUndefined();
+
+      const updated = await store.updateFollowUp('rec-patch', { patchProposalId: 'patch-rec-patch' });
+      expect(updated).not.toBeNull();
+      expect(updated?.id).toBe('rec-patch');
+      expect(updated?.patchProposalId).toBe('patch-rec-patch');
+      // Unchanged fields stay intact.
+      expect(updated?.ownerAction).toBe('revise_intent');
+      expect(updated?.source).toBe('action_drift');
+    });
+
+    it('writes resultingCandidateId and returns the updated record', async () => {
+      const created = await store.record(makeInput({ id: 'rec-link', ownerAction: 'confirm_drift' }));
+      expect(created.record.resultingCandidateId).toBeUndefined();
+
+      const updated = await store.updateFollowUp('rec-link', { resultingCandidateId: 'cand-001' });
+      expect(updated).not.toBeNull();
+      expect(updated?.resultingCandidateId).toBe('cand-001');
+      // Other follow-up fields remain unset.
+      expect(updated?.resultingRuleCandidateId).toBeUndefined();
+      expect(updated?.patchProposalId).toBeUndefined();
+    });
+
+    it('writes resultingRuleCandidateId independently', async () => {
+      await store.record(makeInput({ id: 'rec-rule', ownerAction: 'promote_to_rulehost' }));
+      const updated = await store.updateFollowUp('rec-rule', { resultingRuleCandidateId: 'rule-cand-9' });
+      expect(updated?.resultingRuleCandidateId).toBe('rule-cand-9');
+      expect(updated?.resultingCandidateId).toBeUndefined();
+    });
+
+    it('returns null when the record does not exist', async () => {
+      const result = await store.updateFollowUp('does-not-exist', { patchProposalId: 'p-x' });
+      expect(result).toBeNull();
+    });
+
+    it('returns the existing record unchanged when patch has no fields', async () => {
+      await store.record(makeInput({ id: 'rec-empty', ownerAction: 'observe' }));
+      const result = await store.updateFollowUp('rec-empty', {});
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe('rec-empty');
+      expect(result?.patchProposalId).toBeUndefined();
+      expect(result?.resultingCandidateId).toBeUndefined();
+      expect(result?.resultingRuleCandidateId).toBeUndefined();
+    });
+
+    it('only updates fields present in the patch (leaves others unchanged)', async () => {
+      await store.record(makeInput({ id: 'rec-multi', ownerAction: 'confirm_drift' }));
+      // First follow-up: set patchProposalId
+      await store.updateFollowUp('rec-multi', { patchProposalId: 'patch-1' });
+      // Second follow-up: set resultingCandidateId — patchProposalId must persist
+      const updated = await store.updateFollowUp('rec-multi', { resultingCandidateId: 'cand-A' });
+      expect(updated?.patchProposalId).toBe('patch-1');
+      expect(updated?.resultingCandidateId).toBe('cand-A');
+    });
+
+    it('persists the follow-up fields across a fresh read (EP-07 / ERR-015)', async () => {
+      // Write the patch
+      await store.record(makeInput({ id: 'rec-persist', ownerAction: 'revise_intent' }));
+      await store.updateFollowUp('rec-persist', { patchProposalId: 'patch-persist' });
+
+      // Read the row fresh — the field MUST be persisted, not just in-memory.
+      const fresh = await store.getById('rec-persist');
+      expect(fresh?.patchProposalId).toBe('patch-persist');
+
+      // Also verify the raw DB column was written.
+      const row = connection.getDb().prepare(
+        'SELECT patch_proposal_id, resulting_candidate_id, resulting_rule_candidate_id FROM intent_decisions WHERE id = ?',
+      ).get('rec-persist') as {
+        patch_proposal_id: string | null;
+        resulting_candidate_id: string | null;
+        resulting_rule_candidate_id: string | null;
+      };
+      expect(row.patch_proposal_id).toBe('patch-persist');
+      expect(row.resulting_candidate_id).toBeNull();
+      expect(row.resulting_rule_candidate_id).toBeNull();
+    });
+  });
 });

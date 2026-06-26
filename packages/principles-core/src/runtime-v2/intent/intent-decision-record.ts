@@ -94,6 +94,21 @@ export interface IntentDecisionSummary {
 }
 
 /**
+ * Patch for updating follow-up action fields on an existing IntentDecisionRecord.
+ * Used by PRI-471 to record which follow-up action was dispatched after the
+ * Owner decision was persisted (SPEC §22.1.4).
+ *
+ * Only one field should be set per call — each follow-up type is independent.
+ * Setting a field to `undefined` leaves it unchanged; the store only updates
+ * fields that are explicitly provided.
+ */
+export interface FollowUpPatch {
+  resultingCandidateId?: string;
+  resultingRuleCandidateId?: string;
+  patchProposalId?: string;
+}
+
+/**
  * Durable store contract for IntentDecisionRecord (SPEC §21.7 persistence).
  *
  * Implementations MUST:
@@ -112,4 +127,10 @@ export interface IntentDecisionStore {
   listByPainId(painId: string): Promise<IntentDecisionRecord[]>;
   listByTaskId(taskId: string): Promise<IntentDecisionRecord[]>;
   getSummary(): Promise<IntentDecisionSummary>;
+  /**
+   * Update follow-up action fields on an existing record (PRI-471, SPEC §22.1.4).
+   * Returns the updated record, or null if the record does not exist.
+   * Only fields present in `patch` are updated; others remain unchanged.
+   */
+  updateFollowUp(id: string, patch: FollowUpPatch): Promise<IntentDecisionRecord | null>;
 }
