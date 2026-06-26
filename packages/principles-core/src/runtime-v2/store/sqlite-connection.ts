@@ -16,6 +16,10 @@ import { join } from 'path';
 import * as fs from 'fs';
 import { PDRuntimeError } from '../error-categories.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
@@ -129,6 +133,28 @@ export class SqliteConnection {
       return { journalMode: 'error', busyTimeout: 0, synchronous: 'error', foreignKeys: false, healthy: false, issues: ['pragma read failed - database may be corrupted'] };
     }
   }
+
+  /**
+   * Returns the current schema version of state.db.
+   * Versions are stored as TEXT and compared lexicographically (e.g., '000' < '001').
+   * Returns '000' for fresh databases or if the table is somehow missing.
+   */
+  getSchemaVersion(): string {
+    const db = this.getDb();
+    const row = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get();
+    if (!isRecord(row) || typeof row.version !== 'string') return '000';
+    return row.version;
+  }
+
+  /**
+   * Records a new schema version after a migration is applied.
+   * Each call inserts a new row (append-only history for audit).
+   */
+  setSchemaVersion(version: string): void {
+    const db = this.getDb();
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version);
+  }
+
   private initSchema(): void {
     const db = this.db as Database.Database;
     db.exec(`
@@ -367,6 +393,21 @@ export class SqliteConnection {
       DROP TABLE IF EXISTS confirm_first_state;
       DROP INDEX IF EXISTS idx_confirm_first_state_last_seen;
     `);
+
+    // P2-10: Minimal schema_version table for state.db migration tracking.
+    // core cannot import plugin's MigrationRunner (dependency direction),
+    // so this is a lightweight version that records schema version history.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_version (
+        version TEXT NOT NULL DEFAULT '000',
+        applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      );
+    `);
+    // Seed initial version '000' if table is empty (fresh database).
+    const countRow = db.prepare('SELECT COUNT(*) as cnt FROM schema_version').get();
+    if (!isRecord(countRow) || typeof countRow.cnt !== 'number' || countRow.cnt === 0) {
+      db.prepare("INSERT INTO schema_version (version) VALUES ('000')").run();
+    }
   }
 
   private migrateSchema(): void {
