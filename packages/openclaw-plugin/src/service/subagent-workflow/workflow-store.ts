@@ -93,8 +93,12 @@ export class WorkflowStore {
             try {
                 this.db.exec('ALTER TABLE subagent_workflows ADD COLUMN duration_ms INTEGER');
                 console.info(`[PD:WorkflowStore] Schema migration v${fromVersion} → v${toVersion}: added duration_ms column`);
-            } catch {
-                void 0;
+            } catch (err: unknown) {
+                // rc-9: surface failure reason instead of silent void 0
+                const message = err instanceof Error ? err.message : String(err);
+                if (!message.includes('duplicate column name')) {
+                    console.info(`[PD:WorkflowStore] Schema migration v${fromVersion} → v${toVersion} failed: ${message}`);
+                }
             }
         }
     }
@@ -270,5 +274,93 @@ export class WorkflowStore {
         `).all(workflowType, limit) as { duration_ms: number }[];
 
         return rows.map(r => r.duration_ms);
+    }
+}
+
+/**
+ * Initialize subagent_workflows.db schema at the given workspace directory.
+ *
+ * Opens the DB in write mode, applies the full schema (tables + indexes + migrations),
+ * then closes the DB. Used by `pd runtime init` for unified DB initialization.
+ *
+ * Idempotent: safe to call on an existing DB; all CREATE statements use IF NOT EXISTS.
+ *
+ * @returns list of created/verified table names and any warnings
+ */
+export function initWorkflowSchema(workspaceDir: string): { tables: string[]; warnings: string[] } {
+    const resolvedDir = path.resolve(workspaceDir);
+    const stateDir = path.join(resolvedDir, '.state');
+    const dbPath = path.join(stateDir, 'subagent_workflows.db');
+    const warnings: string[] = [];
+    const tables = ['schema_version', 'subagent_workflows', 'subagent_workflow_events'];
+
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const db = new Database(dbPath);
+    try {
+        db.pragma('journal_mode = WAL');
+        db.pragma('foreign_keys = ON');
+        db.pragma('synchronous = NORMAL');
+        db.pragma(`busy_timeout = ${DEFAULT_BUSY_TIMEOUT_MS}`);
+
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS subagent_workflows (
+                workflow_id TEXT PRIMARY KEY,
+                workflow_type TEXT NOT NULL,
+                transport TEXT NOT NULL,
+                parent_session_id TEXT NOT NULL,
+                child_session_key TEXT NOT NULL,
+                run_id TEXT,
+                state TEXT NOT NULL DEFAULT 'pending',
+                cleanup_state TEXT NOT NULL DEFAULT 'none',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_observed_at INTEGER,
+                duration_ms INTEGER,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE IF NOT EXISTS subagent_workflow_events (
+                workflow_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                from_state TEXT,
+                to_state TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (workflow_id) REFERENCES subagent_workflows(workflow_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflows_parent_session ON subagent_workflows(parent_session_id);
+            CREATE INDEX IF NOT EXISTS idx_workflows_child_session ON subagent_workflows(child_session_key);
+            CREATE INDEX IF NOT EXISTS idx_workflows_state ON subagent_workflows(state);
+            CREATE INDEX IF NOT EXISTS idx_workflows_type ON subagent_workflows(workflow_type);
+            CREATE INDEX IF NOT EXISTS idx_events_workflow ON subagent_workflow_events(workflow_id);
+        `);
+
+        // Run migrations to bring schema up to SCHEMA_VERSION
+        const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
+        const currentVersion = row?.version ?? 0;
+        if (currentVersion === 0) {
+            db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+        } else if (currentVersion < SCHEMA_VERSION) {
+            // Inline migration logic (mirrors WorkflowStore.runMigrations)
+            if (currentVersion < 2 && SCHEMA_VERSION >= 2) {
+                try {
+                    db.exec('ALTER TABLE subagent_workflows ADD COLUMN duration_ms INTEGER');
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    if (!message.includes('duplicate column name')) {
+                        warnings.push(`migration v${currentVersion}→v${SCHEMA_VERSION} duration_ms failed: ${message}`);
+                    }
+                }
+            }
+            db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
+        }
+
+        return { tables, warnings };
+    } finally {
+        db.close();
     }
 }
