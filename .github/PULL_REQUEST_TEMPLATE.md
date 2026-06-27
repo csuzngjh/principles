@@ -68,6 +68,23 @@ PR 模板分层说明：
 - [ ] Core 边界检查：本 PR 是否在 `packages/principles-core/src/` 新增了 `fs`/`path` 导入？如果是，是否更新了 `architecture-regression.test.ts` 的白名单和 `eslint.config.js` 的豁免列表？
   - 规则引用: `antipattern-core-io`
 
+### Core Store 契约变更审计（条件性 — 仅当修改 `packages/principles-core/src/**/sqlite-*-store.ts` 时填写）
+<!-- 若本 PR 修改了 core store 方法的签名、新增 throw guard、或新增 precondition，
+     必须列出所有跨包 caller 并确认已验证。参考 ERR-083。 -->
+<!-- 触发条件：packages/principles-core/src/**/sqlite-*-store.ts 中任何方法的
+     签名变更、新增 throw、或新增 precondition（如 FK 校验、必填字段校验） -->
+
+- [ ] N/A — 本 PR 未修改 core store 契约
+- 或填写审计结果:
+  - 修改的 store 文件与方法: ___
+  - 新增的 throw / precondition: ___
+  - 跨包 caller 审计（列出所有 caller 文件路径 + 是否已验证）:
+    - `packages/openclaw-plugin/...`: 已验证 / 未验证
+    - `packages/pd-cli/...`: 已验证 / 未验证
+    - `packages/pd-console/...`: 已验证 / 未验证
+    - `packages/create-principles-disciple/...`: 已验证 / 未验证
+  - 规则引用: `ERR-083` — 共享 store 契约变更必须审计跨包 caller
+
 ### ERR Checklist（必填）
 <!-- 列出本 PR 考虑过的 ERR 条目（最少 3 个），及如何避免复发。参考 docs/ERROR_PATTERN_INDEX.md -->
 <!-- 示例：ERR-001 (parsed JSON as any) — 本 PR 使用 typeof 类型守卫，未使用 as 绕过 -->
