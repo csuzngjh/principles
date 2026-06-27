@@ -11,7 +11,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors — including degradation/fallback/retry-exhausted paths.
 - **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous; degradation paths emit objects built from validator-rejected candidates.
 - **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; shape checks validate fields that actually exist in the target type; **every output-emitting path (happy, degraded, fallback, exhausted) emits only validated objects — degradation is a content transform, not a trust escape hatch**.
-- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069, ERR-076.
+- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069, ERR-076, ERR-085.
 - **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, and casts near parse/adapter/DB/CLI boundaries; grep degradation/fallback functions for emit-before-validate.
 
 ### EP-02 Production Path Wiring
@@ -34,9 +34,9 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 - **Use when**: touching `packages/pd-cli`, operator commands, installers, command registration, or JSON mode.
 - **Failure mode**: flags parse differently than handlers expect, `process.exit()` falls through, dry-run mutates, JSON stdout is polluted, or nextAction is unusable.
-- **Must check**: parser-level tests use the real Commander program; failed paths stop execution and do not mutate state; `--json` emits exactly one parseable object; `--no-<flag>` options are stored as the positive form (e.g., `--no-enqueue-next` → `opts.enqueueNext`), never `opts.noEnqueueNext`.
-- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063, ERR-066.
-- **Automation target**: command wiring tests that call `program.parseAsync()` with full command paths.
+- **Must check**: parser-level tests use the real Commander program; failed paths stop execution and do not mutate state; `--json` emits exactly one parseable object; `--no-<flag>` options are stored as the positive form (e.g., `--no-enqueue-next` → `opts.enqueueNext`), never `opts.noEnqueueNext`; **one-shot migration scripts that mutate multiple DB rows must wrap the mutation loop in `db.transaction(() => { ... })()` so partial failures roll back (ERR-086); docstrings claiming "default dry-run" must match `parseArgs()` actual default — verify by reading the flag-parsing code, not the docstring (ERR-023 recurrence on PR #1079)**.
+- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063, ERR-066, ERR-086.
+- **Automation target**: command wiring tests that call `program.parseAsync()` with full command paths; for migration scripts, grep the script for `db.transaction` and assert it wraps every `db.prepare(...).run()` call in the apply/mutate phase.
 
 ### EP-05 Loop State Freshness
 
