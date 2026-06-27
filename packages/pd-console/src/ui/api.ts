@@ -14,6 +14,7 @@ import {
   validateConfigCatalog,
   validateAgentBindingUpdate,
   validateDefaultRuntimeUpdate,
+  validateFeatureFlagUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
   validateActivations,
@@ -29,7 +30,6 @@ import {
   validateEvidenceChain,
   validateTrajectoryData,
   validateIntentSummary,
-  validateIntentDecisionRecord,
   validateIntentDecisionList,
   validateIntentDecisionResult,
   validateIntentDecisionSummary,
@@ -47,6 +47,7 @@ import type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
@@ -225,6 +226,18 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
+async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/archive`, {
+    method: "POST",
+  });
+}
+
+async function unarchivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/unarchive`, {
+    method: "POST",
+  });
+}
+
 // ── Principle Trajectory ──────────────────────────────────────────────────────
 
 async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
@@ -232,10 +245,6 @@ async function fetchPrincipleTrajectory(principleId: string): Promise<ApiRespons
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-
-async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalRecordDirect);
-}
 
 async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
@@ -326,6 +335,22 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
       body: JSON.stringify({ defaultRuntime }),
     },
     validateDefaultRuntimeUpdate,
+  );
+}
+
+// ── Feature Flag Toggle (spec 2026-06-27 §13.5) ─────────────────────────────
+
+async function patchFeatureFlag(
+  featureName: string,
+  enabled: boolean,
+): Promise<ApiResponse<FeatureFlagUpdateData>> {
+  return request<FeatureFlagUpdateData>(
+    `/api/v1/config/features/${encodeURIComponent(featureName)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+    validateFeatureFlagUpdate,
   );
 }
 
@@ -464,16 +489,6 @@ async function listIntentDecisionsByTaskId(
   );
 }
 
-async function getIntentDecision(
-  decisionId: string,
-): Promise<ApiResponse<IntentDecisionRecordData>> {
-  return request<IntentDecisionRecordData>(
-    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}`,
-    undefined,
-    validateIntentDecisionRecord,
-  );
-}
-
 async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionSummaryData>> {
   return request<IntentDecisionSummaryData>(
     '/api/v1/intent-decisions/summary',
@@ -521,14 +536,14 @@ export {
   setToken,
   clearToken,
   checkAuth,
-  request,
-  fetchApprovalDetail,
   approveApproval,
   rejectApproval,
   editApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
   fetchPrincipleTrajectory,
+  archivePrinciple,
+  unarchivePrinciple,
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,
@@ -537,6 +552,7 @@ export {
   fetchConfigCatalog,
   updateAgentBinding,
   updateDefaultRuntime,
+  patchFeatureFlag,
   fetchOutputLanguage,
   updateOutputLanguage,
   fetchWorkspaces,
@@ -557,7 +573,6 @@ export {
   recordIntentDecision,
   listIntentDecisionsByPainId,
   listIntentDecisionsByTaskId,
-  getIntentDecision,
   fetchIntentDecisionSummary,
   dispatchFollowUp,
 };
@@ -578,6 +593,7 @@ export type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
