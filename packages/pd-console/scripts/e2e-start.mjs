@@ -1,9 +1,9 @@
-// E2E 服务器启动脚本：创建临时工作区 + 启动 tsx 服务器
+// E2E 服务器启动脚本：创建临时工作区 + seed 测试数据 + 启动 tsx 服务器
 // 跨平台兼容（Node API 而非 shell），被 playwright.config.ts 的 webServer.command 调用
 import { mkdtempSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 
 const workspaceDir = mkdtempSync(join(tmpdir(), 'pd-console-e2e-'));
 console.log(`[e2e] workspace: ${workspaceDir}`);
@@ -13,6 +13,22 @@ const webRoot = join(process.cwd(), 'dist', 'web');
 if (!existsSync(webRoot)) {
   console.error('[e2e] dist/web missing, run "npm run build:ui" first');
   process.exit(1);
+}
+
+// Seed 测试数据：初始化 state.db schema + 插入 approvals/principles/pain_events
+// 使用 spawnSync 同步等待 seed 完成后再启动 server（server 用 readonly 打开 db）
+const seedResult = spawnSync(
+  'npx',
+  ['tsx', 'scripts/e2e-seed.ts', workspaceDir],
+  {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    cwd: process.cwd(),
+  },
+);
+if (seedResult.status !== 0) {
+  console.error('[e2e] seed failed, aborting');
+  process.exit(seedResult.status ?? 1);
 }
 
 // 启动 tsx 服务器（--no-auth 免认证，强制 loopback 绑定）

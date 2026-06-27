@@ -30,7 +30,6 @@ import {
   validateEvidenceChain,
   validateTrajectoryData,
   validateIntentSummary,
-  validateIntentDecisionRecord,
   validateIntentDecisionList,
   validateIntentDecisionResult,
   validateIntentDecisionSummary,
@@ -246,10 +245,6 @@ async function fetchPrincipleTrajectory(principleId: string): Promise<ApiRespons
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-
-async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalRecordDirect);
-}
 
 async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
@@ -494,16 +489,6 @@ async function listIntentDecisionsByTaskId(
   );
 }
 
-async function getIntentDecision(
-  decisionId: string,
-): Promise<ApiResponse<IntentDecisionRecordData>> {
-  return request<IntentDecisionRecordData>(
-    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}`,
-    undefined,
-    validateIntentDecisionRecord,
-  );
-}
-
 async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionSummaryData>> {
   return request<IntentDecisionSummaryData>(
     '/api/v1/intent-decisions/summary',
@@ -551,8 +536,6 @@ export {
   setToken,
   clearToken,
   checkAuth,
-  request,
-  fetchApprovalDetail,
   approveApproval,
   rejectApproval,
   editApproval,
@@ -590,7 +573,6 @@ export {
   recordIntentDecision,
   listIntentDecisionsByPainId,
   listIntentDecisionsByTaskId,
-  getIntentDecision,
   fetchIntentDecisionSummary,
   dispatchFollowUp,
 };
