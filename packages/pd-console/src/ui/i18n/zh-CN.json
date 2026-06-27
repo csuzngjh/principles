@@ -647,7 +647,12 @@
       "agentEnabled": "已启用",
       "agentDisabled": "已停用",
       "profileLabel": "配置",
-      "readinessLabel": "就绪状态"
+      "readinessLabel": "就绪状态",
+      "empathyCostHint": {
+        "body": "共情观察器已启用 — 每次关键词未命中时会调用 LLM 做深度分析（当前模型：{{provider}}/{{model}}）。",
+        "muted": "如需节省成本，在 workflows.yaml 的 pd-empathy-observer.policy.model 换更便宜模型。",
+        "ack": "知道了"
+      }
     },
     "login": {
       "title": "登录",
@@ -706,7 +711,10 @@
       "flagStatus": {
         "enabled": "标志已开启",
         "disabled": "标志已关闭",
-        "ariaLabel": "intent_engineering 功能标志状态"
+        "ariaLabel": "intent_engineering 功能标志状态",
+        "enable": "启用意图工程",
+        "enabling": "启用中…",
+        "enableFailed": "启用失败，请稍后重试或手动修改 .pd/config.yaml"
       },
       "editEntry": {
         "heading": "编辑 INTENT.md",
@@ -717,8 +725,7 @@
       },
       "flagDisabled": {
         "title": "意图工程已关闭",
-        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。",
-        "nextAction": "如需启用，请在 .pd/config.yaml 中设置 features.intent_engineering.enabled=true，然后重启 pd-console。"
+        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。"
       },
       "notFound": {
         "title": "未找到 INTENT.md",
@@ -769,6 +776,33 @@
         "noDecisions": "暂无决策记录",
         "loadError": "加载决策摘要失败"
       }
+    },
+    "debt": {
+      "eyebrow": "原则债务",
+      "title": "原则债务管理",
+      "subtitle": "审查那些未激活、长期停滞或可能成为技术/行为负债的原则。",
+      "emptyTitle": "暂无原则债务",
+      "emptyDescription": "太棒了！你的所有活跃原则均运行正常，没有发现长期未激活或被晾在审批队列里的情况。",
+      "reasonNeverActivated": "该原则已被批准，但从未真正部署到任何运行通道（如提示词、RuleHost）。",
+      "reasonStagnant": "该原则的审批请求已在队列中滞留超过 7 天，可能已被遗忘。",
+      "suggestedAction": "建议操作",
+      "actionArchive": "归档",
+      "actionDeactivate": "停用通道",
+      "actionKeep": "保留观察",
+      "confirmArchive": "归档该原则会将其移出当前活跃原则库，确认归档吗？",
+      "confirmDeactivate": "停用该通道将使该原则不再在运行时对智能体进行拦截，确认停用吗？",
+      "deactivateSuccess": "通道停用成功。",
+      "deactivateFailed": "停用通道失败。",
+      "archiveSuccess": "原则归档成功。",
+      "archiveFailed": "原则归档失败。",
+      "undoAction": "撤销",
+      "undoSuccess": "操作已撤销。",
+      "undoFailed": "撤销操作失败。",
+      "loadError": "无法加载原则债务数据，请尝试刷新页面。",
+      "daysSinceAgo": "{{count}} 天前",
+      "demoteTooltip": "降权端点开发中",
+      "principleAriaLabel": "原则债务 {{id}}",
+      "listAriaLabel": "原则债务列表"
     }
   },
   "components": {
