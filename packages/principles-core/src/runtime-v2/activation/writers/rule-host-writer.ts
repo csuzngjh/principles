@@ -2,6 +2,7 @@ import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput,
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../../internalization/refiner-rulehost-gate.js';
 import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-rulehost-gate.js';
 import type { GoldenTrace } from '../../golden-trace.js';
+import { validateGoldenTrace } from '../../golden-trace.js';
 
 const DESTRUCTIVE_TOOL_PREFIXES: readonly string[] = ['edit', 'write', 'delete', 'bash', 'exec', 'remove'];
 
@@ -29,19 +30,51 @@ function extractImplementationCode(parsed: Record<string, unknown>): string | nu
   return null;
 }
 
-function extractGoldenTrace(parsed: Record<string, unknown>): GoldenTrace | null {
+type ExtractedGoldenTrace =
+  | { ok: true; trace: GoldenTrace }
+  | { ok: false; reason: string };
+
+/**
+ * Extract and validate the goldenTrace field from parsed artifact contentJson.
+ *
+ * ERR-001/ERR-005 (rc-1/rc-2): the previous implementation used
+ * `as unknown as GoldenTrace` to cast the parsed object without calling
+ * `validateGoldenTrace()`. This bypassed schema validation, allowing
+ * artifacts with illegal `expectedDecision` values (e.g. "requireApproval",
+ * which is a RuleHostDecision runtime enum, not a GoldenTraceDecision test
+ * expectation) to pass canActivate and only fail later inside the sandbox
+ * with an opaque `gate_decision_not_accepted_shadow:rejected_validation_failed`
+ * error. The owner had no way to understand the real cause.
+ *
+ * Now we run the canonical `validateGoldenTrace()` validator and surface a
+ * clear reason pointing at the offending field when validation fails.
+ */
+function extractGoldenTrace(parsed: Record<string, unknown>): ExtractedGoldenTrace {
   const trace = parsed.goldenTrace;
   if (typeof trace !== 'object' || trace === null || Array.isArray(trace)) {
-    return null;
+    return { ok: false, reason: 'no_golden_trace' };
   }
   const traceObj = trace as Record<string, unknown>;
   if (!Array.isArray(traceObj.cases) || traceObj.cases.length === 0) {
-    return null;
+    return { ok: false, reason: 'no_golden_trace' };
   }
   if (typeof traceObj.traceId !== 'string' || traceObj.traceId.trim().length === 0) {
-    return null;
+    return { ok: false, reason: 'no_golden_trace' };
   }
-  return trace as unknown as GoldenTrace;
+
+  // Run the canonical schema validator. This rejects illegal
+  // expectedDecision values (e.g. "requireApproval"), missing required
+  // fields, and other contract violations before entering the sandbox.
+  const validation = validateGoldenTrace(trace);
+  if (!validation.valid) {
+    const detail = validation.errors.slice(0, 3).join('; ');
+    return {
+      ok: false,
+      reason: `golden_trace_schema_invalid: ${detail}`,
+    };
+  }
+
+  return { ok: true, trace: trace as GoldenTrace };
 }
 
 function extractRuleHostGateDecision(parsed: Record<string, unknown>): string | null {
@@ -93,10 +126,11 @@ export class RuleHostWriter implements ChannelWriter {
       return { ok: false, reason: 'no_implementation_code', riskLevel: 'high' };
     }
 
-    const goldenTrace = extractGoldenTrace(parsed);
-    if (!goldenTrace) {
-      return { ok: false, reason: 'no_golden_trace', riskLevel: 'high' };
+    const goldenTraceResult = extractGoldenTrace(parsed);
+    if (!goldenTraceResult.ok) {
+      return { ok: false, reason: goldenTraceResult.reason, riskLevel: 'high' };
     }
+    const goldenTrace = goldenTraceResult.trace;
 
     const gateDecision = extractRuleHostGateDecision(parsed);
     if (gateDecision !== 'accepted_shadow') {

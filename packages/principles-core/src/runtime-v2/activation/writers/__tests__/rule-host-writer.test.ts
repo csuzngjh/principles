@@ -23,6 +23,13 @@ function makeGoldenTrace(): GoldenTrace {
         params: { path: '/etc/passwd' },
         expectedDecision: 'block',
       },
+      {
+        caseId: 'case-002',
+        kind: 'positive',
+        toolName: 'edit_file',
+        params: { path: '/project/src/safe.ts' },
+        expectedDecision: 'allow',
+      },
     ],
     createdAt: '2026-05-17T00:00:00.000Z',
     version: 1,
@@ -248,6 +255,46 @@ describe('RuleHostWriter', () => {
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('no_golden_trace');
+  });
+
+  // Regression: artifact with illegal expectedDecision value (e.g. "requireApproval",
+  // which is a RuleHostDecision runtime enum, not a GoldenTraceDecision test expectation)
+  // must be rejected at the schema validation layer with a clear, actionable reason —
+  // NOT passed through to the sandbox where it fails with an opaque
+  // "gate_decision_not_accepted_shadow:rejected_validation_failed" error.
+  // See ERR-001/ERR-005 (rc-1/rc-2): previously extractGoldenTrace() used
+  // `as unknown as GoldenTrace` to bypass schema validation.
+  it('rejects artifact with illegal expectedDecision (requireApproval) before sandbox, with clear reason', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const badTrace = {
+      ...makeGoldenTrace(),
+      cases: [
+        {
+          caseId: 'case-bad',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          // Illegal: requireApproval is a RuleHostDecision, not a GoldenTraceDecision.
+          // Legal values are: allow | block | propose_correction.
+          expectedDecision: 'requireApproval',
+        },
+      ],
+    };
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() { return { decision: "requireApproval", matched: true, reason: "test" }; }',
+        goldenTrace: badTrace,
+        ruleHostGateDecision: 'accepted_shadow',
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    // Must surface the schema violation clearly, not the opaque sandbox error.
+    expect(result.reason).toContain('golden_trace_schema_invalid');
+    expect(result.reason).not.toContain('gate_decision_not_accepted_shadow');
+    // The reason should point at the offending field so the owner knows what to fix.
+    expect(result.reason).toMatch(/expectedDecision|requireApproval|allow.*block.*propose_correction/);
   });
 
   it('rejects artifact where implementationCode is not a string', async () => {
