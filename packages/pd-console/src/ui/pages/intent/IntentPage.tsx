@@ -115,14 +115,17 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
         disabled={busy}
         onClick={async () => {
           setBusy(true);
-          const res = await patchFeatureFlag("intent_engineering", true);
-          setBusy(false);
-          if (!res.success) {
-            toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
-            return;
+          try {
+            const res = await patchFeatureFlag("intent_engineering", true);
+            if (!res.success) {
+              toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
+              return;
+            }
+            setAcknowledged(true);
+            onAfterEnable?.();
+          } finally {
+            setBusy(false);
           }
-          setAcknowledged(true);
-          onAfterEnable?.();
         }}
         className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         aria-label={t("pages.intent.flagStatus.enable")}
