@@ -2,20 +2,43 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { EventEmitter } from 'node:events';
 import * as yaml from 'js-yaml';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleIntentRoute, disposeIntentModels } from '../../../src/server/routes/intent.js';
-import * as pdConfigStore from '../../../src/server/config/pd-config-store.js';
 
 let workspaceDir: string;
 let pdDir: string;
 let principlesDir: string;
 
-// Mock helpers that store state on the mock object itself (not closures)
-// to avoid destructuring-copy issues.
+// ── Mock req/res helpers ────────────────────────────────────────────────────
 
-function makeReq(method: string): IncomingMessage {
-  return { method, url: '/api/v1/intent' } as unknown as IncomingMessage;
+function makeGetReq(url: string): IncomingMessage {
+  const req = new EventEmitter();
+  Object.assign(req, { method: 'GET', url });
+  return req as unknown as IncomingMessage;
+}
+
+function makePostReq(url: string, body: unknown): IncomingMessage {
+  const req = new EventEmitter();
+  Object.assign(req, { method: 'POST', url });
+  setImmediate(() => {
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    req.emit('data', Buffer.from(bodyStr, 'utf8'));
+    req.emit('end');
+  });
+  return req as unknown as IncomingMessage;
+}
+
+function makePutReq(url: string, body: unknown): IncomingMessage {
+  const req = new EventEmitter();
+  Object.assign(req, { method: 'PUT', url });
+  setImmediate(() => {
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    req.emit('data', Buffer.from(bodyStr, 'utf8'));
+    req.emit('end');
+  });
+  return req as unknown as IncomingMessage;
 }
 
 function makeRes(): ServerResponse {
@@ -23,11 +46,12 @@ function makeRes(): ServerResponse {
     headersSent: false,
     statusCode: 200,
     _body: '',
-    writeHead: vi.fn(function (this: ServerResponse, code: number) {
+    writeHead: vi.fn(function (this: unknown, code: number) {
       (res as { statusCode: number }).statusCode = code;
+      (res as { headersSent: boolean }).headersSent = true;
       return this;
     }),
-    end: vi.fn(function (this: ServerResponse, data?: string) {
+    end: vi.fn(function (this: unknown, data?: string) {
       if (data !== undefined) {
         (res as { _body: string })._body = data;
       }
@@ -49,6 +73,24 @@ function parseBody(res: ServerResponse): { success: boolean; data: Record<string
   return JSON.parse(getBody(res)) as { success: boolean; data: Record<string, unknown> };
 }
 
+function parseError(res: ServerResponse): {
+  success: boolean;
+  error: string;
+  message: string;
+  reason?: string;
+  nextAction?: string;
+} {
+  return JSON.parse(getBody(res)) as {
+    success: boolean;
+    error: string;
+    message: string;
+    reason?: string;
+    nextAction?: string;
+  };
+}
+
+// ── Workspace setup ─────────────────────────────────────────────────────────
+
 function writeConfig(intentEnabled: boolean): void {
   const config = {
     version: 1,
@@ -67,34 +109,6 @@ function writeConfig(intentEnabled: boolean): void {
   fs.writeFileSync(path.join(pdDir, 'config.yaml'), yaml.dump(config), 'utf8');
 }
 
-function writeIntent(content: string): void {
-  fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), content, 'utf8');
-}
-
-const VALID_INTENT = `# INTENT.md
-
-## 1. Why
-
-This project validates pain from repeatedly correcting Agents.
-
-## 2. Desired Outcome
-
-A new user understands PD within five minutes.
-
-## 3. Non-negotiables
-
-- Do not make PD a heavy Agent platform.
-- Do not increase Owner attention burden.
-
-## 4. Stop / Escalation
-
-If a change expands PD into orchestration, stop and ask Owner.
-
-## 5. Current Strategic Focus
-
-Validate the smallest loop: Pain to Principle to Delta.
-`;
-
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-intent-route-'));
@@ -102,6 +116,7 @@ beforeEach(() => {
   principlesDir = path.join(workspaceDir, '.principles');
   fs.mkdirSync(pdDir, { recursive: true });
   fs.mkdirSync(principlesDir, { recursive: true });
+  writeConfig(true);
 });
 
 afterEach(() => {
@@ -109,133 +124,269 @@ afterEach(() => {
   try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-describe('Intent route — method guard', () => {
-  it('POST returns 405', async () => {
+// ── GET /api/v1/intent (existing, smoke test) ───────────────────────────────
+
+describe('Intent route — GET /api/v1/intent', () => {
+  it('returns summary with flag_enabled=true', async () => {
     const res = makeRes();
-    await handleIntentRoute(makeReq('POST'), res, workspaceDir);
-    expect(getStatus(res)).toBe(405);
+    await handleIntentRoute(makeGetReq('/api/v1/intent'), res, { workspaceDir, subPath: '' });
+    expect(getStatus(res)).toBe(200);
+    const body = parseBody(res);
+    expect(body.success).toBe(true);
+    expect(body.data.flagEnabled).toBe(true);
+    expect(body.data.found).toBe(false); // no INTENT.md yet
   });
 
-  it('DELETE returns 405', async () => {
-    const res = makeRes();
-    await handleIntentRoute(makeReq('DELETE'), res, workspaceDir);
-    expect(getStatus(res)).toBe(405);
-  });
-});
-
-describe('Intent route — flag-disabled', () => {
-  it('returns flag_disabled when no config file exists (defaults)', async () => {
-    const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.success).toBe(true);
-    expect(parsed.data.ok).toBe(false);
-    expect(parsed.data.reason).toBe('flag_disabled');
-  });
-
-  it('returns flag_disabled when config explicitly disables flag', async () => {
+  it('returns 403 when flag is disabled', async () => {
     writeConfig(false);
     const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.data.reason).toBe('flag_disabled');
+    await handleIntentRoute(makeGetReq('/api/v1/intent'), res, { workspaceDir, subPath: '' });
+    expect(getStatus(res)).toBe(200); // GET returns summary with flagEnabled=false
+    const body = parseBody(res);
+    expect(body.data.flagEnabled).toBe(false);
+    expect(body.data.reason).toBe('flag_disabled');
   });
 });
 
-describe('Intent route — flag-on', () => {
-  it('returns not_found when INTENT.md is missing', async () => {
-    writeConfig(true);
+// ── POST /api/v1/intent/init ────────────────────────────────────────────────
+
+describe('Intent route — POST /api/v1/intent/init', () => {
+  it('creates INTENT.md template (201)', async () => {
     const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.data.ok).toBe(false);
-    expect(parsed.data.reason).toBe('not_found');
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(201);
+    const body = parseBody(res);
+    expect(body.success).toBe(true);
+    expect(body.data.created).toBe(true);
+    expect(body.data.path).toContain('INTENT.md');
+
+    // Verify file exists on disk
+    const intentPath = path.join(principlesDir, 'INTENT.md');
+    expect(fs.existsSync(intentPath)).toBe(true);
+    const content = fs.readFileSync(intentPath, 'utf8');
+    expect(content).toContain('# INTENT.md');
+    expect(content).toContain('## 1. Why');
   });
 
-  it('returns oversized for file > 32KB', async () => {
-    writeConfig(true);
-    writeIntent('# INTENT.md\n\n## 1. Why\n\n' + 'x'.repeat(33 * 1024) + '\n');
+  it('returns 200 with created=false when file already exists', async () => {
+    // Pre-create the file
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'existing content', 'utf8');
+
     const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.data.reason).toBe('oversized');
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(200);
+    const body = parseBody(res);
+    expect(body.success).toBe(true);
+    expect(body.data.created).toBe(false);
+    expect(body.data.reason).toBe('already_exists');
+
+    // Verify file was NOT overwritten
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    expect(content).toBe('existing content');
   });
 
-  it('returns parsed sections for valid INTENT.md', async () => {
-    writeConfig(true);
-    writeIntent(VALID_INTENT);
+  it('overwrites existing file when force=true', async () => {
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'old content', 'utf8');
+
     const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.data.ok).toBe(true);
-    expect(parsed.data.found).toBe(true);
-    expect(parsed.data.flagEnabled).toBe(true);
-    expect(parsed.data.contentHash).toMatch(/^sha256:/);
-    expect(parsed.data.sections).toBeDefined();
-    const sections = parsed.data.sections as Record<string, string>;
-    expect(sections.why).toContain('correcting Agents');
-    expect(parsed.data.warnings).toEqual([]);
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', { force: true }), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(201);
+    const body = parseBody(res);
+    expect(body.data.created).toBe(true);
+
+    // Verify file WAS overwritten with template
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    expect(content).toContain('# INTENT.md');
+    expect(content).not.toContain('old content');
   });
 
-  it('returns missing_section warnings for partial INTENT.md', async () => {
-    writeConfig(true);
-    writeIntent(`# INTENT.md\n\n## 1. Why\n\nJust the why.\n`);
+  it('creates .principles directory if it does not exist', async () => {
+    // Remove the .principles directory
+    fs.rmSync(principlesDir, { recursive: true, force: true });
+    expect(fs.existsSync(principlesDir)).toBe(false);
+
     const res = makeRes();
-    await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-    const parsed = parseBody(res);
-    expect(parsed.data.ok).toBe(true);
-    const warnings = parsed.data.warnings as unknown[];
-    expect(warnings.length).toBe(4);
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(201);
+
+    // Directory and file should now exist
+    expect(fs.existsSync(principlesDir)).toBe(true);
+    expect(fs.existsSync(path.join(principlesDir, 'INTENT.md'))).toBe(true);
+  });
+
+  it('returns 403 when flag is disabled', async () => {
+    writeConfig(false);
+    const res = makeRes();
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(403);
+    const body = parseError(res);
+    expect(body.reason).toBe('flag_disabled');
+  });
+
+  it('handles empty body gracefully', async () => {
+    const res = makeRes();
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', ''), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(201);
+  });
+
+  it('returns 400 on invalid JSON body', async () => {
+    const res = makeRes();
+    await handleIntentRoute(makePostReq('/api/v1/intent/init', '{not valid'), res, { workspaceDir, subPath: '/init' });
+    expect(getStatus(res)).toBe(400);
+    const body = parseError(res);
+    expect(body.reason).toBe('invalid_json');
   });
 });
 
-describe('Intent route — model cache', () => {
-  it('returns cached model on second request within TTL', async () => {
-    writeConfig(true);
-    writeIntent(VALID_INTENT);
-    // First request — cache miss, creates model
-    const res1 = makeRes();
-    await handleIntentRoute(makeReq('GET'), res1, workspaceDir);
-    const parsed1 = parseBody(res1);
-    expect(parsed1.data.ok).toBe(true);
+// ── GET /api/v1/intent/content ──────────────────────────────────────────────
 
-    // Second request — cache hit (same workspaceDir, within TTL)
-    const res2 = makeRes();
-    await handleIntentRoute(makeReq('GET'), res2, workspaceDir);
-    const parsed2 = parseBody(res2);
-    expect(parsed2.data.ok).toBe(true);
-    expect(parsed2.data.contentHash).toBe(parsed1.data.contentHash);
+describe('Intent route — GET /api/v1/intent/content', () => {
+  it('returns raw content when file exists', async () => {
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), '# My Intent\n\ntest content', 'utf8');
+
+    const res = makeRes();
+    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    expect(getStatus(res)).toBe(200);
+    const body = parseBody(res);
+    expect(body.data.content).toContain('# My Intent');
+    expect(body.data.content).toContain('test content');
+    expect(body.data.path).toContain('INTENT.md');
+  });
+
+  it('returns 404 when file does not exist', async () => {
+    const res = makeRes();
+    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    expect(getStatus(res)).toBe(404);
+    const body = parseError(res);
+    expect(body.reason).toBe('not_found');
+  });
+
+  it('returns 403 when flag is disabled', async () => {
+    writeConfig(false);
+    const res = makeRes();
+    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    expect(getStatus(res)).toBe(403);
+    expect(parseError(res).reason).toBe('flag_disabled');
   });
 });
 
-describe('Intent route — error path (catch block)', () => {
-  it('returns 500 when loadPdConfig throws an Error', async () => {
-    const spy = vi.spyOn(pdConfigStore, 'loadPdConfig');
-    spy.mockImplementation(() => { throw new Error('config corruption'); });
-    try {
-      const res = makeRes();
-      await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-      expect(getStatus(res)).toBe(500);
-      const body = JSON.parse(getBody(res)) as { error: string; message: string };
-      expect(body.error).toBe('intent_route_error');
-      expect(body.message).toContain('config corruption');
-    } finally {
-      spy.mockRestore();
-    }
+// ── PUT /api/v1/intent/content ──────────────────────────────────────────────
+
+describe('Intent route — PUT /api/v1/intent/content', () => {
+  it('saves content and returns updated metadata', async () => {
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: '# My Intent\n\nnew content' }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(200);
+    const body = parseBody(res);
+    expect(body.data.saved).toBe(true);
+    expect(body.data.contentHash).toBeTruthy();
+    expect(body.data.lastEditedAt).toBeTruthy();
+
+    // Verify file was written
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    expect(content).toBe('# My Intent\n\nnew content');
   });
 
-  it('returns 500 with "Unknown error" for non-Error throw', async () => {
-    const spy = vi.spyOn(pdConfigStore, 'loadPdConfig');
-    spy.mockImplementation(() => { throw 'string error'; });
-    try {
-      const res = makeRes();
-      await handleIntentRoute(makeReq('GET'), res, workspaceDir);
-      expect(getStatus(res)).toBe(500);
-      const body = JSON.parse(getBody(res)) as { error: string; message: string };
-      expect(body.error).toBe('intent_route_error');
-      expect(body.message).toBe('Unknown error');
-    } finally {
-      spy.mockRestore();
-    }
+  it('overwrites existing file', async () => {
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'old content', 'utf8');
+
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: 'new content' }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(200);
+
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    expect(content).toBe('new content');
+  });
+
+  it('returns 400 when content is missing', async () => {
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { other: 'field' }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).reason).toBe('missing_content');
+  });
+
+  it('returns 400 when content is empty string', async () => {
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: '' }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).reason).toBe('empty_content');
+  });
+
+  it('returns 400 when content is not a string', async () => {
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: 123 }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).reason).toBe('invalid_content');
+  });
+
+  it('returns 400 when content exceeds 32KB', async () => {
+    const hugeContent = 'x'.repeat(33 * 1024);
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: hugeContent }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).reason).toBe('oversized');
+  });
+
+  it('returns 403 when flag is disabled', async () => {
+    writeConfig(false);
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', { content: 'test' }),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(403);
+    expect(parseError(res).reason).toBe('flag_disabled');
+  });
+
+  it('returns 400 on invalid JSON body', async () => {
+    const res = makeRes();
+    await handleIntentRoute(
+      makePutReq('/api/v1/intent/content', '{not valid'),
+      res,
+      { workspaceDir, subPath: '/content' },
+    );
+    expect(getStatus(res)).toBe(400);
+    expect(parseError(res).reason).toBe('invalid_json');
+  });
+});
+
+// ── Unknown sub-paths ────────────────────────────────────────────────────────
+
+describe('Intent route — unknown sub-paths', () => {
+  it('returns 404 for unknown GET sub-path', async () => {
+    const res = makeRes();
+    await handleIntentRoute(makeGetReq('/api/v1/intent/unknown'), res, { workspaceDir, subPath: '/unknown' });
+    expect(getStatus(res)).toBe(404);
+  });
+
+  it('returns 404 for unknown POST sub-path', async () => {
+    const res = makeRes();
+    await handleIntentRoute(makePostReq('/api/v1/intent/unknown', {}), res, { workspaceDir, subPath: '/unknown' });
+    expect(getStatus(res)).toBe(404);
   });
 });

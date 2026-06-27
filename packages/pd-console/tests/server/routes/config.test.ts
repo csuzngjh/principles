@@ -1284,8 +1284,10 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('rejects when config has no features section (422)', async () => {
-    // Config without a features: section at all
+  it('auto-creates features section for registered flags (PRI-477 onboarding)', async () => {
+    // Config without a features: section at all — on fresh install.
+    // PRI-477: updateFeatureFlag now auto-creates the features section for
+    // registered flags instead of returning 422.
     writeConfig({
       version: 1,
       runtimeProfiles: VALID_CONFIG.runtimeProfiles,
@@ -1302,9 +1304,10 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       subPath: '/features/intent_engineering',
     });
 
-    expect(res.statusCode).toBe(422);
-    const body = errorEnvelope(res);
-    expect(body.error).toBe('no_features_section');
+    expect(res.statusCode).toBe(200);
+    const body = okEnvelope<{ feature: string; enabled: boolean }>(res);
+    expect(body.feature).toBe('intent_engineering');
+    expect(body.enabled).toBe(true);
   });
 
   it('rejects malformed existing config with 409', async () => {

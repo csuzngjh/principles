@@ -34,6 +34,9 @@ import {
   validateIntentDecisionResult,
   validateIntentDecisionSummary,
   validateFollowUpResponse,
+  validateIntentInitResult,
+  validateIntentSaveResult,
+  validateIntentRawContent,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -67,6 +70,9 @@ import type {
   IntentDecisionResultData,
   IntentDecisionSummaryData,
   FollowUpResponseData,
+  IntentInitResultData,
+  IntentSaveResultData,
+  IntentRawContentData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -437,6 +443,48 @@ async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
   return request<IntentSummaryData>('/api/v1/intent', undefined, validateIntentSummary);
 }
 
+// ── Intent Init / Edit (PRI-477 onboarding) ──────────────────────────────────
+
+/**
+ * Fetch raw INTENT.md content for editing via GET /api/v1/intent/content.
+ */
+async function fetchIntentContent(): Promise<ApiResponse<IntentRawContentData>> {
+  return request<IntentRawContentData>(
+    '/api/v1/intent/content',
+    undefined,
+    validateIntentRawContent,
+  );
+}
+
+/**
+ * Create INTENT.md from the SPEC §7 template via POST /api/v1/intent/init.
+ * Does NOT overwrite an existing file unless force=true.
+ */
+async function createIntentTemplate(force = false): Promise<ApiResponse<IntentInitResultData>> {
+  return request<IntentInitResultData>(
+    '/api/v1/intent/init',
+    {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    },
+    validateIntentInitResult,
+  );
+}
+
+/**
+ * Save user-edited INTENT.md content via PUT /api/v1/intent/content.
+ */
+async function saveIntentContent(content: string): Promise<ApiResponse<IntentSaveResultData>> {
+  return request<IntentSaveResultData>(
+    '/api/v1/intent/content',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    },
+    validateIntentSaveResult,
+  );
+}
+
 // ── Intent Decisions (PRI-470) ───────────────────────────────────────────────
 
 /**
@@ -570,6 +618,9 @@ export {
   rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,
+  fetchIntentContent,
+  createIntentTemplate,
+  saveIntentContent,
   recordIntentDecision,
   listIntentDecisionsByPainId,
   listIntentDecisionsByTaskId,
