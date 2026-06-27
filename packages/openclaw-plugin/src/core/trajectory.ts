@@ -129,6 +129,8 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       empathy_signal_json TEXT NOT NULL,
       blob_ref TEXT,
       raw_excerpt TEXT,
+      stop_reason TEXT,
+      thinking_blocks_count INTEGER,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS user_turns (
@@ -155,6 +157,7 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       gfi_before REAL,
       gfi_after REAL,
       params_json TEXT NOT NULL,
+      result_preview TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS pain_events (
@@ -167,6 +170,8 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       origin TEXT,
       confidence REAL,
       text TEXT,
+      canonical_pain_id TEXT,
+      runtime_task_id TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gate_blocks (
@@ -245,6 +250,12 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       started_at TEXT,
       completed_at TEXT,
       resolution TEXT,
+      task_kind TEXT,
+      priority TEXT,
+      retry_count INTEGER,
+      max_retries INTEGER,
+      last_error TEXT,
+      result_ref TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

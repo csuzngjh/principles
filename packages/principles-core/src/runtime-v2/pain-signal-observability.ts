@@ -64,6 +64,14 @@ function getSessionsColumns(db: Database.Database): string[] {
 }
 
 /**
+ * Type guard: narrows `object` to `{ name: unknown }` without `as` casts.
+ * Used for PRAGMA table_info rows (rc-2-no-as-bypass).
+ */
+function hasNameField(row: object): row is { name: unknown } {
+  return Object.hasOwn(row, 'name');
+}
+
+/**
  * Ensure trajectory.db has the full schema (all 16 tables + indexes + migrations).
  *
  * This mirrors packages/openclaw-plugin/src/core/trajectory.ts applyTrajectorySchema()
@@ -110,6 +118,8 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       empathy_signal_json TEXT NOT NULL,
       blob_ref TEXT,
       raw_excerpt TEXT,
+      stop_reason TEXT,
+      thinking_blocks_count INTEGER,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS user_turns (
@@ -136,6 +146,7 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       gfi_before REAL,
       gfi_after REAL,
       params_json TEXT NOT NULL,
+      result_preview TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS pain_events (
@@ -148,6 +159,8 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       origin TEXT,
       confidence REAL,
       text TEXT,
+      canonical_pain_id TEXT,
+      runtime_task_id TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gate_blocks (
@@ -226,6 +239,12 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       started_at TEXT,
       completed_at TEXT,
       resolution TEXT,
+      task_kind TEXT,
+      priority TEXT,
+      retry_count INTEGER,
+      max_retries INTEGER,
+      last_error TEXT,
+      result_ref TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -304,7 +323,11 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
   ];
   for (const col of v2Columns) {
     const exists = db.prepare(`PRAGMA table_info(evolution_tasks)`).all()
-      .some((row) => (row as Record<string, unknown>).name === col.name);
+      .some((row): boolean => {
+        if (typeof row !== 'object' || row === null) return false;
+        // Use type guard predicate to narrow without `as` (rc-2-no-as-bypass)
+        return hasNameField(row) && row.name === col.name;
+      });
     if (!exists) {
       db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
     }
