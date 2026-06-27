@@ -4,6 +4,15 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { IntentPageModel } from '../../src/server/models/IntentPageModel.js';
 
+// Cross-platform path that genuinely cannot be created:
+// - Linux: /dev/null is a char device, mkdir under it fails with ENOTDIR
+// - Windows: Z: drive typically doesn't exist, fails with ENOENT
+// Using a Windows-style "Z:" path on Linux is treated as a relative path and
+// CAN be created by mkdir({ recursive: true }), causing tests to falsely pass.
+const INVALID_PATH = process.platform === 'win32'
+  ? 'Z:/nonexistent/path/that/does/not/exist'
+  : '/dev/null/cannot-create-subdir-here';
+
 let workspaceDir: string;
 let principlesDir: string;
 
@@ -125,7 +134,7 @@ describe('IntentPageModel — missing sections', () => {
 
 describe('IntentPageModel — never-throws contract', () => {
   it('does not throw when workspaceDir does not exist', async () => {
-    const model = new IntentPageModel('Z:/nonexistent/path/that/does/not/exist');
+    const model = new IntentPageModel(INVALID_PATH);
     const result = await model.getSummary(true);
     expect(result.ok).toBe(false);
     expect(result.reason).toBeDefined();
@@ -225,7 +234,7 @@ describe('IntentPageModel — createTemplate', () => {
   });
 
   it('returns write_error when workspaceDir does not exist', async () => {
-    const model = new IntentPageModel('Z:/nonexistent/path/that/does/not/exist');
+    const model = new IntentPageModel(INVALID_PATH);
     const result = await model.createTemplate(true, false);
     expect(result.ok).toBe(false);
     expect(result.created).toBe(false);
@@ -277,7 +286,7 @@ describe('IntentPageModel — getRawContent', () => {
     // When the workspace directory doesn't exist, existsSync(filePath) returns
     // false, so the model returns not_found (not read_error). This is correct:
     // the file genuinely doesn't exist.
-    const model = new IntentPageModel('Z:/nonexistent/path/that/does/not/exist');
+    const model = new IntentPageModel(INVALID_PATH);
     const result = await model.getRawContent(true);
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('not_found');
@@ -359,7 +368,7 @@ describe('IntentPageModel — saveContent', () => {
   });
 
   it('returns write_error when workspaceDir does not exist', async () => {
-    const model = new IntentPageModel('Z:/nonexistent/path/that/does/not/exist');
+    const model = new IntentPageModel(INVALID_PATH);
     const result = await model.saveContent(true, 'content');
     expect(result.ok).toBe(false);
     expect(result.saved).toBe(false);
