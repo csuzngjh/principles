@@ -25,7 +25,9 @@ import type { IntentDecisionRecordData, IntentDecisionSummaryData } from '../../
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
-function validIntentDecisionRecord(overrides?: Partial<IntentDecisionRecordData>): Record<string, unknown> {
+function validIntentDecisionRecord(
+  overrides?: Partial<Record<keyof IntentDecisionRecordData, unknown>>
+): Record<string, unknown> {
   return {
     id: 'idr-001',
     source: 'action_drift',
@@ -46,7 +48,9 @@ function validIntentDecisionResult(overrides?: Record<string, unknown>): Record<
   };
 }
 
-function validIntentDecisionSummary(overrides?: Partial<IntentDecisionSummaryData>): Record<string, unknown> {
+function validIntentDecisionSummary(
+  overrides?: Partial<Record<keyof IntentDecisionSummaryData, unknown>>
+): Record<string, unknown> {
   return {
     counts: {
       confirm_drift: 5,
