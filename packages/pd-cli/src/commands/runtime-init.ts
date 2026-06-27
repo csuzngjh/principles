@@ -303,24 +303,3 @@ export async function handleRuntimeInit(opts: RuntimeInitOptions): Promise<void>
   }
 }
 
-// ── Command registration (cli-7-test-wiring) ────────────────────────────────
-
-import type { Command } from 'commander';
-
-export function registerRuntimeInitCommand(runtimeCmd: Command): Command {
-  return runtimeCmd
-    .command('init')
-    .description('Initialize all PD SQLite databases (state.db, trajectory.db, subagent_workflows.db)')
-    .option('-w, --workspace <path>', 'Workspace directory')
-    .option('--dry-run', 'Show what would be initialized without writing (default)')
-    .option('--confirm', 'Actually initialize the databases (required to write)')
-    .option('--json', 'Output raw JSON')
-    .action(async (opts) => {
-      await handleRuntimeInit({
-        workspace: opts.workspace,
-        dryRun: opts.dryRun === true,
-        confirm: opts.confirm === true,
-        json: opts.json === true,
-      });
-    });
-}

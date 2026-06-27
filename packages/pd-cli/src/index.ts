@@ -50,7 +50,6 @@ import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleR
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
-import { registerRuntimeInitCommand } from './commands/runtime-init.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
 import { registerMvpCommands } from './commands/mvp-smoke.js';
 import { registerRulecodeCommand } from './commands/rulecode.js';
@@ -335,8 +334,27 @@ runtimeCmd
     await handleRuntimeCanary({ workspace: opts.workspace, json: opts.json });
   });
 
-// pd runtime init — Initialize all PD SQLite databases for a workspace (PRI-475 sibling).
-registerRuntimeInitCommand(runtimeCmd);
+// pd runtime init — Initialize all PD SQLite databases for a workspace.
+// Lazy import: avoids loading `principles-disciple` at module init time, which
+// would crash `pd --version` in packaged installs where the plugin's transitive
+// deps are not resolvable from pd-cli's node_modules. The import only executes
+// when `pd runtime init` is actually invoked.
+runtimeCmd
+  .command('init')
+  .description('Initialize all PD SQLite databases (state.db, trajectory.db, subagent_workflows.db)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Show what would be initialized without writing (default)')
+  .option('--confirm', 'Actually initialize the databases (required to write)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleRuntimeInit } = await import('./commands/runtime-init.js');
+    await handleRuntimeInit({
+      workspace: opts.workspace,
+      dryRun: opts.dryRun === true,
+      confirm: opts.confirm === true,
+      json: opts.json === true,
+    });
+  });
 
 const synthCmd = runtimeCmd
   .command('synthetic', { hidden: true })
