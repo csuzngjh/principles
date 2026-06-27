@@ -920,31 +920,68 @@ export function updateFeatureFlag(
     rawConfig = {};
   }
 
-  // 4. Refuse to CREATE a features section if absent (spec §13.4: 不允许新增)
-  //    Use Object.hasOwn for untrusted key check (ERR-013)
-  if (!Object.hasOwn(rawConfig, 'features') || !isRecord(rawConfig.features)) {
-    return {
-      ok: false,
-      statusCode: 422,
-      error: 'no_features_section',
-      message: `Cannot update feature flag: .pd/config.yaml has no 'features:' section. This API does not create new feature sections.`,
-      nextAction: 'Manually add a features: section to .pd/config.yaml first, or set the flag via yaml directly.',
-    };
-  }
-
-  // 5. Load existing config — if malformed, refuse to write
-  const loadResult = loadPdConfig(workspaceDir);
-  if (!loadResult.ok) {
+  // 4. PRI-477 onboarding: auto-create `features:` section ONLY when absent.
+  //    Original spec §13.4 "不允许新增" applied to UNREGISTERED flags —
+  //    auto-creating the section for registered flags (validated in step 1) is
+  //    safe and required for the FlagToggleCard one-click enable flow on fresh
+  //    installs where .pd/config.yaml has no features: section yet.
+  //
+  //    IMPORTANT — Runtime Contract `rc-9-no-silent-fallback` (ERR-002):
+  //    If `features` EXISTS but is NOT a record/object, we must NOT silently
+  //    overwrite the user's malformed value with defaults — that would hide a
+  //    config error and lose the original mistake. Return 409 conflict so the
+  //    Owner can fix the config first. Without this guard, a config typo like
+  //    `features: "oops"` would be silently reset on the first flag toggle.
+  //
+  //    Use Object.hasOwn for untrusted key check (ERR-013).
+  let featuresSection: Record<string, unknown>;
+  if (!Object.hasOwn(rawConfig, 'features')) {
+    // Section absent — seed with defaults from the registered flag set so the
+    // subsequent validatePdConfig passes (it requires prompt/code_tool_hook /
+    // defer_archive as registered flags). Computed once at module load.
+    featuresSection = {};
+    for (const [flagId, flag] of Object.entries(_DEFAULT_FLAGS_RESULT.flags)) {
+      featuresSection[flagId] = { category: flag.category, enabled: flag.enabled };
+    }
+    rawConfig.features = featuresSection;
+  } else if (isRecord(rawConfig.features)) {
+    featuresSection = rawConfig.features;
+  } else {
+    // features: exists but is malformed (string, array, number, null, etc.).
+    // Reject rather than silently resetting — rc-9-no-silent-fallback.
+    const gotType = rawConfig.features === null ? 'null' : typeof rawConfig.features;
     return {
       ok: false,
       statusCode: 409,
       error: 'conflict',
-      message: `Cannot update feature flag: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+      message:
+        `Cannot update feature flag: .pd/config.yaml has a 'features:' section that ` +
+        `is not an object/map (got ${gotType}). Fix the config file so 'features:' ` +
+        `is a map of flag objects before retrying, or remove the 'features:' key ` +
+        `entirely so PD can seed registered-flag defaults.`,
+      nextAction:
+        "Open .pd/config.yaml and set 'features: {}' (or remove the 'features:' line).",
+    };
+  }
+
+  // 5. Validate the in-memory rawConfig (with auto-created features section).
+  //    NOTE: We do NOT call loadPdConfig(workspaceDir) here because that reads
+  //    from DISK, where the features section may still be missing (the exact
+  //    case we just auto-created for). Validating rawConfig in memory gives
+  //    the same malformed-config protection without the false-positive on
+  //    fresh installs. PRI-477.
+  const existingConfigValidation = validatePdConfig(rawConfig);
+  if (!existingConfigValidation.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update feature flag: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${existingConfigValidation.errors.map(e => e.reason).join('; ')}`,
     };
   }
 
   // 6. Merge: update features[featureName].enabled, preserving other flags
-  const existingFeatures = { ...rawConfig.features } as Record<string, unknown>;
+  const existingFeatures = { ...featuresSection };
   const existingEntry = Object.hasOwn(existingFeatures, featureName)
     ? existingFeatures[featureName]
     : undefined;
