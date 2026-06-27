@@ -162,7 +162,7 @@ describe('handleUpdateRoute', () => {
       expect(body.error).toBe('method_not_allowed');
     });
 
-    it('should return 500 when version cannot be determined', async () => {
+    it('should return degraded 200 with reason when version cannot be determined (ERR-002)', async () => {
       const emptyTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-noplugin-'));
       const emptyWorkspace = path.join(emptyTmpDir, 'workspace');
       fs.mkdirSync(emptyWorkspace, { recursive: true });
@@ -178,9 +178,14 @@ describe('handleUpdateRoute', () => {
 
         await handleUpdateRoute(req, res, emptyWorkspace, '/check');
 
-        expect(res.writeHead).toHaveBeenCalledWith(500, expect.any(Object));
-        const body = parseResponseBody<{ success: boolean; error: string }>(res);
-        expect(body.error).toBe('version_not_found');
+        // ERR-002 / Runtime Contract Rule 9: graceful degradation with reason, not 500.
+        expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+        const body = parseResponseBody<{ success: boolean; data: { hasUpdate: boolean; currentVersion: string; latestVersion: string; error?: string } }>(res);
+        expect(body.success).toBe(true);
+        expect(body.data.hasUpdate).toBe(false);
+        expect(body.data.currentVersion).toBe('unknown');
+        expect(body.data.latestVersion).toBe('');
+        expect(body.data.error).toMatch(/Could not determine current version/i);
       } finally {
         process.env.OPENCLAW_HOME = savedHome;
         fs.rmSync(emptyTmpDir, { recursive: true, force: true });

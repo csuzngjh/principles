@@ -14,9 +14,7 @@ const SMOKE_PAGES = [
   { path: '/#/debt', name: 'Debt' },
   { path: '/#/control-center', name: 'ControlCenter' },
   { path: '/#/settings', name: 'Settings' },
-  // Update 页面已标记为 known failure — /api/update/check 在空工作区返回 500
-  // （无法确定当前版本）。这是冒烟测试发现的真实 flow break，需后续修复 update route。
-  { path: '/#/update', name: 'Update', fixme: true },
+  { path: '/#/update', name: 'Update' },
   { path: '/#/report-problem', name: 'ReportProblem' },
   { path: '/#/intent', name: 'Intent' },
 ] as const;
@@ -36,12 +34,8 @@ function attachErrorCollectors(page: Page): string[] {
   return errors;
 }
 
-for (const { path, name, fixme } of SMOKE_PAGES) {
+for (const { path, name } of SMOKE_PAGES) {
   test(`smoke: ${name} page loads without error`, async ({ page }) => {
-    if (fixme) {
-      test.fixme(true, 'Known flow break: /api/update/check returns 500 on empty workspace');
-    }
-
     const errors = attachErrorCollectors(page);
 
     await page.goto(path);
