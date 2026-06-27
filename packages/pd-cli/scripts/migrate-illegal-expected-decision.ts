@@ -20,17 +20,18 @@
  *   - 其他非法值 → 报告但不修改（需人工判断）
  *
  * 使用：
- *   npx tsx scripts/migrate-illegal-expected-decision.ts <workspace-dir> [--dry-run]
+ *   npx tsx scripts/migrate-illegal-expected-decision.ts <workspace-dir> [--write]
  *
  * 示例：
- *   npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace --dry-run
  *   npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace
+ *   npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace --write
  *
  * 安全保障：
- *   1. 默认 dry-run，先看会改什么
- *   2. 非 dry-run 模式下自动备份 state.db 到 state.db.backup-<timestamp>
+ *   1. 默认 dry-run（只读），必须显式 --write 才会写入
+ *   2. --write 模式下自动备份 state.db 到 state.db.backup-<timestamp>
  *   3. 只修改 artifact_kind='rule' 的记录
  *   4. 同时修正 goldenTrace 和 goldenTraceCases 两个字段（artificer raw 输出副本）
+ *   5. --write 模式下所有 UPDATE 在单个事务内执行，保证原子性
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -43,13 +44,15 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const positional = argv.slice(2).filter((a) => !a.startsWith('--'));
-  const dryRun = argv.includes('--dry-run');
+  // Safety default: dry-run (read-only). Operator must pass --write to mutate.
+  const writeMode = argv.includes('--write');
   if (positional.length === 0) {
-    console.error('Usage: npx tsx scripts/migrate-illegal-expected-decision.ts <workspace-dir> [--dry-run]');
-    console.error('Example: npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace --dry-run');
+    console.error('Usage: npx tsx scripts/migrate-illegal-expected-decision.ts <workspace-dir> [--write]');
+    console.error('Example: npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace');
+    console.error('         npx tsx scripts/migrate-illegal-expected-decision.ts D:/.openclaw/workspace --write');
     process.exit(1);
   }
-  return { workspaceDir: positional[0] ?? '', dryRun };
+  return { workspaceDir: positional[0] ?? '', dryRun: !writeMode };
 }
 
 interface FixRecord {
@@ -63,12 +66,20 @@ interface FixRecord {
 
 function normalizeExpectedDecision(value: unknown, kind: unknown): string | null {
   if (value !== 'requireApproval') return null;
-  // negative case → block (block case accepts requireApproval as runtime output)
-  // positive case → allow (positive cases should expect allow)
-  return kind === 'positive' ? 'allow' : 'block';
+  // Only map explicit kinds — unknown kind must NOT be silently coerced.
+  // Unknown kinds are reported (not modified) so a human can review them.
+  if (kind === 'positive') return 'allow';
+  if (kind === 'negative') return 'block';
+  return null;
 }
 
-function fixCasesArray(cases: unknown, artifactId: string, field: 'goldenTrace' | 'goldenTraceCases', fixes: FixRecord[]): boolean {
+function fixCasesArray(
+  cases: unknown,
+  artifactId: string,
+  field: 'goldenTrace' | 'goldenTraceCases',
+  fixes: FixRecord[],
+  issues: Array<{ artifactId: string; issue: string }>,
+): boolean {
   if (!Array.isArray(cases)) return false;
   let modified = false;
   for (const c of cases) {
@@ -86,6 +97,16 @@ function fixCasesArray(cases: unknown, artifactId: string, field: 'goldenTrace' 
       });
       rec.expectedDecision = newVal;
       modified = true;
+    } else if (rec.expectedDecision === 'requireApproval') {
+      // Illegal value found but kind is not positive/negative — cannot
+      // auto-fix safely. Record for manual review instead of silently
+      // coercing to 'block' (rc-9: no silent fallback).
+      const kindStr = typeof rec.kind === 'string' ? rec.kind : '<unknown>';
+      const caseIdStr = typeof rec.caseId === 'string' ? rec.caseId : '<unknown>';
+      issues.push({
+        artifactId,
+        issue: `requireApproval with unknown kind="${kindStr}" (case=${caseIdStr}, field=${field}) — manual review required`,
+      });
     }
   }
   return modified;
@@ -152,64 +173,78 @@ function main(): void {
     // 修复 goldenTrace.cases
     if (typeof obj.goldenTrace === 'object' && obj.goldenTrace !== null) {
       const trace = obj.goldenTrace as Record<string, unknown>;
-      fixCasesArray(trace.cases, art.artifact_id, 'goldenTrace', fixes);
+      fixCasesArray(trace.cases, art.artifact_id, 'goldenTrace', fixes, issues);
     }
 
     // 修复 goldenTraceCases（artificer raw 输出副本）
-    fixCasesArray(obj.goldenTraceCases, art.artifact_id, 'goldenTraceCases', fixes);
+    fixCasesArray(obj.goldenTraceCases, art.artifact_id, 'goldenTraceCases', fixes, issues);
   }
 
   // 3. 报告
-  if (fixes.length === 0) {
+  if (fixes.length === 0 && issues.length === 0) {
     console.log('\n[summary] no illegal expectedDecision values found. Nothing to fix.');
     db.close();
     return;
   }
 
-  console.log(`\n[fixes] ${fixes.length} case(s) ${dryRun ? 'would be ' : ''}fixed across ${new Set(fixes.map((f) => f.artifactId)).size} artifact(s):`);
-  for (const f of fixes) {
-    console.log(`  ${f.artifactId} | ${f.field} | case=${f.caseId} kind=${f.kind}: ${f.from} → ${f.to}`);
+  if (fixes.length > 0) {
+    console.log(`\n[fixes] ${fixes.length} case(s) ${dryRun ? 'would be ' : ''}fixed across ${new Set(fixes.map((f) => f.artifactId)).size} artifact(s):`);
+    for (const f of fixes) {
+      console.log(`  ${f.artifactId} | ${f.field} | case=${f.caseId} kind=${f.kind}: ${f.from} → ${f.to}`);
+    }
+  } else {
+    console.log('\n[fixes] 0 cases can be auto-fixed.');
+  }
+
+  if (issues.length > 0) {
+    console.log(`\n[issues] ${issues.length} artifact(s) had parse issues or require manual review:`);
+    for (const i of issues) console.log(`  ${i.artifactId}: ${i.issue}`);
   }
 
   if (dryRun) {
-    console.log('\n[dry-run] no changes written. Re-run without --dry-run to apply.');
+    console.log('\n[dry-run] no changes written. Re-run with --write to apply.');
     db.close();
     return;
   }
 
-  // 4. 应用修复
+  if (fixes.length === 0) {
+    // Nothing to write — only issues (manual review). Don't open a transaction.
+    db.close();
+    return;
+  }
+
+  // 4. 应用修复 — 所有 UPDATE 在单个事务内执行，保证原子性 (all-or-nothing)
   let updatedCount = 0;
   const artifactsToFix = new Set(fixes.map((f) => f.artifactId));
-  for (const art of artifacts) {
-    if (!artifactsToFix.has(art.artifact_id)) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(art.content_json);
-    } catch {
-      continue;
+  const applyTx = db.transaction(() => {
+    for (const art of artifacts) {
+      if (!artifactsToFix.has(art.artifact_id)) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(art.content_json);
+      } catch {
+        continue;
+      }
+      // Runtime guard (rc-1/rc-2): validate parsed shape before use.
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const parsedObj = parsed as Record<string, unknown>;
+
+      if (typeof parsedObj.goldenTrace === 'object' && parsedObj.goldenTrace !== null) {
+        const trace = parsedObj.goldenTrace as Record<string, unknown>;
+        fixCasesArray(trace.cases, art.artifact_id, 'goldenTrace', [], issues);
+      }
+      fixCasesArray(parsedObj.goldenTraceCases, art.artifact_id, 'goldenTraceCases', [], issues);
+
+      const newContentJson = JSON.stringify(parsedObj);
+      const result = db
+        .prepare('UPDATE pi_artifacts SET content_json = ?, updated_at = ? WHERE artifact_id = ?')
+        .run(newContentJson, new Date().toISOString(), art.artifact_id);
+      if (result.changes > 0) updatedCount++;
     }
-    // Runtime guard (rc-1/rc-2): validate parsed shape before use.
-    if (typeof parsed !== 'object' || parsed === null) continue;
-    const parsedObj = parsed as Record<string, unknown>;
+  });
+  applyTx();
 
-    if (typeof parsedObj.goldenTrace === 'object' && parsedObj.goldenTrace !== null) {
-      const trace = parsedObj.goldenTrace as Record<string, unknown>;
-      fixCasesArray(trace.cases, art.artifact_id, 'goldenTrace', []);
-    }
-    fixCasesArray(parsedObj.goldenTraceCases, art.artifact_id, 'goldenTraceCases', []);
-
-    const newContentJson = JSON.stringify(parsedObj);
-    const result = db
-      .prepare('UPDATE pi_artifacts SET content_json = ?, updated_at = ? WHERE artifact_id = ?')
-      .run(newContentJson, new Date().toISOString(), art.artifact_id);
-    if (result.changes > 0) updatedCount++;
-  }
-
-  console.log(`\n[summary] ${updatedCount} artifact row(s) updated`);
-  if (issues.length > 0) {
-    console.log(`[issues] ${issues.length} artifact(s) had parse issues:`);
-    for (const i of issues) console.log(`  ${i.artifactId}: ${i.issue}`);
-  }
+  console.log(`\n[summary] ${updatedCount} artifact row(s) updated (transaction committed)`);
 
   db.close();
 }

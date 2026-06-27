@@ -54,17 +54,11 @@ function extractGoldenTrace(parsed: Record<string, unknown>): ExtractedGoldenTra
   if (typeof trace !== 'object' || trace === null || Array.isArray(trace)) {
     return { ok: false, reason: 'no_golden_trace' };
   }
-  const traceObj = trace as Record<string, unknown>;
-  if (!Array.isArray(traceObj.cases) || traceObj.cases.length === 0) {
-    return { ok: false, reason: 'no_golden_trace' };
-  }
-  if (typeof traceObj.traceId !== 'string' || traceObj.traceId.trim().length === 0) {
-    return { ok: false, reason: 'no_golden_trace' };
-  }
 
-  // Run the canonical schema validator. This rejects illegal
-  // expectedDecision values (e.g. "requireApproval"), missing required
-  // fields, and other contract violations before entering the sandbox.
+  // Once we have an object, defer ALL field-level validation to the canonical
+  // validator. The previous intermediate checks (cases non-empty, traceId
+  // non-empty) masked schema errors as 'no_golden_trace', giving the owner
+  // a less actionable reason than 'golden_trace_schema_invalid: <detail>'.
   const validation = validateGoldenTrace(trace);
   if (!validation.valid) {
     const detail = validation.errors.slice(0, 3).join('; ');

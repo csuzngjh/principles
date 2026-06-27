@@ -182,7 +182,11 @@ describe('RuleHostWriter', () => {
     });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain('no_golden_trace');
+    // Empty cases is a schema violation (missing required positive/negative
+    // cases), not a missing trace. The canonical validator surfaces the
+    // specific schema error rather than masking it as 'no_golden_trace'.
+    expect(result.reason).toContain('golden_trace_schema_invalid');
+    expect(result.reason).toMatch(/cases|positive|negative/);
   });
 
   it('rejects artifact with unparseable contentJson', async () => {
@@ -266,7 +270,11 @@ describe('RuleHostWriter', () => {
   // `as unknown as GoldenTrace` to bypass schema validation.
   it('rejects artifact with illegal expectedDecision (requireApproval) before sandbox, with clear reason', async () => {
     const { RuleHostWriter } = await importWriter();
-    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const gateDeps = makeGateDeps();
+    const writer = new RuleHostWriter({ gateDeps });
+    // Include a valid positive case so the ONLY schema failure is the illegal
+    // expectedDecision — isolating the test to the exact regression scenario
+    // rather than also tripping "missing positive case".
     const badTrace = {
       ...makeGoldenTrace(),
       cases: [
@@ -278,6 +286,13 @@ describe('RuleHostWriter', () => {
           // Illegal: requireApproval is a RuleHostDecision, not a GoldenTraceDecision.
           // Legal values are: allow | block | propose_correction.
           expectedDecision: 'requireApproval',
+        },
+        {
+          caseId: 'case-pos-valid',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/project/src/safe.ts' },
+          expectedDecision: 'allow',
         },
       ],
     };
@@ -295,6 +310,9 @@ describe('RuleHostWriter', () => {
     expect(result.reason).not.toContain('gate_decision_not_accepted_shadow');
     // The reason should point at the offending field so the owner knows what to fix.
     expect(result.reason).toMatch(/expectedDecision|requireApproval|allow.*block.*propose_correction/);
+    // The rejection must happen BEFORE the sandbox is invoked — proving the
+    // schema guard is the defense, not the sandbox's validation_failed path.
+    expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
   });
 
   it('rejects artifact where implementationCode is not a string', async () => {
