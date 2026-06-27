@@ -151,7 +151,7 @@ trajectory.db（由 plugin MigrationRunner 管理）
 ├── pain_signals                       ✅ PainSignal
 ├── pain_evidence                      ✅ PainEvidence
 ├── thinking_model_events              ✅ ThinkingModelEvent
-└── schema_version                     ✅ 完整版（plugin MigrationRunner 管理）
+└── schema_version                     ✅ 装饰性版本标记（applyTrajectorySchema 管理，不驱动迁移决策）
 ```
 
 ### 3.2 关键表 Schema（新增表）
@@ -347,9 +347,9 @@ CREATE INDEX idx_checkpoints_task ON agent_session_checkpoints(task_id);
 - `schema_version`（P2-10，精简版，core 实现）
 - ❌ `confirm_first_state`：已 DROP（PRI-473 / P3-12）
 
-**trajectory.db 已实现表**（✅ 由 plugin schema-definitions.ts 管理）：
+**trajectory.db 已实现表**（✅ 由 trajectory.ts applyTrajectorySchema 管理）：
 - `events` / `pain_signals` / `pain_evidence` / `thinking_model_events`
-- `schema_version`（完整版，plugin MigrationRunner 管理）
+- `schema_version`（装饰性版本标记，不驱动迁移决策）
 
 ---
 
@@ -725,7 +725,7 @@ async approveAndActivate(approvalId): Promise<void> {
 
 ### 8.1 SQLite Migration（forward-only）
 
-> **实现状态**：state.db 当前用 `PRAGMA table_info` 做内联迁移（`sqlite-connection.ts` 的 `initSchema()` / `migrateSchema()`），P2-10 增加精简版 `schema_version` 表作为版本追踪基础设施。trajectory.db 由 plugin `MigrationRunner` 管理，有完整版本化迁移。下方列出的版本化 SQL 文件均为 post-MVP 计划。
+> **实现状态**：state.db 当前用 `PRAGMA table_info` 做内联迁移（`sqlite-connection.ts` 的 `initSchema()` / `migrateSchema()`），P2-10 增加精简版 `schema_version` 表作为版本追踪基础设施。trajectory.db 由 `trajectory.ts` 的 `applyTrajectorySchema()` 管理（CREATE TABLE + ALTER 迁移块），`schema_version` 表为装饰性版本标记。下方列出的版本化 SQL 文件均为 post-MVP 计划。
 
 ```
 @principles/core/runtime-v2/store/migrations/   ⏸️ post-MVP
@@ -737,7 +737,7 @@ async approveAndActivate(approvalId): Promise<void> {
 ```
 
 - state.db 启动时由 `sqlite-connection.ts` 的 `initSchema()` + `migrateSchema()` 自动应用（PRAGMA table_info 检测 + ALTER TABLE）。
-- trajectory.db 启动时由 plugin `migration-runner.ts` 自动应用（基于 `schema_version` 表的版本化迁移）。
+- trajectory.db 启动时由 `trajectory.ts` 的 `applyTrajectorySchema()` 自动应用（CREATE TABLE IF NOT EXISTS + ALTER TABLE 迁移块）。`schema_version` 表存在但当前为装饰性版本标记，不驱动迁移决策。
 - post-MVP 计划：将 state.db 迁移也改为版本化 SQL 文件，由 core 层精简版 `schema_version` 表追踪。
 
 ### 8.2 Ledger Migration
