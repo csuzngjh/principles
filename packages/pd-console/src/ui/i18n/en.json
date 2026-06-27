@@ -798,7 +798,11 @@
       "undoAction": "Undo",
       "undoSuccess": "Operation undone successfully.",
       "undoFailed": "Undo operation failed.",
-      "loadError": "Unable to load principle debt data. Please try refreshing the page."
+      "loadError": "Unable to load principle debt data. Please try refreshing the page.",
+      "daysSinceAgo": "{{count}} days ago",
+      "demoteTooltip": "Demote endpoint under development",
+      "principleAriaLabel": "Debt Principle {{id}}",
+      "listAriaLabel": "Debt principles list"
     }
   },
   "components": {

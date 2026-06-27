@@ -798,7 +798,11 @@
       "undoAction": "撤销",
       "undoSuccess": "操作已撤销。",
       "undoFailed": "撤销操作失败。",
-      "loadError": "无法加载原则债务数据，请尝试刷新页面。"
+      "loadError": "无法加载原则债务数据，请尝试刷新页面。",
+      "daysSinceAgo": "{{count}} 天前",
+      "demoteTooltip": "降权端点开发中",
+      "principleAriaLabel": "原则债务 {{id}}",
+      "listAriaLabel": "原则债务列表"
     }
   },
   "components": {

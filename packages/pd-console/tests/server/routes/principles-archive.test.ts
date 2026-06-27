@@ -60,6 +60,12 @@ function readLedger(workspaceDir: string): Record<string, unknown> | null {
   return (parsed._tree ?? parsed.tree) as Record<string, unknown>;
 }
 
+// Runtime type narrowing helper (rc-2-no-as-bypass: no `as any` on untrusted
+// parsed JSON). Narrows unknown → Record for nested ledger field access.
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Principles archive and unarchive routes", () => {
@@ -115,7 +121,9 @@ describe("Principles archive and unarchive routes", () => {
     // Verify DB state
     const ledger = readLedger(tempDir);
     expect(ledger).not.toBeNull();
-    const p = (ledger as any).principles.p1;
+    if (!ledger) throw new Error("ledger should not be null");
+    const principles = asRecord(ledger.principles);
+    const p = asRecord(principles.p1);
     expect(p.status).toBe("archived");
   });
 
@@ -156,7 +164,9 @@ describe("Principles archive and unarchive routes", () => {
     // Verify DB state
     const ledger = readLedger(tempDir);
     expect(ledger).not.toBeNull();
-    const p = (ledger as any).principles.p1;
+    if (!ledger) throw new Error("ledger should not be null");
+    const principles = asRecord(ledger.principles);
+    const p = asRecord(principles.p1);
     expect(p.status).toBe("active");
   });
 

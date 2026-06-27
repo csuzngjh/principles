@@ -92,7 +92,7 @@ function DebtCard({
           {t("pages.debt.reasonStagnant")}
           {item.daysSince !== undefined && (
             <span className="text-amber font-semibold ml-1">
-              ({t("pages.focus.stagnationDaysSince", { count: item.daysSince, defaultValue: `${item.daysSince} days ago` })})
+              ({t("pages.debt.daysSinceAgo", { count: item.daysSince })})
             </span>
           )}
         </span>
@@ -106,7 +106,7 @@ function DebtCard({
   return (
     <article
       className="p-5 bg-panel border border-line rounded-[6px] hover:border-line-2 transition-colors relative"
-      aria-label={`Debt Principle ${item.id}`}
+      aria-label={t("pages.debt.principleAriaLabel", { id: item.id })}
     >
       <div className="flex flex-col md:flex-row md:items-start gap-4">
         {/* Left Section: Details */}
@@ -182,7 +182,7 @@ function DebtCard({
                 <button
                   disabled
                   className="w-full inline-flex items-center justify-center gap-1.5 border border-line bg-surface/50 text-ink-4 cursor-not-allowed rounded-[3px] px-[14px] py-[6px] text-[12.5px]"
-                  title="降权端点开发中"
+                  title={t("pages.debt.demoteTooltip")}
                 >
                   {t("pages.debt.actionKeep")}
                 </button>
@@ -456,7 +456,7 @@ export function DebtPage() {
         </div>
 
         {/* Section List */}
-        <section aria-label="Debt principles list" className="space-y-[14px]">
+        <section aria-label={t("pages.debt.listAriaLabel")} className="space-y-[14px]">
           {debtItems.length > 0 ? (
             <>
               <SectionTitle id="section-debt-list">
