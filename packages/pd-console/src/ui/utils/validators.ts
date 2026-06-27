@@ -445,6 +445,20 @@ export function validateAgentBindingUpdate(v: unknown): AgentBindingUpdateData |
   return { agent: v.agent, runtimeProfile: v.runtimeProfile, enabled: v.enabled };
 }
 
+// ── Feature Flag Update (spec 2026-06-27 §13.5) ──────────────────────────────
+
+export interface FeatureFlagUpdateData {
+  feature: string;
+  enabled: boolean;
+}
+
+export function validateFeatureFlagUpdate(v: unknown): FeatureFlagUpdateData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'feature') || !isString(v.feature)) return null;
+  if (!Object.hasOwn(v, 'enabled') || !isBoolean(v.enabled)) return null;
+  return { feature: v.feature, enabled: v.enabled };
+}
+
 export interface ReadinessCheckData {
   agent: string;
   readiness: ReadinessStatus;
