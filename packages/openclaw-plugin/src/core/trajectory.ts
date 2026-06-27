@@ -77,6 +77,339 @@ const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
 const SCHEMA_VERSION = 1;
 
+/**
+ * Type guard: narrows `object` to `{ name: unknown }` without `as` casts.
+ * Used for PRAGMA table_info rows (rc-2-no-as-bypass).
+ */
+function hasNameField(row: object): row is { name: unknown } {
+  return Object.hasOwn(row, 'name');
+}
+
+/**
+ * Apply the full trajectory.db schema (tables + indexes + views + migrations) to an open
+ * Database handle. Used by TrajectoryDatabase.initSchema() and exported via
+ * initTrajectorySchema() for external callers (e.g. `pd runtime init`).
+ *
+ * DDL is the single source of truth for trajectory.db schema. pain-signal-observability.ts
+ * in principles-core also duplicates a subset of this DDL (acknowledged duplication); when
+ * updating this function, audit ensureTrajectorySchema() in core for parallel updates.
+ *
+ * Idempotent: all CREATE statements use IF NOT EXISTS; ALTER columns use try/catch on
+ * "duplicate column name" to skip existing columns.
+ */
+function applyTrajectorySchema(db: Database.Database): { tables: string[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const tables = [
+    'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
+    'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
+    'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
+    'exports_audit', 'evolution_tasks', 'evolution_events',
+  ];
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS ingest_checkpoint (
+      source_key TEXT PRIMARY KEY,
+      imported_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_id TEXT PRIMARY KEY,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS assistant_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      raw_text TEXT,
+      sanitized_text TEXT NOT NULL,
+      usage_json TEXT NOT NULL,
+      empathy_signal_json TEXT NOT NULL,
+      blob_ref TEXT,
+      raw_excerpt TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS user_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL,
+      raw_text TEXT,
+      blob_ref TEXT,
+      raw_excerpt TEXT,
+      correction_detected INTEGER NOT NULL DEFAULT 0,
+      correction_cue TEXT,
+      references_assistant_turn_id INTEGER,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      duration_ms INTEGER,
+      exit_code INTEGER,
+      error_type TEXT,
+      error_message TEXT,
+      gfi_before REAL,
+      gfi_after REAL,
+      params_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS pain_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      score REAL NOT NULL,
+      reason TEXT,
+      severity TEXT,
+      origin TEXT,
+      confidence REAL,
+      text TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS gate_blocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      tool_name TEXT NOT NULL,
+      file_path TEXT,
+      reason TEXT NOT NULL,
+      plan_status TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS trust_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      previous_score REAL NOT NULL,
+      new_score REAL NOT NULL,
+      delta REAL NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS principle_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      principle_id TEXT,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS task_outcomes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      task_id TEXT,
+      outcome TEXT NOT NULL,
+      summary TEXT,
+      principle_ids_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS correction_samples (
+      sample_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      bad_assistant_turn_id INTEGER NOT NULL,
+      user_correction_turn_id INTEGER NOT NULL,
+      recovery_tool_span_json TEXT NOT NULL,
+      diff_excerpt TEXT NOT NULL,
+      principle_ids_json TEXT NOT NULL,
+      quality_score REAL NOT NULL,
+      review_status TEXT NOT NULL,
+      export_mode TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sample_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sample_id TEXT NOT NULL,
+      review_status TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS exports_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      export_kind TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      approved_only INTEGER NOT NULL,
+      file_path TEXT NOT NULL,
+      row_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS evolution_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT UNIQUE NOT NULL,
+      trace_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      reason TEXT,
+      score INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      enqueued_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      resolution TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS evolution_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trace_id TEXT NOT NULL,
+      task_id TEXT,
+      stage TEXT NOT NULL,
+      level TEXT DEFAULT 'info',
+      message TEXT NOT NULL,
+      summary TEXT,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
+  // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
+  try {
+    db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+      // Re-throw unexpected errors — silently swallowing migration failures is dangerous
+      throw err;
+    }
+  }
+
+  // PRI-406: Add canonical_pain_id and runtime_task_id columns to pain_events
+  for (const col of [
+    { name: 'canonical_pain_id', type: 'TEXT' },
+    { name: 'runtime_task_id', type: 'TEXT' },
+  ]) {
+    try {
+      db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+        throw err;
+      }
+    }
+  }
+
+  // Trajectory enhancement: add stop_reason, thinking_blocks_count, result_preview
+  const trajectoryEnhancementColumns = [
+    { table: 'assistant_turns', name: 'stop_reason', type: 'TEXT' },
+    { table: 'assistant_turns', name: 'thinking_blocks_count', type: 'INTEGER' },
+    { table: 'tool_calls', name: 'result_preview', type: 'TEXT' },
+  ];
+  for (const col of trajectoryEnhancementColumns) {
+    try {
+      db.exec(`ALTER TABLE ${col.table} ADD COLUMN ${col.name} ${col.type}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+        throw err;
+      }
+    }
+  }
+
+  // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
+    ON pain_events(canonical_pain_id)
+    WHERE canonical_pain_id IS NOT NULL
+  `);
+
+  // V2 migration: Add V2 columns to evolution_tasks if they don't exist
+  const v2Columns = [
+    { name: 'task_kind', type: 'TEXT' },
+    { name: 'priority', type: 'TEXT' },
+    { name: 'retry_count', type: 'INTEGER' },
+    { name: 'max_retries', type: 'INTEGER' },
+    { name: 'last_error', type: 'TEXT' },
+    { name: 'result_ref', type: 'TEXT' },
+  ];
+  for (const col of v2Columns) {
+    const rows = db.prepare(`PRAGMA table_info(evolution_tasks)`).all();
+    const exists = rows.some((row): boolean => {
+      if (typeof row !== 'object' || row === null) return false;
+      // Use type guard predicate to narrow without `as` (rc-2-no-as-bypass)
+      return hasNameField(row) && row.name === col.name;
+    });
+    if (!exists) {
+      db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
+    }
+  }
+
+  db.exec(`
+    CREATE VIEW IF NOT EXISTS v_error_clusters AS
+    SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
+    FROM tool_calls
+    WHERE outcome = 'failure'
+    GROUP BY tool_name, COALESCE(error_type, 'unknown')
+    ORDER BY occurrences DESC;
+    CREATE VIEW IF NOT EXISTS v_principle_effectiveness AS
+    SELECT event_type, COUNT(*) AS total
+    FROM principle_events
+    GROUP BY event_type
+    ORDER BY total DESC;
+    CREATE VIEW IF NOT EXISTS v_sample_queue AS
+    SELECT review_status, COUNT(*) AS total
+    FROM correction_samples
+    GROUP BY review_status;
+    CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id);
+    CREATE INDEX IF NOT EXISTS idx_assistant_turns_created_at ON assistant_turns(created_at);
+    CREATE INDEX IF NOT EXISTS idx_assistant_turns_provider_model ON assistant_turns(provider, model);
+    CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
+    CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
+    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_trace_id ON evolution_tasks(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_status ON evolution_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_created_at ON evolution_tasks(created_at);
+    CREATE INDEX IF NOT EXISTS idx_evolution_events_trace_id ON evolution_events(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_evolution_events_created_at ON evolution_events(created_at);
+  `);
+
+  return { tables, warnings };
+}
+
+/**
+ * Initialize trajectory.db schema at the given workspace directory.
+ *
+ * Opens trajectory.db in write mode, applies the full schema (tables + indexes + views +
+ * migrations), then closes the DB. Does NOT run importLegacyArtifacts() or
+ * pruneUnreferencedBlobs() — those are runtime side-effects of TrajectoryDatabase
+ * construction and are not needed for pure initialization.
+ *
+ * Idempotent: safe to call on an existing DB; all CREATE statements use IF NOT EXISTS.
+ *
+ * @returns list of created/verified table names and any warnings
+ */
+export function initTrajectorySchema(workspaceDir: string): { tables: string[]; warnings: string[] } {
+  const resolvedDir = path.resolve(workspaceDir);
+  const stateDir = resolvePdPath(resolvedDir, 'STATE_DIR');
+  const blobDir = resolvePdPath(resolvedDir, 'TRAJECTORY_BLOBS_DIR');
+  const exportDir = resolvePdPath(resolvedDir, 'EXPORTS_DIR');
+  const dbPath = resolvePdPath(resolvedDir, 'TRAJECTORY_DB');
+
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(blobDir, { recursive: true });
+  fs.mkdirSync(exportDir, { recursive: true });
+
+  const db = new Database(dbPath);
+  try {
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    db.pragma('synchronous = NORMAL');
+    db.pragma(`busy_timeout = ${DEFAULT_BUSY_TIMEOUT_MS}`);
+    const result = applyTrajectorySchema(db);
+    // Record schema version (same logic as TrajectoryDatabase.initSchema)
+    const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
+    if (!row) {
+      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+    } else if (row.version !== SCHEMA_VERSION) {
+      db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
+    }
+    return result;
+  } finally {
+    db.close();
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -1134,266 +1467,13 @@ export class TrajectoryDatabase {
   }
 
   private initSchema(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS ingest_checkpoint (
-        source_key TEXT PRIMARY KEY,
-        imported_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS assistant_turns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        raw_text TEXT,
-        sanitized_text TEXT NOT NULL,
-        usage_json TEXT NOT NULL,
-        empathy_signal_json TEXT NOT NULL,
-        blob_ref TEXT,
-        raw_excerpt TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS user_turns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        turn_index INTEGER NOT NULL,
-        raw_text TEXT,
-        blob_ref TEXT,
-        raw_excerpt TEXT,
-        correction_detected INTEGER NOT NULL DEFAULT 0,
-        correction_cue TEXT,
-        references_assistant_turn_id INTEGER,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS tool_calls (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        tool_name TEXT NOT NULL,
-        outcome TEXT NOT NULL,
-        duration_ms INTEGER,
-        exit_code INTEGER,
-        error_type TEXT,
-        error_message TEXT,
-        gfi_before REAL,
-        gfi_after REAL,
-        params_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS pain_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        score REAL NOT NULL,
-        reason TEXT,
-        severity TEXT,
-        origin TEXT,
-        confidence REAL,
-        text TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS gate_blocks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT,
-        tool_name TEXT NOT NULL,
-        file_path TEXT,
-        reason TEXT NOT NULL,
-        plan_status TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS trust_changes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT,
-        previous_score REAL NOT NULL,
-        new_score REAL NOT NULL,
-        delta REAL NOT NULL,
-        reason TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS principle_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        principle_id TEXT,
-        event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS task_outcomes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        task_id TEXT,
-        outcome TEXT NOT NULL,
-        summary TEXT,
-        principle_ids_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS correction_samples (
-        sample_id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        bad_assistant_turn_id INTEGER NOT NULL,
-        user_correction_turn_id INTEGER NOT NULL,
-        recovery_tool_span_json TEXT NOT NULL,
-        diff_excerpt TEXT NOT NULL,
-        principle_ids_json TEXT NOT NULL,
-        quality_score REAL NOT NULL,
-        review_status TEXT NOT NULL,
-        export_mode TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sample_reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sample_id TEXT NOT NULL,
-        review_status TEXT NOT NULL,
-        note TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS exports_audit (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        export_kind TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        approved_only INTEGER NOT NULL,
-        file_path TEXT NOT NULL,
-        row_count INTEGER NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS evolution_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id TEXT UNIQUE NOT NULL,
-        trace_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        reason TEXT,
-        score INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'pending',
-        enqueued_at TEXT,
-        started_at TEXT,
-        completed_at TEXT,
-        resolution TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS evolution_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        trace_id TEXT NOT NULL,
-        task_id TEXT,
-        stage TEXT NOT NULL,
-        level TEXT DEFAULT 'info',
-        message TEXT NOT NULL,
-        summary TEXT,
-        metadata_json TEXT,
-        created_at TEXT NOT NULL
-      );
-    `);
-
-    // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
-    // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
-    try {
-      this.db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-        // Re-throw unexpected errors — silently swallowing migration failures is dangerous
-        throw err;
-      }
+    const result = applyTrajectorySchema(this.db);
+    // Best-effort: surface any warnings from schema initialization (rc-9: no silent fallback).
+    // Warnings include failed migrations or view creation issues; surfaced via console.info
+    // because TrajectoryDatabase does not have a warnings buffer at this layer.
+    for (const w of result.warnings) {
+      console.info(`[PD:TrajectoryDatabase] schema init warning: ${w}`);
     }
-
-    // PRI-406: Add canonical_pain_id and runtime_task_id columns to pain_events
-    for (const col of [
-      { name: 'canonical_pain_id', type: 'TEXT' },
-      { name: 'runtime_task_id', type: 'TEXT' },
-    ]) {
-      try {
-        this.db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-          throw err;
-        }
-      }
-    }
-
-    // Trajectory enhancement: add stop_reason, thinking_blocks_count, result_preview
-    const trajectoryEnhancementColumns = [
-      { table: 'assistant_turns', name: 'stop_reason', type: 'TEXT' },
-      { table: 'assistant_turns', name: 'thinking_blocks_count', type: 'INTEGER' },
-      { table: 'tool_calls', name: 'result_preview', type: 'TEXT' },
-    ];
-    for (const col of trajectoryEnhancementColumns) {
-      try {
-        this.db.exec(`ALTER TABLE ${col.table} ADD COLUMN ${col.name} ${col.type}`);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!message.includes('duplicate column name') && !message.includes('no column named')) {
-          throw err;
-        }
-      }
-    }
-
-    // PRI-406: Partial unique index on canonical_pain_id (non-null only) for dedup
-    this.db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_pain_events_canonical_pain_id
-      ON pain_events(canonical_pain_id)
-      WHERE canonical_pain_id IS NOT NULL
-    `);
-
-    // pain_events_fts FTS5 virtual table creation removed (PRI-451 Wave 1):
-    // the only reader (searchPainEvents) was dead code. Existing DBs keep the
-    // orphan table harmlessly (CREATE was IF NOT EXISTS); new DBs skip it.
-
-    // V2 migration: Add V2 columns to evolution_tasks if they don't exist
-    // SQLite does not support IF NOT EXISTS for ADD COLUMN, so we must check manually
-    // before each ALTER to avoid "duplicate column name" errors on existing DBs
-    const v2Columns = [
-      { name: 'task_kind', type: 'TEXT' },
-      { name: 'priority', type: 'TEXT' },
-      { name: 'retry_count', type: 'INTEGER' },
-      { name: 'max_retries', type: 'INTEGER' },
-      { name: 'last_error', type: 'TEXT' },
-      { name: 'result_ref', type: 'TEXT' },
-    ];
-    for (const col of v2Columns) {
-      const exists = this.db.prepare(`PRAGMA table_info(evolution_tasks)`).all()
-        .some((row) => (row as Record<string, unknown>).name === col.name);
-      if (!exists) {
-        this.db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
-      }
-    }
-
-    this.db.exec(`
-      CREATE VIEW IF NOT EXISTS v_error_clusters AS
-      SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
-      FROM tool_calls
-      WHERE outcome = 'failure'
-      GROUP BY tool_name, COALESCE(error_type, 'unknown')
-      ORDER BY occurrences DESC;
-      CREATE VIEW IF NOT EXISTS v_principle_effectiveness AS
-      SELECT event_type, COUNT(*) AS total
-      FROM principle_events
-      GROUP BY event_type
-      ORDER BY total DESC;
-      CREATE VIEW IF NOT EXISTS v_sample_queue AS
-      SELECT review_status, COUNT(*) AS total
-      FROM correction_samples
-      GROUP BY review_status;
-      CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id);
-      CREATE INDEX IF NOT EXISTS idx_assistant_turns_created_at ON assistant_turns(created_at);
-      CREATE INDEX IF NOT EXISTS idx_assistant_turns_provider_model ON assistant_turns(provider, model);
-      CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
-      CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id);
-      CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
-      CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
-      CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
-      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_trace_id ON evolution_tasks(trace_id);
-      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_status ON evolution_tasks(status);
-      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_created_at ON evolution_tasks(created_at);
-      CREATE INDEX IF NOT EXISTS idx_evolution_events_trace_id ON evolution_events(trace_id);
-      CREATE INDEX IF NOT EXISTS idx_evolution_events_created_at ON evolution_events(created_at);
-    `);
-
     const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
     this.migrateSchema(row?.version);
     if (!row) {

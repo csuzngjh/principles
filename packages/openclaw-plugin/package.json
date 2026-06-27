@@ -3,9 +3,13 @@
   "version": "1.74.1",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",
-  "main": "./dist/bundle.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/bundle.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "repository": {
     "type": "git",
