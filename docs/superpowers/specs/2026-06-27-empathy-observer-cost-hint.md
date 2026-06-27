@@ -262,3 +262,156 @@ if (!visible) return null;
 2. **localStorage 不持久**：用户换设备 / 清缓存会重新看到。这个其实是 fail-open 的优势，不算风险。
 3. **i18n key 缺失**：`react-i18next` 不会因缺失 key 报错，会把 key 本身当文案——视觉上不优雅但不损坏功能。需要在实现时确保同步加两份 locale。
 4. **未取代真正 token cost 数据链路**——只告知"当前 model 是谁"，不展示"已花多少 token"。这由非目标 §2 明确划界。如果将来 owner 需要 active token 计数，那是下一阶段的独立 feature。
+
+---
+
+## 13. 扩展需求：Intent Engineering 特性开关
+
+### 13.1 问题
+
+Owner 审阅时指出：IntentPage 当前显示静态文案"如需启用，请在 .pd/config.yaml 中设置 features.intent_engineering.enabled=true，然后重启 pd-console"（zh-CN.json:722 `flagDisabled.nextAction`）。让 owner 手改 yaml 然后重启，不符合 PD"可治理、可撤回"的气质。
+
+### 13.2 真实事实
+
+| 维度 | 现状 |
+|---|---|
+| `flagEnabled` 数据流 | `intent.ts:36-38` → `loadPdConfig(workspaceDir)` → `computeFlagsFromLoadResult(...)` → `flags.intent_engineering?.enabled === true`。前端 `IntentPage` 通过 `IntentSummaryData.flagEnabled` 拿到 |
+| 前端 banner | `IntentPage.tsx:74` `FlagDisabledBanner` 静态展示 + copy "去改 yaml" |
+| 后端写 yaml 基础设施 | `pd-config-store.ts:130` 已有 `writeConfigAtomic()`；已有 `updateAgentBinding()` / `updateDefaultRuntime()` / `updatePrinciplesOutputLanguage()` 三个范式（都遵循 "load → validate → merge → atomic write"） |
+| 已存在的 features 写 endpoint | **没有** —— `PATCH /api/v1/config/features/:name` 这种路由不存在，需要新增 |
+| i18n 现成 key | `pages.intent.flagStatus.{title,description,nextAction}` 已存在。改文案即可，不需要加新 key 段 |
+
+### 13.3 设计目标（新增）
+
+1. **后端**：新增 `PATCH /api/v1/config/features/:featureName`，请求体 `{ enabled: boolean }`，调用方写 `.pd/config.yaml` 的对应 `features.<name>.enabled` 字段，原子写，返回新状态
+2. **前端**：把 `FlagDisabledBanner` 改成可交互（带 toggle 按钮）；文案从"去改 yaml"改为开关即点即用
+3. **影响范围**：只有 `intent_engineering` 一个 flag 在当前 MVP 范围内。API 设计成通用 `:featureName`（不是写死 intent），但前端按钮只对 intent_engineering 出现，避免动非 MVP-Quiet 的其它 flag
+
+### 13.4 后端改动
+
+新增文件 / 改动：
+
+| 文件 | 改动 |
+|---|---|
+| `packages/pd-console/src/server/config/pd-config-store.ts` | 新增 `updateFeatureFlag(workspaceDir: string, featureName: string, enabled: boolean): { ok: boolean; enabled: boolean; reason?: string; nextAction?: string }`，参照 `updateAgentBinding` 的"原子写 + 拒绝改破坏结构"模式 |
+| `packages/pd-console/src/server/routes/config.ts` | 新增 `PATCH /api/v1/config/features/:featureName` handler，调 `updateFeatureFlag` |
+| `packages/pd-console/tests/server/routes/config.test.ts` | 新增覆盖：合法 PATCH / 校验失败 / 写入的 yaml 保持原有其它段不丢 / 不存在的 flag 名拒绝 |
+
+**约束**：
+- 只允许 `featureName` 是已注册 flag 名集合（见 `computeFlagsFromLoadResult` 输出），暂仅 `intent_engineering` 实际暴露到前端
+- 不允许通过此 API **新增** flag —— 即测试如果 yaml 完全没有 `features:` 段，请求拒绝
+- 原子写（`writeConfigAtomic` 现成）+ 验证合并后 yaml 仍可被 `loadPdConfig` 重新解析成功。任一失败回滚且返回 `ok: false`
+
+### 13.5 前端改动
+
+改动 `IntentPage.tsx`：
+
+```tsx
+// 替换 FlagDisabledBanner 的静态说明为可交互按钮
+
+interface FlagToggleCardProps {
+  flagEnabled: boolean;
+  workspaceName: string;
+  onAfterEnable?: () => void;  // 父组件在 toggle 成功后重新 fetch IntentSummary
+}
+
+function FlagToggleCard({ flagEnabled, workspaceName, onAfterEnable }: FlagToggleCardProps) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  // 仅当 flagEnabled===false 时（disabled 状态）展示启用按钮
+  // flagEnabled===true 时只显示 status badge（已是 enabled），不再做副作用 toggle
+  if (flagEnabled || acknowledged) return null;
+
+  return (
+    <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
+      <h2 className="text-ink text-[15px] font-semibold mb-2">
+        {t("pages.intent.flagDisabled.title")}
+      </h2>
+      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+        {t("pages.intent.flagDisabled.description")}
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const res = await patchFeatureFlag("intent_engineering", true);
+          setBusy(false);
+          if (!res.success) {
+            toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
+            return;
+          }
+          setAcknowledged(true);
+          onAfterEnable?.();  // 父组件重新 fetch IntentSummary
+        }}
+        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50"
+      >
+        {busy ? t("pages.intent.flagStatus.enabling") : t("pages.intent.flagStatus.enable")}
+      </button>
+    </div>
+  );
+}
+```
+
+父组件 `IntentPage` 在挂载 `FlagToggleCard` 时传入 `onAfterEnable={() => loadData()}`（`loadData` 已存在，会重 fetch IntentSummary 并覆盖 cache）。
+
+i18n 文案修改：
+- `pages.intent.flagDisabled.nextAction` **删除**（不再"去改 yaml"）—保留 `title` 和 `description` 描述"已关闭"含义
+- 新增 `pages.intent.flagStatus.` 子段：`enable`（启用）、`enabling`（启用中…）、`enableFailed`（启用失败提示）
+
+### 13.6 CLI Gate 适配
+
+按 AGENTS.md `cli-1-strict-json` / `cli-4-dry-run-confirm-mutex`：本 PR 不动 `pd-cli` 命令，只在 server HTTP API 路由层加新端点。CLI Gate N/A。
+
+### 13.7 Feature Flag 自注册检查
+
+按 AGENTS.md "Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval"——本 PR 不引入新功能子系统：`intent_engineering` 本身已经是 MVP-Quiet 注册的 feature（schema 中已存在）。我们只是将其 enable 操作从"手改 yaml"转换为"前端点击 toggle"。不改运行时行为集合。`.pd/feature-flags.yaml` 注册的 elif PRI-239 仍待落地。
+
+### 13.8 MVP 三问自答（intent_engineering 部分）
+
+- **mvp-q-1-what-if-skip**：30 天后 owner 想体验 intent_engineering 仍要去翻 yaml 文件手改，用户体验断点持续
+- **mvp-q-2-how-observed**：ControlCenterPage 之外的 intent 页面里直接看见 toggle 启用按钮，点完立即看到 INTENT.md 上下文（若文件存在），可见
+- **mvp-q-3-how-disabled**：仅需 PATCH 一次 `/api/v1/config/features/intent_engineering` body `{enabled:false}`。无 feature flag of feature flag。失败可手动改 yaml 回滚
+- **mvp-q-4-emotional-value**：使"启动一个新方向"从"翻配置文件 → 重启 console" 变为"点一下 toggle" — 降低 *疲惫感*，提升 *掌控感*
+
+### 13.9 ERROR Checklist（intent_engineering 部分）
+
+- **ERR-001 / ERR-005**：API 请求体 `enabled` 严格 `typeof === 'boolean'` 校验；`featureName` 严格对照白名单，禁止任意字符串
+- **ERR-009**：featureName 不在白名单 → `ok: false, reason: 'unknown_feature', nextAction: 'use one of: [...]'`
+- **ERR-013**：使用 `Object.hasOwn` 检查 yaml 是否已有 `features` 段，没有则拒绝新建
+- **ERR-015/018/019**：load-validate-merge-write-reload 链不引入 stale cache；调用方在成功后强制 invalidate model cache（IntentPageModel.getSummary 必须拿新值）
+- **rc-5**：处理 `features` 子对象用 `Object.hasOwn`
+
+### 13.10 测试计划（intent_engineering 部分）
+
+#### Unit / Server
+- `PATCH /api/v1/config/features/intent_engineering` `{enabled:true}` → 后端写 yaml 成功 + 返回 `ok:true`
+- featureName 不在白名单 → 400
+- enabled 非 boolean → 400
+- yaml 没有 `features:` 段 → 422 + reason
+
+#### Integration
+- 前端点 toggle → IntentPageModel.getSummary 重新返回 `flagEnabled=true`（cache 失效）→ 原 FlagDisabledBanner 不再渲染
+- 刷新浏览器 → 状态保持（yaml 已落盘）
+
+### 13.11 修改文件清单（追加）
+
+新增 / 修改：
+- `packages/pd-console/src/server/config/pd-config-store.ts` — 加 `updateFeatureFlag()`
+- `packages/pd-console/src/server/routes/config.ts` — 加 PATCH endpoint
+- `packages/pd-console/src/ui/pages/intent/IntentPage.tsx` — 替换 `FlagDisabledBanner` 为 `FlagToggleCard`，加 `onAfterEnable` 传参
+- `packages/pd-console/src/ui/api.ts` — 加 `patchFeatureFlag(featureName, enabled)` 客户端
+- `packages/pd-console/src/ui/i18n/zh-CN.json` — **删除** `pages.intent.flagDisabled.nextAction`，**新增** `pages.intent.flagStatus.{enable,enabling,enableFailed}`
+- `packages/pd-console/src/ui/i18n/en.json` — 同步上述删除与新增
+- `packages/pd-console/tests/server/routes/config.test.ts` — 加 PATCH feature 测试
+- `packages/pd-console/tests/ui/IntentPage.test.tsx`（新增）— 测 FlagToggleCard 渲染 / disable / success
+
+预计额外工作量：1-1.5 天（含 server 写、unit、component 验证）
+
+### 13.12 残余风险（追加）
+
+1. **运行时影响**：开启 `intent_engineering` 后立即把 prompt hook 的 intent 注入路径激活（已存在的 prompt.ts:1014 `loadFeatureFlagFromConfig` 会读到）。此 PR 不动 runtime。但需要在前端提示文案里讲清楚——开启后会被注入到 prompt，不只是"看 INTENT.md"
+2. **multi-workspace 隔离**：`flagEnabled` 按 workspaceDir 缓存，无关工作空间互不影响
+3. **回滚**：若 owner 在 toggle 打开后想再关，本 spec 只设计了"启用按钮"，没有设计 "关" 按钮—— 非 MVP scope。需要关时手改 yaml 是回退路径（符合不完全对称设计 + MVP-First 范围克制）。后续可补
