@@ -26,6 +26,7 @@ import {
   validateConfigSummary,
   validateConfigCatalog,
   validateAgentBindingUpdate,
+  validateFeatureFlagUpdate,
   validateReadinessCheck,
   validateDefaultRuntimeUpdate,
   validateConfigReadiness,
@@ -1319,5 +1320,29 @@ describe('validateApprovalRecordDirect', () => {
       requestedAt: '2026-06-01T00:00:00Z',
     });
     expect(validateApprovalRecordDirect(obj)).toBeNull();
+  });
+});
+
+describe('validateFeatureFlagUpdate', () => {
+  it('accepts a valid feature flag update', () => {
+    const result = validateFeatureFlagUpdate({ feature: 'intent_engineering', enabled: true });
+    expect(result).toEqual({ feature: 'intent_engineering', enabled: true });
+  });
+
+  it('rejects missing or invalid fields', () => {
+    expect(validateFeatureFlagUpdate(null)).toBeNull();
+    expect(validateFeatureFlagUpdate({})).toBeNull();
+    expect(validateFeatureFlagUpdate({ feature: 'intent_engineering' })).toBeNull();
+    expect(validateFeatureFlagUpdate({ enabled: true })).toBeNull();
+    expect(validateFeatureFlagUpdate({ feature: 123, enabled: true })).toBeNull();
+    expect(validateFeatureFlagUpdate({ feature: 'intent_engineering', enabled: 'true' })).toBeNull();
+  });
+
+  it('rejects inherited properties (ERR-013)', () => {
+    const obj = Object.create({
+      feature: 'intent_engineering',
+      enabled: true,
+    });
+    expect(validateFeatureFlagUpdate(obj)).toBeNull();
   });
 });
