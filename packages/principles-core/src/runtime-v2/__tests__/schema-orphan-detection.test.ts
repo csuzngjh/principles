@@ -96,8 +96,23 @@ function collectProductionSourceFiles(): string[] {
 }
 
 /**
+ * Strip comments from TypeScript source so that commented-out SQL statements
+ * are not counted as write paths (avoids false negatives in orphan detection).
+ * Handles line comments (//) and block comments (slash-star ... star-slash).
+ * Simplified: does not parse string literals, but SQL rarely contains //.
+ */
+function stripComments(source: string): string {
+  // Strip block comments first (may span multiple lines)
+  let result = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Strip line comments
+  result = result.replace(/\/\/.*$/gm, '');
+  return result;
+}
+
+/**
  * Check whether a table name appears in any INSERT/REPLACE/UPDATE statement
- * in the given source file content.
+ * in the given source file content. Comments are stripped first to avoid
+ * false negatives from commented-out write paths.
  */
 function hasWritePath(table: string, fileContents: string[]): boolean {
   // Match INSERT INTO <table>, INSERT OR IGNORE INTO <table>,
@@ -107,7 +122,7 @@ function hasWritePath(table: string, fileContents: string[]): boolean {
     `(INSERT\\s+(OR\\s+(IGNORE|REPLACE)\\s+)?INTO|REPLACE\\s+INTO|UPDATE)\\s+${table}\\b`,
     'i',
   );
-  return fileContents.some((content) => pattern.test(content));
+  return fileContents.some((content) => pattern.test(stripComments(content)));
 }
 
 describe('Schema orphan table detection (PRI-475 / M2)', () => {
