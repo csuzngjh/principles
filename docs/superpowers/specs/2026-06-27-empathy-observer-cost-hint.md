@@ -51,7 +51,7 @@
 ControlCenterPage 现有内容：
 - `OverallStatusCard`：`bg-panel border border-line rounded-[6px] px-[18px] py-[14px]`
 - Warnings 区视觉：`bg-surface/60 border border-amber/20 border-l-2 border-l-amber rounded-[6px] px-3 py-2`
-- 现成按钮风格：`ControlCenterPage.tsx:447-449` 的 commit 按钮 `border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px]`
+- 现成 toggle 按钮风格：`ControlCenterPage.tsx:440-462` AgentRow 的启用/停用按钮 `border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50`
 
 ### 3.5 产品气质要求
 
@@ -113,7 +113,7 @@ bg-surface/60 border border-line border-l-2 border-l-amber rounded-[6px] px-3 py
 文案色彩分工：
 - 主体：`text-ink-2 text-[14px] leading-relaxed`（与 OverallStatusCard 正文一致）
 - 副文案（workflows.yaml 提示）：`text-ink-3 text-[12px] mt-1`
-- "知道了" 按钮：仿 AgentRow 充电按钮 `border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium`
+- "知道了" 按钮：仿 AgentRow toggle 按钮 `border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium`
 
 ### 4.3 文案 i18n key
 
@@ -279,7 +279,7 @@ Owner 审阅时指出：IntentPage 当前显示静态文案"如需启用，请�
 | 前端 banner | `IntentPage.tsx:74` `FlagDisabledBanner` 静态展示 + copy "去改 yaml" |
 | 后端写 yaml 基础设施 | `pd-config-store.ts:130` 已有 `writeConfigAtomic()`；已有 `updateAgentBinding()` / `updateDefaultRuntime()` / `updatePrinciplesOutputLanguage()` 三个范式（都遵循 "load → validate → merge → atomic write"） |
 | 已存在的 features 写 endpoint | **没有** —— `PATCH /api/v1/config/features/:name` 这种路由不存在，需要新增 |
-| i18n 现成 key | `pages.intent.flagStatus.{title,description,nextAction}` 已存在。改文案即可，不需要加新 key 段 |
+| i18n 现成 key | `pages.intent.flagStatus` 下已有 `enabled` / `disabled` / `ariaLabel` 三子键；`pages.intent.flagDisabled` 下已有 `title` / `description` / `nextAction` 三子键（nextAction 文案"请改 yaml 重启"就是要替换的目标） |
 
 ### 13.3 设计目标（新增）
 
@@ -358,7 +358,8 @@ function FlagToggleCard({ flagEnabled, workspaceName, onAfterEnable }: FlagToggl
 父组件 `IntentPage` 在挂载 `FlagToggleCard` 时传入 `onAfterEnable={() => loadData()}`（`loadData` 已存在，会重 fetch IntentSummary 并覆盖 cache）。
 
 i18n 文案修改：
-- `pages.intent.flagDisabled.nextAction` **删除**（不再"去改 yaml"）—保留 `title` 和 `description` 描述"已关闭"含义
+- `pages.intent.flagDisabled.nextAction` **删除**——且必须同步删除 `IntentPage.tsx:84-86` 那段引用该 key 的 `<div>` 渲染（否则会留下一个空 div 圆角框）
+- 保留 `flagDisabled.title` 和 `flagDisabled.description` 描述"已关闭"含义
 - 新增 `pages.intent.flagStatus.` 子段：`enable`（启用）、`enabling`（启用中…）、`enableFailed`（启用失败提示）
 
 ### 13.6 CLI Gate 适配
@@ -367,7 +368,11 @@ i18n 文案修改：
 
 ### 13.7 Feature Flag 自注册检查
 
-按 AGENTS.md "Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval"——本 PR 不引入新功能子系统：`intent_engineering` 本身已经是 MVP-Quiet 注册的 feature（schema 中已存在）。我们只是将其 enable 操作从"手改 yaml"转换为"前端点击 toggle"。不改运行时行为集合。`.pd/feature-flags.yaml` 注册的 elif PRI-239 仍待落地。
+按 AGENTS.md "Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval"——本 PR 不引入新功能子系统：
+- `intent_engineering` flag 的 schema 在 `pd-config-store` 中已存在（前端与后端运行时都已经能识别），不是新 flag
+- 本 PR 只是把 enable 操作从"手改 yaml"转换为"前端点击 toggle"，不改运行时行为集合
+- 不在 `.pd/feature-flags.yaml` 注册新条目（且该文件尚未随 PRI-239 存在）
+- ADR-0014 的 MVP-Quiet / MVP-Core 分类对 `intent_engineering` 没有显式陈述；本 spec 视其为"已存在运行时实现路径、当前默认关闭"的 flag，与 MVP-First 阶段 .pd/config.yaml 的 features.* schema 一致
 
 ### 13.8 MVP 三问自答（intent_engineering 部分）
 
@@ -401,12 +406,12 @@ i18n 文案修改：
 新增 / 修改：
 - `packages/pd-console/src/server/config/pd-config-store.ts` — 加 `updateFeatureFlag()`
 - `packages/pd-console/src/server/routes/config.ts` — 加 PATCH endpoint
-- `packages/pd-console/src/ui/pages/intent/IntentPage.tsx` — 替换 `FlagDisabledBanner` 为 `FlagToggleCard`，加 `onAfterEnable` 传参
+- `packages/pd-console/src/ui/pages/intent/IntentPage.tsx` — 替换整个 `FlagDisabledBanner` 函数（IntentPage.tsx:74-89，含 84-86 渲染 nextAction 的 div）为 `FlagToggleCard`，加 `onAfterEnable` 传参
 - `packages/pd-console/src/ui/api.ts` — 加 `patchFeatureFlag(featureName, enabled)` 客户端
 - `packages/pd-console/src/ui/i18n/zh-CN.json` — **删除** `pages.intent.flagDisabled.nextAction`，**新增** `pages.intent.flagStatus.{enable,enabling,enableFailed}`
 - `packages/pd-console/src/ui/i18n/en.json` — 同步上述删除与新增
 - `packages/pd-console/tests/server/routes/config.test.ts` — 加 PATCH feature 测试
-- `packages/pd-console/tests/ui/IntentPage.test.tsx`（新增）— 测 FlagToggleCard 渲染 / disable / success
+- `packages/pd-console/tests/ui/IntentPage.test.tsx`（新增，目录 `tests/ui/` 已存在）— 测 FlagToggleCard 渲染 / disable / success
 
 预计额外工作量：1-1.5 天（含 server 写、unit、component 验证）
 
@@ -415,3 +420,29 @@ i18n 文案修改：
 1. **运行时影响**：开启 `intent_engineering` 后立即把 prompt hook 的 intent 注入路径激活（已存在的 prompt.ts:1014 `loadFeatureFlagFromConfig` 会读到）。此 PR 不动 runtime。但需要在前端提示文案里讲清楚——开启后会被注入到 prompt，不只是"看 INTENT.md"
 2. **multi-workspace 隔离**：`flagEnabled` 按 workspaceDir 缓存，无关工作空间互不影响
 3. **回滚**：若 owner 在 toggle 打开后想再关，本 spec 只设计了"启用按钮"，没有设计 "关" 按钮—— 非 MVP scope。需要关时手改 yaml 是回退路径（符合不完全对称设计 + MVP-First 范围克制）。后续可补
+
+---
+
+## 14. Spec 自审记录
+
+本次自审过程中对每条具体引用做了实证核实，修复了 4 处事实错误：
+
+| # | 错误 | 修正 |
+|---|---|---|
+| 1 | §3.4 / §4.2 写 `ControlCenterPage.tsx:447-449` 有"commit 按钮" | 实为 AgentRow toggle 按钮 440-462；不存在"commit 按钮"概念。已统一改为"AgentRow toggle 按钮" |
+| 2 | §13.2 i18n key 段写"`pages.intent.flagStatus.{title,description,nextAction}` 已存在" | 实测 `flagStatus` 只有 `enabled`/`disabled`/`ariaLabel` 三子键；`title`/`description` 在 `flagDisabled` 下。已改正 |
+| 3 | §13.5 说"删除 `flagDisabled.nextAction` key" | IntentPage.tsx:84-86 还在用 `t("flagDisabled.nextAction")` 渲染一个 div。只删 key 会留下空 div。已明确标注"同步删除 IntentPage.tsx:84-86 渲染代码" |
+| 4 | §13.7 说"intent_engineering 已经是 MVP-Quiet 注册的 feature（schema 中已存在）" | ADR-0014 没有 "intent_engineering" 显式注册陈述。重写为"flag schema 在 pd-config-store 中已存在，ADR 没有显式分类；本 PR 视其为已存在运行时路径默认关闭的 flag" |
+
+未发现问题 / 保持原样：
+- §3.1 `ControlCenterPage.tsx:440-462` AgentRow toggle ✓
+- §3.2 `pd-config-store.ts:122` 构造 label 代码 ✓
+- §3.3 `zh-CN.json:622` pages.controlCenter.* ✓
+- §3.5 emotional-value.md §4 ✓
+- §11 `tests/ui/` 目录已存在 ✓
+- §11 `config.test.ts` 现存文件 ✓
+- §1 `prompt.ts:1113` env fallback `anthropic/claude-3-5-sonnet` ✓
+- §13.2 `intent.ts:36-38` 数据流 ✓
+- §13.2 `IntentPageModel.ts:35-45` getSummary(flagEnabled) ✓
+- §13.2 `pd-config-store.ts:130` writeConfigAtomic ✓
+- §13.2 `IntentPage.tsx:74-89` FlagDisabledBanner ✓
