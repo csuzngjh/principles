@@ -647,7 +647,12 @@
       "agentEnabled": "Enabled",
       "agentDisabled": "Disabled",
       "profileLabel": "Profile",
-      "readinessLabel": "Readiness"
+      "readinessLabel": "Readiness",
+      "empathyCostHint": {
+        "body": "Empathy Observer is on — every unmatched message triggers an LLM call (current model: {{provider}}/{{model}}).",
+        "muted": "To reduce cost, switch pd-empathy-observer.policy.model in workflows.yaml to a cheaper model.",
+        "ack": "Got it"
+      }
     },
     "login": {
       "title": "Login",
@@ -706,7 +711,10 @@
       "flagStatus": {
         "enabled": "Flag on",
         "disabled": "Flag off",
-        "ariaLabel": "intent_engineering feature flag status"
+        "ariaLabel": "intent_engineering feature flag status",
+        "enable": "Enable Intent Engineering",
+        "enabling": "Enabling…",
+        "enableFailed": "Failed to enable. Try again later or manually edit .pd/config.yaml"
       },
       "editEntry": {
         "heading": "Edit INTENT.md",
@@ -717,8 +725,7 @@
       },
       "flagDisabled": {
         "title": "Intent Engineering is off",
-        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state.",
-        "nextAction": "To enable, set features.intent_engineering.enabled=true in .pd/config.yaml and restart pd-console."
+        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state."
       },
       "notFound": {
         "title": "No INTENT.md found",
@@ -769,6 +776,29 @@
         "noDecisions": "No decisions recorded yet",
         "loadError": "Failed to load decision summary"
       }
+    },
+    "debt": {
+      "eyebrow": "Principle Debt",
+      "title": "Principle Debt Management",
+      "subtitle": "Review active principles that may be stagnant, never activated, or flagged as technical/behavioral debt.",
+      "emptyTitle": "No Principle Debts",
+      "emptyDescription": "Excellent! All your active principles are either recently active, verified in execution, or have no pending stagnation alerts.",
+      "reasonNeverActivated": "This principle has been approved but never deployed to any active channel (e.g. prompt, RuleHost).",
+      "reasonStagnant": "This principle approval request has been stagnant/pending for more than 7 days.",
+      "suggestedAction": "Suggested Action",
+      "actionArchive": "Archive",
+      "actionDeactivate": "Deactivate",
+      "actionKeep": "Keep and Observe",
+      "confirmArchive": "Archiving this principle will remove it from the active ruleset. Are you sure you want to archive?",
+      "confirmDeactivate": "Deactivating this channel will stop enforcing this rule at runtime. Are you sure you want to deactivate?",
+      "deactivateSuccess": "Channel deactivated successfully.",
+      "deactivateFailed": "Failed to deactivate channel.",
+      "archiveSuccess": "Principle archived successfully.",
+      "archiveFailed": "Failed to archive principle.",
+      "undoAction": "Undo",
+      "undoSuccess": "Operation undone successfully.",
+      "undoFailed": "Undo operation failed.",
+      "loadError": "Unable to load principle debt data. Please try refreshing the page."
     }
   },
   "components": {

@@ -1164,3 +1164,147 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
     expect(parsed.features).toBeDefined();
   });
 });
+
+// ===========================================================================
+// PATCH /api/v1/config/features/:featureName — spec 2026-06-27 §13.4
+// ===========================================================================
+
+describe('PATCH /api/v1/config/features/:featureName', () => {
+  it('enables a registered feature flag and persists to config.yaml', async () => {
+    // Config with a features section that includes intent_engineering (disabled)
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        intent_engineering: { category: 'quiet', enabled: false },
+      },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ feature: string; enabled: boolean }>(res);
+    expect(data.feature).toBe('intent_engineering');
+    expect(data.enabled).toBe(true);
+
+    // Verify persisted to disk
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    const ie = features.intent_engineering as Record<string, unknown>;
+    expect(ie.enabled).toBe(true);
+
+    // Verify other feature flags are preserved
+    const prompt = features.prompt as Record<string, unknown>;
+    expect(prompt.enabled).toBe(true);
+  });
+
+  it('rejects unknown feature name with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/nonexistent_flag',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/nonexistent_flag',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.error).toBe('unknown_feature');
+  });
+
+  it('rejects non-boolean enabled with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: 'true' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects when config has no features section (422)', async () => {
+    // Config without a features: section at all
+    writeConfig({
+      version: 1,
+      runtimeProfiles: VALID_CONFIG.runtimeProfiles,
+      internalAgents: VALID_CONFIG.internalAgents,
+      ui: { diagnostics: { mode: 'simple' } },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(422);
+    const body = errorEnvelope(res);
+    expect(body.error).toBe('no_features_section');
+  });
+
+  it('rejects malformed existing config with 409', async () => {
+    writeMalformedConfig('version: [unclosed\n');
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('preserves other config sections when writing feature flag', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        intent_engineering: { category: 'quiet', enabled: false },
+      },
+      principles: { outputLanguage: 'en' },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Verify principles section is preserved
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(isRecord(parsed.principles)).toBe(true);
+    if (!isRecord(parsed.principles)) throw new Error('unreachable');
+    expect(parsed.principles.outputLanguage).toBe('en');
+    // runtimeProfiles preserved
+    expect(isRecord(parsed.runtimeProfiles)).toBe(true);
+  });
+});

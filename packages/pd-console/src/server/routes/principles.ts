@@ -95,12 +95,75 @@ export async function handlePrinciplesRoute({
   workspaceDir,
   subPath,
 }: PrinciplesRouteParams): Promise<void> {
+  const model = getModel(workspaceDir);
+
+  // ── POST Routes ─────────────────────────────────────────────────────────────
+  if (req.method === 'POST') {
+    // POST /api/principles/:id/archive
+    const archiveMatch = /^\/([^/]+)\/archive$/.exec(subPath);
+    if (archiveMatch) {
+      const [, rawPrincipleId] = archiveMatch;
+      if (!rawPrincipleId) {
+        sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+        return;
+      }
+      let principleId: string;
+      try {
+        principleId = decodeURIComponent(rawPrincipleId);
+      } catch {
+        sendError(res, 400, 'invalid_principle_id', 'Principle ID contains invalid URL encoding');
+        return;
+      }
+      try {
+        const ok = await model.archivePrinciple(principleId);
+        if (ok) {
+          sendSuccess(res, { success: true, principleId });
+        } else {
+          sendError(res, 500, 'archive_failed', `Failed to archive principle "${principleId}"`);
+        }
+      } catch (err: unknown) {
+        sendError(res, 500, 'archive_failed', err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    // POST /api/principles/:id/unarchive
+    const unarchiveMatch = /^\/([^/]+)\/unarchive$/.exec(subPath);
+    if (unarchiveMatch) {
+      const [, rawPrincipleId] = unarchiveMatch;
+      if (!rawPrincipleId) {
+        sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing');
+        return;
+      }
+      let principleId: string;
+      try {
+        principleId = decodeURIComponent(rawPrincipleId);
+      } catch {
+        sendError(res, 400, 'invalid_principle_id', 'Principle ID contains invalid URL encoding');
+        return;
+      }
+      try {
+        const ok = await model.unarchivePrinciple(principleId);
+        if (ok) {
+          sendSuccess(res, { success: true, principleId });
+        } else {
+          sendError(res, 500, 'unarchive_failed', `Failed to unarchive principle "${principleId}"`);
+        }
+      } catch (err: unknown) {
+        sendError(res, 500, 'unarchive_failed', err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    sendNotFound(res, `Route ${req.method} /api/principles${subPath} not found`);
+    return;
+  }
+
+  // ── GET Routes ──────────────────────────────────────────────────────────────
   if (req.method !== 'GET') {
     sendNotFound(res, `Route /api/principles${subPath} not found`);
     return;
   }
-
-  const model = getModel(workspaceDir);
 
   if (subPath === '' || subPath === '/') {
     try {
@@ -176,6 +239,7 @@ export async function handlePrinciplesRoute({
   }
 
   sendNotFound(res, `Route /api/principles${subPath} not found`);
+
 }
 
 export function disposePrinciplesModels(): void {

@@ -14,6 +14,7 @@ import {
   validateConfigCatalog,
   validateAgentBindingUpdate,
   validateDefaultRuntimeUpdate,
+  validateFeatureFlagUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
   validateActivations,
@@ -47,6 +48,7 @@ import type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
@@ -225,6 +227,18 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
+async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/archive`, {
+    method: "POST",
+  });
+}
+
+async function unarchivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/unarchive`, {
+    method: "POST",
+  });
+}
+
 // ── Principle Trajectory ──────────────────────────────────────────────────────
 
 async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
@@ -326,6 +340,22 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
       body: JSON.stringify({ defaultRuntime }),
     },
     validateDefaultRuntimeUpdate,
+  );
+}
+
+// ── Feature Flag Toggle (spec 2026-06-27 §13.5) ─────────────────────────────
+
+async function patchFeatureFlag(
+  featureName: string,
+  enabled: boolean,
+): Promise<ApiResponse<FeatureFlagUpdateData>> {
+  return request<FeatureFlagUpdateData>(
+    `/api/v1/config/features/${encodeURIComponent(featureName)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+    validateFeatureFlagUpdate,
   );
 }
 
@@ -529,6 +559,8 @@ export {
   fetchPrinciples,
   fetchPrincipleDetail,
   fetchPrincipleTrajectory,
+  archivePrinciple,
+  unarchivePrinciple,
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,
@@ -537,6 +569,7 @@ export {
   fetchConfigCatalog,
   updateAgentBinding,
   updateDefaultRuntime,
+  patchFeatureFlag,
   fetchOutputLanguage,
   updateOutputLanguage,
   fetchWorkspaces,
@@ -578,6 +611,7 @@ export type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,

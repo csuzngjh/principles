@@ -31,6 +31,7 @@ import {
   checkReadiness,
   getPrinciplesOutputLanguage,
   updatePrinciplesOutputLanguage,
+  updateFeatureFlag,
 } from '../config/pd-config-store.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -62,6 +63,11 @@ function safeParseBody(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** Type guard: is `value` a plain Record<string, unknown>? (ERR-001) */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // ── Route Handler ────────────────────────────────────────────────────────────
@@ -194,6 +200,55 @@ export async function handleConfigRoute(
       ...(result.reason ? { reason: result.reason } : {}),
       ...(result.nextAction ? { nextAction: result.nextAction } : {}),
     });
+    return;
+  }
+
+  // PATCH /features/:featureName — spec 2026-06-27 §13.4
+  // Toggles a registered feature flag's `enabled` field in .pd/config.yaml.
+  const featureFlagMatch = /^\/features\/([^/]+)$/.exec(subPath);
+  if (featureFlagMatch) {
+    if (method !== 'PATCH') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    let featureName: string;
+    try {
+      featureName = decodeURIComponent(featureFlagMatch[1] ?? '');
+    } catch {
+      sendBadRequest(res, 'Invalid feature name encoding');
+      return;
+    }
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch {
+      sendBadRequest(res, 'Request body exceeds maximum allowed size');
+      return;
+    }
+    const body = safeParseBody(bodyText);
+    if (body === null) {
+      sendBadRequest(res, 'Invalid JSON body');
+      return;
+    }
+    // Validate body shape: { enabled: boolean } (ERR-001: no `as` bypass)
+    if (!isObject(body)) {
+      sendBadRequest(res, 'Body must be a JSON object with an enabled field');
+      return;
+    }
+    if (!Object.hasOwn(body, 'enabled')) {
+      sendBadRequest(res, 'Missing required field: enabled');
+      return;
+    }
+    if (typeof body.enabled !== 'boolean') {
+      sendBadRequest(res, 'enabled must be a boolean');
+      return;
+    }
+    const result = updateFeatureFlag(workspaceDir, featureName, body.enabled);
+    if (!result.ok) {
+      sendError(res, result.statusCode, result.error, result.message);
+      return;
+    }
+    sendSuccess(res, { feature: result.feature, enabled: result.enabled });
     return;
   }
 
