@@ -259,7 +259,7 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   };
 }
 
-async function closeServices(services: AppServices): Promise<void> {
+async function closeServices(): Promise<void> {
   disposeFeedbackReportModels();
   disposeApprovalsModels();
   disposeApprovalsGroupedModels();
@@ -271,7 +271,6 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeEvidenceChainModels();
   disposeIntentModels();
   disposeIntentDecisionModels();
-  services.workspaceService.dispose();
 }
 
 // ── Route handler ───────────────────────────────────────────────────────────
@@ -354,7 +353,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // Update routes: GET /api/update/check, POST /api/update/apply, GET /api/update/status, POST /api/update/rollback
+      // Update routes: GET /api/update/check, POST /api/update/apply, POST /api/update/rollback
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         const isApply = subPath === '/apply';
@@ -450,7 +449,7 @@ export async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[pd-console] Received ${signal}, shutting down...`);
     await new Promise<void>((resolve) => { server.close(() => resolve()); });
-    await closeServices(services);
+    await closeServices();
     process.exit(0);
   };
 
