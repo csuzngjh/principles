@@ -19,10 +19,13 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-// __dirname in vitest points to the source file location:
+// ESM-safe __dirname derivation (packages/principles-core is "type": "module").
+// Points to the source file location:
 // .../packages/principles-core/src/runtime-v2/__tests__/
 // sqlite-connection.ts is at .../packages/principles-core/src/runtime-v2/store/
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONNECTION_FILE = path.resolve(__dirname, '../store/sqlite-connection.ts');
 // PACKAGES_DIR is .../packages/ (contains all monorepo packages).
 // From __tests__/ go up 4 levels: __tests__ -> runtime-v2 -> src -> principles-core -> packages
