@@ -111,15 +111,32 @@ describe('PRI-140: readonly connection constraints', () => {
     }
   });
 
-  it('does not create .pd directory on a fresh path', () => {
+  it('bootstraps .pd directory and state.db on a fresh path for readonly access', () => {
+    // Readonly fix: readonly connections on fresh paths now bootstrap the DB
+    // (create .pd dir + state.db via a temporary writable connection) instead of
+    // throwing. This prevents pd-console GET routes from failing on fresh workspaces.
     const freshPath = freshDir('readonly-fresh');
     const pdDir = path.join(freshPath, '.pd');
 
     expect(fs.existsSync(pdDir)).toBe(false);
 
     const readonlyConn = new SqliteConnection({ workspaceDir: freshPath, readonly: true });
-    expect(() => readonlyConn.getDb()).toThrow();
-    expect(fs.existsSync(pdDir)).toBe(false);
+    const db = readonlyConn.getDb(); // bootstraps then reopens readonly
+
+    // Bootstrap creates .pd dir and state.db
+    expect(fs.existsSync(pdDir)).toBe(true);
+
+    // Schema is initialized (tasks table exists)
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'",
+    ).all();
+    expect(tables.length).toBe(1);
+
+    // Readonly: writes should throw
+    expect(() => {
+      db.exec("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('x','y','z','a','b')");
+    }).toThrow();
+
     readonlyConn.close();
   });
 });

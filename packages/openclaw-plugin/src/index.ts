@@ -846,4 +846,10 @@ export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 /* istanbul ignore next — test exports for evolution worker gate */
 export { loadFeatureFlagFromWorkspace, isRecord };
 
+// Schema initialization exports for `pd runtime init` (unified DB init).
+// These functions open the DB in write mode, apply the full schema, and close the DB.
+// They do NOT run runtime side-effects (importLegacyArtifacts, pruneUnreferencedBlobs).
+export { initTrajectorySchema } from './core/trajectory.js';
+export { initWorkflowSchema } from './service/subagent-workflow/workflow-store.js';
+
 export default plugin;

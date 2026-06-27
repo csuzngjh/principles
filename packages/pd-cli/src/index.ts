@@ -50,6 +50,7 @@ import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleR
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
+import { registerRuntimeInitCommand } from './commands/runtime-init.js';
 import { handleConfigDoctor } from './commands/config-doctor.js';
 import { registerMvpCommands } from './commands/mvp-smoke.js';
 import { registerRulecodeCommand } from './commands/rulecode.js';
@@ -333,6 +334,9 @@ runtimeCmd
   .action(async (opts) => {
     await handleRuntimeCanary({ workspace: opts.workspace, json: opts.json });
   });
+
+// pd runtime init — Initialize all PD SQLite databases for a workspace (PRI-475 sibling).
+registerRuntimeInitCommand(runtimeCmd);
 
 const synthCmd = runtimeCmd
   .command('synthetic', { hidden: true })
