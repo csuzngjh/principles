@@ -25,6 +25,7 @@ import {
 } from "../../utils/control-center-helpers.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import type { ControlCenterDiagnostics } from "../../utils/control-center-helpers.js";
+import { EmpathyObserverCostHint } from "./EmpathyObserverCostHint.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
@@ -108,7 +109,20 @@ function validateRedactedRuntimeProfileSummary(
     Object.hasOwn(raw, "apiKeyEnv") && typeof raw.apiKeyEnv === "string"
       ? raw.apiKeyEnv
       : undefined;
-  return { id, type, label, apiKeyEnv, readiness };
+  // provider/model are optional (set by backend redactPdConfig for both
+  // pi-ai and openclaw profiles). Extract so EmpathyObserverCostHint can
+  // show the active model without parsing the label string. Aligns with
+  // the canonical validator in validators.ts (EP-01: validate fields that
+  // actually exist in the target type).
+  const provider =
+    Object.hasOwn(raw, "provider") && typeof raw.provider === "string"
+      ? raw.provider
+      : undefined;
+  const model =
+    Object.hasOwn(raw, "model") && typeof raw.model === "string"
+      ? raw.model
+      : undefined;
+  return { id, type, label, apiKeyEnv, provider, model, readiness };
 }
 
 function validateRedactedAgentSummary(
@@ -869,6 +883,31 @@ export function ControlCenterPage() {
           agents={configData.agents}
         />
       </section>
+
+      {/* Empathy Observer cost hint — spec 2026-06-27 §4.1
+          Gate 1: only mount when empathyObserver is enabled AND localStorage
+          has not acked. Gate 2 (inside the component) handles dismiss.
+          Agent name is 'empathyObserver' (camelCase, per INTERNAL_AGENT_NAMES);
+          'empathy_observer' (snake_case) is the featureId used for display. */}
+      {(() => {
+        const empathyAgent = configData.agents.find(
+          (a) => a.name === "empathyObserver" && a.enabled,
+        );
+        if (!empathyAgent) return null;
+        let acked = false;
+        try {
+          acked = localStorage.getItem("pd.empathyObserver.costAck") === "true";
+        } catch {
+          // localStorage unavailable (privacy mode) → not acked → render
+        }
+        if (acked) return null;
+        return (
+          <EmpathyObserverCostHint
+            agent={empathyAgent}
+            profiles={availableProfiles}
+          />
+        );
+      })()}
 
       {/* Section 2: Internal Agents */}
       <section className="mt-8" aria-labelledby="section-agents">
