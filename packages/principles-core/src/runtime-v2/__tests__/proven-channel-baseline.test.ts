@@ -234,7 +234,20 @@ describe('Proven Channel Baseline (PRI-240)', () => {
         contentJson: JSON.stringify({
           principleId: 'P_240',
           implementationCode: 'function evaluate() { return "allow"; }',
-          goldenTrace: { traceId: 't1', cases: [{ caseId: 'c1', kind: 'negative', toolName: 'write', params: {}, expectedDecision: 'block' }], createdAt: '2026-01-01', version: 1 },
+          // Fixture must pass validateGoldenTrace() so the test reaches the
+          // gateDecision check (the test's stated intent). Previously this
+          // used an invalid createdAt + no positive case, which silently
+          // slipped past the old extractGoldenTrace() `as` bypass but is now
+          // correctly rejected by validateGoldenTrace() before gateDecision.
+          goldenTrace: {
+            traceId: 't1',
+            cases: [
+              { caseId: 'c1', kind: 'negative', toolName: 'write', params: {}, expectedDecision: 'block' },
+              { caseId: 'c2', kind: 'positive', toolName: 'write', params: {}, expectedDecision: 'allow' },
+            ],
+            createdAt: '2026-01-01T00:00:00.000Z',
+            version: 1,
+          },
           ruleHostGateDecision: 'rejected',
         }),
       };
