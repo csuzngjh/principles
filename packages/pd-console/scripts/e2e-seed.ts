@@ -73,6 +73,51 @@ insertPiArtifact.run(
   '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '错误后必须分析根因' }), now, now,
 );
 
+// Regression fixture for PR #1079: a rule artifact with an illegal
+// `expectedDecision: 'requireApproval'` in its goldenTrace. This value
+// is a RuleHostDecision runtime enum, NOT a GoldenTraceDecision test
+// expectation (legal: allow | block | propose_correction). Before
+// PR #1079, extractGoldenTrace() used `as unknown as GoldenTrace` to
+// bypass schema validation, so this artifact would slip through and
+// fail later inside the sandbox with an opaque
+// `gate_decision_not_accepted_shadow:rejected_validation_failed` error.
+// After PR #1079, the canonical validateGoldenTrace() rejects it at
+// the schema layer with `golden_trace_schema_invalid: <detail>`.
+insertPiArtifact.run(
+  'artifact-rule-bad-trace', 'rule', 'task-diag-1', 'p-001',
+  '[]', 'validated',
+  JSON.stringify({
+    implementationCode: 'function evaluate(input, helpers) { return { decision: "requireApproval", matched: true, reason: "test" }; }',
+    goldenTrace: {
+      traceId: 'gt-bad-trace-1',
+      sourcePainId: 'pain-e2e-1',
+      cases: [
+        {
+          caseId: 'case-bad-negative',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          // ILLEGAL: requireApproval is a RuleHostDecision, not a
+          // GoldenTraceDecision. Legal values: allow | block | propose_correction.
+          expectedDecision: 'requireApproval',
+        },
+        {
+          caseId: 'case-valid-positive',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/project/src/safe.ts' },
+          expectedDecision: 'allow',
+        },
+      ],
+      createdAt: now,
+      version: 1,
+    },
+    ruleHostGateDecision: 'accepted_shadow',
+    affectedTools: ['write_file'],
+  }),
+  now, now,
+);
+
 // ── 6. 插入 principle_candidates（evidence-chain 候选，需 artifact_id + run_id）
 stateDb.prepare(`
   INSERT INTO principle_candidates (
@@ -107,8 +152,23 @@ stateDb.prepare(`
   now, '将"错误后必须分析根因"挂载到 code_tool_hook', 'Owner 审批：新增工具调用钩子',
 );
 
+// Regression approval for PR #1079: points at the bad-trace rule artifact.
+// Approving this MUST return 500 activation_failed with reason containing
+// 'golden_trace_schema_invalid' (post-fix), NOT 'gate_decision_not_accepted_shadow'
+// (pre-fix opaque error). The approval is rolled back to pending so the
+// owner can retry after fixing the artifact.
+stateDb.prepare(`
+  INSERT INTO approvals (
+    approval_id, artifact_id, channel, risk_level, status, confidence,
+    requested_at, summary, trigger_reason
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+  'apr-hook-bad-trace', 'artifact-rule-bad-trace', 'code_tool_hook', 'high', 'pending', 0.72,
+  now, '回归测试：rule artifact 含非法 expectedDecision=requireApproval', 'Owner 审批：触发 golden_trace_schema_invalid 验证',
+);
+
 stateConn.close();
-console.log('[e2e-seed] state.db seeded: 2 approvals, 2 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
+console.log('[e2e-seed] state.db seeded: 3 approvals (incl. 1 bad-trace regression), 3 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
 
 // ── 8. 初始化 trajectory.db + pain_events ───────────────────────────────────
 const trajectoryDir = path.join(workspaceDir, '.state');
