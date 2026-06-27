@@ -730,7 +730,55 @@
       "notFound": {
         "title": "No INTENT.md found",
         "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
-        "nextAction": "Run: pd intent init --confirm --workspace <path>"
+        "nextAction": "Run: pd intent init --confirm --workspace <path>",
+        "createButton": "Create INTENT.md",
+        "creating": "Creating…",
+        "createFailed": "Creation failed, please try again later",
+        "createSuccess": "INTENT.md created. You can start filling in your intent."
+      },
+      "onboarding": {
+        "title": "Welcome to Intent Engineering",
+        "subtitle": "Before we begin, let's understand what intent engineering is",
+        "whatIsIt": {
+          "title": "What is Intent Engineering?",
+          "description": "INTENT.md is your long-term intent anchor — recording your goals, non-negotiable boundaries, and when to stop and escalate. It helps PD align with your true intent at key decision points."
+        },
+        "whyYouFill": {
+          "title": "Why do you need to fill it in?",
+          "description": "Intent is Owner-owned. PD will not auto-generate intent because only you know the project's real goals and boundaries. This is your decision authority; PD only helps you execute and align."
+        },
+        "sectionGuide": {
+          "title": "5-section guide",
+          "description": "INTENT.md contains 5 sections, each with a clear purpose:",
+          "sections": {
+            "why": "Why — the fundamental motivation for this project",
+            "desiredOutcome": "Desired Outcome — the specific results you want to achieve",
+            "nonNegotiables": "Non-Negotiables — boundaries that must never be violated",
+            "stopEscalation": "Stop / Escalation — when to stop the current action and escalate to you",
+            "currentStrategicFocus": "Current Strategic Focus — phase-specific priorities"
+          }
+        },
+        "skipOption": "Skip guide, create empty template to fill in later",
+        "startFilling": "Start filling",
+        "skip": "Skip",
+        "close": "Close",
+        "dontShowAgain": "Don't show again"
+      },
+      "editor": {
+        "title": "Edit INTENT.md",
+        "description": "Edit your intent document directly in the browser. Changes take effect immediately after saving.",
+        "placeholder": "Enter INTENT.md content here (Markdown format)…",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "edit": "Edit",
+        "saveSuccess": "INTENT.md saved",
+        "saveFailed": "Save failed, please try again later",
+        "emptyContent": "Content cannot be empty",
+        "oversized": "Content exceeds 32KB limit, please trim and retry",
+        "confirmDiscard": "You have unsaved changes. Discard them?",
+        "yes": "Yes, discard changes",
+        "no": "Continue editing"
       },
       "oversized": {
         "title": "INTENT.md exceeds 32KB",

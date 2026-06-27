@@ -1389,7 +1389,7 @@ show INTENT anchor
 
 ### 22.1.1 Intent Page
 
-Intent Page 是 `.principles/INTENT.md` 的只读治理视图，不是通用编辑器。
+Intent Page 是 `.principles/INTENT.md` 的治理视图。默认只读；为支持首次 onboarding（PRI-477），页面内嵌一个 markdown 编辑器，Owner 可通过 "Edit" 按钮切换到编辑态，保存后回到只读视图。Agent 永远不会自动修改 INTENT.md（§3.9 不变）；所有编辑都由 Owner 主动触发。
 
 首屏必须展示：
 
@@ -1438,6 +1438,34 @@ Validation warnings 应显示为治理提示，而不是普通 lint 噪音：
 1. 展示无法从 IntentDecisionRecord 追溯的推断指标。
 2. 在 Mode A 下展示 intent_friction.check_emitted 或类似 hook 捕获计数。
 3. 展示“低风险事件归档率”等会把 Intent Page 变成 dashboard 的指标。
+```
+
+#### 22.1.1.1 Onboarding & Inline Editor (PRI-477)
+
+首次使用支持（解决"小白用户无法用"的死亡循环）：
+
+```text
+1. FlagToggleCard — 当 intent_engineering 关闭时，提供一键开启按钮，
+   调用 PATCH /api/v1/config/features/intent_engineering。
+   对已注册 flag，store 会自动创建 features: 段并 seed 默认 flag（不再 422）。
+2. NotFoundBanner — 当 INTENT.md 不存在时，提供 "Create INTENT.md" 按钮，
+   调用 POST /api/v1/intent/init 生成 SPEC §7 模板。
+3. OnboardingModal — 首次进入 Intent Page 时弹出，介绍：
+   (a) 什么是意图工程；(b) 为什么要填写；(c) 5 段结构说明；(d) 可跳过。
+   通过 localStorage key `pd_intent_onboarding_dismissed` 记忆跳过状态。
+4. IntentEditor — 内嵌 markdown textarea 编辑器：
+   - "Edit" 按钮切换到编辑态，加载 GET /api/v1/intent/content
+   - Save 调用 PUT /api/v1/intent/content，校验 INTENT_MAX_BYTES (32KB)
+   - Cancel 时若有未保存改动，弹出 discard 确认
+   - 保存成功后回到只读视图并刷新 summary
+```
+
+边界：
+
+```text
+1. flag 关闭时不显示编辑器、不显示 Create 按钮。
+2. Agent 永远不会自动调用 init 或 PUT content — 全部由 Owner 点击触发。
+3. 编辑器只支持纯 markdown 文本编辑，不支持富文本、附件、外部链接抓取。
 ```
 
 ---
