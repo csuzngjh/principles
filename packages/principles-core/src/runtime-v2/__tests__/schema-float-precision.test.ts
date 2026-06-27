@@ -10,11 +10,13 @@
  * preserves precision. If a schema change accidentally reverts REAL to
  * INTEGER, the test fails.
  *
- * Scope:
+ * Scope (per PRI-476 acceptance criteria):
  *   - pain_events.score (trajectory.db) — the P0-1 field
- *   - pain_events.confidence (trajectory.db)
  *   - approvals.confidence (state.db)
- *   - pi_artifacts REAL fields (state.db) — if any
+ *
+ * Note: pain_events.confidence is hardcoded to 1 (integer) in the writer
+ * (pain-signal-observability.ts), so float-precision testing is not applicable.
+ * pi_artifacts has no REAL columns carrying semantic meaning, so it is excluded.
  */
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
