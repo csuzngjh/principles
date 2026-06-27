@@ -145,6 +145,7 @@ async function request<T = unknown>(
       }
       let errorMessage = `HTTP ${response.status}`;
       let nextAction: string | undefined;
+      let reason: string | undefined;
       try {
         const raw = await response.json();
         const parsed = validateErrorResponse(raw);
@@ -154,6 +155,9 @@ async function request<T = unknown>(
           } else if (parsed.error) {
             errorMessage = parsed.error;
           }
+          if (parsed.reason) {
+            ({ reason } = parsed);
+          }
           if (parsed.nextAction) {
             ({ nextAction } = parsed);
           }
@@ -161,7 +165,7 @@ async function request<T = unknown>(
       } catch {
         // ignore parse errors
       }
-      return { success: false, error: errorMessage, nextAction };
+      return { success: false, error: errorMessage, reason, nextAction };
     }
 
     const raw = await response.json();

@@ -42,6 +42,14 @@ export interface IntentSaveResult {
   nextAction?: string;
 }
 
+export interface IntentRawContentResult {
+  ok: boolean;
+  content?: string;
+  path?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
 const INTENT_FILENAME = 'INTENT.md';
 const INTENT_DIR = '.principles';
 
@@ -128,20 +136,63 @@ export class IntentPageModel {
 
   /**
    * Read the raw content of INTENT.md for editing.
-   * Returns null if the file doesn't exist or can't be read.
+   *
+   * Returns a structured result so callers can distinguish failure modes
+   * (file missing / oversized / read error / flag disabled) — rc-9-no-silent-
+   * fallback (ERR-002). The previous implementation collapsed all three into a
+   * bare `null`, which forced the route to claim `not_found` even when the real
+   * reason was a permission or read failure.
+   *
+   * Stat-first size guard keeps this path consistent with `getSummary()`, which
+   * returns `reason='oversized'` for files > INTENT_MAX_BYTES. Without the guard
+   * here, oversized files would be silently read into memory and only rejected
+   * on save — inconsistent with the read-only `getSummary` contract.
    */
-  async getRawContent(flagEnabled: boolean): Promise<{ content: string; path: string } | null> {
-    if (!flagEnabled) return null;
+  async getRawContent(flagEnabled: boolean): Promise<IntentRawContentResult> {
+    if (!flagEnabled) {
+      return {
+        ok: false,
+        reason: 'flag_disabled',
+        nextAction: 'Enable the intent_engineering feature flag first.',
+      };
+    }
 
     const filePath = path.join(this.workspaceDir, INTENT_DIR, INTENT_FILENAME);
 
     try {
-      if (!fs.existsSync(filePath)) return null;
+      if (!fs.existsSync(filePath)) {
+        return {
+          ok: false,
+          reason: 'not_found',
+          nextAction: 'INTENT.md does not exist. Create it first using POST /api/v1/intent/init.',
+        };
+      }
+
+      // Stat-first size guard. Use stat.size (byte length on disk) for the
+      // oversized path; `Buffer.byteLength(content, 'utf8')` is only meaningful
+      // post-read — and reading a 32 KiB+ file just to reject it is wasteful.
+      const stat = fs.statSync(filePath);
+      if (stat.size > INTENT_MAX_BYTES) {
+        return {
+          ok: false,
+          reason: 'oversized',
+          nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content before opening the editor.`,
+        };
+      }
+
       const content = fs.readFileSync(filePath, 'utf8');
-      return { content, path: filePath };
+      return { ok: true, content, path: filePath };
     } catch (err) {
+      // rc-9-no-silent-fallback: distinguish I/O / permission errors from
+      // "file missing" so the route can map to a real status code instead of
+      // claiming not_found for everything (combining ERR-002 + ERR-010).
+      const message = err instanceof Error ? err.message : String(err);
       console.error('[IntentPageModel] failed to read raw INTENT.md:', err);
-      return null;
+      return {
+        ok: false,
+        reason: 'read_error',
+        nextAction: `Could not read INTENT.md: ${message}. Check filesystem permissions.`,
+      };
     }
   }
 

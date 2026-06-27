@@ -137,7 +137,7 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   );
 }
 
-function NotFoundBanner({ onCreated }: { onCreated: () => void }) {
+function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => void }) {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
@@ -352,10 +352,17 @@ export function IntentPage() {
     setIsEditing(true);
   }, [t]);
 
-  // PRI-477: Called when template is created — refresh summary and open editor
-  const handleCreated = useCallback(async () => {
+  // PRI-477: Called when template is created — refresh summary; optionally
+  // open the editor immediately so the user can start filling.
+  //
+  // PR-1083 review (CodeRabbit A5): `openEditor` lets CreateIntentButton
+  // distinguish "Start filling" (open editor) from "Skip" (just refresh the
+  // summary so NotFoundBanner re-renders to the sections view — otherwise the
+  // user would see a stale "file not found" banner even though INTENT.md now
+  // exists on disk).
+  const handleCreated = useCallback(async (openEditor: boolean) => {
     await loadData();
-    // After creation, automatically open the editor so user can start filling
+    if (!openEditor) return;
     setEditorLoading(true);
     const result = await fetchIntentContent();
     setEditorLoading(false);
@@ -460,9 +467,9 @@ export function IntentPage() {
             {/* PRI-477: Inline editor — shown when user clicks "Edit" */}
             {isEditing && (
               <section aria-labelledby="section-editor" className="mb-8">
-                <SectionTitle id="section-editor">
-                  {t("pages.intent.editor.title")}
-                </SectionTitle>
+                {/* N2 (PR-1083 review): outer SectionTitle removed — IntentEditor
+                    already renders its own `<h3 id="section-editor">` carrying the
+                    title. Having two visible "Edit INTENT.md" titles was confusing. */}
                 <IntentEditor
                   initialContent={editorContent}
                   onSaved={handleSaved}
@@ -479,8 +486,11 @@ export function IntentPage() {
                     <SectionTitle id="section-content">
                       {t("pages.intent.title")}
                     </SectionTitle>
-                    {/* PRI-477: Edit button — opens inline editor */}
-                    <EditButton onClick={handleStartEdit} />
+                    {/* PRI-477 + A7 review: pass editorLoading so the button
+                        disables + switches its label while fetchIntentContent()
+                        is in flight, preventing double-clicks and giving the
+                        user immediate feedback. */}
+                    <EditButton onClick={handleStartEdit} loading={editorLoading} />
                   </div>
                   <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
                     <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />

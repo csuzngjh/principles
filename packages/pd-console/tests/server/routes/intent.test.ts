@@ -268,6 +268,27 @@ describe('Intent route — GET /api/v1/intent/content', () => {
     expect(getStatus(res)).toBe(403);
     expect(parseError(res).reason).toBe('flag_disabled');
   });
+
+  it('returns 413 oversized when INTENT.md exceeds 32KB (rc-9-no-silent-fallback)', async () => {
+    // PR-1083 review (CodeRabbit comment ~133-145):
+    // getRawContent no longer collapses missing / oversized / read-error into a
+    // bare null. An oversized file now yields a structured `oversized` reason
+    // and is rejected at stat-time BEFORE readFileSync — keeping this path
+    // consistent with getSummary() which also returns reason='oversized' when
+    // the file > INTENT_MAX_BYTES. Without this guard the editor would silently
+    // load a > 32 KiB document while the read-only summary page rejects it.
+    fs.writeFileSync(
+      path.join(principlesDir, 'INTENT.md'),
+      '# INTENT.md\n\n## 1. Why\n\n' + 'x'.repeat(33 * 1024) + '\n',
+      'utf8',
+    );
+
+    const res = makeRes();
+    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    expect(getStatus(res)).toBe(413);
+    const body = parseError(res);
+    expect(body.reason).toBe('oversized');
+  });
 });
 
 // ── PUT /api/v1/intent/content ──────────────────────────────────────────────

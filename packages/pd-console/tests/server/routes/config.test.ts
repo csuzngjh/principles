@@ -1308,6 +1308,56 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
     const body = okEnvelope<{ feature: string; enabled: boolean }>(res);
     expect(body.feature).toBe('intent_engineering');
     expect(body.enabled).toBe(true);
+
+    // N1 — verify the auto-create side effect on disk, not just the response.
+    // Without this assertion, a regression that returns 200 without writing the
+    // features section would silently pass.
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as unknown;
+    expect(isRecord(parsed)).toBe(true);
+    if (!isRecord(parsed)) throw new Error('unreachable: parsed config is not a record');
+    expect(isRecord(parsed.features)).toBe(true);
+    if (!isRecord(parsed.features)) throw new Error('unreachable: features is not a record');
+    const intentEngineering = parsed.features.intent_engineering;
+    expect(isRecord(intentEngineering)).toBe(true);
+    if (!isRecord(intentEngineering)) throw new Error('unreachable: intent_engineering is not a record');
+    expect(intentEngineering.enabled).toBe(true);
+  });
+
+  it('rejects malformed existing features (non-object) with 409 (rc-9-no-silent-fallback)', async () => {
+    // PR-1083 review (CodeRabbit comment on pd-config-store.ts):
+    // When `features:` exists but is not a record/object, updateFeatureFlag
+    // must NOT silently overwrite it with registered-flag defaults — that
+    // would hide a config typo. It must return 409 conflict so the Owner can
+    // fix the malformed value first. Without this guard, a config like
+    // `features: "oops"` would be silently reset on the first flag toggle
+    // and the original mistake would be lost.
+    writeMalformedConfig(
+      [
+        'version: 1',
+        'features: "oops-malformed-string"',
+        '',
+      ].join('\n'),
+    );
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(409);
+    const body = errorEnvelope(res);
+    expect(body.error).toBe('conflict');
+    expect(body.message).toContain('features');
+
+    // Verify the malformed value was NOT overwritten on disk (rc-9).
+    const raw = fs.readFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), 'utf8');
+    expect(raw).toContain('oops-malformed-string');
   });
 
   it('rejects malformed existing config with 409', async () => {

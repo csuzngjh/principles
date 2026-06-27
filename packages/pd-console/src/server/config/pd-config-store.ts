@@ -920,25 +920,48 @@ export function updateFeatureFlag(
     rawConfig = {};
   }
 
-  // 4. Auto-create `features:` section for REGISTERED flags (PRI-477 onboarding).
-  //    Original spec §13.4 "不允许新增" was intended to prevent creating
-  //    UNREGISTERED flags. For registered flags (validated in step 1 above),
-  //    auto-creating the features section is safe and required for the
-  //    FlagToggleCard one-click enable flow to work on fresh installs where
-  //    .pd/config.yaml has no features: section yet.
-  //    Use Object.hasOwn for untrusted key check (ERR-013)
-  //    When creating the section, seed it with DEFAULT flags so loadPdConfig
-  //    validation passes (it requires prompt/code_tool_hook/defer_archive).
+  // 4. PRI-477 onboarding: auto-create `features:` section ONLY when absent.
+  //    Original spec §13.4 "不允许新增" applied to UNREGISTERED flags —
+  //    auto-creating the section for registered flags (validated in step 1) is
+  //    safe and required for the FlagToggleCard one-click enable flow on fresh
+  //    installs where .pd/config.yaml has no features: section yet.
+  //
+  //    IMPORTANT — Runtime Contract `rc-9-no-silent-fallback` (ERR-002):
+  //    If `features` EXISTS but is NOT a record/object, we must NOT silently
+  //    overwrite the user's malformed value with defaults — that would hide a
+  //    config error and lose the original mistake. Return 409 conflict so the
+  //    Owner can fix the config first. Without this guard, a config typo like
+  //    `features: "oops"` would be silently reset on the first flag toggle.
+  //
+  //    Use Object.hasOwn for untrusted key check (ERR-013).
   let featuresSection: Record<string, unknown>;
-  if (Object.hasOwn(rawConfig, 'features') && isRecord(rawConfig.features)) {
-    featuresSection = rawConfig.features;
-  } else {
-    // Seed with defaults from the registered flag set (computed once at module load)
+  if (!Object.hasOwn(rawConfig, 'features')) {
+    // Section absent — seed with defaults from the registered flag set so the
+    // subsequent validatePdConfig passes (it requires prompt/code_tool_hook /
+    // defer_archive as registered flags). Computed once at module load.
     featuresSection = {};
     for (const [flagId, flag] of Object.entries(_DEFAULT_FLAGS_RESULT.flags)) {
       featuresSection[flagId] = { category: flag.category, enabled: flag.enabled };
     }
     rawConfig.features = featuresSection;
+  } else if (isRecord(rawConfig.features)) {
+    featuresSection = rawConfig.features;
+  } else {
+    // features: exists but is malformed (string, array, number, null, etc.).
+    // Reject rather than silently resetting — rc-9-no-silent-fallback.
+    const gotType = rawConfig.features === null ? 'null' : typeof rawConfig.features;
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message:
+        `Cannot update feature flag: .pd/config.yaml has a 'features:' section that ` +
+        `is not an object/map (got ${gotType}). Fix the config file so 'features:' ` +
+        `is a map of flag objects before retrying, or remove the 'features:' key ` +
+        `entirely so PD can seed registered-flag defaults.`,
+      nextAction:
+        "Open .pd/config.yaml and set 'features: {}' (or remove the 'features:' line).",
+    };
   }
 
   // 5. Validate the in-memory rawConfig (with auto-created features section).

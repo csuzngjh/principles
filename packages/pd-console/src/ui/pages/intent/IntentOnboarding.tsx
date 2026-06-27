@@ -200,9 +200,12 @@ export function IntentEditor({ initialContent, onSaved, onCancel }: IntentEditor
     setSaving(false);
 
     if (!result.success) {
-      // Check for known error reasons
-      const nextAction = result.nextAction ?? "";
-      if (nextAction.includes("32KB") || nextAction.includes("oversized")) {
+      // N4 (PR-1083 review): branch on the structured machine-readable
+      // `reason` field surfaced from the server, NOT on substring matching
+      // against nextAction text. The previous `nextAction.includes("32KB")`
+      // check silently regressed to "saveFailed" the moment the backend
+      // rephrased the cap or returned localized text.
+      if (result.reason === "oversized") {
         toast.error(t("pages.intent.editor.oversized"));
       } else {
         toast.error(t("pages.intent.editor.saveFailed"));
@@ -226,7 +229,11 @@ export function IntentEditor({ initialContent, onSaved, onCancel }: IntentEditor
     <div className="bg-panel border border-line rounded-[6px] p-5">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 className="text-[15px] font-semibold text-ink mb-0.5">
+          {/* N2 (PR-1083 review): hardcoded id matches the parent IntentPage
+              `<section aria-labelledby="section-editor">`. IntentEditor owns the
+              visible title now — IntentPage no longer renders a duplicate
+              SectionTitle wrapping this component. */}
+          <h3 id="section-editor" className="text-[15px] font-semibold text-ink mb-0.5">
             {t("pages.intent.editor.title")}
           </h3>
           <p className="text-ink-3 text-[12px] leading-relaxed">
@@ -309,8 +316,18 @@ export function IntentEditor({ initialContent, onSaved, onCancel }: IntentEditor
 // ── CreateIntentButton ────────────────────────────────────────────────────────
 
 interface CreateIntentButtonProps {
-  /** Called after template is successfully created — parent should refresh + open editor */
-  onCreated: () => void;
+  /**
+   * Called after INTENT.md is successfully created (or already existed).
+   * Receives `openEditor` so the parent (IntentPage) can split the two
+   * concerns of the create flow:
+   *   - always: refresh the summary so NotFoundBanner updates to sections
+   *   - optionally: open the inline editor immediately afterwards
+   *
+   * PR-1083 review (CodeRabbit A5): previously this was `() => void` and only
+   * invoked when openEditor was true — so the Skip path left NotFoundBanner
+   * showing stale "file not found" state after a successful create.
+   */
+  onCreated: (openEditor: boolean) => void;
   /** If true, show onboarding modal before creating. If false, create directly. */
   showOnboarding?: boolean;
 }
@@ -332,16 +349,20 @@ export function CreateIntentButton({ onCreated, showOnboarding = false }: Create
       return;
     }
 
-    if (!result.data.created) {
-      // File already existed — still open editor to let user edit it
-      toast.success(t("pages.intent.notFound.createSuccess"));
-    } else {
-      toast.success(t("pages.intent.notFound.createSuccess"));
-    }
+    // PR-1083 review (CodeRabbit comment N3): both branches used to call the
+    // identical toast.success — collapse to a single call. `result.data.created`
+    // (true=create, false=already-existed) is still surfaced via onCreated(openEditor)
+    // below so the parent IntentPage can refresh the summary either way; the
+    // distinction no longer needs a separate banner here.
+    toast.success(t("pages.intent.notFound.createSuccess"));
 
-    if (openEditor) {
-      onCreated();
-    }
+    // PR-1083 review (CodeRabbit comment A5): the OLD code only invoked
+    // onCreated() when openEditor was true, so the "Skip" path created the
+    // file but never told the parent to refresh — leaving NotFoundBanner
+    // showing stale state even though the file now existed. ALL successful
+    // creation paths MUST trigger onCreated(openEditor) so the summary is
+    // reloaded; openEditor only controls whether the editor mounts afterwards.
+    onCreated(openEditor);
   }
 
   function handleStartFilling() {
@@ -395,17 +416,28 @@ export function CreateIntentButton({ onCreated, showOnboarding = false }: Create
 interface EditButtonProps {
   /** Called when user clicks "Edit" — parent should show the editor */
   onClick: () => void;
+  /**
+   * Optional loading state — disables the button and switches the label /
+   * aria-busy so the user gets immediate feedback while fetchIntentContent()
+   * is in flight. PR-1083 review (CodeRabbit "outside diff" comment ~318-353):
+   * `editorLoading` was set in handleStartEdit/handleCreated but never read by
+   * the render path, so the EditButton could be clicked repeatedly with no
+   * signal that something was happening.
+   */
+  loading?: boolean;
 }
 
-export function EditButton({ onClick }: EditButtonProps) {
+export function EditButton({ onClick, loading = false }: EditButtonProps) {
   const { t } = useTranslation();
   return (
     <button
       type="button"
       onClick={onClick}
-      className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+      disabled={loading}
+      aria-busy={loading}
+      className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-line"
     >
-      {t("pages.intent.editor.edit")}
+      {loading ? t("common.loading") : t("pages.intent.editor.edit")}
     </button>
   );
 }

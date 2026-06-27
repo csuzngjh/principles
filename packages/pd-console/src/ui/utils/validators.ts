@@ -81,6 +81,7 @@ function validateArray<T>(v: unknown, validateElement: (el: unknown) => T | null
 export interface ErrorResponse {
   error?: string;
   message?: string;
+  reason?: string;
   nextAction?: string;
 }
 
@@ -94,6 +95,14 @@ export function validateErrorResponse(v: unknown): ErrorResponse | null {
   }
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
+  }
+  // N4 (PR-1083 review): surfacing the machine-readable `reason` field lets
+  // the UI branch on structured error codes instead of parsing natural
+  // language out of nextAction. Previously `nextAction.includes("32KB")`
+  // would silently regress to "saveFailed" the moment the backend phrased
+  // the cap differently or returned localized text.
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) {
+    result.reason = v.reason;
   }
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
     result.nextAction = v.nextAction;

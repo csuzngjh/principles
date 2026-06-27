@@ -82,17 +82,25 @@ export async function handleIntentRoute(
       const model = getModel(workspaceDir);
       const result = await model.getRawContent(flagEnabled);
 
-      if (result === null) {
+      if (!result.ok) {
+        // Map model error reason → HTTP status (rc-9-no-silent-fallback).
+        // not_found → 404; oversized → 413 (Payload Too Large, matches the
+        // byte-budget contract with getSummary); read_error / unknown → 500.
+        const statusCode =
+          result.reason === 'not_found' ? 404 :
+          result.reason === 'oversized' ? 413 :
+          result.reason === 'flag_disabled' ? 403 :
+          500;
         sendStructuredError(res, {
-          statusCode: 404,
-          error: 'not_found',
-          reason: 'not_found',
-          nextAction: 'INTENT.md does not exist. Create it first using POST /api/v1/intent/init.',
+          statusCode,
+          error: result.reason ?? 'intent_content_error',
+          reason: result.reason ?? 'unknown',
+          nextAction: result.nextAction,
         });
         return;
       }
 
-      sendSuccess(res, result);
+      sendSuccess(res, { content: result.content, path: result.path });
       return;
     }
 
