@@ -27,8 +27,6 @@ import {
   SqliteConnection,
   sanitizeString,
   assembleEvidenceChain,
-  crossReferenceByTimestamp,
-  resolveSummary,
 } from '@principles/core/runtime-v2';
 import type {
   EvidenceChainState,
@@ -43,11 +41,6 @@ export type {
   EvidenceChainState,
   EvidenceChainRecord,
   EvidenceChainResponse,
-};
-
-export {
-  crossReferenceByTimestamp,
-  resolveSummary,
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
