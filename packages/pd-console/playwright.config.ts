@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false, // 单服务器实例 + SQLite 文件锁，串行避免竞争
+  workers: 1, // 单 worker：所有 E2E 测试共享同一 workspace + 服务器实例，跨文件状态依赖（如 intent flag toggle）需要严格串行
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: [
