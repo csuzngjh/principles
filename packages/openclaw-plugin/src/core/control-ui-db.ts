@@ -324,9 +324,16 @@ export class ControlUiDatabase {
         ON thinking_model_events(assistant_turn_id);
       CREATE INDEX IF NOT EXISTS idx_thinking_model_events_run_id
         ON thinking_model_events(run_id);
+    `);
 
-      DROP VIEW IF EXISTS v_thinking_model_usage;
-      CREATE VIEW v_thinking_model_usage AS
+    // Views depend on tables owned by TrajectoryDatabase (assistant_turns, tool_calls,
+    // pain_events, user_turns, correction_samples). If ControlUiDatabase is constructed
+    // before TrajectoryDatabase has run initSchema (e.g. llm_output is the first hook
+    // triggered on a fresh workspace), CREATE VIEW would throw and break the hook.
+    // Wrap each view creation in try/catch so missing-dependency views are skipped with
+    // a warning rather than aborting schema initialization (rc-9: no silent fallback —
+    // failures are surfaced via console.info).
+    this.createViewSafely('v_thinking_model_usage', `
       WITH totals AS (
         SELECT COUNT(*) AS assistant_turns FROM assistant_turns
       ),
@@ -349,10 +356,10 @@ export class ControlUiDatabase {
           ELSE ROUND(CAST(usage_rows.distinct_turns AS REAL) / CAST(totals.assistant_turns AS REAL), 4)
         END AS coverage_rate
       FROM usage_rows, totals
-      ORDER BY usage_rows.hits DESC, usage_rows.model_id ASC;
+      ORDER BY usage_rows.hits DESC, usage_rows.model_id ASC
+    `);
 
-      DROP VIEW IF EXISTS v_thinking_model_effectiveness;
-      CREATE VIEW v_thinking_model_effectiveness AS
+    this.createViewSafely('v_thinking_model_effectiveness', `
       WITH event_windows AS (
         SELECT
           e.id,
@@ -418,10 +425,10 @@ export class ControlUiDatabase {
         ) THEN 1 ELSE 0 END) AS correction_sample_windows
       FROM bounded_windows b
       GROUP BY b.model_id
-      ORDER BY events DESC, model_id ASC;
+      ORDER BY events DESC, model_id ASC
+    `);
 
-      DROP VIEW IF EXISTS v_thinking_model_scenarios;
-      CREATE VIEW v_thinking_model_scenarios AS
+    this.createViewSafely('v_thinking_model_scenarios', `
       SELECT
         e.model_id AS model_id,
         CAST(j.value AS TEXT) AS scenario,
@@ -434,18 +441,39 @@ export class ControlUiDatabase {
         END
       ) AS j
       GROUP BY e.model_id, CAST(j.value AS TEXT)
-      ORDER BY hits DESC, scenario ASC;
+      ORDER BY hits DESC, scenario ASC
+    `);
 
-      DROP VIEW IF EXISTS v_thinking_model_daily_trend;
-      CREATE VIEW v_thinking_model_daily_trend AS
+    this.createViewSafely('v_thinking_model_daily_trend', `
       SELECT
         substr(created_at, 1, 10) AS day,
         model_id,
         COUNT(*) AS hits
       FROM thinking_model_events
       GROUP BY substr(created_at, 1, 10), model_id
-      ORDER BY day ASC, model_id ASC;
+      ORDER BY day ASC, model_id ASC
     `);
+  }
+
+  /**
+   * Create or replace a view, tolerating missing dependency tables.
+   *
+   * Views in ControlUiDatabase depend on tables created by TrajectoryDatabase
+   * (assistant_turns, tool_calls, pain_events, user_turns, correction_samples).
+   * If ControlUiDatabase is constructed before TrajectoryDatabase has created
+   * those tables, CREATE VIEW would throw. We DROP+CREATE with try/catch so
+   * missing-dependency views are skipped with a warning (rc-9: surfaced via
+   * console.info) rather than aborting schema initialization.
+   */
+  private createViewSafely(viewName: string, viewBody: string): void {
+    try {
+      this.db.exec(`DROP VIEW IF EXISTS ${viewName};`);
+      this.db.exec(`CREATE VIEW ${viewName} AS ${viewBody};`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      // rc-9: surface the failure — do not silently swallow
+      console.info(`[PD:ControlUiDatabase] view ${viewName} creation skipped: ${message}. It will be created on next TrajectoryDatabase initSchema().`);
+    }
   }
 
   private withWrite<T>(fn: () => T): T {
