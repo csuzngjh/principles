@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
+import { updatePrinciple } from '@principles/core/principle-tree-ledger';
 
 export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';
@@ -393,5 +394,39 @@ export class PrinciplesConsoleModel {
     };
 
     return { principle };
+  }
+
+  async archivePrinciple(principleId: string): Promise<boolean> {
+    try {
+      const stateDir = path.join(this.workspaceDir, '.state');
+      updatePrinciple(stateDir, principleId, {
+        status: 'archived',
+        updatedAt: new Date().toISOString(),
+      });
+      // Clear cache to force reload
+      this.cachedLedger = null;
+      this.cacheTimestamp = 0;
+      return true;
+    } catch (e) {
+      console.error(`Failed to archive principle ${principleId}:`, e);
+      return false;
+    }
+  }
+
+  async unarchivePrinciple(principleId: string): Promise<boolean> {
+    try {
+      const stateDir = path.join(this.workspaceDir, '.state');
+      updatePrinciple(stateDir, principleId, {
+        status: 'active',
+        updatedAt: new Date().toISOString(),
+      });
+      // Clear cache to force reload
+      this.cachedLedger = null;
+      this.cacheTimestamp = 0;
+      return true;
+    } catch (e) {
+      console.error(`Failed to unarchive principle ${principleId}:`, e);
+      return false;
+    }
   }
 }
