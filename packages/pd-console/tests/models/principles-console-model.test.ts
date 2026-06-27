@@ -740,6 +740,42 @@ describe('PrinciplesConsoleModel', () => {
     expect(result.principles).toHaveLength(1);
     expect(result.principles[0].readabilityWarningCode).toBeUndefined();
   });
+
+  it('archivePrinciple archives an active principle and unarchivePrinciple restores it', async () => {
+    ws = await createTestWorkspace();
+    writeLedger(ws.workspaceDir, {
+      principles: {
+        p1: {
+          id: 'p1',
+          status: 'active',
+          text: 'Rule 1',
+          triggerPattern: 't1',
+          action: 'a1',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      },
+      rules: {},
+      implementations: {},
+      metrics: {},
+      lastUpdated: '2026-05-01T00:00:00Z',
+    });
+    const model = new PrinciplesConsoleModel(ws.workspaceDir);
+    
+    // Archive
+    const archiveResult = await model.archivePrinciple('p1');
+    expect(archiveResult).toBe(true);
+    
+    const detailAfterArchive = await model.getPrincipleDetail('p1');
+    expect(detailAfterArchive?.principle.status).toBe('archived');
+    
+    // Unarchive
+    const unarchiveResult = await model.unarchivePrinciple('p1');
+    expect(unarchiveResult).toBe(true);
+    
+    const detailAfterUnarchive = await model.getPrincipleDetail('p1');
+    expect(detailAfterUnarchive?.principle.status).toBe('active');
+  });
 });
 
 function writeLedger(workspaceDir: string, tree: Record<string, unknown>): void {

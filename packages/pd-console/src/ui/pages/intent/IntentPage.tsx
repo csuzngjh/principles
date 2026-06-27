@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary, fetchIntentDecisionSummary } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag } from "../../api.js";
 import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
@@ -71,19 +72,66 @@ function EditEntry({ filePath }: { filePath: string }) {
   );
 }
 
-function FlagDisabledBanner() {
+/**
+ * FlagToggleCard — spec 2026-06-27 §13.5
+ *
+ * Replaces the static FlagDisabledBanner. Instead of telling the Owner to
+ * hand-edit yaml + restart, this card offers a one-click toggle that calls
+ * PATCH /api/v1/config/features/intent_engineering { enabled: true }.
+ *
+ * Only renders when flagEnabled === false (disabled state). After a successful
+ * enable, calls onAfterEnable so the parent re-fetches IntentSummary and the
+ * card unmounts (flagEnabled becomes true).
+ *
+ * Design note (§13.12.3): only an "enable" button is provided — no "disable"
+ * button. To turn off, hand-edit yaml. This is intentional MVP-scope asymmetry.
+ */
+interface FlagToggleCardProps {
+  flagEnabled: boolean;
+  onAfterEnable?: () => void;
+}
+
+function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  // Only show when disabled and not yet acknowledged.
+  // flagEnabled === true → already on, nothing to toggle.
+  // acknowledged === true → owner just enabled, parent will re-fetch and
+  //   flagEnabled will flip to true; this prevents a flash of the card.
+  if (flagEnabled || acknowledged) return null;
+
   return (
-    <div className="bg-panel border border-line rounded-[6px] p-5">
+    <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
       <h2 className="text-ink text-[15px] font-semibold mb-2">
         {t("pages.intent.flagDisabled.title")}
       </h2>
       <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
         {t("pages.intent.flagDisabled.description")}
       </p>
-      <div className="font-mono text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-3 py-2">
-        {t("pages.intent.flagDisabled.nextAction")}
-      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const res = await patchFeatureFlag("intent_engineering", true);
+            if (!res.success) {
+              toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
+              return;
+            }
+            setAcknowledged(true);
+            onAfterEnable?.();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        aria-label={t("pages.intent.flagStatus.enable")}
+      >
+        {busy ? t("pages.intent.flagStatus.enabling") : t("pages.intent.flagStatus.enable")}
+      </button>
     </div>
   );
 }
@@ -343,9 +391,12 @@ export function IntentPage() {
           {t("pages.intent.subtitle")}
         </p>
 
-        {/* Flag-disabled short-circuit */}
+        {/* Flag-disabled short-circuit — spec §13.5: interactive toggle */}
         {summary && !summary.flagEnabled && (
-          <FlagDisabledBanner />
+          <FlagToggleCard
+            flagEnabled={summary.flagEnabled}
+            onAfterEnable={loadData}
+          />
         )}
 
         {/* Flag-on but file not found */}
