@@ -13,6 +13,7 @@ import { SqliteConnection } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as yaml from 'js-yaml';
 
 const workspaceDir = process.argv[2];
 if (!workspaceDir || !fs.existsSync(workspaceDir)) {
@@ -259,5 +260,33 @@ const ledger = {
 };
 fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), 'utf8');
 console.log('[e2e-seed] principle_training_state.json written: 1 principle (p-001)');
+
+// ── 10. 写入最小有效 .pd/config.yaml ─────────────────────────────────────────
+// 必须包含 validatePdConfig 要求的所有 required sections（version/runtimeProfiles/
+// internalAgents/ui），features section 包含 intent_engineering=false（默认 off）。
+// 这样 intent-onboarding-flow.spec.ts 的 PATCH /config/features/intent_engineering
+// 只需 toggle 已存在的 flag，不会触发 auto-create-features 路径（该路径生成的不完整
+// config 会 fail validatePdConfig → 409 conflict）。
+const configPath = path.join(stateDir, 'config.yaml');
+const minimalConfig = {
+  version: 1,
+  features: {
+    intent_engineering: { category: 'quiet', enabled: false },
+  },
+  runtimeProfiles: {
+    'openclaw.default': { type: 'openclaw', source: 'default' },
+  },
+  internalAgents: {
+    defaultRuntime: 'openclaw.default',
+    agents: {
+      diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+      dreamer: { enabled: true },
+      scribe: { enabled: true },
+    },
+  },
+  ui: { diagnostics: { mode: 'simple' } },
+};
+fs.writeFileSync(configPath, yaml.dump(minimalConfig), 'utf8');
+console.log('[e2e-seed] .pd/config.yaml written: intent_engineering=false (flag-off default)');
 
 console.log('[e2e-seed] done — workspace ready for E2E tests');

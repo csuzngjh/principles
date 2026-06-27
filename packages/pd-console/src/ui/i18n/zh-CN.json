@@ -730,7 +730,55 @@
       "notFound": {
         "title": "未找到 INTENT.md",
         "description": "PD 在 .principles/ 目录中未找到 INTENT.md 文件。缺少此锚点时，基于意图的诊断无法运行。",
-        "nextAction": "运行：pd intent init --confirm --workspace <path>"
+        "nextAction": "运行：pd intent init --confirm --workspace <path>",
+        "createButton": "创建 INTENT.md",
+        "creating": "创建中…",
+        "createFailed": "创建失败，请稍后重试",
+        "createSuccess": "INTENT.md 已创建，你可以开始填写意图"
+      },
+      "onboarding": {
+        "title": "欢迎使用意图工程",
+        "subtitle": "在开始之前，让我们先了解一下意图工程",
+        "whatIsIt": {
+          "title": "什么是意图工程？",
+          "description": "INTENT.md 是你的长期意图锚点 — 记录你的目标、不可违背的边界、以及何时应当停止并升级。它帮助 PD 在关键决策点对齐你的真实意图。"
+        },
+        "whyYouFill": {
+          "title": "为什么需要你填写？",
+          "description": "意图是拥有者自有的。PD 不会自动生成意图，因为只有你知道项目的真实目标和边界。这是你的决策权，PD 只负责帮助你执行和对齐。"
+        },
+        "sectionGuide": {
+          "title": "5 个章节填写引导",
+          "description": "INTENT.md 包含 5 个章节，每个章节有明确的用途：",
+          "sections": {
+            "why": "为什么 — 这个项目的根本动机",
+            "desiredOutcome": "期望结果 — 你希望达成的具体结果",
+            "nonNegotiables": "不可妥协项 — 绝对不能违反的边界",
+            "stopEscalation": "停止 / 升级 — 何时应当停止当前操作并升级给你",
+            "currentStrategicFocus": "当前战略焦点 — 阶段性重点"
+          }
+        },
+        "skipOption": "跳过引导，创建空模板稍后填写",
+        "startFilling": "开始填写",
+        "skip": "跳过",
+        "close": "关闭",
+        "dontShowAgain": "不再显示"
+      },
+      "editor": {
+        "title": "编辑 INTENT.md",
+        "description": "直接在浏览器中编辑你的意图文档。保存后会立即生效。",
+        "placeholder": "在此输入 INTENT.md 内容（Markdown 格式）…",
+        "save": "保存",
+        "saving": "保存中…",
+        "cancel": "取消",
+        "edit": "编辑",
+        "saveSuccess": "INTENT.md 已保存",
+        "saveFailed": "保存失败，请稍后重试",
+        "emptyContent": "内容不能为空",
+        "oversized": "内容超过 32KB 上限，请精简后重试",
+        "confirmDiscard": "你有未保存的修改，确定要放弃吗？",
+        "yes": "是，放弃修改",
+        "no": "继续编辑"
       },
       "oversized": {
         "title": "INTENT.md 超过 32KB",

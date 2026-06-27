@@ -81,6 +81,7 @@ function validateArray<T>(v: unknown, validateElement: (el: unknown) => T | null
 export interface ErrorResponse {
   error?: string;
   message?: string;
+  reason?: string;
   nextAction?: string;
 }
 
@@ -94,6 +95,14 @@ export function validateErrorResponse(v: unknown): ErrorResponse | null {
   }
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
+  }
+  // N4 (PR-1083 review): surfacing the machine-readable `reason` field lets
+  // the UI branch on structured error codes instead of parsing natural
+  // language out of nextAction. Previously `nextAction.includes("32KB")`
+  // would silently regress to "saveFailed" the moment the backend phrased
+  // the cap differently or returned localized text.
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) {
+    result.reason = v.reason;
   }
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
     result.nextAction = v.nextAction;
@@ -1959,5 +1968,107 @@ export function validateIntentSummary(v: unknown): IntentSummaryData | null {
     if (sections === null) return null;
     result.sections = sections;
   }
+  return result;
+}
+
+// ── Intent Init / Save validators (PRI-477 onboarding) ────────────────────────
+
+export interface IntentRawContentData {
+  content: string;
+  path: string;
+}
+
+export function validateIntentRawContent(v: unknown): IntentRawContentData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'content') || !isString(v.content)) return null;
+  if (!Object.hasOwn(v, 'path') || !isString(v.path)) return null;
+  return { content: v.content, path: v.path };
+}
+
+export interface IntentInitResultData {
+  ok: boolean;
+  created: boolean;
+  path?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export interface IntentSaveResultData {
+  ok: boolean;
+  saved: boolean;
+  path?: string;
+  contentHash?: string;
+  lastEditedAt?: string;
+  warnings?: IntentDocWarningData[];
+  reason?: string;
+  nextAction?: string;
+}
+
+export function validateIntentInitResult(v: unknown): IntentInitResultData | null {
+  if (!isObject(v)) return null;
+  // Required fields
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok)) return null;
+  if (!Object.hasOwn(v, 'created') || !isBoolean(v.created)) return null;
+
+  const result: IntentInitResultData = {
+    ok: v.ok,
+    created: v.created,
+  };
+
+  // Optional fields
+  const path = readNullableString(v, 'path');
+  if (!path.valid) return null;
+  if (path.value !== null) result.path = path.value;
+
+  const reason = readNullableString(v, 'reason');
+  if (!reason.valid) return null;
+  if (reason.value !== null) result.reason = reason.value;
+
+  const nextAction = readNullableString(v, 'nextAction');
+  if (!nextAction.valid) return null;
+  if (nextAction.value !== null) result.nextAction = nextAction.value;
+
+  return result;
+}
+
+export function validateIntentSaveResult(v: unknown): IntentSaveResultData | null {
+  if (!isObject(v)) return null;
+  // Required fields
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok)) return null;
+  if (!Object.hasOwn(v, 'saved') || !isBoolean(v.saved)) return null;
+
+  const result: IntentSaveResultData = {
+    ok: v.ok,
+    saved: v.saved,
+  };
+
+  // Optional fields
+  const path = readNullableString(v, 'path');
+  if (!path.valid) return null;
+  if (path.value !== null) result.path = path.value;
+
+  const contentHash = readNullableString(v, 'contentHash');
+  if (!contentHash.valid) return null;
+  if (contentHash.value !== null) result.contentHash = contentHash.value;
+
+  const lastEditedAt = readNullableString(v, 'lastEditedAt');
+  if (!lastEditedAt.valid) return null;
+  if (lastEditedAt.value !== null) result.lastEditedAt = lastEditedAt.value;
+
+  const reason = readNullableString(v, 'reason');
+  if (!reason.valid) return null;
+  if (reason.value !== null) result.reason = reason.value;
+
+  const nextAction = readNullableString(v, 'nextAction');
+  if (!nextAction.valid) return null;
+  if (nextAction.value !== null) result.nextAction = nextAction.value;
+
+  if (Object.hasOwn(v, 'warnings')) {
+    if (!Array.isArray(v.warnings)) return null;
+    const warnings = validateArray(v.warnings, validateIntentWarning);
+    if (warnings === null) return null;
+    result.warnings = warnings;
+  }
+
   return result;
 }

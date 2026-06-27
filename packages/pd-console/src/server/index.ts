@@ -392,9 +392,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // PRI-466: GET /api/v1/intent
-      if (urlPath === '/api/v1/intent') {
-        asyncHandler(() => handleIntentRoute(req, res, services.workspaceDir))(req, res);
+      // PRI-466/477: GET/POST/PUT /api/v1/intent (+ /init, /content sub-paths)
+      if (urlPath === '/api/v1/intent' || urlPath.startsWith('/api/v1/intent/')) {
+        const subPath = urlPath === '/api/v1/intent' ? '' : urlPath.slice('/api/v1/intent'.length);
+        asyncHandler(() => handleIntentRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 

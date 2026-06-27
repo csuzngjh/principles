@@ -4,8 +4,9 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent } from "../../api.js";
 import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
+import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   );
 }
 
-function NotFoundBanner() {
+function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => void }) {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
@@ -146,8 +147,11 @@ function NotFoundBanner() {
       <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
         {t("pages.intent.notFound.description")}
       </p>
-      <div className="font-mono text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-3 py-2">
-        {t("pages.intent.notFound.nextAction")}
+      <div className="flex items-center gap-3">
+        <CreateIntentButton onCreated={onCreated} showOnboarding={true} />
+        <span className="text-ink-4 text-[12px] font-mono">
+          {t("pages.intent.notFound.nextAction")}
+        </span>
       </div>
     </div>
   );
@@ -311,6 +315,10 @@ export function IntentPage() {
   const [data, setData] = useState<IntentSummaryData | null>(null);
   const [pageState, setPageState] = useState<PageState>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // PRI-477: inline editor state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editorContent, setEditorContent] = useState("");
+  const [editorLoading, setEditorLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setPageState("loading");
@@ -330,6 +338,50 @@ export function IntentPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // PRI-477: Called when user clicks "Edit" — fetch raw content and open editor
+  const handleStartEdit = useCallback(async () => {
+    setEditorLoading(true);
+    const result = await fetchIntentContent();
+    setEditorLoading(false);
+    if (!result.success) {
+      toast.error(t("pages.intent.loadError"));
+      return;
+    }
+    setEditorContent(result.data.content);
+    setIsEditing(true);
+  }, [t]);
+
+  // PRI-477: Called when template is created — refresh summary; optionally
+  // open the editor immediately so the user can start filling.
+  //
+  // PR-1083 review (CodeRabbit A5): `openEditor` lets CreateIntentButton
+  // distinguish "Start filling" (open editor) from "Skip" (just refresh the
+  // summary so NotFoundBanner re-renders to the sections view — otherwise the
+  // user would see a stale "file not found" banner even though INTENT.md now
+  // exists on disk).
+  const handleCreated = useCallback(async (openEditor: boolean) => {
+    await loadData();
+    if (!openEditor) return;
+    setEditorLoading(true);
+    const result = await fetchIntentContent();
+    setEditorLoading(false);
+    if (result.success) {
+      setEditorContent(result.data.content);
+      setIsEditing(true);
+    }
+  }, [loadData]);
+
+  // PRI-477: Called after successful save — close editor and refresh summary
+  const handleSaved = useCallback(() => {
+    setIsEditing(false);
+    void loadData();
+  }, [loadData]);
+
+  // PRI-477: Called when user cancels editing
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+  }, []);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (pageState === "loading") {
@@ -399,9 +451,9 @@ export function IntentPage() {
           />
         )}
 
-        {/* Flag-on but file not found */}
+        {/* Flag-on but file not found — PRI-477: add Create button + onboarding */}
         {summary && summary.flagEnabled && !summary.found && summary.reason === "not_found" && (
-          <NotFoundBanner />
+          <NotFoundBanner onCreated={handleCreated} />
         )}
 
         {/* Flag-on but oversized */}
@@ -409,67 +461,92 @@ export function IntentPage() {
           <OversizedBanner />
         )}
 
-        {/* Flag-on and valid — show sections */}
+        {/* Flag-on and valid — show sections OR inline editor (PRI-477) */}
         {summary && summary.flagEnabled && summary.ok && summary.sections && (
           <>
-            {/* Sections */}
-            <section aria-labelledby="section-content">
-              <SectionTitle id="section-content">
-                {t("pages.intent.title")}
-              </SectionTitle>
-              <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
-                <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />
-                <SectionContent label={t("pages.intent.sections.desiredOutcome")} content={summary.sections.desiredOutcome} />
-                <SectionContent label={t("pages.intent.sections.nonNegotiables")} content={summary.sections.nonNegotiables} />
-                <SectionContent label={t("pages.intent.sections.stopEscalation")} content={summary.sections.stopEscalation} />
-                <SectionContent label={t("pages.intent.sections.currentStrategicFocus")} content={summary.sections.currentStrategicFocus} />
-              </div>
-            </section>
-
-            {/* Health warnings */}
-            <section className="mt-8" aria-labelledby="section-warnings">
-              <SectionTitle id="section-warnings">
-                {t("pages.intent.warnings.title")}
-              </SectionTitle>
-              {summary.warnings.length === 0 ? (
-                <p className="text-ink-3 text-[13px] leading-relaxed">
-                  {t("pages.intent.warnings.empty")}
-                </p>
-              ) : (
-                <ul className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                  {summary.warnings.map((w, i) => (
-                    <WarningItem key={i} warning={w} />
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            {/* Meta */}
-            <section className="mt-8" aria-labelledby="section-meta">
-              <SectionTitle id="section-meta">
-                {t("pages.intent.meta.title")}
-              </SectionTitle>
-              <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                {summary.lastEditedAt && (
-                  <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />
-                )}
-                {summary.contentHash && (
-                  <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
-                )}
-                {summary.path && (
-                  <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
-                )}
-              </div>
-            </section>
-
-            {/* Edit entry — SPEC §22.1.1 line 1402 */}
-            {summary.path && (
-              <section className="mt-8" aria-labelledby="section-edit">
-                <SectionTitle id="section-edit">
-                  {t("pages.intent.editEntry.heading")}
-                </SectionTitle>
-                <EditEntry filePath={summary.path} />
+            {/* PRI-477: Inline editor — shown when user clicks "Edit" */}
+            {isEditing && (
+              <section aria-labelledby="section-editor" className="mb-8">
+                {/* N2 (PR-1083 review): outer SectionTitle removed — IntentEditor
+                    already renders its own `<h3 id="section-editor">` carrying the
+                    title. Having two visible "Edit INTENT.md" titles was confusing. */}
+                <IntentEditor
+                  initialContent={editorContent}
+                  onSaved={handleSaved}
+                  onCancel={handleCancelEdit}
+                />
               </section>
+            )}
+
+            {/* Read-only sections — shown when NOT editing */}
+            {!isEditing && (
+              <>
+                <section aria-labelledby="section-content">
+                  <div className="flex items-center justify-between mb-3">
+                    <SectionTitle id="section-content">
+                      {t("pages.intent.title")}
+                    </SectionTitle>
+                    {/* PRI-477 + A7 review: pass editorLoading so the button
+                        disables + switches its label while fetchIntentContent()
+                        is in flight, preventing double-clicks and giving the
+                        user immediate feedback. */}
+                    <EditButton onClick={handleStartEdit} loading={editorLoading} />
+                  </div>
+                  <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
+                    <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />
+                    <SectionContent label={t("pages.intent.sections.desiredOutcome")} content={summary.sections.desiredOutcome} />
+                    <SectionContent label={t("pages.intent.sections.nonNegotiables")} content={summary.sections.nonNegotiables} />
+                    <SectionContent label={t("pages.intent.sections.stopEscalation")} content={summary.sections.stopEscalation} />
+                    <SectionContent label={t("pages.intent.sections.currentStrategicFocus")} content={summary.sections.currentStrategicFocus} />
+                  </div>
+                </section>
+
+                {/* Health warnings */}
+                <section className="mt-8" aria-labelledby="section-warnings">
+                  <SectionTitle id="section-warnings">
+                    {t("pages.intent.warnings.title")}
+                  </SectionTitle>
+                  {summary.warnings.length === 0 ? (
+                    <p className="text-ink-3 text-[13px] leading-relaxed">
+                      {t("pages.intent.warnings.empty")}
+                    </p>
+                  ) : (
+                    <ul className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
+                      {summary.warnings.map((w, i) => (
+                        <WarningItem key={i} warning={w} />
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {/* Meta */}
+                <section className="mt-8" aria-labelledby="section-meta">
+                  <SectionTitle id="section-meta">
+                    {t("pages.intent.meta.title")}
+                  </SectionTitle>
+                  <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
+                    {summary.lastEditedAt && (
+                      <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />
+                    )}
+                    {summary.contentHash && (
+                      <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
+                    )}
+                    {summary.path && (
+                      <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
+                    )}
+                  </div>
+                </section>
+
+                {/* Edit entry — SPEC §22.1.1 line 1402 (legacy file-path entry, kept for CLI users) */}
+                {summary.path && (
+                  <section className="mt-8" aria-labelledby="section-edit">
+                    <SectionTitle id="section-edit">
+                      {t("pages.intent.editEntry.heading")}
+                    </SectionTitle>
+                    <EditEntry filePath={summary.path} />
+                  </section>
+                )}
+              </>
             )}
           </>
         )}
