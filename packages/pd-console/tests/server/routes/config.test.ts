@@ -35,14 +35,16 @@ vi.mock('fs', async () => {
 
 function createMockRequest(
   method: string,
-  options?: { body?: unknown; url?: string },
+  options?: { body?: unknown; url?: string; rawBody?: string },
 ): IncomingMessage {
-  const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';
+  const bodyStr = options?.rawBody !== undefined
+    ? options.rawBody
+    : (options?.body !== undefined ? JSON.stringify(options.body) : '');
   const req = {
     method,
     url: options?.url ?? '/api/v1/config/summary',
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === 'data' && options?.body !== undefined) {
+      if (event === 'data' && bodyStr.length > 0) {
         handler(Buffer.from(bodyStr));
       }
       if (event === 'end') {
@@ -1425,6 +1427,136 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       expect(err.error).toBe('confirm_read_failed');
     } finally {
       writeSpy.mockRestore();
+      readSpy.mockRestore();
+    }
+  });
+
+  // ── Input validation edge cases (codecov gap coverage) ──────────────────
+
+  it('rejects invalid JSON body with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      rawBody: '{invalid json',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Invalid JSON');
+  });
+
+  it('rejects array body (not object) with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      rawBody: '[1, 2, 3]',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('JSON object');
+  });
+
+  it('rejects body missing enabled field with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { foo: 'bar' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Missing required field: enabled');
+  });
+
+  it('rejects invalid feature name URL encoding with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // %E0%A4%A is an incomplete UTF-8 sequence — decodeURIComponent throws
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/%E0%A4%A',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/%E0%A4%A',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Invalid feature name encoding');
+  });
+
+  it('rejects body too large with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // Construct a body > 64KB to trigger readBody rejection
+    const hugePayload = { enabled: true, padding: 'x'.repeat(70 * 1024) };
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: hugePayload,
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('maximum allowed size');
+  });
+
+  // ── Direct store-level tests for defensive branches ─────────────────────
+  // These branches are unreachable from the route layer (route validates
+  // first) but the store function is a public API that must defend itself.
+
+  it('store-level: updateFeatureFlag rejects non-boolean enabled defensively', () => {
+    writeConfig(VALID_CONFIG);
+    const result = store.updateFeatureFlag(
+      workspaceDir,
+      'intent_engineering',
+      'not-boolean' as unknown as boolean,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('bad_request');
+      expect(result.statusCode).toBe(400);
+    }
+  });
+
+  it('store-level: updateFeatureFlag returns read_error when fs.readFileSync throws', () => {
+    writeConfig(VALID_CONFIG);
+    const originalExists = fs.existsSync;
+    const originalRead = fs.readFileSync;
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      throw new Error('mock permission denied');
+    });
+
+    try {
+      const result = store.updateFeatureFlag(workspaceDir, 'intent_engineering', true);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe('read_error');
+        expect(result.statusCode).toBe(500);
+      }
+    } finally {
+      existsSpy.mockRestore();
       readSpy.mockRestore();
     }
   });
