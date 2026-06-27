@@ -20,6 +20,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
 import { handleConfigRoute } from '../../../src/server/routes/config.js';
+import * as store from '../../../src/server/config/pd-config-store.js';
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Test utilities (mirrors existing route test patterns)
@@ -1163,6 +1171,41 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
     expect(parsed.principles.outputLanguage).toBe('en');
     expect(parsed.features).toBeDefined();
   });
+
+  it('PATCH returns 500 when re-read after write fails', async () => {
+    writeConfig(VALID_CONFIG);
+    const spy = vi.spyOn(store, 'getPrinciplesOutputLanguage').mockReturnValue({
+      ok: false,
+      statusCode: 500,
+      error: 'confirm_read_failed',
+      message: 'Write succeeded but re-read failed',
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/principles/output-language',
+        body: { outputLanguage: 'en' },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('confirm_read_failed');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('returns 405 on non-GET/PATCH methods', async () => {
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/principles/output-language',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(405);
+  });
 });
 
 // ===========================================================================
@@ -1306,5 +1349,83 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
     expect(parsed.principles.outputLanguage).toBe('en');
     // runtimeProfiles preserved
     expect(isRecord(parsed.runtimeProfiles)).toBe(true);
+  });
+
+  it('returns 405 on non-PATCH methods for features', async () => {
+    const req = createMockRequest('GET', {
+      url: '/api/v1/config/features/intent_engineering',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(405);
+  });
+
+  it('PATCH returns 500 when writeConfigAtomic fails during feature update', async () => {
+    writeConfig(VALID_CONFIG);
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw new Error('mock write error');
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/features/intent_engineering',
+        body: { enabled: true },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, {
+        workspaceDir,
+        subPath: '/features/intent_engineering',
+      });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('write_error');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('PATCH returns 500 when re-read fails during feature update', async () => {
+    writeConfig(VALID_CONFIG);
+    const originalRead = fs.readFileSync;
+    const originalWrite = fs.writeFileSync;
+    let written = false;
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(function (this: any, p, data, opts) {
+      if (typeof p === 'string' && p.endsWith('config.yaml.tmp')) {
+        written = true;
+      }
+      return originalWrite(p, data, opts);
+    });
+
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(function (this: any, p, opts) {
+      if (written && typeof p === 'string' && p.endsWith('config.yaml')) {
+        return 'version: [unclosed\n';
+      }
+      return originalRead(p, opts);
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/features/intent_engineering',
+        body: { enabled: true },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, {
+        workspaceDir,
+        subPath: '/features/intent_engineering',
+      });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('confirm_read_failed');
+    } finally {
+      writeSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 });

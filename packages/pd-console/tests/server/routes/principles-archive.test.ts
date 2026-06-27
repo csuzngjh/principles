@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { handlePrinciplesRoute, disposePrinciplesModels } from "../../../src/server/routes/principles.js";
+import { PrinciplesConsoleModel } from "../../../src/server/models/PrinciplesConsoleModel.js";
 
 // ── Test utilities ───────────────────────────────────────────────────────────
 
@@ -157,5 +158,133 @@ describe("Principles archive and unarchive routes", () => {
     expect(ledger).not.toBeNull();
     const p = (ledger as any).principles.p1;
     expect(p.status).toBe("active");
+  });
+
+  it("model archive/unarchive returns false when file system fails", async () => {
+    // Passing null/empty/invalid directory to trigger fs error
+    const badModel = new PrinciplesConsoleModel("\0");
+    const archiveResult = await badModel.archivePrinciple("p1");
+    expect(archiveResult).toBe(false);
+
+    const unarchiveResult = await badModel.unarchivePrinciple("p1");
+    expect(unarchiveResult).toBe(false);
+  });
+
+  it("POST /api/principles//archive returns 400 when ID is missing", async () => {
+    const req = createMockRequest("POST", { subPath: "//archive" });
+    const res = createMockResponse();
+
+    await handlePrinciplesRoute({
+      req,
+      res,
+      workspaceDir: tempDir,
+      subPath: "//archive",
+    });
+
+    expect(res.statusCode).toBe(400);
+    const parsed = JSON.parse(res._body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe("invalid_principle_id");
+  });
+
+  it("POST /api/principles/:id/archive returns 400 when ID is invalid URL encoded", async () => {
+    const req = createMockRequest("POST", { subPath: "/%E0%A0/archive" });
+    const res = createMockResponse();
+
+    await handlePrinciplesRoute({
+      req,
+      res,
+      workspaceDir: tempDir,
+      subPath: "/%E0%A0/archive",
+    });
+
+    expect(res.statusCode).toBe(400);
+    const parsed = JSON.parse(res._body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe("invalid_principle_id");
+  });
+
+  it("POST /api/principles/:id/archive returns 500 when model returns false", async () => {
+    const req = createMockRequest("POST", { subPath: "/p1/archive" });
+    const res = createMockResponse();
+
+    // Use bad workspace directory to trigger model failure (returns false)
+    await handlePrinciplesRoute({
+      req,
+      res,
+      workspaceDir: "\0",
+      subPath: "/p1/archive",
+    });
+
+    expect(res.statusCode).toBe(500);
+    const parsed = JSON.parse(res._body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe("archive_failed");
+  });
+
+  it("POST /api/principles/:id/unarchive returns 500 when model returns false", async () => {
+    const req = createMockRequest("POST", { subPath: "/p1/unarchive" });
+    const res = createMockResponse();
+
+    // Use bad workspace directory to trigger model failure (returns false)
+    await handlePrinciplesRoute({
+      req,
+      res,
+      workspaceDir: "\0",
+      subPath: "/p1/unarchive",
+    });
+
+    expect(res.statusCode).toBe(500);
+    const parsed = JSON.parse(res._body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe("unarchive_failed");
+  });
+
+  it("POST /api/principles/:id/archive returns 500 when model throws error", async () => {
+    const req = createMockRequest("POST", { subPath: "/p1/archive" });
+    const res = createMockResponse();
+
+    const spy = vi.spyOn(PrinciplesConsoleModel.prototype, "archivePrinciple")
+      .mockRejectedValue(new Error("forced archive error"));
+
+    try {
+      await handlePrinciplesRoute({
+        req,
+        res,
+        workspaceDir: tempDir,
+        subPath: "/p1/archive",
+      });
+
+      expect(res.statusCode).toBe(500);
+      const parsed = JSON.parse(res._body);
+      expect(parsed.success).toBe(false);
+      expect(parsed.message).toBe("forced archive error");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("POST /api/principles/:id/unarchive returns 500 when model throws error", async () => {
+    const req = createMockRequest("POST", { subPath: "/p1/unarchive" });
+    const res = createMockResponse();
+
+    const spy = vi.spyOn(PrinciplesConsoleModel.prototype, "unarchivePrinciple")
+      .mockRejectedValue(new Error("forced unarchive error"));
+
+    try {
+      await handlePrinciplesRoute({
+        req,
+        res,
+        workspaceDir: tempDir,
+        subPath: "/p1/unarchive",
+      });
+
+      expect(res.statusCode).toBe(500);
+      const parsed = JSON.parse(res._body);
+      expect(parsed.success).toBe(false);
+      expect(parsed.message).toBe("forced unarchive error");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

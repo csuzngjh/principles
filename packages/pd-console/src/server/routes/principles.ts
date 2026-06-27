@@ -100,7 +100,7 @@ export async function handlePrinciplesRoute({
   // ── POST Routes ─────────────────────────────────────────────────────────────
   if (req.method === 'POST') {
     // POST /api/principles/:id/archive
-    const archiveMatch = /^\/([^/]+)\/archive$/.exec(subPath);
+    const archiveMatch = /^\/([^/]*)\/archive$/.exec(subPath);
     if (archiveMatch) {
       const [, rawPrincipleId] = archiveMatch;
       if (!rawPrincipleId) {
@@ -128,7 +128,7 @@ export async function handlePrinciplesRoute({
     }
 
     // POST /api/principles/:id/unarchive
-    const unarchiveMatch = /^\/([^/]+)\/unarchive$/.exec(subPath);
+    const unarchiveMatch = /^\/([^/]*)\/unarchive$/.exec(subPath);
     if (unarchiveMatch) {
       const [, rawPrincipleId] = unarchiveMatch;
       if (!rawPrincipleId) {
