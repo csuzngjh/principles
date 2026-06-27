@@ -3,7 +3,6 @@
  *
  * GET  /check    — Check for updates
  * POST /apply    — Apply an update
- * GET  /status   — Get current update status
  * POST /rollback — Rollback an update
  */
 /* eslint-disable @typescript-eslint/max-params */
@@ -473,14 +472,6 @@ export async function handleUpdateRoute(
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_apply_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
-
-  // GET /status
-  if (subPath === '/status') {
-    if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
-    const currentVersion = readCurrentVersion(pluginDir) ?? 'unknown';
-    sendSuccess(res, { checking: false, updating: false, currentVersion });
     return;
   }
 

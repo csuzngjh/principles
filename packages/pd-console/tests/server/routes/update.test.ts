@@ -368,33 +368,6 @@ describe('handleUpdateRoute', () => {
     });
   });
 
-  // ── GET /status ─────────────────────────────────────────────────────
-
-  describe('GET /status', () => {
-    it('should return current update status', async () => {
-      const req = createMockRequest('GET');
-      const res = createMockResponse();
-
-      await handleUpdateRoute(req, res, workspaceDir, '/status');
-
-      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; data: { checking: boolean; updating: boolean; currentVersion: string } }>(res);
-      expect(body.success).toBe(true);
-      expect(body.data.checking).toBe(false);
-      expect(body.data.updating).toBe(false);
-      expect(body.data.currentVersion).toBe('1.0.0');
-    });
-
-    it('should return 405 for non-GET method', async () => {
-      const req = createMockRequest('POST');
-      const res = createMockResponse();
-
-      await handleUpdateRoute(req, res, workspaceDir, '/status');
-
-      expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
-    });
-  });
-
   // ── POST /rollback ──────────────────────────────────────────────────
 
   describe('POST /rollback', () => {
