@@ -443,8 +443,8 @@ async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
 
 // ── Intent Summary (PRI-466) ─────────────────────────────────────────────────
 
-async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
-  return request<IntentSummaryData>('/api/v1/intent', undefined, validateIntentSummary);
+async function fetchIntentSummary(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSummaryData>> {
+  return request<IntentSummaryData>(`/api/v1/intent?lang=${lang}`, undefined, validateIntentSummary);
 }
 
 // ── Intent Init / Edit (PRI-477 onboarding) ──────────────────────────────────
@@ -452,9 +452,9 @@ async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
 /**
  * Fetch raw INTENT.md content for editing via GET /api/v1/intent/content.
  */
-async function fetchIntentContent(): Promise<ApiResponse<IntentRawContentData>> {
+async function fetchIntentContent(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentRawContentData>> {
   return request<IntentRawContentData>(
-    '/api/v1/intent/content',
+    `/api/v1/intent/content?lang=${lang}`,
     undefined,
     validateIntentRawContent,
   );
@@ -464,9 +464,9 @@ async function fetchIntentContent(): Promise<ApiResponse<IntentRawContentData>> 
  * Create INTENT.md from the SPEC §7 template via POST /api/v1/intent/init.
  * Does NOT overwrite an existing file unless force=true.
  */
-async function createIntentTemplate(force = false): Promise<ApiResponse<IntentInitResultData>> {
+async function createIntentTemplate(force = false, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentInitResultData>> {
   return request<IntentInitResultData>(
-    '/api/v1/intent/init',
+    `/api/v1/intent/init?lang=${lang}`,
     {
       method: 'POST',
       body: JSON.stringify({ force }),
@@ -478,9 +478,9 @@ async function createIntentTemplate(force = false): Promise<ApiResponse<IntentIn
 /**
  * Save user-edited INTENT.md content via PUT /api/v1/intent/content.
  */
-async function saveIntentContent(content: string): Promise<ApiResponse<IntentSaveResultData>> {
+async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSaveResultData>> {
   return request<IntentSaveResultData>(
-    '/api/v1/intent/content',
+    `/api/v1/intent/content?lang=${lang}`,
     {
       method: 'PUT',
       body: JSON.stringify({ content }),

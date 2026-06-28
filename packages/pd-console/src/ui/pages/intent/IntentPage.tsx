@@ -137,7 +137,7 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   );
 }
 
-function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => void }) {
+function NotFoundBanner({ onCreated, lang }: { onCreated: (openEditor: boolean) => void; lang: 'zh-CN' | 'en' }) {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
@@ -148,7 +148,7 @@ function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => voi
         {t("pages.intent.notFound.description")}
       </p>
       <div className="flex items-center gap-3">
-        <CreateIntentButton onCreated={onCreated} showOnboarding={true} />
+        <CreateIntentButton onCreated={onCreated} showOnboarding={true} lang={lang} />
         <span className="text-ink-4 text-[12px] font-mono">
           {t("pages.intent.notFound.nextAction")}
         </span>
@@ -319,11 +319,13 @@ export function IntentPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editorContent, setEditorContent] = useState("");
   const [editorLoading, setEditorLoading] = useState(false);
+  // Bilingual: language selector state
+  const [lang, setLang] = useState<'zh-CN' | 'en'>('zh-CN');
 
   const loadData = useCallback(async () => {
     setPageState("loading");
     setErrorMsg(null);
-    const result = await fetchIntentSummary();
+    const result = await fetchIntentSummary(lang);
     if (!result.success) {
       // ERR-002: graceful degradation with reason
       setErrorMsg(result.error ?? t("pages.intent.loadError"));
@@ -333,7 +335,7 @@ export function IntentPage() {
     // result.data is already validated by validateIntentSummary in the API layer
     setData(result.data);
     setPageState("loaded");
-  }, [t]);
+  }, [t, lang]);
 
   useEffect(() => {
     loadData();
@@ -342,7 +344,7 @@ export function IntentPage() {
   // PRI-477: Called when user clicks "Edit" — fetch raw content and open editor
   const handleStartEdit = useCallback(async () => {
     setEditorLoading(true);
-    const result = await fetchIntentContent();
+    const result = await fetchIntentContent(lang);
     setEditorLoading(false);
     if (!result.success) {
       toast.error(t("pages.intent.loadError"));
@@ -350,7 +352,7 @@ export function IntentPage() {
     }
     setEditorContent(result.data.content);
     setIsEditing(true);
-  }, [t]);
+  }, [t, lang]);
 
   // PRI-477: Called when template is created — refresh summary; optionally
   // open the editor immediately so the user can start filling.
@@ -364,13 +366,13 @@ export function IntentPage() {
     await loadData();
     if (!openEditor) return;
     setEditorLoading(true);
-    const result = await fetchIntentContent();
+    const result = await fetchIntentContent(lang);
     setEditorLoading(false);
     if (result.success) {
       setEditorContent(result.data.content);
       setIsEditing(true);
     }
-  }, [loadData]);
+  }, [loadData, lang]);
 
   // PRI-477: Called after successful save — close editor and refresh summary
   const handleSaved = useCallback(() => {
@@ -438,6 +440,16 @@ export function IntentPage() {
           {summary && (
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
+          {/* Bilingual language selector */}
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en')}
+            className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            aria-label={t("pages.intent.langSelector.ariaLabel")}
+          >
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
+          </select>
         </div>
         <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
           {t("pages.intent.subtitle")}
@@ -453,7 +465,7 @@ export function IntentPage() {
 
         {/* Flag-on but file not found — PRI-477: add Create button + onboarding */}
         {summary && summary.flagEnabled && !summary.found && summary.reason === "not_found" && (
-          <NotFoundBanner onCreated={handleCreated} />
+          <NotFoundBanner onCreated={handleCreated} lang={lang} />
         )}
 
         {/* Flag-on but oversized */}
@@ -474,6 +486,7 @@ export function IntentPage() {
                   initialContent={editorContent}
                   onSaved={handleSaved}
                   onCancel={handleCancelEdit}
+                  lang={lang}
                 />
               </section>
             )}

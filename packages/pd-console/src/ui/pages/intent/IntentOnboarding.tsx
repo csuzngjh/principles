@@ -170,9 +170,11 @@ interface IntentEditorProps {
   onSaved: () => void;
   /** Called when user cancels editing — parent should hide the editor */
   onCancel: () => void;
+  /** Language for bilingual INTENT.md */
+  lang: 'zh-CN' | 'en';
 }
 
-export function IntentEditor({ initialContent, onSaved, onCancel }: IntentEditorProps) {
+export function IntentEditor({ initialContent, onSaved, onCancel, lang }: IntentEditorProps) {
   const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const [saving, setSaving] = useState(false);
@@ -196,7 +198,7 @@ export function IntentEditor({ initialContent, onSaved, onCancel }: IntentEditor
     }
 
     setSaving(true);
-    const result = await saveIntentContent(content);
+    const result = await saveIntentContent(content, lang);
     setSaving(false);
 
     if (!result.success) {
@@ -330,9 +332,11 @@ interface CreateIntentButtonProps {
   onCreated: (openEditor: boolean) => void;
   /** If true, show onboarding modal before creating. If false, create directly. */
   showOnboarding?: boolean;
+  /** Language for bilingual INTENT.md */
+  lang: 'zh-CN' | 'en';
 }
 
-export function CreateIntentButton({ onCreated, showOnboarding = false }: CreateIntentButtonProps) {
+export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: CreateIntentButtonProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [showOnboardingModal, setShowOnboardingModal] = useState(
@@ -341,7 +345,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false }: Create
 
   async function createTemplate(openEditor: boolean) {
     setBusy(true);
-    const result = await createIntentTemplate(false);
+    const result = await createIntentTemplate(false, lang);
     setBusy(false);
 
     if (!result.success) {
