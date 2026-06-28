@@ -319,7 +319,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'migration.ts',
   'file-store.ts',
   'pd-task-store.ts',
-  'evolution-migration.ts',
   'empathy-keyword-matcher.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
@@ -412,7 +411,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // reading .principles/INTENT.md with TTL+mtime cache for prompt injection.
     // PRI-468: Added intent-doc-reader-adapter.ts (93 → 94) — plugin adapter
     // implementing core IntentDocReader port (pure type mapping, no new I/O).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // Stage-1 cleanup: Removed evolution-migration.ts (94 → 93) — dead code,
+    // zero production references after refactor to @principles/core.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
