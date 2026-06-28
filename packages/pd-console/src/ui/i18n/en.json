@@ -650,7 +650,7 @@
       "readinessLabel": "Readiness",
       "empathyCostHint": {
         "body": "Empathy Observer is on — every unmatched message triggers an LLM call (current model: {{provider}}/{{model}}).",
-        "muted": "To reduce cost, switch pd-empathy-observer.policy.model in workflows.yaml to a cheaper model.",
+        "muted": "To reduce cost, consider using a local LLM model (e.g. Ollama), or switch pd-empathy-observer.policy.model in workflows.yaml to a cheaper model.",
         "ack": "Got it"
       },
       "workflow": {

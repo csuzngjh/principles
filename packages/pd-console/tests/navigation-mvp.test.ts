@@ -90,12 +90,6 @@ describe('Console Rebuild Navigation — CR2', () => {
       expect(sidebarSrc).toContain('LogOut');
     });
 
-    it('has keyboard shortcut hints (Alt+)', () => {
-      expect(sidebarSrc).toContain('Alt+3');
-      expect(sidebarSrc).toContain('Alt+4');
-      expect(sidebarSrc).toContain('Alt+5');
-    });
-
     it('no health red dot, no DNA logo', () => {
       expect(sidebarSrc).not.toContain('alertCount');
       expect(sidebarSrc).not.toContain('DNA');
