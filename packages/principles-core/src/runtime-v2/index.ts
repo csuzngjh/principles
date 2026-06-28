@@ -459,6 +459,12 @@ export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
 export type { CorrectionProposal, CorrectionProposalValidationResult, PathValidationResult } from './internalization/correction-proposal.js';
 export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspace, validateProposedPathBounds } from './internalization/correction-proposal.js';
 
+// RuleHost input builder pure helpers (PRI-482 Phase 3: re-exported so the
+// openclaw-plugin assembler can normalise historical tool-call paths using the
+// same pure logic as buildRuleHostAction, avoiding production/replay drift.)
+export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './internalization/rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+
 // RuleContext v2 — Phase 1 Core ABI (PRI-480): pure-logic types + canonicalize +
 // validators + behavior-facts computation + the frozen unavailable sentinel.
 // Zero I/O; gates nothing in production yet (the flag from PRI-479 is still off).
