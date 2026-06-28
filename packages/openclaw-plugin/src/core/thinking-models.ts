@@ -14,7 +14,7 @@
 import { loadThinkingOsFromWorkspace, generateDetectionPatterns } from './thinking-os-parser.js';
 import { CORE_PRINCIPLES } from '@principles/core/runtime-v2';
 
-export interface ThinkingModelDefinition {
+interface ThinkingModelDefinition {
   id: string;
   name: string;
   description: string;
@@ -23,12 +23,12 @@ export interface ThinkingModelDefinition {
   baselineScenarios: string[];
 }
 
-export interface ThinkingModelMatch {
+interface ThinkingModelMatch {
   modelId: string;
   matchedPattern: string;
 }
 
-export interface ThinkingScenarioContext {
+interface ThinkingScenarioContext {
   recentToolCalls?: {
     toolName: string;
     outcome: 'success' | 'failure' | 'blocked';
@@ -274,16 +274,7 @@ export function listThinkingModels(workspaceDir?: string): ThinkingModelDefiniti
   return models.slice();
 }
 
-/**
- * Clear the cached model definitions.
- * Call this when THINKING_OS.md changes.
- */
-export function clearThinkingModelCache(): void {
-  _cachedDefinitions = null;
-  _cachedWorkspace = null;
-}
-
-export function getThinkingModel(modelId: string, workspaceDir?: string): ThinkingModelDefinition | undefined {
+function getThinkingModel(modelId: string, workspaceDir?: string): ThinkingModelDefinition | undefined {
   const models = listThinkingModels(workspaceDir);
   return models.find(m => m.id === modelId);
 }
@@ -306,23 +297,6 @@ export function detectThinkingModelMatches(text: string, workspaceDir?: string):
     }
   }
   return matches;
-}
-
-/**
- * Get all model definitions for display purposes (no patterns).
- */
-export function getThinkingModelDefinitions(workspaceDir?: string): {
-  modelId: string;
-  name: string;
-  description: string;
-  antiPattern?: string;
-}[] {
-  return listThinkingModels(workspaceDir).map(m => ({
-    modelId: m.id,
-    name: m.id + ': ' + m.name,
-    description: m.description,
-    antiPattern: m.antiPattern,
-  }));
 }
 
 export function deriveThinkingScenarios(
