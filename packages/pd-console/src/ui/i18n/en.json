@@ -652,7 +652,53 @@
         "body": "Empathy Observer is on — every unmatched message triggers an LLM call (current model: {{provider}}/{{model}}).",
         "muted": "To reduce cost, switch pd-empathy-observer.policy.model in workflows.yaml to a cheaper model.",
         "ack": "Got it"
-      }
+      },
+      "workflow": {
+        "title": "PD Behavior Loop",
+        "subtitle": "From error to principle, from principle to change",
+        "phase01": "Detect Error",
+        "phase01Desc": "Observe Agent behavior\nIdentify patterns to improve",
+        "phase02": "Form Principle",
+        "phase02Desc": "Distill experience into\na followable principle",
+        "phase03": "Owner Approval",
+        "phase03Desc": "You decide which principles\ncan take effect",
+        "phase04": "Change Behavior",
+        "phase04Desc": "Principle acts on\nAgent's next behavior",
+        "loopHint": "After behavior changes, PD keeps observing — forming a closed loop. 9 agents are distributed across this loop, each with its own role."
+      },
+      "status": {
+        "enabled": "Enabled",
+        "notReady": "Not Ready",
+        "corePipeline": "Core Pipeline",
+        "corePipelineOk": "OK",
+        "corePipelineDegraded": "Degraded",
+        "corePipelineParalyzed": "Paralyzed",
+        "needsConfig": "Needs Config"
+      },
+      "groups": {
+        "coreTrio": "Core Trio",
+        "coreTrioTag": "Must together",
+        "coreTrioHint": "Disabling any one breaks the error-to-principle pipeline",
+        "codeChain": "Code Chain",
+        "codeChainTag": "Recommend together",
+        "codeChainHint": "Only artificer degrades to prompt-only; only evaluator is meaningless",
+        "qualityPolish": "Quality Polish",
+        "qualityPolishTag": "Optional · toggle individually",
+        "qualityPolishHint": "Refines principles; disabling is fine, just slightly rougher quality",
+        "sidechain": "Sidechain",
+        "sidechainTag": "Independent · toggle individually",
+        "sidechainHint": "Does not affect the main pipeline; only pain signal detection precision"
+      },
+      "impact": {
+        "label": "If disabled",
+        "confirmTitle": "Confirm disabling core agent",
+        "confirmAck": "Confirm disable",
+        "confirmCancel": "Cancel"
+      },
+      "techDetail": "Technical Details",
+      "profileLabelShort": "Runtime",
+      "unknownAgentsWarning": "Detected {{count}} unrecognized agent(s): {{names}}. They are not shown in groups.",
+      "footerNote": "9 agents are distributed across the internalization pipeline and sidechain services. The Core Trio must be enabled together — otherwise PD cannot turn errors into principles."
     },
     "login": {
       "title": "Login",
