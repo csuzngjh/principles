@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent } from "../../api.js";
-import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent, fetchIntentVersions } from "../../api.js";
+import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
 import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
@@ -321,6 +321,8 @@ export function IntentPage() {
   const [editorLoading, setEditorLoading] = useState(false);
   // Bilingual: language selector state
   const [lang, setLang] = useState<'zh-CN' | 'en'>('zh-CN');
+  // Version history
+  const [versions, setVersions] = useState<IntentVersionEntry[]>([]);
 
   const loadData = useCallback(async () => {
     setPageState("loading");
@@ -335,6 +337,12 @@ export function IntentPage() {
     // result.data is already validated by validateIntentSummary in the API layer
     setData(result.data);
     setPageState("loaded");
+    // Load version history in parallel (best-effort, never blocks page)
+    fetchIntentVersions(lang).then(v => {
+      if (v.success && v.data?.versions) {
+        setVersions(v.data.versions);
+      }
+    }).catch(() => { /* best-effort */ });
   }, [t, lang]);
 
   useEffect(() => {
@@ -586,6 +594,24 @@ export function IntentPage() {
             section appears regardless of whether INTENT.md was found/OK. */}
         {summary && summary.flagEnabled && (
           <DecisionSummarySection />
+        )}
+
+        {/* Version History — shows saved INTENT.md versions from SQLite */}
+        {versions.length > 0 && (
+          <details className="border border-line rounded-[3px] mt-6">
+            <summary className="cursor-pointer px-4 py-2 text-[13px] font-medium text-ink-2 select-none">
+              {t("pages.intent.versionHistory.title")} ({versions.length})
+            </summary>
+            <div className="px-4 py-2 border-t border-line">
+              {versions.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 py-1 text-[12px] font-mono text-ink-2">
+                  <span className="text-ink-3">{v.createdAt.slice(0, 19).replace('T', ' ')}</span>
+                  <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3">{v.reason}</span>
+                  <span className="text-ink-3">{v.contentHash.slice(0, 12)}</span>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </PageShell>

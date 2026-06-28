@@ -113,6 +113,18 @@ export async function handleIntentRoute(
       return;
     }
 
+    // ── GET /api/v1/intent/versions — list version history ────────────────
+    if (req.method === 'GET' && subPath === '/versions') {
+      const model = getModel(workspaceDir);
+      const result = await model.getVersions(lang);
+      if (!result.ok) {
+        sendSuccess(res, { versions: [], reason: result.reason, nextAction: result.nextAction });
+        return;
+      }
+      sendSuccess(res, { versions: result.versions });
+      return;
+    }
+
     // ── POST /api/v1/intent/init — create INTENT.md template ──────────────
     if (req.method === 'POST' && subPath === '/init') {
       const flagEnabled = loadFlagEnabled(workspaceDir);

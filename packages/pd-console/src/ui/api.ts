@@ -489,6 +489,34 @@ async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'
   );
 }
 
+export interface IntentVersionEntry {
+  id: string;
+  lang: string;
+  contentHash: string;
+  contentSnapshot: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface IntentVersionData {
+  versions: IntentVersionEntry[];
+}
+
+function validateIntentVersions(data: unknown): IntentVersionData | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.versions)) return null;
+  return { versions: obj.versions as IntentVersionEntry[] };
+}
+
+async function fetchIntentVersions(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentVersionData>> {
+  return request<IntentVersionData>(
+    `/api/v1/intent/versions?lang=${lang}`,
+    undefined,
+    validateIntentVersions,
+  );
+}
+
 // ── Intent Decisions (PRI-470) ───────────────────────────────────────────────
 
 /**
@@ -625,6 +653,7 @@ export {
   fetchIntentContent,
   createIntentTemplate,
   saveIntentContent,
+  fetchIntentVersions,
   recordIntentDecision,
   listIntentDecisionsByPainId,
   listIntentDecisionsByTaskId,

@@ -7,8 +7,11 @@ import {
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
+  SqliteConnection,
+  SqliteIntentDocVersionStore,
   type IntentDocSections,
   type IntentDocWarning,
+  type IntentDocVersion,
   type IntentLang,
 } from '@principles/core/runtime-v2';
 
@@ -52,7 +55,39 @@ export interface IntentRawContentResult {
   nextAction?: string;
 }
 
+export interface IntentVersionResult {
+  ok: boolean;
+  versions?: IntentDocVersion[];
+  reason?: string;
+  nextAction?: string;
+}
+
 const INTENT_DIR = '.principles';
+
+function stateDbExists(workspaceDir: string): boolean {
+  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+}
+
+/** Best-effort version record — never blocks save on failure. */
+function recordVersion(args: {
+  workspaceDir: string;
+  lang: IntentLang;
+  content: string;
+  reason: string;
+}): void {
+  if (!stateDbExists(args.workspaceDir)) return;
+  try {
+    const connection = new SqliteConnection({ workspaceDir: args.workspaceDir });
+    try {
+      const store = new SqliteIntentDocVersionStore(connection);
+      store.saveVersion({ lang: args.lang, content: args.content, reason: args.reason });
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
+  } catch {
+    // Version recording is best-effort — never block save on failure.
+  }
+}
 
 export class IntentPageModel {
   private readonly workspaceDir: string;
@@ -203,7 +238,9 @@ export class IntentPageModel {
         };
       }
 
-      fs.writeFileSync(filePath, createIntentTemplate(lang), 'utf8');
+      const templateContent = createIntentTemplate(lang);
+      fs.writeFileSync(filePath, templateContent, 'utf8');
+      recordVersion({ workspaceDir: this.workspaceDir, lang, content: templateContent, reason: 'init' });
       return {
         ok: true,
         created: true,
@@ -273,6 +310,8 @@ export class IntentPageModel {
       const contentHash = computeIntentContentHash(content);
       const stat = fs.statSync(filePath);
 
+      recordVersion({ workspaceDir: this.workspaceDir, lang, content, reason: 'save' });
+
       return {
         ok: true,
         saved: true,
@@ -288,6 +327,35 @@ export class IntentPageModel {
         saved: false,
         reason: 'write_error',
         nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
+      };
+    }
+  }
+
+  async getVersions(lang: IntentLang): Promise<IntentVersionResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return {
+        ok: false,
+        reason: 'state_db_not_found',
+        nextAction: 'Run a PD command that creates state.db first (e.g. pd pain list).',
+      };
+    }
+
+    try {
+      const connection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
+      try {
+        const store = new SqliteIntentDocVersionStore(connection);
+        const versions = await store.listVersions(lang);
+        return { ok: true, versions };
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[IntentPageModel] failed to list versions:`, err);
+      return {
+        ok: false,
+        reason: 'read_error',
+        nextAction: `Could not read version history: ${message}`,
       };
     }
   }
