@@ -17,11 +17,40 @@ import {
   validateGoldenTrace,
   createSyntheticRuleHostInput,
   createGoldenTraceFixture,
+  buildGoldenTraceFromArtificer,
 } from '../golden-trace.js';
 import type {
   GoldenTraceCase,
   GoldenTrace,
 } from '../golden-trace.js';
+import type { RuleContextV2 } from '../internalization/rule-context-v2.js';
+
+// ── PRI-481 Phase 2: ruleContext fixtures ────────────────────────────────────
+
+const sampleRuleContextV2: RuleContextV2 = {
+  version: 2,
+  history: {
+    status: 'available',
+    truncated: false,
+    calls: [
+      {
+        sequenceId: 1,
+        toolName: 'read',
+        canonicalKind: 'read',
+        normalizedPath: 'src/a.ts',
+        paramsSummary: {},
+        outcome: 'success',
+      },
+    ],
+  },
+  facts: {
+    priorReadOfTarget: 'yes',
+    readCount: 1,
+    writeCount: 0,
+    uniqueWritePathCount: 0,
+    sameActionBlockCount: 0,
+  },
+};
 
 // ── GoldenTraceCase type tests ───────────────────────────────────────────────
 
@@ -386,5 +415,132 @@ describe('createGoldenTraceFixture', () => {
 
     expect(trace.sourcePainId).toBe('pain-001');
     expect(trace.sourceCandidateId).toBe('cand-001');
+  });
+});
+
+// ── PRI-481 Phase 2: ruleContext through Golden Trace ABI ─────────────────────
+
+describe('PRI-481 Phase 2 — GoldenTraceCaseSchema accepts ruleContext', () => {
+  it('accepts a case carrying ruleContext', () => {
+    const caseWithCtx = {
+      caseId: 'case-ctx-001',
+      kind: 'negative',
+      toolName: 'Write',
+      params: { file_path: 'src/a.ts', content: 'x' },
+      expectedDecision: 'block',
+      ruleContext: sampleRuleContextV2,
+    };
+    expect(Value.Check(GoldenTraceCaseSchema, caseWithCtx)).toBe(true);
+  });
+
+  it('still accepts a v1 case without ruleContext', () => {
+    const v1Case = {
+      caseId: 'case-v1-001',
+      kind: 'negative',
+      toolName: 'Write',
+      params: { file_path: 'src/a.ts', content: 'x' },
+      expectedDecision: 'block',
+    };
+    expect(Value.Check(GoldenTraceCaseSchema, v1Case)).toBe(true);
+  });
+
+  it('validateGoldenTraceCase accepts ruleContext-bearing input', () => {
+    const result = validateGoldenTraceCase({
+      caseId: 'case-ctx-002',
+      kind: 'positive',
+      toolName: 'Write',
+      params: { file_path: 'src/b.ts', content: 'y' },
+      expectedDecision: 'allow',
+      ruleContext: sampleRuleContextV2,
+    });
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('PRI-481 Phase 2 — createSyntheticRuleHostInput context propagation', () => {
+  it('sets input.context when overrides.context provided (case has ruleContext)', () => {
+    const input = createSyntheticRuleHostInput(
+      { toolName: 'Write', params: { file_path: 'src/a.ts', content: 'x' } },
+      { context: sampleRuleContextV2 },
+    );
+    expect(input.context).toBeDefined();
+    expect(input.context).toBe(sampleRuleContextV2);
+    expect(input.context?.history.calls).toHaveLength(1);
+  });
+
+  it('omits input.context when no overrides.context (v1 case compatibility)', () => {
+    const input = createSyntheticRuleHostInput(
+      { toolName: 'Write', params: { file_path: 'src/a.ts', content: 'x' } },
+    );
+    expect(input.context).toBeUndefined();
+  });
+
+  it('keeps other overrides working alongside context', () => {
+    const input = createSyntheticRuleHostInput(
+      { toolName: 'Write', params: { file_path: 'src/a.ts', content: 'x' } },
+      {
+        context: sampleRuleContextV2,
+        workspace: { isRiskPath: true, planStatus: 'NONE', hasPlanFile: false },
+      },
+    );
+    expect(input.context).toBe(sampleRuleContextV2);
+    expect(input.workspace.isRiskPath).toBe(true);
+  });
+});
+
+describe('PRI-481 Phase 2 — buildGoldenTraceFromArtificer preserves ruleContext', () => {
+  it('preserves ruleContext on mapped cases (does not drop it)', () => {
+    const result = buildGoldenTraceFromArtificer({
+      cases: [
+        {
+          caseId: 'neg-ctx',
+          kind: 'negative',
+          toolName: 'Write',
+          params: { file_path: 'src/a.ts', content: 'bad' },
+          expectedDecision: 'block',
+          ruleContext: sampleRuleContextV2,
+        },
+        {
+          caseId: 'pos-ctx',
+          kind: 'positive',
+          toolName: 'Write',
+          params: { file_path: 'src/a.ts', content: 'good' },
+          expectedDecision: 'allow',
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.trace.cases[0]?.ruleContext).toEqual(sampleRuleContextV2);
+    expect(result.trace.cases[1]?.ruleContext).toBeUndefined();
+  });
+
+  it('validates a ruleContext-bearing trace end-to-end', () => {
+    const result = buildGoldenTraceFromArtificer({
+      cases: [
+        {
+          caseId: 'neg-ctx-2',
+          kind: 'negative',
+          toolName: 'Write',
+          params: { file_path: 'src/a.ts', content: 'bad' },
+          expectedDecision: 'block',
+          ruleContext: sampleRuleContextV2,
+        },
+        {
+          caseId: 'pos-ctx-2',
+          kind: 'positive',
+          toolName: 'Write',
+          params: { file_path: 'src/a.ts', content: 'good' },
+          expectedDecision: 'allow',
+          ruleContext: sampleRuleContextV2,
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const validateResult = validateGoldenTrace(result.trace);
+    expect(validateResult.valid).toBe(true);
   });
 });

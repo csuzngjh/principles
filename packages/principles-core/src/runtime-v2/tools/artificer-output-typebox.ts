@@ -40,6 +40,7 @@ export const GoldenTraceCaseInputTypebox = Type.Object({
   ]),
   expectedProposedParams: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   expectedApplicationMode: Type.Optional(Type.Union([Type.Literal('shadow'), Type.Literal('live')])),
+  ruleContext: Type.Optional(Type.Unknown()),
 });
 
 /**

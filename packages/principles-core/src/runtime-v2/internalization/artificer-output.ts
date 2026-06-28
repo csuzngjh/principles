@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
+import type { RuleContextV2 } from './rule-context-v2.js';
 
 /**
  * Artificer source trace — lineage back to upstream peer artifacts.
@@ -27,6 +28,7 @@ export interface GoldenTraceCaseInput {
   readonly expectedDecision: GoldenTraceDecision;
   readonly expectedProposedParams?: Record<string, unknown>;
   readonly expectedApplicationMode?: 'shadow' | 'live';
+  readonly ruleContext?: RuleContextV2;
 }
 
 /**
