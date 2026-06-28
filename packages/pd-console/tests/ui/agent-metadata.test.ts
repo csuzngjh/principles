@@ -68,9 +68,15 @@ describe("AGENT_METADATA: coverage", () => {
     for (const name of EXPECTED_AGENT_NAMES) {
       const meta = AGENT_METADATA[name];
       if (sidechainAgentsWithEmptyTechDetail.has(name)) {
-        // sidechain agents: techDetail may be empty (design choice)
-        expect(meta.techDetailZh).toBeDefined();
-        expect(meta.techDetailEn).toBeDefined();
+        // sidechain agents: techDetail may be empty (design choice),
+        // but must still be a non-null object (downstream does
+        // Object.keys(techDetail) — null would crash the component)
+        expect(meta.techDetailZh).not.toBeNull();
+        expect(typeof meta.techDetailZh).toBe("object");
+        expect(Array.isArray(meta.techDetailZh)).toBe(false);
+        expect(meta.techDetailEn).not.toBeNull();
+        expect(typeof meta.techDetailEn).toBe("object");
+        expect(Array.isArray(meta.techDetailEn)).toBe(false);
       } else {
         // all other agents: techDetail must be non-empty bilingual
         expect(Object.keys(meta.techDetailZh).length).toBeGreaterThan(0);

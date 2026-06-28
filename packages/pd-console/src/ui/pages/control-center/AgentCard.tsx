@@ -200,6 +200,7 @@ export function AgentCard({
 
   return (
     <div
+      data-agent-card={agent.name}
       className={cn(
         "bg-surface border border-line-2 rounded-[4px] mb-[6px] overflow-hidden transition-colors hover:border-line",
         !meta.isCore && "border-dashed",

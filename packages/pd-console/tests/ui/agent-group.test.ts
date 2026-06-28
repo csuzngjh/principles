@@ -56,13 +56,14 @@ describe("AgentGroup: source-code contract", () => {
     expect(source).toContain("text-green");
   });
 
-  it("imports and renders AgentCard for each agent", () => {
+  it("imports and renders AgentCard for each known agent", () => {
     expect(source).toMatch(/import\s+.*AgentCard.*from/);
-    expect(source).toContain("agents.map");
+    expect(source).toContain("knownAgents.map");
   });
 
-  it("has empty state fallback (rc-9: no silent fallback)", () => {
-    expect(source).toMatch(/agents\.length\s*===\s*0/);
+  it("has empty state fallback based on filtered knownAgents (rc-9: no silent fallback)", () => {
+    // 空状态判断基于过滤后的 knownAgents，避免"全部未知时仍渲染 group header 但无卡片"
+    expect(source).toMatch(/knownAgents\.length\s*===\s*0/);
   });
 
   it("uses isKnownAgentName type guard for agent metadata lookup (rc-2/rc-5)", () => {

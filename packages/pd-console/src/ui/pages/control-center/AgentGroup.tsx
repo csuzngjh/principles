@@ -71,6 +71,15 @@ export function AgentGroup({
   const groupTagLabel = isZh ? groupMeta.tagLabelZh : groupMeta.tagLabelEn;
   const groupHint = isZh ? groupMeta.hintZh : groupMeta.hintEn;
 
+  // rc-2/rc-5: 先用类型守卫缩窄 agent.name，避免 as 绕过；
+  // 空状态判断基于过滤后的 knownAgents，避免"全部未知时仍渲染 group header 但无卡片"
+  // 用对象级类型谓词让 TS 在后续 map 中正确缩窄 agent.name（Array.filter 对
+  // 子属性的 string 谓词不会传播到元素类型）
+  const knownAgents = agents.filter(
+    (agent): agent is RedactedAgentSummary & { name: keyof typeof AGENT_METADATA } =>
+      isKnownAgentName(agent.name),
+  );
+
   return (
     <div className="mb-[20px]">
       {/* group header */}
@@ -85,17 +94,13 @@ export function AgentGroup({
       </div>
 
       {/* agent cards */}
-      {agents.length === 0 ? (
+      {knownAgents.length === 0 ? (
         // rc-9: 空状态显式提示（不静默）
         <div className="py-2 px-4 text-[12.5px] text-ink-4 italic">
           —
         </div>
       ) : (
-        agents.map((agent) => {
-          // rc-2/rc-5: 用类型守卫缩窄 agent.name，避免 as 绕过
-          if (!isKnownAgentName(agent.name)) {
-            return null;
-          }
+        knownAgents.map((agent) => {
           const meta = AGENT_METADATA[agent.name];
           return (
             <AgentCard

@@ -402,7 +402,13 @@ function CompactStatusBar({
     const meta = AGENT_METADATA[a.name];
     return meta.group === "core_trio";
   });
+  const codeChainAgents = coreAgents.filter((a) => {
+    if (!isKnownAgentName(a.name)) return false;
+    const meta = AGENT_METADATA[a.name];
+    return meta.group === "code_chain";
+  });
   const coreTrioAnyDisabled = coreTrioAgents.some((a) => !a.enabled);
+  const codeChainAnyDisabled = codeChainAgents.some((a) => !a.enabled);
   const coreAnyNotReady = enabledCoreAgents.some(
     (a) => a.readiness === "not_ready",
   );
@@ -410,14 +416,21 @@ function CompactStatusBar({
     (a) => a.readiness === "needs_setup",
   );
 
+  // 状态优先级（per AGENT_METADATA.impactZh）:
+  // - paralyzed: core_trio 任一 disabled 或 enabled 但 not_ready
+  //   （core_trio 是入口，关掉任何一个整个管道瘫痪）
+  // - degraded: code_chain 任一 disabled（降级运行，非瘫痪）
+  //             或 enabled 但 needs_setup
+  // - ok: 全 ready
+  //
+  // needsConfig 标记仅用于 readiness 异常（not_ready / needs_setup），
+  // 不用于主动 disabled — 主动 disable 是 owner 的有意决策，不是配置缺失。
   let corePipelineKey: string;
-  let needsConfig = false;
+  const needsConfig = coreAnyNotReady || coreAnyNeedsSetup;
   if (coreTrioAnyDisabled || coreAnyNotReady) {
     corePipelineKey = "pages.controlCenter.status.corePipelineParalyzed";
-    needsConfig = true;
-  } else if (coreAnyNeedsSetup) {
+  } else if (codeChainAnyDisabled || coreAnyNeedsSetup) {
     corePipelineKey = "pages.controlCenter.status.corePipelineDegraded";
-    needsConfig = true;
   } else {
     corePipelineKey = "pages.controlCenter.status.corePipelineOk";
   }
