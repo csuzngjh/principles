@@ -652,7 +652,53 @@
         "body": "共情观察器已启用 — 每次关键词未命中时会调用 LLM 做深度分析（当前模型：{{provider}}/{{model}}）。",
         "muted": "如需节省成本，在 workflows.yaml 的 pd-empathy-observer.policy.model 换更便宜模型。",
         "ack": "知道了"
-      }
+      },
+      "workflow": {
+        "title": "PD 行为回路",
+        "subtitle": "从错误到原则，从原则到改变",
+        "phase01": "发现错误",
+        "phase01Desc": "观察智能体行为\n识别需要改进的模式",
+        "phase02": "形成原则",
+        "phase02Desc": "把经验提炼成\n可遵循的原则",
+        "phase03": "拥有者审批",
+        "phase03Desc": "你决定哪些原则\n可以生效",
+        "phase04": "改变行为",
+        "phase04Desc": "原则作用于\n智能体下次行为",
+        "loopHint": "行为改变后，PD 继续观察 —— 形成闭环。9 个代理分布在这条回路上，各司其职。"
+      },
+      "status": {
+        "enabled": "已启用",
+        "notReady": "未就绪",
+        "corePipeline": "核心管道",
+        "corePipelineOk": "正常",
+        "corePipelineDegraded": "降级可用",
+        "corePipelineParalyzed": "瘫痪",
+        "needsConfig": "需配置"
+      },
+      "groups": {
+        "coreTrio": "核心三件套",
+        "coreTrioTag": "必须一起开",
+        "coreTrioHint": "关掉任何一个，PD 都无法把错误转化为原则",
+        "codeChain": "代码实现链",
+        "codeChainTag": "推荐一起开",
+        "codeChainHint": "只开 artificer 会降级为纯提示通道；只开 evaluator 无意义",
+        "qualityPolish": "质量打磨",
+        "qualityPolishTag": "可选 · 单独开关",
+        "qualityPolishHint": "让原则更精炼，关掉也能用，只是质量略粗",
+        "sidechain": "侧链服务",
+        "sidechainTag": "独立 · 单独开关",
+        "sidechainHint": "不影响主管道，只影响 pain 信号检测精度"
+      },
+      "impact": {
+        "label": "关掉会怎样",
+        "confirmTitle": "确认关闭核心代理",
+        "confirmAck": "确认关闭",
+        "confirmCancel": "取消"
+      },
+      "techDetail": "技术细节",
+      "profileLabelShort": "运行时",
+      "unknownAgentsWarning": "检测到 {{count}} 个未识别的代理：{{names}}。它们未被分组显示。",
+      "footerNote": "9 个代理分布在内化管道与侧链服务两条路径上。核心三件套必须一起开，否则 PD 无法把错误转化为原则。"
     },
     "login": {
       "title": "登录",
