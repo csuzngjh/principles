@@ -14,6 +14,7 @@
  */
 
 import type { ReadinessStatus } from '../api.js';
+import { AGENT_METADATA, type AgentGroup } from './agent-metadata.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,51 @@ export function groupAgentsByReadiness(
   }
 
   return groups;
+}
+
+// ── Group Agents by Dependency Cluster ───────────────────────────────────────
+
+export type AgentDependencyGroups = Record<AgentGroup, RedactedAgentSummary[]>;
+
+/**
+ * Type guard: is `name` a known internal agent with metadata?
+ * Replaces `as keyof typeof AGENT_METADATA` (rc-2: no `as` bypass).
+ */
+export function isKnownAgentName(name: string): name is keyof typeof AGENT_METADATA {
+  return Object.hasOwn(AGENT_METADATA, name);
+}
+
+/**
+ * Group agents by dependency cluster (core_trio / code_chain / quality_polish / sidechain).
+ * Agents not found in AGENT_METADATA go to the `unknown` bucket for fail-loud
+ * handling by the caller (rc-5: Object.hasOwn lookup; rc-9: no silent fallback).
+ *
+ * Group insertion order matches GROUP_ORDER (core_trio → code_chain → quality_polish → sidechain),
+ * so Object.keys(groups) returns the render order.
+ */
+export function groupAgentsByDependency(
+  agents: RedactedAgentSummary[],
+): { groups: AgentDependencyGroups; unknown: RedactedAgentSummary[] } {
+  const groups: AgentDependencyGroups = {
+    core_trio: [],
+    code_chain: [],
+    quality_polish: [],
+    sidechain: [],
+  };
+  const unknown: RedactedAgentSummary[] = [];
+
+  for (const agent of agents) {
+    // rc-5: Object.hasOwn for untrusted keys (agent.name comes from server response)
+    if (isKnownAgentName(agent.name)) {
+      const meta = AGENT_METADATA[agent.name];
+      groups[meta.group].push(agent);
+    } else {
+      // rc-9: unknown agents go to a separate bucket; caller decides how to surface
+      unknown.push(agent);
+    }
+  }
+
+  return { groups, unknown };
 }
 
 // ── Redacted Diagnostics for Copy ────────────────────────────────────────────
