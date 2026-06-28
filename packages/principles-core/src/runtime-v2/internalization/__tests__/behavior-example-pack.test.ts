@@ -182,7 +182,7 @@ describe('PRI-484 BehaviorExamplePack validator — ownerDesiredOutcome', () => 
 describe('PRI-484 BehaviorExamplePack validator — sourceNegativeCase', () => {
   it('rejects missing sourceNegativeCase', () => {
     const pack = makeValidPack();
-    delete (pack as Record<string, unknown>).sourceNegativeCase;
+    delete (pack as unknown as Record<string, unknown>).sourceNegativeCase;
     const result = validateBehaviorExamplePack(pack);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('sourceNegativeCase'))).toBe(true);
