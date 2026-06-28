@@ -65,6 +65,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'dictionary-service.ts',
     // I/O boundary
     'trajectory.ts',
+    // PRI-482: Plugin I/O boundary — converts TrajectoryDatabase rows to
+    // validated RuleHistoryWindow. Pure logic delegated to @principles/core.
+    'rule-context-assembler.ts',
     'evolution-reducer.ts',
     'focus-history.ts',
     'replay-engine.ts',
