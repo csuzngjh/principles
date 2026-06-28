@@ -33,6 +33,7 @@ import type {
   CorrectionSampleRecord,
   TrajectoryExportResult,
   TrajectoryDatabaseOptions,
+  RuleHostContextResult,
 } from './trajectory-types.js';
 
 export type {
@@ -60,6 +61,8 @@ export type {
   CorrectionSampleRecord,
   TrajectoryExportResult,
   TrajectoryDatabaseOptions,
+  RuleHostContextRow,
+  RuleHostContextResult,
 } from './trajectory-types.js';
 
 /**
@@ -1130,6 +1133,39 @@ export class TrajectoryDatabase {
         createdAt: String(row.created_at),
       };
     });
+  }
+
+  /**
+   * PRI-482 Phase 3: Query tool_calls for RuleContext v2 history assembly.
+   *
+   * Reads limit+1 rows (DESC by id) to compute truncated, then reverses to FIFO.
+   * Returns raw rows — the assembler (rule-context-assembler.ts) validates them.
+   *
+   * Spec: §5.1, §5.2. ERR-026: reuses production schema (no hand-written DDL).
+   */
+  getRuleHostContextRows(sessionId: string, limit: number = 20): RuleHostContextResult {
+    const cappedLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db.prepare(`
+      SELECT id, tool_name, outcome, params_json
+      FROM tool_calls
+      WHERE session_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(sessionId, cappedLimit + 1) as Record<string, unknown>[];
+
+    const truncated = rows.length > cappedLimit;
+    const output = truncated ? rows.slice(0, cappedLimit) : rows;
+    output.reverse(); // DESC → FIFO (oldest first)
+
+    return {
+      rows: output.map((row) => ({
+        id: Number(row.id),
+        toolName: String(row.tool_name),
+        outcome: String(row.outcome),
+        paramsJson: String(row.params_json),
+      })),
+      truncated,
+    };
   }
 
   /**

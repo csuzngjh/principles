@@ -681,4 +681,103 @@ describe('TrajectoryDatabase', () => {
       db.dispose();
     });
   });
+
+  // ── PRI-482 Phase 3: getRuleHostContextRows ──────────────────────────────
+
+  describe('getRuleHostContextRows (PRI-482 Phase 3)', () => {
+    it('returns rows in FIFO order (oldest first after reverse)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'edit', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'bash', outcome: 'failure' });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows[0].toolName).toBe('read');
+      expect(result.rows[1].toolName).toBe('edit');
+      expect(result.rows[2].toolName).toBe('bash');
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('detects truncated when more than limit rows exist (limit+1 trick)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Insert limit+2 rows (limit=3 → insert 5)
+      for (let i = 0; i < 5; i++) {
+        db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      }
+
+      const result = db.getRuleHostContextRows('s1', 3);
+      expect(result.rows).toHaveLength(3);
+      expect(result.truncated).toBe(true);
+      db.dispose();
+    });
+
+    it('returns truncated=false when exactly limit rows exist', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      for (let i = 0; i < 3; i++) {
+        db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      }
+
+      const result = db.getRuleHostContextRows('s1', 3);
+      expect(result.rows).toHaveLength(3);
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('isolates by sessionId (other session rows not included)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's2', toolName: 'edit', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'bash', outcome: 'failure' });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows.every((r) => r.toolName !== 'edit')).toBe(true);
+      db.dispose();
+    });
+
+    it('returns empty for unknown session', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+
+      const result = db.getRuleHostContextRows('unknown-session', 20);
+      expect(result.rows).toHaveLength(0);
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('ERR-025: end-to-end recordToolCall → getRuleHostContextRows preserves id, toolName, outcome, paramsJson', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({
+        sessionId: 's1',
+        toolName: 'edit',
+        outcome: 'success',
+        paramsJson: { file_path: 'src/auth.ts', new_string: 'x' },
+      });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(1);
+      const row = result.rows[0];
+      expect(row.id).toBeGreaterThan(0);
+      expect(row.toolName).toBe('edit');
+      expect(row.outcome).toBe('success');
+      // paramsJson is the raw JSON string from SQLite
+      const parsed = JSON.parse(row.paramsJson);
+      expect(parsed.file_path).toBe('src/auth.ts');
+      db.dispose();
+    });
+  });
 });
