@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildArtificerL2Tools,
   ARTIFICER_L2_TOOL_WHITELIST,
+  RULECODE_SPEC_TEXT,
   type ArtificerL2ToolContext,
   type ArtificerL2OutputCapture,
 } from '../artificer-l2-tool-contract.js';
@@ -324,7 +325,7 @@ describe('PRI-439 submit_rulecode tool', () => {
     const tool = findTool(tools, 'submit_rulecode');
     const bad = makeRuleOutput() as unknown as Record<string, unknown>;
     delete bad.affectedTools;
-    const result = await tool.execute('call-1', bad as never);
+    const result = await tool.execute('call-1', bad);
     const text = resultText(result);
     expect(text).toContain('REJECTED');
     expect(ctx.outputCapture.output).toBeNull();
@@ -350,7 +351,56 @@ describe('PRI-439 submit_rulecode tool', () => {
     const tool = findTool(tools, 'submit_rulecode');
     const bad = makeRuleOutput() as unknown as Record<string, unknown>;
     delete bad.affectedTools;
-    await tool.execute('call-1', bad as never);
+    await tool.execute('call-1', bad);
     expect(calls).toEqual([{ toolName: 'submit_rulecode', ok: false }]);
+  });
+});
+
+// ── PRI-484 Phase 5: RULECODE_SPEC_TEXT v2 context section ─────────────────
+
+describe('PRI-484 RULECODE_SPEC_TEXT — v2 context section', () => {
+  it('contains input.context field description', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('input.context');
+  });
+
+  it('contains context.version field', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('context.version');
+  });
+
+  it('contains context.history.status field', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('context.history.status');
+  });
+
+  it('contains context.facts field', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('context.facts');
+  });
+
+  it('documents the unavailable must-allow rule', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('unavailable');
+    expect(RULECODE_SPEC_TEXT).toMatch(/must.*allow/i);
+  });
+
+  it('documents requiresContextVersion', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('requiresContextVersion');
+  });
+
+  it('documents that empty calls array must not be inferred as "not done"', () => {
+    expect(RULECODE_SPEC_TEXT).toMatch(/empty.*array|not.*done|not.*infer/i);
+  });
+
+  it('documents preference for canonicalKind and facts over raw calls', () => {
+    expect(RULECODE_SPEC_TEXT).toContain('canonicalKind');
+    expect(RULECODE_SPEC_TEXT).toContain('facts');
+  });
+
+  it('read_rulecode_spec tool returns text containing v2 context section', async () => {
+    const ctx = makeContext();
+    const tools = buildArtificerL2Tools(ctx);
+    const tool = findTool(tools, 'read_rulecode_spec');
+    const result = await tool.execute('call-1', {});
+    const text = resultText(result);
+    expect(text).toContain('input.context');
+    expect(text).toContain('unavailable');
+    expect(text).toContain('requiresContextVersion');
   });
 });

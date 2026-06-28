@@ -296,6 +296,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // delegated to @principles/core. Assembler stays in plugin because it
   // consumes DB row shapes (I/O data).
   'rule-context-assembler.ts',
+  // PRI-484: Plugin I/O boundary — assembles a BehaviorExamplePack for the
+  // Artificer by reading pain lineage + trajectory from TrajectoryDatabase.
+  // Pure logic (type + validator) lives in @principles/core; this module
+  // owns the DB row → pack mapping and fail-loud validation.
+  'behavior-example-pack-assembler.ts',
   'evolution-reducer.ts',
   'focus-history.ts',
   'training-program.ts',
@@ -423,7 +428,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // calculatePercentageThreshold) removed.
     // Stage-3 sink: Removed surface-guard.ts (93 → 92) — pure guard logic
     // migrated to @principles/core/runtime-v2/feature-flags/surface-guard-policy.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
+    // PRI-484: Added behavior-example-pack-assembler.ts (92 → 93) — plugin I/O
+    // boundary assembling BehaviorExamplePack from pain lineage + trajectory.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 

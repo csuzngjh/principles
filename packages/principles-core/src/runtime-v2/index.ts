@@ -505,6 +505,10 @@ export {
   computeBehaviorFacts,
 } from './internalization/rule-context-v2.js';
 
+// BehaviorExamplePack (PRI-484 — Phase 5 Artificer)
+export type { BehaviorExamplePack, BehaviorExamplePackValidationResult } from './internalization/behavior-example-pack.js';
+export { validateBehaviorExamplePack } from './internalization/behavior-example-pack.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';

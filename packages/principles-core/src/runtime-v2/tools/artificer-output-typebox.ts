@@ -70,4 +70,6 @@ export const ArtificerRuleOutputTypebox = Type.Object({
   risks: Type.Array(Type.String()),
   sourceTrace: ArtificerSourceTraceTypebox,
   generatedAt: Type.String({ minLength: 1 }),
+  // PRI-484 — optional v2 context declaration. Only literal `2` is supported.
+  requiresContextVersion: Type.Optional(Type.Literal(2)),
 });

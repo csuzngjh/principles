@@ -55,6 +55,7 @@ OUTPUT FORMAT (pure JSON, no markdown):
     {"caseId":"positive-1","kind":"positive","toolName":"write_file","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
   ],
   "affectedTools": ["write_file"],
+  "requiresContextVersion": 2,
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -74,7 +75,11 @@ CONSTRAINTS:
 - GOOD: return { decision: 'block', matched: true, reason: 'write to system path outside workspace' }
 - BAD:  return { matched: false } — missing decision and reason, will be rejected
 - BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
-- input.action contains toolName, normalizedPath, and paramsSummary; inspect only these RuleHost inputs
+- input.action contains toolName, normalizedPath, and paramsSummary; you may inspect input.action for v1-style rules
+- For v2 rules: you may also inspect input.context (RuleContext v2 surface). input.context is OPTIONAL — when it is undefined or context.history.status === "unavailable", the rule MUST return { decision: "allow", matched: false, reason: "context unavailable" } and MUST NOT treat missing context as evidence of "not done" or "no history".
+- Prefer context.facts (deterministic, host-computed) over raw context.history.calls. Use canonicalKind from facts for kind-based logic; only fall back to raw calls when facts cannot express the needed pattern.
+- Do NOT infer "not done" from an empty calls array. An empty or truncated history window means the host did not provide enough data, not that the action did not happen.
+- A rule declares itself as a v2 rule by setting requiresContextVersion: 2 in its output. v2 rules must handle context unavailability gracefully (return allow). v1 rules (no requiresContextVersion) must NOT read input.context and must behave exactly as before.
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block/propose_correction case
 - propose_correction cases MUST include expectedProposedParams and expectedApplicationMode (shadow or live)
@@ -86,7 +91,7 @@ PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
 `;
 
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v1';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v2';
 
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
