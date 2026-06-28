@@ -708,7 +708,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       cases: [...positiveCases, ...conversion.trace.cases],
     };
 
-    // (5) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
+    // (6) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
     // catches its own sandbox throws internally (rejected_runtime_error), so
     // this await cannot throw on sandbox failure — but we guard anyway for
     // defense-in-depth (ERR-018: trust boundary at injected deps).
@@ -740,7 +740,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       failedCaseCount: gateResult.sandboxResult.failedCases.length,
     });
 
-    // (6) Populate adversarialResult from the gate result.
+    // (7) Populate adversarialResult from the gate result.
     const accepted = gateResult.decision === 'accepted_shadow';
     const failedCases: AdversarialFailedCase[] = accepted
       ? []
