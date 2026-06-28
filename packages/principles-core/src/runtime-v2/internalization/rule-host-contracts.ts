@@ -12,6 +12,7 @@
  */
 
 import type { CorrectionProposal } from './correction-proposal.js';
+import type { RuleContextV2 } from './rule-context-v2.js';
 
 // ---------------------------------------------------------------------------
 // Input: Frozen snapshot provided to implementations
@@ -40,6 +41,14 @@ export interface RuleHostInput {
     estimatedLineChanges: number;
     bashRisk: 'safe' | 'normal' | 'dangerous' | 'unknown';
   };
+  /**
+   * PRI-480 (RuleContext v2 — Phase 1): optional structured context describing
+   * the recent tool-call history and derived behavior facts. Optional on purpose
+   * — v1 rule implementations that never read this field see `undefined` and
+   * behave exactly as before. Hosts opt in by populating the field; downstream
+   * phases will gate new rule behavior on `context?.history.status === 'available'`.
+   */
+  context?: RuleContextV2;
 }
 
 // ---------------------------------------------------------------------------
