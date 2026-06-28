@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createRuleHostHelpers } from '../../src/core/rule-host-helpers.js';
-import type { RuleHostInput } from '../../src/core/rule-host-types.js';
+import { createRuleHostHelpers } from '@principles/core/runtime-v2';
+import type { RuleHostInput } from '@principles/core/runtime-v2';
 
 function makeInput(overrides?: Partial<RuleHostInput>): RuleHostInput {
   return {
