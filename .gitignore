@@ -106,9 +106,9 @@ docs/*
 # Exception: brand guidelines must be committed
 !docs/brand/
 !docs/brand/**
-# Exception: console rebuild plan must be committed
-!docs/plans/
-!docs/plans/**
+# Exception: post-commit bug analysis reports
+!docs/post-commit-bug-analysis/
+!docs/post-commit-bug-analysis/**
 # Exception: superpowers specs (brainstorming design docs)
 !docs/superpowers/
 !docs/superpowers/**
