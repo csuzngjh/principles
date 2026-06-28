@@ -21,11 +21,20 @@ import type {
 import {
   computeOverallReadiness,
   groupAgentsByReadiness,
+  groupAgentsByDependency,
+  isKnownAgentName,
   redactDiagnosticsForCopy,
 } from "../../utils/control-center-helpers.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import type { ControlCenterDiagnostics } from "../../utils/control-center-helpers.js";
 import { EmpathyObserverCostHint } from "./EmpathyObserverCostHint.js";
+import { WorkflowDiagram } from "./WorkflowDiagram.js";
+import { AgentGroup } from "./AgentGroup.js";
+import { AgentCard, type AgentLocale } from "./AgentCard.js";
+import {
+  AGENT_GROUPS,
+  AGENT_METADATA,
+} from "../../utils/agent-metadata.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
@@ -351,7 +360,20 @@ function readinessTagClasses(readiness: ReadinessStatus): string {
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-function OverallStatusCard({
+/**
+ * CompactStatusBar — 紧凑状态条（替代 OverallStatusCard）
+ *
+ * 取自原型 control-center.html 第 153-168 行。一行展示：
+ * 已启用 N/M · 未就绪 N 项 · 核心管道 状态 · [需配置] pill
+ *
+ * 核心管道状态 = core_trio + code_chain 中已启用代理的就绪情况：
+ * - paralyzed: core_trio 任一 disabled 或有 not_ready
+ * - degraded: 有 needs_setup
+ * - ok: 全 ready
+ *
+ * rc-2: 用 Object.hasOwn 守卫 agent.name 查 AGENT_METADATA（无 as 绕过）
+ */
+function CompactStatusBar({
   readiness,
   agents,
 }: {
@@ -362,118 +384,87 @@ function OverallStatusCard({
 
   const enabledCount = agents.filter((a) => a.enabled).length;
   const totalCount = agents.length;
+  const notReadyCount = agents.filter(
+    (a) => a.enabled && a.readiness !== "ready",
+  ).length;
 
-  let messageKey: string;
-  switch (readiness) {
-    case "ready":
-      messageKey = "pages.controlCenter.configReady";
-      break;
-    case "needs_setup":
-      messageKey = "pages.controlCenter.configNeedsSetup";
-      break;
-    case "not_ready":
-      messageKey = "pages.controlCenter.configNotReady";
-      break;
-    case "disabled":
-      messageKey = "pages.controlCenter.configDisabled";
-      break;
-    default:
-      messageKey = "pages.controlCenter.configUnknown";
-      break;
+  // 核心管道状态：core_trio + code_chain 中已启用代理
+  // rc-2: 用 isKnownAgentName 类型守卫缩窄，不用 as 绕过
+  const coreAgents = agents.filter((a) => {
+    if (!isKnownAgentName(a.name)) return false;
+    const meta = AGENT_METADATA[a.name];
+    return meta.group === "core_trio" || meta.group === "code_chain";
+  });
+
+  const enabledCoreAgents = coreAgents.filter((a) => a.enabled);
+  const coreTrioAgents = coreAgents.filter((a) => {
+    if (!isKnownAgentName(a.name)) return false;
+    const meta = AGENT_METADATA[a.name];
+    return meta.group === "core_trio";
+  });
+  const codeChainAgents = coreAgents.filter((a) => {
+    if (!isKnownAgentName(a.name)) return false;
+    const meta = AGENT_METADATA[a.name];
+    return meta.group === "code_chain";
+  });
+  const coreTrioAnyDisabled = coreTrioAgents.some((a) => !a.enabled);
+  const codeChainAnyDisabled = codeChainAgents.some((a) => !a.enabled);
+  const coreAnyNotReady = enabledCoreAgents.some(
+    (a) => a.readiness === "not_ready",
+  );
+  const coreAnyNeedsSetup = enabledCoreAgents.some(
+    (a) => a.readiness === "needs_setup",
+  );
+
+  // 状态优先级（per AGENT_METADATA.impactZh）:
+  // - paralyzed: core_trio 任一 disabled 或 enabled 但 not_ready
+  //   （core_trio 是入口，关掉任何一个整个管道瘫痪）
+  // - degraded: code_chain 任一 disabled（降级运行，非瘫痪）
+  //             或 enabled 但 needs_setup
+  // - ok: 全 ready
+  //
+  // needsConfig 标记仅用于 readiness 异常（not_ready / needs_setup），
+  // 不用于主动 disabled — 主动 disable 是 owner 的有意决策，不是配置缺失。
+  let corePipelineKey: string;
+  const needsConfig = coreAnyNotReady || coreAnyNeedsSetup;
+  if (coreTrioAnyDisabled || coreAnyNotReady) {
+    corePipelineKey = "pages.controlCenter.status.corePipelineParalyzed";
+  } else if (codeChainAnyDisabled || coreAnyNeedsSetup) {
+    corePipelineKey = "pages.controlCenter.status.corePipelineDegraded";
+  } else {
+    corePipelineKey = "pages.controlCenter.status.corePipelineOk";
   }
 
   return (
-    <div className="bg-panel border border-line rounded-[6px] px-[18px] py-[14px]">
-      <div className="flex items-center gap-3 mb-2">
-        <span className={readinessTagClasses(readiness)}>
-          {enumLabel('readiness', readiness, t)}
+    <div className="mt-5 px-[16px] py-[11px] bg-surface border border-line-2 rounded-[4px] flex items-center gap-[16px] text-[12.5px] text-ink-3 flex-wrap">
+      <div className="flex items-center gap-[6px]">
+        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+          {t("pages.controlCenter.status.enabled")}
         </span>
-        <span className="text-ink-3 text-[13px]">
-          {enabledCount}/{totalCount} {t("pages.controlCenter.agentEnabled").toLowerCase()}
-        </span>
-      </div>
-      <p className="text-ink-2 text-[14px] leading-relaxed">
-        {t(messageKey)}
-      </p>
-    </div>
-  );
-}
-
-function AgentRow({
-  agent,
-  profiles,
-  onBindingChange,
-  saving,
-}: {
-  agent: RedactedAgentSummary;
-  profiles: RedactedRuntimeProfileSummary[];
-  onBindingChange: (
-    agentName: string,
-    runtimeProfile: string,
-    enabled: boolean,
-  ) => void;
-  saving: string | null;
-}) {
-  const { t } = useTranslation();
-  const isSaving = saving === agent.name;
-
-  return (
-    <div className="flex items-center gap-4 py-[10px] border-b border-line last:border-b-0">
-      {/* Agent name */}
-      <div className="min-w-[140px]">
-        <span className="text-ink text-[13px] font-medium">{agent.name}</span>
-      </div>
-
-      {/* Readiness tag */}
-      <div className="min-w-[100px]">
-        <span className={readinessTagClasses(agent.readiness)}>
-          {enumLabel('readiness', agent.readiness, t)}
+        <span className="text-ink font-semibold">
+          <span className="font-mono">{enabledCount}</span> /{" "}
+          <span className="font-mono">{totalCount}</span>
         </span>
       </div>
-
-      {/* Profile selector */}
-      <div className="flex-1">
-        <select
-          value={agent.runtimeProfileId}
-          onChange={(e) => {
-            onBindingChange(agent.name, e.target.value, agent.enabled);
-          }}
-          disabled={isSaving}
-          className="bg-surface border border-line rounded-[3px] px-2 py-1 text-[12.5px] text-ink focus:outline-none focus:border-gov disabled:opacity-50"
-          aria-label={t("pages.controlCenter.profileLabel")}
-        >
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+      <div className="flex items-center gap-[6px]">
+        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+          {t("pages.controlCenter.status.notReady")}
+        </span>
+        <span className="text-ink font-semibold">
+          <span className="font-mono">{notReadyCount}</span>
+        </span>
       </div>
-
-      {/* Enable/disable toggle */}
-      <button
-        type="button"
-        onClick={() => {
-          onBindingChange(agent.name, agent.runtimeProfileId, !agent.enabled);
-        }}
-        disabled={isSaving}
-        className={
-          agent.enabled
-            ? "border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50"
-            : "border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-line-2 transition-colors disabled:opacity-50"
-        }
-        aria-label={
-          agent.enabled
-            ? t("pages.controlCenter.agentDisabled")
-            : t("pages.controlCenter.agentEnabled")
-        }
-      >
-        {isSaving
-          ? t("pages.controlCenter.saving")
-          : agent.enabled
-            ? t("pages.controlCenter.on")
-            : t("pages.controlCenter.off")}
-      </button>
+      <div className="flex items-center gap-[6px]">
+        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+          {t("pages.controlCenter.status.corePipeline")}
+        </span>
+        <span className="text-ink font-semibold">{t(corePipelineKey)}</span>
+      </div>
+      {needsConfig && (
+        <span className="ml-auto px-[9px] py-[3px] rounded-[2px] text-[10.5px] font-mono tracking-[0.02em] font-medium border border-amber text-amber bg-amber/10">
+          {t("pages.controlCenter.status.needsConfig")}
+        </span>
+      )}
     </div>
   );
 }
@@ -715,7 +706,7 @@ function AdvancedDiagnostics({
 type LoadingState = "loading" | "loaded" | "error";
 
 export function ControlCenterPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [configData, setConfigData] = useState<ConfigSummaryData | null>(null);
   const [catalogData, setCatalogData] = useState<ConfigCatalogData | null>(
     null,
@@ -876,13 +867,12 @@ export function ControlCenterPage() {
         {t("pages.controlCenter.subtitle")}
       </p>
 
-      {/* Section 1: Config Readiness Card */}
-      <section aria-labelledby="section-readiness">
-        <OverallStatusCard
-          readiness={overallReadiness}
-          agents={configData.agents}
-        />
-      </section>
+      {/* Section 1: 行为回路图 + 紧凑状态条（替代 OverallStatusCard） */}
+      <WorkflowDiagram />
+      <CompactStatusBar
+        readiness={overallReadiness}
+        agents={configData.agents}
+      />
 
       {/* Empathy Observer cost hint — spec 2026-06-27 §4.1
           Gate 1: only mount when empathyObserver is enabled AND localStorage
@@ -909,7 +899,7 @@ export function ControlCenterPage() {
         );
       })()}
 
-      {/* Section 2: Internal Agents */}
+      {/* Section 2: Internal Agents — 按依赖分组 */}
       <section className="mt-8" aria-labelledby="section-agents">
         <SectionTitle id="section-agents">
           {t("pages.controlCenter.internalAgents")}
@@ -917,21 +907,38 @@ export function ControlCenterPage() {
         <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
           {t("pages.controlCenter.internalAgentsDescription")}
         </p>
-        <div className="bg-panel border border-line rounded-[6px] px-[18px] py-[6px]">
-          {configData.agents.length === 0 ? (
-            <div className="py-3 text-ink-3 text-[13px]">—</div>
-          ) : (
-            configData.agents.map((agent) => (
-              <AgentRow
-                key={agent.name}
-                agent={agent}
-                profiles={availableProfiles}
-                onBindingChange={handleBindingChange}
-                saving={savingAgent}
-              />
-            ))
-          )}
-        </div>
+        {(() => {
+          const { groups, unknown } = groupAgentsByDependency(
+            configData.agents,
+          );
+          const locale: AgentLocale = i18n.language.startsWith("en")
+            ? "en"
+            : "zh-CN";
+          return (
+            <>
+              {AGENT_GROUPS.map((groupMeta) => (
+                <AgentGroup
+                  key={groupMeta.id}
+                  groupMeta={groupMeta}
+                  agents={groups[groupMeta.id]}
+                  profiles={availableProfiles}
+                  onBindingChange={handleBindingChange}
+                  saving={savingAgent}
+                  locale={locale}
+                />
+              ))}
+              {/* rc-9: 未知代理不静默 */}
+              {unknown.length > 0 && (
+                <div className="mt-3 px-3 py-2 border border-amber/30 border-l-2 border-l-amber rounded-[4px] bg-amber/10 text-[12.5px] text-ink-3">
+                  {t("pages.controlCenter.unknownAgentsWarning", {
+                    count: unknown.length,
+                    names: unknown.map((a) => a.name).join(", "),
+                  })}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </section>
 
       {/* Section 3: Default Runtime */}
@@ -951,6 +958,11 @@ export function ControlCenterPage() {
       <section className="mt-8" aria-labelledby="section-diagnostics">
         <AdvancedDiagnostics config={configData} />
       </section>
+
+      {/* Footer note */}
+      <p className="mt-10 pt-[18px] border-t border-line-2 text-ink-4 text-[12px] leading-[1.6] max-w-[60ch] font-mono">
+        {t("pages.controlCenter.footerNote")}
+      </p>
       </div>
     </PageShell>
   );

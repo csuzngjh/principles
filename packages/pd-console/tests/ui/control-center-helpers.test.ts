@@ -5,7 +5,9 @@ import {
   redactDiagnosticsForCopy,
   computeOverallReadiness,
   groupAgentsByReadiness,
+  groupAgentsByDependency,
   type ControlCenterDiagnostics,
+  type RedactedAgentSummary,
 } from '../../src/ui/utils/control-center-helpers.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -315,5 +317,112 @@ describe('redactDiagnosticsForCopy', () => {
     expect(result).toContain('feature-49');
     expect(result).not.toContain('+');
     expect(result).not.toContain('more');
+  });
+});
+
+// ── groupAgentsByDependency ──────────────────────────────────────────────────
+
+describe('groupAgentsByDependency', () => {
+  function makeAgent(
+    name: string,
+    overrides: Partial<RedactedAgentSummary> = {},
+  ): RedactedAgentSummary {
+    return {
+      name,
+      enabled: true,
+      runtimeProfileId: 'default',
+      runtimeProfileLabel: 'openclaw: default',
+      readiness: 'ready',
+      ...overrides,
+    };
+  }
+
+  const allKnownAgents: RedactedAgentSummary[] = [
+    makeAgent('diagnostician'),
+    makeAgent('dreamer'),
+    makeAgent('scribe'),
+    makeAgent('artificer'),
+    makeAgent('evaluator'),
+    makeAgent('philosopher'),
+    makeAgent('rolloutReviewer'),
+    makeAgent('correctionObserver'),
+    makeAgent('empathyObserver'),
+  ];
+
+  it('assigns all 9 known agents to the correct 4 groups', () => {
+    const { groups, unknown } = groupAgentsByDependency(allKnownAgents);
+    expect(unknown).toHaveLength(0);
+    expect(groups.core_trio.map((a) => a.name)).toEqual([
+      'diagnostician',
+      'dreamer',
+      'scribe',
+    ]);
+    expect(groups.code_chain.map((a) => a.name)).toEqual([
+      'artificer',
+      'evaluator',
+    ]);
+    expect(groups.quality_polish.map((a) => a.name)).toEqual([
+      'philosopher',
+      'rolloutReviewer',
+    ]);
+    expect(groups.sidechain.map((a) => a.name)).toEqual([
+      'correctionObserver',
+      'empathyObserver',
+    ]);
+  });
+
+  it('sends unknown agent names to the unknown bucket (rc-9: no silent fallback)', () => {
+    const agents = [
+      makeAgent('diagnostician'),
+      makeAgent('unknownAgent'),
+      makeAgent('empathyObserver'),
+    ];
+    const { groups, unknown } = groupAgentsByDependency(agents);
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0].name).toBe('unknownAgent');
+    expect(groups.core_trio).toHaveLength(1);
+    expect(groups.sidechain).toHaveLength(1);
+  });
+
+  it('returns empty groups and empty unknown for an empty array', () => {
+    const { groups, unknown } = groupAgentsByDependency([]);
+    expect(unknown).toHaveLength(0);
+    expect(groups.core_trio).toHaveLength(0);
+    expect(groups.code_chain).toHaveLength(0);
+    expect(groups.quality_polish).toHaveLength(0);
+    expect(groups.sidechain).toHaveLength(0);
+  });
+
+  it('returns groups with keys matching GROUP_ORDER order', () => {
+    const { groups } = groupAgentsByDependency(allKnownAgents);
+    expect(Object.keys(groups)).toEqual([
+      'core_trio',
+      'code_chain',
+      'quality_polish',
+      'sidechain',
+    ]);
+  });
+
+  it('preserves insertion order within each group', () => {
+    // Pass agents in a shuffled order
+    const shuffled: RedactedAgentSummary[] = [
+      makeAgent('scribe'),
+      makeAgent('evaluator'),
+      makeAgent('diagnostician'),
+      makeAgent('dreamer'),
+      makeAgent('artificer'),
+    ];
+    const { groups } = groupAgentsByDependency(shuffled);
+    // core_trio should preserve the shuffled insertion order: scribe, diagnostician, dreamer
+    expect(groups.core_trio.map((a) => a.name)).toEqual([
+      'scribe',
+      'diagnostician',
+      'dreamer',
+    ]);
+    // code_chain should preserve: evaluator, artificer
+    expect(groups.code_chain.map((a) => a.name)).toEqual([
+      'evaluator',
+      'artificer',
+    ]);
   });
 });
