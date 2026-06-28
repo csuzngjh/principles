@@ -208,7 +208,7 @@ function validateCase(
 ): ReplayValidatorCaseResult {
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
-    {},
+    traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {},
     projectDir ? { projectDir } : {},
   );
 

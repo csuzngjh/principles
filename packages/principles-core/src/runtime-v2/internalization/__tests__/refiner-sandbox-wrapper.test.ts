@@ -5,6 +5,7 @@ import type { RefinerSandboxDependencies, RefinerSandboxOptions } from '../refin
 import {
   evaluateInRefinerSandbox,
 } from '../refiner-sandbox-wrapper.js';
+import type { RuleContextV2 } from '../rule-context-v2.js';
 
 function makeCase(overrides: Partial<GoldenTraceCase> = {}): GoldenTraceCase {
   return {
@@ -801,6 +802,147 @@ describe('evaluateInRefinerSandbox', () => {
       },
     });
     const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: validProposal });
+    expect(result.success).toBe(true);
+    expect(result.failedCases).toEqual([]);
+  });
+});
+
+// ── PRI-481 Phase 2: ruleContext reaches the rule during replay (ERR-024) ────
+
+describe('PRI-481 Phase 2 — ruleContext reaches VM during replay (ERR-024)', () => {
+  const contextWithOneRead: RuleContextV2 = {
+    version: 2,
+    history: {
+      status: 'available',
+      truncated: false,
+      calls: [
+        {
+          sequenceId: 1,
+          toolName: 'read',
+          canonicalKind: 'read',
+          normalizedPath: 'src/a.ts',
+          paramsSummary: {},
+          outcome: 'success',
+        },
+      ],
+    },
+    facts: {
+      priorReadOfTarget: 'yes',
+      readCount: 1,
+      writeCount: 0,
+      uniqueWritePathCount: 0,
+      sameActionBlockCount: 0,
+    },
+  };
+
+  // A rule that genuinely reads input.context — NOT a helper test. It blocks
+  // when history shows prior reads, allows otherwise. Proving the rule's
+  // decision flips based on context proves context actually arrived.
+  const contextReadingRule: ReplayEvaluateFn = (input) => {
+    const calls = input.context?.history?.calls;
+    if (Array.isArray(calls) && calls.length > 0) {
+      return { decision: 'block', matched: true, reason: 'history shows prior reads' };
+    }
+    return { decision: 'allow', matched: false, reason: 'no context or no reads' };
+  };
+
+  it('replay delivers input.context to the rule when case carries ruleContext', () => {
+    const trace: GoldenTrace = {
+      traceId: 'trace-ctx',
+      createdAt: '2026-06-28T00:00:00.000Z',
+      version: 1,
+      cases: [
+        {
+          caseId: 'neg-with-ctx',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: 'src/a.ts', content: 'x' },
+          expectedDecision: 'block',
+          ruleContext: contextWithOneRead,
+        },
+        {
+          caseId: 'pos-with-ctx',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: 'src/other.ts', content: 'y' },
+          expectedDecision: 'allow',
+          ruleContext: contextWithOneRead,
+        },
+      ],
+    };
+    // Positive case expects allow but the rule blocks because context arrives
+    // with prior reads — this FAILS the positive case, which is the proof that
+    // context reached the rule (otherwise the rule would allow it).
+    const result = evaluateInRefinerSandbox('reads-context', trace, {
+      evaluateCode: contextReadingRule,
+    });
+    expect(result.success).toBe(false);
+    expect(result.failedCases.some((c) => c.caseId === 'pos-with-ctx')).toBe(true);
+  });
+
+  it('v1 case without ruleContext — input.context is undefined, rule allows (zero behavior change)', () => {
+    const trace: GoldenTrace = {
+      traceId: 'trace-v1',
+      createdAt: '2026-06-28T00:00:00.000Z',
+      version: 1,
+      cases: [
+        {
+          caseId: 'neg-v1',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd', content: 'hacked' },
+          expectedDecision: 'block',
+        },
+        {
+          caseId: 'pos-v1',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/safe.txt', content: 'ok' },
+          expectedDecision: 'allow',
+        },
+      ],
+    };
+    // The same context-reading rule, but with no context it falls to allow.
+    // Negative case expects block → fails; positive case expects allow → passes.
+    // This proves v1 cases have input.context === undefined.
+    const result = evaluateInRefinerSandbox('reads-context', trace, {
+      evaluateCode: contextReadingRule,
+    });
+    expect(result.success).toBe(false);
+    expect(result.failedCases.some((c) => c.caseId === 'neg-v1')).toBe(true);
+    expect(result.failedCases.some((c) => c.caseId === 'pos-v1')).toBe(false);
+  });
+
+  it('a rule keyed on context passes ALL cases when expectations align with context', () => {
+    // Definitive positive proof: both cases expect block, context carries reads,
+    // the rule blocks both → success=true. If context did NOT arrive, the rule
+    // would allow both and both negative cases would fail.
+    const trace: GoldenTrace = {
+      traceId: 'trace-ctx-aligned',
+      createdAt: '2026-06-28T00:00:00.000Z',
+      version: 1,
+      cases: [
+        {
+          caseId: 'neg-ctx-a',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: 'src/a.ts', content: 'x' },
+          expectedDecision: 'block',
+          ruleContext: contextWithOneRead,
+        },
+        {
+          caseId: 'neg-ctx-b',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: 'src/b.ts', content: 'z' },
+          expectedDecision: 'block',
+          ruleContext: contextWithOneRead,
+        },
+      ],
+    };
+    const result = evaluateInRefinerSandbox('reads-context', trace, {
+      evaluateCode: contextReadingRule,
+    });
     expect(result.success).toBe(true);
     expect(result.failedCases).toEqual([]);
   });
