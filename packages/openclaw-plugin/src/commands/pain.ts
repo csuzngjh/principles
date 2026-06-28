@@ -322,7 +322,7 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       autoIntakeEnabled: true,
       effectiveConfig: configResult.effective,
       getEnvVar: (name: string) => process.env[name],
-      intentDocReader: createIntentDocReader(wctx.workspaceDir),
+      intentDocReader: createIntentDocReader(wctx.workspaceDir, 'zh-CN'),
     });
 
     const result = await service.recordPain({

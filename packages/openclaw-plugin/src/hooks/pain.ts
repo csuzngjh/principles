@@ -64,7 +64,7 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     // PRI-468: wire INTENT.md reader so Stage A can produce intentTension
     // when intent_engineering flag is on. Adapter performs no I/O beyond
     // delegating to safeReadIntentDoc (which owns the flag-first check).
-    intentDocReader: createIntentDocReader(wctx.workspaceDir),
+    intentDocReader: createIntentDocReader(wctx.workspaceDir, 'zh-CN'),
   });
 }
 

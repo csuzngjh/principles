@@ -23,19 +23,20 @@ import type {
   IntentDocReader,
   IntentDocReadResult,
   IntentDocReference,
+  IntentLang,
 } from '@principles/core/runtime-v2';
 
 /**
- * Create an IntentDocReader bound to a specific workspace.
+ * Create an IntentDocReader bound to a specific workspace and language.
  *
- * The returned reader is stateless beyond the workspace binding — each
+ * The returned reader is stateless beyond the (workspace, lang) binding — each
  * `readIntentDoc()` call delegates to `safeReadIntentDoc()`, which owns
- * the TTL+mtime cache.
+ * the TTL+mtime cache keyed by `${workspaceDir}:${lang}`.
  */
-export function createIntentDocReader(workspaceDir: string): IntentDocReader {
+export function createIntentDocReader(workspaceDir: string, lang: IntentLang): IntentDocReader {
   return {
     readIntentDoc(): IntentDocReadResult {
-      const result = safeReadIntentDoc(workspaceDir);
+      const result = safeReadIntentDoc(workspaceDir, lang);
 
       if (result.ok && result.doc) {
         const doc = result.doc;

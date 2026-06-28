@@ -1013,7 +1013,7 @@ export async function handleBeforePromptBuild(
   try {
     const intentFlag = loadFeatureFlagFromConfig(workspaceDir, 'intent_engineering', logger);
     if (intentFlag.enabled) {
-      const intentResult = safeReadIntentDoc(workspaceDir, { logger });
+      const intentResult = safeReadIntentDoc(workspaceDir, 'zh-CN', { logger });
       if (intentResult.ok && intentResult.doc) {
         const block = buildIntentFrictionBlock({ rawIntentMd: intentResult.doc.raw });
         if (block.length > 0) {
