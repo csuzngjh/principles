@@ -13,14 +13,16 @@ import { normalizePath } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
-import { validateCorrectionProposal, validateProposedPathBounds } from '@principles/core/runtime-v2';
+import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
+import { validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '../core/risk-calculator.js';
+import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
+import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -68,6 +70,10 @@ export function handleBeforeToolCall(
   // 3. Rule Host Evaluation — sole gate
   try {
     const ruleHost = new RuleHost(wctx.stateDir, logger, { workspaceDir: ctx.workspaceDir });
+    // PRI-483 Phase 4: assemble RuleContextV2 when `rulecode_context_v2` flag is ON.
+    // flag OFF → undefined (v1 zero-change, no trajectory access).
+    // flag ON  → RuleContextV2 (available or unavailable). Never throws (ERR-024).
+    const ruleContext = _buildRuleContextIfEnabled(wctx, relPath, ctx.sessionId, logger);
     const hostInput: RuleHostInput = {
       action: {
         toolName: event.toolName,
@@ -95,6 +101,7 @@ export function handleBeforeToolCall(
         estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }),
         bashRisk: _getBashRisk(event),
       },
+      context: ruleContext,
     };
 
     const hostResult = ruleHost.evaluate(hostInput);
@@ -390,5 +397,53 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
     return 'safe';
   } catch {
     return 'unknown';
+  }
+}
+
+/**
+ * PRI-483 Phase 4 — Build RuleContextV2 for RuleHost.evaluate when the
+ * `rulecode_context_v2` feature flag is ON. Returns `undefined` when the flag
+ * is OFF (v1 zero-change — does NOT touch trajectory) or when config loading
+ * fails (conservative fail-soft: can't determine flag state → v1-style).
+ *
+ * ERR-024 prevention: context assembly failures never skip RuleHost.evaluate.
+ * - loadPdConfigForPlugin throws → return undefined (v1-style)
+ * - buildProductionRuleContext throws → return UNAVAILABLE_RULE_CONTEXT
+ *   (structured unavailable so v2 rules see "context unavailable" and allow)
+ *
+ * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §5.3
+ */
+function _buildRuleContextIfEnabled(
+  wctx: WorkspaceContext,
+  targetPath: string,
+  sessionId: string | undefined,
+  logger: { warn?: (msg: string) => void } | undefined,
+): RuleContextV2 | undefined {
+  // Step 1: load PD config (flag-gated). If this throws, we can't safely
+  // determine whether v2 context is required — fall back to v1 (undefined).
+  let configResult: ReturnType<typeof loadPdConfigForPlugin>;
+  try {
+    configResult = loadPdConfigForPlugin(wctx.workspaceDir);
+  } catch (err) {
+    logger?.warn?.(`[PD_GATE] RuleContext v2: config load failed, skipping context assembly: ${String(err)}`);
+    return undefined;
+  }
+
+  // Step 2: compute effective flags and check rulecode_context_v2.
+  const flagsResult = computeFeatureFlagsFromConfig(configResult.effective);
+  const v2Flag = flagsResult.flags['rulecode_context_v2'];
+  if (!v2Flag?.enabled) {
+    // Flag OFF → v1 zero-change. Do NOT access trajectory (spec §10.1).
+    return undefined;
+  }
+
+  // Step 3: flag ON → assemble context via production data source.
+  // buildProductionRuleContext is fail-soft internally (returns unavailable),
+  // but wrap in try/catch as defense-in-depth (ERR-024).
+  try {
+    return buildProductionRuleContext(sessionId, targetPath, wctx.trajectory, wctx.workspaceDir);
+  } catch (err) {
+    logger?.warn?.(`[PD_GATE] RuleContext v2: buildProductionRuleContext threw unexpectedly, using unavailable context: ${String(err)}`);
+    return UNAVAILABLE_RULE_CONTEXT;
   }
 }
