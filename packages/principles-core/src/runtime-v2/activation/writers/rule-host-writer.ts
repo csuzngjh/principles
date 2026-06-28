@@ -8,7 +8,20 @@ const DESTRUCTIVE_TOOL_PREFIXES: readonly string[] = ['edit', 'write', 'delete',
 
 export interface RuleHostWriterConfig {
   gateDeps: RefinerRuleHostGateDeps;
+  /**
+   * PRI-484 — feature flag probe used to gate v2 artifacts.
+   *
+   * Returns `true` if the named flag is enabled, `false` otherwise. When
+   * omitted, all flags are treated as disabled (safe default for the
+   * `quiet`-category `rulecode_context_v2` flag, which defaults to off per
+   * PRI-239). The probe is injected (not imported) so this file stays pure
+   * logic — no I/O, no YAML loader.
+   */
+  featureFlagProbe?: (flagId: string) => boolean;
 }
+
+/** PRI-484 — the feature flag id that gates v2 rule artifacts. */
+const RULECODE_CONTEXT_V2_FLAG_ID = 'rulecode_context_v2';
 
 function parseContentJson(contentJson: string): Record<string, unknown> | null {
   try {
@@ -96,9 +109,11 @@ export class RuleHostWriter implements ChannelWriter {
   readonly channel = 'code_tool_hook' as const;
 
   private readonly gateDeps: RefinerRuleHostGateDeps;
+  private readonly featureFlagProbe?: (flagId: string) => boolean;
 
   constructor(config: RuleHostWriterConfig) {
     this.gateDeps = config.gateDeps;
+    this.featureFlagProbe = config.featureFlagProbe;
   }
 
   async canActivate(artifact: PIArtifactSnapshot): Promise<CanActivateResult> {
@@ -113,6 +128,25 @@ export class RuleHostWriter implements ChannelWriter {
     const parsed = parseContentJson(artifact.contentJson);
     if (!parsed) {
       return { ok: false, reason: 'content_json_parse_failed', riskLevel: 'high' };
+    }
+
+    // PRI-484 — gate v2 artifacts on the rulecode_context_v2 feature flag.
+    // The check runs BEFORE the sandbox call so that a v2 artifact in a
+    // flag-off workspace never pays sandbox cost or risks a stale
+    // accepted_shadow decision being activated against v1 expectations.
+    // Only literal `2` is treated as a v2 declaration; any other value
+    // (including 1, "2", null) falls through to the v1 path unchanged.
+    if (parsed.requiresContextVersion === 2) {
+      const enabled = this.featureFlagProbe
+        ? this.featureFlagProbe(RULECODE_CONTEXT_V2_FLAG_ID)
+        : false;
+      if (!enabled) {
+        return {
+          ok: false,
+          reason: 'rulecode_context_v2_disabled',
+          riskLevel: 'high',
+        };
+      }
     }
 
     const implementationCode = extractImplementationCode(parsed);
