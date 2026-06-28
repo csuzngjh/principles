@@ -122,7 +122,7 @@ These rules prevent architectural drift. Violating them will break the project.
   Delegates computation to core; never reimplements logic that core already provides.
 - **Rule:** New pure logic (data transforms, state machines, validation, type definitions) goes to `principles-core`.
   New I/O adapters (file readers, DB queries, hook handlers) go to `openclaw-plugin`.
-- **FROZEN LEGACY CODE (ADR-0005):** Do NOT modify or add new features to `nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, or `nocturnal-service.ts`. These are deprecated god-classes. All new internalization logic must go to the Runtime V2 Peer Runners in `@principles/core`.
+- **FROZEN LEGACY (ADR-0005):** The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them. All new internalization logic must go to the Runtime V2 Peer Runners in `@principles/core`.
 
 ### Architecture regression tests
 - `packages/principles-core/tests/architecture-regression.test.ts` guards the core/plugin boundary.
