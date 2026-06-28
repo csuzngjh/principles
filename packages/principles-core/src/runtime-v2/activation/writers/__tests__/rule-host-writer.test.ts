@@ -416,6 +416,108 @@ describe('RuleHostWriter', () => {
   });
 });
 
+describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', () => {
+  async function importWriter() {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    return { RuleHostWriter };
+  }
+
+  /** Build a v2-declaring artifact (requiresContextVersion: 2 in contentJson). */
+  function makeV2Artifact(): PIArtifactSnapshot {
+    const goldenTrace = makeGoldenTrace();
+    return {
+      artifactId: 'art-rule-v2-001',
+      artifactKind: 'rule',
+      sourceTaskId: 'task-v2-001',
+      sourcePrincipleId: 'P_v2',
+      sourceRuleId: 'R_v2',
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "v2 rule" }; }',
+        goldenTrace,
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['read_file'],
+        requiresContextVersion: 2,
+      }),
+      createdAt: '2026-06-27T00:00:00.000Z',
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    };
+  }
+
+  it('rejects v2 artifact when rulecode_context_v2 flag is OFF (default, no probe)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // No featureFlagProbe provided — defaults to "all flags off" (safe default
+    // for quiet-category flags per PRI-239).
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('rulecode_context_v2_disabled');
+  });
+
+  it('rejects v2 artifact when featureFlagProbe reports rulecode_context_v2=false', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (_flagId: string) => false,
+    });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('rulecode_context_v2_disabled');
+  });
+
+  it('accepts v2 artifact when featureFlagProbe reports rulecode_context_v2=true', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts v1 artifact (no requiresContextVersion) regardless of flag state', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // Flag OFF — v1 artifact must still pass.
+    const writerOff = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const resultOff = await writerOff.canActivate(makeRuleArtifact());
+    expect(resultOff.ok).toBe(true);
+
+    // Flag ON — v1 artifact still passes (flag doesn't affect v1).
+    const writerOn = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: () => true,
+    });
+    const resultOn = await writerOn.canActivate(makeRuleArtifact());
+    expect(resultOn.ok).toBe(true);
+  });
+
+  it('does not invoke the sandbox when rejecting v2 artifact with flag OFF', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const gateDeps = makeGateDeps();
+    const writer = new RuleHostWriter({ gateDeps });
+    await writer.canActivate(makeV2Artifact());
+    expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
+  });
+
+  it('ignores requiresContextVersion values other than 2 (treats as v1)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "x" }; }',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['read_file'],
+        // Not 2 — must be treated as v1 (not gated by the flag).
+        requiresContextVersion: 1,
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe('RuleHostWriter.buildApprovalContext', () => {
   async function importWriter() {
     const { RuleHostWriter } = await import('../rule-host-writer.js');

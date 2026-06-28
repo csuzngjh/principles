@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
+import { validateRuleContextV2 } from './rule-context-v2.js';
 
 /**
  * Artificer source trace — lineage back to upstream peer artifacts.
@@ -41,6 +42,11 @@ export interface GoldenTraceCaseInput {
  *
  * `meta`, `taskId`, lineage, and `generatedAt` are server-injected / model-filled
  * per the existing contract; the validator enforces their presence and consistency.
+ *
+ * PRI-484 (Phase 5): `requiresContextVersion?: 2` declares a v2 rule that may
+ * inspect `input.context` and may carry `ruleContext` on its golden trace cases.
+ * When absent, the rule is v1 and MUST NOT read input.context (validator rejects
+ * any case-level ruleContext on a v1 rule).
  */
 export interface ArtificerRuleOutput {
   readonly taskId: string;
@@ -52,6 +58,8 @@ export interface ArtificerRuleOutput {
   readonly risks: readonly string[];
   readonly sourceTrace: ArtificerSourceTrace;
   readonly generatedAt: string;
+  /** PRI-484 — declare v2 rule that reads input.context. Only `2` is supported. */
+  readonly requiresContextVersion?: 2;
 }
 
 export const ArtificerSourceTraceSchema = Type.Object({
@@ -85,6 +93,8 @@ export const ArtificerRuleOutputSchema = Type.Object({
   risks: Type.Array(Type.String()),
   sourceTrace: ArtificerSourceTraceSchema,
   generatedAt: Type.String({ minLength: 1 }),
+  // PRI-484 — optional v2 context declaration. Only literal `2` is supported.
+  requiresContextVersion: Type.Optional(Type.Literal(2)),
 });
 
 export type ArtificerRuleOutputTB = Static<typeof ArtificerRuleOutputSchema>;
@@ -238,11 +248,59 @@ export class DefaultArtificerValidator implements ArtificerValidator {
     }
 
     // ── goldenTraceCases (MANDATORY) ──
+    // PRI-484: ruleContext on a case is only allowed when requiresContextVersion === 2.
+    // v1 rules (no requiresContextVersion) MUST NOT carry ruleContext — this is
+    // enforced below after the per-case structural validation runs.
     if (!Object.hasOwn(rec, 'goldenTraceCases')) {
       errors.push('goldenTraceCases is required');
     } else {
       const casesErr = validateGoldenTraceCasesInput(rec.goldenTraceCases);
       errors.push(...casesErr);
+    }
+
+    // ── requiresContextVersion (PRI-484, optional v2 declaration) ──
+    // Only `2` is supported. Any other value (number or non-number) is rejected.
+    const hasRequiresContextVersion = Object.hasOwn(rec, 'requiresContextVersion');
+    const {requiresContextVersion} = rec;
+    const isV2Declared = hasRequiresContextVersion
+      && typeof requiresContextVersion === 'number'
+      && requiresContextVersion === 2;
+    if (hasRequiresContextVersion) {
+      if (typeof requiresContextVersion !== 'number' || requiresContextVersion !== 2) {
+        errors.push(
+          `requiresContextVersion must be 2 (only v2 is supported), got ${String(requiresContextVersion)}`,
+        );
+      }
+    }
+
+    // ── ruleContext consistency (PRI-484) ──
+    // Walk the cases once more to enforce the v1/v2 contract on ruleContext.
+    // Only runs when the array shape was already accepted (avoid noise on
+    // malformed arrays that already produced errors above).
+    if (Array.isArray(rec.goldenTraceCases)) {
+      const cases = rec.goldenTraceCases as readonly unknown[];
+      for (let i = 0; i < cases.length; i++) {
+        const entry = cases[i];
+        if (!isRecord(entry) || !Object.hasOwn(entry, 'ruleContext')) {
+          continue;
+        }
+        const ctxValue = entry.ruleContext;
+        if (!isV2Declared) {
+          errors.push(
+            `goldenTraceCases[${i}].ruleContext is only allowed when requiresContextVersion: 2 is declared (v1 rules must not read input.context)`,
+          );
+          continue;
+        }
+        // v2 declared: validate the ruleContext structurally (ERR-001, ERR-076).
+        // `undefined` is allowed — the field is optional even for v2 cases.
+        if (ctxValue === undefined) {
+          continue;
+        }
+        const ctxResult = validateRuleContextV2(ctxValue);
+        if (!ctxResult.valid) {
+          errors.push(`goldenTraceCases[${i}].ruleContext invalid: ${ctxResult.errors.join('; ')}`);
+        }
+      }
     }
 
     // ── affectedTools (MANDATORY) ──

@@ -68,6 +68,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-482: Plugin I/O boundary — converts TrajectoryDatabase rows to
     // validated RuleHistoryWindow. Pure logic delegated to @principles/core.
     'rule-context-assembler.ts',
+    // PRI-484: Plugin I/O boundary — assembles a BehaviorExamplePack for the
+    // Artificer by reading pain lineage + trajectory from TrajectoryDatabase.
+    // Pure logic (type + validator) lives in @principles/core.
+    'behavior-example-pack-assembler.ts',
     'evolution-reducer.ts',
     'focus-history.ts',
     'replay-engine.ts',
