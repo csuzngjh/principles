@@ -63,8 +63,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'rule-implementation-runtime.ts',
     'detection-service.ts',
     'dictionary-service.ts',
-    'rule-host-types.ts',
-    'rule-host-helpers.ts',
     // I/O boundary
     'trajectory.ts',
     'evolution-reducer.ts',
