@@ -31,3 +31,19 @@ export type {
   PluginSurfaceEntry,
   SurfaceRegistryValidationResult,
 } from './plugin-surface-registry.js';
+
+// Surface guard — pure logic migrated from plugin (Stage 3)
+export {
+  checkSurfaceGuard,
+  getSurfaceIdForHook,
+  getSurfaceIdForService,
+  isSurfaceEnabled,
+  guardHook,
+  guardService,
+  __resetSurfaceGuardSkipLogStateForTests,
+} from './surface-guard-policy.js';
+
+export type {
+  SurfaceGuardResult,
+  HookHandler,
+} from './surface-guard-policy.js';

@@ -94,7 +94,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'evolution-engine.ts',
     'runtime-v2-prompt-activation-reader.ts',
     'workspace-guidance-migrator.ts',
-    'surface-guard.ts',
     'pd-config-loader.ts',
     'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
     // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime
