@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, computeIntentContentHash, validateIntentDocSections, type IntentDocWarning, type IntentDocSections } from '../intent-doc.js';
+import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, computeIntentContentHash, validateIntentDocSections, type IntentDocWarning, type IntentDocSections, INTENT_DOC_TEMPLATE_ZH, INTENT_DOC_TEMPLATE_EN, getIntentFilename, createIntentTemplate } from '../intent-doc.js';
 
 const VALID = `# INTENT.md
 
@@ -91,5 +91,36 @@ describe('constants', () => {
   it('template has 5 headers', () => {
     expect(INTENT_DOC_TEMPLATE).toContain('## 1. Why');
     expect(INTENT_DOC_TEMPLATE).toContain('## 5. Current Strategic Focus');
+  });
+});
+
+describe('Intent bilingual templates', () => {
+  it('getIntentFilename returns lang-suffixed filename', () => {
+    expect(getIntentFilename('zh-CN')).toBe('INTENT.zh-CN.md');
+    expect(getIntentFilename('en')).toBe('INTENT.en.md');
+  });
+
+  it('INTENT_DOC_TEMPLATE_ZH contains Chinese guidance prompts', () => {
+    expect(INTENT_DOC_TEMPLATE_ZH).toContain('这个项目');
+    expect(INTENT_DOC_TEMPLATE_ZH).toContain('## 1. Why');
+  });
+
+  it('INTENT_DOC_TEMPLATE_EN contains enhanced prompts', () => {
+    expect(INTENT_DOC_TEMPLATE_EN).toContain('Why does this project matter?');
+    expect(INTENT_DOC_TEMPLATE_EN).toContain('## 1. Why');
+  });
+
+  it('createIntentTemplate returns correct template per lang', () => {
+    expect(createIntentTemplate('zh-CN')).toBe(INTENT_DOC_TEMPLATE_ZH);
+    expect(createIntentTemplate('en')).toBe(INTENT_DOC_TEMPLATE_EN);
+  });
+
+  it('both templates parse to 5 sections with same keys', () => {
+    const zhSections = parseIntentDocSections(INTENT_DOC_TEMPLATE_ZH);
+    const enSections = parseIntentDocSections(INTENT_DOC_TEMPLATE_EN);
+    const zhKeys = Object.keys(zhSections).sort();
+    const enKeys = Object.keys(enSections).sort();
+    expect(zhKeys).toEqual(['currentStrategicFocus', 'desiredOutcome', 'nonNegotiables', 'stopEscalation', 'why']);
+    expect(enKeys).toEqual(zhKeys);
   });
 });

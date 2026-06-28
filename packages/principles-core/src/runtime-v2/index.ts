@@ -1734,8 +1734,12 @@ export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 export {
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
+  INTENT_DOC_TEMPLATE_ZH,
+  INTENT_DOC_TEMPLATE_EN,
   INTENT_INJECT_MAX_CHARS,
   INTENT_TRUNCATION_MARKER,
+  getIntentFilename,
+  createIntentTemplate,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
@@ -1757,6 +1761,7 @@ export type {
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   IntentDecisionStore,
+  IntentLang,
   FollowUpPatch,
   IntentPatchProposal,
 } from './intent/index.js';
