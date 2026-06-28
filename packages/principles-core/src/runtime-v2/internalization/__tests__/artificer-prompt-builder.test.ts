@@ -49,7 +49,9 @@ describe('ArtificerPromptBuilder', () => {
   });
 
   it('promptContractVersion identifies the executable V2 contract', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v1');
+    // PRI-484 — bumped from v1 to v2 to signal the RuleCode context surface
+    // is part of the contract the model must obey.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v2');
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {
@@ -70,5 +72,53 @@ describe('ArtificerPromptBuilder', () => {
   it('artificerInstruction is included in prompt input', () => {
     const { promptInput } = builder.buildPrompt(input);
     expect(promptInput.artificerInstruction).toBe(ARTIFICER_PROTOCOL_INSTRUCTION);
+  });
+});
+
+describe('PRI-484 ARTIFICER_PROTOCOL_INSTRUCTION — v2 context section', () => {
+  // Red phase: assertions covering the rewrite required by the
+  // 2026-06-27 RuleCode context vision design §7.3.
+
+  it('allows inspecting input.context (v2 surface)', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/input\.context/i);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('inspect input.context');
+  });
+
+  it('requires allow when context is missing or unavailable', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('unavailable');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/MUST.*allow.*matched.*false/i);
+  });
+
+  it('requires preferring canonicalKind / facts over raw history.calls', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('facts');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('canonicalKind');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('Prefer');
+  });
+
+  it('forbids inferring "not done" from an empty calls array', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('not done');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('empty');
+  });
+
+  it('declares the v2 contract version bump v1 -> v2', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v2');
+  });
+
+  it('still references input.action for v1 compatibility', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('input.action');
+  });
+
+  it('mentions requiresContextVersion when declaring v2 rules', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('requiresContextVersion');
+  });
+
+  it('keeps the existing JSON-only output constraint intact', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('ONLY valid JSON');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('no markdown');
+  });
+
+  it('keeps the prior adversarial-failures section intact', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('adversarialFeedback');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('RETRY');
   });
 });

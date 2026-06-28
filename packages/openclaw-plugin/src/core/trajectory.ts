@@ -89,6 +89,58 @@ function hasNameField(row: object): row is { name: unknown } {
 }
 
 /**
+ * Type guard: narrows a raw better-sqlite3 row to a typed pain_event row
+ * without `as` casts (rc-2-no-as-bypass, ERR-001).
+ *
+ * Used by getPainEventByCanonicalId. Validates only the fields we read; the
+ * caller still calls String()/Number() on values whose types SQLite may
+ * widen (e.g. text → string, real → number).
+ */
+interface PainEventRow {
+  id: number;
+  session_id: string;
+  source: unknown;
+  score: unknown;
+  reason: unknown;
+  severity: unknown;
+  origin: unknown;
+  confidence: unknown;
+  text: unknown;
+  canonical_pain_id: unknown;
+  runtime_task_id: unknown;
+  created_at: unknown;
+}
+
+/**
+ * Pure structural narrowing from `unknown` to `Record<string, unknown>` with
+ * no `as` cast (ERR-001 / rc-2). The returned type allows indexed access in
+ * subsequent code without further casts.
+ */
+function isStringRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPainEventRow(value: unknown): value is PainEventRow {
+  if (!isStringRecord(value)) return false;
+  if (typeof value.id !== 'number') return false;
+  if (typeof value.session_id !== 'string') return false;
+  // The remaining fields are accessed via String()/Number() which tolerate any
+  // primitive; presence check only (rc-5: Object.hasOwn over `in`).
+  return (
+    Object.hasOwn(value, 'source')
+    && Object.hasOwn(value, 'score')
+    && Object.hasOwn(value, 'reason')
+    && Object.hasOwn(value, 'severity')
+    && Object.hasOwn(value, 'origin')
+    && Object.hasOwn(value, 'confidence')
+    && Object.hasOwn(value, 'text')
+    && Object.hasOwn(value, 'canonical_pain_id')
+    && Object.hasOwn(value, 'runtime_task_id')
+    && Object.hasOwn(value, 'created_at')
+  );
+}
+
+/**
  * Apply the full trajectory.db schema (tables + indexes + views + migrations) to an open
  * Database handle. Used by TrajectoryDatabase.initSchema() and exported via
  * initTrajectorySchema() for external callers (e.g. `pd runtime init`).
@@ -1201,6 +1253,55 @@ export class TrajectoryDatabase {
       confidence: row.confidence != null ? Number(row.confidence) : null,
       createdAt: String(row.created_at),
     }));
+  }
+
+  /**
+   * PRI-484 Phase 5 — Look up a single pain event by canonical_pain_id.
+   *
+   * Used by BehaviorExamplePackAssembler to anchor a pain lineage without
+   * already knowing the session_id. Returns null when not found.
+   *
+   * ERR-001 (rc-1, rc-2): row fields validated as unknown — no `as` bypass.
+   * Uses a type-guard predicate to narrow the DB row structurally.
+   */
+  getPainEventByCanonicalId(canonicalPainId: string): {
+    id: number;
+    sessionId: string;
+    source: string;
+    score: number;
+    reason: string | null;
+    severity: string | null;
+    origin: string | null;
+    confidence: number | null;
+    text: string | null;
+    canonicalPainId: string;
+    runtimeTaskId: string | null;
+    createdAt: string;
+  } | null {
+    const rawRow = this.db.prepare(`
+      SELECT id, session_id, source, score, reason, severity, origin, confidence,
+             text, canonical_pain_id, runtime_task_id, created_at
+      FROM pain_events
+      WHERE canonical_pain_id = ?
+      LIMIT 1
+    `).get(canonicalPainId);
+
+    if (!isPainEventRow(rawRow)) return null;
+
+    return {
+      id: rawRow.id,
+      sessionId: rawRow.session_id,
+      source: String(rawRow.source),
+      score: Number(rawRow.score),
+      reason: rawRow.reason ? String(rawRow.reason) : null,
+      severity: rawRow.severity ? String(rawRow.severity) : null,
+      origin: rawRow.origin ? String(rawRow.origin) : null,
+      confidence: rawRow.confidence != null ? Number(rawRow.confidence) : null,
+      text: rawRow.text ? String(rawRow.text) : null,
+      canonicalPainId: String(rawRow.canonical_pain_id),
+      runtimeTaskId: rawRow.runtime_task_id ? String(rawRow.runtime_task_id) : null,
+      createdAt: String(rawRow.created_at),
+    };
   }
 
   /**
