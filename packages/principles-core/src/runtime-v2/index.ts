@@ -459,6 +459,30 @@ export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
 export type { CorrectionProposal, CorrectionProposalValidationResult, PathValidationResult } from './internalization/correction-proposal.js';
 export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspace, validateProposedPathBounds } from './internalization/correction-proposal.js';
 
+// RuleContext v2 — Phase 1 Core ABI (PRI-480): pure-logic types + canonicalize +
+// validators + behavior-facts computation + the frozen unavailable sentinel.
+// Zero I/O; gates nothing in production yet (the flag from PRI-479 is still off).
+export type {
+  CanonicalKind,
+  EvidenceState,
+  RuleToolOutcome,
+  RuleHistoryStatus,
+  RuleToolCallRecord,
+  RuleHistoryWindow,
+  RuleBehaviorFacts,
+  RuleContextV2,
+  ValidationResult as RuleContextValidationResult,
+} from './internalization/rule-context-v2.js';
+export {
+  UNAVAILABLE_RULE_CONTEXT,
+  canonicalizeToolKind,
+  validateRuleToolCallRecord,
+  validateRuleHistoryWindow,
+  validateRuleBehaviorFacts,
+  validateRuleContextV2,
+  computeBehaviorFacts,
+} from './internalization/rule-context-v2.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';
