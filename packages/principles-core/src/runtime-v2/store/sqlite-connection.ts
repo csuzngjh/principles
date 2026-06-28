@@ -483,6 +483,21 @@ export class SqliteConnection {
         WHERE pain_id IS NOT NULL;
     `);
 
+    // INTENT.md doc version snapshots (SPEC bilingual+lifecycle).
+    // Mirrors the intent_decisions audit pattern: immutable snapshots, hash linkage.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS intent_doc_versions (
+        id TEXT PRIMARY KEY,
+        lang TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        content_snapshot TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_intent_doc_versions_lang
+        ON intent_doc_versions(lang, created_at DESC);
+    `);
+
     // P2-10: Minimal schema_version table for state.db migration tracking.
     // core cannot import plugin's MigrationRunner (dependency direction),
     // so this is a lightweight version that records schema version history.

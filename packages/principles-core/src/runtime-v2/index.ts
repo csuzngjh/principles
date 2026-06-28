@@ -1771,7 +1771,7 @@ export type {
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
-export { SqliteIntentDecisionStore } from './store/intent/index.js';
+export { SqliteIntentDecisionStore, SqliteIntentDocVersionStore } from './store/intent/index.js';
 
 // Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
 export type { FileModification } from './risk/index.js';
