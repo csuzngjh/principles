@@ -37,6 +37,7 @@ import {
   validateIntentInitResult,
   validateIntentSaveResult,
   validateIntentRawContent,
+  validateIntentVersions,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -73,6 +74,7 @@ import type {
   IntentInitResultData,
   IntentSaveResultData,
   IntentRawContentData,
+  IntentVersionData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -489,26 +491,6 @@ async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'
   );
 }
 
-export interface IntentVersionEntry {
-  id: string;
-  lang: string;
-  contentHash: string;
-  contentSnapshot: string;
-  reason: string;
-  createdAt: string;
-}
-
-export interface IntentVersionData {
-  versions: IntentVersionEntry[];
-}
-
-function validateIntentVersions(data: unknown): IntentVersionData | null {
-  if (typeof data !== 'object' || data === null) return null;
-  const obj = data as Record<string, unknown>;
-  if (!Array.isArray(obj.versions)) return null;
-  return { versions: obj.versions as IntentVersionEntry[] };
-}
-
 async function fetchIntentVersions(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentVersionData>> {
   return request<IntentVersionData>(
     `/api/v1/intent/versions?lang=${lang}`,
@@ -705,6 +687,8 @@ export type {
   LinkCandidateFollowUpData,
   GuideRulehostFollowUpData,
   GeneratePatchProposalFollowUpData,
+  IntentVersionEntry,
+  IntentVersionData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

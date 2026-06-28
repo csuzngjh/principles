@@ -324,6 +324,14 @@ export function IntentPage() {
   // Version history
   const [versions, setVersions] = useState<IntentVersionEntry[]>([]);
 
+  // Map raw backend reason codes to localized labels for the version history panel.
+  // Unknown reasons fall back to the raw string (observability over silent masking).
+  const versionReasonLabel = useCallback((reason: string): string => {
+    if (reason === 'init') return t("pages.intent.versionHistory.reasonInit");
+    if (reason === 'save') return t("pages.intent.versionHistory.reasonSave");
+    return reason;
+  }, [t]);
+
   const loadData = useCallback(async () => {
     setPageState("loading");
     setErrorMsg(null);
@@ -348,6 +356,18 @@ export function IntentPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // P0 fix: when language changes, reset editor state and stale versions.
+  // Without this, switching language while editing would keep the editor open
+  // with the old language's content — and saving would write that content
+  // into the NEW language's file (data corruption).
+  // Also clears stale versions so the panel doesn't show the old language's
+  // history while the new language's fetch is in flight or has failed.
+  useEffect(() => {
+    setIsEditing(false);
+    setEditorContent("");
+    setVersions([]);
+  }, [lang]);
 
   // PRI-477: Called when user clicks "Edit" — fetch raw content and open editor
   const handleStartEdit = useCallback(async () => {
@@ -606,7 +626,9 @@ export function IntentPage() {
               {versions.map((v) => (
                 <div key={v.id} className="flex items-center gap-3 py-1 text-[12px] font-mono text-ink-2">
                   <span className="text-ink-3">{v.createdAt.slice(0, 19).replace('T', ' ')}</span>
-                  <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3">{v.reason}</span>
+                  <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3">
+                    {versionReasonLabel(v.reason)}
+                  </span>
                   <span className="text-ink-3">{v.contentHash.slice(0, 12)}</span>
                 </div>
               ))}

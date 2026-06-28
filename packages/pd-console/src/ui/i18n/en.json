@@ -869,6 +869,14 @@
         "lastDecisionAtLabel": "Last decision",
         "noDecisions": "No decisions recorded yet",
         "loadError": "Failed to load decision summary"
+      },
+      "langSelector": {
+        "ariaLabel": "Select INTENT.md language"
+      },
+      "versionHistory": {
+        "title": "Version History",
+        "reasonInit": "Initialized",
+        "reasonSave": "Saved"
       }
     },
     "debt": {
