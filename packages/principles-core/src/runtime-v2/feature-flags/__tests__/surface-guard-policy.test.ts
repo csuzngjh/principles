@@ -7,9 +7,8 @@ import {
   getSurfaceIdForHook,
   getSurfaceIdForService,
   __resetSurfaceGuardSkipLogStateForTests,
-} from '../../src/core/surface-guard.js';
-import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
-import type { OpenClawPluginService } from '../../src/openclaw-sdk.js';
+} from '../surface-guard-policy.js';
+import { PLUGIN_SURFACE_REGISTRY } from '../plugin-surface-registry.js';
 
 describe('surface-guard', () => {
   beforeEach(() => {
@@ -152,19 +151,12 @@ describe('surface-guard', () => {
     });
 
     it('does not log at guardHook construction time (PRI-298 / chatgpt P2)', () => {
-      // Registering a guard for a quiet hook must not emit the SKIP line on
-      // its own; the log fires only when the returned no-op is actually
-      // invoked. Plugin startup that registers a dozen quiet hooks would
-      // otherwise log a dozen SKIP lines before any real traffic.
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
       guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
       expect(mockLogger.info).not.toHaveBeenCalled();
     });
 
     it('logger undefined on first fire does not consume the one-shot slot (PRI-298 / coderabbit Major)', () => {
-      // First call has no logger — the no-op still suppresses the handler,
-      // and the once-only slot is preserved for a later call that does
-      // have a logger.
       const handler1 = guardHook('hook:after_tool_call.trajectory', undefined, vi.fn());
       handler1({}, {});
 
@@ -172,13 +164,11 @@ describe('surface-guard', () => {
       const handler2 = guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
       handler2({}, {});
 
-      // Only the second call (which had a logger) should have emitted a log.
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('[PD:surface-guard] SKIP hook:after_tool_call.trajectory'),
       );
 
-      // A third call should now be silent (slot consumed by the second call).
       const handler3 = guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
       handler3({}, {});
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
@@ -206,16 +196,12 @@ describe('surface-guard', () => {
       const mockHandler = vi.fn();
       const guarded = guardHook('hook:after_tool_call.trajectory', mockLogger, mockHandler);
 
-      // First fire: log is emitted once with the disabled reason.
       guarded({}, {});
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('[PD:surface-guard] SKIP hook:after_tool_call.trajectory'),
       );
 
-      // Subsequent fires on the same surfaceId: no further log noise, but the
-      // handler is still suppressed (observability remains: the no-op returns
-      // undefined; the surface is still classified as disabled).
       for (let i = 0; i < 5; i += 1) {
         guarded({}, {});
       }
@@ -247,20 +233,20 @@ describe('surface-guard', () => {
     });
 
     it('returns original service for enabled surface', () => {
-      const mockService: OpenClawPluginService = { id: 'test-service' };
+      const mockService = { id: 'test-service' };
       const result = guardService('hook:before_prompt_build', mockService);
       expect(result).toBe(mockService);
     });
 
     it('returns null for disabled surface without logger', () => {
-      const mockService: OpenClawPluginService = { id: 'test-service' };
+      const mockService = { id: 'test-service' };
       const result = guardService('hook:after_tool_call.trajectory', mockService);
       expect(result).toBeNull();
     });
 
     it('logs when surface is disabled with logger', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
-      const mockService: OpenClawPluginService = { id: 'test-service' };
+      const mockService = { id: 'test-service' };
       const result = guardService('hook:after_tool_call.trajectory', mockService, mockLogger);
       expect(result).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -269,16 +255,15 @@ describe('surface-guard', () => {
     });
 
     it('returns null for unknown surface', () => {
-      const mockService: OpenClawPluginService = { id: 'test-service' };
+      const mockService = { id: 'test-service' };
       const result = guardService('service:nonexistent', mockService);
       expect(result).toBeNull();
     });
 
     it('logs once per service surface on first registration (PRI-298 rate-limit)', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
-      const service: OpenClawPluginService = { id: 'test-service' };
+      const service = { id: 'test-service' };
 
-      // service:evolution-worker is quiet/disabled — use it for the rate-limit test.
       const first = guardService('service:evolution-worker', service, mockLogger);
       expect(first).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
@@ -286,7 +271,6 @@ describe('surface-guard', () => {
         expect.stringContaining('SKIP service service:evolution-worker'),
       );
 
-      // Subsequent guardService calls for the same surfaceId stay silent.
       guardService('service:evolution-worker', service, mockLogger);
       guardService('service:evolution-worker', service, mockLogger);
       expect(mockLogger.info).toHaveBeenCalledTimes(1);
@@ -301,7 +285,6 @@ describe('surface-guard', () => {
       expect(quietOrNonCore.length).toBeGreaterThan(0);
       for (const surface of quietOrNonCore) {
         expect(surface.disabledReason).toBeDefined();
-        // MVP residue that should not appear in production log copy.
         expect(surface.disabledReason).not.toMatch(/Story A/);
         expect(surface.disabledReason).not.toMatch(/MVP\s*验收/);
         expect(surface.disabledReason).not.toMatch(/测试任务/);
@@ -316,15 +299,10 @@ describe('surface-guard', () => {
     });
 
     it('no quiet surface disabledReason promises a feature flag override (PRI-298 / chatgpt P2)', () => {
-      // The runtime guard path (`isSurfaceEnabled(surfaceId)` with no
-      // overrides argument) does not consume `.pd/config.yaml`, so
-      // telling operators to "enable via feature flag override" would be
-      // an impossible next action. Quiet copy must describe the surface
-      // honestly without pointing to a non-existent override path.
       const quiet = PLUGIN_SURFACE_REGISTRY.filter(s => s.category === 'quiet');
       expect(quiet.length).toBeGreaterThan(0);
       for (const surface of quiet) {
-        const reason = surface.disabledReason!.toLowerCase();
+        const reason = (surface.disabledReason ?? '').toLowerCase();
         expect(reason).not.toContain('enable via feature flag');
         expect(reason).not.toMatch(/enable via .* override/);
       }
