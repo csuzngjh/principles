@@ -138,6 +138,12 @@ const TOOL_ALIAS: Readonly<Record<string, CanonicalKind>> = {
 
 export function canonicalizeToolKind(toolName: unknown): CanonicalKind {
   if (typeof toolName !== 'string') return 'other';
+  // ERR-076: Object.hasOwn guards against inherited Object.prototype keys
+  // (__proto__, constructor, toString, hasOwnProperty, ...) that direct
+  // indexing would otherwise leak as non-CanonicalKind values (e.g. the
+  // Object.prototype object, the Object constructor function). Without this
+  // guard `TOOL_ALIAS['__proto__']` returns Object.prototype, not undefined.
+  if (!Object.hasOwn(TOOL_ALIAS, toolName)) return 'other';
   const hit = TOOL_ALIAS[toolName];
   return hit !== undefined ? hit : 'other';
 }

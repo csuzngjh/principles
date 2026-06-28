@@ -99,6 +99,14 @@ describe('PRI-480 canonicalizeToolKind — static alias table', () => {
     expect(canonicalizeToolKind({ name: 'read' })).toBe('other');
     expect(canonicalizeToolKind(['read'])).toBe('other');
   });
+
+  it('returns "other" for inherited Object.prototype keys (ERR-076: no inherited-key leakage from TOOL_ALIAS)', () => {
+    expect(canonicalizeToolKind('__proto__')).toBe('other');
+    expect(canonicalizeToolKind('constructor')).toBe('other');
+    expect(canonicalizeToolKind('toString')).toBe('other');
+    expect(canonicalizeToolKind('hasOwnProperty')).toBe('other');
+    expect(canonicalizeToolKind('valueOf')).toBe('other');
+  });
 });
 
 // ── B. UNAVAILABLE_RULE_CONTEXT sentinel ─────────────────────────────────
@@ -207,11 +215,19 @@ describe('PRI-480 validateRuleToolCallRecord', () => {
     ).toBe(false);
   });
 
-  it('rejects prototype-pollution own keys (ERR-076)', () => {
-    const hostile = makeCall();
-    Object.defineProperty(hostile, '__proto__', { value: 42, enumerable: true, configurable: true, writable: true });
-    expect(validateRuleToolCallRecord(hostile).valid).toBe(false);
-  });
+  it.each(['__proto__', 'constructor', 'prototype'] as const)(
+    'rejects prototype-pollution own key %s (ERR-076)',
+    (key) => {
+      const hostile = makeCall();
+      Object.defineProperty(hostile, key, {
+        value: 42,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      expect(validateRuleToolCallRecord(hostile).valid).toBe(false);
+    },
+  );
 });
 
 // ── D. validateRuleHistoryWindow ──────────────────────────────────────────
