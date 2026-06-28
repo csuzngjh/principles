@@ -13,6 +13,15 @@ export interface FileModification {
 }
 
 /**
+ * Read a string-typed param safely, returning '' for non-string values.
+ * Replaces `as string` assertions that could throw at runtime if upstream
+ * passed a non-string (e.g. number, object). See rc-2-no-as-bypass.
+ */
+function readStringParam(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+/**
  * Estimate the number of lines changed by a tool call.
  * Returns 0 for unknown tools, 50 for file deletions.
  */
@@ -20,19 +29,23 @@ export function estimateLineChanges(modification: FileModification): number {
   const { toolName, params } = modification;
 
   if (toolName === 'write_file' || toolName === 'write') {
-    const content = (params.content as string) || '';
+    const content = readStringParam(params.content);
     return content.split('\n').length;
   }
 
   if (toolName === 'replace' || toolName === 'edit') {
-    const newContent = (params.new_string as string) || (params.newText as string) || '';
+    const newContent = readStringParam(params.new_string) || readStringParam(params.newText);
     return newContent.split('\n').length;
   }
 
   if (toolName === 'apply_patch' || toolName === 'patch') {
-    const patch = (params.patch as string) || '';
-    // Rough estimate for patch files
-    return patch.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length;
+    const patch = readStringParam(params.patch);
+    // Rough estimate for patch files.
+    // Exclude unified-diff file headers (--- / +++) which are not actual changes.
+    return patch
+      .split('\n')
+      .filter((l: string) => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---'))
+      .length;
   }
 
   if (toolName === 'delete_file') {

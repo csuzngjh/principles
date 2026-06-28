@@ -49,4 +49,58 @@ describe('estimateLineChanges', () => {
     });
     expect(lines).toBe(3);
   });
+
+  // Regression: apply_patch must NOT count --- / +++ file headers as changes.
+  // See CodeRabbit review on PR #1094 (P2): unified-diff headers overcounted by 2.
+  it('should exclude --- / +++ file headers from apply_patch line count', () => {
+    const lines = estimateLineChanges({
+      toolName: 'apply_patch',
+      params: {
+        patch: '--- a/file.txt\n+++ b/file.txt\n+line1\n-line2\n context',
+      },
+    });
+    // Only +line1 and -line2 are actual changes; --- and +++ are file headers.
+    expect(lines).toBe(2);
+  });
+
+  // Regression: non-string params must NOT throw. See rc-2-no-as-bypass.
+  it('should return 0 (not throw) when params.content is a number', () => {
+    const lines = estimateLineChanges({
+      toolName: 'write_file',
+      params: { content: 12345 },
+    });
+    expect(lines).toBe(1); // '' split by '\n' gives [''], length 1
+  });
+
+  it('should return 0 (not throw) when params.content is an object', () => {
+    const lines = estimateLineChanges({
+      toolName: 'write_file',
+      params: { content: { foo: 'bar' } },
+    });
+    expect(lines).toBe(1);
+  });
+
+  it('should return 0 (not throw) when params.content is an array', () => {
+    const lines = estimateLineChanges({
+      toolName: 'write_file',
+      params: { content: ['a', 'b'] },
+    });
+    expect(lines).toBe(1);
+  });
+
+  it('should return 0 (not throw) when params.new_string is null', () => {
+    const lines = estimateLineChanges({
+      toolName: 'replace',
+      params: { new_string: null },
+    });
+    expect(lines).toBe(1);
+  });
+
+  it('should return 0 (not throw) when params.patch is a number', () => {
+    const lines = estimateLineChanges({
+      toolName: 'apply_patch',
+      params: { patch: 999 },
+    });
+    expect(lines).toBe(0);
+  });
 });
