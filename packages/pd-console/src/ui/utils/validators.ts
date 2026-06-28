@@ -2072,3 +2072,45 @@ export function validateIntentSaveResult(v: unknown): IntentSaveResultData | nul
 
   return result;
 }
+
+// ── Intent Version History (PRI-467) ─────────────────────────────────────────
+
+export interface IntentVersionEntry {
+  id: string;
+  lang: string;
+  contentHash: string;
+  contentSnapshot: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface IntentVersionData {
+  versions: IntentVersionEntry[];
+}
+
+function validateIntentVersionEntry(v: unknown): IntentVersionEntry | null {
+  if (!isObject(v)) return null;
+  // Required string fields — fail loud on missing or wrong type (rc-3, rc-4)
+  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'lang') || !isString(v.lang)) return null;
+  if (!Object.hasOwn(v, 'contentHash') || !isString(v.contentHash)) return null;
+  if (!Object.hasOwn(v, 'contentSnapshot') || !isString(v.contentSnapshot)) return null;
+  if (!Object.hasOwn(v, 'reason') || !isString(v.reason)) return null;
+  if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
+  return {
+    id: v.id,
+    lang: v.lang,
+    contentHash: v.contentHash,
+    contentSnapshot: v.contentSnapshot,
+    reason: v.reason,
+    createdAt: v.createdAt,
+  };
+}
+
+export function validateIntentVersions(v: unknown): IntentVersionData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'versions') || !Array.isArray(v.versions)) return null;
+  const versions = validateArray(v.versions, validateIntentVersionEntry);
+  if (versions === null) return null;
+  return { versions };
+}

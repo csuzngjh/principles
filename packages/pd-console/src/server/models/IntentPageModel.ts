@@ -2,12 +2,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   INTENT_MAX_BYTES,
-  INTENT_DOC_TEMPLATE,
+  getIntentFilename,
+  createIntentTemplate,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
+  SqliteConnection,
+  SqliteIntentDocVersionStore,
   type IntentDocSections,
   type IntentDocWarning,
+  type IntentDocVersion,
+  type IntentLang,
 } from '@principles/core/runtime-v2';
 
 export interface IntentPageResult {
@@ -50,8 +55,43 @@ export interface IntentRawContentResult {
   nextAction?: string;
 }
 
-const INTENT_FILENAME = 'INTENT.md';
+export interface IntentVersionResult {
+  ok: boolean;
+  versions?: IntentDocVersion[];
+  reason?: string;
+  nextAction?: string;
+}
+
 const INTENT_DIR = '.principles';
+
+function stateDbExists(workspaceDir: string): boolean {
+  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+}
+
+/** Best-effort version record — never blocks save on failure. */
+function recordVersion(args: {
+  workspaceDir: string;
+  lang: IntentLang;
+  content: string;
+  reason: string;
+}): void {
+  // Note: no stateDbExists short-circuit. SqliteConnection creates the .pd
+  // dir and state.db file (with intent_doc_versions table via CREATE TABLE
+  // IF NOT EXISTS) on first open. Short-circuiting here would silently drop
+  // the first-write version history on fresh workspaces — the operator
+  // would see an empty history panel after their very first save.
+  try {
+    const connection = new SqliteConnection({ workspaceDir: args.workspaceDir });
+    try {
+      const store = new SqliteIntentDocVersionStore(connection);
+      store.saveVersion({ lang: args.lang, content: args.content, reason: args.reason });
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
+  } catch {
+    // Version recording is best-effort — never block save on failure.
+  }
+}
 
 export class IntentPageModel {
   private readonly workspaceDir: string;
@@ -60,7 +100,7 @@ export class IntentPageModel {
     this.workspaceDir = workspaceDir;
   }
 
-  async getSummary(flagEnabled: boolean): Promise<IntentPageResult> {
+  async getSummary(flagEnabled: boolean, lang: IntentLang): Promise<IntentPageResult> {
     if (!flagEnabled) {
       return {
         ok: false,
@@ -68,11 +108,11 @@ export class IntentPageModel {
         flagEnabled: false,
         warnings: [],
         reason: 'flag_disabled',
-        nextAction: 'Enable the intent_engineering feature flag in .pd/config.yaml to read INTENT.md.',
+        nextAction: `Enable the intent_engineering feature flag in .pd/config.yaml to read ${getIntentFilename(lang)}.`,
       };
     }
 
-    const filePath = path.join(this.workspaceDir, INTENT_DIR, INTENT_FILENAME);
+    const filePath = path.join(this.workspaceDir, INTENT_DIR, getIntentFilename(lang));
 
     try {
       if (!fs.existsSync(filePath)) {
@@ -82,7 +122,7 @@ export class IntentPageModel {
           flagEnabled: true,
           warnings: [],
           reason: 'not_found',
-          nextAction: 'Create .principles/INTENT.md using "pd intent init".',
+          nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
         };
       }
 
@@ -94,7 +134,7 @@ export class IntentPageModel {
           flagEnabled: true,
           warnings: [],
           reason: 'oversized',
-          nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
         };
       }
 
@@ -120,35 +160,19 @@ export class IntentPageModel {
         sections: sectionRecord,
       };
     } catch (err) {
-      // Runtime Contract Rule #9: log underlying error for observability
-      // while preserving the never-throws contract.
-      console.error('[IntentPageModel] failed to read INTENT.md:', err);
+      console.error(`[IntentPageModel] failed to read ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
         found: false,
         flagEnabled: true,
         warnings: [],
         reason: 'read_error',
-        nextAction: 'Check filesystem permissions for .principles/INTENT.md.',
+        nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
       };
     }
   }
 
-  /**
-   * Read the raw content of INTENT.md for editing.
-   *
-   * Returns a structured result so callers can distinguish failure modes
-   * (file missing / oversized / read error / flag disabled) — rc-9-no-silent-
-   * fallback (ERR-002). The previous implementation collapsed all three into a
-   * bare `null`, which forced the route to claim `not_found` even when the real
-   * reason was a permission or read failure.
-   *
-   * Stat-first size guard keeps this path consistent with `getSummary()`, which
-   * returns `reason='oversized'` for files > INTENT_MAX_BYTES. Without the guard
-   * here, oversized files would be silently read into memory and only rejected
-   * on save — inconsistent with the read-only `getSummary` contract.
-   */
-  async getRawContent(flagEnabled: boolean): Promise<IntentRawContentResult> {
+  async getRawContent(flagEnabled: boolean, lang: IntentLang): Promise<IntentRawContentResult> {
     if (!flagEnabled) {
       return {
         ok: false,
@@ -157,53 +181,40 @@ export class IntentPageModel {
       };
     }
 
-    const filePath = path.join(this.workspaceDir, INTENT_DIR, INTENT_FILENAME);
+    const filePath = path.join(this.workspaceDir, INTENT_DIR, getIntentFilename(lang));
 
     try {
       if (!fs.existsSync(filePath)) {
         return {
           ok: false,
           reason: 'not_found',
-          nextAction: 'INTENT.md does not exist. Create it first using POST /api/v1/intent/init.',
+          nextAction: `${getIntentFilename(lang)} does not exist. Create it first using POST /api/v1/intent/init.`,
         };
       }
 
-      // Stat-first size guard. Use stat.size (byte length on disk) for the
-      // oversized path; `Buffer.byteLength(content, 'utf8')` is only meaningful
-      // post-read — and reading a 32 KiB+ file just to reject it is wasteful.
       const stat = fs.statSync(filePath);
       if (stat.size > INTENT_MAX_BYTES) {
         return {
           ok: false,
           reason: 'oversized',
-          nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content before opening the editor.`,
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content before opening the editor.`,
         };
       }
 
       const content = fs.readFileSync(filePath, 'utf8');
       return { ok: true, content, path: filePath };
     } catch (err) {
-      // rc-9-no-silent-fallback: distinguish I/O / permission errors from
-      // "file missing" so the route can map to a real status code instead of
-      // claiming not_found for everything (combining ERR-002 + ERR-010).
       const message = err instanceof Error ? err.message : String(err);
-      console.error('[IntentPageModel] failed to read raw INTENT.md:', err);
+      console.error(`[IntentPageModel] failed to read raw ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
         reason: 'read_error',
-        nextAction: `Could not read INTENT.md: ${message}. Check filesystem permissions.`,
+        nextAction: `Could not read ${getIntentFilename(lang)}: ${message}. Check filesystem permissions.`,
       };
     }
   }
 
-  /**
-   * Create INTENT.md from the SPEC §7 template.
-   * - Does NOT overwrite an existing file unless force=true (EP-03 idempotent).
-   * - Creates .principles/ directory if it doesn't exist.
-   * - Owner-owned: this is triggered by Owner clicking "Create template" in UI,
-   *   NOT by Agent auto-modification (SPEC §3.9 boundary preserved).
-   */
-  async createTemplate(flagEnabled: boolean, force: boolean): Promise<IntentInitResult> {
+  async createTemplate(flagEnabled: boolean, force: boolean, lang: IntentLang): Promise<IntentInitResult> {
     if (!flagEnabled) {
       return {
         ok: false,
@@ -214,15 +225,13 @@ export class IntentPageModel {
     }
 
     const dirPath = path.join(this.workspaceDir, INTENT_DIR);
-    const filePath = path.join(dirPath, INTENT_FILENAME);
+    const filePath = path.join(dirPath, getIntentFilename(lang));
 
     try {
-      // Create .principles/ directory if it doesn't exist
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
 
-      // Don't overwrite existing file unless force=true
       if (fs.existsSync(filePath) && !force) {
         return {
           ok: true,
@@ -233,14 +242,16 @@ export class IntentPageModel {
         };
       }
 
-      fs.writeFileSync(filePath, INTENT_DOC_TEMPLATE, 'utf8');
+      const templateContent = createIntentTemplate(lang);
+      fs.writeFileSync(filePath, templateContent, 'utf8');
+      recordVersion({ workspaceDir: this.workspaceDir, lang, content: templateContent, reason: 'init' });
       return {
         ok: true,
         created: true,
         path: filePath,
       };
     } catch (err) {
-      console.error('[IntentPageModel] failed to create INTENT.md:', err);
+      console.error(`[IntentPageModel] failed to create ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
         created: false,
@@ -250,13 +261,7 @@ export class IntentPageModel {
     }
   }
 
-  /**
-   * Save user-edited INTENT.md content.
-   * - Validates content size (INTENT_MAX_BYTES) and type.
-   * - Overwrites the existing file (Owner explicitly clicked "Save").
-   * - Returns updated summary (hash, warnings) for UI refresh.
-   */
-  async saveContent(flagEnabled: boolean, content: unknown): Promise<IntentSaveResult> {
+  async saveContent(flagEnabled: boolean, content: unknown, lang: IntentLang): Promise<IntentSaveResult> {
     if (!flagEnabled) {
       return {
         ok: false,
@@ -266,7 +271,6 @@ export class IntentPageModel {
       };
     }
 
-    // Runtime Contract Rule #1 + #2: treat input as unknown, validate with typeof
     if (typeof content !== 'string') {
       return {
         ok: false,
@@ -276,7 +280,6 @@ export class IntentPageModel {
       };
     }
 
-    // Rule #3: fail loud on empty content
     if (content.length === 0) {
       return {
         ok: false,
@@ -286,7 +289,6 @@ export class IntentPageModel {
       };
     }
 
-    // Validate size limit
     const byteLength = Buffer.byteLength(content, 'utf8');
     if (byteLength > INTENT_MAX_BYTES) {
       return {
@@ -298,7 +300,7 @@ export class IntentPageModel {
     }
 
     const dirPath = path.join(this.workspaceDir, INTENT_DIR);
-    const filePath = path.join(dirPath, INTENT_FILENAME);
+    const filePath = path.join(dirPath, getIntentFilename(lang));
 
     try {
       if (!fs.existsSync(dirPath)) {
@@ -307,11 +309,12 @@ export class IntentPageModel {
 
       fs.writeFileSync(filePath, content, 'utf8');
 
-      // Return updated summary for UI refresh
       const sections = parseIntentDocSections(content);
       const warnings = validateIntentDocSections(sections);
       const contentHash = computeIntentContentHash(content);
       const stat = fs.statSync(filePath);
+
+      recordVersion({ workspaceDir: this.workspaceDir, lang, content, reason: 'save' });
 
       return {
         ok: true,
@@ -322,12 +325,41 @@ export class IntentPageModel {
         warnings,
       };
     } catch (err) {
-      console.error('[IntentPageModel] failed to save INTENT.md:', err);
+      console.error(`[IntentPageModel] failed to save ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
         saved: false,
         reason: 'write_error',
-        nextAction: 'Check filesystem permissions for .principles/INTENT.md.',
+        nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
+      };
+    }
+  }
+
+  async getVersions(lang: IntentLang): Promise<IntentVersionResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return {
+        ok: false,
+        reason: 'state_db_not_found',
+        nextAction: 'Run a PD command that creates state.db first (e.g. pd pain list).',
+      };
+    }
+
+    try {
+      const connection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
+      try {
+        const store = new SqliteIntentDocVersionStore(connection);
+        const versions = await store.listVersions(lang);
+        return { ok: true, versions };
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[IntentPageModel] failed to list versions:`, err);
+      return {
+        ok: false,
+        reason: 'read_error',
+        nextAction: `Could not read version history: ${message}`,
       };
     }
   }

@@ -2,13 +2,16 @@
  * pd intent — Owner-authored INTENT.md management (PRI-466).
  *
  * Subcommands:
- *   - init : create .principles/INTENT.md from the canonical template
- *   - show : display a read-only summary of INTENT.md (sections, hash, warnings)
+ *   - init : create .principles/INTENT.{lang}.md from the canonical template
+ *   - show : display a read-only summary of INTENT.{lang}.md (sections, hash, warnings)
  *
  * `init` is not gated by the intent_engineering flag — the Owner can
  * initialise the intent doc at any time. `show` IS gated: flag-off returns
  * a structured `flag_disabled` result without touching the filesystem,
  * matching the Console backend contract.
+ *
+ * Bilingual: --lang zh-CN|en (default zh-CN) selects the intent doc language.
+ * File naming: INTENT.zh-CN.md / INTENT.en.md via getIntentFilename(lang).
  *
  * JSON mode is strict: --json outputs exactly one parseable JSON object on
  * stdout (CLI Operator Gate rule 1). Failure paths include structured
@@ -27,13 +30,14 @@ import * as path from 'node:path';
 import type { Command } from 'commander';
 import {
   INTENT_MAX_BYTES,
-  INTENT_DOC_TEMPLATE,
+  getIntentFilename,
+  createIntentTemplate,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
   isFeatureEnabled,
 } from '@principles/core/runtime-v2';
-import type { IntentDocSections, IntentDocWarning } from '@principles/core/runtime-v2';
+import type { IntentDocSections, IntentDocWarning, IntentLang } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { emitResult } from '../services/cli-output.js';
@@ -41,7 +45,23 @@ import { emitResult } from '../services/cli-output.js';
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const INTENT_DIR = '.principles';
-const INTENT_FILENAME = 'INTENT.md';
+
+/**
+ * Parse and validate the --lang option.
+ *
+ * Returns:
+ *   - 'zh-CN' | 'en' when value is undefined (default zh-CN) or a valid lang.
+ *   - null when value is a non-empty string that is neither 'zh-CN' nor 'en'.
+ *
+ * rc-9: invalid values MUST NOT silently fall back to zh-CN — that would
+ * let a typo like `--lang zh` quietly write to INTENT.zh-CN.md. Callers
+ * emit a structured `invalid_lang` error when null is returned.
+ */
+export function parseLang(value: string | undefined): IntentLang | null {
+  if (value === undefined) return 'zh-CN';
+  if (value === 'zh-CN' || value === 'en') return value;
+  return null;
+}
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
@@ -54,7 +74,7 @@ export interface IntentInitOutput {
 }
 
 export interface IntentShowOutput {
-  status: 'ok' | 'flag_disabled' | 'not_found' | 'oversized' | 'read_error';
+  status: 'ok' | 'skipped' | 'flag_disabled' | 'not_found' | 'oversized' | 'read_error';
   flagEnabled: boolean;
   found: boolean;
   path?: string;
@@ -68,8 +88,8 @@ export interface IntentShowOutput {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function getIntentFilePath(workspaceDir: string): string {
-  return path.join(workspaceDir, INTENT_DIR, INTENT_FILENAME);
+function getIntentFilePath(workspaceDir: string, lang: IntentLang): string {
+  return path.join(workspaceDir, INTENT_DIR, getIntentFilename(lang));
 }
 
 function sectionsToRecord(sections: IntentDocSections): Record<string, string> {
@@ -82,9 +102,9 @@ function sectionsToRecord(sections: IntentDocSections): Record<string, string> {
   return record;
 }
 
-function formatIntentShowText(o: IntentShowOutput): string {
+function formatIntentShowText(o: IntentShowOutput, filename: string): string {
   const lines: string[] = [];
-  lines.push(`INTENT.md — ${o.path}`);
+  lines.push(`${filename} — ${o.path}`);
   lines.push(`Content hash: ${o.contentHash}`);
   lines.push(`Last edited:  ${o.lastEditedAt}`);
   lines.push('');
@@ -114,9 +134,29 @@ export interface IntentInitOptions {
   json?: boolean;
   dryRun?: boolean;
   confirm?: boolean;
+  lang?: string;
 }
 
 export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
+  const lang = parseLang(opts.lang);
+
+  // rc-9: invalid --lang must not silently fall back. Emit structured error.
+  if (lang === null) {
+    const output: IntentInitOutput = {
+      status: 'skipped',
+      path: '',
+      overwritten: false,
+      reason: 'invalid_lang',
+      nextAction: `--lang must be 'zh-CN' or 'en'. Received: ${opts.lang ?? ''}`,
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   // CLI Gate rule 4: --dry-run and --confirm must be mutually exclusive.
   if (opts.dryRun && opts.confirm) {
     const output: IntentInitOutput = {
@@ -141,7 +181,7 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
   let dir: string;
   try {
     workspaceDir = resolveWorkspaceDir(opts.workspace);
-    filePath = getIntentFilePath(workspaceDir);
+    filePath = getIntentFilePath(workspaceDir, lang);
     dir = path.dirname(filePath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -160,6 +200,8 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
     return;
   }
 
+  const filename = getIntentFilename(lang);
+
   // CLI Gate rule 4: state-mutating command defaults to dry-run unless --confirm.
   const isDryRun = opts.dryRun === true || opts.confirm !== true;
 
@@ -170,11 +212,11 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
         path: filePath,
         overwritten: false,
         reason: 'file_exists',
-        nextAction: `Use --force to overwrite: pd intent init --force --confirm --workspace "${workspaceDir}"`,
+        nextAction: `Use --force to overwrite: pd intent init --force --confirm --lang ${lang} --workspace "${workspaceDir}"`,
       };
       emitResult(output, {
         json: opts.json ?? false,
-        formatText: (o) => `INTENT.md already exists at ${o.path}\n→ ${o.nextAction}`,
+        formatText: (o) => `${filename} already exists at ${o.path}\n→ ${o.nextAction}`,
       });
       process.exitCode = 1;
       return;
@@ -186,17 +228,17 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
         path: filePath,
         overwritten: opts.force === true,
         reason: 'dry_run',
-        nextAction: `Confirm write: pd intent init --confirm${opts.force ? ' --force' : ''} --workspace "${workspaceDir}"`,
+        nextAction: `Confirm write: pd intent init --confirm --lang ${lang}${opts.force ? ' --force' : ''} --workspace "${workspaceDir}"`,
       };
       emitResult(output, {
         json: opts.json ?? false,
-        formatText: (o) => `[dry-run] Would create INTENT.md at ${o.path}${o.overwritten ? ' (overwritten)' : ''}\n→ ${o.nextAction}`,
+        formatText: (o) => `[dry-run] Would create ${filename} at ${o.path}${o.overwritten ? ' (overwritten)' : ''}\n→ ${o.nextAction}`,
       });
       return;
     }
 
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, INTENT_DOC_TEMPLATE, 'utf8');
+    fs.writeFileSync(filePath, createIntentTemplate(lang), 'utf8');
 
     const output: IntentInitOutput = {
       status: 'ok',
@@ -205,7 +247,7 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
     };
     emitResult(output, {
       json: opts.json ?? false,
-      formatText: (o) => `Created INTENT.md at ${o.path}${o.overwritten ? ' (overwritten)' : ''}\nNext: edit the file to declare your project intent, then run "pd intent show".`,
+      formatText: (o) => `Created ${filename} at ${o.path}${o.overwritten ? ' (overwritten)' : ''}\nNext: edit the file to declare your project intent, then run "pd intent show --lang ${lang}".`,
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -228,9 +270,30 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
 export interface IntentShowOptions {
   workspace?: string;
   json?: boolean;
+  lang?: string;
 }
 
 export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
+  const lang = parseLang(opts.lang);
+
+  // rc-9: invalid --lang must not silently fall back. Emit structured error.
+  if (lang === null) {
+    const output: IntentShowOutput = {
+      status: 'skipped',
+      flagEnabled: false,
+      found: false,
+      warnings: [],
+      reason: 'invalid_lang',
+      nextAction: `--lang must be 'zh-CN' or 'en'. Received: ${opts.lang ?? ''}`,
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   // CLI Gate rule 6: workspace resolution inside try/catch for structured errors.
   let workspaceDir: string;
   try {
@@ -258,6 +321,8 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
   const flagsResult = computeFlagsFromLoadResult(configResult);
   const flagEnabled = isFeatureEnabled(flagsResult, 'intent_engineering');
 
+  const filename = getIntentFilename(lang);
+
   if (!flagEnabled) {
     const output: IntentShowOutput = {
       status: 'flag_disabled',
@@ -265,7 +330,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
       found: false,
       warnings: [],
       reason: 'flag_disabled',
-      nextAction: 'Enable the intent_engineering feature flag in .pd/config.yaml to read INTENT.md.',
+      nextAction: `Enable the intent_engineering feature flag in .pd/config.yaml to read ${filename}.`,
     };
     emitResult(output, {
       json: opts.json ?? false,
@@ -274,7 +339,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
     return;
   }
 
-  const filePath = getIntentFilePath(workspaceDir);
+  const filePath = getIntentFilePath(workspaceDir, lang);
 
   try {
     if (!fs.existsSync(filePath)) {
@@ -284,11 +349,11 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
         found: false,
         warnings: [],
         reason: 'not_found',
-        nextAction: `Create INTENT.md: pd intent init --workspace "${workspaceDir}"`,
+        nextAction: `Create ${filename}: pd intent init --confirm --lang ${lang} --workspace "${workspaceDir}"`,
       };
       emitResult(output, {
         json: opts.json ?? false,
-        formatText: (o) => `INTENT.md not found.\n→ ${o.nextAction}`,
+        formatText: (o) => `${filename} not found.\n→ ${o.nextAction}`,
       });
       return;
     }
@@ -301,11 +366,11 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
         found: true,
         warnings: [],
         reason: 'oversized',
-        nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+        nextAction: `${filename} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
       };
       emitResult(output, {
         json: opts.json ?? false,
-        formatText: (o) => `INTENT.md is too large.\n→ ${o.nextAction}`,
+        formatText: (o) => `${filename} is too large.\n→ ${o.nextAction}`,
       });
       return;
     }
@@ -327,7 +392,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
     };
     emitResult(output, {
       json: opts.json ?? false,
-      formatText: (o) => formatIntentShowText(o),
+      formatText: (o) => formatIntentShowText(o, filename),
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -341,7 +406,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
     };
     emitResult(output, {
       json: opts.json ?? false,
-      formatText: (o) => `Error reading INTENT.md: ${o.reason}\n→ ${o.nextAction}`,
+      formatText: (o) => `Error reading ${filename}: ${o.reason}\n→ ${o.nextAction}`,
     });
     process.exitCode = 1;
   }
@@ -356,11 +421,12 @@ export function registerIntentCommand(parentCmd: Command): Command {
 
   intentCmd
     .command('init')
-    .description('Create .principles/INTENT.md from the canonical template')
+    .description('Create .principles/INTENT.{lang}.md from the canonical template')
     .option('-w, --workspace <path>', 'Workspace directory')
-    .option('--force', 'Overwrite existing INTENT.md')
+    .option('--force', 'Overwrite existing INTENT file')
     .option('--dry-run', 'Show what would happen without writing (default)')
-    .option('--confirm', 'Actually write the file (required to create INTENT.md)')
+    .option('--confirm', 'Actually write the file (required to create INTENT file)')
+    .option('--lang <lang>', 'Language: zh-CN or en (default: zh-CN)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleIntentInit({
@@ -369,18 +435,21 @@ export function registerIntentCommand(parentCmd: Command): Command {
         json: opts.json === true,
         dryRun: opts.dryRun === true,
         confirm: opts.confirm === true,
+        lang: opts.lang,
       });
     });
 
   intentCmd
     .command('show')
-    .description('Display a read-only summary of INTENT.md (sections, hash, warnings)')
+    .description('Display a read-only summary of INTENT.{lang}.md (sections, hash, warnings)')
     .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--lang <lang>', 'Language: zh-CN or en (default: zh-CN)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleIntentShow({
         workspace: opts.workspace,
         json: opts.json === true,
+        lang: opts.lang,
       });
     });
 

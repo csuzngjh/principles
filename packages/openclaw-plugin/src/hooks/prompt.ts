@@ -31,6 +31,7 @@ import { buildEmpathyObservation, resolveSourceKind } from './raw-observation-ad
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
+import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
@@ -1013,7 +1014,7 @@ export async function handleBeforePromptBuild(
   try {
     const intentFlag = loadFeatureFlagFromConfig(workspaceDir, 'intent_engineering', logger);
     if (intentFlag.enabled) {
-      const intentResult = safeReadIntentDoc(workspaceDir, { logger });
+      const intentResult = safeReadIntentDoc(workspaceDir, resolveIntentLang(workspaceDir), { logger });
       if (intentResult.ok && intentResult.doc) {
         const block = buildIntentFrictionBlock({ rawIntentMd: intentResult.doc.raw });
         if (block.length > 0) {

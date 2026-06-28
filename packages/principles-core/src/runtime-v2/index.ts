@@ -1734,14 +1734,20 @@ export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 export {
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
+  INTENT_DOC_TEMPLATE_ZH,
+  INTENT_DOC_TEMPLATE_EN,
   INTENT_INJECT_MAX_CHARS,
   INTENT_TRUNCATION_MARKER,
+  getIntentFilename,
+  createIntentTemplate,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
   buildIntentFrictionBlock,
   NullIntentDocReader,
   generateIntentPatchProposal,
+  computeVersionDiff,
+  formatVersionSummary,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -1757,12 +1763,15 @@ export type {
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   IntentDecisionStore,
+  IntentLang,
+  IntentDocVersion,
+  IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
-export { SqliteIntentDecisionStore } from './store/intent/index.js';
+export { SqliteIntentDecisionStore, SqliteIntentDocVersionStore } from './store/intent/index.js';
 
 // Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
 export type { FileModification } from './risk/index.js';
