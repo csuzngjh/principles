@@ -25,6 +25,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/rule-host-contracts.ts',
   'internalization/rule-host-helpers.ts',
   'internalization/index.ts',
+  // PRI-480 (RuleContext v2 — Phase 1 Core ABI)
+  'internalization/rule-context-v2.ts',
   // PRI-43
   'internalization/internalization-route.ts',
   // PRI-44
