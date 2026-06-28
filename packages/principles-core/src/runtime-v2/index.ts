@@ -1767,3 +1767,21 @@ export { SqliteIntentDecisionStore } from './store/intent/index.js';
 // Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
 export type { FileModification } from './risk/index.js';
 export { estimateLineChanges } from './risk/index.js';
+
+// Thinking models (Stage 3) — pure detection patterns + scenario derivation
+// migrated from plugin. I/O (reading THINKING_OS.md) stays in the plugin.
+export {
+  BUILTIN_PATTERNS,
+  BUILTIN_PATTERN_MAP,
+  getFallbackName,
+  getFallbackDescription,
+  getBuiltinBaselineScenarios,
+  deriveThinkingScenarios,
+} from './thinking-models/index.js';
+
+export type {
+  ThinkingModelDefinition,
+  ThinkingModelMatch,
+  ThinkingScenarioContext,
+  BuiltinPatternEntry,
+} from './thinking-models/index.js';
