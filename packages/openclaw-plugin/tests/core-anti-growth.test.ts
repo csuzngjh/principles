@@ -84,7 +84,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'thinking-os-parser.ts',
     'system-logger.ts',
     'detection-funnel.ts',
-    'risk-calculator.ts',
     'migration.ts',
     'file-store.ts',
     'pd-task-store.ts',
