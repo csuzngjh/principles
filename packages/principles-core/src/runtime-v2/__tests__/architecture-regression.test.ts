@@ -291,6 +291,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
 
   // ── I/O Boundary ────────────────────────────────────────────────────────
   'trajectory.ts',
+  // PRI-482: Plugin I/O boundary — converts raw TrajectoryDatabase rows into
+  // validated RuleHistoryWindow. Pure logic (canonicalize, validate, facts)
+  // delegated to @principles/core. Assembler stays in plugin because it
+  // consumes DB row shapes (I/O data).
+  'rule-context-assembler.ts',
   'evolution-reducer.ts',
   'focus-history.ts',
   'training-program.ts',
@@ -393,7 +398,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (93 files)', async () => {
+  it('known baseline count is self-consistent (94 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
@@ -413,7 +418,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // implementing core IntentDocReader port (pure type mapping, no new I/O).
     // Stage-1 cleanup: Removed evolution-migration.ts (94 → 93) — dead code,
     // zero production references after refactor to @principles/core.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // PRI-482: Added rule-context-assembler.ts (93 → 94) — plugin I/O boundary
+    // converting TrajectoryDatabase rows to validated RuleHistoryWindow.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 
