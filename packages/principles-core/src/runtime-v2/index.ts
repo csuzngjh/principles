@@ -1746,6 +1746,8 @@ export {
   buildIntentFrictionBlock,
   NullIntentDocReader,
   generateIntentPatchProposal,
+  computeVersionDiff,
+  formatVersionSummary,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -1762,6 +1764,8 @@ export type {
   IntentDecisionSummary,
   IntentDecisionStore,
   IntentLang,
+  IntentDocVersion,
+  IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
 } from './intent/index.js';
