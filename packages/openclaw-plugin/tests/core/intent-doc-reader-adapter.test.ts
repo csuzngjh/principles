@@ -57,7 +57,7 @@ function writeConfigEnablingIntent(workspaceDir: string, enabled: boolean): void
 function writeIntentMd(workspaceDir: string, content: string): void {
   const intentDir = path.join(workspaceDir, '.principles');
   fs.mkdirSync(intentDir, { recursive: true });
-  fs.writeFileSync(path.join(intentDir, 'INTENT.md'), content, 'utf8');
+  fs.writeFileSync(path.join(intentDir, 'INTENT.zh-CN.md'), content, 'utf8');
 }
 
 describe('createIntentDocReader (PRI-468 adapter)', () => {
@@ -78,7 +78,7 @@ describe('createIntentDocReader (PRI-468 adapter)', () => {
     const content = '# Why\nValidate the loop\n';
     writeIntentMd(workspaceDir, content);
 
-    const reader = createIntentDocReader(workspaceDir);
+    const reader = createIntentDocReader(workspaceDir, 'zh-CN');
     const result = reader.readIntentDoc();
 
     expect(result.ok).toBe(true);
@@ -90,7 +90,7 @@ describe('createIntentDocReader (PRI-468 adapter)', () => {
     expect(typeof result.doc?.contentHash).toBe('string');
     expect(result.doc?.contentHash.length).toBeGreaterThan(0);
     expect(typeof result.doc?.path).toBe('string');
-    expect(result.doc?.path).toContain('INTENT.md');
+    expect(result.doc?.path).toContain('INTENT.zh-CN.md');
   });
 
   it('returns ok=false with reason=flag_disabled when flag off (no fs access)', () => {
@@ -98,7 +98,7 @@ describe('createIntentDocReader (PRI-468 adapter)', () => {
     // Even with a file present, flag off → flag_disabled
     writeIntentMd(workspaceDir, '# Why\nx\n');
 
-    const reader = createIntentDocReader(workspaceDir);
+    const reader = createIntentDocReader(workspaceDir, 'zh-CN');
     const result = reader.readIntentDoc();
 
     expect(result.ok).toBe(false);
@@ -113,7 +113,7 @@ describe('createIntentDocReader (PRI-468 adapter)', () => {
     writeConfigEnablingIntent(workspaceDir, true);
     // No INTENT.md written
 
-    const reader = createIntentDocReader(workspaceDir);
+    const reader = createIntentDocReader(workspaceDir, 'zh-CN');
     const result = reader.readIntentDoc();
 
     expect(result.ok).toBe(false);
@@ -130,7 +130,7 @@ describe('createIntentDocReader (PRI-468 adapter)', () => {
     const big = '# Why\n' + 'a'.repeat(33 * 1024);
     writeIntentMd(workspaceDir, big);
 
-    const reader = createIntentDocReader(workspaceDir);
+    const reader = createIntentDocReader(workspaceDir, 'zh-CN');
     const result = reader.readIntentDoc();
 
     expect(result.ok).toBe(false);

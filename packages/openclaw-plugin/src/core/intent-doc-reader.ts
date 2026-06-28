@@ -26,17 +26,18 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   INTENT_MAX_BYTES,
+  getIntentFilename,
   parseIntentDocSections,
   computeIntentContentHash,
   validateIntentDocSections,
   type IntentDocSections,
   type IntentDocWarning,
+  type IntentLang,
 } from '@principles/core/runtime-v2';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const INTENT_FILENAME = 'INTENT.md';
 const INTENT_DIR = '.principles';
 const INTENT_CACHE_TTL_MS = 60_000; // 1 minute (SPEC §12.1)
 
@@ -92,20 +93,42 @@ const _intentDocCache = new Map<string, CachedIntentDoc>();
 
 /**
  * Reset the intent doc cache for test isolation.
- * Call in beforeEach() to ensure tests don't pollute each other.
+ *
+ * - No args: clear the whole cache.
+ * - workspaceDir only: delete all entries for that workspace (any lang).
+ *   Keys are formatted as `${workspaceDir}:${lang}`, so we match by prefix.
+ * - workspaceDir + lang: delete the single `${workspaceDir}:${lang}` entry.
+ *
+ * Note: prompt.ts resetPromptStateForTest passes workspaceDir only — the
+ * previous signature treated it as a literal cache key, which never matched
+ * the `${workspaceDir}:${lang}` format and silently left entries behind.
  */
-export function resetIntentDocCacheForTest(workspaceDir?: string): void {
-  if (workspaceDir) {
-    _intentDocCache.delete(workspaceDir);
-  } else {
+export function resetIntentDocCacheForTest(workspaceDir?: string, lang?: IntentLang): void {
+  if (workspaceDir === undefined) {
     _intentDocCache.clear();
+    return;
+  }
+  if (lang !== undefined) {
+    _intentDocCache.delete(`${workspaceDir}:${lang}`);
+    return;
+  }
+  // workspaceDir only — clear all langs for this workspace by prefix.
+  const prefix = `${workspaceDir}:`;
+  for (const key of _intentDocCache.keys()) {
+    if (key.startsWith(prefix)) {
+      _intentDocCache.delete(key);
+    }
   }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function getIntentFilePath(workspaceDir: string): string {
-  return path.join(workspaceDir, INTENT_DIR, INTENT_FILENAME);
+function getIntentFilePath(workspaceDir: string, lang: IntentLang): string {
+  return path.join(workspaceDir, INTENT_DIR, getIntentFilename(lang));
+}
+
+function getCacheKey(workspaceDir: string, lang: IntentLang): string {
+  return `${workspaceDir}:${lang}`;
 }
 
 function buildDocFromRaw(raw: string, filePath: string, readAt: string): IntentDoc {
@@ -135,11 +158,13 @@ function buildDocFromRaw(raw: string, filePath: string, readAt: string): IntentD
  * 4. Never throws — all errors return structured reason + nextAction.
  *
  * @param workspaceDir - Absolute path to the workspace root
+ * @param lang - Mandatory language code ('zh-CN' | 'en'); selects INTENT.${lang}.md
  * @param options - Optional logger for debug-level diagnostics
  * @returns SafeReadIntentDocResult (never throws)
  */
 export function safeReadIntentDoc(
   workspaceDir: string,
+  lang: IntentLang,
   options?: { logger?: { debug?: (msg: string) => void; warn?: (msg: string) => void } },
 ): SafeReadIntentDocResult {
   // SPEC §12 — Flag check FIRST. Flag off → no fs access, no cache access.
@@ -150,16 +175,17 @@ export function safeReadIntentDoc(
       found: false,
       flagEnabled: false,
       reason: 'flag_disabled',
-      nextAction: 'Enable the intent_engineering feature flag in .pd/config.yaml to read INTENT.md.',
+      nextAction: `Enable the intent_engineering feature flag in .pd/config.yaml to read ${getIntentFilename(lang)}.`,
       warnings: [],
     };
   }
 
-  const filePath = getIntentFilePath(workspaceDir);
+  const cacheKey = getCacheKey(workspaceDir, lang);
+  const filePath = getIntentFilePath(workspaceDir, lang);
   const now = Date.now();
 
   // Check cache freshness (TTL + mtime)
-  const cached = _intentDocCache.get(workspaceDir);
+  const cached = _intentDocCache.get(cacheKey);
   if (cached && (now - cached.loadedAt) < INTENT_CACHE_TTL_MS) {
     // Cache is within TTL. Verify mtime hasn't changed.
     try {
@@ -185,13 +211,13 @@ export function safeReadIntentDoc(
     // Check existence first
     if (!fs.existsSync(filePath)) {
       // Invalidate stale cache entry if any
-      _intentDocCache.delete(workspaceDir);
+      _intentDocCache.delete(cacheKey);
       return {
         ok: false,
         found: false,
         flagEnabled: true,
         reason: 'not_found',
-        nextAction: 'Create .principles/INTENT.md using "pd intent init".',
+        nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
         warnings: [],
       };
     }
@@ -200,13 +226,13 @@ export function safeReadIntentDoc(
 
     // SPEC §12 — 32KB size cap
     if (stat.size > INTENT_MAX_BYTES) {
-      _intentDocCache.delete(workspaceDir);
+      _intentDocCache.delete(cacheKey);
       return {
         ok: false,
         found: true,
         flagEnabled: true,
         reason: 'oversized',
-        nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+        nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
         warnings: [],
       };
     }
@@ -219,13 +245,13 @@ export function safeReadIntentDoc(
     // an oversized file would enter parse/hash/cache as ok:true.
     const actualBytes = Buffer.byteLength(raw, 'utf8');
     if (actualBytes > INTENT_MAX_BYTES) {
-      _intentDocCache.delete(workspaceDir);
+      _intentDocCache.delete(cacheKey);
       return {
         ok: false,
         found: true,
         flagEnabled: true,
         reason: 'oversized',
-        nextAction: `INTENT.md exceeds ${INTENT_MAX_BYTES} bytes (${actualBytes} bytes after read). Reduce content.`,
+        nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${actualBytes} bytes after read). Reduce content.`,
         warnings: [],
       };
     }
@@ -233,7 +259,7 @@ export function safeReadIntentDoc(
     const doc = buildDocFromRaw(raw, filePath, new Date(now).toISOString());
 
     // Update cache
-    _intentDocCache.set(workspaceDir, {
+    _intentDocCache.set(cacheKey, {
       doc,
       mtime: stat.mtimeMs,
       loadedAt: now,
@@ -248,15 +274,15 @@ export function safeReadIntentDoc(
     };
   } catch (err) {
     // ERR-002 — graceful degradation with reason + nextAction
-    _intentDocCache.delete(workspaceDir);
+    _intentDocCache.delete(cacheKey);
     const message = err instanceof Error ? err.message : String(err);
-    options?.logger?.warn?.(`[PD:Intent] safeReadIntentDoc failed: workspace=${workspaceDir}, error=${message}`);
+    options?.logger?.warn?.(`[PD:Intent] safeReadIntentDoc failed: workspace=${workspaceDir}, lang=${lang}, error=${message}`);
     return {
       ok: false,
       found: false,
       flagEnabled: true,
       reason: 'read_error',
-      nextAction: 'Check filesystem permissions for .principles/INTENT.md.',
+      nextAction: `Check filesystem permissions for .principles/${getIntentFilename(lang)}.`,
       warnings: [],
     };
   }
