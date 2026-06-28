@@ -59,7 +59,7 @@ function writeConfig(intentEnabled: boolean): void {
 }
 
 function getIntentPath(): string {
-  return path.join(workspaceDir, '.principles', 'INTENT.md');
+  return path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md');
 }
 
 const VALID_INTENT = `# INTENT.md
@@ -107,7 +107,7 @@ describe('handleIntentInit', () => {
     expect(logSpy).toHaveBeenCalled();
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(jsonOutput.status).toBe('dry_run');
-    expect(jsonOutput.path).toContain('INTENT.md');
+    expect(jsonOutput.path).toContain('INTENT.zh-CN.md');
     expect(jsonOutput.reason).toBe('dry_run');
     expect(jsonOutput.nextAction).toContain('--confirm');
 
@@ -177,7 +177,7 @@ describe('handleIntentInit', () => {
     expect(logSpy).toHaveBeenCalled();
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(jsonOutput.status).toBe('ok');
-    expect(jsonOutput.path).toContain('INTENT.md');
+    expect(jsonOutput.path).toContain('INTENT.zh-CN.md');
     expect(jsonOutput.overwritten).toBe(false);
 
     logSpy.mockRestore();
@@ -311,7 +311,7 @@ describe('handleIntentShow', () => {
     await handleIntentShow({ workspace: workspaceDir, json: false });
 
     const textOutput = logSpy.mock.calls[0][0] as string;
-    expect(textOutput).toContain('INTENT.md');
+    expect(textOutput).toContain('INTENT.zh-CN.md');
     expect(textOutput).toContain('Content hash:');
     expect(textOutput).toContain('Last edited:');
     expect(textOutput).toContain('## 1. Why');

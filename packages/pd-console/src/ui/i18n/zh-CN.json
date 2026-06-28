@@ -869,6 +869,15 @@
         "lastDecisionAtLabel": "最近决策",
         "noDecisions": "暂无决策记录",
         "loadError": "加载决策摘要失败"
+      },
+      "langSelector": {
+        "ariaLabel": "选择 INTENT.md 语言",
+        "disabledWhileEditing": "请先保存或取消编辑，再切换语言"
+      },
+      "versionHistory": {
+        "title": "版本历史",
+        "reasonInit": "初始化",
+        "reasonSave": "保存"
       }
     },
     "debt": {

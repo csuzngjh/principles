@@ -3,6 +3,14 @@ import { IntentPageModel } from '../models/IntentPageModel.js';
 import { sendSuccess, sendError, sendJson } from '../utils/response.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { readBody } from '../utils/request.js';
+import type { IntentLang } from '@principles/core/runtime-v2';
+
+/** Parse lang from query string; default 'zh-CN' if missing/invalid. */
+function parseLang(req: IncomingMessage): IntentLang {
+  const url = new URL(req.url ?? '', 'http://localhost');
+  const lang = url.searchParams.get('lang');
+  return lang === 'en' ? 'en' : 'zh-CN';
+}
 
 const MODEL_CACHE_TTL_MS = 30 * 1000;
 
@@ -56,12 +64,13 @@ export async function handleIntentRoute(
   ctx: IntentRouteContext,
 ): Promise<void> {
   const { workspaceDir, subPath } = ctx;
+  const lang = parseLang(req);
   try {
     // ── GET /api/v1/intent — read Intent summary ──────────────────────────
     if (req.method === 'GET' && subPath === '') {
       const flagEnabled = loadFlagEnabled(workspaceDir);
       const model = getModel(workspaceDir);
-      const summary = await model.getSummary(flagEnabled);
+      const summary = await model.getSummary(flagEnabled, lang);
       sendSuccess(res, summary);
       return;
     }
@@ -80,7 +89,7 @@ export async function handleIntentRoute(
       }
 
       const model = getModel(workspaceDir);
-      const result = await model.getRawContent(flagEnabled);
+      const result = await model.getRawContent(flagEnabled, lang);
 
       if (!result.ok) {
         // Map model error reason → HTTP status (rc-9-no-silent-fallback).
@@ -101,6 +110,18 @@ export async function handleIntentRoute(
       }
 
       sendSuccess(res, { content: result.content, path: result.path });
+      return;
+    }
+
+    // ── GET /api/v1/intent/versions — list version history ────────────────
+    if (req.method === 'GET' && subPath === '/versions') {
+      const model = getModel(workspaceDir);
+      const result = await model.getVersions(lang);
+      if (!result.ok) {
+        sendSuccess(res, { versions: [], reason: result.reason, nextAction: result.nextAction });
+        return;
+      }
+      sendSuccess(res, { versions: result.versions });
       return;
     }
 
@@ -143,7 +164,7 @@ export async function handleIntentRoute(
       }
 
       const model = getModel(workspaceDir);
-      const result = await model.createTemplate(flagEnabled, force);
+      const result = await model.createTemplate(flagEnabled, force, lang);
 
       if (result.ok) {
         if (result.created) {
@@ -213,7 +234,7 @@ export async function handleIntentRoute(
       }
 
       const model = getModel(workspaceDir);
-      const result = await model.saveContent(flagEnabled, bodyObj.content);
+      const result = await model.saveContent(flagEnabled, bodyObj.content, lang);
 
       if (result.ok) {
         sendSuccess(res, result);

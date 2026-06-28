@@ -168,9 +168,13 @@ vi.mock('../../src/core/intent-doc-reader.js', async (importOriginal) => {
   const actual = await importOriginal() as typeof import('../../src/core/intent-doc-reader.js');
   return {
     ...actual,
-    safeReadIntentDoc: (workspaceDir: string, options?: { logger?: unknown }) => {
+    safeReadIntentDoc: (
+      workspaceDir: string,
+      lang: 'zh-CN' | 'en',
+      options?: { logger?: unknown },
+    ) => {
       _safeReadIntentDocCalls.push({ workspaceDir });
-      return actual.safeReadIntentDoc(workspaceDir, options);
+      return actual.safeReadIntentDoc(workspaceDir, lang, options);
     },
   };
 });
@@ -208,7 +212,7 @@ function writeConfig(dir: string, intentFlagEnabled: boolean): void {
 function writeIntentMd(dir: string, content: string): void {
   const intentDir = path.join(dir, '.principles');
   fs.mkdirSync(intentDir, { recursive: true });
-  fs.writeFileSync(path.join(intentDir, 'INTENT.md'), content, 'utf8');
+  fs.writeFileSync(path.join(intentDir, 'INTENT.zh-CN.md'), content, 'utf8');
 }
 
 const VALID_INTENT = `# INTENT.md

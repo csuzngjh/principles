@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
-import { registerIntentCommand } from '../intent.js';
+import { registerIntentCommand, parseLang } from '../intent.js';
 
 type ActionOptions = Record<string, unknown>;
 interface CapturedAction {
@@ -54,7 +54,7 @@ describe('pd intent — command registration', () => {
 });
 
 describe('pd intent init — option metadata', () => {
-  it('has --workspace (-w), --force, --dry-run, --confirm, and --json options', () => {
+  it('has --workspace (-w), --force, --dry-run, --confirm, --lang, and --json options', () => {
     const program = freshProgram();
     registerIntentCommand(program);
     const intentCmd = requireCmd(program.commands.find((c) => c.name() === 'intent'), 'intent');
@@ -65,6 +65,7 @@ describe('pd intent init — option metadata', () => {
     expect(initCmd.options.find((o) => o.long === '--force')).toBeDefined();
     expect(initCmd.options.find((o) => o.long === '--dry-run')).toBeDefined();
     expect(initCmd.options.find((o) => o.long === '--confirm')).toBeDefined();
+    expect(initCmd.options.find((o) => o.long === '--lang')).toBeDefined();
     expect(initCmd.options.find((o) => o.long === '--json')).toBeDefined();
   });
 
@@ -82,7 +83,7 @@ describe('pd intent init — option metadata', () => {
 });
 
 describe('pd intent show — option metadata', () => {
-  it('has --workspace (-w) and --json options, no --force', () => {
+  it('has --workspace (-w), --lang, and --json options, no --force', () => {
     const program = freshProgram();
     registerIntentCommand(program);
     const intentCmd = requireCmd(program.commands.find((c) => c.name() === 'intent'), 'intent');
@@ -90,6 +91,7 @@ describe('pd intent show — option metadata', () => {
 
     expect(showCmd.options.find((o) => o.long === '--workspace')).toBeDefined();
     expect(showCmd.options.find((o) => o.long === '--workspace')?.short).toBe('-w');
+    expect(showCmd.options.find((o) => o.long === '--lang')).toBeDefined();
     expect(showCmd.options.find((o) => o.long === '--json')).toBeDefined();
     expect(showCmd.options.find((o) => o.long === '--force')).toBeUndefined();
   });
@@ -193,5 +195,88 @@ describe('pd intent show — parser-level dispatch', () => {
     await program.parseAsync(['node', 'pd', 'intent', 'show', '-w', '/tmp/ws']);
     expect(captured.opts).not.toBeNull();
     expect(captured.opts?.workspace).toBe('/tmp/ws');
+  });
+});
+
+describe('pd intent --lang — parser-level dispatch (cli-7)', () => {
+  it('init: parses --lang zh-CN', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const initCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'init'), 'init');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(initCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'init', '--lang', 'zh-CN']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.lang).toBe('zh-CN');
+  });
+
+  it('init: parses --lang en', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const initCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'init'), 'init');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(initCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'init', '--lang', 'en']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.lang).toBe('en');
+  });
+
+  it('init: lang defaults to undefined when not passed', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const initCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'init'), 'init');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(initCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'init']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.lang).toBeUndefined();
+  });
+
+  it('show: parses --lang en', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const showCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'show'), 'show');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(showCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'show', '--lang', 'en']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.lang).toBe('en');
+  });
+
+  it('show: lang defaults to undefined when not passed', async () => {
+    const program = freshProgram();
+    const intentCmd = registerIntentCommand(program);
+    const showCmd = requireCmd(intentCmd.commands.find((c) => c.name() === 'show'), 'show');
+    const captured: CapturedAction = { opts: null };
+    attachCapture(showCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'intent', 'show']);
+    expect(captured.opts).not.toBeNull();
+    expect(captured.opts?.lang).toBeUndefined();
+  });
+});
+
+describe('parseLang — invalid value rejection (rc-9)', () => {
+  it('returns zh-CN when value is undefined (default)', () => {
+    expect(parseLang(undefined)).toBe('zh-CN');
+  });
+
+  it('returns zh-CN when value is zh-CN', () => {
+    expect(parseLang('zh-CN')).toBe('zh-CN');
+  });
+
+  it('returns en when value is en', () => {
+    expect(parseLang('en')).toBe('en');
+  });
+
+  it('returns null for invalid value (no silent fallback)', () => {
+    expect(parseLang('fr')).toBeNull();
+    expect(parseLang('zh')).toBeNull();
+    expect(parseLang('english')).toBeNull();
+    expect(parseLang('')).toBeNull();
   });
 });

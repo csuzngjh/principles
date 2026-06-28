@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent } from "../../api.js";
-import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent, fetchIntentVersions } from "../../api.js";
+import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
 import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   );
 }
 
-function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => void }) {
+function NotFoundBanner({ onCreated, lang }: { onCreated: (openEditor: boolean) => void; lang: 'zh-CN' | 'en' }) {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
@@ -148,7 +148,7 @@ function NotFoundBanner({ onCreated }: { onCreated: (openEditor: boolean) => voi
         {t("pages.intent.notFound.description")}
       </p>
       <div className="flex items-center gap-3">
-        <CreateIntentButton onCreated={onCreated} showOnboarding={true} />
+        <CreateIntentButton onCreated={onCreated} showOnboarding={true} lang={lang} />
         <span className="text-ink-4 text-[12px] font-mono">
           {t("pages.intent.notFound.nextAction")}
         </span>
@@ -319,11 +319,23 @@ export function IntentPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editorContent, setEditorContent] = useState("");
   const [editorLoading, setEditorLoading] = useState(false);
+  // Bilingual: language selector state
+  const [lang, setLang] = useState<'zh-CN' | 'en'>('zh-CN');
+  // Version history
+  const [versions, setVersions] = useState<IntentVersionEntry[]>([]);
+
+  // Map raw backend reason codes to localized labels for the version history panel.
+  // Unknown reasons fall back to the raw string (observability over silent masking).
+  const versionReasonLabel = useCallback((reason: string): string => {
+    if (reason === 'init') return t("pages.intent.versionHistory.reasonInit");
+    if (reason === 'save') return t("pages.intent.versionHistory.reasonSave");
+    return reason;
+  }, [t]);
 
   const loadData = useCallback(async () => {
     setPageState("loading");
     setErrorMsg(null);
-    const result = await fetchIntentSummary();
+    const result = await fetchIntentSummary(lang);
     if (!result.success) {
       // ERR-002: graceful degradation with reason
       setErrorMsg(result.error ?? t("pages.intent.loadError"));
@@ -333,16 +345,34 @@ export function IntentPage() {
     // result.data is already validated by validateIntentSummary in the API layer
     setData(result.data);
     setPageState("loaded");
-  }, [t]);
+    // Load version history in parallel (best-effort, never blocks page)
+    fetchIntentVersions(lang).then(v => {
+      if (v.success && v.data?.versions) {
+        setVersions(v.data.versions);
+      }
+    }).catch(() => { /* best-effort */ });
+  }, [t, lang]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  // P0 fix: when language changes, reset editor state and stale versions.
+  // Without this, switching language while editing would keep the editor open
+  // with the old language's content — and saving would write that content
+  // into the NEW language's file (data corruption).
+  // Also clears stale versions so the panel doesn't show the old language's
+  // history while the new language's fetch is in flight or has failed.
+  useEffect(() => {
+    setIsEditing(false);
+    setEditorContent("");
+    setVersions([]);
+  }, [lang]);
+
   // PRI-477: Called when user clicks "Edit" — fetch raw content and open editor
   const handleStartEdit = useCallback(async () => {
     setEditorLoading(true);
-    const result = await fetchIntentContent();
+    const result = await fetchIntentContent(lang);
     setEditorLoading(false);
     if (!result.success) {
       toast.error(t("pages.intent.loadError"));
@@ -350,7 +380,7 @@ export function IntentPage() {
     }
     setEditorContent(result.data.content);
     setIsEditing(true);
-  }, [t]);
+  }, [t, lang]);
 
   // PRI-477: Called when template is created — refresh summary; optionally
   // open the editor immediately so the user can start filling.
@@ -364,13 +394,13 @@ export function IntentPage() {
     await loadData();
     if (!openEditor) return;
     setEditorLoading(true);
-    const result = await fetchIntentContent();
+    const result = await fetchIntentContent(lang);
     setEditorLoading(false);
     if (result.success) {
       setEditorContent(result.data.content);
       setIsEditing(true);
     }
-  }, [loadData]);
+  }, [loadData, lang]);
 
   // PRI-477: Called after successful save — close editor and refresh summary
   const handleSaved = useCallback(() => {
@@ -438,6 +468,22 @@ export function IntentPage() {
           {summary && (
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
+          {/* Bilingual language selector
+              Disabled while editing to prevent silent loss of unsaved changes.
+              The P0 useEffect on [lang] resets editor state on lang change —
+              without disabling, switching lang mid-edit would discard the
+              user's draft with no confirmation. */}
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en')}
+            disabled={isEditing || editorLoading}
+            className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label={t("pages.intent.langSelector.ariaLabel")}
+            title={isEditing || editorLoading ? t("pages.intent.langSelector.disabledWhileEditing") : undefined}
+          >
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
+          </select>
         </div>
         <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
           {t("pages.intent.subtitle")}
@@ -453,7 +499,7 @@ export function IntentPage() {
 
         {/* Flag-on but file not found — PRI-477: add Create button + onboarding */}
         {summary && summary.flagEnabled && !summary.found && summary.reason === "not_found" && (
-          <NotFoundBanner onCreated={handleCreated} />
+          <NotFoundBanner onCreated={handleCreated} lang={lang} />
         )}
 
         {/* Flag-on but oversized */}
@@ -474,6 +520,7 @@ export function IntentPage() {
                   initialContent={editorContent}
                   onSaved={handleSaved}
                   onCancel={handleCancelEdit}
+                  lang={lang}
                 />
               </section>
             )}
@@ -573,6 +620,26 @@ export function IntentPage() {
             section appears regardless of whether INTENT.md was found/OK. */}
         {summary && summary.flagEnabled && (
           <DecisionSummarySection />
+        )}
+
+        {/* Version History — shows saved INTENT.md versions from SQLite */}
+        {versions.length > 0 && (
+          <details className="border border-line rounded-[3px] mt-6">
+            <summary className="cursor-pointer px-4 py-2 text-[13px] font-medium text-ink-2 select-none">
+              {t("pages.intent.versionHistory.title")} ({versions.length})
+            </summary>
+            <div className="px-4 py-2 border-t border-line">
+              {versions.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 py-1 text-[12px] font-mono text-ink-2">
+                  <span className="text-ink-3">{v.createdAt.slice(0, 19).replace('T', ' ')}</span>
+                  <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3">
+                    {versionReasonLabel(v.reason)}
+                  </span>
+                  <span className="text-ink-3">{v.contentHash.slice(0, 12)}</span>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </PageShell>
