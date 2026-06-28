@@ -38,19 +38,19 @@ function ThresholdMark({ className }: { className?: string }) {
 }
 
 const mainNavItems = [
-  { id: "focus", labelKey: "components.sidebar.focus", href: "/focus", icon: Focus, shortcut: "Alt+3" },
-  { id: "pain", labelKey: "components.sidebar.pain", href: "/pain", icon: AlertTriangle, shortcut: "Alt+4" },
-  { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen, shortcut: "Alt+5" },
-  { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap, shortcut: "Alt+6" },
-  { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive, shortcut: "Alt+7" },
-  { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass, shortcut: "" },
+  { id: "focus", labelKey: "components.sidebar.focus", href: "/focus", icon: Focus },
+  { id: "pain", labelKey: "components.sidebar.pain", href: "/pain", icon: AlertTriangle },
+  { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen },
+  { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap },
+  { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive },
+  { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass },
 ];
 
 const toolNavItems = [
-  { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings, shortcut: "Alt+8" },
-  { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare, shortcut: "Alt+9" },
-  { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings, shortcut: "Alt+0" },
-  { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw, shortcut: "" },
+  { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings },
+  { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare },
+  { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings },
+  { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw },
 ];
 
 export function AppSidebar() {
@@ -119,10 +119,6 @@ export function AppSidebar() {
                     role="status"
                     aria-label={t("components.sidebar.pendingApprovalsAria", { count: pendingCount })}
                   />
-                ) : item.shortcut ? (
-                  <span className="text-ink-4 font-mono text-[11px]">
-                    {item.shortcut}
-                  </span>
                 ) : null}
               </Link>
             );
@@ -158,10 +154,6 @@ export function AppSidebar() {
                       role="status"
                       aria-label={t("components.sidebar.degradedSignalsAria", { count: degradedCount })}
                     />
-                  ) : item.shortcut ? (
-                    <span className="text-ink-4 font-mono text-[11px]">
-                      {item.shortcut}
-                    </span>
                   ) : null}
                 </Link>
               );
