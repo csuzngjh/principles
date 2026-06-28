@@ -75,7 +75,11 @@ function recordVersion(args: {
   content: string;
   reason: string;
 }): void {
-  if (!stateDbExists(args.workspaceDir)) return;
+  // Note: no stateDbExists short-circuit. SqliteConnection creates the .pd
+  // dir and state.db file (with intent_doc_versions table via CREATE TABLE
+  // IF NOT EXISTS) on first open. Short-circuiting here would silently drop
+  // the first-write version history on fresh workspaces — the operator
+  // would see an empty history panel after their very first save.
   try {
     const connection = new SqliteConnection({ workspaceDir: args.workspaceDir });
     try {

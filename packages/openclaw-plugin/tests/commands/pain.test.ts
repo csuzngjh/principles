@@ -8,6 +8,10 @@ vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/pd-config-loader.js', () => ({
   loadPdConfigForPlugin: vi.fn().mockReturnValue({ ok: true, effective: {}, source: 'defaults', warnings: [], errors: [] }),
 }));
+vi.mock('../../src/core/intent-doc-reader-adapter.js', () => ({
+  createIntentDocReader: vi.fn().mockReturnValue({ readIntentDoc: vi.fn() }),
+  resolveIntentLang: vi.fn().mockReturnValue('zh-CN'),
+}));
 vi.mock('@principles/core/runtime-v2', () => ({
   PainToPrincipleService: vi.fn(),
   PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),

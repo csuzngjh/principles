@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
-import { registerIntentCommand } from '../intent.js';
+import { registerIntentCommand, parseLang } from '../intent.js';
 
 type ActionOptions = Record<string, unknown>;
 interface CapturedAction {
@@ -257,5 +257,26 @@ describe('pd intent --lang — parser-level dispatch (cli-7)', () => {
     await program.parseAsync(['node', 'pd', 'intent', 'show']);
     expect(captured.opts).not.toBeNull();
     expect(captured.opts?.lang).toBeUndefined();
+  });
+});
+
+describe('parseLang — invalid value rejection (rc-9)', () => {
+  it('returns zh-CN when value is undefined (default)', () => {
+    expect(parseLang(undefined)).toBe('zh-CN');
+  });
+
+  it('returns zh-CN when value is zh-CN', () => {
+    expect(parseLang('zh-CN')).toBe('zh-CN');
+  });
+
+  it('returns en when value is en', () => {
+    expect(parseLang('en')).toBe('en');
+  });
+
+  it('returns null for invalid value (no silent fallback)', () => {
+    expect(parseLang('fr')).toBeNull();
+    expect(parseLang('zh')).toBeNull();
+    expect(parseLang('english')).toBeNull();
+    expect(parseLang('')).toBeNull();
   });
 });

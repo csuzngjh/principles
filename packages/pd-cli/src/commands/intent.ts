@@ -46,8 +46,21 @@ import { emitResult } from '../services/cli-output.js';
 
 const INTENT_DIR = '.principles';
 
-function parseLang(value: string | undefined): IntentLang {
-  return value === 'en' ? 'en' : 'zh-CN';
+/**
+ * Parse and validate the --lang option.
+ *
+ * Returns:
+ *   - 'zh-CN' | 'en' when value is undefined (default zh-CN) or a valid lang.
+ *   - null when value is a non-empty string that is neither 'zh-CN' nor 'en'.
+ *
+ * rc-9: invalid values MUST NOT silently fall back to zh-CN — that would
+ * let a typo like `--lang zh` quietly write to INTENT.zh-CN.md. Callers
+ * emit a structured `invalid_lang` error when null is returned.
+ */
+export function parseLang(value: string | undefined): IntentLang | null {
+  if (value === undefined) return 'zh-CN';
+  if (value === 'zh-CN' || value === 'en') return value;
+  return null;
 }
 
 // ── Output types ─────────────────────────────────────────────────────────────
@@ -61,7 +74,7 @@ export interface IntentInitOutput {
 }
 
 export interface IntentShowOutput {
-  status: 'ok' | 'flag_disabled' | 'not_found' | 'oversized' | 'read_error';
+  status: 'ok' | 'skipped' | 'flag_disabled' | 'not_found' | 'oversized' | 'read_error';
   flagEnabled: boolean;
   found: boolean;
   path?: string;
@@ -126,6 +139,23 @@ export interface IntentInitOptions {
 
 export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
   const lang = parseLang(opts.lang);
+
+  // rc-9: invalid --lang must not silently fall back. Emit structured error.
+  if (lang === null) {
+    const output: IntentInitOutput = {
+      status: 'skipped',
+      path: '',
+      overwritten: false,
+      reason: 'invalid_lang',
+      nextAction: `--lang must be 'zh-CN' or 'en'. Received: ${opts.lang ?? ''}`,
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
 
   // CLI Gate rule 4: --dry-run and --confirm must be mutually exclusive.
   if (opts.dryRun && opts.confirm) {
@@ -246,6 +276,24 @@ export interface IntentShowOptions {
 export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
   const lang = parseLang(opts.lang);
 
+  // rc-9: invalid --lang must not silently fall back. Emit structured error.
+  if (lang === null) {
+    const output: IntentShowOutput = {
+      status: 'skipped',
+      flagEnabled: false,
+      found: false,
+      warnings: [],
+      reason: 'invalid_lang',
+      nextAction: `--lang must be 'zh-CN' or 'en'. Received: ${opts.lang ?? ''}`,
+    };
+    emitResult(output, {
+      json: opts.json ?? false,
+      formatText: (o) => `Error: ${o.reason}\n→ ${o.nextAction}`,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   // CLI Gate rule 6: workspace resolution inside try/catch for structured errors.
   let workspaceDir: string;
   try {
@@ -301,7 +349,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
         found: false,
         warnings: [],
         reason: 'not_found',
-        nextAction: `Create ${filename}: pd intent init --lang ${lang} --workspace "${workspaceDir}"`,
+        nextAction: `Create ${filename}: pd intent init --confirm --lang ${lang} --workspace "${workspaceDir}"`,
       };
       emitResult(output, {
         json: opts.json ?? false,

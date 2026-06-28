@@ -93,14 +93,31 @@ const _intentDocCache = new Map<string, CachedIntentDoc>();
 
 /**
  * Reset the intent doc cache for test isolation.
- * Accepts an optional cache key (workspaceDir:lang) to delete a single entry;
- * omit to clear the whole cache.
+ *
+ * - No args: clear the whole cache.
+ * - workspaceDir only: delete all entries for that workspace (any lang).
+ *   Keys are formatted as `${workspaceDir}:${lang}`, so we match by prefix.
+ * - workspaceDir + lang: delete the single `${workspaceDir}:${lang}` entry.
+ *
+ * Note: prompt.ts resetPromptStateForTest passes workspaceDir only — the
+ * previous signature treated it as a literal cache key, which never matched
+ * the `${workspaceDir}:${lang}` format and silently left entries behind.
  */
-export function resetIntentDocCacheForTest(cacheKey?: string): void {
-  if (cacheKey) {
-    _intentDocCache.delete(cacheKey);
-  } else {
+export function resetIntentDocCacheForTest(workspaceDir?: string, lang?: IntentLang): void {
+  if (workspaceDir === undefined) {
     _intentDocCache.clear();
+    return;
+  }
+  if (lang !== undefined) {
+    _intentDocCache.delete(`${workspaceDir}:${lang}`);
+    return;
+  }
+  // workspaceDir only — clear all langs for this workspace by prefix.
+  const prefix = `${workspaceDir}:`;
+  for (const key of _intentDocCache.keys()) {
+    if (key.startsWith(prefix)) {
+      _intentDocCache.delete(key);
+    }
   }
 }
 

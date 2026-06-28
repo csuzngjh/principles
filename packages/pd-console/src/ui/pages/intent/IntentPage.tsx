@@ -468,12 +468,18 @@ export function IntentPage() {
           {summary && (
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
-          {/* Bilingual language selector */}
+          {/* Bilingual language selector
+              Disabled while editing to prevent silent loss of unsaved changes.
+              The P0 useEffect on [lang] resets editor state on lang change —
+              without disabling, switching lang mid-edit would discard the
+              user's draft with no confirmation. */}
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en')}
-            className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            disabled={isEditing || editorLoading}
+            className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label={t("pages.intent.langSelector.ariaLabel")}
+            title={isEditing || editorLoading ? t("pages.intent.langSelector.disabledWhileEditing") : undefined}
           >
             <option value="zh-CN">中文</option>
             <option value="en">English</option>
