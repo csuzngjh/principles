@@ -650,7 +650,7 @@
       "readinessLabel": "就绪状态",
       "empathyCostHint": {
         "body": "共情观察器已启用 — 每次关键词未命中时会调用 LLM 做深度分析（当前模型：{{provider}}/{{model}}）。",
-        "muted": "如需节省成本，在 workflows.yaml 的 pd-empathy-observer.policy.model 换更便宜模型。",
+        "muted": "如需节省成本，建议使用本地 LLM 模型（如 Ollama），或在 workflows.yaml 的 pd-empathy-observer.policy.model 换更便宜模型。",
         "ack": "知道了"
       },
       "workflow": {
