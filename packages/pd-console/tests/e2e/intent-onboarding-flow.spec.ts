@@ -116,7 +116,9 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
     expect(body.success).toBe(true);
     expect(body.data.ok).toBe(true);
     expect(body.data.created).toBe(true);
-    expect(body.data.path).toContain('INTENT.md');
+    // Bilingual convention: filename is INTENT.${lang}.md (e.g. INTENT.zh-CN.md)
+    expect(body.data.path).toContain('INTENT.');
+    expect(body.data.path).toMatch(/INTENT\.(zh-CN|en)\.md$/);
   });
 
   test('POST /intent/init idempotent — already_exists without force', async () => {
@@ -152,7 +154,8 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
     expect(typeof body.data.content).toBe('string');
     expect(body.data.content.length).toBeGreaterThan(0);
     expect(body.data.content).toContain('# INTENT.md');
-    expect(body.data.path).toContain('INTENT.md');
+    // Bilingual convention: filename is INTENT.${lang}.md (e.g. INTENT.zh-CN.md)
+    expect(body.data.path).toMatch(/INTENT\.(zh-CN|en)\.md$/);
   });
 
   // ── Step 6: PUT /intent/content 保存内容 ───────────────────────────────────
