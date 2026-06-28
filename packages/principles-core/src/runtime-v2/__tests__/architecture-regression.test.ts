@@ -337,7 +337,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // ── Runtime V2 ──────────────────────────────────────────────────────────
   'runtime-v2-prompt-activation-reader.ts',
   'workspace-guidance-migrator.ts',
-  'surface-guard.ts',
   // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
@@ -397,7 +396,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (93 files)', async () => {
+  it('known baseline count is self-consistent (92 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
@@ -422,7 +421,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Stage-3: Removed risk-calculator.ts (94 → 93) — pure logic sunk to
     // core runtime-v2/risk/, dead code (assessRiskLevel/getTargetFileLineCount/
     // calculatePercentageThreshold) removed.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // Stage-3 sink: Removed surface-guard.ts (93 → 92) — pure guard logic
+    // migrated to @principles/core/runtime-v2/feature-flags/surface-guard-policy.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
   });
 });
 
