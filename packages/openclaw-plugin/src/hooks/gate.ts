@@ -430,8 +430,16 @@ function _buildRuleContextIfEnabled(
   }
 
   // Step 2: compute effective flags and check rulecode_context_v2.
+  // Explicit ok:false guard (rc-9-no-silent-fallback): when config is malformed,
+  // do NOT silently fall through to flag computation on defaults — log and
+  // return v1-style undefined so config issues surface to the operator.
+  if (!configResult.ok) {
+    const reasons = configResult.errors.map(e => e.reason).join('; ');
+    logger?.warn?.(`[PD_GATE] RuleContext v2: config load returned malformed result, skipping context assembly: ${reasons}`);
+    return undefined;
+  }
   const flagsResult = computeFeatureFlagsFromConfig(configResult.effective);
-  const v2Flag = flagsResult.flags['rulecode_context_v2'];
+  const v2Flag = flagsResult.flags.rulecode_context_v2;
   if (!v2Flag?.enabled) {
     // Flag OFF → v1 zero-change. Do NOT access trajectory (spec §10.1).
     return undefined;

@@ -23,6 +23,11 @@ import * as yaml from 'js-yaml';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
+// Type aliases for test fixture construction (avoids `any` per project convention).
+type GateEvent = Parameters<typeof handleBeforeToolCall>[0];
+type GateCtx = Parameters<typeof handleBeforeToolCall>[1];
+type HookContextParam = Parameters<typeof WorkspaceContext.fromHookContext>[0];
+
 // ── Mocks (only RuleHost and non-DB services) ──────────────────────────────
 
 const mockEvolution = {
@@ -54,7 +59,7 @@ vi.mock('../../src/core/event-log.js', () => ({
 
 let _mockEvaluate = vi.fn().mockReturnValue(undefined);
 vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function (this: any, _stateDir: string, _logger: any) {
+  RuleHost: vi.fn(function (this: { evaluate: typeof _mockEvaluate }, _stateDir: string, _logger: unknown) {
     this.evaluate = _mockEvaluate;
   }),
 }));
@@ -119,7 +124,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as any);
+    } as unknown as HookContextParam);
 
     // 2. Record a read tool call on the real trajectory DB
     wctx.trajectory.recordToolCall({
@@ -140,7 +145,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     };
 
-    handleBeforeToolCall(event as any, ctx as any);
+    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
 
     // 4. Assert RuleHost.evaluate received context with the read in history
     expect(_mockEvaluate).toHaveBeenCalledTimes(1);
@@ -166,7 +171,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as any);
+    } as unknown as HookContextParam);
 
     // Record a read for src/auth.ts
     wctx.trajectory.recordToolCall({
@@ -187,7 +192,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     };
 
-    handleBeforeToolCall(event as any, ctx as any);
+    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
 
     expect(_mockEvaluate).toHaveBeenCalledTimes(1);
     const hostInput = _mockEvaluate.mock.calls[0][0];
@@ -217,7 +222,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     };
 
-    handleBeforeToolCall(event as any, ctx as any);
+    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
 
     expect(_mockEvaluate).toHaveBeenCalledTimes(1);
     const hostInput = _mockEvaluate.mock.calls[0][0];
@@ -233,7 +238,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as any);
+    } as unknown as HookContextParam);
 
     // Record a read in a DIFFERENT session
     wctx.trajectory.recordToolCall({
@@ -254,7 +259,7 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     };
 
-    handleBeforeToolCall(event as any, ctx as any);
+    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
 
     const hostInput = _mockEvaluate.mock.calls[0][0];
     // Session isolation: the other-session read is NOT in current session's history.

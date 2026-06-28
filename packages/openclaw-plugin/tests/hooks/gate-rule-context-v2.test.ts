@@ -16,7 +16,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { loadPdConfigForPlugin } from '../../src/core/pd-config-loader.js';
 import { buildProductionRuleContext } from '../../src/core/rule-context-assembler.js';
-import type { RuleContextV2 } from '@principles/core/runtime-v2';
+import type { RuleContextV2, EffectivePdConfig } from '@principles/core/runtime-v2';
+
+// Type aliases for test fixture construction (avoids `any` per project convention).
+// `as unknown as T` is acceptable here: these are test fixtures with known shape,
+// not untrusted data bypassing runtime validation (rc-2 applies to runtime validation).
+type GateEvent = Parameters<typeof handleBeforeToolCall>[0];
+type GateCtx = Parameters<typeof handleBeforeToolCall>[1];
 
 // ── Shared mock state ──────────────────────────────────────────────────────
 
@@ -52,7 +58,7 @@ vi.mock('../../src/core/event-log.js', () => ({
 
 let _mockEvaluate = vi.fn().mockReturnValue(undefined);
 vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function (this: any, _stateDir: string, _logger: any) {
+  RuleHost: vi.fn(function (this: { evaluate: typeof _mockEvaluate }, _stateDir: string, _logger: unknown) {
     this.evaluate = _mockEvaluate;
   }),
 }));
@@ -89,7 +95,7 @@ vi.mock('../../src/core/rule-context-assembler.js', () => ({
 function flagOffConfig(): ReturnType<typeof loadPdConfigForPlugin> {
   return {
     ok: true,
-    effective: { config: { features: {} } } as any,
+    effective: { config: { features: {} } } as unknown as EffectivePdConfig,
     source: 'defaults',
     configPath: '/mock/.pd/config.yaml',
     warnings: [],
@@ -106,11 +112,22 @@ function flagOnConfig(): ReturnType<typeof loadPdConfigForPlugin> {
           rulecode_context_v2: { category: 'quiet' as const, enabled: true },
         },
       },
-    } as any,
+    } as unknown as EffectivePdConfig,
     source: 'user_config',
     configPath: '/mock/.pd/config.yaml',
     warnings: [],
     errors: [],
+  };
+}
+
+function malformedConfig(): ReturnType<typeof loadPdConfigForPlugin> {
+  return {
+    ok: false,
+    effective: { config: { features: {} } } as unknown as EffectivePdConfig,
+    source: 'malformed',
+    configPath: '/mock/.pd/config.yaml',
+    warnings: [],
+    errors: [{ path: '', reason: 'YAML parse error: bad indentation', nextAction: 'Fix YAML syntax' }],
   };
 }
 
@@ -165,7 +182,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       vi.mocked(loadPdConfigForPlugin).mockReturnValue(flagOffConfig());
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       expect(_mockEvaluate).toHaveBeenCalledTimes(1);
       const hostInput = _mockEvaluate.mock.calls[0][0];
@@ -176,7 +193,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       vi.mocked(loadPdConfigForPlugin).mockReturnValue(flagOffConfig());
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       expect(buildProductionRuleContext).not.toHaveBeenCalled();
     });
@@ -188,7 +205,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       vi.mocked(buildProductionRuleContext).mockReturnValue(availableContext());
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       expect(_mockEvaluate).toHaveBeenCalledTimes(1);
       const hostInput = _mockEvaluate.mock.calls[0][0];
@@ -203,7 +220,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       vi.mocked(buildProductionRuleContext).mockReturnValue(availableContext());
 
       const event = makeWriteEvent('src/target.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       expect(buildProductionRuleContext).toHaveBeenCalledTimes(1);
       const [callSessionId, callTargetPath, callSource, callProjectDir] =
@@ -244,7 +261,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       );
 
       const event = makeWriteEvent('src/auth.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       const hostInput = _mockEvaluate.mock.calls[0][0];
       expect(hostInput.context.facts.priorReadOfTarget).toBe('yes');
@@ -266,7 +283,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       );
 
       const event = makeWriteEvent('src/other.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       const hostInput = _mockEvaluate.mock.calls[0][0];
       expect(hostInput.context.facts.priorReadOfTarget).toBe('no');
@@ -281,7 +298,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       });
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       // ERR-024: evaluate MUST still be called
       expect(_mockEvaluate).toHaveBeenCalledTimes(1);
@@ -301,13 +318,29 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       });
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       // ERR-024: evaluate MUST still be called
       expect(_mockEvaluate).toHaveBeenCalledTimes(1);
       const hostInput = _mockEvaluate.mock.calls[0][0];
       // Can't even check the flag → conservative fail-soft: no context (v1-style)
       expect(hostInput.context).toBeUndefined();
+    });
+
+    it('Test D2: loadPdConfigForPlugin returns ok:false → RuleHost.evaluate still called, context undefined (rc-9)', () => {
+      vi.mocked(loadPdConfigForPlugin).mockReturnValue(malformedConfig());
+
+      const event = makeWriteEvent('src/safe.ts');
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
+
+      // ERR-024: evaluate MUST still be called
+      expect(_mockEvaluate).toHaveBeenCalledTimes(1);
+      const hostInput = _mockEvaluate.mock.calls[0][0];
+      // rc-9: malformed config → explicit fail-soft to v1 (undefined), not silent
+      // fall-through into flag computation on defaults
+      expect(hostInput.context).toBeUndefined();
+      // buildProductionRuleContext must NOT be called when config is malformed
+      expect(buildProductionRuleContext).not.toHaveBeenCalled();
     });
 
     it('buildProductionRuleContext returns unavailable → context propagated as-is', () => {
@@ -317,7 +350,7 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
       );
 
       const event = makeWriteEvent('src/safe.ts');
-      handleBeforeToolCall(event as any, { workspaceDir, sessionId } as any);
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
 
       const hostInput = _mockEvaluate.mock.calls[0][0];
       expect(hostInput.context.history.status).toBe('unavailable');
