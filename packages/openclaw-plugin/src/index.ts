@@ -55,7 +55,7 @@ import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard.js';
+import { checkSurfaceGuard, guardHook, guardService } from '@principles/core/runtime-v2';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
