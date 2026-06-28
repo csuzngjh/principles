@@ -1,11 +1,21 @@
+/**
+ * Surface Guard Policy — pure logic migrated from openclaw-plugin.
+ *
+ * No I/O, no fs, no network. Operates on PLUGIN_SURFACE_REGISTRY (same
+ * directory) and in-memory module-level Set for once-only log state.
+ *
+ * The guardService<T> generic constraint was relaxed from
+ * <T extends OpenClawPluginService> (a plugin type) to <T> because the
+ * function body only passes the service through — it never accesses
+ * OpenClawPluginService properties. Callers pass concrete service types,
+ * so TypeScript infers T correctly without the constraint.
+ */
+
 import {
   PLUGIN_SURFACE_REGISTRY,
   validateSurfaceRegistry,
   getSurfacesByCategory,
-  type PluginSurfaceEntry,
-  type MvpCategory,
-} from '@principles/core/runtime-v2';
-import type { OpenClawPluginService } from '../openclaw-sdk.js';
+} from './plugin-surface-registry.js';
 
 export interface SurfaceGuardResult {
   passed: boolean;
@@ -166,7 +176,7 @@ export function guardHook<E, C, R>(
   };
 }
 
-export function guardService<T extends OpenClawPluginService>(
+export function guardService<T>(
   surfaceId: string,
   service: T,
   logger?: LoggerLike,
@@ -183,6 +193,3 @@ export function guardService<T extends OpenClawPluginService>(
   logSkipOnce(surfaceId, logger, `[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
   return null;
 }
-
-export { PLUGIN_SURFACE_REGISTRY, validateSurfaceRegistry, getSurfacesByCategory };
-export type { PluginSurfaceEntry, MvpCategory };

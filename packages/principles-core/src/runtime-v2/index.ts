@@ -395,6 +395,22 @@ export type {
   SurfaceRegistryValidationResult,
 } from './feature-flags/index.js';
 
+// Surface guard (Stage 3) — pure logic migrated from plugin
+export {
+  checkSurfaceGuard,
+  getSurfaceIdForHook,
+  getSurfaceIdForService,
+  isSurfaceEnabled,
+  guardHook,
+  guardService,
+  __resetSurfaceGuardSkipLogStateForTests,
+} from './feature-flags/index.js';
+
+export type {
+  SurfaceGuardResult,
+  HookHandler,
+} from './feature-flags/index.js';
+
 // Proven channel baseline (PRI-240) — MVP activation continuity fixtures
 export {
   runPromptFixture,
