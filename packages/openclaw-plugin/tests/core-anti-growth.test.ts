@@ -87,7 +87,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'migration.ts',
     'file-store.ts',
     'pd-task-store.ts',
-    'evolution-migration.ts',
     'empathy-keyword-matcher.ts',
     'session-tracker.ts',
     'principle-tree-ledger.ts',
