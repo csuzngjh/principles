@@ -20,7 +20,7 @@ import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js'
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
-import { estimateLineChanges } from '../core/risk-calculator.js';
+import { estimateLineChanges } from '@principles/core/runtime-v2';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
