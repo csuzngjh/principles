@@ -158,10 +158,10 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     const body = parseBody(res);
     expect(body.success).toBe(true);
     expect(body.data.created).toBe(true);
-    expect(body.data.path).toContain('INTENT.md');
+    expect(body.data.path).toContain('INTENT.zh-CN.md');
 
     // Verify file exists on disk
-    const intentPath = path.join(principlesDir, 'INTENT.md');
+    const intentPath = path.join(principlesDir, 'INTENT.zh-CN.md');
     expect(fs.existsSync(intentPath)).toBe(true);
     const content = fs.readFileSync(intentPath, 'utf8');
     expect(content).toContain('# INTENT.md');
@@ -170,7 +170,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
 
   it('returns 200 with created=false when file already exists', async () => {
     // Pre-create the file
-    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'existing content', 'utf8');
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'existing content', 'utf8');
 
     const res = makeRes();
     await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
@@ -181,12 +181,12 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     expect(body.data.reason).toBe('already_exists');
 
     // Verify file was NOT overwritten
-    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'utf8');
     expect(content).toBe('existing content');
   });
 
   it('overwrites existing file when force=true', async () => {
-    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'old content', 'utf8');
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'old content', 'utf8');
 
     const res = makeRes();
     await handleIntentRoute(makePostReq('/api/v1/intent/init', { force: true }), res, { workspaceDir, subPath: '/init' });
@@ -195,7 +195,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     expect(body.data.created).toBe(true);
 
     // Verify file WAS overwritten with template
-    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'utf8');
     expect(content).toContain('# INTENT.md');
     expect(content).not.toContain('old content');
   });
@@ -211,7 +211,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
 
     // Directory and file should now exist
     expect(fs.existsSync(principlesDir)).toBe(true);
-    expect(fs.existsSync(path.join(principlesDir, 'INTENT.md'))).toBe(true);
+    expect(fs.existsSync(path.join(principlesDir, 'INTENT.zh-CN.md'))).toBe(true);
   });
 
   it('returns 403 when flag is disabled', async () => {
@@ -242,7 +242,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
 
 describe('Intent route — GET /api/v1/intent/content', () => {
   it('returns raw content when file exists', async () => {
-    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), '# My Intent\n\ntest content', 'utf8');
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), '# My Intent\n\ntest content', 'utf8');
 
     const res = makeRes();
     await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
@@ -250,7 +250,7 @@ describe('Intent route — GET /api/v1/intent/content', () => {
     const body = parseBody(res);
     expect(body.data.content).toContain('# My Intent');
     expect(body.data.content).toContain('test content');
-    expect(body.data.path).toContain('INTENT.md');
+    expect(body.data.path).toContain('INTENT.zh-CN.md');
   });
 
   it('returns 404 when file does not exist', async () => {
@@ -278,7 +278,7 @@ describe('Intent route — GET /api/v1/intent/content', () => {
     // the file > INTENT_MAX_BYTES. Without this guard the editor would silently
     // load a > 32 KiB document while the read-only summary page rejects it.
     fs.writeFileSync(
-      path.join(principlesDir, 'INTENT.md'),
+      path.join(principlesDir, 'INTENT.zh-CN.md'),
       '# INTENT.md\n\n## 1. Why\n\n' + 'x'.repeat(33 * 1024) + '\n',
       'utf8',
     );
@@ -308,12 +308,12 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
     expect(body.data.lastEditedAt).toBeTruthy();
 
     // Verify file was written
-    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'utf8');
     expect(content).toBe('# My Intent\n\nnew content');
   });
 
   it('overwrites existing file', async () => {
-    fs.writeFileSync(path.join(principlesDir, 'INTENT.md'), 'old content', 'utf8');
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'old content', 'utf8');
 
     const res = makeRes();
     await handleIntentRoute(
@@ -323,7 +323,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
     );
     expect(getStatus(res)).toBe(200);
 
-    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.md'), 'utf8');
+    const content = fs.readFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'utf8');
     expect(content).toBe('new content');
   });
 
