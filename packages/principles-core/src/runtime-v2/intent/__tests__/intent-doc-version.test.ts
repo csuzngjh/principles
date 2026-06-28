@@ -54,7 +54,7 @@ describe('formatVersionSummary', () => {
     expect(summary.preview.length).toBeLessThanOrEqual(80);
   });
 
-  it('handles missing reason', () => {
+  it('handles missing reason with zh-CN fallback', () => {
     const version: IntentDocVersion = {
       id: 'abc-456',
       lang: 'zh-CN',
@@ -65,6 +65,21 @@ describe('formatVersionSummary', () => {
     };
     const summary = formatVersionSummary(version, 1);
     expect(summary.label).toContain('v2');
+    expect(summary.label).toContain('无备注');
+  });
+
+  it('handles missing reason with en fallback (no Chinese text)', () => {
+    const version: IntentDocVersion = {
+      id: 'abc-en',
+      lang: 'en',
+      contentHash: 'sha256:en',
+      contentSnapshot: 'content',
+      reason: null,
+      createdAt: '2026-06-28T10:00:00.000Z',
+    };
+    const summary = formatVersionSummary(version, 0);
+    expect(summary.label).toContain('(no note)');
+    expect(summary.label).not.toContain('无备注');
   });
 
   it('truncates long previews with ellipsis', () => {

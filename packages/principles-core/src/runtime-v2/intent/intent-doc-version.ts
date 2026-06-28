@@ -35,7 +35,9 @@ export function formatVersionSummary(
   index: number,
 ): { label: string; preview: string } {
   const versionNumber = `v${index + 1}`;
-  const reason = version.reason ?? '无备注';
+  // Language-aware fallback for missing reason (CodeRabbit review):
+  // English versions should not show Chinese default text.
+  const reason = version.reason ?? (version.lang === 'en' ? '(no note)' : '无备注');
   const label = `${versionNumber} · ${reason}`;
   const previewText = version.contentSnapshot.replace(/##\s*\d+\.\s*[^\n]*/g, '').trim();
   const preview = previewText.length > 80 ? previewText.slice(0, 77) + '...' : previewText;
