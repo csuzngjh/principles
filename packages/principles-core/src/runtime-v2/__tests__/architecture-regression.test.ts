@@ -319,7 +319,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'migration.ts',
   'file-store.ts',
   'pd-task-store.ts',
-  'evolution-migration.ts',
   'empathy-keyword-matcher.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
@@ -412,7 +411,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // reading .principles/INTENT.md with TTL+mtime cache for prompt injection.
     // PRI-468: Added intent-doc-reader-adapter.ts (93 → 94) — plugin adapter
     // implementing core IntentDocReader port (pure type mapping, no new I/O).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // Stage-1 cleanup: Removed evolution-migration.ts (94 → 93) — dead code,
+    // zero production references after refactor to @principles/core.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
@@ -646,14 +647,6 @@ describe('openclaw-plugin pain hook integration', () => {
 // ── PRI-42: Internalization boundary guards ──────────────────────────────────
 
 describe('PRI-42 internalization boundary', () => {
-  const CONTRACT_TYPES = [
-    'RuleHostInput',
-    'RuleHostResult',
-    'RuleHostDecision',
-    'RuleHostMeta',
-    'LoadedImplementation',
-  ];
-
   it('core internalization has zero openclaw-plugin imports', async () => {
     const { existsSync, readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
@@ -708,39 +701,6 @@ describe('PRI-42 internalization boundary', () => {
       expect(src).not.toContain('openclaw-plugin');
       expect(src).not.toContain('../../../openclaw-plugin');
     }
-  });
-
-  it('plugin does not re-define RuleHost contract types locally', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const typesPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host-types.ts',
-    );
-    expect(existsSync(typesPath)).toBe(true);
-    const src = readFileSync(typesPath, 'utf-8');
-
-    // After PRI-42, rule-host-types.ts should re-export from core, not define interfaces
-    for (const typeName of CONTRACT_TYPES) {
-      expect(src).toContain(typeName);
-      expect(src).toContain("from '@principles/core/runtime-v2'");
-    }
-  });
-
-  it('plugin does not re-define RuleHostHelpers locally', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const helpersPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host-helpers.ts',
-    );
-    expect(existsSync(helpersPath)).toBe(true);
-    const src = readFileSync(helpersPath, 'utf-8');
-
-    // After PRI-42, rule-host-helpers.ts should re-export from core, not define interface
-    expect(src).toContain('RuleHostHelpers');
-    expect(src).toContain('createRuleHostHelpers');
-    expect(src).toContain("from '@principles/core/runtime-v2'");
   });
 
   it('plugin rule-host.ts imports contracts from core barrel', async () => {

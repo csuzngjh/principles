@@ -29,7 +29,7 @@ import {
 } from '../../src/core/principle-tree-ledger.js';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import { safeRmDir } from '../test-utils.js';
-import type { RuleHostInput } from '../../src/core/rule-host-types.js';
+import type { RuleHostInput } from '@principles/core/runtime-v2';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -126,7 +126,7 @@ After code review (if a real bug is found):
 ## Critical Rules
 
 1. **Core vs Plugin boundary**: `packages/principles-core/` = pure logic only (no I/O, no fs, no DB, no network). `packages/openclaw-plugin/` = I/O boundary. New pure logic → core. New I/O → plugin.
-2. **FROZEN LEGACY (ADR-0005)**: Do NOT modify `nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, or `nocturnal-service.ts`.
+2. **FROZEN LEGACY (ADR-0005)**: The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them.
 3. **Architecture regression tests**: `packages/principles-core/tests/architecture-regression.test.ts` — never skip or delete.
 4. **ADR compliance**: `docs/adr/` — code contradicting an ADR is a bug.
 5. **No `any`**: Use `unknown` for truly unknown types. Strict TypeScript mode.
