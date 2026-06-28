@@ -97,6 +97,7 @@ function evaluateCaseWithTimeout(
 ): { result: RuleHostResult | null; error: unknown; timedOut: boolean; threw: boolean } {
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
+    traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {},
   );
 
   const helpers: RuleHostHelpers = {

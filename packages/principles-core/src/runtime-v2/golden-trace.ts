@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import type { RuleHostInput } from './internalization/rule-host-contracts.js';
+import type { RuleContextV2 } from './internalization/rule-context-v2.js';
 import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
 import { buildRuleHostAction } from './internalization/rule-host-input-builder.js';
 
@@ -41,6 +42,7 @@ export const GoldenTraceCaseSchema = Type.Object({
     artifactId: Type.Optional(Type.String({ minLength: 1 })),
     auditEventId: Type.Optional(Type.String({ minLength: 1 })),
   })),
+  ruleContext: Type.Optional(Type.Unknown()),
 });
 
 export const GoldenTraceSchema = Type.Object({
@@ -56,8 +58,12 @@ export const GoldenTraceSchema = Type.Object({
 export type CorrectionApplicationMode = Static<typeof CorrectionApplicationModeSchema>;
 export type GoldenTraceDecision = Static<typeof GoldenTraceDecisionSchema>;
 export type GoldenTraceCaseKind = Static<typeof GoldenTraceCaseKindSchema>;
-export type GoldenTraceCase = Static<typeof GoldenTraceCaseSchema>;
-export type GoldenTrace = Static<typeof GoldenTraceSchema>;
+export type GoldenTraceCase = Omit<Static<typeof GoldenTraceCaseSchema>, 'ruleContext'> & {
+  readonly ruleContext?: RuleContextV2;
+};
+export type GoldenTrace = Omit<Static<typeof GoldenTraceSchema>, 'cases'> & {
+  cases: GoldenTraceCase[];
+};
 
 export interface GoldenTraceValidationResult {
   valid: boolean;
@@ -75,6 +81,7 @@ export interface SyntheticRuleHostInputOverrides {
   evolution?: Partial<RuleHostInput['evolution']>;
   derived?: Partial<RuleHostInput['derived']>;
   normalizedPath?: string | null;
+  context?: RuleContextV2;
 }
 
 /**
@@ -207,6 +214,7 @@ export function createSyntheticRuleHostInput(
       bashRisk: 'unknown',
       ...overrides.derived,
     },
+    ...(overrides.context !== undefined ? { context: overrides.context } : {}),
   };
 }
 
@@ -243,9 +251,15 @@ export function createGoldenTraceFixture(input: GoldenTraceFixtureInput): Golden
 
 /**
  * Input for buildGoldenTraceFromArtificer (RuleHost MVP Activation, PRD Decision 5).
+ *
+ * `cases` accepts a shape compatible with both the strict `GoldenTraceCaseInput`
+ * interface (artificer TS callers) and the TypeBox `GoldenTraceCaseInputTypebox`
+ * static type (L2 tool params decoded from JSON, where `ruleContext` is `unknown`
+ * until runtime-validated). Each entry is re-validated by `validateGoldenTraceCase`
+ * before use, so a loose input type here is safe — Runtime Contract Rule 4.
  */
 export interface BuildGoldenTraceFromArtificerInput {
-  readonly cases: readonly GoldenTraceCaseInput[];
+  readonly cases: readonly (Omit<GoldenTraceCaseInput, 'ruleContext'> & { readonly ruleContext?: unknown })[];
   readonly sourceArtifactId?: string;
   /** Override for createdAt; defaults to current ISO-8601 UTC timestamp. */
   readonly createdAt?: string;
