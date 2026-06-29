@@ -1243,7 +1243,7 @@ export class TrajectoryDatabase {
   }
 
   /** Return FIFO history strictly before an Owner-selected tool call. */
-  getRuleHostContextRowsBefore(sessionId: string, beforeId: number, limit: number = 20): RuleHostContextResult {
+  getRuleHostContextRowsBefore(sessionId: string, beforeId: number, limit = 20): RuleHostContextResult {
     const cappedLimit = Math.max(1, Math.floor(limit));
     const rows = this.db.prepare(`
       SELECT id, tool_name, outcome, params_json

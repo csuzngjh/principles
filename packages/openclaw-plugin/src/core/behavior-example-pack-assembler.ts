@@ -124,8 +124,9 @@ export class BehaviorExamplePackAssembler {
     }
 
     const redactionNotes: string[] = [];
-    const sourceNegativeCase = this.buildSelectedCase(negativeRow, 'negative', 'block', input.projectDir, redactionNotes);
-    const positiveCounterexamples = positiveRows.map((row) => this.buildSelectedCase(row, 'positive', 'allow', input.projectDir, redactionNotes));
+    const buildCtx = { projectDir: input.projectDir, redactionNotes };
+    const sourceNegativeCase = this.buildSelectedCase(negativeRow, 'negative', 'block', buildCtx);
+    const positiveCounterexamples = positiveRows.map((row) => this.buildSelectedCase(row, 'positive', 'allow', buildCtx));
     const pack: BehaviorExamplePack = {
       sourceNegativeCase,
       ownerDesiredOutcome: input.ownerDesiredOutcome,
@@ -149,9 +150,9 @@ export class BehaviorExamplePackAssembler {
     row: RuleHostEvidenceRow,
     kind: 'positive' | 'negative',
     expectedDecision: 'allow' | 'block',
-    projectDir: string,
-    redactionNotes: string[],
+    ctx: { projectDir: string; redactionNotes: string[] },
   ): GoldenTraceCaseInput {
+    const { projectDir, redactionNotes } = ctx;
     const base = buildCaseFromRow(row, kind, expectedDecision, projectDir);
     const redaction = redactParams(base.params, projectDir);
     redactionNotes.push(...redaction.notes);
