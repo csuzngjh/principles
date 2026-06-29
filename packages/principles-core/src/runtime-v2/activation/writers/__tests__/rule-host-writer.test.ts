@@ -23,6 +23,13 @@ function makeGoldenTrace(): GoldenTrace {
         params: { path: '/etc/passwd' },
         expectedDecision: 'block',
       },
+      {
+        caseId: 'case-002',
+        kind: 'positive',
+        toolName: 'edit_file',
+        params: { path: '/project/src/safe.ts' },
+        expectedDecision: 'allow',
+      },
     ],
     createdAt: '2026-05-17T00:00:00.000Z',
     version: 1,
@@ -175,7 +182,11 @@ describe('RuleHostWriter', () => {
     });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain('no_golden_trace');
+    // Empty cases is a schema violation (missing required positive/negative
+    // cases), not a missing trace. The canonical validator surfaces the
+    // specific schema error rather than masking it as 'no_golden_trace'.
+    expect(result.reason).toContain('golden_trace_schema_invalid');
+    expect(result.reason).toMatch(/cases|positive|negative/);
   });
 
   it('rejects artifact with unparseable contentJson', async () => {
@@ -248,6 +259,60 @@ describe('RuleHostWriter', () => {
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('no_golden_trace');
+  });
+
+  // Regression: artifact with illegal expectedDecision value (e.g. "requireApproval",
+  // which is a RuleHostDecision runtime enum, not a GoldenTraceDecision test expectation)
+  // must be rejected at the schema validation layer with a clear, actionable reason —
+  // NOT passed through to the sandbox where it fails with an opaque
+  // "gate_decision_not_accepted_shadow:rejected_validation_failed" error.
+  // See ERR-001/ERR-005 (rc-1/rc-2): previously extractGoldenTrace() used
+  // `as unknown as GoldenTrace` to bypass schema validation.
+  it('rejects artifact with illegal expectedDecision (requireApproval) before sandbox, with clear reason', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const gateDeps = makeGateDeps();
+    const writer = new RuleHostWriter({ gateDeps });
+    // Include a valid positive case so the ONLY schema failure is the illegal
+    // expectedDecision — isolating the test to the exact regression scenario
+    // rather than also tripping "missing positive case".
+    const badTrace = {
+      ...makeGoldenTrace(),
+      cases: [
+        {
+          caseId: 'case-bad',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          // Illegal: requireApproval is a RuleHostDecision, not a GoldenTraceDecision.
+          // Legal values are: allow | block | propose_correction.
+          expectedDecision: 'requireApproval',
+        },
+        {
+          caseId: 'case-pos-valid',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/project/src/safe.ts' },
+          expectedDecision: 'allow',
+        },
+      ],
+    };
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() { return { decision: "requireApproval", matched: true, reason: "test" }; }',
+        goldenTrace: badTrace,
+        ruleHostGateDecision: 'accepted_shadow',
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    // Must surface the schema violation clearly, not the opaque sandbox error.
+    expect(result.reason).toContain('golden_trace_schema_invalid');
+    expect(result.reason).not.toContain('gate_decision_not_accepted_shadow');
+    // The reason should point at the offending field so the owner knows what to fix.
+    expect(result.reason).toMatch(/expectedDecision|requireApproval|allow.*block.*propose_correction/);
+    // The rejection must happen BEFORE the sandbox is invoked — proving the
+    // schema guard is the defense, not the sandbox's validation_failed path.
+    expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
   });
 
   it('rejects artifact where implementationCode is not a string', async () => {
@@ -348,6 +413,108 @@ describe('RuleHostWriter', () => {
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('artifact_validation_status_rejected');
+  });
+});
+
+describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', () => {
+  async function importWriter() {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    return { RuleHostWriter };
+  }
+
+  /** Build a v2-declaring artifact (requiresContextVersion: 2 in contentJson). */
+  function makeV2Artifact(): PIArtifactSnapshot {
+    const goldenTrace = makeGoldenTrace();
+    return {
+      artifactId: 'art-rule-v2-001',
+      artifactKind: 'rule',
+      sourceTaskId: 'task-v2-001',
+      sourcePrincipleId: 'P_v2',
+      sourceRuleId: 'R_v2',
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "v2 rule" }; }',
+        goldenTrace,
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['read_file'],
+        requiresContextVersion: 2,
+      }),
+      createdAt: '2026-06-27T00:00:00.000Z',
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    };
+  }
+
+  it('rejects v2 artifact when rulecode_context_v2 flag is OFF (default, no probe)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // No featureFlagProbe provided — defaults to "all flags off" (safe default
+    // for quiet-category flags per PRI-239).
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('rulecode_context_v2_disabled');
+  });
+
+  it('rejects v2 artifact when featureFlagProbe reports rulecode_context_v2=false', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (_flagId: string) => false,
+    });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('rulecode_context_v2_disabled');
+  });
+
+  it('accepts v2 artifact when featureFlagProbe reports rulecode_context_v2=true', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const result = await writer.canActivate(makeV2Artifact());
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts v1 artifact (no requiresContextVersion) regardless of flag state', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // Flag OFF — v1 artifact must still pass.
+    const writerOff = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const resultOff = await writerOff.canActivate(makeRuleArtifact());
+    expect(resultOff.ok).toBe(true);
+
+    // Flag ON — v1 artifact still passes (flag doesn't affect v1).
+    const writerOn = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: () => true,
+    });
+    const resultOn = await writerOn.canActivate(makeRuleArtifact());
+    expect(resultOn.ok).toBe(true);
+  });
+
+  it('does not invoke the sandbox when rejecting v2 artifact with flag OFF', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const gateDeps = makeGateDeps();
+    const writer = new RuleHostWriter({ gateDeps });
+    await writer.canActivate(makeV2Artifact());
+    expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
+  });
+
+  it('ignores requiresContextVersion values other than 2 (treats as v1)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "x" }; }',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['read_file'],
+        // Not 2 — must be treated as v1 (not gated by the flag).
+        requiresContextVersion: 1,
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
   });
 });
 

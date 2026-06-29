@@ -40,6 +40,7 @@ export const GoldenTraceCaseInputTypebox = Type.Object({
   ]),
   expectedProposedParams: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   expectedApplicationMode: Type.Optional(Type.Union([Type.Literal('shadow'), Type.Literal('live')])),
+  ruleContext: Type.Optional(Type.Unknown()),
 });
 
 /**
@@ -69,4 +70,6 @@ export const ArtificerRuleOutputTypebox = Type.Object({
   risks: Type.Array(Type.String()),
   sourceTrace: ArtificerSourceTraceTypebox,
   generatedAt: Type.String({ minLength: 1 }),
+  // PRI-484 — optional v2 context declaration. Only literal `2` is supported.
+  requiresContextVersion: Type.Optional(Type.Literal(2)),
 });

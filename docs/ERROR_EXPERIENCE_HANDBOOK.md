@@ -88,7 +88,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
 | ERR-010 | Falsy evaluator return silently passes validation instead of recording failure | PRI-172 |
-| ERR-013 | `in` operator on untrusted object matches inherited Object.prototype properties | PRI-201 |
+| ERR-013 | `in` operator OR direct indexing on a plain object leaks inherited Object.prototype members (`__proto__`, `constructor`, `toString`) — use `Object.hasOwn` for key checks AND to guard lookup-table value reads | PRI-201 |
 | ERR-037 | UI action buttons gated only by `status`, ignoring backend actionability field | PRI-244 |
 | ERR-038 | Read-only GET paths create writable SqliteConnection; readonly breaks fresh workspace | PRI-244 |
 | ERR-039 | Test `filter(isRecord)` silently discards malformed items; `if (isRecord)` skips assertions | PRI-244 |
@@ -112,6 +112,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
+| ERR-085 | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults | PR #1079 |
+| ERR-087 | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases | PRI-485 / PR #1102 |
 
 ---
 
@@ -134,6 +136,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
+| ERR-086 | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state | PR #1079 |
 
 ---
 
@@ -186,8 +189,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Latest recurrence**: 2026-06-26 PR #1072 (PRI-471): `dispatchFollowUp` built the `link_candidate` payload from raw `candidateIdInput` while the button's disabled-check used `candidateIdInput.trim()` — a whitespace-pasted id (`" cand-1 "`) was persisted verbatim into `resultingCandidateId`. Same class: normalization at the guard layer but not the authoritative persistence path. Fixed by trimming in the payload + at the server trust boundary. Also 2026-06-25 PR #1047/#1045: unsafe JSON narrowing and `(err as NodeJS.ErrnoException).code` on caught `unknown`; fixed with `isRecord()`/`isErrnoException()` guards.
-- **Recurrence**: Yes - repeated across JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, and test fixtures. Representative recent recurrences: PR #1020 package JSON parsing; PR #989 console SQLite rows; PR #972 vm sandbox output; PR #966 RuleHost CLI/runtime casts; PR #960 RuleHost DB/module metadata; PR #928 diagnostic JSON lineage merge; PR #926 schema guessing in SQLite tests; PR #892 hook result classification; PR #847 SQLite numeric IDs; PR #836 sanitizer casts; PR #829 JSON fixture casts; PR #817 env-var validation; PR #808/#809/#810 validator casts; PR #739 recommendation kind validation; PR #729 CLI language validation; PR #727 activation SQLite rows; PR #702 YAML feature flags; PR #688 raw event data. Prevention remains: treat parsed/external data as `unknown`, validate with runtime guards, and avoid `as` at trust boundaries.
+- **Latest recurrence**: 2026-06-29 PR #1104: `parseIntentDocSections` used `(sections as Record<string, string>)[def.key] = trimmed` to silence TypeScript's index-signature complaint on `IntentDocSections` (interface without index signature, indexed by `def.key: keyof IntentDocSections`). The PR body's rc-2 self-check defended the cast as "necessary narrowing" — but direct `sections[def.key] = trimmed` is fully type-safe (no runtime guard needed). Same `as`-anti-pattern family, distinct flavor: not untrusted data, just an unnecessary cast where direct assignment works. Fixed by removing the cast. Also 2026-06-28 PR #1098 (PRI-483): test files used `any` type in mock constructors (`this: any`, `_logger: any`) and `as any` assertions on test fixtures (`handleBeforeToolCall(event as any, ctx as any)`), bypassing type safety and hiding signature drift between tests and production APIs. Fixed by replacing with `as unknown as T` using `Parameters<typeof handleBeforeToolCall>` type derivation. Also 2026-06-26 PR #1072 (PRI-471): `dispatchFollowUp` built the `link_candidate` payload from raw `candidateIdInput` while the button's disabled-check used `candidateIdInput.trim()` — a whitespace-pasted id (`" cand-1 "`) was persisted verbatim into `resultingCandidateId`. Same class: normalization at the guard layer but not the authoritative persistence path. Fixed by trimming in the payload + at the server trust boundary. Older: 2026-06-25 PR #1047/#1045 (unsafe JSON narrowing + `(err as NodeJS.ErrnoException).code` on caught `unknown`; fixed with `isRecord()`/`isErrnoException()` guards).
+- **Recurrence**: Yes - repeated across JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, and test fixtures. Representative recent recurrences: PR #1020 package JSON parsing; PR #989 console SQLite rows; PR #972 vm sandbox output; PR #966 RuleHost CLI/runtime casts; PR #960 RuleHost DB/module metadata; PR #928 diagnostic JSON lineage merge; PR #926 schema guessing in SQLite tests; PR #892 hook result classification. Older compressed (PR #847/#836/#829/#817/#808-810/#739/#729/#727/#702/#688): SQLite numeric IDs, sanitizer casts, JSON fixture casts, env-var validation, validator casts, recommendation kind, CLI language, activation SQLite rows, YAML feature flags, raw event data — all `as`/missing-`typeof` at trust boundaries. Prevention remains: treat parsed/external data as `unknown`, validate with runtime guards, and avoid `as` at trust boundaries.
 
 ---
 
@@ -199,7 +202,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction. Recent: 2026-06-19 PRI-408 (PR#972) approval-completion silent catch + 3 `refused` paths with hardcoded `riskLevel:'low'`/no nextAction; PRI-431 (PR#975) `ConfigResolutionError` catch dropped `nextAction` from JSON. 2026-06-18 PRI-428 (PR#966) run-rulehost non-approved JSON omitted `nextAction`; 2026-06-14 PRI-392 (PR#922) `recoveredCount++` on `null` (concurrent-mod) → false success; 2026-06-13 PRI-385 (PR#918) `determineNextAction` emitted non-executable retry command. 2026-06-07 PRI-331 (PR#847) candidates-table catch swallowed `isMissingTableError`. Older: PR#729 (catch→skip in `beforeAll`), PR#721 (malformed yaml→`[]`), PR#715 (`passed` on `queued_for_approval`), PR#711 (persistent skeleton on fetch error), PR#702 (canary `healthy` with warnings), PR#699 (`catch { void 0 }`). Pattern: degrade lacks reason+nextAction OR returns success-shaped value. Fix: every catch/fallback emits structured reason + nextAction via telemetry/log/field.
+- **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction. Recent: 2026-06-28 PRI-483 (PR#1098) `_buildRuleContextIfEnabled` only handled thrown exceptions from `loadPdConfigForPlugin`, not `ok:false` return results — malformed config silently fell through into flag computation on defaults. Fixed by adding explicit `!configResult.ok` guard with warn log (rc-9). 2026-06-19 PRI-408 (PR#972) approval-completion silent catch + 3 `refused` paths with hardcoded `riskLevel:'low'`/no nextAction; PRI-431 (PR#975) `ConfigResolutionError` catch dropped `nextAction` from JSON. 2026-06-18 PRI-428 (PR#966) run-rulehost non-approved JSON omitted `nextAction`; 2026-06-14 PRI-392 (PR#922) `recoveredCount++` on `null` (concurrent-mod) → false success; 2026-06-13 PRI-385 (PR#918) `determineNextAction` emitted non-executable retry command. 2026-06-07 PRI-331 (PR#847) candidates-table catch swallowed `isMissingTableError`. Older: PR#729 (catch→skip in `beforeAll`), PR#721 (malformed yaml→`[]`), PR#715 (`passed` on `queued_for_approval`), PR#711 (persistent skeleton on fetch error), PR#702 (canary `healthy` with warnings), PR#699 (`catch { void 0 }`). Pattern: degrade lacks reason+nextAction OR returns success-shaped value. Fix: every catch/fallback emits structured reason + nextAction via telemetry/log/field.
 
 ---
 
@@ -367,15 +370,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-013]** | `in` operator on untrusted object matches inherited Object.prototype properties
+**[ERR-013]** | `in` operator OR direct indexing on a plain object leaks inherited Object.prototype members (`__proto__`, `constructor`, `toString`)
 
-- **What happened**: In `validateCorrectionProposal()`, the cross-check for `correctedFields[].field` against `proposedParams` used `cf.field in proposal.proposedParams`. The `in` operator traverses the prototype chain, so inherited properties like `toString`, `constructor`, `valueOf` would match even though they are not actual keys in `proposedParams`. A `correctedFields` entry with `field: 'toString'` would incorrectly pass validation, allowing the semantic-contradiction bug the cross-check was designed to prevent.
-- **Why it's wrong**: When checking whether a key exists in an untrusted object (one that came from LLM output), the `in` operator is the wrong tool because it matches inherited properties from `Object.prototype`. This is the same class of error as ERR-001/ERR-005/ERR-007 where runtime semantics differ from the developer's intent due to type-system/primitive mismatches.
-- **Correct approach**: Use `Object.hasOwn(obj, key)` which only checks own properties and does not traverse the prototype chain. This is the correct semantics for "is this key present in the data the agent provided".
-- **How to prevent**: When checking key existence in untrusted objects (LLM output, parsed JSON, `Record<string, unknown>`), always use `Object.hasOwn()` or `Object.prototype.hasOwnProperty.call()`, never the `in` operator. Add a test case with an inherited property name (e.g., `toString`) to every validator that checks key existence.
-- **Source**: PRI-201 / PR #663 (Codex review)
-- **Date**: 2026-05-21
-- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent. Also 2026-05-25 PRI-239 (PR #702): `computeEffectiveFlags()` used `Object.hasOwn()` for override reads but lacked dangerous-key rejection (`__proto__`, `constructor`, `prototype`). `feature-flag-loader.ts` also lacked dangerous-key guard on parsed YAML keys. Fixed by adding `DANGEROUS_KEYS` set + filtering in both contract and loader, with regression tests. Also 2026-06-03 PR #808/#809/#810 review: Scribe/Evaluator/Artificer validators checked required fields with direct property access (`obj.taskId`, `obj.sourcePhilosopherArtifactId`) instead of `Object.hasOwn()`. Prototype-inherited properties like `toString` on `taskId` would pass validation. Fixed by adding `Object.hasOwn()` checks for all required fields in all three validators, with regression tests proving prototype-inherited values are rejected. Also 2026-06-14 PRI-394 (PR #926): SQLite INSERT guess column names in malformed-row test — same trust-boundary pattern on DB schema instead of JSON.
+- **What happened**: Two variants of the same prototype-chain leakage. **Variant A (`in` operator, PRI-201):** in `validateCorrectionProposal()`, the cross-check for `correctedFields[].field` against `proposedParams` used `cf.field in proposal.proposedParams`. The `in` operator traverses the prototype chain, so inherited properties like `toString`, `constructor`, `valueOf` would match even though they are not actual keys in `proposedParams`. A `correctedFields` entry with `field: 'toString'` would incorrectly pass validation. **Variant B (lookup-table value read, PRI-480 PR #1089):** `canonicalizeToolKind()` indexed a hardcoded `TOOL_ALIAS` plain-object table via `TOOL_ALIAS[toolName]` and checked `hit !== undefined`. For inherited keys (`__proto__`, `constructor`, `toString`, `hasOwnProperty`, `valueOf`), the lookup returns the corresponding `Object.prototype` member (the prototype object itself, the Object constructor function, the `toString` method, etc.) — none of which are `=== undefined`, so the function returned a non-`CanonicalKind` value (`Object.prototype` for `__proto__`, the Object constructor for `constructor`) and violated its closed-enum return contract. `Record<string, T>` typing does NOT model the prototype chain, so `noUncheckedIndexedAccess` does not catch this.
+- **Why it's wrong**: Plain JavaScript objects inherit from `Object.prototype` unless created via `Object.create(null)`. Both `in` (key existence) and `table[key]` (value read) traverse that chain. For untrusted keys this means an attacker- or caller-supplied string like `__proto__` / `constructor` resolves to an `Object.prototype` member instead of `undefined`. This is the same class as ERR-001/ERR-005/ERR-007: runtime semantics bypass the developer's intent because of a primitive mismatch the type system does not surface.
+- **Correct approach**: For key-existence checks use `Object.hasOwn(obj, key)`. For lookup-table value reads, guard with `Object.hasOwn(table, key)` BEFORE indexing: `if (!Object.hasOwn(TOOL_ALIAS, toolName)) return 'other'; const hit = TOOL_ALIAS[toolName]; return hit !== undefined ? hit : 'other';`. For maps keyed entirely by external input, prefer `new Map()` or `Object.create(null)` so no prototype chain exists. `Map` is immune (no prototype chain on entries); `Object.create(null)` is immune (null prototype).
+- **How to prevent**: Two rules. (1) When checking key existence in untrusted objects (LLM output, parsed JSON, `Record<string, unknown>`), always use `Object.hasOwn()` — never `in`. Add a test case with an inherited property name (e.g., `toString`) to every validator that checks key existence. (2) **30-second PR-review test for lookup tables:** when a plain-object table is indexed by external input, mentally run `table['__proto__']` and `table['constructor']` — if either returns something other than `undefined`, the lookup needs an `Object.hasOwn` guard or a `Map`. Add a regression test asserting all five inherited keys (`__proto__`, `constructor`, `prototype`, `toString`, `hasOwnProperty`) resolve to the default/`other` branch.
+- **Source**: PRI-201 / PR #663 (Codex review, variant A); PRI-480 / PR #1089 (CodeRabbit review, variant B)
+- **Date**: 2026-05-21 (variant A); 2026-06-28 (variant B)
+- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent. Variant B (2026-06-28 PRI-480 PR #1089): `canonicalizeToolKind()` lookup-table indexing returned `Object.prototype` for `__proto__` and the Object constructor for `constructor`; fixed with `Object.hasOwn(TOOL_ALIAS, toolName)` guard + 5-inherited-key regression test. Prior variant A incidents: 2026-05-25 PRI-239 (PR #702) `computeEffectiveFlags()` used `Object.hasOwn()` for override reads but lacked dangerous-key rejection (`__proto__`/`constructor`/`prototype`) — fixed with `DANGEROUS_KEYS` set. 2026-06-03 PR #808/#809/#810: Scribe/Evaluator/Artificer validators used direct property access for required fields — fixed with `Object.hasOwn()` checks. 2026-06-14 PRI-394 (PR #926): SQLite INSERT guess column names — same trust-boundary pattern on DB schema.
 
 ---
 
@@ -495,7 +498,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a "readonly wiring test" checklist item for every CLI command that uses `RuntimeStateManager`. Test that: (1) no flags / `--dry-run` → `readonly: true`; (2) `--confirm` → `readonly: false`.
 - **Source**: PRI-218 / PR #681
 - **Date**: 2026-05-23
-- **Recurrence**: None
+- **Recurrence**: 2026-06-27 PR #1079 — `migrate-illegal-expected-decision.ts` docstring claimed "默认 dry-run" but `parseArgs()` defaulted to write mode (no `--write` flag required). Operator running the script with no flags would mutate the DB. Fixed by flipping to `--write` opt-in.
 
 ---
 
@@ -736,10 +739,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 84 |
-| Last updated | 2026-06-26 |
+| Total lessons | 87 |
+| Last updated | 2026-06-29 |
 | Top category | Schema & Type |
-| Recurring errors | 37 |
+| Recurring errors | 38 |
 
 ---
 
@@ -1235,4 +1238,51 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-022, ERR-045, ERR-068
 - **Source**: PR #1068
 - **Date**: 2026-06-26
+- **Recurrence**: None
+
+---
+
+**[ERR-085]** | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults
+
+- **What happened**: Two trust-boundary defects in PR #1079's `RuleHostWriter.extractGoldenTrace()` and `migrate-illegal-expected-decision.ts`:
+  1. `extractGoldenTrace()` performed intermediate checks (`cases` non-empty, `traceId` non-empty) before calling the canonical `validateGoldenTrace()`. When these intermediate checks failed, the function returned `no_golden_trace` — masking the real schema violation (e.g. empty cases, missing traceId) with a less actionable "missing trace" reason. The owner saw `no_golden_trace` when the actual problem was "cases array missing required positive/negative entries".
+  2. `normalizeExpectedDecision()` in the migration script coerced any unknown `kind` value to `block` via `kind === 'positive' ? 'allow' : 'block'`. An artifact with `kind: "shadow"` (illegal) and `expectedDecision: "requireApproval"` would be silently rewritten to `block`, hiding the data-quality issue from the operator.
+- **Why it's wrong**: When a canonical validator exists (`validateGoldenTrace()`), intermediate field-level checks must NOT short-circuit it — they steal the validator's chance to produce actionable, specific error details. Silent coercion of unknown enum values to a default violates rc-9 (no silent fallback): the operator never learns the data was malformed. Both defects share the root cause: bypassing the canonical validator's specific, observable error surface.
+- **Generalized failure mode**: When a canonical validator exists for a schema, intermediate checks must defer to it (not preempt it) so failure reasons stay specific and actionable; and unknown enum values must be recorded for manual review, never silently coerced to a "safe" default.
+- **Correct approach**: (1) In `extractGoldenTrace()`, only check `typeof trace !== 'object' || trace === null || Array.isArray(trace)` to decide `no_golden_trace`; once it's an object, defer ALL field validation to `validateGoldenTrace()` and surface `golden_trace_schema_invalid: <detail>`. (2) In `normalizeExpectedDecision()`, only map explicit `kind === 'positive'` → `'allow'` and `kind === 'negative'` → `'block'`; for any other `kind`, return `null` and record the artifact in `issues[]` for manual review.
+- **How to prevent**: (1) When writing a validator wrapper, ask: "Does my intermediate check produce a MORE specific reason than the canonical validator?" If no, delete the intermediate check. (2) For any coercion/default rule on enum-like fields, ask: "Can I distinguish 'default applies because value is X' from 'default applies because value is unknown'?" If no, the unknown case must be reported, not coerced. (3) Code-review checklist: grep for `? 'allow' : 'block'` and `'block' : 'allow'` ternaries in normalization code — every branch must be an explicit enum match.
+- **Regression guard**: `rule-host-writer.test.ts` "rejects artifact with empty GoldenTrace cases" now asserts `golden_trace_schema_invalid` (not `no_golden_trace`); "rejects artifact with illegal expectedDecision" asserts `gateDeps.evaluateInSandbox` was NOT called, proving the schema guard (not the sandbox) is the defense. Migration script's `issues[]` array captures unknown-kind cases for manual review.
+- **Related ERRs**: ERR-001, ERR-005, ERR-009, ERR-010, ERR-069 (same trust-boundary pattern group — `as`/intermediate checks/silent defaults bypass canonical validation); ERR-002 (silent degradation without observability — rc-9)
+- **Source**: PR #1079
+- **Date**: 2026-06-27
+- **Recurrence**: None
+
+---
+
+**[ERR-086]** | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state
+
+- **What happened**: `migrate-illegal-expected-decision.ts` Step 4 ("应用修复") iterated over artifacts needing fixes and called `db.prepare('UPDATE pi_artifacts ...').run(...)` once per artifact without any transaction wrapping. If the script crashed, threw, or was interrupted (Ctrl+C, OOM, power loss) after updating some artifacts but before others, the DB would be left in a half-migrated state: some artifacts have corrected `expectedDecision`, others still have `requireApproval`. The operator has no way to know which subset was modified without inspecting each row.
+- **Why it's wrong**: Migration scripts that mutate multiple rows must be atomic — either ALL rows are updated or NONE are. Without a transaction, a partial failure creates an inconsistent state that is strictly worse than no migration at all: the operator believes "the script ran" but the data is half-fixed, and re-running the script may skip already-fixed rows (depending on idempotency) or re-fix them (depending on logic). This violates the CLI Command Gate implicit contract that failure paths must not leave partial state.
+- **Generalized failure mode**: When a migration or batch-mutation script modifies multiple DB rows, the entire mutation set must be wrapped in a single transaction (`db.transaction(() => { ... })()`) so partial failures roll back to the pre-migration state. Better-sqlite3's `db.transaction()` makes this trivial.
+- **Correct approach**: Wrap the entire Step 4 loop in `const applyTx = db.transaction(() => { for (...) { ... } }); applyTx();`. If any `UPDATE` throws (e.g. DB locked, disk full, constraint violation), the transaction auto-rolls-back and the exception propagates — leaving the DB untouched. The script can then be safely re-run after the underlying issue is resolved.
+- **How to prevent**: (1) Code-review checklist for any script that loops `db.prepare(...).run()`: "Is this loop inside `db.transaction(() => { ... })()`?" If no, block the PR. (2) Better-sqlite3 idiom: prefer `const tx = db.transaction(() => { ... }); tx()` over manual `BEGIN`/`COMMIT`/`ROLLBACK` (handles nested transactions and exception rollback automatically). (3) Test by killing the script mid-loop (Ctrl+C) and verifying the DB is unchanged.
+- **Regression guard**: Manual smoke test — run `--write` mode, interrupt with Ctrl+C after first UPDATE, verify all artifacts still have original `expectedDecision` (transaction rolled back). The script's `[summary]` log now reports "transaction committed" only after the transaction completes.
+- **Related ERRs**: ERR-071 (async cleanup not awaited — same "cleanup/lifecycle hygiene" class), ERR-074 (inner try/catch exit tunnel bypasses outer cleanup — same "transactional boundary" concern)
+- **Source**: PR #1079
+- **Date**: 2026-06-27
+- **Recurrence**: None
+
+---
+
+**[ERR-087]** | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases
+
+- **What happened**: In PRI-485 Phase 6, `generateV2CasesFromArtificer()` (packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts) generated 5 v2 adversarial cases for ANY `canonicalKind` returned by `canonicalizeToolKind()`. But the 5 templates (alias/path-boundary/combination) are write-path semantics — they assume the action tool is a write tool. For non-write tools (read/search/execute/agent/other), the generated cases are semantically wrong: e.g. `v2-path-boundary` expects `block` on a `read_file` tool, which a correct read-rule would never do. This would cause the Evaluator to reject valid read-path rules during adversarial replay.
+- **Why it's wrong**: The function's type signature accepts all `CanonicalKind` values (`read | search | write | execute | agent | other`), but its implementation only correctly handles `write`. This is a type contract overpromise — the signature promises more than the implementation delivers. The spec §10.1 acceptance scenarios are ALL write-oriented, which created a blind spot: the generator was coded to the spec's examples without considering what happens for non-write inputs the spec didn't mention.
+- **Generalized failure mode**: When implementing a generator whose templates are domain-specific (proven by spec examples all being one domain), assistants must add a precondition guard that filters non-applicable inputs and degrades with structured telemetry (rc-9), otherwise the generator produces semantically wrong artifacts for unhandled domains.
+- **Correct approach**: Before calling `generateV2ContextAdversarialCases()`, check `canonicalKind !== 'write'` and degrade to `[]` with a telemetry event carrying `reason` + `nextAction` + `toolName` + `canonicalKind`. Non-write tools fall back to LLM-supplied adversarial cases only.
+- **How to prevent**: 30-second PR-review check — when a generator produces domain-specific artifacts from a generic input type (enum/union), verify: (1) does the spec/acceptance criteria cover ALL values of the input type, or only a subset? (2) if only a subset, is there a precondition guard filtering non-applicable values? (3) is there a regression test asserting the guard fires for a non-applicable value? If any answer is no, the generator has a domain blind spot.
+- **Regression guard**: `packages/principles-core/src/runtime-v2/__tests__/evaluator-runner-vslice-v2.test.ts` — "PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)" asserts: (a) trace captured with only 3 LLM cases (no v2 caseIds), (b) telemetry event `evaluator_v2_adversarial_cases_skipped` emitted with `reason: 'non_write_canonical_kind_for_v2_adversarial_cases'` and `canonicalKind: 'read'`.
+- **Related ERRs**: ERR-069 (writing against remembered contract instead of actual schema — same pattern group: spec-driven blind spot), ERR-025 (test reality gap — fixtures used read_file and passed without asserting semantic correctness), EP-02 (production path wiring — component exists but real inputs it can't handle break it).
+- **Source**: PRI-485 / PR #1102 (CodeRabbit review)
+- **Date**: 2026-06-29
 - **Recurrence**: None

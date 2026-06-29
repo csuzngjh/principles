@@ -14,6 +14,9 @@ import {
   validateIntentWarning,
   validateIntentSections,
   validateIntentSummary,
+  validateIntentRawContent,
+  validateIntentInitResult,
+  validateIntentSaveResult,
 } from '../../src/ui/utils/validators.js';
 
 // ── validateIntentWarning ────────────────────────────────────────────────────
@@ -266,5 +269,270 @@ describe('validateIntentSummary', () => {
 
   it('rejects sections with non-string value', () => {
     expect(validateIntentSummary({ ...validSummary, sections: { why: 123 } })).toBeNull();
+  });
+});
+
+// ── validateIntentRawContent (PRI-477) ───────────────────────────────────────
+
+describe('validateIntentRawContent', () => {
+  it('accepts valid { content, path }', () => {
+    const result = validateIntentRawContent({
+      content: '# INTENT.md\n\ntest',
+      path: '/workspace/.principles/INTENT.md',
+    });
+    expect(result).not.toBeNull();
+    expect(result?.content).toBe('# INTENT.md\n\ntest');
+    expect(result?.path).toBe('/workspace/.principles/INTENT.md');
+  });
+
+  it('rejects null', () => {
+    expect(validateIntentRawContent(null)).toBeNull();
+  });
+
+  it('rejects array', () => {
+    expect(validateIntentRawContent([1, 2, 3])).toBeNull();
+  });
+
+  it('rejects primitive', () => {
+    expect(validateIntentRawContent('content')).toBeNull();
+  });
+
+  it('rejects missing content', () => {
+    expect(validateIntentRawContent({ path: '/foo' })).toBeNull();
+  });
+
+  it('rejects non-string content', () => {
+    expect(validateIntentRawContent({ content: 123, path: '/foo' })).toBeNull();
+  });
+
+  it('rejects missing path', () => {
+    expect(validateIntentRawContent({ content: 'text' })).toBeNull();
+  });
+
+  it('rejects non-string path', () => {
+    expect(validateIntentRawContent({ content: 'text', path: 123 })).toBeNull();
+  });
+});
+
+// ── validateIntentInitResult (PRI-477) ───────────────────────────────────────
+
+describe('validateIntentInitResult', () => {
+  it('accepts minimal valid result with required fields only', () => {
+    const result = validateIntentInitResult({ ok: true, created: true });
+    expect(result).not.toBeNull();
+    expect(result?.ok).toBe(true);
+    expect(result?.created).toBe(true);
+    expect(result?.path).toBeUndefined();
+    expect(result?.reason).toBeUndefined();
+    expect(result?.nextAction).toBeUndefined();
+  });
+
+  it('accepts full valid result with all optional fields', () => {
+    const result = validateIntentInitResult({
+      ok: true,
+      created: true,
+      path: '/workspace/.principles/INTENT.md',
+      reason: 'already_exists',
+      nextAction: 'Edit the existing file instead.',
+    });
+    expect(result).not.toBeNull();
+    expect(result?.path).toBe('/workspace/.principles/INTENT.md');
+    expect(result?.reason).toBe('already_exists');
+    expect(result?.nextAction).toBe('Edit the existing file instead.');
+  });
+
+  it('accepts result with created=false (already_exists case)', () => {
+    const result = validateIntentInitResult({
+      ok: true,
+      created: false,
+      reason: 'already_exists',
+      nextAction: 'Use force=true to overwrite.',
+    });
+    expect(result).not.toBeNull();
+    expect(result?.created).toBe(false);
+    expect(result?.reason).toBe('already_exists');
+  });
+
+  it('accepts null values for optional fields', () => {
+    const result = validateIntentInitResult({
+      ok: false,
+      created: false,
+      path: null,
+      reason: null,
+      nextAction: null,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.path).toBeUndefined();
+    expect(result?.reason).toBeUndefined();
+    expect(result?.nextAction).toBeUndefined();
+  });
+
+  it('rejects null', () => {
+    expect(validateIntentInitResult(null)).toBeNull();
+  });
+
+  it('rejects array', () => {
+    expect(validateIntentInitResult([1, 2, 3])).toBeNull();
+  });
+
+  it('rejects primitive', () => {
+    expect(validateIntentInitResult('ok')).toBeNull();
+  });
+
+  it('rejects missing ok', () => {
+    expect(validateIntentInitResult({ created: true })).toBeNull();
+  });
+
+  it('rejects non-boolean ok', () => {
+    expect(validateIntentInitResult({ ok: 'true', created: true })).toBeNull();
+  });
+
+  it('rejects missing created', () => {
+    expect(validateIntentInitResult({ ok: true })).toBeNull();
+  });
+
+  it('rejects non-boolean created', () => {
+    expect(validateIntentInitResult({ ok: true, created: 1 })).toBeNull();
+  });
+
+  it('rejects non-string path when present (wrong type)', () => {
+    expect(validateIntentInitResult({ ok: true, created: true, path: 123 })).toBeNull();
+  });
+
+  it('rejects non-string reason when present (wrong type)', () => {
+    expect(validateIntentInitResult({ ok: true, created: true, reason: 42 })).toBeNull();
+  });
+
+  it('rejects non-string nextAction when present (wrong type)', () => {
+    expect(validateIntentInitResult({ ok: true, created: true, nextAction: {} })).toBeNull();
+  });
+});
+
+// ── validateIntentSaveResult (PRI-477) ───────────────────────────────────────
+
+describe('validateIntentSaveResult', () => {
+  it('accepts minimal valid result with required fields only', () => {
+    const result = validateIntentSaveResult({ ok: true, saved: true });
+    expect(result).not.toBeNull();
+    expect(result?.ok).toBe(true);
+    expect(result?.saved).toBe(true);
+    expect(result?.path).toBeUndefined();
+    expect(result?.contentHash).toBeUndefined();
+    expect(result?.warnings).toBeUndefined();
+  });
+
+  it('accepts full valid result with all optional fields', () => {
+    const result = validateIntentSaveResult({
+      ok: true,
+      saved: true,
+      path: '/workspace/.principles/INTENT.md',
+      contentHash: 'sha256:abc123',
+      lastEditedAt: '2026-06-25T10:00:00Z',
+      warnings: [{ code: 'missing_section', message: 'Missing', section: 'Why' }],
+    });
+    expect(result).not.toBeNull();
+    expect(result?.path).toBe('/workspace/.principles/INTENT.md');
+    expect(result?.contentHash).toBe('sha256:abc123');
+    expect(result?.lastEditedAt).toBe('2026-06-25T10:00:00Z');
+    expect(result?.warnings?.length).toBe(1);
+    expect(result?.warnings?.[0].code).toBe('missing_section');
+  });
+
+  it('accepts result with saved=false (error case)', () => {
+    const result = validateIntentSaveResult({
+      ok: false,
+      saved: false,
+      reason: 'oversized',
+      nextAction: 'Reduce content.',
+    });
+    expect(result).not.toBeNull();
+    expect(result?.saved).toBe(false);
+    expect(result?.reason).toBe('oversized');
+  });
+
+  it('accepts null values for optional fields', () => {
+    const result = validateIntentSaveResult({
+      ok: true,
+      saved: true,
+      path: null,
+      contentHash: null,
+      lastEditedAt: null,
+      reason: null,
+      nextAction: null,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.path).toBeUndefined();
+    expect(result?.contentHash).toBeUndefined();
+    expect(result?.lastEditedAt).toBeUndefined();
+  });
+
+  it('accepts empty warnings array', () => {
+    const result = validateIntentSaveResult({
+      ok: true,
+      saved: true,
+      warnings: [],
+    });
+    expect(result).not.toBeNull();
+    expect(result?.warnings).toEqual([]);
+  });
+
+  it('rejects null', () => {
+    expect(validateIntentSaveResult(null)).toBeNull();
+  });
+
+  it('rejects array', () => {
+    expect(validateIntentSaveResult([1, 2, 3])).toBeNull();
+  });
+
+  it('rejects primitive', () => {
+    expect(validateIntentSaveResult('ok')).toBeNull();
+  });
+
+  it('rejects missing ok', () => {
+    expect(validateIntentSaveResult({ saved: true })).toBeNull();
+  });
+
+  it('rejects non-boolean ok', () => {
+    expect(validateIntentSaveResult({ ok: 1, saved: true })).toBeNull();
+  });
+
+  it('rejects missing saved', () => {
+    expect(validateIntentSaveResult({ ok: true })).toBeNull();
+  });
+
+  it('rejects non-boolean saved', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: 'yes' })).toBeNull();
+  });
+
+  it('rejects non-string path when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, path: 123 })).toBeNull();
+  });
+
+  it('rejects non-string contentHash when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, contentHash: true })).toBeNull();
+  });
+
+  it('rejects non-string lastEditedAt when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, lastEditedAt: {} })).toBeNull();
+  });
+
+  it('rejects non-string reason when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, reason: 42 })).toBeNull();
+  });
+
+  it('rejects non-string nextAction when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, nextAction: {} })).toBeNull();
+  });
+
+  it('rejects non-array warnings when present (wrong type)', () => {
+    expect(validateIntentSaveResult({ ok: true, saved: true, warnings: 'none' })).toBeNull();
+  });
+
+  it('rejects invalid warning element in warnings array', () => {
+    expect(validateIntentSaveResult({
+      ok: true,
+      saved: true,
+      warnings: [{ code: 'invalid_code', message: 'msg' }],
+    })).toBeNull();
   });
 });

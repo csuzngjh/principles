@@ -3,7 +3,6 @@
  *
  * GET  /check    — Check for updates
  * POST /apply    — Apply an update
- * GET  /status   — Get current update status
  * POST /rollback — Rollback an update
  */
 /* eslint-disable @typescript-eslint/max-params */
@@ -413,9 +412,17 @@ export async function handleUpdateRoute(
   if (subPath === '/check') {
     if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
     try {
+      // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
+      // 返回 degraded 状态 + reason，而非 500。前端 validateUpdateStatus 要求
+      // currentVersion/latestVersion 为 string，hasUpdate 为 boolean。
       const currentVersion = readCurrentVersion(pluginDir);
       if (!currentVersion) {
-        sendError(res, 500, 'version_not_found', 'Could not determine current version');
+        sendSuccess(res, {
+          hasUpdate: false,
+          currentVersion: 'unknown',
+          latestVersion: '',
+          error: 'Could not determine current version (plugin not installed)',
+        });
         return;
       }
       const result = await doCheckForUpdates(currentVersion);
@@ -465,14 +472,6 @@ export async function handleUpdateRoute(
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_apply_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
-
-  // GET /status
-  if (subPath === '/status') {
-    if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
-    const currentVersion = readCurrentVersion(pluginDir) ?? 'unknown';
-    sendSuccess(res, { checking: false, updating: false, currentVersion });
     return;
   }
 

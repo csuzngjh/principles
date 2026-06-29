@@ -38,6 +38,12 @@ export class SqliteConnection {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private readonly readonlyMode: boolean;
+  /**
+   * Schema initialization warnings collected during getDb(). Populated when initSchema()
+   * or migrateSchema() fails (rc-9: no silent fallback — callers can read these warnings
+   * to surface degraded state). Empty array means no warnings.
+   */
+  private readonly schemaInitWarnings: string[] = [];
 
   constructor(workspaceDirOrOpts: string | SqliteConnectionOptions) {
     const opts = typeof workspaceDirOrOpts === 'string'
@@ -51,8 +57,36 @@ export class SqliteConnection {
     this.dbPath = join(pdDir, 'state.db');
   }
 
+  /**
+   * Returns warnings collected during schema initialization (rc-9: no silent fallback).
+   * Empty if no warnings. Call after getDb() to inspect degraded schema state.
+   */
+  getSchemaInitWarnings(): string[] {
+    return [...this.schemaInitWarnings];
+  }
+
   getDb(): Database.Database {
     if (this.db) return this.db;
+
+    // readonly mode: if the DB file does not exist, bootstrap it once in write mode
+    // (triggers initSchema), then close and reopen in readonly mode. This prevents
+    // pd-console GET routes and other readonly callers from throwing SqliteError on
+    // fresh workspaces where state.db has not been created yet.
+    if (this.readonlyMode && !fs.existsSync(this.dbPath)) {
+      const bootstrapper = new SqliteConnection({ workspaceDir: this.workspaceDirFromDbPath(), readonly: false });
+      try {
+        bootstrapper.getDb(); // triggers initSchema + migrateSchema
+      } catch (err) {
+        // rc-9: fail loud with reason and next action — do not silently swallow
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `Failed to bootstrap state.db for readonly access: ${err instanceof Error ? err.message : String(err)}`,
+          { nextAction: 'Run "pd runtime init --confirm --workspace <dir>" to initialize databases, then retry.' },
+        );
+      } finally {
+        try { bootstrapper.close(); } catch { /* best-effort */ }
+      }
+    }
 
     this.db = this.readonlyMode
       ? new Database(this.dbPath, { readonly: true })
@@ -96,13 +130,34 @@ export class SqliteConnection {
       }
       try {
         this.initSchema();
-      } catch { /* schema init may fail in restricted environments */ }
+      } catch (err) {
+        // rc-9: surface failure reason instead of silent catch (was `catch { }`).
+        // Schema init may fail in restricted environments; record the warning so
+        // callers can detect degraded state via getSchemaInitWarnings().
+        this.schemaInitWarnings.push(
+          `initSchema failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       try {
         this.migrateSchema();
-      } catch { /* schema migration is non-fatal */ }
+      } catch (err) {
+        // rc-9: surface migration failure reason (was `catch { }`)
+        this.schemaInitWarnings.push(
+          `migrateSchema failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     return this.db;
+  }
+
+  /**
+   * Derive workspaceDir from dbPath (used for readonly bootstrap).
+   * dbPath is <workspaceDir>/.pd/state.db, so workspaceDir is two levels up.
+   */
+  private workspaceDirFromDbPath(): string {
+    // dbPath = <workspaceDir>/.pd/state.db → workspaceDir is dirname(dirname(dbPath))
+    return join(this.dbPath, '..', '..');
   }
 
   getPragmaReport(): SqlitePragmaReport {
@@ -426,6 +481,21 @@ export class SqliteConnection {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_decisions_pain_hash_action
         ON intent_decisions(pain_id, intent_doc_hash, owner_action)
         WHERE pain_id IS NOT NULL;
+    `);
+
+    // INTENT.md doc version snapshots (SPEC bilingual+lifecycle).
+    // Mirrors the intent_decisions audit pattern: immutable snapshots, hash linkage.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS intent_doc_versions (
+        id TEXT PRIMARY KEY,
+        lang TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        content_snapshot TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_intent_doc_versions_lang
+        ON intent_doc_versions(lang, created_at DESC);
     `);
 
     // P2-10: Minimal schema_version table for state.db migration tracking.

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { replayGoldenTrace } from '../golden-trace-replay-validator.js';
 import type { ReplayEvaluateFn } from '../golden-trace-replay-validator.js';
 import type { GoldenTraceCase } from '../golden-trace.js';
+import type { RuleContextV2 } from '../internalization/rule-context-v2.js';
 
 // --- Helpers ---
 
@@ -244,4 +245,78 @@ describe('replayGoldenTrace', () => {
     expect(caseResult?.repairHint).toContain('applicationMode');
   });
 
+});
+
+// --- PRI-481 Phase 2: ruleContext reaches rule via replayGoldenTrace (ERR-024, Task 13b) ---
+
+describe('PRI-481 Phase 2 — replayGoldenTrace delivers ruleContext to validateCase', () => {
+  const contextWithOneRead: RuleContextV2 = {
+    version: 2,
+    history: {
+      status: 'available',
+      truncated: false,
+      calls: [
+        {
+          sequenceId: 1,
+          toolName: 'read',
+          canonicalKind: 'read',
+          normalizedPath: 'src/a.ts',
+          paramsSummary: {},
+          outcome: 'success',
+        },
+      ],
+    },
+    facts: {
+      priorReadOfTarget: 'yes',
+      readCount: 1,
+      writeCount: 0,
+      uniqueWritePathCount: 0,
+      sameActionBlockCount: 0,
+    },
+  };
+
+  it('rule reading input.context flips its decision when case carries ruleContext', () => {
+    const contextReadingRule: ReplayEvaluateFn = (input) => {
+      const calls = input.context?.history?.calls;
+      if (Array.isArray(calls) && calls.length > 0) {
+        return { decision: 'block' as const, matched: true, reason: 'prior reads in history', confidence: 0.9 };
+      }
+      return { decision: 'allow' as const, matched: false, reason: 'no context', confidence: 1.0 };
+    };
+    const cases: GoldenTraceCase[] = [
+      {
+        caseId: 'ctx-block',
+        kind: 'negative',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts', content: 'x' },
+        expectedDecision: 'block',
+        ruleContext: contextWithOneRead,
+      },
+    ];
+    const result = replayGoldenTrace(contextReadingRule, cases);
+    expect(result.passed).toBe(true);
+    expect(result.perCaseResults[0]?.actualDecision).toBe('block');
+  });
+
+  it('v1 case without ruleContext — rule sees no context, allows (zero behavior change)', () => {
+    const contextReadingRule: ReplayEvaluateFn = (input) => {
+      const calls = input.context?.history?.calls;
+      if (Array.isArray(calls) && calls.length > 0) {
+        return { decision: 'block' as const, matched: true, reason: 'prior reads', confidence: 0.9 };
+      }
+      return { decision: 'allow' as const, matched: false, reason: 'no context', confidence: 1.0 };
+    };
+    const cases: GoldenTraceCase[] = [
+      {
+        caseId: 'v1-allow',
+        kind: 'positive',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts', content: 'x' },
+        expectedDecision: 'allow',
+      },
+    ];
+    const result = replayGoldenTrace(contextReadingRule, cases);
+    expect(result.passed).toBe(true);
+    expect(result.perCaseResults[0]?.actualDecision).toBe('allow');
+  });
 });

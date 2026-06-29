@@ -14,6 +14,7 @@ import {
   validateConfigCatalog,
   validateAgentBindingUpdate,
   validateDefaultRuntimeUpdate,
+  validateFeatureFlagUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
   validateActivations,
@@ -29,11 +30,14 @@ import {
   validateEvidenceChain,
   validateTrajectoryData,
   validateIntentSummary,
-  validateIntentDecisionRecord,
   validateIntentDecisionList,
   validateIntentDecisionResult,
   validateIntentDecisionSummary,
   validateFollowUpResponse,
+  validateIntentInitResult,
+  validateIntentSaveResult,
+  validateIntentRawContent,
+  validateIntentVersions,
 } from "./utils/validators.js";
 import type {
   FeedbackReportData,
@@ -47,6 +51,7 @@ import type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
@@ -66,6 +71,10 @@ import type {
   IntentDecisionResultData,
   IntentDecisionSummaryData,
   FollowUpResponseData,
+  IntentInitResultData,
+  IntentSaveResultData,
+  IntentRawContentData,
+  IntentVersionData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -138,6 +147,7 @@ async function request<T = unknown>(
       }
       let errorMessage = `HTTP ${response.status}`;
       let nextAction: string | undefined;
+      let reason: string | undefined;
       try {
         const raw = await response.json();
         const parsed = validateErrorResponse(raw);
@@ -147,6 +157,9 @@ async function request<T = unknown>(
           } else if (parsed.error) {
             errorMessage = parsed.error;
           }
+          if (parsed.reason) {
+            ({ reason } = parsed);
+          }
           if (parsed.nextAction) {
             ({ nextAction } = parsed);
           }
@@ -154,7 +167,7 @@ async function request<T = unknown>(
       } catch {
         // ignore parse errors
       }
-      return { success: false, error: errorMessage, nextAction };
+      return { success: false, error: errorMessage, reason, nextAction };
     }
 
     const raw = await response.json();
@@ -225,6 +238,18 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
+async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/archive`, {
+    method: "POST",
+  });
+}
+
+async function unarchivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
+  return request(`/api/principles/${encodeURIComponent(principleId)}/unarchive`, {
+    method: "POST",
+  });
+}
+
 // ── Principle Trajectory ──────────────────────────────────────────────────────
 
 async function fetchPrincipleTrajectory(principleId: string): Promise<ApiResponse<TrajectoryData>> {
@@ -232,10 +257,6 @@ async function fetchPrincipleTrajectory(principleId: string): Promise<ApiRespons
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
-
-async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalRecordDirect);
-}
 
 async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
@@ -329,6 +350,22 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
   );
 }
 
+// ── Feature Flag Toggle (spec 2026-06-27 §13.5) ─────────────────────────────
+
+async function patchFeatureFlag(
+  featureName: string,
+  enabled: boolean,
+): Promise<ApiResponse<FeatureFlagUpdateData>> {
+  return request<FeatureFlagUpdateData>(
+    `/api/v1/config/features/${encodeURIComponent(featureName)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+    validateFeatureFlagUpdate,
+  );
+}
+
 // ── Principles Output Language (PRI-332 P1-1) ────────────────────────────────
 
 async function fetchOutputLanguage(): Promise<ApiResponse<OutputLanguageData>> {
@@ -408,8 +445,58 @@ async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
 
 // ── Intent Summary (PRI-466) ─────────────────────────────────────────────────
 
-async function fetchIntentSummary(): Promise<ApiResponse<IntentSummaryData>> {
-  return request<IntentSummaryData>('/api/v1/intent', undefined, validateIntentSummary);
+async function fetchIntentSummary(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSummaryData>> {
+  return request<IntentSummaryData>(`/api/v1/intent?lang=${lang}`, undefined, validateIntentSummary);
+}
+
+// ── Intent Init / Edit (PRI-477 onboarding) ──────────────────────────────────
+
+/**
+ * Fetch raw INTENT.md content for editing via GET /api/v1/intent/content.
+ */
+async function fetchIntentContent(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentRawContentData>> {
+  return request<IntentRawContentData>(
+    `/api/v1/intent/content?lang=${lang}`,
+    undefined,
+    validateIntentRawContent,
+  );
+}
+
+/**
+ * Create INTENT.md from the SPEC §7 template via POST /api/v1/intent/init.
+ * Does NOT overwrite an existing file unless force=true.
+ */
+async function createIntentTemplate(force = false, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentInitResultData>> {
+  return request<IntentInitResultData>(
+    `/api/v1/intent/init?lang=${lang}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    },
+    validateIntentInitResult,
+  );
+}
+
+/**
+ * Save user-edited INTENT.md content via PUT /api/v1/intent/content.
+ */
+async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSaveResultData>> {
+  return request<IntentSaveResultData>(
+    `/api/v1/intent/content?lang=${lang}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    },
+    validateIntentSaveResult,
+  );
+}
+
+async function fetchIntentVersions(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentVersionData>> {
+  return request<IntentVersionData>(
+    `/api/v1/intent/versions?lang=${lang}`,
+    undefined,
+    validateIntentVersions,
+  );
 }
 
 // ── Intent Decisions (PRI-470) ───────────────────────────────────────────────
@@ -464,16 +551,6 @@ async function listIntentDecisionsByTaskId(
   );
 }
 
-async function getIntentDecision(
-  decisionId: string,
-): Promise<ApiResponse<IntentDecisionRecordData>> {
-  return request<IntentDecisionRecordData>(
-    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}`,
-    undefined,
-    validateIntentDecisionRecord,
-  );
-}
-
 async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionSummaryData>> {
   return request<IntentDecisionSummaryData>(
     '/api/v1/intent-decisions/summary',
@@ -521,14 +598,14 @@ export {
   setToken,
   clearToken,
   checkAuth,
-  request,
-  fetchApprovalDetail,
   approveApproval,
   rejectApproval,
   editApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
   fetchPrincipleTrajectory,
+  archivePrinciple,
+  unarchivePrinciple,
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,
@@ -537,6 +614,7 @@ export {
   fetchConfigCatalog,
   updateAgentBinding,
   updateDefaultRuntime,
+  patchFeatureFlag,
   fetchOutputLanguage,
   updateOutputLanguage,
   fetchWorkspaces,
@@ -554,10 +632,13 @@ export {
   rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,
+  fetchIntentContent,
+  createIntentTemplate,
+  saveIntentContent,
+  fetchIntentVersions,
   recordIntentDecision,
   listIntentDecisionsByPainId,
   listIntentDecisionsByTaskId,
-  getIntentDecision,
   fetchIntentDecisionSummary,
   dispatchFollowUp,
 };
@@ -578,6 +659,7 @@ export type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
   ActivationsData,
@@ -605,6 +687,8 @@ export type {
   LinkCandidateFollowUpData,
   GuideRulehostFollowUpData,
   GeneratePatchProposalFollowUpData,
+  IntentVersionEntry,
+  IntentVersionData,
 } from "./utils/validators.js";
 
 // Consumer-facing type aliases (old names that pages import)

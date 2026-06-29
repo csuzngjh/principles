@@ -1107,6 +1107,21 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     await createConfigFile(options.workspaceDir, options.channels);
     stepIndex++;
 
+    if (spinner) updateProgress(spinner, stepIndex, 'Initializing PD databases...');
+    try {
+      const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+      execFileSync(process.execPath, [pdCliEntry, 'runtime', 'init', '--confirm', '--workspace', options.workspaceDir], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        timeout: 30000,
+      });
+    } catch (err) {
+      // rc-9: surface failure — do not silently swallow.
+      // Non-fatal: demo story-a and runtime hooks will surface DB issues.
+      const initWarn = err instanceof Error ? err.message : String(err);
+      logger.warn(`pd runtime init failed (non-fatal): ${initWarn}`);
+    }
+    stepIndex++;
+
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...');
     try {
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');

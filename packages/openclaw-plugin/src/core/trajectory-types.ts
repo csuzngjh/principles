@@ -249,4 +249,24 @@ export interface TrajectoryDatabaseOptions {
   orphanBlobGraceDays?: number;
 }
 
+/**
+ * Raw row from tool_calls for RuleContext v2 history assembly.
+ * Fields are raw strings from SQLite — the assembler validates them as unknown.
+ */
+export interface RuleHostContextRow {
+  readonly id: number;
+  readonly toolName: string;
+  readonly outcome: string;
+  readonly paramsJson: string;
+}
+
+/**
+ * Result of getRuleHostContextRows: FIFO-ordered rows + truncated flag.
+ * truncated=true when more than `limit` rows existed (limit+1 read trick).
+ */
+export interface RuleHostContextResult {
+  readonly rows: readonly RuleHostContextRow[];
+  readonly truncated: boolean;
+}
+
 export type { DailyMetricRow };

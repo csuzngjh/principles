@@ -20,6 +20,14 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
 import { handleConfigRoute } from '../../../src/server/routes/config.js';
+import * as store from '../../../src/server/config/pd-config-store.js';
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Test utilities (mirrors existing route test patterns)
@@ -27,14 +35,16 @@ import { handleConfigRoute } from '../../../src/server/routes/config.js';
 
 function createMockRequest(
   method: string,
-  options?: { body?: unknown; url?: string },
+  options?: { body?: unknown; url?: string; rawBody?: string },
 ): IncomingMessage {
-  const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';
+  const bodyStr = options?.rawBody !== undefined
+    ? options.rawBody
+    : (options?.body !== undefined ? JSON.stringify(options.body) : '');
   const req = {
     method,
     url: options?.url ?? '/api/v1/config/summary',
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === 'data' && options?.body !== undefined) {
+      if (event === 'data' && bodyStr.length > 0) {
         handler(Buffer.from(bodyStr));
       }
       if (event === 'end') {
@@ -1162,5 +1172,445 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
     if (!isRecord(parsed.principles)) throw new Error('unreachable: principles is not a record');
     expect(parsed.principles.outputLanguage).toBe('en');
     expect(parsed.features).toBeDefined();
+  });
+
+  it('PATCH returns 500 when re-read after write fails', async () => {
+    writeConfig(VALID_CONFIG);
+    const spy = vi.spyOn(store, 'getPrinciplesOutputLanguage').mockReturnValue({
+      ok: false,
+      statusCode: 500,
+      error: 'confirm_read_failed',
+      message: 'Write succeeded but re-read failed',
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/principles/output-language',
+        body: { outputLanguage: 'en' },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('confirm_read_failed');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('returns 405 on non-GET/PATCH methods', async () => {
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/principles/output-language',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
+
+    expect(res.statusCode).toBe(405);
+  });
+});
+
+// ===========================================================================
+// PATCH /api/v1/config/features/:featureName — spec 2026-06-27 §13.4
+// ===========================================================================
+
+describe('PATCH /api/v1/config/features/:featureName', () => {
+  it('enables a registered feature flag and persists to config.yaml', async () => {
+    // Config with a features section that includes intent_engineering (disabled)
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        intent_engineering: { category: 'quiet', enabled: false },
+      },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ feature: string; enabled: boolean }>(res);
+    expect(data.feature).toBe('intent_engineering');
+    expect(data.enabled).toBe(true);
+
+    // Verify persisted to disk
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    const ie = features.intent_engineering as Record<string, unknown>;
+    expect(ie.enabled).toBe(true);
+
+    // Verify other feature flags are preserved
+    const prompt = features.prompt as Record<string, unknown>;
+    expect(prompt.enabled).toBe(true);
+  });
+
+  it('rejects unknown feature name with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/nonexistent_flag',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/nonexistent_flag',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.error).toBe('unknown_feature');
+  });
+
+  it('rejects non-boolean enabled with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: 'true' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('auto-creates features section for registered flags (PRI-477 onboarding)', async () => {
+    // Config without a features: section at all — on fresh install.
+    // PRI-477: updateFeatureFlag now auto-creates the features section for
+    // registered flags instead of returning 422.
+    writeConfig({
+      version: 1,
+      runtimeProfiles: VALID_CONFIG.runtimeProfiles,
+      internalAgents: VALID_CONFIG.internalAgents,
+      ui: { diagnostics: { mode: 'simple' } },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = okEnvelope<{ feature: string; enabled: boolean }>(res);
+    expect(body.feature).toBe('intent_engineering');
+    expect(body.enabled).toBe(true);
+
+    // N1 — verify the auto-create side effect on disk, not just the response.
+    // Without this assertion, a regression that returns 200 without writing the
+    // features section would silently pass.
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as unknown;
+    expect(isRecord(parsed)).toBe(true);
+    if (!isRecord(parsed)) throw new Error('unreachable: parsed config is not a record');
+    expect(isRecord(parsed.features)).toBe(true);
+    if (!isRecord(parsed.features)) throw new Error('unreachable: features is not a record');
+    const intentEngineering = parsed.features.intent_engineering;
+    expect(isRecord(intentEngineering)).toBe(true);
+    if (!isRecord(intentEngineering)) throw new Error('unreachable: intent_engineering is not a record');
+    expect(intentEngineering.enabled).toBe(true);
+  });
+
+  it('rejects malformed existing features (non-object) with 409 (rc-9-no-silent-fallback)', async () => {
+    // PR-1083 review (CodeRabbit comment on pd-config-store.ts):
+    // When `features:` exists but is not a record/object, updateFeatureFlag
+    // must NOT silently overwrite it with registered-flag defaults — that
+    // would hide a config typo. It must return 409 conflict so the Owner can
+    // fix the malformed value first. Without this guard, a config like
+    // `features: "oops"` would be silently reset on the first flag toggle
+    // and the original mistake would be lost.
+    writeMalformedConfig(
+      [
+        'version: 1',
+        'features: "oops-malformed-string"',
+        '',
+      ].join('\n'),
+    );
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(409);
+    const body = errorEnvelope(res);
+    expect(body.error).toBe('conflict');
+    expect(body.message).toContain('features');
+
+    // Verify the malformed value was NOT overwritten on disk (rc-9).
+    const raw = fs.readFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), 'utf8');
+    expect(raw).toContain('oops-malformed-string');
+  });
+
+  it('rejects malformed existing config with 409', async () => {
+    writeMalformedConfig('version: [unclosed\n');
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('preserves other config sections when writing feature flag', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        intent_engineering: { category: 'quiet', enabled: false },
+      },
+      principles: { outputLanguage: 'en' },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Verify principles section is preserved
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(isRecord(parsed.principles)).toBe(true);
+    if (!isRecord(parsed.principles)) throw new Error('unreachable');
+    expect(parsed.principles.outputLanguage).toBe('en');
+    // runtimeProfiles preserved
+    expect(isRecord(parsed.runtimeProfiles)).toBe(true);
+  });
+
+  it('returns 405 on non-PATCH methods for features', async () => {
+    const req = createMockRequest('GET', {
+      url: '/api/v1/config/features/intent_engineering',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(405);
+  });
+
+  it('PATCH returns 500 when writeConfigAtomic fails during feature update', async () => {
+    writeConfig(VALID_CONFIG);
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw new Error('mock write error');
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/features/intent_engineering',
+        body: { enabled: true },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, {
+        workspaceDir,
+        subPath: '/features/intent_engineering',
+      });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('write_error');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('PATCH returns 500 when re-read fails during feature update', async () => {
+    writeConfig(VALID_CONFIG);
+    const originalRead = fs.readFileSync;
+    const originalWrite = fs.writeFileSync;
+    let written = false;
+
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(function (this: any, p, data, opts) {
+      if (typeof p === 'string' && p.endsWith('config.yaml.tmp')) {
+        written = true;
+      }
+      return originalWrite(p, data, opts);
+    });
+
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(function (this: any, p, opts) {
+      if (written && typeof p === 'string' && p.endsWith('config.yaml')) {
+        return 'version: [unclosed\n';
+      }
+      return originalRead(p, opts);
+    });
+
+    try {
+      const req = createMockRequest('PATCH', {
+        url: '/api/v1/config/features/intent_engineering',
+        body: { enabled: true },
+      });
+      const res = createMockResponse();
+      await handleConfigRoute(req, res, {
+        workspaceDir,
+        subPath: '/features/intent_engineering',
+      });
+
+      expect(res.statusCode).toBe(500);
+      const err = errorEnvelope(res);
+      expect(err.error).toBe('confirm_read_failed');
+    } finally {
+      writeSpy.mockRestore();
+      readSpy.mockRestore();
+    }
+  });
+
+  // ── Input validation edge cases (codecov gap coverage) ──────────────────
+
+  it('rejects invalid JSON body with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      rawBody: '{invalid json',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Invalid JSON');
+  });
+
+  it('rejects array body (not object) with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      rawBody: '[1, 2, 3]',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('JSON object');
+  });
+
+  it('rejects body missing enabled field with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { foo: 'bar' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Missing required field: enabled');
+  });
+
+  it('rejects invalid feature name URL encoding with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // %E0%A4%A is an incomplete UTF-8 sequence — decodeURIComponent throws
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/%E0%A4%A',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/%E0%A4%A',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('Invalid feature name encoding');
+  });
+
+  it('rejects body too large with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // Construct a body > 64KB to trigger readBody rejection
+    const hugePayload = { enabled: true, padding: 'x'.repeat(70 * 1024) };
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: hugePayload,
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = errorEnvelope(res);
+    expect(body.message).toContain('maximum allowed size');
+  });
+
+  // ── Direct store-level tests for defensive branches ─────────────────────
+  // These branches are unreachable from the route layer (route validates
+  // first) but the store function is a public API that must defend itself.
+
+  it('store-level: updateFeatureFlag rejects non-boolean enabled defensively', () => {
+    writeConfig(VALID_CONFIG);
+    const result = store.updateFeatureFlag(
+      workspaceDir,
+      'intent_engineering',
+      'not-boolean' as unknown as boolean,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('bad_request');
+      expect(result.statusCode).toBe(400);
+    }
+  });
+
+  it('store-level: updateFeatureFlag returns read_error when fs.readFileSync throws', () => {
+    writeConfig(VALID_CONFIG);
+    const originalExists = fs.existsSync;
+    const originalRead = fs.readFileSync;
+    const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      throw new Error('mock permission denied');
+    });
+
+    try {
+      const result = store.updateFeatureFlag(workspaceDir, 'intent_engineering', true);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe('read_error');
+        expect(result.statusCode).toBe(500);
+      }
+    } finally {
+      existsSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 });

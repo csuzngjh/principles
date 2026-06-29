@@ -142,6 +142,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
 
   // PRI-465: Intent Engineering MVP — default off; quiet flag.
   { id: 'intent_engineering', category: 'quiet', enabled: false, since: '2026-06-25', description: 'INTENT.md-grounded constructive friction and Stage-A intent tension diagnosis (PRI-465). Default off; flag-off = no INTENT read, no prompt injection, no intentTension.' },
+  // PRI-479: RuleContext v2 — foundation flag for the rule-code context vision
+  // (spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md).
+  // Quiet + default off: registering the flag does NOT change any production
+  // behavior. Subsequent phases gate new RuleHostInput fields and context
+  // builders behind this flag; v1 rule behavior is unchanged while the flag
+  // is off. Roll back = leave the flag off (or set enabled: false in config).
+  { id: 'rulecode_context_v2', category: 'quiet', enabled: false, since: '2026-06-27', description: 'RuleContext v2 — rule-code context vision (PRI-479). Foundation flag; default off, v1 rule behavior unchanged. See docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

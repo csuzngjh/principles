@@ -1,5 +1,7 @@
 export * from './intent-doc.js';
+export * from './intent-hash.js';
 export * from './intent-friction-block.js';
 export * from './intent-doc-reader-port.js';
 export * from './intent-decision-record.js';
 export * from './intent-patch-proposal.js';
+export * from './intent-doc-version.js';

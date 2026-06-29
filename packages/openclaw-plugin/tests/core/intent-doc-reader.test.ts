@@ -67,7 +67,7 @@ function writeConfig(workspaceDir: string, intentFlagEnabled: boolean): void {
 function writeIntentMd(workspaceDir: string, content: string): string {
   const intentDir = path.join(workspaceDir, '.principles');
   fs.mkdirSync(intentDir, { recursive: true });
-  const filePath = path.join(intentDir, 'INTENT.md');
+  const filePath = path.join(intentDir, 'INTENT.zh-CN.md');
   fs.writeFileSync(filePath, content, 'utf8');
   return filePath;
 }
@@ -117,7 +117,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     writeConfig(workspaceDir, false);
     // Do NOT write INTENT.md — if the reader accesses fs, it would still
     // return not_found, but the contract requires flag_disabled first.
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.flagEnabled).toBe(false);
     expect(result.reason).toBe('flag_disabled');
@@ -129,7 +129,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('returns flag_disabled even when INTENT.md exists (flag off short-circuits before fs)', () => {
     writeConfig(workspaceDir, false);
     writeIntentMd(workspaceDir, VALID_INTENT);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.flagEnabled).toBe(false);
     expect(result.reason).toBe('flag_disabled');
@@ -139,7 +139,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   // SPEC §12 — flag on + missing file → not_found with nextAction
   it('returns not_found when INTENT.md does not exist (flag on)', () => {
     writeConfig(workspaceDir, true);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.found).toBe(false);
     expect(result.flagEnabled).toBe(true);
@@ -152,7 +152,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('returns ok=true with full IntentDoc for valid INTENT.md (flag on)', () => {
     writeConfig(workspaceDir, true);
     const filePath = writeIntentMd(workspaceDir, VALID_INTENT);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(true);
     expect(result.found).toBe(true);
     expect(result.flagEnabled).toBe(true);
@@ -177,7 +177,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     // INTENT_MAX_BYTES = 32 * 1024 = 32768
     const oversized = 'A'.repeat(33000);
     writeIntentMd(workspaceDir, oversized);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.found).toBe(true);
     expect(result.flagEnabled).toBe(true);
@@ -190,7 +190,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('returns ok=true with missing_section warnings when INTENT.md has no section headers', () => {
     writeConfig(workspaceDir, true);
     writeIntentMd(workspaceDir, INTENT_MISSING_SECTIONS);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(true);
     expect(result.found).toBe(true);
     expect(result.flagEnabled).toBe(true);
@@ -205,8 +205,8 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     writeConfig(workspaceDir, true);
     // Pass a non-existent workspace dir — should not throw
     const badDir = path.join(os.tmpdir(), 'pd-nonexistent-' + Date.now());
-    expect(() => safeReadIntentDoc(badDir)).not.toThrow();
-    const result = safeReadIntentDoc(badDir);
+    expect(() => safeReadIntentDoc(badDir, 'zh-CN')).not.toThrow();
+    const result = safeReadIntentDoc(badDir, 'zh-CN');
     expect(result.ok).toBe(false);
     expect(result.reason).toBeTruthy();
     expect(result.nextAction).toBeTruthy();
@@ -216,14 +216,14 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('returns cached doc on second call within TTL (same object identity = cache hit)', () => {
     writeConfig(workspaceDir, true);
     writeIntentMd(workspaceDir, VALID_INTENT);
-    const first = safeReadIntentDoc(workspaceDir);
+    const first = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(first.ok).toBe(true);
     expect(first.doc).toBeDefined();
 
     // Second call immediately (within TTL, same mtime) → cache hit.
     // Cache hit returns the SAME doc object reference (cached.doc).
     // A fresh read would build a new doc object, breaking identity.
-    const second = safeReadIntentDoc(workspaceDir);
+    const second = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(second.ok).toBe(true);
     expect(second.doc).toBeDefined();
     expect(second.doc).toBe(first.doc); // object identity proves cache hit
@@ -234,12 +234,12 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('invalidates cache when INTENT.md mtime changes (returns fresh content)', () => {
     writeConfig(workspaceDir, true);
     writeIntentMd(workspaceDir, VALID_INTENT);
-    const first = safeReadIntentDoc(workspaceDir);
+    const first = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(first.ok).toBe(true);
     expect(first.doc!.sections.why).toContain('behavior internalization system');
 
     // Wait a bit so mtime changes, then write new content
-    const newPath = path.join(workspaceDir, '.principles', 'INTENT.md');
+    const newPath = path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md');
     const futureTime = new Date(Date.now() + 2000);
     const newContent = VALID_INTENT.replace(
       'behavior internalization system',
@@ -249,7 +249,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     // Force mtime to a future time to ensure mtime differs from cached
     fs.utimesSync(newPath, futureTime, futureTime);
 
-    const second = safeReadIntentDoc(workspaceDir);
+    const second = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(second.ok).toBe(true);
     expect(second.doc).toBeDefined();
     // Fresh content should reflect the updated text
@@ -261,17 +261,17 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('fail-open with structured reason when file becomes oversized after caching', () => {
     writeConfig(workspaceDir, true);
     writeIntentMd(workspaceDir, VALID_INTENT);
-    const first = safeReadIntentDoc(workspaceDir);
+    const first = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(first.ok).toBe(true);
 
     // Overwrite with oversized content + force mtime change
-    const filePath = path.join(workspaceDir, '.principles', 'INTENT.md');
+    const filePath = path.join(workspaceDir, '.principles', 'INTENT.zh-CN.md');
     const oversized = 'B'.repeat(33000);
     fs.writeFileSync(filePath, oversized, 'utf8');
     const futureTime = new Date(Date.now() + 2000);
     fs.utimesSync(filePath, futureTime, futureTime);
 
-    const second = safeReadIntentDoc(workspaceDir);
+    const second = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(second.ok).toBe(false);
     expect(second.reason).toBe('oversized');
     expect(second.nextAction).toBeTruthy();
@@ -281,7 +281,7 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('reads INTENT.md from .principles/INTENT.md inside the workspace', () => {
     writeConfig(workspaceDir, true);
     const filePath = writeIntentMd(workspaceDir, VALID_INTENT);
-    const result = safeReadIntentDoc(workspaceDir);
+    const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(result.ok).toBe(true);
     expect(result.doc!.path).toBe(filePath);
     // Path must be inside workspace
@@ -292,9 +292,9 @@ describe('safeReadIntentDoc (PRI-467)', () => {
   it('returns stable contentHash across reads of the same content', () => {
     writeConfig(workspaceDir, true);
     writeIntentMd(workspaceDir, VALID_INTENT);
-    const first = safeReadIntentDoc(workspaceDir);
+    const first = safeReadIntentDoc(workspaceDir, 'zh-CN');
     resetIntentDocCacheForTest(); // force fresh read
-    const second = safeReadIntentDoc(workspaceDir);
+    const second = safeReadIntentDoc(workspaceDir, 'zh-CN');
     expect(first.doc!.contentHash).toBe(second.doc!.contentHash);
   });
 });

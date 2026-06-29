@@ -25,6 +25,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/rule-host-contracts.ts',
   'internalization/rule-host-helpers.ts',
   'internalization/index.ts',
+  // PRI-480 (RuleContext v2 — Phase 1 Core ABI)
+  'internalization/rule-context-v2.ts',
   // PRI-43
   'internalization/internalization-route.ts',
   // PRI-44
@@ -100,6 +102,8 @@ const REQUIRED_SOURCE_FILES = [
   // RuleHost MVP Activation (PRI-421..428, ADR-0014 Amendment 2026-06-17)
   'internalization/adversarial-case.ts',
   'internalization/adversarial-feedback.ts',
+  // PRI-485 Phase 6: v2 adversarial case generator (pure logic)
+  'internalization/v2-adversarial-cases.ts',
   'internalization/artificer-prompt-builder.ts',
   'adversarial-loop.ts',
   // Phase 2 migration: evolution types
@@ -289,6 +293,16 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
 
   // ── I/O Boundary ────────────────────────────────────────────────────────
   'trajectory.ts',
+  // PRI-482: Plugin I/O boundary — converts raw TrajectoryDatabase rows into
+  // validated RuleHistoryWindow. Pure logic (canonicalize, validate, facts)
+  // delegated to @principles/core. Assembler stays in plugin because it
+  // consumes DB row shapes (I/O data).
+  'rule-context-assembler.ts',
+  // PRI-484: Plugin I/O boundary — assembles a BehaviorExamplePack for the
+  // Artificer by reading pain lineage + trajectory from TrajectoryDatabase.
+  // Pure logic (type + validator) lives in @principles/core; this module
+  // owns the DB row → pack mapping and fail-loud validation.
+  'behavior-example-pack-assembler.ts',
   'evolution-reducer.ts',
   'focus-history.ts',
   'training-program.ts',
@@ -313,11 +327,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // with crypto.createHash + PainDictionary. Kept here because it owns the
   // crypto + dictionary I/O boundary.
   'detection-funnel.ts',
-  'risk-calculator.ts',
   'migration.ts',
   'file-store.ts',
   'pd-task-store.ts',
-  'evolution-migration.ts',
   'empathy-keyword-matcher.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
@@ -332,7 +344,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // ── Runtime V2 ──────────────────────────────────────────────────────────
   'runtime-v2-prompt-activation-reader.ts',
   'workspace-guidance-migrator.ts',
-  'surface-guard.ts',
   // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
   'pd-config-loader.ts',
   // PRI-346: Pure function for checking conversation access config (extracted for circular import avoidance)
@@ -392,7 +403,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (93 files)', async () => {
+  it('known baseline count is self-consistent (92 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
@@ -410,7 +421,18 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // reading .principles/INTENT.md with TTL+mtime cache for prompt injection.
     // PRI-468: Added intent-doc-reader-adapter.ts (93 → 94) — plugin adapter
     // implementing core IntentDocReader port (pure type mapping, no new I/O).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // Stage-1 cleanup: Removed evolution-migration.ts (94 → 93) — dead code,
+    // zero production references after refactor to @principles/core.
+    // PRI-482: Added rule-context-assembler.ts (93 → 94) — plugin I/O boundary
+    // converting TrajectoryDatabase rows to validated RuleHistoryWindow.
+    // Stage-3: Removed risk-calculator.ts (94 → 93) — pure logic sunk to
+    // core runtime-v2/risk/, dead code (assessRiskLevel/getTargetFileLineCount/
+    // calculatePercentageThreshold) removed.
+    // Stage-3 sink: Removed surface-guard.ts (93 → 92) — pure guard logic
+    // migrated to @principles/core/runtime-v2/feature-flags/surface-guard-policy.
+    // PRI-484: Added behavior-example-pack-assembler.ts (92 → 93) — plugin I/O
+    // boundary assembling BehaviorExamplePack from pain lineage + trajectory.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
@@ -644,14 +666,6 @@ describe('openclaw-plugin pain hook integration', () => {
 // ── PRI-42: Internalization boundary guards ──────────────────────────────────
 
 describe('PRI-42 internalization boundary', () => {
-  const CONTRACT_TYPES = [
-    'RuleHostInput',
-    'RuleHostResult',
-    'RuleHostDecision',
-    'RuleHostMeta',
-    'LoadedImplementation',
-  ];
-
   it('core internalization has zero openclaw-plugin imports', async () => {
     const { existsSync, readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
@@ -706,39 +720,6 @@ describe('PRI-42 internalization boundary', () => {
       expect(src).not.toContain('openclaw-plugin');
       expect(src).not.toContain('../../../openclaw-plugin');
     }
-  });
-
-  it('plugin does not re-define RuleHost contract types locally', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const typesPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host-types.ts',
-    );
-    expect(existsSync(typesPath)).toBe(true);
-    const src = readFileSync(typesPath, 'utf-8');
-
-    // After PRI-42, rule-host-types.ts should re-export from core, not define interfaces
-    for (const typeName of CONTRACT_TYPES) {
-      expect(src).toContain(typeName);
-      expect(src).toContain("from '@principles/core/runtime-v2'");
-    }
-  });
-
-  it('plugin does not re-define RuleHostHelpers locally', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const helpersPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/rule-host-helpers.ts',
-    );
-    expect(existsSync(helpersPath)).toBe(true);
-    const src = readFileSync(helpersPath, 'utf-8');
-
-    // After PRI-42, rule-host-helpers.ts should re-export from core, not define interface
-    expect(src).toContain('RuleHostHelpers');
-    expect(src).toContain('createRuleHostHelpers');
-    expect(src).toContain("from '@principles/core/runtime-v2'");
   });
 
   it('plugin rule-host.ts imports contracts from core barrel', async () => {

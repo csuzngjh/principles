@@ -647,7 +647,58 @@
       "agentEnabled": "已启用",
       "agentDisabled": "已停用",
       "profileLabel": "配置",
-      "readinessLabel": "就绪状态"
+      "readinessLabel": "就绪状态",
+      "empathyCostHint": {
+        "body": "共情观察器已启用 — 每次关键词未命中时会调用 LLM 做深度分析（当前模型：{{provider}}/{{model}}）。",
+        "muted": "如需节省成本，建议使用本地 LLM 模型（如 Ollama），或在 workflows.yaml 的 pd-empathy-observer.policy.model 换更便宜模型。",
+        "ack": "知道了"
+      },
+      "workflow": {
+        "title": "PD 行为回路",
+        "subtitle": "从错误到原则，从原则到改变",
+        "phase01": "发现错误",
+        "phase01Desc": "观察智能体行为\n识别需要改进的模式",
+        "phase02": "形成原则",
+        "phase02Desc": "把经验提炼成\n可遵循的原则",
+        "phase03": "拥有者审批",
+        "phase03Desc": "你决定哪些原则\n可以生效",
+        "phase04": "改变行为",
+        "phase04Desc": "原则作用于\n智能体下次行为",
+        "loopHint": "行为改变后，PD 继续观察 —— 形成闭环。9 个代理分布在这条回路上，各司其职。"
+      },
+      "status": {
+        "enabled": "已启用",
+        "notReady": "未就绪",
+        "corePipeline": "核心管道",
+        "corePipelineOk": "正常",
+        "corePipelineDegraded": "降级可用",
+        "corePipelineParalyzed": "瘫痪",
+        "needsConfig": "需配置"
+      },
+      "groups": {
+        "coreTrio": "核心三件套",
+        "coreTrioTag": "必须一起开",
+        "coreTrioHint": "关掉任何一个，PD 都无法把错误转化为原则",
+        "codeChain": "代码实现链",
+        "codeChainTag": "推荐一起开",
+        "codeChainHint": "只开 artificer 会降级为纯提示通道；只开 evaluator 无意义",
+        "qualityPolish": "质量打磨",
+        "qualityPolishTag": "可选 · 单独开关",
+        "qualityPolishHint": "让原则更精炼，关掉也能用，只是质量略粗",
+        "sidechain": "侧链服务",
+        "sidechainTag": "独立 · 单独开关",
+        "sidechainHint": "不影响主管道，只影响 pain 信号检测精度"
+      },
+      "impact": {
+        "label": "关掉会怎样",
+        "confirmTitle": "确认关闭核心代理",
+        "confirmAck": "确认关闭",
+        "confirmCancel": "取消"
+      },
+      "techDetail": "技术细节",
+      "profileLabelShort": "运行时",
+      "unknownAgentsWarning": "检测到 {{count}} 个未识别的代理：{{names}}。它们未被分组显示。",
+      "footerNote": "9 个代理分布在内化管道与侧链服务两条路径上。核心三件套必须一起开，否则 PD 无法把错误转化为原则。"
     },
     "login": {
       "title": "登录",
@@ -706,7 +757,10 @@
       "flagStatus": {
         "enabled": "标志已开启",
         "disabled": "标志已关闭",
-        "ariaLabel": "intent_engineering 功能标志状态"
+        "ariaLabel": "intent_engineering 功能标志状态",
+        "enable": "启用意图工程",
+        "enabling": "启用中…",
+        "enableFailed": "启用失败，请稍后重试或手动修改 .pd/config.yaml"
       },
       "editEntry": {
         "heading": "编辑 INTENT.md",
@@ -717,13 +771,60 @@
       },
       "flagDisabled": {
         "title": "意图工程已关闭",
-        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。",
-        "nextAction": "如需启用，请在 .pd/config.yaml 中设置 features.intent_engineering.enabled=true，然后重启 pd-console。"
+        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。"
       },
       "notFound": {
         "title": "未找到 INTENT.md",
         "description": "PD 在 .principles/ 目录中未找到 INTENT.md 文件。缺少此锚点时，基于意图的诊断无法运行。",
-        "nextAction": "运行：pd intent init --confirm --workspace <path>"
+        "nextAction": "运行：pd intent init --confirm --workspace <path>",
+        "createButton": "创建 INTENT.md",
+        "creating": "创建中…",
+        "createFailed": "创建失败，请稍后重试",
+        "createSuccess": "INTENT.md 已创建，你可以开始填写意图"
+      },
+      "onboarding": {
+        "title": "欢迎使用意图工程",
+        "subtitle": "在开始之前，让我们先了解一下意图工程",
+        "whatIsIt": {
+          "title": "什么是意图工程？",
+          "description": "INTENT.md 是你的长期意图锚点 — 记录你的目标、不可违背的边界、以及何时应当停止并升级。它帮助 PD 在关键决策点对齐你的真实意图。"
+        },
+        "whyYouFill": {
+          "title": "为什么需要你填写？",
+          "description": "意图是拥有者自有的。PD 不会自动生成意图，因为只有你知道项目的真实目标和边界。这是你的决策权，PD 只负责帮助你执行和对齐。"
+        },
+        "sectionGuide": {
+          "title": "5 个章节填写引导",
+          "description": "INTENT.md 包含 5 个章节，每个章节有明确的用途：",
+          "sections": {
+            "why": "为什么 — 这个项目的根本动机",
+            "desiredOutcome": "期望结果 — 你希望达成的具体结果",
+            "nonNegotiables": "不可妥协项 — 绝对不能违反的边界",
+            "stopEscalation": "停止 / 升级 — 何时应当停止当前操作并升级给你",
+            "currentStrategicFocus": "当前战略焦点 — 阶段性重点"
+          }
+        },
+        "skipOption": "跳过引导，创建空模板稍后填写",
+        "startFilling": "开始填写",
+        "skip": "跳过",
+        "close": "关闭",
+        "dontShowAgain": "不再显示"
+      },
+      "editor": {
+        "title": "编辑 INTENT.md",
+        "description": "直接在浏览器中编辑你的意图文档。保存后会立即生效。",
+        "placeholder": "在此输入 INTENT.md 内容（Markdown 格式）…",
+        "save": "保存",
+        "saving": "保存中…",
+        "cancel": "取消",
+        "edit": "编辑",
+        "saveSuccess": "INTENT.md 已保存",
+        "saveFailed": "保存失败，请稍后重试",
+        "emptyContent": "内容不能为空",
+        "oversized": "内容超过 32KB 上限，请精简后重试",
+        "confirmDiscard": "你有未保存的修改，确定要放弃吗？",
+        "yes": "是，放弃修改",
+        "no": "继续编辑"
       },
       "oversized": {
         "title": "INTENT.md 超过 32KB",
@@ -768,7 +869,79 @@
         "lastDecisionAtLabel": "最近决策",
         "noDecisions": "暂无决策记录",
         "loadError": "加载决策摘要失败"
+      },
+      "langSelector": {
+        "ariaLabel": "选择 INTENT.md 语言",
+        "disabledWhileEditing": "请先保存或取消编辑，再切换语言"
+      },
+      "versionHistory": {
+        "title": "版本历史",
+        "reasonInit": "初始化",
+        "reasonSave": "保存"
+      },
+      "wizard": {
+        "progressLabel": "第 {{current}}/5 步",
+        "next": "下一步",
+        "prev": "上一步",
+        "finish": "完成",
+        "review": "查看摘要",
+        "complete": "完成保存",
+        "cancel": "取消",
+        "emptyWarning": "此节不能为空，请填写后再继续",
+        "stepLabels": {
+          "why": "1. 为什么（Why）",
+          "desiredOutcome": "2. 期望结果（Desired Outcome）",
+          "nonNegotiables": "3. 不可妥协项（Non-negotiables）",
+          "stopEscalation": "4. 止损/升级（Stop / Escalation）",
+          "currentStrategicFocus": "5. 当前战略焦点（Current Strategic Focus）"
+        },
+        "guidance": {
+          "why": "说明这个项目为什么重要。拥有者关心什么？不解决会怎样？",
+          "desiredOutcome": "描述可观察的改变。做完后，什么会变好？",
+          "nonNegotiables": "列出不可违反的硬约束（合规/安全/边界）。",
+          "stopEscalation": "什么情况下应该停下来升级给拥有者，而不是继续推进？",
+          "currentStrategicFocus": "当前阶段最优先的事是什么？（会随阶段更新）"
+        },
+        "discardConfirmTitle": "放弃填写？",
+        "discardConfirmBody": "你已填写的内容将丢失，无法恢复。",
+        "discardConfirmCancel": "继续填写",
+        "discardConfirmConfirm": "放弃"
+      },
+      "versionDiff": {
+        "changed": "已变更",
+        "unchanged": "未变更",
+        "oldPreview": "旧版本",
+        "newPreview": "新版本",
+        "expandHint": "点击查看 section 级差异",
+        "collapseHint": "点击折叠差异"
       }
+    },
+    "debt": {
+      "eyebrow": "原则债务",
+      "title": "原则债务管理",
+      "subtitle": "审查那些未激活、长期停滞或可能成为技术/行为负债的原则。",
+      "emptyTitle": "暂无原则债务",
+      "emptyDescription": "太棒了！你的所有活跃原则均运行正常，没有发现长期未激活或被晾在审批队列里的情况。",
+      "reasonNeverActivated": "该原则已被批准，但从未真正部署到任何运行通道（如提示词、RuleHost）。",
+      "reasonStagnant": "该原则的审批请求已在队列中滞留超过 7 天，可能已被遗忘。",
+      "suggestedAction": "建议操作",
+      "actionArchive": "归档",
+      "actionDeactivate": "停用通道",
+      "actionKeep": "保留观察",
+      "confirmArchive": "归档该原则会将其移出当前活跃原则库，确认归档吗？",
+      "confirmDeactivate": "停用该通道将使该原则不再在运行时对智能体进行拦截，确认停用吗？",
+      "deactivateSuccess": "通道停用成功。",
+      "deactivateFailed": "停用通道失败。",
+      "archiveSuccess": "原则归档成功。",
+      "archiveFailed": "原则归档失败。",
+      "undoAction": "撤销",
+      "undoSuccess": "操作已撤销。",
+      "undoFailed": "撤销操作失败。",
+      "loadError": "无法加载原则债务数据，请尝试刷新页面。",
+      "daysSinceAgo": "{{count}} 天前",
+      "demoteTooltip": "降权端点开发中",
+      "principleAriaLabel": "原则债务 {{id}}",
+      "listAriaLabel": "原则债务列表"
     }
   },
   "components": {

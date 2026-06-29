@@ -8,18 +8,18 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-01 Trust Boundary Validation
 
-- **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors — including degradation/fallback/retry-exhausted paths.
-- **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous; degradation paths emit objects built from validator-rejected candidates.
-- **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; shape checks validate fields that actually exist in the target type; **every output-emitting path (happy, degraded, fallback, exhausted) emits only validated objects — degradation is a content transform, not a trust escape hatch**.
-- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069, ERR-076.
-- **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, and casts near parse/adapter/DB/CLI boundaries; grep degradation/fallback functions for emit-before-validate.
+- **Use when**: handling parsed JSON, LLM output, SQLite rows, CLI options, artifact metadata, YAML, or caught errors — including degradation/fallback/retry-exhausted paths. Also applies to `as` casts on known-typed objects used to silence TypeScript index-signature complaints.
+- **Failure mode**: `as` casts or typed helper parameters make untrusted runtime values look validated; runtime shape checks validate wrong field names, making checks vacuous; degradation paths emit objects built from validator-rejected candidates; **or `as Record<string, T>` casts silence TypeScript's index-signature complaint on a known-typed interface when direct `obj[key] = value` is type-safe (key is `keyof T`) — this sibling flavor needs NO runtime guard, just removal of the cast (ERR-001 recurrence PR #1104)**.
+- **Must check**: values stay `unknown` until runtime guards validate them; required fields fail loud; arrays validate elements; `Object.hasOwn()` is used for untrusted keys; **plain-object lookup tables indexed by external input (`table[key]`) are guarded by `Object.hasOwn(table, key)` first — `table['__proto__']` returns `Object.prototype`, not `undefined` (ERR-013 broaden); prefer `Map` or `Object.create(null)` for externally-keyed tables**; shape checks validate fields that actually exist in the target type; **every output-emitting path (happy, degraded, fallback, exhausted) emits only validated objects — degradation is a content transform, not a trust escape hatch**; **for `as Record<string, T>` on a known-typed interface, attempt direct `obj[key] = value` first — if it compiles, the cast is unnecessary and must be removed (ERR-001 recurrence PR #1104)**.
+- **Representative ERRs**: ERR-001, ERR-005, ERR-007, ERR-009, ERR-013, ERR-047, ERR-054, ERR-057, ERR-061, ERR-065, ERR-069, ERR-076, ERR-085.
+- **Automation target**: static scan for `as Record<string, unknown>`, `as TOutput`, `as Record<string,` (index-signature silencer pattern), and casts near parse/adapter/DB/CLI boundaries; grep degradation/fallback functions for emit-before-validate.
 
 ### EP-02 Production Path Wiring
 
 - **Use when**: adding validators, dispatchers, activation paths, CLI commands, baselines, guards, helper APIs, or PDRuntimeAdapter implementations; also when tightening a shared store/API contract by adding a rejection guard, precondition, or FK check that throws.
 - **Failure mode**: a component exists and has isolated tests, but the real user/operator path never calls it; an adapter hand-builds a return object from a remembered schema instead of the real one, masked by `as`; OR a shared store method is tightened with a new rejection guard and isolated same-package tests pass, but cross-package production paths that call it without satisfying the new precondition break (ERR-083).
 - **Must check**: tests exercise the production entry point, not only leaf helpers; new CLI commands are registered in Commander; activation writes are read by the live prompt path; adapter return objects are built from the verbatim Typebox schema (RunHandleSchema/RunStatusSchema), not memory; new public types/functions are re-exported from barrel `index.ts` at every ancestor level; **when adding a `throw`-on-missing guard to a `principles-core` store method consumed by other packages, grep all cross-package callers, confirm each satisfies the new precondition, and run at least one test in each consuming package**.
-- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064, ERR-067, ERR-069, ERR-070, ERR-083.
+- **Representative ERRs**: ERR-011, ERR-024, ERR-025, ERR-028, ERR-035, ERR-048, ERR-053, ERR-060, ERR-064, ERR-067, ERR-069, ERR-070, ERR-083, ERR-087.
 - **Automation target**: command-tree tests, production-path smoke tests, fixture evidence that names the real dispatcher/facade, and schema-field cross-checks for adapter return shapes; cross-package CI tests that exercise store methods after a guard is added.
 
 ### EP-03 Fail Loud and Observable Degradation
@@ -34,9 +34,9 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 - **Use when**: touching `packages/pd-cli`, operator commands, installers, command registration, or JSON mode.
 - **Failure mode**: flags parse differently than handlers expect, `process.exit()` falls through, dry-run mutates, JSON stdout is polluted, or nextAction is unusable.
-- **Must check**: parser-level tests use the real Commander program; failed paths stop execution and do not mutate state; `--json` emits exactly one parseable object; `--no-<flag>` options are stored as the positive form (e.g., `--no-enqueue-next` → `opts.enqueueNext`), never `opts.noEnqueueNext`.
-- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063, ERR-066.
-- **Automation target**: command wiring tests that call `program.parseAsync()` with full command paths.
+- **Must check**: parser-level tests use the real Commander program; failed paths stop execution and do not mutate state; `--json` emits exactly one parseable object; `--no-<flag>` options are stored as the positive form (e.g., `--no-enqueue-next` → `opts.enqueueNext`), never `opts.noEnqueueNext`; **one-shot migration scripts that mutate multiple DB rows must wrap the mutation loop in `db.transaction(() => { ... })()` so partial failures roll back (ERR-086); docstrings claiming "default dry-run" must match `parseArgs()` actual default — verify by reading the flag-parsing code, not the docstring (ERR-023 recurrence on PR #1079)**.
+- **Representative ERRs**: ERR-020, ERR-021, ERR-022, ERR-023, ERR-029, ERR-033, ERR-043, ERR-053, ERR-063, ERR-066, ERR-086.
+- **Automation target**: command wiring tests that call `program.parseAsync()` with full command paths; for migration scripts, grep the script for `db.transaction` and assert it wraps every `db.prepare(...).run()` call in the apply/mutate phase.
 
 ### EP-05 Loop State Freshness
 

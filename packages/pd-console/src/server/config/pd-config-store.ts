@@ -804,6 +804,237 @@ export function updatePrinciplesOutputLanguage(
   return { ok: true, outputLanguage: outputLangRaw, source: 'user_config' };
 }
 
+// ── Update Feature Flag (spec 2026-06-27 §13.4) ────────────────────────────
+
+/**
+ * Whitelist of registered feature flag names. A PATCH request may only
+ * toggle flags that already exist in the registry. Built from the default
+ * effective config's computed flags — this is the authoritative source of
+ * registered flag IDs (avoids ambiguity between the array and Record
+ * forms of DEFAULT_FEATURE_FLAGS in the core barrel).
+ */
+const _DEFAULT_FLAGS_RESULT = computeFeatureFlagsFromConfig(
+  computeEffectivePdConfig(null),
+);
+const REGISTERED_FEATURE_FLAG_NAMES: ReadonlySet<string> = new Set(
+  Object.keys(_DEFAULT_FLAGS_RESULT.flags),
+);
+/** Map of flag ID → category, for preserving category when writing. */
+const DEFAULT_FLAG_CATEGORY: ReadonlyMap<string, string> = new Map(
+  Object.entries(_DEFAULT_FLAGS_RESULT.flags).map(([id, flag]) => [id, flag.category]),
+);
+
+export interface FeatureFlagUpdateResultOk {
+  ok: true;
+  feature: string;
+  enabled: boolean;
+}
+
+export interface FeatureFlagUpdateResultErr {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+  nextAction?: string;
+}
+
+export type FeatureFlagUpdateResult =
+  | FeatureFlagUpdateResultOk
+  | FeatureFlagUpdateResultErr;
+
+/**
+ * Update a feature flag's `enabled` field in .pd/config.yaml.
+ *
+ * Safe partial write: preserves unknown sections, validates before write.
+ * Follows the load → validate → merge → atomic write pattern of
+ * updateAgentBinding / updatePrinciplesOutputLanguage.
+ *
+ * Constraints (spec §13.4):
+ * - featureName must be in the registered flag set (DEFAULT_FEATURE_FLAGS)
+ * - Does NOT create a new `features:` section if absent (rejects)
+ * - Atomic write + validates merged yaml can be re-parsed by loadPdConfig
+ *
+ * ERR entries (spec §13.9):
+ * - ERR-001/ERR-005: enabled strictly typeof === 'boolean'; featureName
+ *   strictly checked against whitelist
+ * - ERR-009: unknown featureName → ok:false with reason
+ * - ERR-013: Object.hasOwn for features section existence check
+ * - ERR-015/018/019: load-validate-merge-write-reload, no stale cache
+ */
+export function updateFeatureFlag(
+  workspaceDir: string,
+  featureName: string,
+  enabled: boolean,
+): FeatureFlagUpdateResult {
+  // 1. Validate featureName against the registered whitelist
+  if (!REGISTERED_FEATURE_FLAG_NAMES.has(featureName)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'unknown_feature',
+      message: `Unknown feature flag '${featureName}'. Registered flags: ${Array.from(REGISTERED_FEATURE_FLAG_NAMES).join(', ')}`,
+      nextAction: `Use one of: ${Array.from(REGISTERED_FEATURE_FLAG_NAMES).join(', ')}`,
+    };
+  }
+
+  // 2. Validate enabled is boolean (typeof check, no `as` — ERR-001)
+  if (typeof enabled !== 'boolean') {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `enabled must be a boolean. Got: ${typeof enabled}`,
+      nextAction: 'Send { enabled: true } or { enabled: false }',
+    };
+  }
+
+  // 3. Read raw config to preserve unknown sections + check features section
+  //    Check features section BEFORE loadPdConfig malformed check: a config
+  //    without a features section is rejected with 422 regardless of whether
+  //    the rest is valid or malformed (spec §13.4: 不允许新增).
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  if (fs.existsSync(configPath)) {
+    let rawContent: string;
+    try {
+      rawContent = fs.readFileSync(configPath, 'utf8');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, statusCode: 500, error: 'read_error', message: `Failed to read config for update: ${message}` };
+    }
+    let rawParsed: unknown;
+    try {
+      rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    } catch (err) {
+      // YAML syntax error = malformed config (409, not 500). Consistent with
+      // updateAgentBinding which treats loadPdConfig failures as conflict.
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, statusCode: 409, error: 'conflict', message: `Cannot update feature flag: existing .pd/config.yaml is malformed. YAML parse error: ${message}` };
+    }
+    if (isRecord(rawParsed)) {
+      rawConfig = { ...rawParsed };
+    } else {
+      rawConfig = {};
+    }
+  } else {
+    rawConfig = {};
+  }
+
+  // 4. PRI-477 onboarding: auto-create `features:` section ONLY when absent.
+  //    Original spec §13.4 "不允许新增" applied to UNREGISTERED flags —
+  //    auto-creating the section for registered flags (validated in step 1) is
+  //    safe and required for the FlagToggleCard one-click enable flow on fresh
+  //    installs where .pd/config.yaml has no features: section yet.
+  //
+  //    IMPORTANT — Runtime Contract `rc-9-no-silent-fallback` (ERR-002):
+  //    If `features` EXISTS but is NOT a record/object, we must NOT silently
+  //    overwrite the user's malformed value with defaults — that would hide a
+  //    config error and lose the original mistake. Return 409 conflict so the
+  //    Owner can fix the config first. Without this guard, a config typo like
+  //    `features: "oops"` would be silently reset on the first flag toggle.
+  //
+  //    Use Object.hasOwn for untrusted key check (ERR-013).
+  let featuresSection: Record<string, unknown>;
+  if (!Object.hasOwn(rawConfig, 'features')) {
+    // Section absent — seed with defaults from the registered flag set so the
+    // subsequent validatePdConfig passes (it requires prompt/code_tool_hook /
+    // defer_archive as registered flags). Computed once at module load.
+    featuresSection = {};
+    for (const [flagId, flag] of Object.entries(_DEFAULT_FLAGS_RESULT.flags)) {
+      featuresSection[flagId] = { category: flag.category, enabled: flag.enabled };
+    }
+    rawConfig.features = featuresSection;
+  } else if (isRecord(rawConfig.features)) {
+    featuresSection = rawConfig.features;
+  } else {
+    // features: exists but is malformed (string, array, number, null, etc.).
+    // Reject rather than silently resetting — rc-9-no-silent-fallback.
+    const gotType = rawConfig.features === null ? 'null' : typeof rawConfig.features;
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message:
+        `Cannot update feature flag: .pd/config.yaml has a 'features:' section that ` +
+        `is not an object/map (got ${gotType}). Fix the config file so 'features:' ` +
+        `is a map of flag objects before retrying, or remove the 'features:' key ` +
+        `entirely so PD can seed registered-flag defaults.`,
+      nextAction:
+        "Open .pd/config.yaml and set 'features: {}' (or remove the 'features:' line).",
+    };
+  }
+
+  // 5. Validate the in-memory rawConfig (with auto-created features section).
+  //    NOTE: We do NOT call loadPdConfig(workspaceDir) here because that reads
+  //    from DISK, where the features section may still be missing (the exact
+  //    case we just auto-created for). Validating rawConfig in memory gives
+  //    the same malformed-config protection without the false-positive on
+  //    fresh installs. PRI-477.
+  const existingConfigValidation = validatePdConfig(rawConfig);
+  if (!existingConfigValidation.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update feature flag: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${existingConfigValidation.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  // 6. Merge: update features[featureName].enabled, preserving other flags
+  const existingFeatures = { ...featuresSection };
+  const existingEntry = Object.hasOwn(existingFeatures, featureName)
+    ? existingFeatures[featureName]
+    : undefined;
+  // Preserve existing category if present; otherwise use the registered default
+  const category = (isRecord(existingEntry) && Object.hasOwn(existingEntry, 'category') && typeof existingEntry.category === 'string')
+    ? existingEntry.category
+    : (DEFAULT_FLAG_CATEGORY.get(featureName) ?? 'quiet');
+  existingFeatures[featureName] = { category, enabled };
+  rawConfig.features = existingFeatures;
+
+  // 7. Validate the updated config before writing
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'validation_error',
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+      nextAction: 'Fix config validation errors before retrying',
+    };
+  }
+
+  // 8. Atomic write
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  // 9. Re-read to confirm actual persisted state (ERR-002: fail loud on re-read failure)
+  const confirmResult = loadPdConfig(workspaceDir);
+  if (!confirmResult.ok) {
+    return {
+      ok: false,
+      statusCode: 500,
+      error: 'confirm_read_failed',
+      message: `Write succeeded but re-read failed: config is now malformed`,
+      nextAction: 'Inspect .pd/config.yaml manually for corruption',
+    };
+  }
+  // Use computeFlagsFromLoadResult (not computeFeatureFlagsFromConfig) because
+  // confirmResult is a ConfigLoadResult, not an EffectivePdConfig.
+  const confirmFlags = computeFlagsFromLoadResult(confirmResult);
+  const confirmedEnabled = confirmFlags.flags[featureName]?.enabled === true;
+
+  return {
+    ok: true,
+    feature: featureName,
+    enabled: confirmedEnabled,
+  };
+}
+
 // ── Check Readiness ──────────────────────────────────────────────────────────
 
 export function checkReadiness(

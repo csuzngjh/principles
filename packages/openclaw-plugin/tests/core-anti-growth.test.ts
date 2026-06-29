@@ -49,33 +49,29 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'principle-internalization/lifecycle-refresh.ts',
     // Do Not Move
     'event-log.ts',
-    'schema/schema-definitions.ts',
     'path-resolver.ts',
     'init.ts',
     'workspace-context.ts',
     'reflection/reflection-context.ts',
     'bootstrap-rules.ts',
-    'schema/migration-runner.ts',
     'rule-host.ts',
     'principle-training-state.ts',
     'pain-diagnostic-gate.ts',
     'hygiene/tracker.ts',
-    'schema/migrations/002-init-central.ts',
     'paths.ts',
-    'schema/migrations/004-add-thinking-and-gfi.ts',
-    'schema/migrations/003-init-workflow.ts',
     'workspace-dir-validation.ts',
     'rule-implementation-runtime.ts',
     'detection-service.ts',
-    'schema/migrations/index.ts',
     'dictionary-service.ts',
-    'schema/index.ts',
-    'schema/db-types.ts',
-    'rule-host-types.ts',
-    'rule-host-helpers.ts',
-    'schema/migrations/001-init-trajectory.ts',
     // I/O boundary
     'trajectory.ts',
+    // PRI-482: Plugin I/O boundary — converts TrajectoryDatabase rows to
+    // validated RuleHistoryWindow. Pure logic delegated to @principles/core.
+    'rule-context-assembler.ts',
+    // PRI-484: Plugin I/O boundary — assembles a BehaviorExamplePack for the
+    // Artificer by reading pain lineage + trajectory from TrajectoryDatabase.
+    // Pure logic (type + validator) lives in @principles/core.
+    'behavior-example-pack-assembler.ts',
     'evolution-reducer.ts',
     'focus-history.ts',
     'replay-engine.ts',
@@ -92,11 +88,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'thinking-os-parser.ts',
     'system-logger.ts',
     'detection-funnel.ts',
-    'risk-calculator.ts',
     'migration.ts',
     'file-store.ts',
     'pd-task-store.ts',
-    'evolution-migration.ts',
     'empathy-keyword-matcher.ts',
     'session-tracker.ts',
     'principle-tree-ledger.ts',
@@ -104,7 +98,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'evolution-engine.ts',
     'runtime-v2-prompt-activation-reader.ts',
     'workspace-guidance-migrator.ts',
-    'surface-guard.ts',
     'pd-config-loader.ts',
     'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
     // PRI-467: Plugin I/O boundary — reads .principles/INTENT.md with TTL+mtime

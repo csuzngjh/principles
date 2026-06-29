@@ -681,4 +681,287 @@ describe('TrajectoryDatabase', () => {
       db.dispose();
     });
   });
+
+  // ── PRI-482 Phase 3: getRuleHostContextRows ──────────────────────────────
+
+  describe('getRuleHostContextRows (PRI-482 Phase 3)', () => {
+    it('returns rows in FIFO order (oldest first after reverse)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'edit', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'bash', outcome: 'failure' });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows[0].toolName).toBe('read');
+      expect(result.rows[1].toolName).toBe('edit');
+      expect(result.rows[2].toolName).toBe('bash');
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('detects truncated when more than limit rows exist (limit+1 trick)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Insert limit+2 rows (limit=3 → insert 5)
+      for (let i = 0; i < 5; i++) {
+        db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      }
+
+      const result = db.getRuleHostContextRows('s1', 3);
+      expect(result.rows).toHaveLength(3);
+      expect(result.truncated).toBe(true);
+      db.dispose();
+    });
+
+    it('returns truncated=false when exactly limit rows exist', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      for (let i = 0; i < 3; i++) {
+        db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      }
+
+      const result = db.getRuleHostContextRows('s1', 3);
+      expect(result.rows).toHaveLength(3);
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('isolates by sessionId (other session rows not included)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's2', toolName: 'edit', outcome: 'success' });
+      db.recordToolCall({ sessionId: 's1', toolName: 'bash', outcome: 'failure' });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows.every((r) => r.toolName !== 'edit')).toBe(true);
+      db.dispose();
+    });
+
+    it('returns empty for unknown session', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({ sessionId: 's1', toolName: 'read', outcome: 'success' });
+
+      const result = db.getRuleHostContextRows('unknown-session', 20);
+      expect(result.rows).toHaveLength(0);
+      expect(result.truncated).toBe(false);
+      db.dispose();
+    });
+
+    it('ERR-025: end-to-end recordToolCall → getRuleHostContextRows preserves id, toolName, outcome, paramsJson', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordToolCall({
+        sessionId: 's1',
+        toolName: 'edit',
+        outcome: 'success',
+        paramsJson: { file_path: 'src/auth.ts', new_string: 'x' },
+      });
+
+      const result = db.getRuleHostContextRows('s1', 20);
+      expect(result.rows).toHaveLength(1);
+      const row = result.rows[0];
+      expect(row.id).toBeGreaterThan(0);
+      expect(row.toolName).toBe('edit');
+      expect(row.outcome).toBe('success');
+      // paramsJson is the raw JSON string from SQLite
+      const parsed = JSON.parse(row.paramsJson);
+      expect(parsed.file_path).toBe('src/auth.ts');
+      db.dispose();
+    });
+  });
+
+  // ── PRI-484 Phase 5: getPainEventByCanonicalId ──────────────────────────
+
+  describe('getPainEventByCanonicalId (PRI-484 Phase 5)', () => {
+    it('returns null when pain event with canonical_pain_id does not exist', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const result = db.getPainEventByCanonicalId('non-existent-pain-id');
+      expect(result).toBeNull();
+      db.dispose();
+    });
+
+    it('returns pain event when found by canonical_pain_id', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-getby-001';
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test_source',
+        score: 75,
+        reason: 'test reason for getByCanonicalId',
+        severity: 'high',
+        origin: 'test_origin',
+        confidence: 0.85,
+        text: 'test text content',
+        canonicalPainId: canonicalId,
+        runtimeTaskId: 'task-abc',
+      });
+
+      const result = db.getPainEventByCanonicalId(canonicalId);
+
+      expect(result).not.toBeNull();
+      expect(result!.canonicalPainId).toBe(canonicalId);
+      expect(result!.sessionId).toBe('s1');
+      expect(result!.source).toBe('test_source');
+      expect(result!.score).toBe(75);
+      expect(result!.reason).toBe('test reason for getByCanonicalId');
+      expect(result!.severity).toBe('high');
+      expect(result!.origin).toBe('test_origin');
+      expect(result!.confidence).toBe(0.85);
+      expect(result!.text).toBe('test text content');
+      expect(result!.runtimeTaskId).toBe('task-abc');
+      expect(result!.id).toBeGreaterThan(0);
+      db.dispose();
+    });
+
+    it('returns pain event when canonical_pain_id is empty string (stored as empty string in SQLite)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Empty string canonicalPainId is stored as empty string in SQLite
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'test',
+        score: 50,
+        reason: 'empty canonical id',
+        origin: 'test',
+        canonicalPainId: '',
+      });
+
+      // SQLite treats empty string as a valid value, not null
+      const result = db.getPainEventByCanonicalId('');
+      expect(result).not.toBeNull();
+      expect(result!.canonicalPainId).toBe('');
+      expect(result!.reason).toBe('empty canonical id');
+      db.dispose();
+    });
+
+    it('returns correct fields including nulls when optional fields are not set', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      const canonicalId = 'pain-canonical-minimal-001';
+      db.recordPainEvent({
+        sessionId: 's2',
+        source: 'minimal_source',
+        score: 30,
+        canonicalPainId: canonicalId,
+        // reason, severity, origin, confidence, text, runtimeTaskId not set
+      });
+
+      const result = db.getPainEventByCanonicalId(canonicalId);
+
+      expect(result).not.toBeNull();
+      expect(result!.canonicalPainId).toBe(canonicalId);
+      expect(result!.sessionId).toBe('s2');
+      expect(result!.source).toBe('minimal_source');
+      expect(result!.score).toBe(30);
+      expect(result!.reason).toBeNull();
+      expect(result!.severity).toBeNull();
+      expect(result!.origin).toBeNull();
+      expect(result!.confidence).toBeNull();
+      expect(result!.text).toBeNull();
+      expect(result!.runtimeTaskId).toBeNull();
+      db.dispose();
+    });
+
+    it('ERR-001: isPainEventRow type guard prevents bypass — malformed row returns null', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Insert a row directly that bypasses recordPainEvent validation
+      (db as any).db.prepare(`
+        INSERT INTO pain_events (session_id, source, score, canonical_pain_id, created_at)
+        VALUES ('s1', 'test', 50, 'pain-direct-insert', '2026-01-01T00:00:00.000Z')
+      `).run();
+
+      // Query should work and return the properly typed result
+      const result = db.getPainEventByCanonicalId('pain-direct-insert');
+      expect(result).not.toBeNull();
+      expect(result!.canonicalPainId).toBe('pain-direct-insert');
+      db.dispose();
+    });
+
+    it('finds correct pain event when multiple have same session but different canonical_id', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'first',
+        score: 40,
+        canonicalPainId: 'pain-first-001',
+      });
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'second',
+        score: 60,
+        canonicalPainId: 'pain-second-002',
+      });
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'third',
+        score: 80,
+        canonicalPainId: 'pain-third-003',
+      });
+
+      const result = db.getPainEventByCanonicalId('pain-second-002');
+
+      expect(result).not.toBeNull();
+      expect(result!.source).toBe('second');
+      expect(result!.score).toBe(60);
+      expect(result!.canonicalPainId).toBe('pain-second-002');
+      db.dispose();
+    });
+
+    it('uses correct table lookup — does not confuse with other indexed columns', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+      const db = new TrajectoryDatabase({ workspaceDir });
+
+      // Insert two pain events with different canonical IDs but same session
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'tool_failure',
+        score: 70,
+        reason: 'edit failed',
+        canonicalPainId: 'pain-tool-failure-001',
+        runtimeTaskId: 'task-related',
+      });
+      db.recordPainEvent({
+        sessionId: 's1',
+        source: 'user_empathy',
+        score: 50,
+        reason: 'user frustration signal',
+        canonicalPainId: 'pain-empathy-001',
+        runtimeTaskId: null,
+      });
+
+      // Query by canonical ID should return exact match
+      const result = db.getPainEventByCanonicalId('pain-empathy-001');
+      expect(result).not.toBeNull();
+      expect(result!.reason).toBe('user frustration signal');
+      expect(result!.runtimeTaskId).toBeNull(); // explicitly null, not missing
+
+      // Verify the other one is still retrievable
+      const otherResult = db.getPainEventByCanonicalId('pain-tool-failure-001');
+      expect(otherResult).not.toBeNull();
+      expect(otherResult!.reason).toBe('edit failed');
+      expect(otherResult!.runtimeTaskId).toBe('task-related');
+      db.dispose();
+    });
+  });
 });

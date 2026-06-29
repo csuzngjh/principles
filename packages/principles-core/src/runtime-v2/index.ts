@@ -395,6 +395,22 @@ export type {
   SurfaceRegistryValidationResult,
 } from './feature-flags/index.js';
 
+// Surface guard (Stage 3) — pure logic migrated from plugin
+export {
+  checkSurfaceGuard,
+  getSurfaceIdForHook,
+  getSurfaceIdForService,
+  isSurfaceEnabled,
+  guardHook,
+  guardService,
+  __resetSurfaceGuardSkipLogStateForTests,
+} from './feature-flags/index.js';
+
+export type {
+  SurfaceGuardResult,
+  HookHandler,
+} from './feature-flags/index.js';
+
 // Proven channel baseline (PRI-240) — MVP activation continuity fixtures
 export {
   runPromptFixture,
@@ -458,6 +474,40 @@ export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
 // Correction proposal (PRI-114)
 export type { CorrectionProposal, CorrectionProposalValidationResult, PathValidationResult } from './internalization/correction-proposal.js';
 export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspace, validateProposedPathBounds } from './internalization/correction-proposal.js';
+
+// RuleHost input builder pure helpers (PRI-482 Phase 3: re-exported so the
+// openclaw-plugin assembler can normalise historical tool-call paths using the
+// same pure logic as buildRuleHostAction, avoiding production/replay drift.)
+export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './internalization/rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+
+// RuleContext v2 — Phase 1 Core ABI (PRI-480): pure-logic types + canonicalize +
+// validators + behavior-facts computation + the frozen unavailable sentinel.
+// Zero I/O; gates nothing in production yet (the flag from PRI-479 is still off).
+export type {
+  CanonicalKind,
+  EvidenceState,
+  RuleToolOutcome,
+  RuleHistoryStatus,
+  RuleToolCallRecord,
+  RuleHistoryWindow,
+  RuleBehaviorFacts,
+  RuleContextV2,
+  ValidationResult as RuleContextValidationResult,
+} from './internalization/rule-context-v2.js';
+export {
+  UNAVAILABLE_RULE_CONTEXT,
+  canonicalizeToolKind,
+  validateRuleToolCallRecord,
+  validateRuleHistoryWindow,
+  validateRuleBehaviorFacts,
+  validateRuleContextV2,
+  computeBehaviorFacts,
+} from './internalization/rule-context-v2.js';
+
+// BehaviorExamplePack (PRI-484 — Phase 5 Artificer)
+export type { BehaviorExamplePack, BehaviorExamplePackValidationResult } from './internalization/behavior-example-pack.js';
+export { validateBehaviorExamplePack } from './internalization/behavior-example-pack.js';
 
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
@@ -1688,14 +1738,21 @@ export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
 export {
   INTENT_MAX_BYTES,
   INTENT_DOC_TEMPLATE,
+  INTENT_DOC_TEMPLATE_ZH,
+  INTENT_DOC_TEMPLATE_EN,
   INTENT_INJECT_MAX_CHARS,
   INTENT_TRUNCATION_MARKER,
+  getIntentFilename,
+  createIntentTemplate,
   parseIntentDocSections,
+  assembleIntentDoc,
   computeIntentContentHash,
   validateIntentDocSections,
   buildIntentFrictionBlock,
   NullIntentDocReader,
   generateIntentPatchProposal,
+  computeVersionDiff,
+  formatVersionSummary,
 } from './intent/index.js';
 export type {
   IntentDocSections,
@@ -1711,9 +1768,34 @@ export type {
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   IntentDecisionStore,
+  IntentLang,
+  IntentDocVersion,
+  IntentDocVersionStore,
   FollowUpPatch,
   IntentPatchProposal,
 } from './intent/index.js';
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
-export { SqliteIntentDecisionStore } from './store/intent/index.js';
+export { SqliteIntentDecisionStore, SqliteIntentDocVersionStore } from './store/intent/index.js';
+
+// Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
+export type { FileModification } from './risk/index.js';
+export { estimateLineChanges } from './risk/index.js';
+
+// Thinking models (Stage 3) — pure detection patterns + scenario derivation
+// migrated from plugin. I/O (reading THINKING_OS.md) stays in the plugin.
+export {
+  BUILTIN_PATTERNS,
+  BUILTIN_PATTERN_MAP,
+  getFallbackName,
+  getFallbackDescription,
+  getBuiltinBaselineScenarios,
+  deriveThinkingScenarios,
+} from './thinking-models/index.js';
+
+export type {
+  ThinkingModelDefinition,
+  ThinkingModelMatch,
+  ThinkingScenarioContext,
+  BuiltinPatternEntry,
+} from './thinking-models/index.js';

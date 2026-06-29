@@ -55,7 +55,7 @@ import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard.js';
+import { checkSurfaceGuard, guardHook, guardService } from '@principles/core/runtime-v2';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
@@ -845,5 +845,11 @@ const plugin = {
 export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 /* istanbul ignore next — test exports for evolution worker gate */
 export { loadFeatureFlagFromWorkspace, isRecord };
+
+// Schema initialization exports for `pd runtime init` (unified DB init).
+// These functions open the DB in write mode, apply the full schema, and close the DB.
+// They do NOT run runtime side-effects (importLegacyArtifacts, pruneUnreferencedBlobs).
+export { initTrajectorySchema } from './core/trajectory.js';
+export { initWorkflowSchema } from './service/subagent-workflow/workflow-store.js';
 
 export default plugin;

@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
-import { fetchIntentSummary, fetchIntentDecisionSummary } from "../../api.js";
-import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData } from "../../api.js";
+import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent, fetchIntentVersions } from "../../api.js";
+import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
+import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
+import { computeVersionDiff } from "@principles/core/runtime-v2/intent-browser";
 
 // ── Page state ────────────────────────────────────────────────────────────────
 
@@ -71,24 +74,71 @@ function EditEntry({ filePath }: { filePath: string }) {
   );
 }
 
-function FlagDisabledBanner() {
+/**
+ * FlagToggleCard — spec 2026-06-27 §13.5
+ *
+ * Replaces the static FlagDisabledBanner. Instead of telling the Owner to
+ * hand-edit yaml + restart, this card offers a one-click toggle that calls
+ * PATCH /api/v1/config/features/intent_engineering { enabled: true }.
+ *
+ * Only renders when flagEnabled === false (disabled state). After a successful
+ * enable, calls onAfterEnable so the parent re-fetches IntentSummary and the
+ * card unmounts (flagEnabled becomes true).
+ *
+ * Design note (§13.12.3): only an "enable" button is provided — no "disable"
+ * button. To turn off, hand-edit yaml. This is intentional MVP-scope asymmetry.
+ */
+interface FlagToggleCardProps {
+  flagEnabled: boolean;
+  onAfterEnable?: () => void;
+}
+
+function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
   const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  // Only show when disabled and not yet acknowledged.
+  // flagEnabled === true → already on, nothing to toggle.
+  // acknowledged === true → owner just enabled, parent will re-fetch and
+  //   flagEnabled will flip to true; this prevents a flash of the card.
+  if (flagEnabled || acknowledged) return null;
+
   return (
-    <div className="bg-panel border border-line rounded-[6px] p-5">
+    <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
       <h2 className="text-ink text-[15px] font-semibold mb-2">
         {t("pages.intent.flagDisabled.title")}
       </h2>
       <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
         {t("pages.intent.flagDisabled.description")}
       </p>
-      <div className="font-mono text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-3 py-2">
-        {t("pages.intent.flagDisabled.nextAction")}
-      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const res = await patchFeatureFlag("intent_engineering", true);
+            if (!res.success) {
+              toast.error(res.error ?? t("pages.intent.flagStatus.enableFailed"));
+              return;
+            }
+            setAcknowledged(true);
+            onAfterEnable?.();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        aria-label={t("pages.intent.flagStatus.enable")}
+      >
+        {busy ? t("pages.intent.flagStatus.enabling") : t("pages.intent.flagStatus.enable")}
+      </button>
     </div>
   );
 }
 
-function NotFoundBanner() {
+function NotFoundBanner({ onCreated, lang }: { onCreated: (openEditor: boolean) => void; lang: 'zh-CN' | 'en' }) {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
@@ -98,8 +148,11 @@ function NotFoundBanner() {
       <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
         {t("pages.intent.notFound.description")}
       </p>
-      <div className="font-mono text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-3 py-2">
-        {t("pages.intent.notFound.nextAction")}
+      <div className="flex items-center gap-3">
+        <CreateIntentButton onCreated={onCreated} showOnboarding={true} lang={lang} />
+        <span className="text-ink-4 text-[12px] font-mono">
+          {t("pages.intent.notFound.nextAction")}
+        </span>
       </div>
     </div>
   );
@@ -159,6 +212,94 @@ function MetaRow({ label, value }: { label: string; value: string }) {
         {label}
       </span>
       <span className="text-ink-2 text-[12px] font-mono break-all">{value}</span>
+    </div>
+  );
+}
+
+// ── Version history entry with section-level diff ────────────────────────────
+
+interface VersionEntryProps {
+  version: IntentVersionEntry;
+  /** Content of the previous version (for diff). Empty string for the oldest version. */
+  previousContent: string;
+  /** Localized reason label */
+  reasonLabel: string;
+  /** Whether this entry should be expanded by default (e.g. newest version) */
+  defaultExpanded?: boolean;
+}
+
+function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded = false }: VersionEntryProps) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // Compute section-level diff between previous and this version.
+  // For the oldest version (no previous), diff against "" so all non-empty
+  // sections show as "changed" — gives the user a visual of what was filled.
+  const diff = computeVersionDiff(previousContent, version.contentSnapshot);
+
+  // Localize the timestamp for display (avoid showing raw UTC to end users).
+  const localizedTime = (() => {
+    try {
+      return new Date(version.createdAt).toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch {
+      return version.createdAt.slice(0, 19).replace('T', ' ');
+    }
+  })();
+
+  return (
+    <div className="border-b border-line last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full flex items-center gap-3 py-1.5 text-[12px] font-mono text-ink-2 hover:bg-surface-2/50 transition-colors text-left"
+        aria-expanded={expanded}
+        aria-label={expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
+        title={version.contentHash}
+      >
+        <span className="text-ink-3 shrink-0 w-4 inline-block">
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span className="text-ink-3 shrink-0">{localizedTime}</span>
+        <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3 shrink-0">
+          {reasonLabel}
+        </span>
+        <span className="text-ink-4 text-[11px] ml-auto shrink-0 hidden sm:inline">
+          {expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
+        </span>
+      </button>
+      {expanded && (
+        <div className="pb-2.5 pl-7 pr-2">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {diff.map((d) => {
+              // d.section is one of the 5 section keys from computeVersionDiff's
+              // SECTION_KEYS — safe to construct the i18n key dynamically.
+              const labelKey = `pages.intent.wizard.stepLabels.${d.section}`;
+              return (
+                <span
+                  key={d.section}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border ${
+                    d.changed
+                      ? "border-amber/40 text-amber bg-amber/5"
+                      : "border-line text-ink-3 bg-surface"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${d.changed ? "bg-amber" : "bg-ink-4"}`}
+                    aria-hidden="true"
+                  />
+                  {t(labelKey)}
+                  <span className="text-ink-4 ml-0.5">
+                    {d.changed ? t("pages.intent.versionDiff.changed") : t("pages.intent.versionDiff.unchanged")}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -263,11 +404,27 @@ export function IntentPage() {
   const [data, setData] = useState<IntentSummaryData | null>(null);
   const [pageState, setPageState] = useState<PageState>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // PRI-477: inline editor state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editorContent, setEditorContent] = useState("");
+  const [editorLoading, setEditorLoading] = useState(false);
+  // Bilingual: language selector state
+  const [lang, setLang] = useState<'zh-CN' | 'en'>('zh-CN');
+  // Version history
+  const [versions, setVersions] = useState<IntentVersionEntry[]>([]);
+
+  // Map raw backend reason codes to localized labels for the version history panel.
+  // Unknown reasons fall back to the raw string (observability over silent masking).
+  const versionReasonLabel = useCallback((reason: string): string => {
+    if (reason === 'init') return t("pages.intent.versionHistory.reasonInit");
+    if (reason === 'save') return t("pages.intent.versionHistory.reasonSave");
+    return reason;
+  }, [t]);
 
   const loadData = useCallback(async () => {
     setPageState("loading");
     setErrorMsg(null);
-    const result = await fetchIntentSummary();
+    const result = await fetchIntentSummary(lang);
     if (!result.success) {
       // ERR-002: graceful degradation with reason
       setErrorMsg(result.error ?? t("pages.intent.loadError"));
@@ -277,11 +434,73 @@ export function IntentPage() {
     // result.data is already validated by validateIntentSummary in the API layer
     setData(result.data);
     setPageState("loaded");
-  }, [t]);
+    // Load version history in parallel (best-effort, never blocks page)
+    fetchIntentVersions(lang).then(v => {
+      if (v.success && v.data?.versions) {
+        setVersions(v.data.versions);
+      }
+    }).catch(() => { /* best-effort */ });
+  }, [t, lang]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // P0 fix: when language changes, reset editor state and stale versions.
+  // Without this, switching language while editing would keep the editor open
+  // with the old language's content — and saving would write that content
+  // into the NEW language's file (data corruption).
+  // Also clears stale versions so the panel doesn't show the old language's
+  // history while the new language's fetch is in flight or has failed.
+  useEffect(() => {
+    setIsEditing(false);
+    setEditorContent("");
+    setVersions([]);
+  }, [lang]);
+
+  // PRI-477: Called when user clicks "Edit" — fetch raw content and open editor
+  const handleStartEdit = useCallback(async () => {
+    setEditorLoading(true);
+    const result = await fetchIntentContent(lang);
+    setEditorLoading(false);
+    if (!result.success) {
+      toast.error(t("pages.intent.loadError"));
+      return;
+    }
+    setEditorContent(result.data.content);
+    setIsEditing(true);
+  }, [t, lang]);
+
+  // PRI-477: Called when template is created — refresh summary; optionally
+  // open the editor immediately so the user can start filling.
+  //
+  // PR-1083 review (CodeRabbit A5): `openEditor` lets CreateIntentButton
+  // distinguish "Start filling" (open editor) from "Skip" (just refresh the
+  // summary so NotFoundBanner re-renders to the sections view — otherwise the
+  // user would see a stale "file not found" banner even though INTENT.md now
+  // exists on disk).
+  const handleCreated = useCallback(async (openEditor: boolean) => {
+    await loadData();
+    if (!openEditor) return;
+    setEditorLoading(true);
+    const result = await fetchIntentContent(lang);
+    setEditorLoading(false);
+    if (result.success) {
+      setEditorContent(result.data.content);
+      setIsEditing(true);
+    }
+  }, [loadData, lang]);
+
+  // PRI-477: Called after successful save — close editor and refresh summary
+  const handleSaved = useCallback(() => {
+    setIsEditing(false);
+    void loadData();
+  }, [loadData]);
+
+  // PRI-477: Called when user cancels editing
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+  }, []);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (pageState === "loading") {
@@ -338,19 +557,38 @@ export function IntentPage() {
           {summary && (
             <FlagStatusBadge enabled={summary.flagEnabled} />
           )}
+          {/* Bilingual language selector
+              Disabled while editing to prevent silent loss of unsaved changes.
+              The P0 useEffect on [lang] resets editor state on lang change —
+              without disabling, switching lang mid-edit would discard the
+              user's draft with no confirmation. */}
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value as 'zh-CN' | 'en')}
+            disabled={isEditing || editorLoading}
+            className="ml-auto border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[12px] font-mono focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label={t("pages.intent.langSelector.ariaLabel")}
+            title={isEditing || editorLoading ? t("pages.intent.langSelector.disabledWhileEditing") : undefined}
+          >
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
+          </select>
         </div>
         <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
           {t("pages.intent.subtitle")}
         </p>
 
-        {/* Flag-disabled short-circuit */}
+        {/* Flag-disabled short-circuit — spec §13.5: interactive toggle */}
         {summary && !summary.flagEnabled && (
-          <FlagDisabledBanner />
+          <FlagToggleCard
+            flagEnabled={summary.flagEnabled}
+            onAfterEnable={loadData}
+          />
         )}
 
-        {/* Flag-on but file not found */}
+        {/* Flag-on but file not found — PRI-477: add Create button + onboarding */}
         {summary && summary.flagEnabled && !summary.found && summary.reason === "not_found" && (
-          <NotFoundBanner />
+          <NotFoundBanner onCreated={handleCreated} lang={lang} />
         )}
 
         {/* Flag-on but oversized */}
@@ -358,67 +596,93 @@ export function IntentPage() {
           <OversizedBanner />
         )}
 
-        {/* Flag-on and valid — show sections */}
+        {/* Flag-on and valid — show sections OR inline editor (PRI-477) */}
         {summary && summary.flagEnabled && summary.ok && summary.sections && (
           <>
-            {/* Sections */}
-            <section aria-labelledby="section-content">
-              <SectionTitle id="section-content">
-                {t("pages.intent.title")}
-              </SectionTitle>
-              <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
-                <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />
-                <SectionContent label={t("pages.intent.sections.desiredOutcome")} content={summary.sections.desiredOutcome} />
-                <SectionContent label={t("pages.intent.sections.nonNegotiables")} content={summary.sections.nonNegotiables} />
-                <SectionContent label={t("pages.intent.sections.stopEscalation")} content={summary.sections.stopEscalation} />
-                <SectionContent label={t("pages.intent.sections.currentStrategicFocus")} content={summary.sections.currentStrategicFocus} />
-              </div>
-            </section>
-
-            {/* Health warnings */}
-            <section className="mt-8" aria-labelledby="section-warnings">
-              <SectionTitle id="section-warnings">
-                {t("pages.intent.warnings.title")}
-              </SectionTitle>
-              {summary.warnings.length === 0 ? (
-                <p className="text-ink-3 text-[13px] leading-relaxed">
-                  {t("pages.intent.warnings.empty")}
-                </p>
-              ) : (
-                <ul className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                  {summary.warnings.map((w, i) => (
-                    <WarningItem key={i} warning={w} />
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            {/* Meta */}
-            <section className="mt-8" aria-labelledby="section-meta">
-              <SectionTitle id="section-meta">
-                {t("pages.intent.meta.title")}
-              </SectionTitle>
-              <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
-                {summary.lastEditedAt && (
-                  <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />
-                )}
-                {summary.contentHash && (
-                  <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
-                )}
-                {summary.path && (
-                  <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
-                )}
-              </div>
-            </section>
-
-            {/* Edit entry — SPEC §22.1.1 line 1402 */}
-            {summary.path && (
-              <section className="mt-8" aria-labelledby="section-edit">
-                <SectionTitle id="section-edit">
-                  {t("pages.intent.editEntry.heading")}
-                </SectionTitle>
-                <EditEntry filePath={summary.path} />
+            {/* PRI-477: Inline editor — shown when user clicks "Edit" */}
+            {isEditing && (
+              <section aria-labelledby="section-editor" className="mb-8">
+                {/* N2 (PR-1083 review): outer SectionTitle removed — IntentEditor
+                    already renders its own `<h3 id="section-editor">` carrying the
+                    title. Having two visible "Edit INTENT.md" titles was confusing. */}
+                <IntentEditor
+                  initialContent={editorContent}
+                  onSaved={handleSaved}
+                  onCancel={handleCancelEdit}
+                  lang={lang}
+                />
               </section>
+            )}
+
+            {/* Read-only sections — shown when NOT editing */}
+            {!isEditing && (
+              <>
+                <section aria-labelledby="section-content">
+                  <div className="flex items-center justify-between mb-3">
+                    <SectionTitle id="section-content">
+                      {t("pages.intent.title")}
+                    </SectionTitle>
+                    {/* PRI-477 + A7 review: pass editorLoading so the button
+                        disables + switches its label while fetchIntentContent()
+                        is in flight, preventing double-clicks and giving the
+                        user immediate feedback. */}
+                    <EditButton onClick={handleStartEdit} loading={editorLoading} />
+                  </div>
+                  <div className="bg-panel border border-line rounded-[6px] p-5 space-y-5">
+                    <SectionContent label={t("pages.intent.sections.why")} content={summary.sections.why} />
+                    <SectionContent label={t("pages.intent.sections.desiredOutcome")} content={summary.sections.desiredOutcome} />
+                    <SectionContent label={t("pages.intent.sections.nonNegotiables")} content={summary.sections.nonNegotiables} />
+                    <SectionContent label={t("pages.intent.sections.stopEscalation")} content={summary.sections.stopEscalation} />
+                    <SectionContent label={t("pages.intent.sections.currentStrategicFocus")} content={summary.sections.currentStrategicFocus} />
+                  </div>
+                </section>
+
+                {/* Health warnings */}
+                <section className="mt-8" aria-labelledby="section-warnings">
+                  <SectionTitle id="section-warnings">
+                    {t("pages.intent.warnings.title")}
+                  </SectionTitle>
+                  {summary.warnings.length === 0 ? (
+                    <p className="text-ink-3 text-[13px] leading-relaxed">
+                      {t("pages.intent.warnings.empty")}
+                    </p>
+                  ) : (
+                    <ul className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
+                      {summary.warnings.map((w, i) => (
+                        <WarningItem key={i} warning={w} />
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {/* Meta */}
+                <section className="mt-8" aria-labelledby="section-meta">
+                  <SectionTitle id="section-meta">
+                    {t("pages.intent.meta.title")}
+                  </SectionTitle>
+                  <div className="bg-panel border border-line rounded-[6px] p-4 space-y-2">
+                    {summary.lastEditedAt && (
+                      <MetaRow label={t("pages.intent.meta.lastEditedAt")} value={summary.lastEditedAt} />
+                    )}
+                    {summary.contentHash && (
+                      <MetaRow label={t("pages.intent.meta.contentHash")} value={summary.contentHash} />
+                    )}
+                    {summary.path && (
+                      <MetaRow label={t("pages.intent.meta.path")} value={summary.path} />
+                    )}
+                  </div>
+                </section>
+
+                {/* Edit entry — SPEC §22.1.1 line 1402 (legacy file-path entry, kept for CLI users) */}
+                {summary.path && (
+                  <section className="mt-8" aria-labelledby="section-edit">
+                    <SectionTitle id="section-edit">
+                      {t("pages.intent.editEntry.heading")}
+                    </SectionTitle>
+                    <EditEntry filePath={summary.path} />
+                  </section>
+                )}
+              </>
             )}
           </>
         )}
@@ -445,6 +709,33 @@ export function IntentPage() {
             section appears regardless of whether INTENT.md was found/OK. */}
         {summary && summary.flagEnabled && (
           <DecisionSummarySection />
+        )}
+
+        {/* Version History — shows saved INTENT.md versions from SQLite.
+            Each entry is expandable to show section-level diff (Task 5). */}
+        {versions.length > 0 && (
+          <details className="border border-line rounded-[3px] mt-6">
+            <summary className="cursor-pointer px-4 py-2 text-[13px] font-medium text-ink-2 select-none">
+              {t("pages.intent.versionHistory.title")} ({versions.length})
+            </summary>
+            <div className="px-4 py-2 border-t border-line">
+              {versions.map((v, idx) => {
+                // versions are sorted newest-first; previous = idx + 1.
+                // For the oldest version (no previous), diff against "" so
+                // all filled sections show as "changed".
+                const previousContent = versions[idx + 1]?.contentSnapshot ?? "";
+                return (
+                  <VersionEntry
+                    key={v.id}
+                    version={v}
+                    previousContent={previousContent}
+                    reasonLabel={versionReasonLabel(v.reason)}
+                    defaultExpanded={idx === 0}
+                  />
+                );
+              })}
+            </div>
+          </details>
         )}
       </div>
     </PageShell>

@@ -20,7 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import Database from 'better-sqlite3';
 import { EvidenceChainConsoleModel } from '../../src/server/models/EvidenceChainConsoleModel.js';
-import { crossReferenceByTimestamp } from '../../src/server/models/EvidenceChainConsoleModel.js';
+import { crossReferenceByTimestamp } from '@principles/core/runtime-v2';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 

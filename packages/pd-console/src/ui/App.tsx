@@ -44,65 +44,6 @@ function AuthRoutes() {
   }, [verifyAuth]);
 
   useEffect(() => {
-    if (authed !== true) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!e.altKey) return;
-
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-         target.tagName === "TEXTAREA" ||
-         target.tagName === "SELECT" ||
-         target.isContentEditable)
-      ) {
-        return;
-      }
-
-      let targetPath: string | null = null;
-      switch (e.key) {
-        case "3":
-          targetPath = "/focus";
-          break;
-        case "4":
-          targetPath = "/pain";
-          break;
-        case "5":
-          targetPath = "/principles";
-          break;
-        case "6":
-          targetPath = "/activation";
-          break;
-        case "7":
-          targetPath = "/debt";
-          break;
-        case "8":
-          targetPath = "/control-center";
-          break;
-        case "9":
-          targetPath = "/report-problem";
-          break;
-        case "0":
-          targetPath = "/settings";
-          break;
-        default:
-          return;
-      }
-
-      if (targetPath) {
-        e.preventDefault();
-        navigate(targetPath);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [authed, navigate]);
-
-  useEffect(() => {
     if (!showSplash) return;
     if (authed === null) return; // still checking
     // Wait for splash animation to complete before navigating

@@ -647,7 +647,58 @@
       "agentEnabled": "Enabled",
       "agentDisabled": "Disabled",
       "profileLabel": "Profile",
-      "readinessLabel": "Readiness"
+      "readinessLabel": "Readiness",
+      "empathyCostHint": {
+        "body": "Empathy Observer is on — every unmatched message triggers an LLM call (current model: {{provider}}/{{model}}).",
+        "muted": "To reduce cost, consider using a local LLM model (e.g. Ollama), or switch pd-empathy-observer.policy.model in workflows.yaml to a cheaper model.",
+        "ack": "Got it"
+      },
+      "workflow": {
+        "title": "PD Behavior Loop",
+        "subtitle": "From error to principle, from principle to change",
+        "phase01": "Detect Error",
+        "phase01Desc": "Observe Agent behavior\nIdentify patterns to improve",
+        "phase02": "Form Principle",
+        "phase02Desc": "Distill experience into\na followable principle",
+        "phase03": "Owner Approval",
+        "phase03Desc": "You decide which principles\ncan take effect",
+        "phase04": "Change Behavior",
+        "phase04Desc": "Principle acts on\nAgent's next behavior",
+        "loopHint": "After behavior changes, PD keeps observing — forming a closed loop. 9 agents are distributed across this loop, each with its own role."
+      },
+      "status": {
+        "enabled": "Enabled",
+        "notReady": "Not Ready",
+        "corePipeline": "Core Pipeline",
+        "corePipelineOk": "OK",
+        "corePipelineDegraded": "Degraded",
+        "corePipelineParalyzed": "Paralyzed",
+        "needsConfig": "Needs Config"
+      },
+      "groups": {
+        "coreTrio": "Core Trio",
+        "coreTrioTag": "Must together",
+        "coreTrioHint": "Disabling any one breaks the error-to-principle pipeline",
+        "codeChain": "Code Chain",
+        "codeChainTag": "Recommend together",
+        "codeChainHint": "Only artificer degrades to prompt-only; only evaluator is meaningless",
+        "qualityPolish": "Quality Polish",
+        "qualityPolishTag": "Optional · toggle individually",
+        "qualityPolishHint": "Refines principles; disabling is fine, just slightly rougher quality",
+        "sidechain": "Sidechain",
+        "sidechainTag": "Independent · toggle individually",
+        "sidechainHint": "Does not affect the main pipeline; only pain signal detection precision"
+      },
+      "impact": {
+        "label": "If disabled",
+        "confirmTitle": "Confirm disabling core agent",
+        "confirmAck": "Confirm disable",
+        "confirmCancel": "Cancel"
+      },
+      "techDetail": "Technical Details",
+      "profileLabelShort": "Runtime",
+      "unknownAgentsWarning": "Detected {{count}} unrecognized agent(s): {{names}}. They are not shown in groups.",
+      "footerNote": "9 agents are distributed across the internalization pipeline and sidechain services. The Core Trio must be enabled together — otherwise PD cannot turn errors into principles."
     },
     "login": {
       "title": "Login",
@@ -706,7 +757,10 @@
       "flagStatus": {
         "enabled": "Flag on",
         "disabled": "Flag off",
-        "ariaLabel": "intent_engineering feature flag status"
+        "ariaLabel": "intent_engineering feature flag status",
+        "enable": "Enable Intent Engineering",
+        "enabling": "Enabling…",
+        "enableFailed": "Failed to enable. Try again later or manually edit .pd/config.yaml"
       },
       "editEntry": {
         "heading": "Edit INTENT.md",
@@ -717,13 +771,60 @@
       },
       "flagDisabled": {
         "title": "Intent Engineering is off",
-        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state.",
-        "nextAction": "To enable, set features.intent_engineering.enabled=true in .pd/config.yaml and restart pd-console."
+        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state."
       },
       "notFound": {
         "title": "No INTENT.md found",
         "description": "PD did not find an INTENT.md file in the .principles/ directory. Without this anchor, intent-grounded diagnosis cannot run.",
-        "nextAction": "Run: pd intent init --confirm --workspace <path>"
+        "nextAction": "Run: pd intent init --confirm --workspace <path>",
+        "createButton": "Create INTENT.md",
+        "creating": "Creating…",
+        "createFailed": "Creation failed, please try again later",
+        "createSuccess": "INTENT.md created. You can start filling in your intent."
+      },
+      "onboarding": {
+        "title": "Welcome to Intent Engineering",
+        "subtitle": "Before we begin, let's understand what intent engineering is",
+        "whatIsIt": {
+          "title": "What is Intent Engineering?",
+          "description": "INTENT.md is your long-term intent anchor — recording your goals, non-negotiable boundaries, and when to stop and escalate. It helps PD align with your true intent at key decision points."
+        },
+        "whyYouFill": {
+          "title": "Why do you need to fill it in?",
+          "description": "Intent is Owner-owned. PD will not auto-generate intent because only you know the project's real goals and boundaries. This is your decision authority; PD only helps you execute and align."
+        },
+        "sectionGuide": {
+          "title": "5-section guide",
+          "description": "INTENT.md contains 5 sections, each with a clear purpose:",
+          "sections": {
+            "why": "Why — the fundamental motivation for this project",
+            "desiredOutcome": "Desired Outcome — the specific results you want to achieve",
+            "nonNegotiables": "Non-Negotiables — boundaries that must never be violated",
+            "stopEscalation": "Stop / Escalation — when to stop the current action and escalate to you",
+            "currentStrategicFocus": "Current Strategic Focus — phase-specific priorities"
+          }
+        },
+        "skipOption": "Skip guide, create empty template to fill in later",
+        "startFilling": "Start filling",
+        "skip": "Skip",
+        "close": "Close",
+        "dontShowAgain": "Don't show again"
+      },
+      "editor": {
+        "title": "Edit INTENT.md",
+        "description": "Edit your intent document directly in the browser. Changes take effect immediately after saving.",
+        "placeholder": "Enter INTENT.md content here (Markdown format)…",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "edit": "Edit",
+        "saveSuccess": "INTENT.md saved",
+        "saveFailed": "Save failed, please try again later",
+        "emptyContent": "Content cannot be empty",
+        "oversized": "Content exceeds 32KB limit, please trim and retry",
+        "confirmDiscard": "You have unsaved changes. Discard them?",
+        "yes": "Yes, discard changes",
+        "no": "Continue editing"
       },
       "oversized": {
         "title": "INTENT.md exceeds 32KB",
@@ -768,7 +869,79 @@
         "lastDecisionAtLabel": "Last decision",
         "noDecisions": "No decisions recorded yet",
         "loadError": "Failed to load decision summary"
+      },
+      "langSelector": {
+        "ariaLabel": "Select INTENT.md language",
+        "disabledWhileEditing": "Save or cancel your edit before switching language"
+      },
+      "versionHistory": {
+        "title": "Version History",
+        "reasonInit": "Initialized",
+        "reasonSave": "Saved"
+      },
+      "wizard": {
+        "progressLabel": "Step {{current}}/5",
+        "next": "Next",
+        "prev": "Previous",
+        "finish": "Finish",
+        "review": "Review",
+        "complete": "Complete",
+        "cancel": "Cancel",
+        "emptyWarning": "This section cannot be empty. Please fill it in before continuing.",
+        "stepLabels": {
+          "why": "1. Why",
+          "desiredOutcome": "2. Desired Outcome",
+          "nonNegotiables": "3. Non-negotiables",
+          "stopEscalation": "4. Stop / Escalation",
+          "currentStrategicFocus": "5. Current Strategic Focus"
+        },
+        "guidance": {
+          "why": "Explain why this project matters. What does the Owner care about? What happens if it is not solved?",
+          "desiredOutcome": "Describe an observable change. After completion, what will be better?",
+          "nonNegotiables": "List hard constraints that cannot be violated (compliance / safety / boundaries).",
+          "stopEscalation": "Under what circumstances should the Agent stop and escalate to the Owner instead of pushing forward?",
+          "currentStrategicFocus": "What is the top priority for the current phase? (Will be updated as phases change.)"
+        },
+        "discardConfirmTitle": "Discard your input?",
+        "discardConfirmBody": "Content you have entered will be lost and cannot be recovered.",
+        "discardConfirmCancel": "Continue editing",
+        "discardConfirmConfirm": "Discard"
+      },
+      "versionDiff": {
+        "changed": "Changed",
+        "unchanged": "Unchanged",
+        "oldPreview": "Previous version",
+        "newPreview": "New version",
+        "expandHint": "Click to view section-level diff",
+        "collapseHint": "Click to collapse diff"
       }
+    },
+    "debt": {
+      "eyebrow": "Principle Debt",
+      "title": "Principle Debt Management",
+      "subtitle": "Review active principles that may be stagnant, never activated, or flagged as technical/behavioral debt.",
+      "emptyTitle": "No Principle Debts",
+      "emptyDescription": "Excellent! All your active principles are either recently active, verified in execution, or have no pending stagnation alerts.",
+      "reasonNeverActivated": "This principle has been approved but never deployed to any active channel (e.g. prompt, RuleHost).",
+      "reasonStagnant": "This principle approval request has been stagnant/pending for more than 7 days.",
+      "suggestedAction": "Suggested Action",
+      "actionArchive": "Archive",
+      "actionDeactivate": "Deactivate",
+      "actionKeep": "Keep and Observe",
+      "confirmArchive": "Archiving this principle will remove it from the active ruleset. Are you sure you want to archive?",
+      "confirmDeactivate": "Deactivating this channel will stop enforcing this rule at runtime. Are you sure you want to deactivate?",
+      "deactivateSuccess": "Channel deactivated successfully.",
+      "deactivateFailed": "Failed to deactivate channel.",
+      "archiveSuccess": "Principle archived successfully.",
+      "archiveFailed": "Failed to archive principle.",
+      "undoAction": "Undo",
+      "undoSuccess": "Operation undone successfully.",
+      "undoFailed": "Undo operation failed.",
+      "loadError": "Unable to load principle debt data. Please try refreshing the page.",
+      "daysSinceAgo": "{{count}} days ago",
+      "demoteTooltip": "Demote endpoint under development",
+      "principleAriaLabel": "Debt Principle {{id}}",
+      "listAriaLabel": "Debt principles list"
     }
   },
   "components": {

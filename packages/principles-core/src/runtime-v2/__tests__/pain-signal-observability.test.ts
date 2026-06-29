@@ -85,10 +85,12 @@ describe('recordPainSignalObservability', () => {
         reason: 'manual pain diagnosis',
       });
 
-      const hasEvolutionTasks = db.prepare(`
-        SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'evolution_tasks'
-      `).get();
-      expect(hasEvolutionTasks).toBeUndefined();
+      // ensureTrajectorySchema now creates ALL trajectory tables (including
+      // evolution_tasks) for schema consistency. The legacy evolution_tasks queue
+      // is "disabled" in the sense that no rows are written to it — not that the
+      // table doesn't exist.
+      const evolutionTaskRows = db.prepare('SELECT COUNT(*) as count FROM evolution_tasks').get() as { count: number };
+      expect(evolutionTaskRows.count).toBe(0);
     } finally {
       db.close();
     }

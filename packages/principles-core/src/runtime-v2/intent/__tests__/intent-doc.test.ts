@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, computeIntentContentHash, validateIntentDocSections, type IntentDocWarning, type IntentDocSections } from '../intent-doc.js';
+import { INTENT_MAX_BYTES, INTENT_DOC_TEMPLATE, parseIntentDocSections, assembleIntentDoc, validateIntentDocSections, type IntentDocWarning, type IntentDocSections, INTENT_DOC_TEMPLATE_ZH, INTENT_DOC_TEMPLATE_EN, getIntentFilename, createIntentTemplate } from '../intent-doc.js';
+import { computeIntentContentHash } from '../intent-hash.js';
 
 const VALID = `# INTENT.md
 
@@ -48,6 +49,74 @@ describe('parseIntentDocSections', () => {
   });
 });
 
+describe('assembleIntentDoc', () => {
+  it('assembles 5 sections with # INTENT.md title and all headers', () => {
+    const sections: IntentDocSections = {
+      why: 'content for why',
+      desiredOutcome: 'content for desired',
+      nonNegotiables: 'content for non-neg',
+      stopEscalation: 'content for stop',
+      currentStrategicFocus: 'content for focus',
+    };
+    const result = assembleIntentDoc(sections);
+    expect(result).toContain('# INTENT.md');
+    expect(result).toContain('## 1. Why');
+    expect(result).toContain('## 2. Desired Outcome');
+    expect(result).toContain('## 3. Non-negotiables');
+    expect(result).toContain('## 4. Stop / Escalation');
+    expect(result).toContain('## 5. Current Strategic Focus');
+    expect(result).toContain('content for why');
+    expect(result).toContain('content for focus');
+  });
+
+  it('emits all 5 headers even when sections are missing', () => {
+    const sections: IntentDocSections = {
+      why: 'only why is filled',
+    };
+    const result = assembleIntentDoc(sections);
+    expect(result).toContain('## 1. Why');
+    expect(result).toContain('## 5. Current Strategic Focus');
+    expect(result).toContain('only why is filled');
+    // Missing sections still produce a header with empty content
+    expect(result).toContain('## 2. Desired Outcome\n\n\n');
+  });
+
+  it('handles empty sections object', () => {
+    const result = assembleIntentDoc({});
+    expect(result).toContain('# INTENT.md');
+    expect(result).toContain('## 1. Why');
+    expect(result).toContain('## 5. Current Strategic Focus');
+  });
+
+  it('headers appear in strict SECTION_DEFS order', () => {
+    const result = assembleIntentDoc({
+      why: 'a', desiredOutcome: 'b', nonNegotiables: 'c', stopEscalation: 'd', currentStrategicFocus: 'e',
+    });
+    const idxWhy = result.indexOf('## 1. Why');
+    const idxDesired = result.indexOf('## 2. Desired Outcome');
+    const idxNonNeg = result.indexOf('## 3. Non-negotiables');
+    const idxStop = result.indexOf('## 4. Stop / Escalation');
+    const idxFocus = result.indexOf('## 5. Current Strategic Focus');
+    expect(idxWhy).toBeLessThan(idxDesired);
+    expect(idxDesired).toBeLessThan(idxNonNeg);
+    expect(idxNonNeg).toBeLessThan(idxStop);
+    expect(idxStop).toBeLessThan(idxFocus);
+  });
+
+  it('round-trip: parseIntentDocSections(assembleIntentDoc(sections)) returns same sections', () => {
+    const sections: IntentDocSections = {
+      why: 'content for why',
+      desiredOutcome: 'content for desired',
+      nonNegotiables: 'content for non-neg',
+      stopEscalation: 'content for stop',
+      currentStrategicFocus: 'content for focus',
+    };
+    const assembled = assembleIntentDoc(sections);
+    const parsed = parseIntentDocSections(assembled);
+    expect(parsed).toEqual(sections);
+  });
+});
+
 describe('computeIntentContentHash', () => {
   it('returns sha256: prefix', () => { expect(computeIntentContentHash('x').startsWith('sha256:')).toBe(true); });
   it('has 64 hex chars', () => { expect(computeIntentContentHash('x').slice(7)).toMatch(/^[0-9a-f]{64}$/); });
@@ -91,5 +160,36 @@ describe('constants', () => {
   it('template has 5 headers', () => {
     expect(INTENT_DOC_TEMPLATE).toContain('## 1. Why');
     expect(INTENT_DOC_TEMPLATE).toContain('## 5. Current Strategic Focus');
+  });
+});
+
+describe('Intent bilingual templates', () => {
+  it('getIntentFilename returns lang-suffixed filename', () => {
+    expect(getIntentFilename('zh-CN')).toBe('INTENT.zh-CN.md');
+    expect(getIntentFilename('en')).toBe('INTENT.en.md');
+  });
+
+  it('INTENT_DOC_TEMPLATE_ZH contains Chinese guidance prompts', () => {
+    expect(INTENT_DOC_TEMPLATE_ZH).toContain('这个项目');
+    expect(INTENT_DOC_TEMPLATE_ZH).toContain('## 1. Why');
+  });
+
+  it('INTENT_DOC_TEMPLATE_EN contains enhanced prompts', () => {
+    expect(INTENT_DOC_TEMPLATE_EN).toContain('Why does this project matter?');
+    expect(INTENT_DOC_TEMPLATE_EN).toContain('## 1. Why');
+  });
+
+  it('createIntentTemplate returns correct template per lang', () => {
+    expect(createIntentTemplate('zh-CN')).toBe(INTENT_DOC_TEMPLATE_ZH);
+    expect(createIntentTemplate('en')).toBe(INTENT_DOC_TEMPLATE_EN);
+  });
+
+  it('both templates parse to 5 sections with same keys', () => {
+    const zhSections = parseIntentDocSections(INTENT_DOC_TEMPLATE_ZH);
+    const enSections = parseIntentDocSections(INTENT_DOC_TEMPLATE_EN);
+    const zhKeys = Object.keys(zhSections).sort();
+    const enKeys = Object.keys(enSections).sort();
+    expect(zhKeys).toEqual(['currentStrategicFocus', 'desiredOutcome', 'nonNegotiables', 'stopEscalation', 'why']);
+    expect(enKeys).toEqual(zhKeys);
   });
 });

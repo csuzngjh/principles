@@ -151,7 +151,7 @@ describe('DefaultArtificerValidator — unified ArtificerRuleOutput (PRI-439)', 
 
   it('rejects output with more than 10 goldenTraceCases', async () => {
     const output = makeRuleOutput();
-    const base = (output.goldenTraceCases as unknown[])[0];
+    const [base] = output.goldenTraceCases as unknown[];
     output.goldenTraceCases = Array.from({ length: 11 }, (_, i) => ({ ...(base as Record<string, unknown>), caseId: `case-${i}` }));
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
@@ -193,7 +193,7 @@ describe('DefaultArtificerValidator — unified ArtificerRuleOutput (PRI-439)', 
   it('rejects goldenTraceCase with invalid expectedDecision enum', async () => {
     const output = makeRuleOutput();
     const cases = output.goldenTraceCases as Record<string, unknown>[];
-    const firstCase = cases[0];
+    const [firstCase] = cases;
     if (!firstCase) throw new Error('fixture must have at least one case');
     firstCase.expectedDecision = 'requireApproval';
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
@@ -277,5 +277,155 @@ describe('DefaultArtificerValidator — unified ArtificerRuleOutput (PRI-439)', 
   it('does not export ArtificerImplementationPlanSchema (plan field removed)', async () => {
     const mod = await import('../artificer-output.js');
     expect((mod as Record<string, unknown>).ArtificerImplementationPlanSchema).toBeUndefined();
+  });
+});
+
+describe('DefaultArtificerValidator — PRI-484 requiresContextVersion + ruleContext', () => {
+  const validator = new DefaultArtificerValidator();
+
+  /** A valid RuleContextV2 (available history, computed facts). */
+  function makeValidRuleContext(): Record<string, unknown> {
+    return {
+      version: 2,
+      history: {
+        status: 'available',
+        truncated: false,
+        calls: [
+          {
+            sequenceId: 1,
+            toolName: 'read_file',
+            canonicalKind: 'read',
+            normalizedPath: '/workspace/foo.txt',
+            paramsSummary: { path: '/workspace/foo.txt' },
+            outcome: 'success',
+          },
+        ],
+      },
+      facts: {
+        priorReadOfTarget: 'yes',
+        readCount: 1,
+        writeCount: 0,
+        uniqueWritePathCount: 0,
+        sameActionBlockCount: 0,
+      },
+    };
+  }
+
+  /** Build a rule output with the given requiresContextVersion + per-case ruleContext. */
+  function makeOutput(opts: {
+    requiresContextVersion?: number;
+    attachRuleContextTo?: number; // index of the case to attach ruleContext to
+  }): Record<string, unknown> {
+    const output: Record<string, unknown> = {
+      taskId: ARTIFICER_TASK_ID,
+      sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
+      implementationCode:
+        'function evaluate(input, helpers) { return helpers.getToolName(input) === "edit" ? { decision: "block", matched: true, reason: "x" } : { decision: "allow", matched: false, reason: "x" }; }',
+      goldenTraceCases: [
+        {
+          caseId: 'negative-1',
+          kind: 'negative',
+          toolName: 'edit',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'block',
+        },
+        {
+          caseId: 'positive-1',
+          kind: 'positive',
+          toolName: 'read',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'allow',
+        },
+      ],
+      affectedTools: ['edit'],
+      implementationSummary: 'Block writes to system directories',
+      risks: [],
+      sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
+      generatedAt: '2026-06-17T00:00:00.000Z',
+    };
+    if (opts.requiresContextVersion !== undefined) {
+      output.requiresContextVersion = opts.requiresContextVersion;
+    }
+    if (opts.attachRuleContextTo !== undefined) {
+      const cases = output.goldenTraceCases as Record<string, unknown>[];
+      const target = cases[opts.attachRuleContextTo];
+      if (!target) throw new Error(`invalid attachRuleContextTo index ${opts.attachRuleContextTo}`);
+      target.ruleContext = makeValidRuleContext();
+    }
+    return output;
+  }
+
+  // ── requiresContextVersion field is accepted ─────────────────────────────
+
+  it('accepts output with requiresContextVersion: 2', async () => {
+    const result = await validator.validate(makeOutput({ requiresContextVersion: 2 }), ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('accepts output without requiresContextVersion (v1 rule, backward compatible)', async () => {
+    const result = await validator.validate(makeOutput({}), ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects requiresContextVersion other than 2 (only v2 is supported)', async () => {
+    const result = await validator.validate(makeOutput({ requiresContextVersion: 1 }), ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('requirescontextversion'))).toBe(true);
+  });
+
+  it('rejects non-number requiresContextVersion', async () => {
+    const result = await validator.validate(makeOutput({ requiresContextVersion: '2' as unknown as number }), ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('requirescontextversion'))).toBe(true);
+  });
+
+  // ── ruleContext on golden trace cases ────────────────────────────────────
+
+  it('accepts ruleContext on a case when requiresContextVersion: 2', async () => {
+    const result = await validator.validate(
+      makeOutput({ requiresContextVersion: 2, attachRuleContextTo: 0 }),
+      ARTIFICER_TASK_ID,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects ruleContext on a case when requiresContextVersion is absent (v1 must not read context)', async () => {
+    const result = await validator.validate(
+      makeOutput({ attachRuleContextTo: 0 }),
+      ARTIFICER_TASK_ID,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('rulecontext') || e.toLowerCase().includes('v1'))).toBe(true);
+  });
+
+  it('rejects malformed ruleContext when requiresContextVersion: 2 is set', async () => {
+    const output = makeOutput({ requiresContextVersion: 2 });
+    const cases = output.goldenTraceCases as Record<string, unknown>[];
+    const [firstCase] = cases;
+    if (!firstCase) throw new Error('fixture must have at least one case');
+    firstCase.ruleContext = { version: 99, history: {}, facts: {} }; // malformed
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('rulecontext'))).toBe(true);
+  });
+
+  it('rejects ruleContext with __proto__ key (prototype pollution, ERR-076)', async () => {
+    const output = makeOutput({ requiresContextVersion: 2 });
+    const cases = output.goldenTraceCases as Record<string, unknown>[];
+    const [firstCase] = cases;
+    if (!firstCase) throw new Error('fixture must have at least one case');
+    // JSON.parse is the only way to create a real own enumerable `__proto__`
+    // property — an object literal `{ __proto__: x }` sets the prototype chain
+    // instead, which Object.keys never sees. The host-realm independence guard
+    // (ERR-076) checks Object.keys, so we must produce the hostile shape via
+    // JSON to exercise the guard faithfully.
+    const malicious = JSON.parse(
+      '{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"yes","readCount":1,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":0},"__proto__":{"polluted":true}}',
+    );
+    firstCase.ruleContext = malicious;
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('rulecontext'))).toBe(true);
   });
 });
