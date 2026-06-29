@@ -113,6 +113,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
 | ERR-085 | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults | PR #1079 |
+| ERR-087 | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases | PRI-485 / PR #1102 |
 
 ---
 
@@ -188,8 +189,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Latest recurrence**: 2026-06-28 PR #1098 (PRI-483): test files used `any` type in mock constructors (`this: any`, `_logger: any`) and `as any` assertions on test fixtures (`handleBeforeToolCall(event as any, ctx as any)`), bypassing type safety and hiding signature drift between tests and production APIs. Fixed by replacing with `as unknown as T` using `Parameters<typeof handleBeforeToolCall>` type derivation. Also 2026-06-26 PR #1072 (PRI-471): `dispatchFollowUp` built the `link_candidate` payload from raw `candidateIdInput` while the button's disabled-check used `candidateIdInput.trim()` — a whitespace-pasted id (`" cand-1 "`) was persisted verbatim into `resultingCandidateId`. Same class: normalization at the guard layer but not the authoritative persistence path. Fixed by trimming in the payload + at the server trust boundary. Also 2026-06-25 PR #1047/#1045: unsafe JSON narrowing and `(err as NodeJS.ErrnoException).code` on caught `unknown`; fixed with `isRecord()`/`isErrnoException()` guards.
-- **Recurrence**: Yes - repeated across JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, and test fixtures. Representative recent recurrences: PR #1020 package JSON parsing; PR #989 console SQLite rows; PR #972 vm sandbox output; PR #966 RuleHost CLI/runtime casts; PR #960 RuleHost DB/module metadata; PR #928 diagnostic JSON lineage merge; PR #926 schema guessing in SQLite tests; PR #892 hook result classification; PR #847 SQLite numeric IDs; PR #836 sanitizer casts; PR #829 JSON fixture casts; PR #817 env-var validation; PR #808/#809/#810 validator casts; PR #739 recommendation kind validation; PR #729 CLI language validation; PR #727 activation SQLite rows; PR #702 YAML feature flags; PR #688 raw event data. Prevention remains: treat parsed/external data as `unknown`, validate with runtime guards, and avoid `as` at trust boundaries.
+- **Latest recurrence**: 2026-06-29 PR #1104: `parseIntentDocSections` used `(sections as Record<string, string>)[def.key] = trimmed` to silence TypeScript's index-signature complaint on `IntentDocSections` (interface without index signature, indexed by `def.key: keyof IntentDocSections`). The PR body's rc-2 self-check defended the cast as "necessary narrowing" — but direct `sections[def.key] = trimmed` is fully type-safe (no runtime guard needed). Same `as`-anti-pattern family, distinct flavor: not untrusted data, just an unnecessary cast where direct assignment works. Fixed by removing the cast. Also 2026-06-28 PR #1098 (PRI-483): test files used `any` type in mock constructors (`this: any`, `_logger: any`) and `as any` assertions on test fixtures (`handleBeforeToolCall(event as any, ctx as any)`), bypassing type safety and hiding signature drift between tests and production APIs. Fixed by replacing with `as unknown as T` using `Parameters<typeof handleBeforeToolCall>` type derivation. Also 2026-06-26 PR #1072 (PRI-471): `dispatchFollowUp` built the `link_candidate` payload from raw `candidateIdInput` while the button's disabled-check used `candidateIdInput.trim()` — a whitespace-pasted id (`" cand-1 "`) was persisted verbatim into `resultingCandidateId`. Same class: normalization at the guard layer but not the authoritative persistence path. Fixed by trimming in the payload + at the server trust boundary. Older: 2026-06-25 PR #1047/#1045 (unsafe JSON narrowing + `(err as NodeJS.ErrnoException).code` on caught `unknown`; fixed with `isRecord()`/`isErrnoException()` guards).
+- **Recurrence**: Yes - repeated across JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, and test fixtures. Representative recent recurrences: PR #1020 package JSON parsing; PR #989 console SQLite rows; PR #972 vm sandbox output; PR #966 RuleHost CLI/runtime casts; PR #960 RuleHost DB/module metadata; PR #928 diagnostic JSON lineage merge; PR #926 schema guessing in SQLite tests; PR #892 hook result classification. Older compressed (PR #847/#836/#829/#817/#808-810/#739/#729/#727/#702/#688): SQLite numeric IDs, sanitizer casts, JSON fixture casts, env-var validation, validator casts, recommendation kind, CLI language, activation SQLite rows, YAML feature flags, raw event data — all `as`/missing-`typeof` at trust boundaries. Prevention remains: treat parsed/external data as `unknown`, validate with runtime guards, and avoid `as` at trust boundaries.
 
 ---
 
@@ -738,8 +739,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 86 |
-| Last updated | 2026-06-28 |
+| Total lessons | 87 |
+| Last updated | 2026-06-29 |
 | Top category | Schema & Type |
 | Recurring errors | 38 |
 
@@ -1269,4 +1270,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-071 (async cleanup not awaited — same "cleanup/lifecycle hygiene" class), ERR-074 (inner try/catch exit tunnel bypasses outer cleanup — same "transactional boundary" concern)
 - **Source**: PR #1079
 - **Date**: 2026-06-27
+- **Recurrence**: None
+
+---
+
+**[ERR-087]** | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases
+
+- **What happened**: In PRI-485 Phase 6, `generateV2CasesFromArtificer()` (packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts) generated 5 v2 adversarial cases for ANY `canonicalKind` returned by `canonicalizeToolKind()`. But the 5 templates (alias/path-boundary/combination) are write-path semantics — they assume the action tool is a write tool. For non-write tools (read/search/execute/agent/other), the generated cases are semantically wrong: e.g. `v2-path-boundary` expects `block` on a `read_file` tool, which a correct read-rule would never do. This would cause the Evaluator to reject valid read-path rules during adversarial replay.
+- **Why it's wrong**: The function's type signature accepts all `CanonicalKind` values (`read | search | write | execute | agent | other`), but its implementation only correctly handles `write`. This is a type contract overpromise — the signature promises more than the implementation delivers. The spec §10.1 acceptance scenarios are ALL write-oriented, which created a blind spot: the generator was coded to the spec's examples without considering what happens for non-write inputs the spec didn't mention.
+- **Generalized failure mode**: When implementing a generator whose templates are domain-specific (proven by spec examples all being one domain), assistants must add a precondition guard that filters non-applicable inputs and degrades with structured telemetry (rc-9), otherwise the generator produces semantically wrong artifacts for unhandled domains.
+- **Correct approach**: Before calling `generateV2ContextAdversarialCases()`, check `canonicalKind !== 'write'` and degrade to `[]` with a telemetry event carrying `reason` + `nextAction` + `toolName` + `canonicalKind`. Non-write tools fall back to LLM-supplied adversarial cases only.
+- **How to prevent**: 30-second PR-review check — when a generator produces domain-specific artifacts from a generic input type (enum/union), verify: (1) does the spec/acceptance criteria cover ALL values of the input type, or only a subset? (2) if only a subset, is there a precondition guard filtering non-applicable values? (3) is there a regression test asserting the guard fires for a non-applicable value? If any answer is no, the generator has a domain blind spot.
+- **Regression guard**: `packages/principles-core/src/runtime-v2/__tests__/evaluator-runner-vslice-v2.test.ts` — "PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)" asserts: (a) trace captured with only 3 LLM cases (no v2 caseIds), (b) telemetry event `evaluator_v2_adversarial_cases_skipped` emitted with `reason: 'non_write_canonical_kind_for_v2_adversarial_cases'` and `canonicalKind: 'read'`.
+- **Related ERRs**: ERR-069 (writing against remembered contract instead of actual schema — same pattern group: spec-driven blind spot), ERR-025 (test reality gap — fixtures used read_file and passed without asserting semantic correctness), EP-02 (production path wiring — component exists but real inputs it can't handle break it).
+- **Source**: PRI-485 / PR #1102 (CodeRabbit review)
+- **Date**: 2026-06-29
 - **Recurrence**: None
