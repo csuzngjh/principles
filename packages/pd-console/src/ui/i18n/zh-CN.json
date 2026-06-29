@@ -884,6 +884,8 @@
         "next": "下一步",
         "prev": "上一步",
         "finish": "完成",
+        "review": "查看摘要",
+        "complete": "完成保存",
         "cancel": "取消",
         "emptyWarning": "此节不能为空，请填写后再继续",
         "stepLabels": {

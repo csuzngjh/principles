@@ -224,16 +224,30 @@ interface VersionEntryProps {
   previousContent: string;
   /** Localized reason label */
   reasonLabel: string;
+  /** Whether this entry should be expanded by default (e.g. newest version) */
+  defaultExpanded?: boolean;
 }
 
-function VersionEntry({ version, previousContent, reasonLabel }: VersionEntryProps) {
+function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded = false }: VersionEntryProps) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   // Compute section-level diff between previous and this version.
   // For the oldest version (no previous), diff against "" so all non-empty
   // sections show as "changed" — gives the user a visual of what was filled.
   const diff = computeVersionDiff(previousContent, version.contentSnapshot);
+
+  // Localize the timestamp for display (avoid showing raw UTC to end users).
+  const localizedTime = (() => {
+    try {
+      return new Date(version.createdAt).toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch {
+      return version.createdAt.slice(0, 19).replace('T', ' ');
+    }
+  })();
 
   return (
     <div className="border-b border-line last:border-b-0">
@@ -243,15 +257,15 @@ function VersionEntry({ version, previousContent, reasonLabel }: VersionEntryPro
         className="w-full flex items-center gap-3 py-1.5 text-[12px] font-mono text-ink-2 hover:bg-surface-2/50 transition-colors text-left"
         aria-expanded={expanded}
         aria-label={expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
+        title={version.contentHash}
       >
         <span className="text-ink-3 shrink-0 w-4 inline-block">
           {expanded ? "▾" : "▸"}
         </span>
-        <span className="text-ink-3 shrink-0">{version.createdAt.slice(0, 19).replace('T', ' ')}</span>
+        <span className="text-ink-3 shrink-0">{localizedTime}</span>
         <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3 shrink-0">
           {reasonLabel}
         </span>
-        <span className="text-ink-3 shrink-0">{version.contentHash.slice(0, 12)}</span>
         <span className="text-ink-4 text-[11px] ml-auto shrink-0 hidden sm:inline">
           {expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
         </span>
@@ -716,6 +730,7 @@ export function IntentPage() {
                     version={v}
                     previousContent={previousContent}
                     reasonLabel={versionReasonLabel(v.reason)}
+                    defaultExpanded={idx === 0}
                   />
                 );
               })}

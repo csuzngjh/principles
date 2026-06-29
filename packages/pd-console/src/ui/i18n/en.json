@@ -884,6 +884,8 @@
         "next": "Next",
         "prev": "Previous",
         "finish": "Finish",
+        "review": "Review",
+        "complete": "Complete",
         "cancel": "Cancel",
         "emptyWarning": "This section cannot be empty. Please fill it in before continuing.",
         "stepLabels": {

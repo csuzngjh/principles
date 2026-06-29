@@ -322,7 +322,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 disabled={isCurrentSectionEmpty}
                 className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {t("pages.intent.wizard.finish")}
+                {t("pages.intent.wizard.review")}
               </button>
             )}
             {step === "finish" && (
@@ -331,7 +331,7 @@ export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModal
                 onClick={() => onComplete(sections)}
                 className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
-                {t("pages.intent.wizard.finish")}
+                {t("pages.intent.wizard.complete")}
               </button>
             )}
           </div>

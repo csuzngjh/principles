@@ -18,7 +18,9 @@ export function parseIntentDocSections(raw: string): IntentDocSections {
     if (match === null) { continue; }
     const rest = raw.slice(match.index + match[0].length);
     const next = /^##\s+/m.exec(rest);
-    (sections as Record<string, string>)[def.key] = rest.slice(0, next !== null ? next.index : rest.length).trim();
+    // Direct assignment is type-safe: def.key is keyof IntentDocSections,
+    // all fields are `string | undefined`, and we assign a string.
+    sections[def.key] = rest.slice(0, next !== null ? next.index : rest.length).trim();
   }
   return sections;
 }
