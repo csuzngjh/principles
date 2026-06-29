@@ -878,6 +878,42 @@
         "title": "版本历史",
         "reasonInit": "初始化",
         "reasonSave": "保存"
+      },
+      "wizard": {
+        "progressLabel": "第 {{current}}/5 步",
+        "next": "下一步",
+        "prev": "上一步",
+        "finish": "完成",
+        "review": "查看摘要",
+        "complete": "完成保存",
+        "cancel": "取消",
+        "emptyWarning": "此节不能为空，请填写后再继续",
+        "stepLabels": {
+          "why": "1. 为什么（Why）",
+          "desiredOutcome": "2. 期望结果（Desired Outcome）",
+          "nonNegotiables": "3. 不可妥协项（Non-negotiables）",
+          "stopEscalation": "4. 止损/升级（Stop / Escalation）",
+          "currentStrategicFocus": "5. 当前战略焦点（Current Strategic Focus）"
+        },
+        "guidance": {
+          "why": "说明这个项目为什么重要。拥有者关心什么？不解决会怎样？",
+          "desiredOutcome": "描述可观察的改变。做完后，什么会变好？",
+          "nonNegotiables": "列出不可违反的硬约束（合规/安全/边界）。",
+          "stopEscalation": "什么情况下应该停下来升级给拥有者，而不是继续推进？",
+          "currentStrategicFocus": "当前阶段最优先的事是什么？（会随阶段更新）"
+        },
+        "discardConfirmTitle": "放弃填写？",
+        "discardConfirmBody": "你已填写的内容将丢失，无法恢复。",
+        "discardConfirmCancel": "继续填写",
+        "discardConfirmConfirm": "放弃"
+      },
+      "versionDiff": {
+        "changed": "已变更",
+        "unchanged": "未变更",
+        "oldPreview": "旧版本",
+        "newPreview": "新版本",
+        "expandHint": "点击查看 section 级差异",
+        "collapseHint": "点击折叠差异"
       }
     },
     "debt": {
