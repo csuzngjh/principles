@@ -71,6 +71,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-071 | Async cleanup not `await`ed in finally; test resources not in try-finally; `process.env` not restored | PRI-428 |
 | ERR-073 | Refactoring characterization tests cover shared logic happy path, not call-site-specific behavior equivalence | PRI-431 |
 | ERR-077 | API migration silently drops input parameters — characterization tests don't verify parameter parity | PRI-454 |
+| ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
 
 ---
 
@@ -1332,5 +1333,22 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `packages/principles-core/src/runtime-v2/__tests__/evaluator-runner-vslice-v2.test.ts` — "PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)" asserts: (a) trace captured with only 3 LLM cases (no v2 caseIds), (b) telemetry event `evaluator_v2_adversarial_cases_skipped` emitted with `reason: 'non_write_canonical_kind_for_v2_adversarial_cases'` and `canonicalKind: 'read'`.
 - **Related ERRs**: ERR-069 (writing against remembered contract instead of actual schema — same pattern group: spec-driven blind spot), ERR-025 (test reality gap — fixtures used read_file and passed without asserting semantic correctness), EP-02 (production path wiring — component exists but real inputs it can't handle break it).
 - **Source**: PRI-485 / PR #1102 (CodeRabbit review)
+- **Date**: 2026-06-29
+- **Recurrence**: None
+
+---
+
+**[ERR-088]** | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path
+
+- **What happened**: In PRI-486 Phase 7 E2E tests (PR #1109), two test cases used non-unique assertion signals:
+  1. `rule-context-v2.perf.test.ts` empty-history baseline measured timing of `buildProductionRuleContext` without verifying the returned context was `available` — a fail-soft `unavailable` result would also pass the timing assertion.
+  2. `gate-rule-context-v2.vm-e2e.test.ts` K3 test asserted `result === undefined` to verify "flag OFF → v2 rule fail-soft allow", but `result === undefined` is also produced when the rule is never loaded from SQLite — the test could not distinguish "rule executed fail-soft" from "rule never loaded".
+- **Why it's wrong**: An assertion signal that is produced by multiple code paths cannot prove which path executed. The test passes on the unintended path (fail-soft / never-loaded) without proving the claimed invariant (rule executed and chose to allow). This is the test-side sibling of ERR-009/ERR-010 (production falsy values silently passing validation) — same root cause, opposite side of the contract.
+- **Generalized failure mode**: When writing tests that verify behavior via indirect/non-unique signals (return value `undefined`, timing metrics, absence of thrown error, side-effect count of 0), assistants must ensure the asserted signal is uniquely produced by the intended behavior path. If a fail-soft / no-op / never-executed path also produces the same signal, the test cannot distinguish intended behavior from accidental pass.
+- **Correct approach**: (1) Perf test: assert `expect(sample.history.status).toBe('available')` before the timing loop to prove the rule actually executed and returned a usable context. (2) K3 test: use a probe rule `V2_RULE_CODE_K3_PROBE` that returns `requireApproval` (not `allow`), then assert `recordRuleHostRequireApproval` was called with `reason: expect.stringContaining('K3 probe')` — this signal is only produced when the rule actually executed and reached the requireApproval branch.
+- **How to prevent**: For any test that asserts an indirect signal (undefined return, timing, absence of error, zero count), ask: "What other code path produces this same signal?" If a fail-soft / no-op / never-executed / cached-empty path also produces it, add a positive assertion that uniquely identifies the intended path (status field, side-effect with distinguishing payload, probe rule with unique reason string).
+- **Regression guard**: `packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts` (status assertion before timing loop); `packages/openclaw-plugin/tests/hooks/gate-rule-context-v2.vm-e2e.test.ts` (K3 probe rule + `recordRuleHostRequireApproval` assertion with `reason` containing 'K3 probe').
+- **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
+- **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: None
