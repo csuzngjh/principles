@@ -1,37 +1,61 @@
 /**
- * PRI-477: Intent Engineering Onboarding components.
+ * PRI-477 + spec 2026-06-27: Intent Engineering onboarding components.
  *
  * Three components:
- * 1. OnboardingModal — first-time intro (4 sections + skip option)
- * 2. IntentEditor — inline markdown editor (Save / Cancel)
- * 3. CreateIntentButton — creates INTENT.md template, optionally shows onboarding
+ * 1. OnboardingModal — 5-step wizard (intro → Why → Desired Outcome →
+ *    Non-negotiables → Stop/Escalation → Current Strategic Focus → finish)
+ * 2. IntentEditor — section editor with 5 independent textareas (one per
+ *    section), replacing the single monolithic textarea
+ * 3. CreateIntentButton — creates INTENT.md template, optionally shows wizard
  *
- * SPEC §22.1.1 update (PRI-477): Intent Page now supports inline editing.
- * This breaks the original "read-only governance view" constraint, but
- * preserves the Owner-owned boundary: all edits are triggered by Owner
- * clicking buttons, never by Agent auto-modification (SPEC §3.9 preserved).
+ * SPEC §22.1.1 update: Intent Page supports inline editing. This breaks the
+ * original "read-only governance view" constraint, but preserves the
+ * Owner-owned boundary: all edits are triggered by Owner clicking buttons,
+ * never by Agent auto-modification (SPEC §3.9 preserved).
+ *
+ * Architecture note: parseIntentDocSections / assembleIntentDoc are imported
+ * from @principles/core/runtime-v2. These are pure functions (no I/O, no
+ * node:crypto) and safe for the browser bundle. The crypto-dependent
+ * computeIntentContentHash lives in intent-hash.ts to keep intent-doc.ts
+ * browser-bundleable.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { createIntentTemplate, saveIntentContent } from "../../api.js";
+import {
+  parseIntentDocSections,
+  assembleIntentDoc,
+  type IntentDocSections,
+} from "@principles/core/runtime-v2/intent-browser";
+
+// ── Section step helpers ─────────────────────────────────────────────────────
+
+const SECTION_STEPS = [1, 2, 3, 4, 5] as const;
+type SectionStep = (typeof SECTION_STEPS)[number];
+type WizardStep = "intro" | SectionStep | "finish";
+
+const STEP_TO_KEY: Record<SectionStep, keyof IntentDocSections> = {
+  1: "why",
+  2: "desiredOutcome",
+  3: "nonNegotiables",
+  4: "stopEscalation",
+  5: "currentStrategicFocus",
+};
 
 // ── localStorage key for onboarding dismissal ─────────────────────────────────
 
 const ONBOARDING_DISMISSED_KEY = "pd_intent_onboarding_dismissed";
 
-/** Check if the user has dismissed the onboarding modal before. */
 function isOnboardingDismissed(): boolean {
   try {
     return localStorage.getItem(ONBOARDING_DISMISSED_KEY) === "true";
   } catch {
-    // localStorage may be unavailable (private mode, etc.) — default to not dismissed
     return false;
   }
 }
 
-/** Mark onboarding as dismissed so it doesn't show again. */
 function setOnboardingDismissed(): void {
   try {
     localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
@@ -40,19 +64,77 @@ function setOnboardingDismissed(): void {
   }
 }
 
-// ── OnboardingModal ───────────────────────────────────────────────────────────
+// ── OnboardingModal (5-step wizard) ──────────────────────────────────────────
 
 interface OnboardingModalProps {
-  /** Called when user clicks "Start filling" — creates template and opens editor */
-  onStartFilling: () => void;
-  /** Called when user clicks "Skip" — creates empty template without opening editor */
+  /** Called when user completes all 5 steps with the assembled sections */
+  onComplete: (sections: IntentDocSections) => void;
+  /** Called when user clicks "Skip" — creates empty template without wizard */
   onSkip: () => void;
-  /** Called when user closes the modal without creating anything */
+  /** Called when user closes the modal without completing */
   onClose: () => void;
 }
 
-export function OnboardingModal({ onStartFilling, onSkip, onClose }: OnboardingModalProps) {
+export function OnboardingModal({ onComplete, onSkip, onClose }: OnboardingModalProps) {
   const { t } = useTranslation();
+  const [step, setStep] = useState<WizardStep>("intro");
+  const [sections, setSections] = useState<IntentDocSections>({});
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus textarea when entering a section step
+  useEffect(() => {
+    if (typeof step === "number") {
+      textareaRef.current?.focus();
+    }
+  }, [step]);
+
+  const hasContent = useMemo(
+    () => Object.values(sections).some((v) => typeof v === "string" && v.trim().length > 0),
+    [sections],
+  );
+
+  function handleRequestClose() {
+    if (hasContent) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  }
+
+  function handleNext() {
+    if (step === "intro") {
+      setStep(1);
+      return;
+    }
+    if (typeof step === "number" && step < 5) {
+      setStep((step + 1) as SectionStep);
+      return;
+    }
+    if (step === 5) {
+      setStep("finish");
+    }
+  }
+
+  function handlePrev() {
+    if (typeof step === "number" && step > 1) {
+      setStep((step - 1) as SectionStep);
+      return;
+    }
+    if (step === 1) {
+      setStep("intro");
+    }
+  }
+
+  function handleSectionChange(value: string) {
+    if (typeof step !== "number") return;
+    const key = STEP_TO_KEY[step];
+    setSections((prev) => ({ ...prev, [key]: value }));
+  }
+
+  const currentSectionValue =
+    typeof step === "number" ? (sections[STEP_TO_KEY[step]] ?? "") : "";
+  const isCurrentSectionEmpty = typeof step === "number" && currentSectionValue.trim().length === 0;
 
   return (
     <div
@@ -60,24 +142,32 @@ export function OnboardingModal({ onStartFilling, onSkip, onClose }: OnboardingM
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-title"
-      onClick={onClose}
+      onClick={handleRequestClose}
     >
       <div
-        className="bg-surface border border-line rounded-[8px] p-6 max-w-[560px] w-full mx-4 max-h-[85vh] overflow-y-auto"
+        className="bg-surface border border-line rounded-[8px] p-6 max-w-[620px] w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 id="onboarding-title" className="text-[20px] font-semibold tracking-tight text-ink mb-1">
               {t("pages.intent.onboarding.title")}
             </h2>
-            <p className="text-ink-3 text-[13px] leading-relaxed">
-              {t("pages.intent.onboarding.subtitle")}
-            </p>
+            {step === "intro" && (
+              <p className="text-ink-3 text-[13px] leading-relaxed">
+                {t("pages.intent.onboarding.subtitle")}
+              </p>
+            )}
+            {typeof step === "number" && (
+              <p className="text-ink-3 text-[12px] font-mono">
+                {t("pages.intent.wizard.progressLabel", { current: step })}
+              </p>
+            )}
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleRequestClose}
             className="shrink-0 ml-3 text-ink-3 hover:text-ink transition-colors"
             aria-label={t("pages.intent.onboarding.close")}
           >
@@ -87,81 +177,213 @@ export function OnboardingModal({ onStartFilling, onSkip, onClose }: OnboardingM
           </button>
         </div>
 
-        {/* Section 1: What is Intent Engineering */}
-        <div className="mb-5">
-          <h3 className="text-[14px] font-semibold text-ink mb-1.5">
-            {t("pages.intent.onboarding.whatIsIt.title")}
-          </h3>
-          <p className="text-ink-2 text-[13px] leading-relaxed">
-            {t("pages.intent.onboarding.whatIsIt.description")}
-          </p>
-        </div>
+        {/* Intro step */}
+        {step === "intro" && (
+          <div className="mb-5">
+            <div className="mb-5">
+              <h3 className="text-[14px] font-semibold text-ink mb-1.5">
+                {t("pages.intent.onboarding.whatIsIt.title")}
+              </h3>
+              <p className="text-ink-2 text-[13px] leading-relaxed">
+                {t("pages.intent.onboarding.whatIsIt.description")}
+              </p>
+            </div>
+            <div className="mb-5">
+              <h3 className="text-[14px] font-semibold text-ink mb-1.5">
+                {t("pages.intent.onboarding.whyYouFill.title")}
+              </h3>
+              <p className="text-ink-2 text-[13px] leading-relaxed">
+                {t("pages.intent.onboarding.whyYouFill.description")}
+              </p>
+            </div>
+            <div className="mb-5">
+              <h3 className="text-[14px] font-semibold text-ink mb-1.5">
+                {t("pages.intent.onboarding.sectionGuide.title")}
+              </h3>
+              <p className="text-ink-3 text-[12px] leading-relaxed mb-2">
+                {t("pages.intent.onboarding.sectionGuide.description")}
+              </p>
+              <ul className="space-y-1.5">
+                {SECTION_STEPS.map((s) => {
+                  const key = STEP_TO_KEY[s];
+                  return (
+                    <li key={s} className="text-ink-2 text-[13px] leading-relaxed">
+                      <span className="font-mono text-gov">•</span>{" "}
+                      {t(`pages.intent.wizard.stepLabels.${key}`)}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
+        )}
 
-        {/* Section 2: Why you fill */}
-        <div className="mb-5">
-          <h3 className="text-[14px] font-semibold text-ink mb-1.5">
-            {t("pages.intent.onboarding.whyYouFill.title")}
-          </h3>
-          <p className="text-ink-2 text-[13px] leading-relaxed">
-            {t("pages.intent.onboarding.whyYouFill.description")}
-          </p>
-        </div>
+        {/* Section steps 1-5 */}
+        {typeof step === "number" && (
+          <div className="mb-5">
+            <h3 className="text-[15px] font-semibold text-ink mb-1.5">
+              {t(`pages.intent.wizard.stepLabels.${STEP_TO_KEY[step]}`)}
+            </h3>
+            <p className="text-ink-3 text-[12px] leading-relaxed mb-3">
+              {t(`pages.intent.wizard.guidance.${STEP_TO_KEY[step]}`)}
+            </p>
+            <textarea
+              ref={textareaRef}
+              value={currentSectionValue}
+              onChange={(e) => handleSectionChange(e.target.value)}
+              placeholder={t(`pages.intent.wizard.guidance.${STEP_TO_KEY[step]}`)}
+              className="w-full h-[180px] bg-surface border border-line rounded-[4px] p-3 text-[13px] text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
+              spellCheck={false}
+              aria-label={t(`pages.intent.wizard.stepLabels.${STEP_TO_KEY[step]}`)}
+            />
+            {/* rc-9: visible warning when section is empty, not silent disable */}
+            {isCurrentSectionEmpty && (
+              <p className="text-amber text-[12px] mt-1.5" role="alert">
+                {t("pages.intent.wizard.emptyWarning")}
+              </p>
+            )}
+          </div>
+        )}
 
-        {/* Section 3: 5-section guide */}
-        <div className="mb-5">
-          <h3 className="text-[14px] font-semibold text-ink mb-1.5">
-            {t("pages.intent.onboarding.sectionGuide.title")}
-          </h3>
-          <p className="text-ink-3 text-[12px] leading-relaxed mb-2">
-            {t("pages.intent.onboarding.sectionGuide.description")}
-          </p>
-          <ul className="space-y-1.5">
-            <li className="text-ink-2 text-[13px] leading-relaxed">
-              <span className="font-mono text-gov">•</span>{" "}
-              {t("pages.intent.onboarding.sectionGuide.sections.why")}
-            </li>
-            <li className="text-ink-2 text-[13px] leading-relaxed">
-              <span className="font-mono text-gov">•</span>{" "}
-              {t("pages.intent.onboarding.sectionGuide.sections.desiredOutcome")}
-            </li>
-            <li className="text-ink-2 text-[13px] leading-relaxed">
-              <span className="font-mono text-gov">•</span>{" "}
-              {t("pages.intent.onboarding.sectionGuide.sections.nonNegotiables")}
-            </li>
-            <li className="text-ink-2 text-[13px] leading-relaxed">
-              <span className="font-mono text-gov">•</span>{" "}
-              {t("pages.intent.onboarding.sectionGuide.sections.stopEscalation")}
-            </li>
-            <li className="text-ink-2 text-[13px] leading-relaxed">
-              <span className="font-mono text-gov">•</span>{" "}
-              {t("pages.intent.onboarding.sectionGuide.sections.currentStrategicFocus")}
-            </li>
-          </ul>
-        </div>
+        {/* Finish step — summary */}
+        {step === "finish" && (
+          <div className="mb-5">
+            <h3 className="text-[15px] font-semibold text-ink mb-3">
+              {t("pages.intent.wizard.finish")}
+            </h3>
+            <div className="space-y-3">
+              {SECTION_STEPS.map((s) => {
+                const key = STEP_TO_KEY[s];
+                const value = sections[key] ?? "";
+                return (
+                  <div key={s} className="border-l-2 border-gov/40 pl-3">
+                    <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-0.5">
+                      {t(`pages.intent.wizard.stepLabels.${key}`)}
+                    </p>
+                    <p className="text-ink-2 text-[13px] leading-relaxed whitespace-pre-wrap">
+                      {value || t("pages.intent.wizard.emptyWarning")}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
-        <div className="flex flex-col gap-2 pt-2 border-t border-line">
-          <button
-            type="button"
-            onClick={onStartFilling}
-            className="w-full bg-gov text-paper rounded-[4px] px-4 py-2.5 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-          >
-            {t("pages.intent.onboarding.startFilling")}
-          </button>
-          <button
-            type="button"
-            onClick={onSkip}
-            className="w-full border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2.5 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-          >
-            {t("pages.intent.onboarding.skipOption")}
-          </button>
+        <div className="flex items-center justify-between gap-2 pt-3 border-t border-line">
+          {/* Left: Prev / Cancel */}
+          <div>
+            {step === "intro" && (
+              <button
+                type="button"
+                onClick={onSkip}
+                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {t("pages.intent.onboarding.skipOption")}
+              </button>
+            )}
+            {typeof step === "number" && (
+              <button
+                type="button"
+                onClick={handlePrev}
+                className="border border-line bg-surface text-ink-2 rounded-[4px] px-4 py-2 text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {t("pages.intent.wizard.prev")}
+              </button>
+            )}
+          </div>
+
+          {/* Right: Next / Finish / Complete */}
+          <div>
+            {step === "intro" && (
+              <button
+                type="button"
+                onClick={handleNext}
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {t("pages.intent.onboarding.startFilling")}
+              </button>
+            )}
+            {typeof step === "number" && step < 5 && (
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={isCurrentSectionEmpty}
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {t("pages.intent.wizard.next")}
+              </button>
+            )}
+            {step === 5 && (
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={isCurrentSectionEmpty}
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {t("pages.intent.wizard.review")}
+              </button>
+            )}
+            {step === "finish" && (
+              <button
+                type="button"
+                onClick={() => onComplete(sections)}
+                className="bg-gov text-paper rounded-[4px] px-4 py-2 text-[13px] font-medium hover:bg-gov-dark transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {t("pages.intent.wizard.complete")}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Discard confirmation */}
+        {showDiscardConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-title"
+            onClick={() => setShowDiscardConfirm(false)}
+          >
+            <div
+              className="bg-surface border border-line rounded-[8px] p-5 max-w-[400px] w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p id="discard-title" className="text-ink text-[14px] font-semibold mb-2">
+                {t("pages.intent.wizard.discardConfirmTitle")}
+              </p>
+              <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+                {t("pages.intent.wizard.discardConfirmBody")}
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDiscardConfirm(false)}
+                  className="border border-line bg-surface text-ink-2 rounded-[4px] px-3 py-1.5 text-[12px] hover:border-line-2 transition-colors"
+                >
+                  {t("pages.intent.wizard.discardConfirmCancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDiscardConfirm(false);
+                    onClose();
+                  }}
+                  className="bg-red-600 text-white rounded-[4px] px-3 py-1.5 text-[12px] hover:bg-red-700 transition-colors"
+                >
+                  {t("pages.intent.wizard.discardConfirmConfirm")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── IntentEditor ──────────────────────────────────────────────────────────────
+// ── IntentEditor (5 section textareas) ───────────────────────────────────────
 
 interface IntentEditorProps {
   /** Initial content to populate the editor (current INTENT.md content) */
@@ -176,37 +398,69 @@ interface IntentEditorProps {
 
 export function IntentEditor({ initialContent, onSaved, onCancel, lang }: IntentEditorProps) {
   const { t } = useTranslation();
-  const [content, setContent] = useState(initialContent);
+  // Parse initial content into 5 sections on mount. parseIntentDocSections
+  // returns undefined for missing sections; we normalize to empty string for
+  // textarea value binding (controlled input requires a string value).
+  const [sections, setSections] = useState<IntentDocSections>(() => {
+    const parsed = parseIntentDocSections(initialContent);
+    return {
+      why: parsed.why ?? "",
+      desiredOutcome: parsed.desiredOutcome ?? "",
+      nonNegotiables: parsed.nonNegotiables ?? "",
+      stopEscalation: parsed.stopEscalation ?? "",
+      currentStrategicFocus: parsed.currentStrategicFocus ?? "",
+    };
+  });
   const [saving, setSaving] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const firstTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Focus the textarea on mount
+  // Focus the first textarea on mount
   useEffect(() => {
-    textareaRef.current?.focus();
+    firstTextareaRef.current?.focus();
   }, []);
 
-  const hasChanges = content !== initialContent;
+  // Detect changes by comparing current sections to initial parsed sections.
+  // We re-parse initialContent on each render (cheap, pure function) rather
+  // than storing a second state variable — avoids stale closure issues.
+  const initialSections = useMemo(() => parseIntentDocSections(initialContent), [initialContent]);
+  const hasChanges = useMemo(() => {
+    for (const step of SECTION_STEPS) {
+      const key = STEP_TO_KEY[step];
+      const current = sections[key] ?? "";
+      const initial = initialSections[key] ?? "";
+      if (current !== initial) return true;
+    }
+    return false;
+  }, [sections, initialSections]);
+
+  function handleSectionChange(key: keyof IntentDocSections, value: string) {
+    setSections((prev) => ({ ...prev, [key]: value }));
+  }
 
   async function handleSave() {
     if (!hasChanges || saving) return;
 
-    // Client-side validation (server also validates, but this gives instant feedback)
-    if (content.trim().length === 0) {
+    // Client-side validation: require at least one non-empty section.
+    // Empty individual sections are allowed (user may clear a section
+    // intentionally); the server emits warnings, not errors, for empty
+    // sections.
+    const allEmpty = SECTION_STEPS.every((s) => {
+      const key = STEP_TO_KEY[s];
+      return (sections[key] ?? "").trim().length === 0;
+    });
+    if (allEmpty) {
       toast.error(t("pages.intent.editor.emptyContent"));
       return;
     }
 
+    const assembled = assembleIntentDoc(sections);
     setSaving(true);
-    const result = await saveIntentContent(content, lang);
+    const result = await saveIntentContent(assembled, lang);
     setSaving(false);
 
     if (!result.success) {
-      // N4 (PR-1083 review): branch on the structured machine-readable
-      // `reason` field surfaced from the server, NOT on substring matching
-      // against nextAction text. The previous `nextAction.includes("32KB")`
-      // check silently regressed to "saveFailed" the moment the backend
-      // rephrased the cap or returned localized text.
+      // Branch on structured reason field, NOT substring matching (PR-1083 N4).
       if (result.reason === "oversized") {
         toast.error(t("pages.intent.editor.oversized"));
       } else {
@@ -229,12 +483,8 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
 
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          {/* N2 (PR-1083 review): hardcoded id matches the parent IntentPage
-              `<section aria-labelledby="section-editor">`. IntentEditor owns the
-              visible title now — IntentPage no longer renders a duplicate
-              SectionTitle wrapping this component. */}
           <h3 id="section-editor" className="text-[15px] font-semibold text-ink mb-0.5">
             {t("pages.intent.editor.title")}
           </h3>
@@ -244,17 +494,37 @@ export function IntentEditor({ initialContent, onSaved, onCancel, lang }: Intent
         </div>
       </div>
 
-      <textarea
-        ref={textareaRef}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder={t("pages.intent.editor.placeholder")}
-        className="w-full h-[420px] bg-surface border border-line rounded-[4px] p-3 text-[13px] font-mono text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
-        spellCheck={false}
-        aria-label={t("pages.intent.editor.title")}
-      />
+      {/* 5 independent section textareas */}
+      <div className="space-y-4">
+        {SECTION_STEPS.map((step, idx) => {
+          const key = STEP_TO_KEY[step];
+          const value = sections[key] ?? "";
+          return (
+            <div key={step}>
+              <label
+                htmlFor={`intent-section-${key}`}
+                className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-1"
+              >
+                {t(`pages.intent.wizard.stepLabels.${key}`)}
+              </label>
+              <p className="text-ink-3 text-[12px] leading-relaxed mb-1.5">
+                {t(`pages.intent.wizard.guidance.${key}`)}
+              </p>
+              <textarea
+                ref={idx === 0 ? firstTextareaRef : undefined}
+                id={`intent-section-${key}`}
+                value={value}
+                onChange={(e) => handleSectionChange(key, e.target.value)}
+                className="w-full h-[120px] bg-surface border border-line rounded-[4px] p-3 text-[13px] text-ink leading-relaxed resize-y focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov/30"
+                spellCheck={false}
+                aria-label={t(`pages.intent.wizard.stepLabels.${key}`)}
+              />
+            </div>
+          );
+        })}
+      </div>
 
-      <div className="flex items-center justify-end gap-2 mt-3">
+      <div className="flex items-center justify-end gap-2 mt-4">
         <button
           type="button"
           onClick={handleCancel}
@@ -330,7 +600,7 @@ interface CreateIntentButtonProps {
    * showing stale "file not found" state after a successful create.
    */
   onCreated: (openEditor: boolean) => void;
-  /** If true, show onboarding modal before creating. If false, create directly. */
+  /** If true, show onboarding wizard before creating. If false, create directly. */
   showOnboarding?: boolean;
   /** Language for bilingual INTENT.md */
   lang: 'zh-CN' | 'en';
@@ -343,42 +613,68 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
     showOnboarding && !isOnboardingDismissed(),
   );
 
-  async function createTemplate(openEditor: boolean) {
+  // Create template + save assembled content from wizard.
+  // Called when user completes all 5 wizard steps.
+  async function createFromWizard(sections: IntentDocSections) {
+    setBusy(true);
+    // Step 1: create template (idempotent — ensures file exists)
+    const createResult = await createIntentTemplate(false, lang);
+    if (!createResult.success) {
+      setBusy(false);
+      toast.error(t("pages.intent.notFound.createFailed"));
+      return;
+    }
+    // Step 2: save the assembled content (overwrites template defaults)
+    const assembled = assembleIntentDoc(sections);
+    const saveResult = await saveIntentContent(assembled, lang);
+    setBusy(false);
+
+    if (!saveResult.success) {
+      // Template was created but wizard content failed to save.
+      // The file exists (template), so refresh summary; show error so the
+      // user knows to edit manually. This is NOT a silent fallback (rc-9).
+      if (saveResult.reason === "oversized") {
+        toast.error(t("pages.intent.editor.oversized"));
+      } else {
+        toast.error(t("pages.intent.editor.saveFailed"));
+      }
+      onCreated(true); // open editor so user can retry / inspect
+      return;
+    }
+
+    toast.success(t("pages.intent.notFound.createSuccess"));
+    onCreated(false); // wizard already filled content — no need to open editor
+  }
+
+  // Create empty template. Returns true on success so the caller can decide
+  // whether to open the editor (legacy path) or just refresh (skip path).
+  // Does NOT call onCreated itself — avoids double-callback bug.
+  async function createEmptyTemplate(): Promise<boolean> {
     setBusy(true);
     const result = await createIntentTemplate(false, lang);
     setBusy(false);
 
     if (!result.success) {
       toast.error(t("pages.intent.notFound.createFailed"));
-      return;
+      return false;
     }
 
-    // PR-1083 review (CodeRabbit comment N3): both branches used to call the
-    // identical toast.success — collapse to a single call. `result.data.created`
-    // (true=create, false=already-existed) is still surfaced via onCreated(openEditor)
-    // below so the parent IntentPage can refresh the summary either way; the
-    // distinction no longer needs a separate banner here.
     toast.success(t("pages.intent.notFound.createSuccess"));
-
-    // PR-1083 review (CodeRabbit comment A5): the OLD code only invoked
-    // onCreated() when openEditor was true, so the "Skip" path created the
-    // file but never told the parent to refresh — leaving NotFoundBanner
-    // showing stale state even though the file now existed. ALL successful
-    // creation paths MUST trigger onCreated(openEditor) so the summary is
-    // reloaded; openEditor only controls whether the editor mounts afterwards.
-    onCreated(openEditor);
+    return true;
   }
 
-  function handleStartFilling() {
+  function handleComplete(sections: IntentDocSections) {
     setShowOnboardingModal(false);
     setOnboardingDismissed();
-    void createTemplate(true);
+    void createFromWizard(sections);
   }
 
   function handleSkip() {
     setShowOnboardingModal(false);
     setOnboardingDismissed();
-    void createTemplate(false);
+    void createEmptyTemplate().then((ok) => {
+      if (ok) onCreated(false);
+    });
   }
 
   function handleClose() {
@@ -389,7 +685,11 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
     if (showOnboarding && !isOnboardingDismissed()) {
       setShowOnboardingModal(true);
     } else {
-      void createTemplate(true);
+      // Legacy direct-create path (onboarding already dismissed or not enabled):
+      // create template then open editor so user can fill content manually.
+      void createEmptyTemplate().then((ok) => {
+        if (ok) onCreated(true);
+      });
     }
   }
 
@@ -406,7 +706,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
 
       {showOnboardingModal && (
         <OnboardingModal
-          onStartFilling={handleStartFilling}
+          onComplete={handleComplete}
           onSkip={handleSkip}
           onClose={handleClose}
         />
@@ -418,16 +718,7 @@ export function CreateIntentButton({ onCreated, showOnboarding = false, lang }: 
 // ── EditButton ─────────────────────────────────────────────────────────────────
 
 interface EditButtonProps {
-  /** Called when user clicks "Edit" — parent should show the editor */
   onClick: () => void;
-  /**
-   * Optional loading state — disables the button and switches the label /
-   * aria-busy so the user gets immediate feedback while fetchIntentContent()
-   * is in flight. PR-1083 review (CodeRabbit "outside diff" comment ~318-353):
-   * `editorLoading` was set in handleStartEdit/handleCreated but never read by
-   * the render path, so the EditButton could be clicked repeatedly with no
-   * signal that something was happening.
-   */
   loading?: boolean;
 }
 

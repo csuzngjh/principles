@@ -254,15 +254,14 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
     await editButton.click();
     await page.waitForLoadState('networkidle');
 
-    // Textarea 应可见
-    const textarea = page.locator('textarea').first();
-    await expect(textarea).toBeVisible({ timeout: 5000 });
+    // Section editor: 5 textareas (one per section). The first is "Why".
+    // Fill it with plain section content (not markdown) — the editor
+    // assembles sections into full markdown on save via assembleIntentDoc.
+    const whyTextarea = page.locator('textarea').first();
+    await expect(whyTextarea).toBeVisible({ timeout: 5000 });
+    await whyTextarea.fill('Modified why content for e2e test');
 
-    // 修改内容
-    const modifiedContent = '# Modified Intent\n\n## 1. Why\n\nModified content\n';
-    await textarea.fill(modifiedContent);
-
-    // 点击 Save → 触发 saveIntentContent() + validateIntentSaveResult()
+    // 点击 Save → 触发 assembleIntentDoc + saveIntentContent + validateIntentSaveResult()
     const saveButton = page.getByRole('button', { name: /^(save|保存)$/i }).first();
     await expect(saveButton).toBeEnabled({ timeout: 3000 });
     await saveButton.click();

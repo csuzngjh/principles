@@ -1745,6 +1745,7 @@ export {
   getIntentFilename,
   createIntentTemplate,
   parseIntentDocSections,
+  assembleIntentDoc,
   computeIntentContentHash,
   validateIntentDocSections,
   buildIntentFrictionBlock,
