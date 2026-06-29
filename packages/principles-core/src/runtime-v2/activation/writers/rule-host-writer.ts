@@ -198,7 +198,7 @@ export class RuleHostWriter implements ChannelWriter {
 
     return {
       activationId: `act_code_${ruleId}`,
-      action: 'code_tool_hook_shadow_activate',
+      action: 'code_tool_hook_live_activate',
       targetRef: `impl://${ruleId}`,
     };
   }
