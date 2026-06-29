@@ -92,7 +92,7 @@ export class WorkflowFunnelLoader {
 
     try {
       const content = fs.readFileSync(this.configPath, 'utf-8');
-      const config = yaml.load(content, { schema: yaml.DEFAULT_SCHEMA }) as WorkflowFunnelConfig;
+      const config = yaml.load(content, { schema: yaml.CORE_SCHEMA }) as WorkflowFunnelConfig;
 
       if (!config || typeof config.version !== 'string' || !Array.isArray(config.funnels)) {
         const msg = 'workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.';
