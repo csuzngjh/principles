@@ -34,6 +34,7 @@
  */
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ArtificerRuleOutput, ArtificerValidator } from './artificer-output.js';
+import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
@@ -122,12 +123,71 @@ export function resolveArtificerRunnerOptions(options: ArtificerRunnerOptions): 
 
 export interface ArtificerRunnerDeps extends PeerRunnerDeps {
   readonly validator: ArtificerValidator;
+  readonly contextMode?: 'v1' | 'v2';
+  readonly behaviorExamplePack?: BehaviorExamplePack;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function deepJsonEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((value, index) => deepJsonEqual(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length || leftKeys.some((key, index) => key !== rightKeys[index])) return false;
+  return leftKeys.every((key) => Object.hasOwn(right, key) && deepJsonEqual(left[key], right[key]));
+}
+
+function validateContextModeOutput(
+  output: unknown,
+  contextMode: 'v1' | 'v2',
+  pack: BehaviorExamplePack | undefined,
+): string[] {
+  if (!isRecord(output)) return [];
+  if (contextMode === 'v1') {
+    return Object.hasOwn(output, 'requiresContextVersion')
+      ? ['v1 Artificer output must not declare requiresContextVersion']
+      : [];
+  }
+  const errors: string[] = [];
+  if (output.requiresContextVersion !== 2) errors.push('v2 Artificer output must declare requiresContextVersion: 2');
+  if (!pack) {
+    errors.push('v2 Artificer output cannot be validated without BehaviorExamplePack');
+    return errors;
+  }
+  if (!Array.isArray(output.goldenTraceCases)) {
+    errors.push('v2 Artificer output must contain goldenTraceCases');
+    return errors;
+  }
+  const expectedCases = [pack.sourceNegativeCase, ...pack.positiveCounterexamples];
+  const protectedFields = ['kind', 'toolName', 'params', 'expectedDecision', 'ruleContext'] as const;
+  for (const expected of expectedCases) {
+    const actual = output.goldenTraceCases.find((entry: unknown) => isRecord(entry) && entry.caseId === expected.caseId);
+    if (!isRecord(actual)) {
+      errors.push(`Owner-labelled example ${expected.caseId} was omitted`);
+      continue;
+    }
+    for (const field of protectedFields) {
+      if (!deepJsonEqual(actual[field], expected[field])) {
+        errors.push(`Owner-labelled example ${expected.caseId}.${field} was rewritten`);
+      }
+    }
+  }
+  return errors;
 }
 
 // ── ArtificerRunner ──────────────────────────────────────────────────────────
 
 export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
+  private readonly contextMode: 'v1' | 'v2';
+  private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
 
   constructor(deps: ArtificerRunnerDeps, options: PeerRunnerOptions) {
     super(deps, options, {
@@ -137,6 +197,8 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       resultRefPrefix: 'artificer',
     });
     this.validator = deps.validator;
+    this.contextMode = deps.contextMode ?? 'v1';
+    this.behaviorExamplePack = deps.behaviorExamplePack;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -216,6 +278,8 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
     const builder = new ArtificerPromptBuilder();
     const { message } = builder.buildPrompt({
+      contextMode: this.contextMode,
+      behaviorExamplePack: this.behaviorExamplePack,
       taskId,
       contextHash: context.contextHash,
       scribeArtifact: scribeArtifactInput,
@@ -235,6 +299,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
+    const modeErrors = validateContextModeOutput(output, this.contextMode, this.behaviorExamplePack);
 
     // Trust-boundary: validator returns `string | undefined` for errorCategory.
     // Must not `as`-cast; validate at runtime (ERR-001, ERR-005).
@@ -254,8 +319,8 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     }
 
     return {
-      valid: result.valid,
-      errors: result.errors,
+      errors: [...result.errors, ...modeErrors],
+      valid: result.valid && modeErrors.length === 0,
       errorCategory,
     };
   }

@@ -34,6 +34,7 @@ import type {
   TrajectoryExportResult,
   TrajectoryDatabaseOptions,
   RuleHostContextResult,
+  RuleHostEvidenceRow,
 } from './trajectory-types.js';
 
 export type {
@@ -63,6 +64,7 @@ export type {
   TrajectoryDatabaseOptions,
   RuleHostContextRow,
   RuleHostContextResult,
+  RuleHostEvidenceRow,
 } from './trajectory-types.js';
 
 /**
@@ -1215,6 +1217,46 @@ export class TrajectoryDatabase {
         toolName: String(row.tool_name),
         outcome: String(row.outcome),
         paramsJson: String(row.params_json),
+      })),
+      truncated,
+    };
+  }
+
+  /** Resolve one Owner-selected tool call without inferring its desired label. */
+  getRuleHostEvidenceRow(id: number): RuleHostEvidenceRow | null {
+    const row = this.db.prepare(`
+      SELECT id, session_id, tool_name, outcome, params_json
+      FROM tool_calls
+      WHERE id = ?
+      LIMIT 1
+    `).get(id);
+    if (!isStringRecord(row)) return null;
+    if (typeof row.id !== 'number' || typeof row.session_id !== 'string') return null;
+    if (typeof row.tool_name !== 'string' || typeof row.outcome !== 'string' || typeof row.params_json !== 'string') return null;
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      toolName: row.tool_name,
+      outcome: row.outcome,
+      paramsJson: row.params_json,
+    };
+  }
+
+  /** Return FIFO history strictly before an Owner-selected tool call. */
+  getRuleHostContextRowsBefore(sessionId: string, beforeId: number, limit: number = 20): RuleHostContextResult {
+    const cappedLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db.prepare(`
+      SELECT id, tool_name, outcome, params_json
+      FROM tool_calls
+      WHERE session_id = ? AND id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(sessionId, beforeId, cappedLimit + 1) as Record<string, unknown>[];
+    const truncated = rows.length > cappedLimit;
+    const output = (truncated ? rows.slice(0, cappedLimit) : rows).reverse();
+    return {
+      rows: output.map((row) => ({
+        id: Number(row.id), toolName: String(row.tool_name), outcome: String(row.outcome), paramsJson: String(row.params_json),
       })),
       truncated,
     };
