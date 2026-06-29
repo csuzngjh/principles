@@ -137,7 +137,7 @@ function artificerV2(taskId: string, priorId?: string): unknown {
   return {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
     implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
-    implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); return p.startsWith("/etc") ? { decision: "block", matched: true, reason: "system path" } : { decision: "allow", matched: false, reason: "ok" }; }',
+    implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "system path" }; const ctx = input?.context; if (ctx && ctx.facts && ctx.facts.priorReadOfTarget === "no") { return { decision: "block", matched: true, reason: "no prior read" }; } return { decision: "allow", matched: false, reason: "ok" }; }',
     implementationSummary: 'Block system path writes',
     goldenTraceCases: [
       { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' },

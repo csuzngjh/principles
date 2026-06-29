@@ -14,6 +14,8 @@
  * replayed. This is pinned by adversarial-case.test.ts.
  */
 import type { GoldenTrace, GoldenTraceCase, GoldenTraceDecision } from '../golden-trace.js';
+import type { RuleContextV2 } from './rule-context-v2.js';
+import { validateRuleContextV2 } from './rule-context-v2.js';
 
 const ADVERSARIAL_ATTACK_TYPES: ReadonlySet<string> = new Set(['boundary', 'omission', 'inversion']);
 const GOLDEN_TRACE_DECISIONS: ReadonlySet<string> = new Set(['allow', 'block', 'propose_correction']);
@@ -28,6 +30,14 @@ export type AdversarialConversionResult =
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Type guard for RuleContextV2 (PRI-485 Phase 6). Wraps validateRuleContextV2
+ * so callers can narrow `unknown` to `RuleContextV2` without `as` (rc-2).
+ */
+function isRuleContextV2(value: unknown): value is RuleContextV2 {
+  return validateRuleContextV2(value).valid;
 }
 
 /**
@@ -75,6 +85,22 @@ export function adversarialCasesToGoldenTrace(cases: unknown): AdversarialConver
       return { ok: false, reason: `${prefix}.rationale must be a non-empty string` };
     }
 
+    // PRI-485 Phase 6: preserve optional ruleContext on the converted
+    // GoldenTraceCase so the sandbox receives the fabricated v2 context.
+    // The field is optional on both AdversarialCase and GoldenTraceCase;
+    // absence is fine (v1 backward compat). When present, re-validate it
+    // here (Runtime Contract Rule 1/2 — adversarial-case.ts is a pure
+    // function and cannot assume the upstream Evaluator validator already
+    // ran). A malformed ruleContext fails the whole conversion loud.
+    let ruleContext: RuleContextV2 | undefined;
+    if (Object.hasOwn(entry, 'ruleContext') && entry.ruleContext !== undefined) {
+      const {ruleContext: rawCtx} = entry;
+      if (rawCtx === undefined || !isRuleContextV2(rawCtx)) {
+        return { ok: false, reason: `${prefix}.ruleContext invalid: failed validateRuleContextV2` };
+      }
+      ruleContext = rawCtx;
+    }
+
     mappedCases.push({
       caseId: entry.caseId,
       // All adversarial cases are attacks → negative expectations.
@@ -83,6 +109,7 @@ export function adversarialCasesToGoldenTrace(cases: unknown): AdversarialConver
       params: entry.params,
       // Narrowed by isGoldenTraceDecision above (Runtime Contract Rule 2).
       expectedDecision: entry.expectedDecision,
+      ...(ruleContext !== undefined ? { ruleContext } : {}),
     });
   }
 
