@@ -420,23 +420,41 @@ describe('Diag chain e2e', () => {
       featuresChangedFromDefault: ['diagnostician_split_pipeline'],
     };
 
+    // Use os.tmpdir() to avoid polluting disk root with /invalid-path-a on Windows
+    // (path.resolve('/invalid-path-a') → D:\invalid-path-a on Windows).
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-diag-e2e-guard-a-'));
+
     // Verify it actually throws in createPainSignalBridge
     await expect(
       createPainSignalBridge({
-        workspaceDir: '/invalid-path-a',
-        stateDir: '/invalid-path-a',
+        workspaceDir: tmpRoot,
+        stateDir: tmpRoot,
         effectiveConfig,
         ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
       })
     ).rejects.toThrowError('diagnostician_split_pipeline requires diagnostician_async_cli=on');
+
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it('split && !async_cli → does NOT throw at startup for default configuration', async () => {
     const defaults = computeEffectivePdConfig(null);
+    // Use os.tmpdir() to avoid polluting disk root with /invalid-path-b on Windows.
+    // The path is "invalid" in the sense that it has no pre-configured .pd/config.yaml,
+    // but it exists on disk so mkdirSync succeeds and DB init proceeds (then fails
+    // later due to missing config, not factory guard).
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-diag-e2e-guard-b-'));
+
     // Should NOT throw the factory guard (so it will proceed to DB init and fail with a filesystem/db error, not PDRuntimeError input_invalid)
     const result = createPainSignalBridge({
-      workspaceDir: '/invalid-path-b',
-      stateDir: '/invalid-path-b',
+      workspaceDir: tmpRoot,
+      stateDir: tmpRoot,
       effectiveConfig: defaults,
       ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
     });
@@ -449,6 +467,8 @@ describe('Diag chain e2e', () => {
       // It should NOT be the PDRuntimeError with code 'input_invalid' from the factory guard
       expect(error.code).not.toBe('input_invalid');
       expect(error.message).not.toContain('diagnostician_split_pipeline requires');
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
@@ -485,10 +505,16 @@ describe('Diag chain e2e', () => {
     expect(effectiveConfig.featuresChangedFromDefault).not.toContain('diagnostician_split_pipeline');
     expect(effectiveConfig.featuresChangedFromDefault).not.toContain('diagnostician_async_cli');
 
+    // Use os.tmpdir() to avoid polluting disk root with /invalid-path-matching-defaults on Windows.
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs');
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-diag-e2e-defaults-'));
+
     // Verify it does NOT throw the factory guard
     const result = createPainSignalBridge({
-      workspaceDir: '/invalid-path-matching-defaults',
-      stateDir: '/invalid-path-matching-defaults',
+      workspaceDir: tmpRoot,
+      stateDir: tmpRoot,
       effectiveConfig,
       ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
     });
@@ -500,6 +526,8 @@ describe('Diag chain e2e', () => {
       const error = err as Error & { code?: string };
       expect(error.code).not.toBe('input_invalid');
       expect(error.message).not.toContain('diagnostician_split_pipeline requires');
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
