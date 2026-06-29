@@ -192,6 +192,16 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     } as unknown as Parameters<typeof WorkspaceContext.fromHookContext>[0]);
 
+    // Sanity: verify baseline returns a valid available context (not fail-soft unavailable)
+    const sample = buildProductionRuleContext(
+      'empty-session',
+      'src/target.ts',
+      wctx.trajectory,
+      tempWorkspaceDir,
+    );
+    expect(sample.version).toBe(2);
+    expect(sample.history.status).toBe('available');
+
     // No history recorded — measure baseline query cost
     const timings: number[] = [];
     for (let i = 0; i < 100; i++) {
