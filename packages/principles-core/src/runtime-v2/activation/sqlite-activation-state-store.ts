@@ -162,6 +162,23 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
   async promoteActivation(activationId: string, promotedAt: string): Promise<boolean> {
     const db = this.connection.getDb();
+    // Guard against duplicate activation_id rows (ERR-083: schema only enforces
+    // uniqueness on idempotency_key, not activation_id). If multiple shadow rows
+    // share the same activation_id, refuse to promote atomically.
+    const countRow = db.prepare(`
+      SELECT COUNT(*) as cnt
+      FROM activations
+      WHERE activation_id = ?
+        AND channel = 'code_tool_hook'
+        AND action = 'code_tool_hook_shadow_activate'
+        AND deactivated_at IS NULL
+    `).get(activationId) as { cnt: number } | undefined;
+    if (!countRow || countRow.cnt === 0) return false;
+    if (countRow.cnt > 1) {
+      throw new Error(
+        `promoteActivation refused: ${countRow.cnt} shadow activations share activation_id=${activationId}; resolve duplicates before promoting.`,
+      );
+    }
     const result = db.prepare(`
       UPDATE activations
       SET action = 'code_tool_hook_live_activate', promoted_at = ?

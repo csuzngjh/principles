@@ -123,6 +123,8 @@ export class WorkspaceContext {
     getRuleHost(logger: RuleHostLogger): RuleHost {
         if (!this._ruleHost) {
             this._ruleHost = new RuleHost(this.stateDir, logger, { workspaceDir: this.workspaceDir });
+        } else {
+            this._ruleHost.updateLogger(logger);
         }
         return this._ruleHost;
     }

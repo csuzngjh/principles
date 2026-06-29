@@ -80,7 +80,7 @@ function isRuleHostMeta(value: unknown): value is RuleHostMeta {
 
 export class RuleHost {
   private readonly stateDir: string;
-  private readonly logger: RuleHostLogger;
+  private logger: RuleHostLogger;
   private readonly workspaceDir: string | null;
   private readonly implementationSources = new Map<string, { activationId: string; artifactId: string; ruleId: string }>();
   private activationFingerprint: string | null = null;
@@ -91,6 +91,18 @@ export class RuleHost {
     this.stateDir = stateDir;
     this.logger = logger;
     this.workspaceDir = options?.workspaceDir ?? null;
+  }
+
+  /**
+   * Update the logger sink on a cached RuleHost instance.
+   *
+   * WorkspaceContext caches the RuleHost singleton, but each gate call may
+   * pass a request-level logger. Without this update, warn/unhealthy logs
+   * would forever go to the first logger sink, making the new path hard to
+   * debug.
+   */
+  updateLogger(logger: RuleHostLogger): void {
+    this.logger = logger;
   }
 
   /**

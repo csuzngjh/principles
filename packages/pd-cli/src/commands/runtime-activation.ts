@@ -1,4 +1,5 @@
 import * as path from 'path';
+import type { Command } from 'commander';
 import {
   RuntimeStateManager,
   ActivationDispatcher,
@@ -332,9 +333,10 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     return;
   }
 
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  let stateManager: RuntimeStateManager | undefined;
   try {
+    const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+    stateManager = new RuntimeStateManager({ workspaceDir });
     await stateManager.initialize();
     const store = new SqliteActivationStateStore(stateManager.connection);
     const activeHooks = await store.listCodeToolHookActivations(false);
@@ -380,7 +382,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       'Check workspace configuration and database integrity; no promotion was applied.',
     );
   } finally {
-    await stateManager.close();
+    await stateManager?.close();
   }
 }
 
@@ -972,4 +974,29 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     // stateManager may be null if resolveWorkspaceDir() threw before assignment.
     await stateManager?.close();
   }
+}
+
+// ── Commander Wiring (CLI gate rule 7: test the real command wiring) ─────────
+//
+// Extracted so parser-level tests can exercise the actual flag registration
+// without importing all of `index.ts`. Mirrors `registerRunRuleHostCommand`.
+
+export function registerRuntimeActivationPromoteCommand(parent: Command): Command {
+  return parent
+    .command('promote')
+    .description('Promote a code_tool_hook activation from shadow observation to live blocking')
+    .requiredOption('--activation-id <id>', 'Shadow activation ID to promote')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--dry-run', 'Validate eligibility without changing activation state')
+    .option('--confirm', 'Confirm promotion to live blocking')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleRuntimeActivationPromote({
+        activationId: opts.activationId,
+        workspace: opts.workspace,
+        dryRun: opts.dryRun,
+        confirm: opts.confirm,
+        json: opts.json,
+      });
+    });
 }
