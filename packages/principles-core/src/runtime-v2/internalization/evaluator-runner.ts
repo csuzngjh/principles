@@ -31,6 +31,7 @@ import type {
   EvaluatorValidator,
   EvaluatorAdversarialResult,
   AdversarialFailedCase,
+  AdversarialCase,
 } from './evaluator-output.js';
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
@@ -50,6 +51,10 @@ import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './ref
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
 import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
+// PRI-485 Phase 6: auto-generate 5 v2 adversarial cases (unavailable/truncation/
+// alias/path/combination) to defend against false-positive blocks.
+import { generateV2ContextAdversarialCases } from './v2-adversarial-cases.js';
+import { canonicalizeToolKind } from './rule-context-v2.js';
 
 // ── Evaluator-specific context ────────────────────────────────────────────────
 
@@ -621,28 +626,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { updatedOutput: null };
     }
 
-    // (2) No adversarial cases → nothing to replay. codeReview may still be
-    // present (passive review only). Not an error condition.
-    if (!output.adversarialCases || output.adversarialCases.length === 0) {
-      return { updatedOutput: null };
-    }
-
-    // (3) Convert adversarial cases to an all-negative GoldenTrace.
-    const conversion = adversarialCasesToGoldenTrace(output.adversarialCases);
-    if (!conversion.ok) {
-      // Validator already accepted adversarialCases, so a conversion failure
-      // here is a contract drift between validator and converter. Degrade loud.
-      this.emitEvent('adversarial_replay_skipped', taskId, {
-        runId,
-        reason: `adversarial_conversion_failed: ${conversion.reason}`,
-        nextAction: 'verify_adversarial_case_validator_alignment',
-      });
-      return { updatedOutput: null };
-    }
-
-    // (4) Resolve the Artificer artifact and extract code + positive cases.
-    // PRI-423: the converted adversarial trace has no positive case; we merge
-    // positive cases from the Artificer's goldenTraceCases before replaying.
+    // (2) Resolve the Artificer artifact early — we need it both to derive
+    // the v2 adversarial spec (PRI-485) and to merge positive cases (PRI-423).
     if (!context.artificerArtifact) {
       this.emitEvent('adversarial_replay_skipped', taskId, {
         runId,
@@ -662,7 +647,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { updatedOutput: null };
     }
 
-    const { implementationCode, goldenTraceCases } = artificerParsed;
+    const { implementationCode, goldenTraceCases, affectedTools } = artificerParsed;
     if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
       // Artificer output is V1 (no code) but the evaluator emitted V2. This is
       // a mismatch — degrade rather than replay against missing code.
@@ -687,6 +672,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { updatedOutput: null };
     }
 
+    // (3) PRI-485 Phase 6: auto-generate 5 v2 adversarial cases from the
+    // Artificer's affectedTools + first positive case's path. These defend
+    // against the most common false-positive patterns (unavailable/truncation/
+    // alias/path/combination). Degrade with telemetry (rc-9) if the spec
+    // cannot be derived — LLM-supplied adversarialCases still replay.
+    const llmCases = output.adversarialCases ?? [];
+    const v2Cases = this.generateV2CasesFromArtificer(affectedTools, positiveCases, taskId, runId);
+    const mergedAdversarialCases: readonly AdversarialCase[] = [...v2Cases, ...llmCases];
+
+    // (4) No adversarial cases (neither v2-generated nor LLM-supplied) →
+    // nothing to replay. codeReview may still be present (passive review only).
+    if (mergedAdversarialCases.length === 0) {
+      return { updatedOutput: null };
+    }
+
+    // (5) Convert the merged adversarial cases to an all-negative GoldenTrace.
+    const conversion = adversarialCasesToGoldenTrace(mergedAdversarialCases);
+    if (!conversion.ok) {
+      // Validator already accepted adversarialCases, so a conversion failure
+      // here is a contract drift between validator and converter. Degrade loud.
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: `adversarial_conversion_failed: ${conversion.reason}`,
+        nextAction: 'verify_adversarial_case_validator_alignment',
+      });
+      return { updatedOutput: null };
+    }
+
     const mergedTrace: GoldenTrace = {
       traceId: `golden-trace-evaluator-replay-${taskId}-${Date.now().toString(36)}`,
       sourceArtifactId: context.sourceArtificerArtifactId ?? undefined,
@@ -695,7 +708,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       cases: [...positiveCases, ...conversion.trace.cases],
     };
 
-    // (5) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
+    // (6) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
     // catches its own sandbox throws internally (rejected_runtime_error), so
     // this await cannot throw on sandbox failure — but we guard anyway for
     // defense-in-depth (ERR-018: trust boundary at injected deps).
@@ -727,11 +740,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       failedCaseCount: gateResult.sandboxResult.failedCases.length,
     });
 
-    // (6) Populate adversarialResult from the gate result.
+    // (7) Populate adversarialResult from the gate result.
     const accepted = gateResult.decision === 'accepted_shadow';
     const failedCases: AdversarialFailedCase[] = accepted
       ? []
-      : this.mapFailedCases(gateResult, output.adversarialCases);
+      : this.mapFailedCases(gateResult, mergedAdversarialCases);
 
     const adversarialResult: EvaluatorAdversarialResult = {
       passed: accepted,
@@ -821,6 +834,97 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const buildResult = buildGoldenTraceFromArtificer({ cases: rawCases });
     if (!buildResult.ok) return [];
     return buildResult.trace.cases.filter((c) => c.kind === 'positive');
+  }
+
+  /**
+   * PRI-485 Phase 6: derive the v2 adversarial case spec from the Artificer
+   * artifact and generate the 5 canonical v2 cases.
+   *
+   * Spec derivation:
+   *   - toolName: the first entry in `affectedTools` (validated as a non-empty
+   *     string array). Falls back to the first positive case's toolName when
+   *     affectedTools is missing/malformed — the rule still governs that tool.
+   *   - targetPath: the first positive case's `params.path` (validated as a
+   *     non-empty string). When absent, degrade with telemetry (rc-9) and
+   *     return [] — v2 cases cannot be path-realistic without a target path.
+   *   - canonicalKind: canonicalizeToolKind(toolName) — pure lookup.
+   *
+   * Never throws. All malformed inputs degrade to [] with a telemetry event
+   * carrying a structured `reason` + `nextAction` (Runtime Contract Rule 9).
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params
+  private generateV2CasesFromArtificer(
+    affectedTools: unknown,
+    positiveCases: readonly GoldenTraceCase[],
+    taskId: string,
+    runId: string,
+  ): readonly AdversarialCase[] {
+    // Resolve toolName: prefer affectedTools[0], fall back to positive case.
+    let toolName: string | null = null;
+    if (Array.isArray(affectedTools) && affectedTools.length > 0) {
+      const [first] = affectedTools;
+      if (typeof first === 'string' && first.trim() !== '') {
+        toolName = first;
+      }
+    }
+    if (toolName === null && positiveCases.length > 0) {
+      const [firstPos] = positiveCases;
+      const posTool = firstPos?.toolName;
+      if (typeof posTool === 'string' && posTool.trim() !== '') {
+        toolName = posTool;
+      }
+    }
+    if (toolName === null) {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
+        runId,
+        reason: 'no_tool_name_for_v2_adversarial_cases',
+        nextAction: 'verify_artificer_emitted_affectedTools_or_positive_case_toolName',
+      });
+      return [];
+    }
+
+    // Resolve targetPath: first positive case's params.path.
+    const [firstPositive] = positiveCases;
+    if (!firstPositive) {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
+        runId,
+        reason: 'no_positive_case_for_v2_adversarial_cases',
+        nextAction: 'verify_artificer_emitted_at_least_one_positive_case',
+      });
+      return [];
+    }
+    const pathParam = firstPositive.params?.path;
+    if (typeof pathParam !== 'string' || pathParam.trim() === '') {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
+        runId,
+        reason: 'no_path_param_for_v2_adversarial_cases',
+        nextAction: 'verify_positive_case_has_string_path_param',
+      });
+      return [];
+    }
+
+    const canonicalKind = canonicalizeToolKind(toolName);
+    // PRI-485 Phase 6: the 5 v2 templates are write-path semantics (alias /
+    // path-boundary / combination all assume a write action). Generating them
+    // for read/search/execute/agent/other tools would produce mismatched
+    // negative cases (e.g. expected block on a read tool). Degrade with
+    // telemetry (rc-9) and return [] — non-write tools fall back to the
+    // LLM-supplied adversarial cases only.
+    if (canonicalKind !== 'write') {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
+        runId,
+        reason: 'non_write_canonical_kind_for_v2_adversarial_cases',
+        nextAction: 'verify_artificer_target_tool_is_write_kind_or_supply_custom_adversarial_cases',
+        toolName,
+        canonicalKind,
+      });
+      return [];
+    }
+    return generateV2ContextAdversarialCases({
+      toolName,
+      targetPath: pathParam,
+      canonicalKind,
+    });
   }
 
   /**

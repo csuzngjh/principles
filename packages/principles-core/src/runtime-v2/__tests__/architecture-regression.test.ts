@@ -102,6 +102,8 @@ const REQUIRED_SOURCE_FILES = [
   // RuleHost MVP Activation (PRI-421..428, ADR-0014 Amendment 2026-06-17)
   'internalization/adversarial-case.ts',
   'internalization/adversarial-feedback.ts',
+  // PRI-485 Phase 6: v2 adversarial case generator (pure logic)
+  'internalization/v2-adversarial-cases.ts',
   'internalization/artificer-prompt-builder.ts',
   'adversarial-loop.ts',
   // Phase 2 migration: evolution types
