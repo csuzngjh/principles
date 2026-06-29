@@ -195,19 +195,19 @@ function makeV2ArtificerArtifact(): PIArtifactRecord {
         {
           caseId: 'artificer-positive-1',
           kind: 'positive',
-          toolName: 'read_file',
+          toolName: 'write_file',
           params: { path: '/safe/path.txt' },
           expectedDecision: 'allow',
         },
         {
           caseId: 'artificer-negative-1',
           kind: 'negative',
-          toolName: 'read_file',
+          toolName: 'write_file',
           params: { path: '/etc/passwd' },
           expectedDecision: 'block',
         },
       ],
-      affectedTools: ['read_file'],
+      affectedTools: ['write_file'],
       sourceTrace: { scribeArtifactId: 'pi-art-scribe-001' },
       risks: [],
       generatedAt: new Date().toISOString(),
@@ -233,7 +233,7 @@ function makeAdversarialCases() {
     {
       caseId: 'adv-boundary-1',
       attackType: 'boundary' as const,
-      toolName: 'read_file',
+      toolName: 'write_file',
       params: { path: '/safe/../etc/passwd' },
       expectedDecision: 'block' as const,
       rationale: 'Path traversal at the boundary of the matcher.',
@@ -241,7 +241,7 @@ function makeAdversarialCases() {
     {
       caseId: 'adv-omission-1',
       attackType: 'omission' as const,
-      toolName: 'read_file',
+      toolName: 'write_file',
       params: { path: '' },
       expectedDecision: 'block' as const,
       rationale: 'Empty path the matcher may have skipped.',
@@ -249,7 +249,7 @@ function makeAdversarialCases() {
     {
       caseId: 'adv-inversion-1',
       attackType: 'inversion' as const,
-      toolName: 'read_file',
+      toolName: 'write_file',
       params: { path: '/safe/path.txt' },
       expectedDecision: 'block' as const,
       rationale: 'Inverted positive case to check false-negative.',
@@ -545,9 +545,95 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     // fail validateGoldenTrace(). The runner must merge in the positive case.
     const positives = cases.filter((c) => c.kind === 'positive');
     expect(positives.length).toBeGreaterThanOrEqual(1);
-    // All adversarial cases preserved as negative.
+    // All adversarial cases preserved as negative. PRI-485 Phase 6: the runner
+    // now auto-generates 5 v2 adversarial cases (unavailable/truncation/alias/
+    // path/combination) and prepends them to the LLM-supplied 3 adversarial
+    // cases, so the merged trace carries 8 negative cases total.
     const negatives = cases.filter((c) => c.kind === 'negative');
+    expect(negatives.length).toBe(8);
+    // PRI-485: the 5 v2 caseIds must be present in the merged trace.
+    const v2CaseIds = ['v2-unavailable', 'v2-truncated', 'v2-alias', 'v2-path-boundary', 'v2-combination'];
+    for (const id of v2CaseIds) {
+      expect(negatives.find((c) => c.caseId === id), `v2 case ${id} missing`).toBeDefined();
+    }
+    // PRI-485: each v2 case must carry a ruleContext for the sandbox.
+    for (const id of v2CaseIds) {
+      const v2Case = negatives.find((c) => c.caseId === id);
+      expect(v2Case?.ruleContext, `v2 case ${id} missing ruleContext`).toBeDefined();
+    }
+  });
+
+  it('PRI-485 Phase 6: v2 cases skipped when artificer is V1 (no affectedTools/goldenTraceCases)', async () => {
+    // V1 artificer has no implementationCode → runAdversarialReplay degrades
+    // before v2 case generation. Existing behavior unchanged.
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeV1ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const capture: { trace?: GoldenTrace; code?: string } = {};
+    const gateDeps = makeRecordingGate(capture, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    // V1 artificer → no implementationCode → replay skipped → no trace captured.
+    expect(capture.trace).toBeUndefined();
+  });
+
+  it('PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)', async () => {
+    // CodeRabbit PR #1102: the 5 v2 templates are write-path semantics.
+    // Generating them for a read/search/execute tool produces mismatched
+    // negative cases. The runner must skip v2 generation and emit telemetry.
+    const store = new MemoryPIArtifactStore();
+    // Override the artificer artifact to use a read tool.
+    const readToolArtifact: PIArtifactRecord = {
+      ...makeV2ArtificerArtifact(),
+      contentJson: JSON.stringify({
+        ...JSON.parse(makeV2ArtificerArtifact().contentJson),
+        goldenTraceCases: [
+          { caseId: 'pos-1', kind: 'positive', toolName: 'read_file', params: { path: '/safe/read.txt' }, expectedDecision: 'allow' },
+          { caseId: 'neg-1', kind: 'negative', toolName: 'read_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        ],
+        affectedTools: ['read_file'],
+      }),
+    };
+    await store.upsertArtifact(readToolArtifact);
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const capture: { trace?: GoldenTrace; code?: string } = {};
+    const gateDeps = makeRecordingGate(capture, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = makeRunner(deps, gateDeps);
+    await runner.run(EVALUATOR_TASK_ID);
+
+    // Trace captured (LLM cases still run), but v2 caseIds must be absent.
+    expect(capture.trace).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const negatives = capture.trace!.cases.filter((c) => c.kind === 'negative');
+    // Only the 3 LLM-supplied adversarial cases — no v2 cases.
     expect(negatives.length).toBe(3);
+    const v2CaseIds = ['v2-unavailable', 'v2-truncated', 'v2-alias', 'v2-path-boundary', 'v2-combination'];
+    for (const id of v2CaseIds) {
+      expect(negatives.find((c) => c.caseId === id), `v2 case ${id} should be absent for non-write tool`).toBeUndefined();
+    }
+    // Telemetry emitted for the skip (rc-9).
+    const skipEvent = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls
+      .map((call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((event) => event.eventType === 'evaluator_v2_adversarial_cases_skipped');
+    expect(skipEvent?.payload.reason).toBe('non_write_canonical_kind_for_v2_adversarial_cases');
+    expect(skipEvent?.payload.canonicalKind).toBe('read');
   });
 
   it('V2 output: adversarial sandbox FAILS (validation_failed) → adversarialResult.passed=false + failedCases', async () => {
