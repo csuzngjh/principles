@@ -113,6 +113,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
 | ERR-085 | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults | PR #1079 |
+| ERR-087 | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases | PRI-485 / PR #1102 |
 
 ---
 
@@ -738,8 +739,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 86 |
-| Last updated | 2026-06-28 |
+| Total lessons | 87 |
+| Last updated | 2026-06-29 |
 | Top category | Schema & Type |
 | Recurring errors | 38 |
 
@@ -1269,4 +1270,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-071 (async cleanup not awaited — same "cleanup/lifecycle hygiene" class), ERR-074 (inner try/catch exit tunnel bypasses outer cleanup — same "transactional boundary" concern)
 - **Source**: PR #1079
 - **Date**: 2026-06-27
+- **Recurrence**: None
+
+---
+
+**[ERR-087]** | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases
+
+- **What happened**: In PRI-485 Phase 6, `generateV2CasesFromArtificer()` (packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts) generated 5 v2 adversarial cases for ANY `canonicalKind` returned by `canonicalizeToolKind()`. But the 5 templates (alias/path-boundary/combination) are write-path semantics — they assume the action tool is a write tool. For non-write tools (read/search/execute/agent/other), the generated cases are semantically wrong: e.g. `v2-path-boundary` expects `block` on a `read_file` tool, which a correct read-rule would never do. This would cause the Evaluator to reject valid read-path rules during adversarial replay.
+- **Why it's wrong**: The function's type signature accepts all `CanonicalKind` values (`read | search | write | execute | agent | other`), but its implementation only correctly handles `write`. This is a type contract overpromise — the signature promises more than the implementation delivers. The spec §10.1 acceptance scenarios are ALL write-oriented, which created a blind spot: the generator was coded to the spec's examples without considering what happens for non-write inputs the spec didn't mention.
+- **Generalized failure mode**: When implementing a generator whose templates are domain-specific (proven by spec examples all being one domain), assistants must add a precondition guard that filters non-applicable inputs and degrades with structured telemetry (rc-9), otherwise the generator produces semantically wrong artifacts for unhandled domains.
+- **Correct approach**: Before calling `generateV2ContextAdversarialCases()`, check `canonicalKind !== 'write'` and degrade to `[]` with a telemetry event carrying `reason` + `nextAction` + `toolName` + `canonicalKind`. Non-write tools fall back to LLM-supplied adversarial cases only.
+- **How to prevent**: 30-second PR-review check — when a generator produces domain-specific artifacts from a generic input type (enum/union), verify: (1) does the spec/acceptance criteria cover ALL values of the input type, or only a subset? (2) if only a subset, is there a precondition guard filtering non-applicable values? (3) is there a regression test asserting the guard fires for a non-applicable value? If any answer is no, the generator has a domain blind spot.
+- **Regression guard**: `packages/principles-core/src/runtime-v2/__tests__/evaluator-runner-vslice-v2.test.ts` — "PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)" asserts: (a) trace captured with only 3 LLM cases (no v2 caseIds), (b) telemetry event `evaluator_v2_adversarial_cases_skipped` emitted with `reason: 'non_write_canonical_kind_for_v2_adversarial_cases'` and `canonicalKind: 'read'`.
+- **Related ERRs**: ERR-069 (writing against remembered contract instead of actual schema — same pattern group: spec-driven blind spot), ERR-025 (test reality gap — fixtures used read_file and passed without asserting semantic correctness), EP-02 (production path wiring — component exists but real inputs it can't handle break it).
+- **Source**: PRI-485 / PR #1102 (CodeRabbit review)
+- **Date**: 2026-06-29
 - **Recurrence**: None
