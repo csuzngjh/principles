@@ -904,6 +904,22 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
 
     const canonicalKind = canonicalizeToolKind(toolName);
+    // PRI-485 Phase 6: the 5 v2 templates are write-path semantics (alias /
+    // path-boundary / combination all assume a write action). Generating them
+    // for read/search/execute/agent/other tools would produce mismatched
+    // negative cases (e.g. expected block on a read tool). Degrade with
+    // telemetry (rc-9) and return [] — non-write tools fall back to the
+    // LLM-supplied adversarial cases only.
+    if (canonicalKind !== 'write') {
+      this.emitEvent('v2_adversarial_cases_skipped', taskId, {
+        runId,
+        reason: 'non_write_canonical_kind_for_v2_adversarial_cases',
+        nextAction: 'verify_artificer_target_tool_is_write_kind_or_supply_custom_adversarial_cases',
+        toolName,
+        canonicalKind,
+      });
+      return [];
+    }
     return generateV2ContextAdversarialCases({
       toolName,
       targetPath: pathParam,
