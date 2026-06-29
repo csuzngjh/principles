@@ -162,31 +162,51 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
   async promoteActivation(activationId: string, promotedAt: string): Promise<boolean> {
     const db = this.connection.getDb();
-    // Guard against duplicate activation_id rows (ERR-083: schema only enforces
-    // uniqueness on idempotency_key, not activation_id). If multiple shadow rows
-    // share the same activation_id, refuse to promote atomically.
-    const countRow = db.prepare(`
-      SELECT COUNT(*) as cnt
-      FROM activations
-      WHERE activation_id = ?
-        AND channel = 'code_tool_hook'
-        AND action = 'code_tool_hook_shadow_activate'
-        AND deactivated_at IS NULL
-    `).get(activationId) as { cnt: number } | undefined;
-    if (!countRow || countRow.cnt === 0) return false;
-    if (countRow.cnt > 1) {
-      throw new Error(
-        `promoteActivation refused: ${countRow.cnt} shadow activations share activation_id=${activationId}; resolve duplicates before promoting.`,
-      );
+    // Wrap COUNT guard + UPDATE in a single IMMEDIATE transaction (CodeRabbit
+    // PR #1122 finding): activation_id is NOT unique, so a shadow row inserted
+    // between the COUNT and UPDATE would be silently promoted alongside the
+    // original. BEGIN IMMEDIATE acquires a write lock so no concurrent insert
+    // can sneak in, and the post-UPDATE row-count check (changes === 1) catches
+    // any pre-existing duplicate that slipped past the COUNT guard inside the
+    // same atomic window. ERR-083 (shared store contract): cross-package callers
+    // must not observe a half-promoted state.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const countRow = db.prepare(`
+        SELECT COUNT(*) as cnt
+        FROM activations
+        WHERE activation_id = ?
+          AND channel = 'code_tool_hook'
+          AND action = 'code_tool_hook_shadow_activate'
+          AND deactivated_at IS NULL
+      `).get(activationId) as { cnt: number } | undefined;
+      if (!countRow || countRow.cnt === 0) {
+        db.exec('COMMIT');
+        return false;
+      }
+      if (countRow.cnt > 1) {
+        throw new Error(
+          `promoteActivation refused: ${countRow.cnt} shadow activations share activation_id=${activationId}; resolve duplicates before promoting.`,
+        );
+      }
+      const result = db.prepare(`
+        UPDATE activations
+        SET action = 'code_tool_hook_live_activate', promoted_at = ?
+        WHERE activation_id = ?
+          AND channel = 'code_tool_hook'
+          AND action = 'code_tool_hook_shadow_activate'
+          AND deactivated_at IS NULL
+      `).run(promotedAt, activationId);
+      if (result.changes !== 1) {
+        throw new Error(
+          `promoteActivation expected to update 1 row, updated ${result.changes}; activation_id=${activationId} (concurrent modification detected within transaction)`,
+        );
+      }
+      db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* best-effort: tx may already be rolled back */ }
+      throw error;
     }
-    const result = db.prepare(`
-      UPDATE activations
-      SET action = 'code_tool_hook_live_activate', promoted_at = ?
-      WHERE activation_id = ?
-        AND channel = 'code_tool_hook'
-        AND action = 'code_tool_hook_shadow_activate'
-        AND deactivated_at IS NULL
-    `).run(promotedAt, activationId);
-    return result.changes > 0;
   }
 }

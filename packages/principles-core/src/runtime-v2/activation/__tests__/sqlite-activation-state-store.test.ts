@@ -5,6 +5,7 @@ import type { ActivationStatusRecord } from '../activation-types.js';
 
 const mockDb = {
   prepare: vi.fn(),
+  exec: vi.fn(),
 };
 
 const mockConnection = {
@@ -264,6 +265,9 @@ describe('SqliteActivationStateStore', () => {
       expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("action = 'code_tool_hook_shadow_activate'"));
       expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("SET action = 'code_tool_hook_live_activate'"));
       expect(mockRun).toHaveBeenCalledWith('2026-06-29T00:00:00.000Z', 'act_code_001');
+      // PR #1122 fix: COUNT guard + UPDATE run inside a single IMMEDIATE transaction.
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('COMMIT');
     });
 
     it('returns false when the activation is not an active shadow activation', async () => {
@@ -278,6 +282,10 @@ describe('SqliteActivationStateStore', () => {
       await expect(store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z')).resolves.toBe(false);
       // UPDATE should not be called when COUNT guard returns 0
       expect(mockRun).not.toHaveBeenCalled();
+      // Empty-result path still commits the transaction cleanly (no ROLLBACK).
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('COMMIT');
+      expect(mockDb.exec).not.toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('throws when multiple shadow activations share the same activation_id', async () => {
@@ -291,6 +299,29 @@ describe('SqliteActivationStateStore', () => {
       await expect(
         store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z'),
       ).rejects.toThrow(/refused: 2 shadow activations share activation_id/);
+      // Duplicate-detection path rolls back the transaction.
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('throws when UPDATE affects != 1 rows (TOCTOU detection inside transaction)', async () => {
+      // Simulate a concurrent insert sneaking in between COUNT and UPDATE:
+      // COUNT sees 1 row, but UPDATE matches 2 rows (changes=2). The post-
+      // UPDATE row-count check must fail loud and roll back the transaction.
+      const mockGet = vi.fn().mockReturnValue({ cnt: 1 });
+      const mockRun = vi.fn().mockReturnValue({ changes: 2 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(
+        store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z'),
+      ).rejects.toThrow(/expected to update 1 row, updated 2/);
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('ROLLBACK');
+      expect(mockDb.exec).not.toHaveBeenCalledWith('COMMIT');
     });
   });
 });
