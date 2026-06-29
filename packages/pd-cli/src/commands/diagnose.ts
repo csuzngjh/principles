@@ -539,9 +539,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     if (opts.json) {
       const candidateIds = candidates.map((c) => c.candidateId);
-      const internalizeNextAction = candidateIds.length > 0
-        ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
-        : 'No candidates were generated from this diagnosis.';
+      // CodeRabbit review fix: reflect dreamer seed status in nextAction so
+      // the owner knows whether internalization has already started or still
+      // needs manual candidate internalize. Previously the message always
+      // said "NOT started automatically" even when dreamer tasks were seeded.
+      const dreamerSeededCount = intakeResults.filter((r) => r.status === 'dreamer_seeded').length;
+      const dreamerSeedFailedCount = intakeResults.filter((r) => r.status === 'dreamer_seed_failed').length;
+      const internalizeNextAction = dreamerSeededCount > 0
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}`
+        : candidateIds.length > 0
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
+          : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         intake: {
@@ -585,6 +593,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
           console.log(`      Next action: pd candidate intake --candidate-id ${ir.candidateId} --workspace "${workspaceDir}"`);
+        } else if (ir.status === 'dreamer_seeded') {
+          // CodeRabbit review fix: surface dreamer seed success in TTY output
+          console.log(`    ${ir.candidateId}: dreamer seeded — ${ir.nextAction}`);
+        } else if (ir.status === 'dreamer_seed_failed') {
+          // CodeRabbit review fix: surface dreamer seed failure in TTY output
+          console.log(`    ${ir.candidateId}: DREAMER SEED FAILED — ${ir.error}`);
+          console.log(`      Next action: ${ir.nextAction}`);
         }
       }
     }

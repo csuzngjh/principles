@@ -664,6 +664,7 @@ interface ApproveResult {
   decision?: string;
   reason?: string;
   nextAction?: string;
+  approvalRolledBack?: boolean;
 }
 
 export async function handleActivationApprove(opts: ActivationApproveOptions): Promise<void> {
@@ -684,11 +685,15 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     return;
   }
 
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const decidedBy = opts.decidedBy ?? 'cli-operator';
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  // CodeRabbit review fix (cli-1-strict-json): declare stateManager outside
+  // try so the finally block can close it, but resolve workspace INSIDE try
+  // so resolveWorkspaceDir() failures are caught and routed through --json.
+  let stateManager: RuntimeStateManager | null = null;
 
   try {
+    const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+    stateManager = new RuntimeStateManager({ workspaceDir });
     await stateManager.initialize();
     const sqliteConn = stateManager.connection;
     const approvalQueueStore = new SqliteApprovalQueueStore(sqliteConn);
@@ -778,14 +783,24 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         now: new Date().toISOString(),
       });
     } catch (err) {
-      // Approval was written but completion failed unexpectedly.
-      // Surface the error; approval record remains 'approved' (Contract F: no data damage).
+      // CodeRabbit review fix (cli-5-failure-no-mutation): approval was
+      // written but completion threw unexpectedly. Roll back the approval to
+      // 'pending' so the operator can retry without a stale 'approved' record
+      // that has no activation. Mirrors ApprovalsConsoleModel.approve() L168-182.
       const errMsg = err instanceof Error ? err.message : String(err);
+      let approvalRolledBack = false;
+      try {
+        const rollbackResult = await queue.resetToPending(opts.approvalId);
+        approvalRolledBack = rollbackResult.ok;
+      } catch { /* best-effort rollback */ }
       const result: ApproveResult = {
         ok: false,
         approvalId: opts.approvalId,
         reason: `activation_completion_failed: ${errMsg}`,
-        nextAction: 'Approval is recorded. Run `pd runtime activation dispatch --artifact-id <id> --confirm` to retry activation.',
+        nextAction: approvalRolledBack
+          ? 'Approval rolled back to pending. Fix the issue and re-run `pd activation approve --approval-id <id>`.'
+          : `Approval remains 'approved'. Run \`pd runtime activation dispatch --artifact-id ${approvalResult.record.artifactId} --confirm\` to retry activation.`,
+        approvalRolledBack,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -798,11 +813,23 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     }
 
     if (!completionResult.ok) {
+      // CodeRabbit review fix (cli-5-failure-no-mutation): activation
+      // returned !ok. Roll back the approval to 'pending' so the operator
+      // can retry without a stale 'approved' record. Mirrors
+      // ApprovalsConsoleModel.approve() L168-182.
+      let approvalRolledBack = false;
+      try {
+        const rollbackResult = await queue.resetToPending(opts.approvalId);
+        approvalRolledBack = rollbackResult.ok;
+      } catch { /* best-effort rollback */ }
       const result: ApproveResult = {
         ok: false,
         approvalId: opts.approvalId,
         reason: `activation_failed: ${completionResult.reason}`,
-        nextAction: completionResult.nextAction ?? 'Check the artifact validation status and retry.',
+        nextAction: approvalRolledBack
+          ? `Approval rolled back to pending. ${completionResult.nextAction ?? 'Fix the issue and re-run `pd activation approve --approval-id <id>`.'}`
+          : `Approval remains 'approved'. ${completionResult.nextAction ?? 'Check the artifact validation status and retry.'}`,
+        approvalRolledBack,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -847,6 +874,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     }
     process.exitCode = 1;
   } finally {
-    await stateManager.close();
+    // stateManager may be null if resolveWorkspaceDir() threw before assignment.
+    await stateManager?.close();
   }
 }

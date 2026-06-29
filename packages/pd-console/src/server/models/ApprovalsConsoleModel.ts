@@ -199,9 +199,15 @@ export class ApprovalsConsoleModel {
     // committed to SQLite; a ledger failure here is non-fatal and surfaced as
     // a warning (rc-9-no-silent-fallback) — the owner is informed that the
     // ledger state may be out of sync and can be repaired separately.
+    //
+    // CodeRabbit review fix: use approvalResult.record.artifactId (post-approve
+    // source of truth) instead of the pre-read `existing.artifactId`. If
+    // editApproval() changed the artifact pointer between read and write, the
+    // pre-read value would bind the ledger upgrade to the wrong artifact while
+    // the returned record points to the new one.
     let ledgerWarning: string | undefined;
     if (isActivationSuccess(activation)) {
-      ledgerWarning = await this.upgradeLedgerPrinciple(existing.artifactId);
+      ledgerWarning = await this.upgradeLedgerPrinciple(approvalResult.record.artifactId);
     }
 
     return { ok: true, record: approvalResult.record, activation, warning: ledgerWarning };
@@ -243,6 +249,14 @@ export class ApprovalsConsoleModel {
         return result.reason;
       }
       return undefined;
+    } catch (err) {
+      // CodeRabbit review fix: read-side failures (getArtifactById, missing
+      // table, connection errors) must NOT propagate upward and fail the
+      // approval flow after activation is already committed. The activation
+      // succeeded; ledger upgrade is a non-fatal post-step. Surface the error
+      // as a warning so the owner can repair the ledger separately (rc-9).
+      const message = err instanceof Error ? err.message : String(err);
+      return `ledger_activate_failed: ${message}`;
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
     }

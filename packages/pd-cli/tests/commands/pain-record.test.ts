@@ -446,4 +446,36 @@ describe('pd pain record', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  // RL-04: CodeRabbit review fix — --json mode emits structured JSON (cli-1, cli-2, cli-5)
+  it('RL-04: --json mode emits structured JSON on reason_too_long and stops execution', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    const reason501 = 'a'.repeat(501);
+    await handlePainRecord({ reason: reason501, json: true });
+
+    // cli-1: exactly one JSON object on stdout
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('reason_too_long');
+    expect(jsonOutput.message).toContain('must be at most 500 characters');
+    expect(jsonOutput.message).toContain('got 501');
+    expect(jsonOutput.nextAction).toContain('Shorten the reason text');
+
+    // cli-2: execution stopped — recordPain must NOT have been called
+    expect(lastRecordPainInput).toBeNull();
+
+    // cli-5: failure path exits 1
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    // No text leaked to stderr
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
