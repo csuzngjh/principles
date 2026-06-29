@@ -15,7 +15,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import { SqliteConnection } from '../../sqlite-connection.js';
 import { SqliteIntentDocVersionStore } from '../sqlite-intent-doc-version-store.js';
-import { computeIntentContentHash } from '../../../intent/intent-doc.js';
+import { computeIntentContentHash } from '../../../intent/intent-hash.js';
 
 function createTestConnection(): SqliteConnection {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-intent-doc-version-'));

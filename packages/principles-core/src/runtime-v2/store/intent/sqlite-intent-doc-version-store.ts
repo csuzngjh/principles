@@ -13,7 +13,8 @@
 
 import { randomUUID } from 'node:crypto';
 import type { SqliteConnection } from '../sqlite-connection.js';
-import { computeIntentContentHash, type IntentLang } from '../../intent/intent-doc.js';
+import { computeIntentContentHash } from '../../intent/intent-hash.js';
+import type { IntentLang } from '../../intent/intent-doc.js';
 import type { IntentDocVersion, IntentDocVersionStore } from '../../intent/intent-doc-version.js';
 
 function isIntentLang(value: unknown): value is IntentLang {
