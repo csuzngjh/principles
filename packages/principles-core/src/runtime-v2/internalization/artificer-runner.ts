@@ -321,7 +321,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     return {
       errors: [...result.errors, ...modeErrors],
       valid: result.valid && modeErrors.length === 0,
-      errorCategory,
+      // CodeRabbit PR2 outside-diff comment: when the base validator passes but
+      // v1/v2 mode validation fails, errorCategory is still undefined. Since
+      // modeErrors are structural contract violations (permanent, not retriable),
+      // classify them as 'output_invalid' to match permanentErrorCategories.
+      errorCategory: errorCategory ?? (modeErrors.length > 0 ? 'output_invalid' : undefined),
     };
   }
 
