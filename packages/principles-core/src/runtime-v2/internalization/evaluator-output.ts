@@ -1,5 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
+import type { RuleContextV2 } from './rule-context-v2.js';
+import { validateRuleContextV2 } from './rule-context-v2.js';
 
 /**
  * Attack type for adversarial cases (PRD Decision 4).
@@ -17,6 +19,13 @@ export interface AdversarialCase {
   /** GoldenTraceDecision, NOT RuleHostDecision. */
   readonly expectedDecision: GoldenTraceDecision;
   readonly rationale: string;
+  /**
+   * Optional v2 rule context (PRI-485 Phase 6). When present, the case carries
+   * a fabricated RuleContextV2 the sandbox uses to evaluate the rule with
+   * history/facts (in addition to the action snapshot). Absent on v1 adversarial
+   * cases for backward compatibility. Runtime-validated via validateRuleContextV2.
+   */
+  readonly ruleContext?: RuleContextV2;
 }
 
 export interface AdversarialFailedCase {
@@ -222,6 +231,15 @@ function validateAdversarialCases(raw: unknown): string[] {
     }
     if (!Object.hasOwn(entry, 'rationale') || typeof entry.rationale !== 'string' || entry.rationale.trim() === '') {
       errors.push(`${prefix}.rationale must be a non-empty string`);
+    }
+    // PRI-485 Phase 6: optional ruleContext. Absent is valid (backward compat
+    // with v1 adversarial cases). Present must pass validateRuleContextV2
+    // (Runtime Contract Rule 1/2 — never `as` bypass on parsed input).
+    if (Object.hasOwn(entry, 'ruleContext') && entry.ruleContext !== undefined) {
+      const ctxResult = validateRuleContextV2(entry.ruleContext);
+      if (!ctxResult.valid) {
+        errors.push(`${prefix}.ruleContext invalid: ${ctxResult.errors.join('; ')}`);
+      }
     }
   });
   return errors;
