@@ -398,4 +398,52 @@ describe('pd pain record', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  // ── Bug-P fix: reason length validation ──────────────────────────────────
+
+  // RL-01: reason length within limit processes normally
+  it('RL-01: accepts reason with length ≤ 500 (boundary)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    const reason500 = 'a'.repeat(500);
+    await handlePainRecord({ reason: reason500, json: true });
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(logSpy).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // RL-02: reason length over limit exits 1 with error message
+  it('RL-02: exits 1 when reason length > 500', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    const reason501 = 'a'.repeat(501);
+    await handlePainRecord({ reason: reason501 });
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('must be at most 500 characters'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('got 501'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Next action'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // RL-03: short reason processes normally (smoke test)
+  it('RL-03: accepts short reason without error', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'short reason', json: true });
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(logSpy).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });

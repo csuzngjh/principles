@@ -4,6 +4,8 @@ const mockGetArtifactById = vi.fn();
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockApprovalEdit = vi.fn();
 const mockApprovalGetById = vi.fn();
+const mockApprovalApprove = vi.fn();
+const mockCompletionComplete = vi.fn();
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -72,11 +74,17 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         }),
       };
     }),
+    ApprovalQueue: vi.fn().mockImplementation(function () {
+      return { approve: mockApprovalApprove };
+    }),
+    ApprovalCompletionService: vi.fn().mockImplementation(function () {
+      return { completeApproval: mockCompletionComplete };
+    }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
 });
 
-import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from '../../src/commands/runtime-activation.js';
+import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleActivationApprove } from '../../src/commands/runtime-activation.js';
 
 const WS = '/fake/workspace';
 
@@ -750,4 +758,146 @@ describe('handleRuntimeActivationEdit', () => {
     expect(mockApprovalEdit).toHaveBeenCalledOnce();
   });
 
+});
+
+// Bug-M fix: Approve command tests (CLI closed loop)
+describe('handleActivationApprove', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetArtifactById.mockResolvedValue(makeArtifact());
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('AP-01: missing --approval-id returns structured error with nextAction (JSON)', async () => {
+    await handleActivationApprove({
+      workspace: WS,
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('approval_id_required');
+    expect(output.nextAction).toContain('--approval-id');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('AP-02: approval not_found returns structured error with nextAction (JSON)', async () => {
+    mockApprovalApprove.mockResolvedValue({ ok: false, error: 'not_found' });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-nonexistent',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toBe('approval_not_found');
+    expect(output.nextAction).toContain('Check the approval ID');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('AP-03: already_decided returns structured error with status (JSON)', async () => {
+    mockApprovalApprove.mockResolvedValue({ ok: false, error: 'already_decided', status: 'rejected' });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-001',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('already_decided');
+    expect(output.reason).toContain('rejected');
+    expect(output.nextAction).toContain('already decided');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('AP-04: success path returns ok=true with activationId and decision (JSON)', async () => {
+    mockApprovalApprove.mockResolvedValue({
+      ok: true,
+      record: { approvalId: 'appr-001', artifactId: 'art-001', status: 'approved' },
+    });
+    mockCompletionComplete.mockResolvedValue({
+      ok: true,
+      activationId: 'act-001',
+      decision: { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' },
+    });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-001',
+      decidedBy: 'test-owner',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(true);
+    expect(output.approvalId).toBe('appr-001');
+    expect(output.activationId).toBe('act-001');
+    expect(output.decision).toBe('activated');
+    expect(output.nextAction).toBe('pd activation list');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('AP-05: --json output is a single parseable JSON object (cli-1-strict-json)', async () => {
+    mockApprovalApprove.mockResolvedValue({
+      ok: true,
+      record: { approvalId: 'appr-001', artifactId: 'art-001', status: 'approved' },
+    });
+    mockCompletionComplete.mockResolvedValue({
+      ok: true,
+      activationId: 'act-001',
+      decision: { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' },
+    });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-001',
+      json: true,
+    });
+
+    // Exactly one console.log call with a single JSON object
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const rawOutput = consoleLogSpy.mock.calls[0][0];
+    const parsed = JSON.parse(rawOutput);
+    expect(parsed).toBeInstanceOf(Object);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('AP-06: completeApproval failure returns structured error with nextAction (JSON)', async () => {
+    mockApprovalApprove.mockResolvedValue({
+      ok: true,
+      record: { approvalId: 'appr-001', artifactId: 'art-001', status: 'approved' },
+    });
+    mockCompletionComplete.mockResolvedValue({
+      ok: false,
+      reason: 'artifact_not_validated',
+      nextAction: 'Check artifact validation status and retry dispatch.',
+    });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-001',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.ok).toBe(false);
+    expect(output.reason).toContain('activation_failed');
+    expect(output.reason).toContain('artifact_not_validated');
+    expect(output.nextAction).toContain('Check artifact validation');
+    expect(process.exitCode).toBe(1);
+  });
 });
