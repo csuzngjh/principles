@@ -427,17 +427,19 @@ describe('Diag chain e2e', () => {
     const fs = await import('node:fs');
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-diag-e2e-guard-a-'));
 
-    // Verify it actually throws in createPainSignalBridge
-    await expect(
-      createPainSignalBridge({
-        workspaceDir: tmpRoot,
-        stateDir: tmpRoot,
-        effectiveConfig,
-        ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
-      })
-    ).rejects.toThrowError('diagnostician_split_pipeline requires diagnostician_async_cli=on');
-
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    try {
+      // Verify it actually throws in createPainSignalBridge
+      await expect(
+        createPainSignalBridge({
+          workspaceDir: tmpRoot,
+          stateDir: tmpRoot,
+          effectiveConfig,
+          ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
+        })
+      ).rejects.toThrowError('diagnostician_split_pipeline requires diagnostician_async_cli=on');
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 
   it('split && !async_cli → does NOT throw at startup for default configuration', async () => {
