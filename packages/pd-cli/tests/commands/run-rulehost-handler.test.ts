@@ -528,3 +528,136 @@ describe('handleRunRuleHost — PRI-461 readiness integration', () => {
     expect(exitCode).toBe(1);
   });
 });
+
+// ── PR #1122: behavior-examples fail-fast + v2-aware text output ──────────
+//
+// CodeRabbit PR2 Comment 1 (P1): when --behavior-examples is provided but the
+// file is missing or contains invalid JSON, the handler MUST return a
+// structured error immediately instead of silently degrading to
+// text_principle_only (rc-9-no-silent-fallback).
+//
+// CodeRabbit PR2 Comment 2 (P2): the text dry-run branch must use the same
+// v2-aware capabilityStatus source as the JSON branch (behaviorExamplesReason-
+// aware), not the stale resolvedRuntime.capabilityStatus.
+//
+// These tests require `rulecode_context_v2` enabled so the handler enters the
+// v2 path where --behavior-examples is honored.
+
+function writeContextV2EnabledConfig(workspaceDir: string): void {
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+      rulecode_context_v2: { category: 'core', enabled: true },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: true, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
+describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit Comment 1+2)', () => {
+  let workspaceDir: string;
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    workspaceDir = mkTmpDir();
+    savedEnv = { ...process.env };
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns status=failed with behavior_examples_unreadable reason in --json mode when --behavior-examples file does not exist', async () => {
+    writeContextV2EnabledConfig(workspaceDir);
+    const missingPath = path.join(workspaceDir, 'nonexistent-examples.json');
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({
+        painId: 'pain-1',
+        dryRun: true,
+        json: true,
+        workspace: workspaceDir,
+        behaviorExamples: missingPath,
+      }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('failed');
+    expect(typeof payload.reason).toBe('string');
+    expect(payload.reason).toMatch(/^behavior_examples_unreadable:/);
+    expect(typeof payload.nextAction).toBe('string');
+    expect(exitCode).toBe(1);
+  });
+
+  it('returns status=failed with behavior_examples_invalid reason in --json mode when --behavior-examples file has invalid JSON shape', async () => {
+    writeContextV2EnabledConfig(workspaceDir);
+    const examplesPath = path.join(workspaceDir, 'bad-examples.json');
+    // Valid JSON but missing required fields → behavior_examples_invalid: ...
+    fs.writeFileSync(examplesPath, JSON.stringify({ foo: 'bar' }), 'utf8');
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({
+        painId: 'pain-1',
+        dryRun: true,
+        json: true,
+        workspace: workspaceDir,
+        behaviorExamples: examplesPath,
+      }),
+    );
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('failed');
+    expect(payload.reason).toMatch(/^behavior_examples_invalid:/);
+    expect(exitCode).toBe(1);
+  });
+
+  it('emits error on stderr in plain-text mode when --behavior-examples file does not exist', async () => {
+    writeContextV2EnabledConfig(workspaceDir);
+    const missingPath = path.join(workspaceDir, 'nonexistent-examples.json');
+    const { stdout, stderr, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({
+        painId: 'pain-1',
+        dryRun: true,
+        workspace: workspaceDir,
+        behaviorExamples: missingPath,
+      }),
+    );
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/behavior_examples_unreadable:/);
+    // Plain-text mode must NOT emit a JSON object on stdout.
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('text dry-run output uses v2-aware capabilityStatus when --behavior-examples is missing (CodeRabbit Comment 2)', async () => {
+    // With contextV2Enabled=true and no --behavior-examples, the handler sets
+    // behaviorExamplesReason='behavior_examples_missing'. The text dry-run
+    // branch must surface this reason in capabilityStatus (matching the JSON
+    // branch), not the stale resolvedRuntime.capabilityStatus.
+    writeContextV2EnabledConfig(workspaceDir);
+    const { stdout } = await captureStdio(() =>
+      handleRunRuleHost({
+        painId: 'pain-1',
+        dryRun: true,
+        workspace: workspaceDir,
+      }),
+    );
+    expect(stdout).toMatch(/code_rule_capability: OFF \(behavior_examples_missing\)/);
+  });
+});

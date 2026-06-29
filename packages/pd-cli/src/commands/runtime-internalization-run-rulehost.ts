@@ -455,8 +455,24 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     } else {
       const examplesResult = readOwnerBehaviorExamples(behaviorExamplesPath);
       if (!examplesResult.ok) {
-        behaviorExamplesReason = examplesResult.reason;
-      } else if (opts.confirm) {
+        // P1 fix (CodeRabbit PR2 Comment 1): fail fast on parse failure instead
+        // of silently degrading to text_principle_only (rc-9-no-silent-fallback).
+        // examplesResult.reason already carries a stable prefix
+        // (behavior_examples_unreadable: | behavior_examples_invalid:).
+        const { reason } = examplesResult;
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({
+            status: 'failed',
+            reason,
+            nextAction: 'fix the --behavior-examples JSON payload and retry',
+          }) + '\n');
+        } else {
+          console.error(`Error: ${reason}. Fix the --behavior-examples JSON payload and retry.`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.confirm) {
         try {
           const assembler = new BehaviorExamplePackAssembler({ workspaceDir, stateDir: path.join(workspaceDir, '.state') });
           behaviorExamplePack = assembler.assemble({
@@ -467,7 +483,20 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
             projectDir: workspaceDir,
           });
         } catch (error) {
-          behaviorExamplesReason = `behavior_examples_unreliable: ${error instanceof Error ? error.message : String(error)}`;
+          // P1 fix (CodeRabbit PR2 Comment 1): fail fast on assembly failure
+          // instead of silently degrading to text_principle_only.
+          const reason = `behavior_examples_unreliable: ${error instanceof Error ? error.message : String(error)}`;
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({
+              status: 'failed',
+              reason,
+              nextAction: 'verify pain lineage and tool call IDs reference existing trajectory rows; rerun pd pain record if needed',
+            }) + '\n');
+          } else {
+            console.error(`Error: ${reason}. Verify pain lineage and tool call IDs reference existing trajectory rows; rerun pd pain record if needed.`);
+          }
+          process.exitCode = 1;
+          return;
         } finally {
           RuleHostEvidenceRegistry.dispose(workspaceDir);
         }
@@ -506,7 +535,12 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
             : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: resolvedRuntime.capabilityStatus, workspaceDir, readiness }) + '\n');
+      // P2 fix (CodeRabbit PR2 Comment 2): text branch must use the same v2-aware
+      // capabilityStatus source as the JSON branch (behaviorExamplesReason-aware).
+      const effectiveCapabilityStatus = behaviorExamplesReason
+        ? `code_rule_capability: OFF (${behaviorExamplesReason})`
+        : resolvedRuntime.capabilityStatus;
+      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness }) + '\n');
     }
     return;
   }
