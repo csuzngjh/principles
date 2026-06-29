@@ -6,6 +6,7 @@ import type {
   ApprovalDecisionResult,
   ApprovalRecord,
   ApprovalStatus,
+  PIArtifactRecord,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,
@@ -21,6 +22,8 @@ import {
   ApprovalQueue,
   mapConfidenceToLabel,
   isArtifactRevisionOf,
+  extractPrincipleId,
+  PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
@@ -37,6 +40,27 @@ function isMissingTableError(err: unknown): boolean {
 
 function isActivationSuccess(activation: ActivationDecision): boolean {
   return activation.decision === 'activated' || activation.decision === 'already_activated';
+}
+
+/**
+ * Bug-O L3b fix: adapt a PIArtifactRecord (DB row) to a PIArtifactSnapshot
+ * (activation contract type). The two interfaces have identical fields but
+ * different names — explicit field copy surfaces future field drift as a
+ * compile error and complies with rc-2-no-as-bypass.
+ */
+function toArtifactSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
+  return {
+    artifactId: record.artifactId,
+    artifactKind: record.artifactKind,
+    sourceTaskId: record.sourceTaskId,
+    sourcePrincipleId: record.sourcePrincipleId,
+    sourceRuleId: record.sourceRuleId,
+    lineageArtifactIds: record.lineageArtifactIds,
+    validationStatus: record.validationStatus,
+    contentJson: record.contentJson,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
 }
 
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
@@ -170,7 +194,58 @@ export class ApprovalsConsoleModel {
       };
     }
 
-    return { ok: true, record: approvalResult.record, activation };
+    // Bug-O L3b fix: after a successful activation, upgrade the corresponding
+    // ledger principle from 'candidate' to 'active'. The activation is already
+    // committed to SQLite; a ledger failure here is non-fatal and surfaced as
+    // a warning (rc-9-no-silent-fallback) — the owner is informed that the
+    // ledger state may be out of sync and can be repaired separately.
+    let ledgerWarning: string | undefined;
+    if (isActivationSuccess(activation)) {
+      ledgerWarning = await this.upgradeLedgerPrinciple(existing.artifactId);
+    }
+
+    return { ok: true, record: approvalResult.record, activation, warning: ledgerWarning };
+  }
+
+  /**
+   * Bug-O L3b fix: upgrade the ledger principle linked to `artifactId` from
+   * 'candidate' to 'active'. Called by {@link approve} after a successful
+   * activation. Non-fatal on failure — the activation is already committed;
+   * ledger failure is surfaced as a warning string (rc-9).
+   *
+   * The principleId is resolved via {@link extractPrincipleId}'s 4-step
+   * fallback (column → parsed.principleId → parsed.sourcePrincipleId →
+   * parsed.principleDraft.title) so dreamer artifacts whose
+   * sourcePrincipleId column was stripped by stripFabricatedCorePrincipleIds
+   * can still be linked via contentJson.
+   */
+  private async upgradeLedgerPrinciple(artifactId: string): Promise<string | undefined> {
+    const stateDir = path.join(this.workspaceDir, '.state');
+    const { connection } = this.createReadContext();
+    try {
+      const piArtifactStore = new SqlitePIArtifactStore(connection);
+      const artifact = await piArtifactStore.getArtifactById(artifactId);
+      if (!artifact) {
+        // rc-9: surface the reason instead of silently returning.
+        return `ledger_activate_skipped: artifact ${artifactId} not found in artifact store`;
+      }
+      const principleId = extractPrincipleId(toArtifactSnapshot(artifact));
+      if (!principleId) {
+        // No principleId resolvable from any source — this is a legitimate
+        // skip (e.g. rule-only artifact), not an error. Surface it so the
+        // owner can verify whether the link was supposed to exist.
+        return `ledger_activate_skipped: artifact ${artifactId} has no resolvable principleId`;
+      }
+      const ledger = new PrincipleTreeLedgerAdapter({ stateDir });
+      const result = ledger.activatePrinciple(principleId);
+      if (!result.ok) {
+        // Reason is already prefixed with `ledger_activate_failed:`.
+        return result.reason;
+      }
+      return undefined;
+    } finally {
+      try { connection.close(); } catch { /* best-effort */ }
+    }
   }
 
   /**
