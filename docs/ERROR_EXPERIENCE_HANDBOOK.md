@@ -206,6 +206,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-171
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction.
+  - 2026-06-29 PR#1122: behavior-examples parse/assemble failure silently degraded to text_principle_only; artificer-runner validateOutput left errorCategory undefined for modeErrors (permanent errors retried) — both fixed with fail-fast structured errors (rc-9)
   - 2026-06-28 PRI-483 (PR#1098): `_buildRuleContextIfEnabled` ignored `ok:false` from `loadPdConfigForPlugin` — added `!configResult.ok` guard + warn log (rc-9)
   - 2026-06-19 PRI-408 (PR#972): approval-completion silent catch + `refused` paths missing nextAction; PRI-431 (PR#975) `ConfigResolutionError` catch dropped `nextAction`
   - Earlier (PR#699-#966): catch→skip, malformed yaml→`[]`, false success on null, missing nextAction. Pattern: degrade lacks reason+nextAction. Fix: every catch/fallback emits structured reason + nextAction.
