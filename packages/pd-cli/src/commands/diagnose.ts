@@ -29,6 +29,10 @@ import {
   run as diagnoseRun,
   status as diagnoseStatus,
   PrincipleTreeLedgerAdapter,
+  buildDreamerSeedFromCandidate,
+  CANDIDATE_KIND_TO_ROUTE,
+  ROUTE_CHANNEL_MAP,
+  MVP_ENABLED_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -481,6 +485,53 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             status: 'intake_failed',
             error: intakeErrorMessage,
             nextAction: `pd candidate intake --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}"`,
+          });
+        }
+      }
+    }
+
+    // Defect-004 fix: seed dreamer task for each consumed candidate whose
+    // recommendation_kind routes to an MVP-enabled internalization channel.
+    // Without this, the chain stops at 'consumed' and never reaches internalization
+    // (11 of 18 consumed candidates hit this in production). Mirrors the pattern
+    // in PainSignalBridge.onDiagnosisComplete (pain-signal-bridge.ts L310-338).
+    if (opts.intake !== false && !intakeFailed) {
+      for (const candidate of candidates) {
+        const kind = candidate.recommendationKind;
+        if (kind === 'defer' || kind === 'implementation') continue;
+        try {
+          const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
+          if (!route) continue;
+          const channel = ROUTE_CHANNEL_MAP[route];
+          const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+          // sourcePainId is unavailable in CLI context (opts.taskId is the
+          // diagnostician task ID, not a pain ID). Passing undefined is safe —
+          // buildDreamerSeedFromCandidate omits the field when blank.
+          const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: undefined });
+          if ('decision' in seed) continue; // not_internalizable or invalid — skip
+          const existingTask = await stateManager.getTask(seed.taskId);
+          if (!existingTask) {
+            await stateManager.createTask({
+              taskId: seed.taskId,
+              taskKind: seed.taskKind,
+              inputRef: '',
+              status: seed.status,
+              attemptCount: seed.attemptCount,
+              maxAttempts: seed.maxAttempts,
+              diagnosticJson: seed.diagnosticJson,
+            });
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'dreamer_seeded',
+              nextAction: `pd task show ${seed.taskId} | pd dreamer run --task-id ${seed.taskId}`,
+            });
+          }
+        } catch (seedErr) {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'dreamer_seed_failed',
+            error: seedErr instanceof Error ? seedErr.message : String(seedErr),
+            nextAction: `pd candidate internalize --candidate-id ${candidate.candidateId}`,
           });
         }
       }
