@@ -799,7 +799,7 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         reason: `activation_completion_failed: ${errMsg}`,
         nextAction: approvalRolledBack
           ? 'Approval rolled back to pending. Fix the issue and re-run `pd activation approve --approval-id <id>`.'
-          : `Approval remains 'approved'. Run \`pd runtime activation dispatch --artifact-id ${approvalResult.record.artifactId} --confirm\` to retry activation.`,
+          : `Approval remains 'approved'. Run \`pd activation dispatch --artifact-id ${approvalResult.record.artifactId} --confirm\` to retry activation.`,
         approvalRolledBack,
       };
       if (opts.json) {
