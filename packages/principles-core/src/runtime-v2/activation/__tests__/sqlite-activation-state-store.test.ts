@@ -251,7 +251,11 @@ describe('SqliteActivationStateStore', () => {
   describe('promoteActivation', () => {
     it('atomically promotes only an active code_tool_hook shadow activation', async () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
-      mockDb.prepare.mockReturnValue({ run: mockRun });
+      const mockGet = vi.fn().mockReturnValue({ cnt: 1 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
       const store = new SqliteActivationStateStore(mockConnection);
 
       const promoted = await store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z');
@@ -263,10 +267,30 @@ describe('SqliteActivationStateStore', () => {
     });
 
     it('returns false when the activation is not an active shadow activation', async () => {
-      mockDb.prepare.mockReturnValue({ run: vi.fn().mockReturnValue({ changes: 0 }) });
+      const mockGet = vi.fn().mockReturnValue({ cnt: 0 });
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
       const store = new SqliteActivationStateStore(mockConnection);
 
       await expect(store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z')).resolves.toBe(false);
+      // UPDATE should not be called when COUNT guard returns 0
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('throws when multiple shadow activations share the same activation_id', async () => {
+      const mockGet = vi.fn().mockReturnValue({ cnt: 2 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: vi.fn() };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(
+        store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z'),
+      ).rejects.toThrow(/refused: 2 shadow activations share activation_id/);
     });
   });
 });
