@@ -763,7 +763,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private parseArtificerArtifact(
     contentJson: string,
-  ): { readonly implementationCode: unknown; readonly goldenTraceCases: unknown; readonly affectedTools: unknown } | null {
+  ): {
+    readonly implementationCode: unknown;
+    readonly goldenTraceCases: unknown;
+    readonly affectedTools: unknown;
+    readonly requiresContextVersion: unknown;
+  } | null {
     let parsed: unknown;
     try {
       parsed = JSON.parse(contentJson);
@@ -775,6 +780,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       implementationCode: parsed.implementationCode,
       goldenTraceCases: parsed.goldenTraceCases,
       affectedTools: parsed.affectedTools,
+      requiresContextVersion: parsed.requiresContextVersion,
     };
   }
 
@@ -997,7 +1003,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
-    const { implementationCode, goldenTraceCases, affectedTools } = artificerParsed;
+    const { implementationCode, goldenTraceCases, affectedTools, requiresContextVersion } = artificerParsed;
     if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
@@ -1053,6 +1059,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       ruleHostGateDecision: 'accepted_shadow',
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
       adversarialResult: output.adversarialResult,
+      ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
     };
 
     // P1 #7 (cross-package acceptance test discovery): resolve the scribe

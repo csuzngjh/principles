@@ -46,7 +46,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
-import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from './commands/runtime-activation.js';
+import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleRuntimeActivationPromote } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -479,6 +479,24 @@ activationTopCmd
       decidedBy: opts.decidedBy,
       note: opts.note,
       workspace: opts.workspace,
+      json: opts.json,
+    });
+  });
+
+activationTopCmd
+  .command('promote')
+  .description('Promote a code_tool_hook activation from shadow observation to live blocking')
+  .requiredOption('--activation-id <id>', 'Shadow activation ID to promote')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Validate eligibility without changing activation state')
+  .option('--confirm', 'Confirm promotion to live blocking')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationPromote({
+      activationId: opts.activationId,
+      workspace: opts.workspace,
+      dryRun: opts.dryRun,
+      confirm: opts.confirm,
       json: opts.json,
     });
   });

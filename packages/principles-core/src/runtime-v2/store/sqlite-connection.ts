@@ -429,6 +429,7 @@ export class SqliteConnection {
         action TEXT NOT NULL,
         target_ref TEXT NOT NULL,
         activated_at TEXT NOT NULL,
+        promoted_at TEXT,
         deactivated_at TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
@@ -439,6 +440,9 @@ export class SqliteConnection {
       const activationCols = db.prepare("PRAGMA table_info(activations)").all() as { name: string }[];
       if (!activationCols.some(c => c.name === 'deactivated_at')) {
         db.exec('ALTER TABLE activations ADD COLUMN deactivated_at TEXT');
+      }
+      if (!activationCols.some(c => c.name === 'promoted_at')) {
+        db.exec('ALTER TABLE activations ADD COLUMN promoted_at TEXT');
       }
     }
 

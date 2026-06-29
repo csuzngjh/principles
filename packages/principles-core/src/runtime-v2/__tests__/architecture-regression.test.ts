@@ -1113,7 +1113,8 @@ describe('PRI-45 RuleHost adapter boundary', () => {
     const src = readFileSync(resolve(
       __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
     ), 'utf-8');
-    expect(src).toMatch(/return mergeDecisions\(/);
+    expect(src).toContain('const liveDecision = mergeDecisions(');
+    expect(src).toContain('return this.evaluateDetailed(input).liveDecision');
   });
 });
 

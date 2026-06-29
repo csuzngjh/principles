@@ -500,7 +500,7 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
     expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
   });
 
-  it('ignores requiresContextVersion values other than 2 (treats as v1)', async () => {
+  it('rejects declared context versions other than 2', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({
@@ -509,12 +509,15 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
         goldenTrace: makeGoldenTrace(),
         ruleHostGateDecision: 'accepted_shadow',
         affectedTools: ['read_file'],
-        // Not 2 — must be treated as v1 (not gated by the flag).
         requiresContextVersion: 1,
       }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      reason: 'unsupported_context_version',
+      riskLevel: 'high',
+    });
   });
 });
 

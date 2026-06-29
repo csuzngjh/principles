@@ -45,6 +45,22 @@ export interface RuleHostOptions {
   workspaceDir?: string;
 }
 
+type RuleHostActivationMode = 'shadow' | 'live';
+
+interface LoadedRuleActivation extends LoadedImplementation {
+  readonly activationId: string;
+  readonly activationMode: RuleHostActivationMode;
+}
+
+export interface RuleHostObservedDecision extends RuleHostResult {
+  readonly activationId: string;
+}
+
+export interface RuleHostEvaluationReport {
+  readonly liveDecision: RuleHostResult | undefined;
+  readonly shadowDecisions: readonly RuleHostObservedDecision[];
+}
+
 /**
  * Type guard for RuleHostMeta from untrusted module exports.
  * Validates all four required string fields (EP-01: no `as` bypass at trust boundary).
@@ -67,6 +83,9 @@ export class RuleHost {
   private readonly logger: RuleHostLogger;
   private readonly workspaceDir: string | null;
   private readonly implementationSources = new Map<string, { activationId: string; artifactId: string; ruleId: string }>();
+  private activationFingerprint: string | null = null;
+  private cachedImplementations: readonly LoadedRuleActivation[] = [];
+  private sqliteConnection: SqliteConnection | null = null;
 
   constructor(stateDir: string, logger: RuleHostLogger = console, options?: RuleHostOptions) {
     this.stateDir = stateDir;
@@ -84,9 +103,38 @@ export class RuleHost {
    *   - { decision: 'requireApproval', ... } when any implementation returns requireApproval
    */
   evaluate(input: RuleHostInput): RuleHostResult | undefined {
+    return this.evaluateDetailed(input).liveDecision;
+  }
+
+  dispose(): void {
+    this.sqliteConnection?.close();
+    this.sqliteConnection = null;
+    this.cachedImplementations = [];
+    this.activationFingerprint = null;
+    this.implementationSources.clear();
+  }
+
+  evaluateDetailed(input: RuleHostInput): RuleHostEvaluationReport {
     try {
-      const activeImpls = this._loadActiveCodeImplementations();
-      return mergeDecisions(activeImpls, input, {
+      const activeImpls = this._loadActiveCodeImplementations(input.context?.version === 2);
+      const liveImpls = activeImpls.filter((impl) => impl.activationMode === 'live');
+      const shadowImpls = activeImpls.filter((impl) => impl.activationMode === 'shadow');
+      const shadowDecisions: RuleHostObservedDecision[] = [];
+      for (const impl of shadowImpls) {
+        try {
+          const result = impl.evaluate(input);
+          shadowDecisions.push({ ...result, activationId: impl.activationId });
+        } catch (evalError: unknown) {
+          const reason = `evaluation failed: ${String(evalError)}`;
+          this.logger.warn?.(`[RuleHost] Shadow implementation ${impl.implId} ${reason}`);
+          const source = this.implementationSources.get(impl.implId);
+          if (source) {
+            this._recordUnhealthy(source.activationId, source.artifactId, source.ruleId, reason,
+              'Fix the RuleCode runtime error or return shape, then re-activate the rule');
+          }
+        }
+      }
+      const liveDecision = mergeDecisions(liveImpls, input, {
         warn: this.logger.warn,
         onImplementationUnhealthy: (impl, reason) => {
           const source = this.implementationSources.get(impl.implId);
@@ -103,12 +151,13 @@ export class RuleHost {
           );
         },
       });
+      return { liveDecision, shadowDecisions };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
         `[RuleHost] Host evaluation failed, degrading conservatively: ${String(hostError)}`
       );
-      return undefined;
+      return { liveDecision: undefined, shadowDecisions: [] };
     }
   }
 
@@ -122,13 +171,13 @@ export class RuleHost {
    * Source: activations table (code_tool_hook channel, deactivated_at IS NULL)
    *   → JOIN pi_artifacts for content_json → extract implementationCode → compile
    */
-  private _loadActiveCodeImplementations(): LoadedImplementation[] {
+  private _loadActiveCodeImplementations(supportsContextV2: boolean): LoadedRuleActivation[] {
     if (!this.workspaceDir) {
       return [];
     }
 
     try {
-      return this._loadFromActivationsTable(this.workspaceDir);
+      return this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
     } catch (activationError: unknown) {
       this.logger.warn?.(
         `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
@@ -152,13 +201,13 @@ export class RuleHost {
    *
    * All data from SQLite is treated as unknown and validated before use.
    */
-  private _loadFromActivationsTable(workspaceDir: string): LoadedImplementation[] {
-    this.implementationSources.clear();
-    const sqliteConn = new SqliteConnection(workspaceDir);
-    try {
+  private _loadFromActivationsTable(workspaceDir: string, supportsContextV2: boolean): LoadedRuleActivation[] {
+    const sqliteConn = this.sqliteConnection ?? new SqliteConnection(workspaceDir);
+    this.sqliteConnection = sqliteConn;
+    {
       const db = sqliteConn.getDb();
       const rows = db.prepare(`
-        SELECT a.activation_id, a.artifact_id, a.target_ref,
+        SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                p.content_json, p.source_rule_id
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
@@ -172,6 +221,20 @@ export class RuleHost {
         );
         return [];
       }
+
+      const fingerprintParts: string[] = [supportsContextV2 ? 'context-v2' : 'context-v1'];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+        const record = row as Record<string, unknown>;
+        fingerprintParts.push([
+          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['content_json'], record['source_rule_id'],
+        ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
+      }
+      const fingerprint = fingerprintParts.join('\u0002');
+      if (fingerprint === this.activationFingerprint) {
+        return [...this.cachedImplementations];
+      }
+      this.implementationSources.clear();
 
       // PRI-436: Group active rows by target_ref to detect duplicates.
       // At most one active activation per rule (target_ref) is allowed.
@@ -236,17 +299,30 @@ export class RuleHost {
         }
       }
 
-      const loaded: LoadedImplementation[] = [];
+      const loaded: LoadedRuleActivation[] = [];
 
       for (const r of validRows) {
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
         const artifactId = typeof r['artifact_id'] === 'string' ? r['artifact_id'] : '';
         const contentJson = typeof r['content_json'] === 'string' ? r['content_json'] : '';
         const sourceRuleId = typeof r['source_rule_id'] === 'string' ? r['source_rule_id'] : null;
+        const action = typeof r['action'] === 'string' ? r['action'] : '';
 
         if (!activationId || !artifactId || !contentJson) {
           this.logger.warn?.(
             `[RuleHost] Activation row missing required fields, skipping`
+          );
+          continue;
+        }
+        const activationMode: RuleHostActivationMode | null = action === 'code_tool_hook_shadow_activate'
+          ? 'shadow'
+          : action === 'code_tool_hook_live_activate'
+            ? 'live'
+            : null;
+        if (!activationMode) {
+          this.logger.warn?.(
+            `[RuleHost] Activation ${activationId}: unsupported action ${action || '(missing)'}, skipping. ` +
+            'nextAction=deactivate and recreate the activation through RuleHostWriter',
           );
           continue;
         }
@@ -260,6 +336,22 @@ export class RuleHost {
           }
 
           const contentObj = content as Record<string, unknown>;
+          if (Object.hasOwn(contentObj, 'requiresContextVersion')) {
+            if (contentObj['requiresContextVersion'] !== 2) {
+              this.logger.warn?.(
+                `[RuleHost] Activation ${activationId}: unsupported context version; skipping. ` +
+                'nextAction=regenerate the rule artifact with requiresContextVersion: 2 or omit the field for v1',
+              );
+              continue;
+            }
+            if (!supportsContextV2) {
+              this.logger.warn?.(
+                `[RuleHost] Activation ${activationId}: suspended because rulecode_context_v2 is disabled or unavailable; skipping. ` +
+                'nextAction=enable rulecode_context_v2 with valid config or deactivate this activation',
+              );
+              continue;
+            }
+          }
           const implementationCode = contentObj['implementationCode'];
           if (typeof implementationCode !== 'string' || implementationCode.length === 0) {
             this.logger.warn?.(
@@ -305,6 +397,8 @@ export class RuleHost {
             implId,
             ruleId,
             meta,
+            activationId,
+            activationMode,
             evaluate: (input: RuleHostInput): RuleHostResult => {
               const frozenHelpers = createRuleHostHelpers(input);
               // PRI-437: Execute inside vm context with timeout boundary.
@@ -337,13 +431,9 @@ export class RuleHost {
         }
       }
 
+      this.activationFingerprint = fingerprint;
+      this.cachedImplementations = loaded;
       return loaded;
-    } finally {
-      try {
-        sqliteConn.close();
-      } catch {
-        // best-effort cleanup
-      }
     }
   }
 

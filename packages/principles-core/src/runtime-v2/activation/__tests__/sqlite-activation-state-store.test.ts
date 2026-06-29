@@ -57,6 +57,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'prompt_activate',
         targetRef: 'ledger://P_001',
         activatedAt: '2026-05-17T00:00:00.000Z',
+        promotedAt: null,
         deactivatedAt: null,
       });
     });
@@ -85,6 +86,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'defer_archive',
         targetRef: 'ledger://P_002#archived',
         activatedAt: '2026-05-17T01:00:00.000Z',
+        promotedAt: null,
         deactivatedAt: null,
       });
     });
@@ -206,6 +208,7 @@ describe('SqliteActivationStateStore', () => {
         'ledger://P_001',
         '2026-05-17T00:00:00.000Z',
         null,
+        null,
       );
     });
 
@@ -240,7 +243,30 @@ describe('SqliteActivationStateStore', () => {
         'ledger://P_003#archived',
         '2026-05-17T02:00:00.000Z',
         null,
+        null,
       );
+    });
+  });
+
+  describe('promoteActivation', () => {
+    it('atomically promotes only an active code_tool_hook shadow activation', async () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockDb.prepare.mockReturnValue({ run: mockRun });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      const promoted = await store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z');
+
+      expect(promoted).toBe(true);
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("action = 'code_tool_hook_shadow_activate'"));
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("SET action = 'code_tool_hook_live_activate'"));
+      expect(mockRun).toHaveBeenCalledWith('2026-06-29T00:00:00.000Z', 'act_code_001');
+    });
+
+    it('returns false when the activation is not an active shadow activation', async () => {
+      mockDb.prepare.mockReturnValue({ run: vi.fn().mockReturnValue({ changes: 0 }) });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z')).resolves.toBe(false);
     });
   });
 });

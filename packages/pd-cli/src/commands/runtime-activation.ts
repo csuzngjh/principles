@@ -22,6 +22,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
 interface ActivationDispatchOptions {
   workspace?: string;
@@ -158,6 +159,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
 
     const activationStateStore = new SqliteActivationStateStore(stateManager.connection);
     const approvalQueueStore = new SqliteApprovalQueueStore(stateManager.connection);
+    const featureFlags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
     // Wire all three MVP-Core writers, including RuleHostWriter for code_tool_hook.
     // PRI-408: fixes P0 breakpoint where code_tool_hook channel could not activate.
     const dispatcher = new ActivationDispatcher(
@@ -166,7 +168,10 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
       {
         writers: [
           new PromptWriter(),
-          new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+          new RuleHostWriter({
+            gateDeps: createProductionGateDeps(),
+            featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+          }),
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
@@ -284,6 +289,96 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
       console.error(`Next action: ${result.nextAction}`);
     }
     process.exitCode = 1;
+  } finally {
+    await stateManager.close();
+  }
+}
+
+export interface ActivationPromoteOptions {
+  workspace?: string;
+  activationId?: string;
+  dryRun?: boolean;
+  confirm?: boolean;
+  json?: boolean;
+}
+
+export interface ActivationPromoteResult {
+  ok: boolean;
+  decision: 'would_promote' | 'promoted' | 'refused';
+  activationId: string;
+  promotedAt?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export async function handleRuntimeActivationPromote(opts: ActivationPromoteOptions): Promise<void> {
+  const activationId = opts.activationId?.trim() ?? '';
+  const refuse = (reason: string, nextAction: string): void => {
+    const result: ActivationPromoteResult = { ok: false, decision: 'refused', activationId, reason, nextAction };
+    if (opts.json) console.log(JSON.stringify(result));
+    else {
+      console.error(`Promotion refused: ${reason}`);
+      console.error(`Next action: ${nextAction}`);
+    }
+    process.exitCode = 1;
+  };
+
+  if (!activationId) {
+    refuse('activation_id_required', 'Provide --activation-id from `pd activation list --channel code_tool_hook`.');
+    return;
+  }
+  if (opts.dryRun === true && opts.confirm === true) {
+    refuse('dry_run_confirm_mutually_exclusive', 'Choose either --dry-run or --confirm.');
+    return;
+  }
+
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  try {
+    await stateManager.initialize();
+    const store = new SqliteActivationStateStore(stateManager.connection);
+    const activeHooks = await store.listCodeToolHookActivations(false);
+    const activation = activeHooks.find((record) => record.activationId === activationId);
+    if (!activation || activation.action !== 'code_tool_hook_shadow_activate') {
+      refuse(
+        'not_found_inactive_or_not_shadow',
+        'Refresh `pd activation list --channel code_tool_hook`; only active shadow activations can be promoted.',
+      );
+      return;
+    }
+
+    if (opts.confirm !== true) {
+      const result: ActivationPromoteResult = {
+        ok: true,
+        decision: 'would_promote',
+        activationId,
+        nextAction: `Run pd activation promote --activation-id ${activationId} --confirm to enable live blocking.`,
+      };
+      if (opts.json) console.log(JSON.stringify(result));
+      else {
+        console.log(`Would promote: ${activationId}`);
+        console.log(`  nextAction: ${result.nextAction}`);
+      }
+      return;
+    }
+
+    const promotedAt = new Date().toISOString();
+    const promoted = await store.promoteActivation(activationId, promotedAt);
+    if (!promoted) {
+      refuse('promotion_precondition_changed', 'Refresh the activation list; the activation changed before promotion.');
+      return;
+    }
+    const result: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId, promotedAt };
+    if (opts.json) console.log(JSON.stringify(result));
+    else {
+      console.log(`Promoted live: ${activationId}`);
+      console.log(`  promotedAt: ${promotedAt}`);
+    }
+  } catch (err: unknown) {
+    refuse(
+      `promotion_failed: ${err instanceof Error ? err.message : String(err)}`,
+      'Check workspace configuration and database integrity; no promotion was applied.',
+    );
   } finally {
     await stateManager.close();
   }

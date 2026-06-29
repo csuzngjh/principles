@@ -87,7 +87,7 @@ async function insertActivation(): Promise<void> {
     idempotencyKey: `${ARTIFACT_ID_BROKEN}::code_tool_hook`,
     artifactId: ARTIFACT_ID_BROKEN,
     channel: 'code_tool_hook',
-    action: 'code_tool_hook_shadow_activate',
+    action: 'code_tool_hook_live_activate',
     targetRef: `impl://${RULE_ID_BROKEN}`,
     activatedAt: now,
     deactivatedAt: null,
