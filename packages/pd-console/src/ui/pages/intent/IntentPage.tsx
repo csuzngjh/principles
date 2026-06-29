@@ -7,6 +7,7 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent, fetchIntentVersions } from "../../api.js";
 import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
 import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
+import { computeVersionDiff } from "@principles/core/runtime-v2/intent-browser";
 
 // ── Page state ────────────────────────────────────────────────────────────────
 
@@ -211,6 +212,80 @@ function MetaRow({ label, value }: { label: string; value: string }) {
         {label}
       </span>
       <span className="text-ink-2 text-[12px] font-mono break-all">{value}</span>
+    </div>
+  );
+}
+
+// ── Version history entry with section-level diff ────────────────────────────
+
+interface VersionEntryProps {
+  version: IntentVersionEntry;
+  /** Content of the previous version (for diff). Empty string for the oldest version. */
+  previousContent: string;
+  /** Localized reason label */
+  reasonLabel: string;
+}
+
+function VersionEntry({ version, previousContent, reasonLabel }: VersionEntryProps) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  // Compute section-level diff between previous and this version.
+  // For the oldest version (no previous), diff against "" so all non-empty
+  // sections show as "changed" — gives the user a visual of what was filled.
+  const diff = computeVersionDiff(previousContent, version.contentSnapshot);
+
+  return (
+    <div className="border-b border-line last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full flex items-center gap-3 py-1.5 text-[12px] font-mono text-ink-2 hover:bg-surface-2/50 transition-colors text-left"
+        aria-expanded={expanded}
+        aria-label={expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
+      >
+        <span className="text-ink-3 shrink-0 w-4 inline-block">
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span className="text-ink-3 shrink-0">{version.createdAt.slice(0, 19).replace('T', ' ')}</span>
+        <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3 shrink-0">
+          {reasonLabel}
+        </span>
+        <span className="text-ink-3 shrink-0">{version.contentHash.slice(0, 12)}</span>
+        <span className="text-ink-4 text-[11px] ml-auto shrink-0 hidden sm:inline">
+          {expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
+        </span>
+      </button>
+      {expanded && (
+        <div className="pb-2.5 pl-7 pr-2">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {diff.map((d) => {
+              // d.section is one of the 5 section keys from computeVersionDiff's
+              // SECTION_KEYS — safe to construct the i18n key dynamically.
+              const labelKey = `pages.intent.wizard.stepLabels.${d.section}`;
+              return (
+                <span
+                  key={d.section}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border ${
+                    d.changed
+                      ? "border-amber/40 text-amber bg-amber/5"
+                      : "border-line text-ink-3 bg-surface"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${d.changed ? "bg-amber" : "bg-ink-4"}`}
+                    aria-hidden="true"
+                  />
+                  {t(labelKey)}
+                  <span className="text-ink-4 ml-0.5">
+                    {d.changed ? t("pages.intent.versionDiff.changed") : t("pages.intent.versionDiff.unchanged")}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -622,22 +697,28 @@ export function IntentPage() {
           <DecisionSummarySection />
         )}
 
-        {/* Version History — shows saved INTENT.md versions from SQLite */}
+        {/* Version History — shows saved INTENT.md versions from SQLite.
+            Each entry is expandable to show section-level diff (Task 5). */}
         {versions.length > 0 && (
           <details className="border border-line rounded-[3px] mt-6">
             <summary className="cursor-pointer px-4 py-2 text-[13px] font-medium text-ink-2 select-none">
               {t("pages.intent.versionHistory.title")} ({versions.length})
             </summary>
             <div className="px-4 py-2 border-t border-line">
-              {versions.map((v) => (
-                <div key={v.id} className="flex items-center gap-3 py-1 text-[12px] font-mono text-ink-2">
-                  <span className="text-ink-3">{v.createdAt.slice(0, 19).replace('T', ' ')}</span>
-                  <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3">
-                    {versionReasonLabel(v.reason)}
-                  </span>
-                  <span className="text-ink-3">{v.contentHash.slice(0, 12)}</span>
-                </div>
-              ))}
+              {versions.map((v, idx) => {
+                // versions are sorted newest-first; previous = idx + 1.
+                // For the oldest version (no previous), diff against "" so
+                // all filled sections show as "changed".
+                const previousContent = versions[idx + 1]?.contentSnapshot ?? "";
+                return (
+                  <VersionEntry
+                    key={v.id}
+                    version={v}
+                    previousContent={previousContent}
+                    reasonLabel={versionReasonLabel(v.reason)}
+                  />
+                );
+              })}
             </div>
           </details>
         )}

@@ -878,6 +878,40 @@
         "title": "Version History",
         "reasonInit": "Initialized",
         "reasonSave": "Saved"
+      },
+      "wizard": {
+        "progressLabel": "Step {{current}}/5",
+        "next": "Next",
+        "prev": "Previous",
+        "finish": "Finish",
+        "cancel": "Cancel",
+        "emptyWarning": "This section cannot be empty. Please fill it in before continuing.",
+        "stepLabels": {
+          "why": "1. Why",
+          "desiredOutcome": "2. Desired Outcome",
+          "nonNegotiables": "3. Non-negotiables",
+          "stopEscalation": "4. Stop / Escalation",
+          "currentStrategicFocus": "5. Current Strategic Focus"
+        },
+        "guidance": {
+          "why": "Explain why this project matters. What does the Owner care about? What happens if it is not solved?",
+          "desiredOutcome": "Describe an observable change. After completion, what will be better?",
+          "nonNegotiables": "List hard constraints that cannot be violated (compliance / safety / boundaries).",
+          "stopEscalation": "Under what circumstances should the Agent stop and escalate to the Owner instead of pushing forward?",
+          "currentStrategicFocus": "What is the top priority for the current phase? (Will be updated as phases change.)"
+        },
+        "discardConfirmTitle": "Discard your input?",
+        "discardConfirmBody": "Content you have entered will be lost and cannot be recovered.",
+        "discardConfirmCancel": "Continue editing",
+        "discardConfirmConfirm": "Discard"
+      },
+      "versionDiff": {
+        "changed": "Changed",
+        "unchanged": "Unchanged",
+        "oldPreview": "Previous version",
+        "newPreview": "New version",
+        "expandHint": "Click to view section-level diff",
+        "collapseHint": "Click to collapse diff"
       }
     },
     "debt": {
