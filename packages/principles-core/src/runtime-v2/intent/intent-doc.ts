@@ -1,16 +1,15 @@
-import { createHash } from 'node:crypto';
 export interface IntentDocSections { why?: string; desiredOutcome?: string; nonNegotiables?: string; stopEscalation?: string; currentStrategicFocus?: string; }
 export type IntentDocWarningCode = 'missing_section' | 'empty_section' | 'too_vague' | 'oversized' | 'parse_failed';
 export interface IntentDocWarning { code: IntentDocWarningCode; message: string; section?: string; }
 export const INTENT_MAX_BYTES = 32 * 1024;
 const MIN_SECTION_LENGTH = 10;
-interface SectionDef { key: keyof IntentDocSections; headerRegex: RegExp; label: string; }
+interface SectionDef { key: keyof IntentDocSections; headerRegex: RegExp; label: string; header: string; }
 const SECTION_DEFS: SectionDef[] = [
-  { key: 'why', headerRegex: /^##\s+1\.\s*Why\s*$/im, label: 'why' },
-  { key: 'desiredOutcome', headerRegex: /^##\s+2\.\s*Desired Outcome\s*$/im, label: 'desiredOutcome' },
-  { key: 'nonNegotiables', headerRegex: /^##\s+3\.\s*Non-negotiables\s*$/im, label: 'nonNegotiables' },
-  { key: 'stopEscalation', headerRegex: /^##\s+4\.\s*Stop\s*\/\s*Escalation\s*$/im, label: 'stopEscalation' },
-  { key: 'currentStrategicFocus', headerRegex: /^##\s+5\.\s*Current Strategic Focus\s*$/im, label: 'currentStrategicFocus' },
+  { key: 'why', headerRegex: /^##\s+1\.\s*Why\s*$/im, label: 'why', header: '## 1. Why' },
+  { key: 'desiredOutcome', headerRegex: /^##\s+2\.\s*Desired Outcome\s*$/im, label: 'desiredOutcome', header: '## 2. Desired Outcome' },
+  { key: 'nonNegotiables', headerRegex: /^##\s+3\.\s*Non-negotiables\s*$/im, label: 'nonNegotiables', header: '## 3. Non-negotiables' },
+  { key: 'stopEscalation', headerRegex: /^##\s+4\.\s*Stop\s*\/\s*Escalation\s*$/im, label: 'stopEscalation', header: '## 4. Stop / Escalation' },
+  { key: 'currentStrategicFocus', headerRegex: /^##\s+5\.\s*Current Strategic Focus\s*$/im, label: 'currentStrategicFocus', header: '## 5. Current Strategic Focus' },
 ];
 export function parseIntentDocSections(raw: string): IntentDocSections {
   const sections: IntentDocSections = {};
@@ -19,11 +18,33 @@ export function parseIntentDocSections(raw: string): IntentDocSections {
     if (match === null) { continue; }
     const rest = raw.slice(match.index + match[0].length);
     const next = /^##\s+/m.exec(rest);
-    (sections as Record<string, string>)[def.key] = rest.slice(0, next !== null ? next.index : rest.length).trim();
+    // Direct assignment is type-safe: def.key is keyof IntentDocSections,
+    // all fields are `string | undefined`, and we assign a string.
+    sections[def.key] = rest.slice(0, next !== null ? next.index : rest.length).trim();
   }
   return sections;
 }
-export function computeIntentContentHash(raw: string): string { return `sha256:${createHash('sha256').update(raw, 'utf8').digest('hex')}`; }
+
+/**
+ * Assemble a complete INTENT.md document from individual sections.
+ *
+ * Symmetric to `parseIntentDocSections`: round-trip
+ * `parseIntentDocSections(assembleIntentDoc(sections))` returns the same
+ * sections (for non-empty content). Missing sections still emit their header
+ * with empty content, so the assembled doc always has all 5 headers in order.
+ *
+ * Used by the wizard and the section editor to save user input without
+ * hand-written string concatenation in the UI layer.
+ */
+export function assembleIntentDoc(sections: IntentDocSections): string {
+  const parts: string[] = ['# INTENT.md', ''];
+  for (const def of SECTION_DEFS) {
+    const value = (sections as Record<string, unknown>)[def.key];
+    const content = typeof value === 'string' ? value : '';
+    parts.push(def.header, '', content, '');
+  }
+  return parts.join('\n');
+}
 export function validateIntentDocSections(sections: IntentDocSections): IntentDocWarning[] {
   const warnings: IntentDocWarning[] = [];
   for (const def of SECTION_DEFS) {
