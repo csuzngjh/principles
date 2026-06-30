@@ -254,6 +254,10 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
         artifactId,
         artifactKind: 'principle',
         sourceTaskId: taskId,
+        // Bug-O L1 fix: propagate sourcePrincipleId so downstream activation
+        // dispatch and ActivationsConsoleModel can resolve the principle link.
+        // Without this, the activation list shows 'unlinked' for dreamer artifacts.
+        sourcePrincipleId: output.sourcePrincipleId,
         lineageArtifactIds,
         validationStatus: 'pending',
         contentJson: JSON.stringify(output),

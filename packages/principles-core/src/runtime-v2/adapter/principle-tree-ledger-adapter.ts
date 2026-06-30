@@ -5,7 +5,7 @@
  * as openclaw-plugin without depending on openclaw-plugin private code.
  */
 
-import { addPrincipleToLedger, loadLedger } from '../../principle-tree-ledger.js';
+import { addPrincipleToLedger, loadLedger, updatePrinciple } from '../../principle-tree-ledger.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
@@ -93,5 +93,27 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
       evaluability: 'weak_heuristic' as const,
       createdAt: found.createdAt,
     };
+  }
+
+  /**
+   * Bug-O L3 fix: upgrade a ledger principle's status to 'active' after the
+   * corresponding approval+activation has been dispatched successfully.
+   *
+   * Called by ApprovalsConsoleModel.approve() after the activation is written
+   * to SQLite. Returns ok:false (not throw) when the principle is missing or
+   * the update fails, so the caller can surface a non-fatal warning without
+   * rolling back the already-committed activation (rc-9-no-silent-fallback).
+   */
+  activatePrinciple(principleId: string): { ok: true } | { ok: false; reason: string } {
+    try {
+      updatePrinciple(this.#stateDir, principleId, {
+        status: 'active',
+        updatedAt: new Date().toISOString(),
+      });
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason: `ledger_activate_failed: ${message}` };
+    }
   }
 }

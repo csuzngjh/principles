@@ -461,10 +461,14 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     expect(deactivatedRecord).toBeDefined();
     expect(deactivatedRecord!.deactivatedAt).not.toBeNull();
 
-    // ── Step 10: Verify the activation status record reflects deactivation ─
+    // ── Step 10: Verify getActivationStatus reflects deactivation (Bug-Q) ─
+    // Bug-Q fix: getActivationStatus now filters out deactivated records
+    // (WHERE deactivated_at IS NULL), returning null when no active activation
+    // exists. This allows re-activation after deactivation. The deactivated
+    // record itself is already verified via listCodeToolHookActivations(true)
+    // above (L459-462, Step 9). Here we verify the new null semantics.
     const activationAfterDeactivate = await stateStore.getActivationStatus(idempotencyKey);
-    expect(activationAfterDeactivate).not.toBeNull();
-    expect(activationAfterDeactivate!.deactivatedAt).not.toBeNull();
+    expect(activationAfterDeactivate).toBeNull();
 
     await sm2.close();
   }, 60_000);

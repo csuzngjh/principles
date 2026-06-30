@@ -352,6 +352,11 @@ export class ActivationDispatcher {
   }
 
   private async checkIdempotency(idempotencyKey: string): Promise<{ decision: ActivationDecision | null }> {
+    // Bug-Q fix: getActivationStatus (both SQLite and Memory stores) now filters out
+    // deactivated records. So `existing` is non-null ONLY for currently-active activations.
+    // When a record is deactivated, getActivationStatus returns null, allowing re-activation.
+    // recordActivation's INSERT OR REPLACE then overwrites the old deactivated row under
+    // the UNIQUE INDEX on idempotency_key — this is intended behavior (latest activation wins).
     try {
       const existing = await this.stateReadModel.getActivationStatus(idempotencyKey);
       if (existing) {
