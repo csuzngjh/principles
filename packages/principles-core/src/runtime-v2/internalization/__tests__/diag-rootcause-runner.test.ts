@@ -423,4 +423,28 @@ describe('DiagRootCauseRunner V-slice', () => {
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('input_invalid');
   });
+
+  // PRI-442 Bug-B-005: split pipeline stages must use 'diagnostician' (the
+  // registered OpenClaw agent) as agentId, not the internal stage name.
+  // The OpenClaw CLI rejects unknown agent IDs with "Unknown agent id".
+  it('PRI-442 Bug-B-005: uses "diagnostician" agentId for OpenClaw CLI (not internal stage name)', async () => {
+    const deps = createMockDeps({ artifactStore });
+    const runner = new DiagRootCauseRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    await runner.run(ROOTCAUSE_TASK_ID);
+
+    // startRun must be called with agentId 'diagnostician', NOT 'diag_rootcause'
+    expect(deps._runtimeAdapter.startRun).toHaveBeenCalledTimes(1);
+    const startRunCalls = (deps._runtimeAdapter.startRun as ReturnType<typeof vi.fn>).mock.calls;
+    expect(startRunCalls.length).toBeGreaterThan(0);
+    const startRunCall = startRunCalls[0]?.[0] as { agentSpec: { agentId: string }; outputSchemaRef: string };
+    expect(startRunCall.agentSpec.agentId).toBe('diagnostician');
+    // outputSchemaRef still distinguishes the stage
+    expect(startRunCall.outputSchemaRef).toBe('diag-rootcause-output-v1');
+  });
 });
