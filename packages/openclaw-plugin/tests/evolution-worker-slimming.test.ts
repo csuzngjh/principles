@@ -372,3 +372,29 @@ describe('PRI-294: Feature flag registry matches surface registry', () => {
     expect(idle!.category).toBe('gone');
   });
 });
+
+// ── 7. F15 (PRI-442): empathy_observer flag must have a real consumption path ──
+
+describe('F15 (PRI-442): empathy_observer flag is not a dead registration', () => {
+  // PRI-239 constraint: "Only flags with real consumption paths are registered".
+  // empathy_observer was registered in feature-flag-contract.ts but never read
+  // by any production code (Bug-C). F15 wires resolveEmpathyObserver to consume
+  // the flag. These tests lock down both the registration and the consumption.
+
+  it('empathy_observer flag exists in DEFAULT_FEATURE_FLAGS as quiet+disabled', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'empathy_observer');
+    expect(flag).toBeDefined();
+    expect(flag!.category).toBe('quiet');
+    expect(flag!.enabled).toBe(false);
+  });
+
+  it('empathy_observer flag is consumed in prompt.ts (not a dead registration)', () => {
+    // Scan prompt.ts source for the flag consumption pattern. The flag must
+    // be loaded via loadFeatureFlagFromConfig with 'empathy_observer'.
+    const promptPath = path.resolve(__dirname, '../src/hooks/prompt.ts');
+    const src = fs.readFileSync(promptPath, 'utf-8');
+    // Must have at least one consumption call
+    const consumptionMatches = src.match(/loadFeatureFlagFromConfig\([^)]*['"]empathy_observer['"]/g) ?? [];
+    expect(consumptionMatches.length).toBeGreaterThanOrEqual(1);
+  });
+});
