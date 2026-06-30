@@ -125,7 +125,7 @@ These rules prevent architectural drift. Violating them will break the project.
 - **FROZEN LEGACY (ADR-0005):** The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them. All new internalization logic must go to the Runtime V2 Peer Runners in `@principles/core`.
 
 ### Architecture regression tests
-- `packages/principles-core/tests/architecture-regression.test.ts` guards the core/plugin boundary.
+- `packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts` guards the core/plugin boundary.
 - Any PR that modifies core exports, plugin imports, or CLI command registration **must** update this test.
 - **Never skip or delete these tests.** If a test fails, fix the code, not the test.
 

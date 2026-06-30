@@ -3724,30 +3724,51 @@ describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
       : []
   );
 
-  // Extract all import module paths from source code.
+  // Extract all RUNTIME import module paths from source code.
   // Handles: import ... from 'mod', import 'mod' (side-effect), and multiline imports.
-  // Reuses the same pattern proven in the PRI-215 extractImportModulePaths helper.
+  // EXCLUDES `import type ... from` — type-only imports are erased at compile time
+  // and do not introduce runtime I/O. Reuses the same pattern proven in the
+  // PRI-215 extractImportModulePaths helper.
+  //
+  // The negative lookahead `(?!type\b)` after `import\s+` prevents matching
+  // `import type { X } from 'mod'` and `import type X from 'mod'`.
   function extractImportPaths(src: string): string[] {
     const paths: string[] = [];
-    for (const m of src.matchAll(/import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
+    // `import ... from 'mod'` — but NOT `import type ... from 'mod'`.
+    for (const m of src.matchAll(/import\s+(?!type\b)[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
       if (m[1] != null) paths.push(m[1]);
     }
-    for (const m of src.matchAll(/import\s+['"]([^'"]+)['"]/g)) {
+    // Side-effect `import 'mod'` — `import type 'mod'` is not valid TS so no
+    // exclusion needed, but the lookahead keeps it defensive.
+    for (const m of src.matchAll(/import\s+(?!type\b)['"]([^'"]+)['"]/g)) {
       if (m[1] != null && !paths.includes(m[1])) paths.push(m[1]);
     }
     return paths;
   }
 
-  // Check if any import path references fs or path (including sub-paths like fs/promises).
-  function importsFsOrPath(src: string): boolean {
+  // Check if any runtime import path references a Node I/O module.
+  // Covers fs, path, child_process, better-sqlite3 (including sub-paths like fs/promises).
+  // Type-only imports (`import type ... from 'fs'`) are excluded by extractImportPaths.
+  //
+  // This MUST stay in sync with eslint.config.js `no-restricted-imports` patterns.
+  // ESLint uses `allowTypeImports: true` for child_process/better-sqlite3, so the
+  // arch test is the runtime-I/O backstop for those modules.
+  function importsNodeIo(src: string): boolean {
     const paths = extractImportPaths(src);
     return paths.some((p) =>
       p === 'fs' || p.startsWith('fs/') ||
       p === 'node:fs' || p.startsWith('node:fs/') ||
       p === 'path' || p.startsWith('path/') ||
-      p === 'node:path' || p.startsWith('node:path/')
+      p === 'node:path' || p.startsWith('node:path/') ||
+      p === 'child_process' || p.startsWith('child_process/') ||
+      p === 'node:child_process' || p.startsWith('node:child_process/') ||
+      p === 'better-sqlite3'
     );
   }
+
+  // Back-compat alias: keep the old name working for any external callers/tests
+  // that referenced importsFsOrPath directly. New code should use importsNodeIo.
+  const importsFsOrPath = importsNodeIo;
 
   function collectTsFiles(dir: string, acc: string[]): void {
     const entries = fsSync.readdirSync(dir, { withFileTypes: true });
@@ -3814,7 +3835,7 @@ describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
 
   // ── Registry ↔ production files (PRI-450, EP-02) ──────────────────────────
 
-  it('core/src/ production files: only registry-listed files import fs/path', () => {
+  it('core/src/ production files: only registry-listed files import Node I/O modules (fs/path/child_process/better-sqlite3)', () => {
     const coreSrcDir = pathSync.resolve(__dirname, '..', '..');
     const allFiles: string[] = [];
     collectTsFiles(coreSrcDir, allFiles);
@@ -3822,7 +3843,7 @@ describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
     const violations: string[] = [];
     for (const filePath of allFiles) {
       const content = fsSync.readFileSync(filePath, 'utf-8');
-      if (importsFsOrPath(content)) {
+      if (importsNodeIo(content)) {
         const relPath = pathSync.relative(coreSrcDir, filePath).replace(/\\/g, '/');
         if (!ALLOWED_IO_FILES.has(relPath)) {
           violations.push(relPath);
@@ -3832,8 +3853,9 @@ describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
 
     if (violations.length > 0) {
       throw new Error(
-        `Found ${violations.length} file(s) importing fs/path that are NOT in io-seam-registry.json.\n` +
+        `Found ${violations.length} file(s) importing fs/path/child_process/better-sqlite3 that are NOT in io-seam-registry.json.\n` +
         `Add them to the appropriate seam in packages/principles-core/io-seam-registry.json.\n` +
+        `Note: \`import type\` from these modules is allowed (erased at runtime) and won't trigger this.\n` +
         `Violations:\n  ` + violations.join('\n  ')
       );
     }
@@ -3867,18 +3889,47 @@ describe('PRI-450 / PRI-462: core I/O seam registry guard', () => {
 
   // ── Helper unit tests ─────────────────────────────────────────────────────
 
-  it('importsFsOrPath detects sub-path imports (fs/promises) and side-effect imports', () => {
+  it('importsNodeIo detects sub-path imports (fs/promises) and side-effect imports', () => {
     // Sub-path import
-    expect(importsFsOrPath(`import { mkdir } from 'node:fs/promises';`)).toBe(true);
-    expect(importsFsOrPath(`import { posix } from 'path/posix';`)).toBe(true);
+    expect(importsNodeIo(`import { mkdir } from 'node:fs/promises';`)).toBe(true);
+    expect(importsNodeIo(`import { posix } from 'path/posix';`)).toBe(true);
     // Side-effect import
-    expect(importsFsOrPath(`import 'fs';`)).toBe(true);
-    expect(importsFsOrPath(`import "node:path";`)).toBe(true);
+    expect(importsNodeIo(`import 'fs';`)).toBe(true);
+    expect(importsNodeIo(`import "node:path";`)).toBe(true);
     // Standard import
-    expect(importsFsOrPath(`import * as fs from 'fs';`)).toBe(true);
-    expect(importsFsOrPath(`import { resolve } from 'node:path';`)).toBe(true);
-    // Non-fs/path imports
-    expect(importsFsOrPath(`import { foo } from 'bar';`)).toBe(false);
-    expect(importsFsOrPath(``)).toBe(false);
+    expect(importsNodeIo(`import * as fs from 'fs';`)).toBe(true);
+    expect(importsNodeIo(`import { resolve } from 'node:path';`)).toBe(true);
+    // Non-I/O imports
+    expect(importsNodeIo(`import { foo } from 'bar';`)).toBe(false);
+    expect(importsNodeIo(``)).toBe(false);
+  });
+
+  it('importsNodeIo detects child_process and better-sqlite3 runtime imports', () => {
+    // Runtime child_process imports
+    expect(importsNodeIo(`import { spawn } from 'child_process';`)).toBe(true);
+    expect(importsNodeIo(`import { execSync } from 'node:child_process';`)).toBe(true);
+    expect(importsNodeIo(`import { fork } from 'child_process/promises';`)).toBe(true);
+    // Runtime better-sqlite3 import
+    expect(importsNodeIo(`import Database from 'better-sqlite3';`)).toBe(true);
+    // Mixed runtime + type import from child_process (still runtime I/O)
+    expect(importsNodeIo(`import { spawn, type SpawnOptions } from 'child_process';`)).toBe(true);
+  });
+
+  it('importsNodeIo EXCLUDES `import type` (erased at runtime, no I/O)', () => {
+    // Type-only imports from forbidden modules — must NOT trigger
+    expect(importsNodeIo(`import type { Database } from 'better-sqlite3';`)).toBe(false);
+    expect(importsNodeIo(`import type BetterSqlite3 from 'better-sqlite3';`)).toBe(false);
+    expect(importsNodeIo(`import type { SpawnOptions } from 'child_process';`)).toBe(false);
+    expect(importsNodeIo(`import type { Stats } from 'node:fs';`)).toBe(false);
+    expect(importsNodeIo(`import type { Platform } from 'node:process';`)).toBe(false);
+    // Mixed: a real `import type` next to a runtime import from a DIFFERENT module
+    // — the type import is excluded, the runtime import is detected.
+    expect(importsNodeIo(`import type { Database } from 'better-sqlite3';\nimport { spawn } from 'child_process';`)).toBe(true);
+  });
+
+  it('importsFsOrPath alias stays in sync with importsNodeIo', () => {
+    // The back-compat alias must point to the same implementation.
+    expect(importsFsOrPath(`import { spawn } from 'child_process';`)).toBe(true);
+    expect(importsFsOrPath(`import type { Database } from 'better-sqlite3';`)).toBe(false);
   });
 });

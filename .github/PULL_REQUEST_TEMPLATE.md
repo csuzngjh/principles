@@ -123,7 +123,7 @@ PR 模板分层说明：
   - [ ] `cli-7-test-wiring` — 测试真实 command wiring
 
 ### Feature Flag 注册检查（条件性 — 仅当引入新功能子系统/hook/writer/reader 时填写）
-<!-- 若本 PR 引入新的功能子系统、hook、writer 或 reader，需在 .pd/feature-flags.yaml 注册 -->
+<!-- 若本 PR 引入新的功能子系统、hook、writer 或 reader，需在 .pd/config.yaml 注册 (ADR-0016: 旧 .pd/feature-flags.yaml 已不再被生产 runtime 读取) -->
 <!-- 参考 AGENTS.md "Feature Flag Registration" 章节 -->
 
 - [ ] N/A — 本 PR 未引入新功能子系统
