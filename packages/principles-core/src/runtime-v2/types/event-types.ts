@@ -440,6 +440,8 @@ export interface RuleHostEvaluatedEventData {
   matched: boolean;
   decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct';
   ruleId?: string;
+  activationId?: string;
+  activationMode?: 'shadow' | 'live';
 }
 
 export const RuleHostEvaluatedEventDataSchema = Type.Object({
@@ -453,6 +455,11 @@ export const RuleHostEvaluatedEventDataSchema = Type.Object({
     Type.Literal('auto_correct'),
   ]),
   ruleId: Type.Optional(Type.String()),
+  activationId: Type.Optional(Type.String()),
+  activationMode: Type.Optional(Type.Union([
+    Type.Literal('shadow'),
+    Type.Literal('live'),
+  ])),
 });
 export type RuleHostEvaluatedEventDataStatic = Static<typeof RuleHostEvaluatedEventDataSchema>;
 

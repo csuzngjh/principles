@@ -1,11 +1,12 @@
 /**
  * PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 layer-3)
  *
- * PURPOSE: Verify the full production chain with REAL VM execution:
- *   SQLite activation → recordToolCall → handleBeforeToolCall
+ * PURPOSE: Verify the production hook runtime with REAL VM execution:
+ *   validated fixture activation → recordToolCall → handleBeforeToolCall
  *   → buildProductionRuleContext → RuleHost.evaluate (real VM) → block/allow
  *
- * This test exercises the FULL public path with NO mocking of RuleHost:
+ * This is a runtime component test, not the generation/approval E2E. It uses
+ * fixture artifacts deliberately and does not claim to validate that upstream chain.
  *   - Real TrajectoryDatabase (production schema)
  *   - Real loadPdConfigForPlugin (reads .pd/config.yaml)
  *   - Real buildProductionRuleContext
@@ -13,7 +14,7 @@
  *   - Real v2 rule code (read-before-write)
  *
  * ERR-025: E2E covers recordToolCall → before_tool_call → block
- * ERR-024: E2E covers fail-soft (flag OFF → context undefined → v2 rule allows)
+ * ERR-024: flag OFF suspends the v2 activation before VM execution.
  *
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §6.3, §10.2 layer-3
  */
@@ -91,25 +92,6 @@ function evaluate(input, helpers) {
     return { decision: 'block', matched: true, reason: 'R_RBW_001: read before write required' };
   }
   return { decision: 'allow', matched: false, reason: 'R_RBW_001: ok' };
-}
-var meta = { name: 'read-before-write', version: '1', ruleId: '${RULE_ID}', coversCondition: 'write' };
-`;
-
-/**
- * K3-specific probe rule: returns requireApproval when !input.context.
- *
- * This makes the fail-soft branch OBSERVABLE. The original V2_RULE_CODE returns
- * allow when !input.context, which is indistinguishable from "rule never loaded"
- * (both produce result === undefined). By returning requireApproval, the gate
- * emits a recordRuleHostRequireApproval event that proves the rule executed
- * and hit the !input.context branch — confirming flag OFF → context undefined.
- */
-const V2_RULE_CODE_K3_PROBE = `
-function evaluate(input, helpers) {
-  if (!input.context) {
-    return { decision: 'requireApproval', matched: true, reason: 'R_RBW_001: K3 probe — context is undefined (flag OFF verified)' };
-  }
-  return { decision: 'allow', matched: false, reason: 'R_RBW_001: K3 probe — context present' };
 }
 var meta = { name: 'read-before-write', version: '1', ruleId: '${RULE_ID}', coversCondition: 'write' };
 `;
@@ -196,6 +178,12 @@ async function insertActivation(): Promise<void> {
   });
 }
 
+async function promoteActivation(): Promise<void> {
+  const store = new SqliteActivationStateStore(sqliteConn);
+  const promoted = await store.promoteActivation(ACTIVATION_ID, new Date().toISOString());
+  expect(promoted).toBe(true);
+}
+
 function teardownTempWorkspace(): void {
   WorkspaceContext.clearCache();
   try { sqliteConn?.close(); } catch { /* best-effort */ }
@@ -246,13 +234,21 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
       toolName: 'write_file',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
+    const warn = vi.fn();
     const ctx: PluginHookToolContext = {
       workspaceDir: tempWorkspaceDir,
       sessionId: SESSION_ID,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      logger: { warn, info: () => {}, error: () => {} },
     };
 
-    // 6. Assert: real VM execution returns block
+    // 6. Shadow executes and is observable but cannot block.
+    expect(handleBeforeToolCall(event, ctx)).toBeUndefined();
+    expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+      expect.objectContaining({ activationId: ACTIVATION_ID, activationMode: 'shadow', decision: 'block' }),
+    );
+
+    // 7. Atomic promotion makes the same activation live; only now may it block.
+    await promoteActivation();
     const result = handleBeforeToolCall(event, ctx);
 
     expect(result).toBeDefined();
@@ -267,6 +263,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
 
     insertV2RuleArtifact();
     await insertActivation();
+    await promoteActivation();
 
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
@@ -286,10 +283,11 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
       toolName: 'write_file',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
+    const warn = vi.fn();
     const ctx: PluginHookToolContext = {
       workspaceDir: tempWorkspaceDir,
       sessionId: SESSION_ID,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      logger: { warn, info: () => {}, error: () => {} },
     };
 
     // 3. Assert: real VM execution returns allow (priorReadOfTarget === 'yes')
@@ -299,23 +297,14 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
     expect(result).toBeUndefined();
   });
 
-  it('Test K3: flag OFF + unread write → allow (v1 zero-change + v2 rule fail-soft)', async () => {
+  it('Test K3: flag OFF suspends v2 activation without executing it', async () => {
     // 1. Setup: temp workspace with rulecode_context_v2 flag OFF
     setupTempWorkspace(false);
     sqliteConn = new SqliteConnection(tempWorkspaceDir);
     sqliteConn.getDb();
 
-    // 2. Insert v2 rule artifact + activation (bypasses canActivate flag gate).
-    //    Use V2_RULE_CODE_K3_PROBE instead of V2_RULE_CODE: the probe returns
-    //    `requireApproval` when `!input.context`, making the fail-soft branch
-    //    OBSERVABLE. The original rule returns `allow` when `!input.context`,
-    //    which is indistinguishable from "rule never loaded" (both produce
-    //    result === undefined). The probe emits a recordRuleHostRequireApproval
-    //    event that proves (a) the rule was loaded from SQLite, and (b) the
-    //    `!input.context` branch was actually executed — confirming flag OFF
-    //    → context undefined. This indirectly proves V2_RULE_CODE would also
-    //    hit the same branch and fall through to allow (v1 zero-change).
-    insertV2RuleArtifact(V2_RULE_CODE_K3_PROBE);
+    // 2. Persist a v2 activation to simulate a previously-enabled workspace.
+    insertV2RuleArtifact();
     await insertActivation();
 
     // 3. Get real WorkspaceContext
@@ -337,44 +326,16 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
       toolName: 'write_file',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
+    const warn = vi.fn();
     const ctx: PluginHookToolContext = {
       workspaceDir: tempWorkspaceDir,
       sessionId: SESSION_ID,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
+      logger: { warn, info: () => {}, error: () => {} },
     };
 
-    // 6. Assert: flag OFF → gate.ts sets context=undefined (v1 zero-change)
-    //    → probe rule hits `!input.context` branch → returns requireApproval.
-    //    gate.ts emits recordRuleHostRequireApproval for requireApproval decisions
-    //    (see gate.ts lines 152-171), proving the rule was loaded AND the
-    //    `!input.context` branch was executed. This is the v1 zero-change
-    //    invariant (spec §10.1 scenario 10): flag OFF → no v2 context.
     const result = handleBeforeToolCall(event, ctx);
-
-    // requireApproval does NOT block (gate.ts falls through), so result is undefined.
-    // This matches v1 behavior: tool call proceeds.
     expect(result).toBeUndefined();
-
-    // The probe rule's requireApproval decision proves BOTH:
-    //   (a) the v2 rule was loaded from SQLite (not a no-op default), AND
-    //   (b) input.context was undefined (flag OFF verified).
-    // Without this signal, `result === undefined` alone cannot distinguish
-    // "rule executed fail-soft" from "rule never loaded".
-    //
-    // NOTE: We assert on `reason` (not `ruleId`) because gate.ts currently
-    // passes `hostResult?.ruleId` to recordRuleHostRequireApproval, and
-    // RuleHost.evaluate does not populate ruleId on requireApproval results
-    // (the rule code returns {decision, matched, reason} without ruleId).
-    // The `reason` string is probe-rule-specific ("K3 probe — context is
-    // undefined"), so matching it proves the probe rule executed and hit
-    // the `!input.context` branch. The ruleId-loss on requireApproval path
-    // is a known gate.ts quirk tracked separately (follow-up, not this PR).
-    expect(mockEventLogInstance.recordRuleHostRequireApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: expect.stringContaining('K3 probe'),
-        filePath: 'src/auth.ts',
-        toolName: 'write_file',
-      }),
-    );
+    expect(warn.mock.calls.flat().join(' ')).toContain('suspended because rulecode_context_v2 is disabled or unavailable');
+    expect(mockEventLogInstance.recordRuleHostRequireApproval).not.toHaveBeenCalled();
   });
 });

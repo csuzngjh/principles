@@ -55,6 +55,25 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(),
 }));
 
+// PR1: gate.ts uses wctx.getRuleHost(logger) (singleton) instead of `new RuleHost()`.
+// Mock WorkspaceContext so each fromHookContext returns a fresh wctx whose
+// getRuleHost returns a fresh object using the current _mockEvaluate.
+// Without this, the singleton RuleHost keeps the first _mockEvaluate reference
+// and beforeEach reassignments have no effect.
+vi.mock('../../src/core/workspace-context.js', () => ({
+  WorkspaceContext: {
+    fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
+      workspaceDir: ctx.workspaceDir,
+      stateDir: (ctx.workspaceDir ?? '') + '/.state',
+      getRuleHost: () => ({ evaluate: _mockEvaluate, dispose: vi.fn() }),
+      eventLog: mockEventLogInstance,
+      trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
+      config: { get: vi.fn().mockReturnValue(undefined) },
+      resolve: vi.fn(() => '/mock/PROFILE.json'),
+    })),
+  },
+}));
+
 describe('Gate Rule Host Only Pipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -102,7 +102,7 @@ function activateCompiledRule(
       idempotencyKey: `${artifactId}::code_tool_hook`,
       artifactId,
       channel: 'code_tool_hook',
-      action: 'code_tool_hook_shadow_activate',
+      action: 'code_tool_hook_live_activate',
       targetRef: `impl://${ruleId}`,
       activatedAt: now,
       deactivatedAt: null,

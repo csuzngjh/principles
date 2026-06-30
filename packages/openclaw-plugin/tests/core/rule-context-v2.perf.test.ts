@@ -20,6 +20,8 @@ import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { buildProductionRuleContext } from '../../src/core/rule-context-assembler.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
 
 // ── Mocks (non-DB services only) ───────────────────────────────────────────
 
@@ -102,6 +104,48 @@ function formatMs(ms: number): string {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)', () => {
+  it('complete production hook including SQLite load and VM compilation stays within budget', async () => {
+    const connection = new SqliteConnection(tempWorkspaceDir);
+    const db = connection.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('perf-rule-artifact', 'rule', 'perf-task', 'perf-rule', '[]', 'validated', JSON.stringify({
+      ruleId: 'perf-rule', requiresContextVersion: 2,
+      implementationCode: "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'perf allow' }; } var meta = { name: 'perf', version: '1', ruleId: 'perf-rule', coversCondition: 'write' };",
+    }), now, now);
+    const store = new SqliteActivationStateStore(connection);
+    await store.recordActivation({
+      activationId: 'perf-activation', idempotencyKey: 'perf-rule-artifact::code_tool_hook', artifactId: 'perf-rule-artifact',
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: 'impl://perf-rule', activatedAt: now, deactivatedAt: null,
+    });
+    connection.close();
+
+    const event = { toolName: 'write_file', params: { file_path: 'src/perf.ts', content: 'x' } };
+    const hookContext = { workspaceDir: tempWorkspaceDir, sessionId: 'perf-hook-session', logger: { warn: () => {}, info: () => {}, error: () => {} } };
+    handleBeforeToolCall(event, hookContext);
+    const timings: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      const start = performance.now();
+      handleBeforeToolCall(event, hookContext);
+      timings.push(performance.now() - start);
+    }
+    timings.sort((a, b) => a - b);
+    const p50 = percentile(timings, 50);
+    const p95 = percentile(timings, 95);
+    const p99 = percentile(timings, 99);
+    const mean = timings.reduce((s, t) => s + t, 0) / timings.length;
+    console.log(`[PRI-486 perf] production hook (100 iterations):
+  min=${formatMs(timings[0])} p50=${formatMs(p50)} p95=${formatMs(p95)} p99=${formatMs(p99)} mean=${formatMs(mean)} max=${formatMs(timings[timings.length - 1])}`);
+    // Spec §10.3: baseline first, budget later. Use sanity upper bounds (matching
+    // the pattern of other tests in this file) instead of strict budgets so the
+    // test is reliable on Windows where SQLite FS overhead is higher and the
+    // full-suite parallel load can push p95 well past 50ms.
+    expect(p95).toBeLessThan(500); // 500ms sanity upper bound
+    expect(p99).toBeLessThan(1000); // 1000ms sanity upper bound
+  }, 30000); // perf test: 100 iterations under full-suite load can exceed the 5s default
+
   it('context query p50/p95 over 100 iterations with 100 history rows', () => {
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
