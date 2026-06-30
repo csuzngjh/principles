@@ -9,9 +9,17 @@ import {
   SqliteActivationStateStore,
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
+  ApprovalQueue,
+  ApprovalCompletionService,
   isArtifactRevisionOf,
 } from '@principles/core/runtime-v2';
-import type { ActivationDecision, PIArtifactSnapshot, RolloutActivationDecision } from '@principles/core/runtime-v2';
+import type {
+  ActivationDecision,
+  PIArtifactSnapshot,
+  RolloutActivationDecision,
+  ApprovalDecisionResult,
+  ApprovalCompletionResult,
+} from '@principles/core/runtime-v2';
 import type { PIArtifactRecord } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -610,7 +618,7 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
         console.log(`  previousArtifactId: ${result.previousArtifactId}`);
       }
       console.log(`  editedAt: ${result.editedAt}`);
-      console.log('Next action: review the new artifact, then approve via Console or `pd runtime activation dispatch`');
+      console.log('Next action: review the new artifact, then run `pd activation approve --approval-id <id>` to approve and dispatch');
     }
   } catch (err: unknown) {
     // P2 #5: initialize/DB exceptions must not break --json contract.
@@ -630,5 +638,243 @@ export async function handleRuntimeActivationEdit(opts: ActivationEditOptions): 
     process.exitCode = 1;
   } finally {
     await stateManager.close();
+  }
+}
+
+// ── Approve Command (Bug-M fix: CLI closed loop) ──────────────────────────────
+//
+// Bug-M root cause: `pd activation` had dispatch/list/edit/deactivate but no
+// `approve`. Owners who completed `dispatch → edit` via CLI had to switch to
+// Console to approve. This handler closes the CLI loop by reusing the same
+// ApprovalQueue + ApprovalCompletionService that the Console model uses,
+// without depending on the pd-console package (which is a private Web UI).
+
+interface ActivationApproveOptions {
+  workspace?: string;
+  approvalId?: string;
+  decidedBy?: string;
+  note?: string;
+  json?: boolean;
+}
+
+interface ApproveResult {
+  ok: boolean;
+  approvalId: string;
+  activationId?: string;
+  decision?: string;
+  reason?: string;
+  nextAction?: string;
+  approvalRolledBack?: boolean;
+}
+
+export async function handleActivationApprove(opts: ActivationApproveOptions): Promise<void> {
+  if (!opts.approvalId) {
+    const result: ApproveResult = {
+      ok: false,
+      approvalId: '',
+      reason: 'approval_id_required',
+      nextAction: 'Provide --approval-id <id>. Run `pd approval list` to see pending approvals.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('Error: --approval-id is required');
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const decidedBy = opts.decidedBy ?? 'cli-operator';
+  // CodeRabbit review fix (cli-1-strict-json): declare stateManager outside
+  // try so the finally block can close it, but resolve workspace INSIDE try
+  // so resolveWorkspaceDir() failures are caught and routed through --json.
+  let stateManager: RuntimeStateManager | null = null;
+
+  try {
+    const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+    stateManager = new RuntimeStateManager({ workspaceDir });
+    await stateManager.initialize();
+    const sqliteConn = stateManager.connection;
+    const approvalQueueStore = new SqliteApprovalQueueStore(sqliteConn);
+    const queue = new ApprovalQueue(approvalQueueStore);
+
+    // Step 1: approve the pending approval record.
+    let approvalResult: ApprovalDecisionResult;
+    try {
+      approvalResult = await queue.approve(opts.approvalId, decidedBy, opts.note);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const result: ApproveResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: `approve_write_failed: ${errMsg}`,
+        nextAction: 'Check workspace DB integrity. Try `pd runtime diagnostics`.',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Error: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!approvalResult.ok) {
+      // Map ApprovalDecisionResult errors to ApproveResult (rc-3 fail-loud).
+      // ApprovalDecisionResult.error is the discriminated union 'not_found' | 'already_decided';
+      // both branches are exhaustive, so no third case is reachable at runtime.
+      const reason = approvalResult.error === 'not_found'
+        ? 'approval_not_found'
+        : `already_decided: status is ${approvalResult.status ?? 'unknown'}`;
+      const nextAction = approvalResult.error === 'not_found'
+        ? 'Check the approval ID. Run `pd approval list` to see pending approvals.'
+        : 'Only pending approvals can be approved. The approval is already decided.';
+      const result: ApproveResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason,
+        nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Error: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    // Step 2: dispatch activation via ApprovalCompletionService (handles
+    // idempotency, feature flag, and rollback on failure).
+    const activationStateStore = new SqliteActivationStateStore(sqliteConn);
+    const piArtifactStore = new SqlitePIArtifactStore(sqliteConn);
+    const artifactReadModel = {
+      getArtifactById: async (id: string): Promise<PIArtifactSnapshot | null> => {
+        const rec = await piArtifactStore.getArtifactById(id);
+        return rec ? toSnapshot(rec) : null;
+      },
+    };
+    const dispatcher = new ActivationDispatcher(
+      artifactReadModel,
+      activationStateStore,
+      {
+        writers: [
+          new PromptWriter(),
+          new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+          new DeferArchiveWriter(),
+        ],
+        approvalQueueStore,
+      },
+    );
+    const completionService = new ApprovalCompletionService(
+      approvalQueueStore,
+      dispatcher,
+      activationStateStore,
+    );
+
+    let completionResult: ApprovalCompletionResult;
+    try {
+      completionResult = await completionService.completeApproval({
+        approvalId: opts.approvalId,
+        actor: { kind: 'human', userId: decidedBy },
+        now: new Date().toISOString(),
+      });
+    } catch (err) {
+      // CodeRabbit review fix (cli-5-failure-no-mutation): approval was
+      // written but completion threw unexpectedly. Roll back the approval to
+      // 'pending' so the operator can retry without a stale 'approved' record
+      // that has no activation. Mirrors ApprovalsConsoleModel.approve() L168-182.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      let approvalRolledBack = false;
+      try {
+        const rollbackResult = await queue.resetToPending(opts.approvalId);
+        approvalRolledBack = rollbackResult.ok;
+      } catch { /* best-effort rollback */ }
+      const result: ApproveResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: `activation_completion_failed: ${errMsg}`,
+        nextAction: approvalRolledBack
+          ? 'Approval rolled back to pending. Fix the issue and re-run `pd activation approve --approval-id <id>`.'
+          : `Approval remains 'approved'. Run \`pd activation dispatch --artifact-id ${approvalResult.record.artifactId} --confirm\` to retry activation.`,
+        approvalRolledBack,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Error: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!completionResult.ok) {
+      // CodeRabbit review fix (cli-5-failure-no-mutation): activation
+      // returned !ok. Roll back the approval to 'pending' so the operator
+      // can retry without a stale 'approved' record. Mirrors
+      // ApprovalsConsoleModel.approve() L168-182.
+      let approvalRolledBack = false;
+      try {
+        const rollbackResult = await queue.resetToPending(opts.approvalId);
+        approvalRolledBack = rollbackResult.ok;
+      } catch { /* best-effort rollback */ }
+      const result: ApproveResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: `activation_failed: ${completionResult.reason}`,
+        nextAction: approvalRolledBack
+          ? `Approval rolled back to pending. ${completionResult.nextAction ?? 'Fix the issue and re-run `pd activation approve --approval-id <id>`.'}`
+          : `Approval remains 'approved'. ${completionResult.nextAction ?? 'Check the artifact validation status and retry.'}`,
+        approvalRolledBack,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Error: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    // Step 3: success — surface activation result.
+    const result: ApproveResult = {
+      ok: true,
+      approvalId: opts.approvalId,
+      activationId: completionResult.activationId,
+      decision: completionResult.decision.decision,
+      nextAction: 'pd activation list',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`Approval approved: ${result.approvalId}`);
+      console.log(`  activationId: ${result.activationId ?? 'N/A'}`);
+      console.log(`  decision: ${result.decision}`);
+      console.log(`Next action: ${result.nextAction}`);
+    }
+  } catch (err: unknown) {
+    // P2 #5: initialize/DB exceptions must not break --json contract.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const result: ApproveResult = {
+      ok: false,
+      approvalId: opts.approvalId ?? '',
+      reason: `initialize_failed: ${errMsg}`,
+      nextAction: 'Check workspace directory and DB integrity. Try `pd runtime diagnostics`.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`Error: ${result.reason}`);
+      console.error(`Next action: ${result.nextAction}`);
+    }
+    process.exitCode = 1;
+  } finally {
+    // stateManager may be null if resolveWorkspaceDir() threw before assignment.
+    await stateManager?.close();
   }
 }

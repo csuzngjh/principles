@@ -4,7 +4,11 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
   private readonly activations = new Map<string, ActivationStatusRecord>();
 
   async getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null> {
-    return this.activations.get(idempotencyKey) ?? null;
+    // Bug-Q fix: filter out deactivated records so dispatcher allows re-activation.
+    // Mirrors SqliteActivationStateStore's `WHERE deactivated_at IS NULL` clause.
+    const record = this.activations.get(idempotencyKey);
+    if (!record || record.deactivatedAt !== null) return null;
+    return record;
   }
 
   async recordActivation(record: ActivationStatusRecord): Promise<void> {

@@ -32,6 +32,27 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     console.error('Error: --reason <text> is required');
     console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]');
     process.exit(1);
+    return;
+  }
+
+  // Bug-P fix: enforce reason length limit to prevent oversized data entering the pipeline.
+  // Consistent with pain-flood-simulation.ts (MAX_REASON_LENGTH = 500) and synthetic-baseline.ts.
+  // CodeRabbit review fix: emit JSON on --json and stop execution after exit (cli-1, cli-2, cli-5).
+  const MAX_REASON_LENGTH = 500;
+  if (opts.reason.length > MAX_REASON_LENGTH) {
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        reason: 'reason_too_long',
+        message: `--reason must be at most ${MAX_REASON_LENGTH} characters (got ${opts.reason.length})`,
+        nextAction: 'Shorten the reason text or split it into multiple pain records.',
+      }, null, 2));
+    } else {
+      console.error(`Error: --reason must be at most ${MAX_REASON_LENGTH} characters (got ${opts.reason.length})`);
+      console.error('Next action: shorten the reason text or split into multiple pain records.');
+    }
+    process.exit(1);
+    return;
   }
 
   if (opts.score !== undefined && (isNaN(opts.score) || opts.score < 0 || opts.score > 100)) {

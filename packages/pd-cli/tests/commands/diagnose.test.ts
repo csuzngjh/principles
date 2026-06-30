@@ -1,20 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { Command } from 'commander';
 
-const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
+  const mockCreateTask = vi.fn().mockResolvedValue(undefined);
+  const mockGetTask = vi.fn().mockResolvedValue({
+    taskId: 'test-task-1',
+    status: 'pending',
+    attemptCount: 0,
+    maxAttempts: 3,
+    lastError: null,
+  });
 
   class MockRuntimeStateManager {
     initialize = vi.fn().mockResolvedValue(undefined);
     close = vi.fn().mockResolvedValue(undefined);
-    getTask = vi.fn().mockResolvedValue({
-      taskId: 'test-task-1',
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      lastError: null,
-    });
+    getTask = mockGetTask;
+    createTask = mockCreateTask;
     getCandidatesByTaskId = mockGetCandidatesByTaskId;
     updateCandidateStatus = mockUpdateCandidateStatus;
     connection = {} as Record<string, unknown>;
@@ -26,7 +29,7 @@ const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateS
       calculateBackoff: () => 10,
     });
   }
-  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus };
+  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask };
 }, { validateType: true });
 
 const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
@@ -129,6 +132,27 @@ vi.mock('@principles/core/runtime-v2', () => {
     }),
     status: vi.fn(),
     PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+    // Defect-004 dreamer seed mocks — minimal stubs that mirror real behavior
+    buildDreamerSeedFromCandidate: vi.fn().mockImplementation((candidate: { candidateId: string }, _opts: { route: string; ready: boolean; sourcePainId?: string }) => ({
+      taskId: `dreamer-${candidate.candidateId}`,
+      taskKind: 'dreamer' as const,
+      channel: 'prompt' as const,
+      diagnosticJson: JSON.stringify({ candidateId: candidate.candidateId }),
+      status: 'pending' as const,
+      attemptCount: 0,
+      maxAttempts: 3,
+    })),
+    CANDIDATE_KIND_TO_ROUTE: {
+      principle: 'principle-candidate',
+      rule: 'rule-candidate',
+      prompt: 'prompt-candidate',
+    },
+    ROUTE_CHANNEL_MAP: {
+      'principle-candidate': 'prompt',
+      'rule-candidate': 'code_tool_hook',
+      'prompt-candidate': 'prompt',
+    },
+    MVP_ENABLED_CHANNELS: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
   };
 });
 
@@ -1107,5 +1131,157 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
     runMock.mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
+  });
+});
+
+// Defect-004 Part 2: dreamer seed after intake
+describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockCreateTask.mockResolvedValue(undefined);
+    // For dreamer seed tests, getTask should return null (dreamer task doesn't exist yet)
+    // so createTask gets called. Individual tests can override this if needed.
+    mockGetTask.mockResolvedValue(null);
+    mockIntake.mockReset();
+    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+  });
+
+  it('DREAMER-01: principle candidate — dreamer task created via createTask', async () => {
+    const candidates = [
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // Verify createTask was called for the dreamer task
+    expect(mockCreateTask).toHaveBeenCalled();
+    const createCall = mockCreateTask.mock.calls[0]?.[0];
+    expect(createCall?.taskKind).toBe('dreamer');
+    expect(createCall?.taskId).toBe('dreamer-cand-1');
+    expect(createCall?.status).toBe('pending');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DREAMER-02: defer candidate — no dreamer task created', async () => {
+    const candidates = [
+      { candidateId: 'cand-defer', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'defer' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // No dreamer task should be created for defer candidates
+    expect(mockCreateTask).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DREAMER-03: implementation candidate — no dreamer task created', async () => {
+    const candidates = [
+      { candidateId: 'cand-impl', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'implementation' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // No dreamer task should be created for implementation candidates
+    expect(mockCreateTask).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DREAMER-04: --no-intake skips dreamer seed', async () => {
+    const candidates = [
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+      intake: false,
+    } as DiagnoseRunOptions);
+
+    // No dreamer task should be created when intake is disabled
+    expect(mockCreateTask).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DREAMER-05: dreamer seed failure surfaces in intake results but does not fail the command', async () => {
+    const candidates = [
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+    // Make createTask throw to simulate seed failure
+    mockCreateTask.mockRejectedValueOnce(new Error('DB write failed'));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // Command should still succeed (exit 0) — dreamer seed failure is best-effort
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    // JSON output should include dreamer_seed_failed status
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.intake && Array.isArray(parsed.intake.candidates);
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    const seedResult = parsed.intake.candidates.find((c: { candidateId: string; status: string }) => c.candidateId === 'cand-1' && c.status === 'dreamer_seed_failed');
+    expect(seedResult).toBeDefined();
+    expect(seedResult.error).toContain('DB write failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });
