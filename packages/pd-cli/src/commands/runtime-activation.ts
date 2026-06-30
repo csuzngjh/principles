@@ -21,7 +21,7 @@ import type {
   ApprovalDecisionResult,
   ApprovalCompletionResult,
 } from '@principles/core/runtime-v2';
-import type { PIArtifactRecord } from '@principles/core/runtime-v2';
+import type { PIArtifactRecord, ActivationStatusRecord } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
@@ -480,7 +480,10 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
     const hasDangling = danglingArtifactIds.size > 0;
 
     // Attach per-record warning for dangling artifact_id (does not mutate DB).
-    const annotated = filtered.map(r => {
+    interface AnnotatedActivation extends ActivationStatusRecord {
+      warning?: string;
+    }
+    const annotated: AnnotatedActivation[] = filtered.map(r => {
       if (danglingArtifactIds.has(r.artifactId)) {
         return {
           ...r,
@@ -516,7 +519,7 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
           console.log(`  action: ${r.action}`);
           console.log(`  targetRef: ${r.targetRef}`);
           console.log(`  activatedAt: ${r.activatedAt}`);
-          if ('warning' in r && typeof r.warning === 'string') {
+          if (r.warning) {
             console.log(`  ⚠ WARNING: ${r.warning}`);
           }
           console.log('');
