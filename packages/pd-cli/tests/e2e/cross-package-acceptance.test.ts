@@ -397,21 +397,23 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     expect(activationRecord!.artifactId).toBe(revisedArtifactId);
     expect(activationRecord!.channel).toBe('code_tool_hook');
     expect(activationRecord!.deactivatedAt).toBeNull();
+    // PRI-489: Owner approval creates a SHADOW activation first (not live).
+    // Shadow activations are observation-only — they record would-block into
+    // shadowDecisions but never actually block the tool call. The only
+    // shadow -> live transition is `pd activation promote --confirm`.
+    expect(activationRecord!.action).toBe('code_tool_hook_shadow_activate');
 
     // Verify via listCodeToolHookActivations (P2 #5: default excludes deactivated)
     const activeActivations = await stateStore.listCodeToolHookActivations();
     const ourActivation = activeActivations.find(a => a.artifactId === revisedArtifactId);
     expect(ourActivation).toBeDefined();
     expect(ourActivation!.deactivatedAt).toBeNull();
+    expect(ourActivation!.action).toBe('code_tool_hook_shadow_activate');
 
-    // ── Step 7b: Verify the rule actually affects behavior via the gate (P1 #4)
-    // The production RuleHost gate loads all active rules, compiles their code,
-    // and calls evaluate() on each tool call. This step simulates that:
-    // 1. Load active rules from the activation state store
-    // 2. Compile the rule code in the production vm sandbox
-    // 3. Call evaluate() with system-path and normal-path inputs
-    // 4. Verify the rule blocks system paths and allows normal paths
-
+    // ── Step 7a: Verify shadow activation does NOT block (PRI-489) ────────
+    // Shadow mode is observation-only. The RuleHost loads the activation but
+    // records shadowDecisions instead of blocking. evaluate() must return
+    // undefined (no block) for shadow activations, even for /etc/passwd.
     const makeRuleHostInput = (targetPath: string): RuleHostInput => ({
       action: { toolName: 'write_file', normalizedPath: targetPath, paramsSummary: { path: targetPath } },
       workspace: { isRiskPath: targetPath.startsWith('/etc'), planStatus: 'NONE', hasPlanFile: false },
@@ -419,6 +421,43 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
       evolution: { epTier: 0 },
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' },
     });
+    const shadowRuleHost = new RuleHost(
+      path.join(tmpDir, '.state'),
+      { warn: () => {} },
+      { workspaceDir: tmpDir },
+    );
+    try {
+      const report = shadowRuleHost.evaluateDetailed(makeRuleHostInput('/etc/passwd'));
+      expect(report.liveDecision).toBeUndefined();
+      expect(report.shadowDecisions).toContainEqual(
+        expect.objectContaining({ activationId: activationRecord!.activationId }),
+      );
+    } finally {
+      shadowRuleHost.dispose();
+    }
+
+    // ── Step 7b: Promote shadow → live (PRI-489) ──────────────────────────
+    // `pd activation promote --activation-id ... --confirm` is the ONLY
+    // shadow → live entry. SqliteActivationStateStore.promoteActivation
+    // atomically rewrites action to `code_tool_hook_live_activate` inside a
+    // BEGIN IMMEDIATE transaction.
+    const activationId = activationRecord!.activationId;
+    const promoteResult = await stateStore.promoteActivation(activationId, new Date().toISOString());
+    expect(promoteResult).toBe(true);
+
+    // Verify the action is now live
+    const liveActivationRecord = await stateStore.getActivationStatus(idempotencyKey);
+    expect(liveActivationRecord).not.toBeNull();
+    expect(liveActivationRecord!.action).toBe('code_tool_hook_live_activate');
+    expect(liveActivationRecord!.promotedAt).not.toBeNull();
+
+    // ── Step 7c: Verify the rule actually blocks in live mode (P1 #4) ────
+    // The production RuleHost gate loads all active rules, compiles their code,
+    // and calls evaluate() on each tool call. This step simulates that:
+    // 1. Load active rules from the activation state store
+    // 2. Compile the rule code in the production vm sandbox
+    // 3. Call evaluate() with system-path and normal-path inputs
+    // 4. Verify the rule blocks system paths and allows normal paths
     const ruleHost = new RuleHost(
       path.join(tmpDir, '.state'),
       { warn: () => {} },
@@ -431,7 +470,6 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     expect(ruleHost.evaluate(makeRuleHostInput('/project/src/main.ts'))).toBeUndefined();
 
     // ── Step 8: Owner deactivates (rollback) ───────────────────────────────
-    const activationId = activationRecord!.activationId;
     const deactivateResult = await stateStore.deactivateActivation(activationId, new Date().toISOString());
     expect(deactivateResult).toBe(true);
 

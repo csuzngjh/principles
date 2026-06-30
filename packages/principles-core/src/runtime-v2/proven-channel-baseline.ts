@@ -528,7 +528,7 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
     {
       channel: 'code_tool_hook',
       entryPoint: 'ActivationDispatcher.dispatch → RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
-      expectedObservable: 'decision=would_activate|queued_for_approval, activationId=act_code_{ruleId}, action=code_tool_hook_live_activate, targetRef=impl://{ruleId}',
+      expectedObservable: 'decision=would_activate|queued_for_approval, activationId=act_code_{ruleId}, action=code_tool_hook_shadow_activate, targetRef=impl://{ruleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → RuleHostWriter gate decision contract; goldenTrace validation path',
