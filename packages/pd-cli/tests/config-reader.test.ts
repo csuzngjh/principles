@@ -22,15 +22,16 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
+// Mock js-yaml with NAMED exports (matches `import * as yaml from 'js-yaml'`
+// in config-reader.ts). js-yaml 5.x removed the default export, so the mock
+// must provide `load` and `JSON_SCHEMA` as named members, not under `default`.
 vi.mock('js-yaml', () => ({
-  default: {
-    load: vi.fn(),
-    JSON_SCHEMA: 'JSON_SCHEMA',
-  },
+  load: vi.fn(),
+  JSON_SCHEMA: 'JSON_SCHEMA',
 }));
 
 import * as fs from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const mockExistsSync = vi.mocked(fs.existsSync);
 const mockReadFileSync = vi.mocked(fs.readFileSync);
