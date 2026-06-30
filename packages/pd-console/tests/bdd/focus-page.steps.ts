@@ -66,8 +66,10 @@ registry.when('owner 在 FocusPage 点击第一条审批通过按钮', async (ct
   expect(approvalsBody.success).toBe(true);
   expect(approvalsBody.data.items.length).toBeGreaterThanOrEqual(2);
 
-  // 选取 prompt channel approval(e2e 测试的成熟选择)
-  const promptApproval = approvalsBody.data.items.find((a) => a.channel === 'prompt');
+  // 使用 BDD 专属 seed,避免与既有 E2E 流程争用同一条可变 approval。
+  const promptApproval = approvalsBody.data.items.find(
+    (a) => a.approvalId === 'apr-prompt-bdd',
+  );
   expect(
     promptApproval,
     'seed 应至少包含 1 个 prompt channel approval',
@@ -98,18 +100,15 @@ registry.when('owner 在 FocusPage 点击第一条审批通过按钮', async (ct
   expect(approveBody.success).toBe(true);
   // approve 后状态应变为 approved
   expect(approveBody.data.status).toBe('approved');
-  // 成功路径:activation 对象应包含 activationId 或 decision
-  // 失败路径:必须有 error reason(Runtime Contract Rule 9 — 不能静默)
-  if (approveBody.data.activation) {
-    expect(
-      approveBody.data.activation.activationId ?? approveBody.data.activation.decision,
-    ).toBeTruthy();
-  } else {
-    expect(approveBody.data.error).toBeTruthy();
-  }
+  // 本 scenario 明确要求出现新激活项,降级路径必须失败并带出原因。
+  expect(
+    approveBody.data.activation,
+    `approval did not activate: ${approveBody.data.error ?? 'missing error reason'}`,
+  ).toBeDefined();
+  expect(approveBody.data.activation?.activationId).toBeTruthy();
 
   ctx.state.approvalId = firstApproval.approvalId;
-  ctx.state.approveSucceeded = Boolean(approveBody.data.activation);
+  ctx.state.activationId = approveBody.data.activation?.activationId;
 });
 
 // ── Then:pending count 减少 1 ────────────────────────────────────────────────
@@ -134,13 +133,15 @@ registry.then('ActivationPage 出现新的激活项', async (ctx, page, api) => 
   const body = (await resp.json()) as {
     success: boolean;
     data: {
-      activations: Array<{ activationId: string; status: string }>;
+      activations: Array<{ id: string; status: string }>;
     };
   };
   expect(body.success).toBe(true);
-  // 应至少有 1 个 active activation
-  const activeActivations = body.data.activations.filter((a) => a.status === 'active');
-  expect(activeActivations.length).toBeGreaterThanOrEqual(1);
+  const activationId = ctx.state.activationId;
+  expect(typeof activationId).toBe('string');
+  const activation = body.data.activations.find((a) => a.id === activationId);
+  expect(activation, `activation ${String(activationId)} not found`).toBeDefined();
+  expect(activation?.status).toBe('active');
 });
 
 // ── 加载并注册 feature ───────────────────────────────────────────────────────

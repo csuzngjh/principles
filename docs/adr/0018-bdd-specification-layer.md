@@ -23,7 +23,7 @@ PD 项目当前测试体系存在三类痛点(详见 [BDD spec §1](../superpowe
 
 2. **BDD runner 放 `tests/bdd/support/`,不进 `src/`**。理由:`@principles/core` 是公开发布的 SDK,放 `src/testing/` 会进 dist,把 BDD 工具带进 SDK。runner 与 step definitions 都属于测试侧代码,不进发布包。
 
-3. **`@cucumber/gherkin-utils` 作为 root devDependency**,不进任何子包的 dependencies。实际解析器从其传递依赖 `@cucumber/gherkin` 导入 `Parser`/`AstBuilder`/`GherkinClassicTokenMatcher`;但注册的 devDependency 是 `@cucumber/gherkin-utils`(版本 `^9.2.0`),避免污染 `@principles/core` 的发布依赖。
+3. **`@cucumber/gherkin` 与 `@cucumber/messages` 作为 root devDependencies**,不进任何子包的 dependencies。BDD 测试直接导入这两个包,因此必须直接声明,不能依赖其他包的传递依赖或 npm hoist;同时不会污染 `@principles/core` 的发布依赖。
 
 4. **BDD 不进 `verify:merge` 合并门禁**。`verify:merge` 只跑 9 个静态门(check:generated-artifacts / check:error-handbook / check:repo-hygiene / check:runtime-contract / check:docs-structure / lint / build / build pd-cli / typecheck:openclaw-plugin / typecheck:pd-console)。BDD 场景随 CI per-package test job 跑;要让 BDD 成为合并门禁,需显式修改 CI required checks(Phase 2 评估)。
 
@@ -57,7 +57,7 @@ PD 项目当前测试体系存在三类痛点(详见 [BDD spec §1](../superpowe
 
 ### 4.2 负面
 
-- **新增依赖**:`@cucumber/gherkin-utils` 进 root devDependencies(传递带入 `@cucumber/gherkin`、`@cucumber/messages`)。
+- **新增依赖**:`@cucumber/gherkin` 与 `@cucumber/messages` 进入 root devDependencies。
 - **维护成本**:需要维护 `.feature` 文件和 step definitions 两套;重构真实接口时 step definitions 必须同步更新。
 - **BDD 不在 verify:merge 内**:需 Owner 知晓——合并门禁不包含 BDD,BDD 失败不会阻断 `npm run verify:merge`。Phase 2 评估是否加入 CI required checks。
 

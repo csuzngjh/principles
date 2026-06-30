@@ -13,8 +13,10 @@ describe('repo-root resolver', () => {
   });
 
   it('resolveFeaturePath 把相对路径解析为绝对路径', () => {
-    const abs = resolveFeaturePath('docs/specs/features/cli/json-output.feature');
-    expect(abs).toMatch(/[A-Z]:\\.*docs[\\/]specs[\\/]features[\\/]cli[\\/]json-output\.feature/);
+    const relativePath = 'docs/specs/features/cli/json-output.feature';
+    const abs = resolveFeaturePath(relativePath);
+    expect(path.isAbsolute(abs)).toBe(true);
+    expect(abs).toBe(path.resolve(resolveRepoRoot(), relativePath));
   });
 
   it('resolveRepoRoot 不依赖 process.cwd()', () => {

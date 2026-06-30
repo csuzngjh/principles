@@ -39,16 +39,6 @@ cd packages/pd-console && npm run test                 # Run tests
 npm run version:patch  # or minor, major
 ```
 
-### Worktree Setup (MANDATORY for new worktrees)
-
-Before any coding in a new worktree (created by Trae/Qoder/Gemini or manually), run:
-
-```powershell
-.\scripts\setup-worktree.ps1
-```
-
-This single command handles: PATH fix (Trae bug), private docs junction, `npm install`, `npm run build`, and a health check. Idempotent and fail loud. Options: `-SkipInstall`, `-SkipBuild`, `-SkipPrivateDocs`. See `.trae/rules/project_rules.md` § Worktree Setup for details.
-
 ## Architecture
 
 ### Directory Structure
