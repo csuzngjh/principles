@@ -656,7 +656,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 - **9.2 ADR 编号**：实施时确认 `docs/adr/` 下一个可用编号，本设计文档占位为 `00XX`。
 - **9.3 `@cucumber/gherkin-utils` 版本**：实施时确认 npm 上最新稳定版，记录到 ADR。注意它依赖 `@cucumber/gherkin`、`@cucumber/messages`、`commander`，unpacked ~213KB，作为 root devDependency 可接受，但**不**进任何 package 的 `dependencies`。
 - **9.4 `architecture-regression.test.ts` 守卫加强**：当前守卫可能未覆盖"测试代码不进 `src/`"。Phase 1 实施时核查，如未覆盖，新增规则禁止 `packages/principles-core/src/testing/` 之类的目录存在。
-- **9.5 `docs/.private/product/emotional-value.md` 可读性**：实施时确认主 worktree 该文件存在；如不存在，修正 §7 引用或补建文件。
+- **9.5 `docs/.private/product/emotional-value.md` 可读性**：**已解决**（2026-06-30）。根因：private repo `D:\Code\principles-private` 工作区文件被误删（未提交），通过 `git restore docs/` 恢复；同时 Trae worktree 的 `docs\.private` junction 缺失，通过 `.\scripts\setup-private-docs-symlink.ps1` 重建。文件 7752 bytes / 174 行，通过 worktree junction 可读。
 
 ## 10. 参考文档
 
