@@ -98,12 +98,13 @@ Outcome here.
 
   // ── Export count sanity check ────────────────────────────────────────
 
-  it('exports exactly 9 named exports (functions + constants)', () => {
+  it('exports at least 9 named exports (functions + constants)', () => {
     // Count all exported keys — should be stable and minimal.
     const exportKeys = Object.keys(browserExports);
     // Filter out type exports (they don't appear at runtime in ESM).
     const runtimeExports = exportKeys.filter(k => typeof browserExports[k as keyof typeof browserExports] !== 'undefined');
-    // Expected: 7 functions/constants from intent-doc + 2 from intent-doc-version
+    // Expected: 9 from intent-doc + 2 from intent-doc-version = 11 runtime exports.
+    // Using >= to avoid breaking when new browser-safe exports are added.
     expect(runtimeExports.length).toBeGreaterThanOrEqual(9);
   });
 });
