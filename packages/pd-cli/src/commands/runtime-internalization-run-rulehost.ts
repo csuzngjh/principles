@@ -39,7 +39,6 @@ import {
 } from '@principles/core/runtime-v2';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
-import { BehaviorExamplePackAssembler, RuleHostEvidenceRegistry } from 'principles-disciple/rulehost-evidence';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
 import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
@@ -473,6 +472,13 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         return;
       }
       if (opts.confirm) {
+        // Lazy import: avoids loading `principles-disciple` at module init time.
+        // `pd --version` (and the create-principles-disciple smoke test) loads
+        // this file statically via index.ts. If we used a static import, the
+        // module would fail with MODULE_NOT_FOUND in bundled environments where
+        // `principles-disciple` is not resolvable from pd-cli's node_modules.
+        // The import only executes when `--confirm` is actually used.
+        const { BehaviorExamplePackAssembler, RuleHostEvidenceRegistry } = await import('principles-disciple/rulehost-evidence');
         try {
           const assembler = new BehaviorExamplePackAssembler({ workspaceDir, stateDir: path.join(workspaceDir, '.state') });
           behaviorExamplePack = assembler.assemble({
