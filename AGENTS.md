@@ -201,6 +201,24 @@ cd packages/openclaw-plugin && npm run build && npm run test
 npm run lint
 ```
 
+## BDD Workflow (AI 助手改代码前)
+
+AI 助手在 PD 项目改代码时的新流程:
+
+1. 读 `docs/specs/features/` 找到受影响的 `.feature` 文件
+2. 读 `.feature` 确认行为契约
+3. 改代码
+4. 跑受影响的 `.feature` 场景(`cd packages/<pkg> && npx vitest run tests/bdd/xxx.steps.ts` 或 `npx playwright test tests/bdd/xxx.steps.ts`)
+5. 如果场景失败,确认是代码 bug 还是 `.feature` 过时
+   - 代码 bug → 修代码
+   - `.feature` 过时 → 跟 Owner 确认后改 `.feature`,并在 PR 说明中记录
+6. PR Pre-Review Gate 的对抗式自检,优先检查 `.feature` 是否都绿
+
+**关键约束**:
+- AI 助手**可以**修改 step definitions(重构真实接口时是必要的)
+- AI 助手**不能降低 `.feature` 的可观察结果**——任何 `.feature` 行为变化必须 Owner-visible,并在 PR 描述说明原因
+- AI 助手**不能**通过删除 `.feature` 文件或加 `@disabled` 标签让测试绿(除非 PR 描述明确说明行为契约被移除/暂停的原因,且 Owner 已确认)
+
 ## Linear Workflow
 
 1. Read the issue (including comments) BEFORE writing code
@@ -257,6 +275,16 @@ Before handing off a PR (pushing, creating PR, or reporting completion), execute
 - `gh pr diff <PR> --name-only` (or `git diff origin/main --name-only`)
 - Confirm no unrelated files were modified.
 - Confirm no stale-main rollback of already-merged code (see ERR-012).
+
+**BDD 影响评估**
+
+- [ ] 本 PR 是否修改了 MVP-Core 用户旅程?如果是,对应 `.feature` 是:
+      - [ ] 保持不变(行为契约未变)
+      - [ ] 更新(行为契约变化,已在 PR 描述说明原因)
+      - [ ] 不适用(说明为什么这条旅程不再适用)
+- [ ] 本 PR 是否新增/修改了 CLI 命令?如果是,cli-1~cli-7 对应 `.feature` 是否更新?
+- [ ] 本 PR 是否触发了 ERR 类?如果是,是否新增了回归 `.feature` scenario?
+- [ ] 本 PR 是否删除了 `.feature` 文件?如果是,是否在 PR 描述说明了"行为契约被移除的原因"?
 
 **Run tests**
 - `cd packages/principles-core && npm run test`
