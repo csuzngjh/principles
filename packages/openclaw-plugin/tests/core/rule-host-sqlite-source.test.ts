@@ -100,6 +100,7 @@ async function insertCodeToolHookActivation(overrides?: {
   artifactId?: string;
   ruleId?: string;
   deactivatedAt?: string | null;
+  action?: string;
 }): Promise<void> {
   const activationId = overrides?.activationId ?? ACTIVATION_ID;
   const artifactId = overrides?.artifactId ?? ARTIFACT_ID;
@@ -112,7 +113,7 @@ async function insertCodeToolHookActivation(overrides?: {
     idempotencyKey: `${artifactId}::code_tool_hook`,
     artifactId,
     channel: 'code_tool_hook',
-    action: 'code_tool_hook_shadow_activate',
+    action: overrides?.action ?? 'code_tool_hook_live_activate',
     targetRef: `impl://${ruleId}`,
     activatedAt: now,
     deactivatedAt: overrides?.deactivatedAt ?? null,
@@ -142,6 +143,23 @@ function makeInput(normalizedPath: string): RuleHostInput {
     derived: {
       estimatedLineChanges: 1,
       bashRisk: 'safe' as const,
+    },
+  };
+}
+
+function makeV2Input(normalizedPath: string): RuleHostInput {
+  return {
+    ...makeInput(normalizedPath),
+    context: {
+      version: 2,
+      history: { status: 'available', truncated: false, calls: [] },
+      facts: {
+        priorReadOfTarget: 'no',
+        readCount: 0,
+        writeCount: 0,
+        uniqueWritePathCount: 0,
+        sameActionBlockCount: null,
+      },
     },
   };
 }
@@ -204,6 +222,54 @@ describe('PRI-436 Slice 1: SQLite-only RuleHost executes exactly once', () => {
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('RuleContext v2 activation compatibility', () => {
+  it('does not load a v2 activation when the host input has no v2 context', async () => {
+    insertRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: BLOCKING_CODE,
+        requiresContextVersion: 2,
+      }),
+    });
+    await insertCodeToolHookActivation({ action: 'code_tool_hook_live_activate' });
+    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+
+    expect(ruleHost.evaluate(makeInput('/etc/passwd'))).toBeUndefined();
+  });
+
+  it('loads a v2 activation when the host input carries v2 context', async () => {
+    insertRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: BLOCKING_CODE,
+        requiresContextVersion: 2,
+      }),
+    });
+    await insertCodeToolHookActivation({ action: 'code_tool_hook_live_activate' });
+    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+
+    expect(ruleHost.evaluate(makeV2Input('/etc/passwd'))?.decision).toBe('block');
+  });
+});
+
+describe('RuleHost shadow and live activation modes', () => {
+  it('evaluates a shadow activation without returning an enforcement decision', async () => {
+    insertRuleArtifact();
+    await insertCodeToolHookActivation({ action: 'code_tool_hook_shadow_activate' });
+    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.shadowDecisions).toEqual([
+      expect.objectContaining({
+        decision: 'block',
+        ruleId: RULE_ID,
+        activationId: ACTIVATION_ID,
+      }),
+    ]);
+    expect(ruleHost.evaluate(makeInput('/etc/passwd'))).toBeUndefined();
   });
 });
 

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const mockRuleHostWriterConfigs = vi.hoisted(() => [] as Array<{ featureFlagProbe?: (flagId: string) => boolean }>);
+const mockFeatureFlags = vi.hoisted(() => ({
+  flags: { rulecode_context_v2: { id: 'rulecode_context_v2', category: 'quiet' as const, enabled: true, since: '2026-06-27', description: 'test' } },
+}));
+
 const mockGetArtifactById = vi.fn();
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockApprovalEdit = vi.fn();
@@ -7,9 +12,18 @@ const mockApprovalGetById = vi.fn();
 const mockApprovalApprove = vi.fn();
 const mockApprovalResetToPending = vi.fn();
 const mockCompletionComplete = vi.fn();
+const mockPromoteActivation = vi.fn().mockResolvedValue(true);
+const mockListCodeToolHookActivations = vi.fn().mockResolvedValue([
+  { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
+]);
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
+}));
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: vi.fn().mockReturnValue({ ok: true, effective: {} }),
+  computeFlagsFromLoadResult: vi.fn().mockReturnValue(mockFeatureFlags),
 }));
 
 vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
@@ -41,9 +55,8 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         listPromptActivations: vi.fn().mockResolvedValue([
           { activationId: 'act-prompt-1', artifactId: 'art-001', channel: 'prompt', action: 'prompt', targetRef: 'P_001', activatedAt: '2026-06-18T00:00:00.000Z', deactivatedAt: null },
         ]),
-        listCodeToolHookActivations: vi.fn().mockResolvedValue([
-          { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'block', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', deactivatedAt: null },
-        ]),
+        listCodeToolHookActivations: mockListCodeToolHookActivations,
+        promoteActivation: mockPromoteActivation,
         listAllActivations: vi.fn().mockResolvedValue([
           { activationId: 'act-prompt-1', artifactId: 'art-001', channel: 'prompt', action: 'prompt', targetRef: 'P_001', activatedAt: '2026-06-18T00:00:00.000Z', deactivatedAt: null },
           { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'block', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', deactivatedAt: null },
@@ -81,11 +94,15 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     ApprovalCompletionService: vi.fn().mockImplementation(function () {
       return { completeApproval: mockCompletionComplete };
     }),
+    RuleHostWriter: vi.fn().mockImplementation(function (config) {
+      mockRuleHostWriterConfigs.push(config);
+      return { channel: 'code_tool_hook' };
+    }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
 });
 
-import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleActivationApprove } from '../../src/commands/runtime-activation.js';
+import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleActivationApprove, handleRuntimeActivationPromote } from '../../src/commands/runtime-activation.js';
 
 const WS = '/fake/workspace';
 
@@ -110,9 +127,22 @@ describe('handleRuntimeActivationDispatch', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRuleHostWriterConfigs.length = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockGetArtifactById.mockResolvedValue(makeArtifact());
+  });
+
+  it('wires the effective workspace feature flags into RuleHostWriter', async () => {
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    expect(mockRuleHostWriterConfigs).toHaveLength(1);
+    expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe?.('rulecode_context_v2')).toBe(true);
   });
 
   afterEach(() => {
@@ -410,6 +440,47 @@ describe('handleRuntimeActivationList', () => {
     const errorText = consoleErrorSpy.mock.calls.map(c => c[0]).join('\n');
     expect(errorText).toContain('invalid channel');
     expect(errorText).toContain('Next action');
+    expect(process.exitCode).toBe(1);
+  });
+});
+
+describe('handleRuntimeActivationPromote', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListCodeToolHookActivations.mockResolvedValue([
+      { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
+    ]);
+    mockPromoteActivation.mockResolvedValue(true);
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('defaults to dry-run and does not mutate activation state', async () => {
+    await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', json: true });
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('would_promote');
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
+  });
+
+  it('promotes an eligible shadow activation when confirmed', async () => {
+    await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', confirm: true, json: true });
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('promoted');
+    expect(mockPromoteActivation).toHaveBeenCalledWith('act-hook-1', expect.any(String));
+  });
+
+  it('rejects mutually exclusive dry-run and confirm without mutation', async () => {
+    await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', dryRun: true, confirm: true, json: true });
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 });
