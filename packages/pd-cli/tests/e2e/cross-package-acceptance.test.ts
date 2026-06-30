@@ -426,8 +426,15 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
       { warn: () => {} },
       { workspaceDir: tmpDir },
     );
-    // Shadow activation must NOT block — evaluate returns undefined.
-    expect(shadowRuleHost.evaluate(makeRuleHostInput('/etc/passwd'))).toBeUndefined();
+    try {
+      const report = shadowRuleHost.evaluateDetailed(makeRuleHostInput('/etc/passwd'));
+      expect(report.liveDecision).toBeUndefined();
+      expect(report.shadowDecisions).toContainEqual(
+        expect.objectContaining({ activationId: activationRecord!.activationId }),
+      );
+    } finally {
+      shadowRuleHost.dispose();
+    }
 
     // ── Step 7b: Promote shadow → live (PRI-489) ──────────────────────────
     // `pd activation promote --activation-id ... --confirm` is the ONLY
