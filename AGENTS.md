@@ -75,6 +75,35 @@ These are **maintainer-driven completeness anxiety**, not external user signal. 
 
 ## Mandatory Pre-Task Reading
 
+### Step 0: Worktree environment health check (run FIRST, every session)
+
+**Before ANY other task action**, verify the worktree is ready. If any of these are missing, run `.\scripts\setup-worktree.ps1` before proceeding:
+
+- `docs/.private/` junction missing → AI 助手将无法读取 private docs(emotional-value.md 等)
+- `node_modules/@types/node` missing → `npm run build` 会失败
+- `packages/principles-core/dist/index.js` missing → 依赖 core 的测试会失败
+- `git`/`node`/`npm` not on PATH → Trae IDE bug,需要 PATH 修复
+
+**One-command fix**:
+
+```powershell
+.\scripts\setup-worktree.ps1
+```
+
+Idempotent and fail loud. Safe to run repeatedly — already-correct steps skip with `[skip]`. See `.trae/rules/project_rules.md` § Worktree Setup for options (`-SkipInstall`, `-SkipBuild`, `-SkipPrivateDocs`).
+
+**Do NOT manually patch these one by one.** Running the script is the only sanctioned way to fix worktree environment issues. Manual patching leads to inconsistent state across worktrees (ERR-025/088 类风险:看起来就绪但实际未就绪)。
+
+**Quick check** (if you want to verify without running the full script):
+
+```powershell
+.\scripts\setup-worktree.ps1 -SkipInstall -SkipBuild
+```
+
+This runs the health check in ~0.2s and reports `[ok]`/`[skip]`/`[fail]` for each item.
+
+### Step 1: Error Pattern Index
+
 Before starting ANY coding task on this project, you MUST read `docs/process/error-management/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
 
 Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
@@ -171,18 +200,6 @@ cd packages/principles-core && npm run build && npm run test
 cd packages/openclaw-plugin && npm run build && npm run test
 npm run lint
 ```
-
-## Worktree Setup (MANDATORY for new worktrees)
-
-**Before any coding in a new worktree (created by Trae/Qoder/Gemini or manually), run:**
-
-```powershell
-.\scripts\setup-worktree.ps1
-```
-
-This single command handles: PATH fix (Trae bug), private docs junction, `npm install`, `npm run build`, and a health check. Idempotent and fail loud. See `.trae/rules/project_rules.md` § Worktree Setup for options and scenarios.
-
-**AI assistants**: If `docs/.private/` is missing OR `node_modules/@types/node` is missing OR `packages/principles-core/dist` is missing, run the script before proceeding. Do not manually patch these one by one.
 
 ## Linear Workflow
 
