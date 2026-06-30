@@ -38,7 +38,7 @@ PR → main → Actions → npm → 5-file sync → tag
 
 ### Triggers
 
-- **Auto**: PR merged to main with `packages/**` changes
+- **Auto**: PR merged to main with changes in `packages/openclaw-plugin/**`, `packages/principles-core/**`, `packages/pd-cli/**`, or `packages/create-principles-disciple/**`
 - **Manual**: Actions → Publish to npm → Run
 - **Tag**: `git push origin v1.8.2`
 
@@ -85,7 +85,7 @@ npm view principles-disciple version
 |-------|-----|
 | Version mismatch | `./scripts/sync-version.sh` |
 | Publish failed | Check `NPM_TOKEN` |
-| Build failed | `git diff --check` |
+| Build failed | `npm run build` (check logs for errors) |
 
 ### Required Setup
 

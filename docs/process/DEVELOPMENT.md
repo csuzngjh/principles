@@ -136,8 +136,8 @@ Tests use **Vitest** with **v8 coverage provider**.
 
 ```bash
 npm run test          # Run all tests once
-npm run test:watch    # Run tests in watch mode (not in package.json scripts, use vitest directly)
 npm run test:coverage # Run with coverage report
+# Watch mode: npx vitest (no npm script defined)
 ```
 
 ### Coverage Thresholds

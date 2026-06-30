@@ -253,7 +253,7 @@ Include in the PR body or completion report:
 
 ## Private Docs Access (Symlink)
 
-Private docs live in an independent git repo at `D:/Code/principles-private/` and are accessed transparently via the `docs/.private/` junction:
+Private docs live in an independent git repo (example path: `D:/Code/principles-private/` — adjust per your environment) and are accessed transparently via the `docs/.private/` junction:
 - `docs/.private/agents/issue-tracker.md` (issue tracker workflow)
 - `docs/.private/agents/triage-labels.md` (triage labels)
 - `docs/.private/agents/domain.md` (domain workflow)

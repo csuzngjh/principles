@@ -1,12 +1,12 @@
-# scripts/setup-private-docs-symlink.ps1
+﻿# scripts/setup-private-docs-symlink.ps1
 # 在所有 worktree 中创建 docs/.private → D:/Code/principles-private/docs 的 junction
-# 用法:.\scripts\setup-private-docs-symlink.ps1
+# 用法: .\scripts\setup-private-docs-symlink.ps1
 #
-# 注:计划中名为 symlink,实际用 Junction 代替 SymbolicLink,因为:
+# 注: 计划中名为 symlink, 实际用 Junction 代替 SymbolicLink, 因为:
 #   - Junction 不需要管理员权限或开发者模式
-#   - Junction 只能指向本地目录(本场景符合)
-#   - Junction 对 AI 助手透明(像普通目录一样访问)
-#   - SymbolicLink 在 Windows 上需要管理员权限,不适合所有 worktree 自动部署
+#   - Junction 只能指向本地目录 (本场景符合)
+#   - Junction 对 AI 助手透明 (像普通目录一样访问)
+#   - SymbolicLink 在 Windows 上需要管理员权限, 不适合所有 worktree 自动部署
 
 $ErrorActionPreference = 'Stop'
 $privateTarget = 'D:\Code\principles-private\docs'
@@ -21,7 +21,7 @@ if (-not (Test-Path $privateTarget)) {
 $worktrees = git worktree list --porcelain | Where-Object { $_ -match '^worktree ' } | ForEach-Object { ($_ -replace '^worktree ', '').Trim() }
 
 if (-not $worktrees) {
-  Write-Warning "未找到任何 worktree,尝试当前目录"
+  Write-Warning "未找到任何 worktree, 尝试当前目录"
   $worktrees = @((Get-Location).Path)
 }
 
@@ -38,11 +38,15 @@ foreach ($wt in $worktrees) {
       $skipped++
       continue
     }
-    # 指向错误或不是 junction,删除后重建
-    try {
-      Remove-Item $linkPath -Force -Recurse -ErrorAction Stop
-    } catch {
-      Write-Warning "[fail] $linkPath : cannot remove existing item: $_"
+    # 存在但不是指向正确目标的 Junction: 报错而非自动删除
+    # (避免误删真实目录或用户手动创建的文件)
+    if ($existing -and $existing.LinkType -ne 'Junction') {
+      Write-Error "[fail] $linkPath 已存在但不是 Junction (类型: $($existing.LinkType)). 请手动检查并删除后重试."
+      $failed++
+      continue
+    }
+    if ($existing -and $existing.LinkType -eq 'Junction' -and "$($existing.Target)" -ne $privateTarget) {
+      Write-Error "[fail] $linkPath 是 Junction 但指向 $($existing.Target), 预期 $privateTarget. 请手动检查后重试."
       $failed++
       continue
     }
@@ -62,5 +66,5 @@ foreach ($wt in $worktrees) {
 }
 
 Write-Host ""
-Write-Host "完成: $created 创建,$skipped 跳过,$failed 失败"
+Write-Host "完成: $created 创建, $skipped 跳过, $failed 失败"
 if ($failed -gt 0) { exit 1 }

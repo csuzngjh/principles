@@ -1,4 +1,4 @@
-﻿# 参与贡献 (Contributing)
+# 参与贡献 (Contributing)
 
 [English](CONTRIBUTING.md) | [中文](CONTRIBUTING_ZH.md)
 

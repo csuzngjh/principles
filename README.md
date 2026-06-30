@@ -249,7 +249,7 @@ Principles Disciple is an attempt to turn that loop into a local, inspectable, o
 ## ❓ FAQ & Troubleshooting
 
 **Q: AI refuses to modify files?**
-A: Check `.planning/plan.md` — it needs `STATUS: READY` for risky paths
+A: Check `docs/PLAN.md` — it needs `STATUS: READY` for risky paths
 
 **Q: AI seems dumbed down?**
 A: Check your expertise level: `/profile "Domain: Expert"`

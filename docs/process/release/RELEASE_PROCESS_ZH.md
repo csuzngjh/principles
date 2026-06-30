@@ -38,7 +38,7 @@ PR → main → Actions → npm → 5文件同步 → tag
 
 ### 触发条件
 
-- **自动**: PR 合并到 main，修改了 `packages/**`
+- **自动**: PR 合并到 main，修改了 `packages/openclaw-plugin/**`、`packages/principles-core/**`、`packages/pd-cli/**` 或 `packages/create-principles-disciple/**`
 - **手动**: Actions → Publish to npm → Run
 - **Tag**: `git push origin v1.8.2`
 
@@ -85,7 +85,7 @@ npm view principles-disciple version
 |------|------|
 | 版本不同步 | `./scripts/sync-version.sh` |
 | 发布失败 | 检查 `NPM_TOKEN` |
-| 构建失败 | `git diff --check` |
+| 构建失败 | `npm run build`（查看日志错误） |
 
 ### 必要配置
 
