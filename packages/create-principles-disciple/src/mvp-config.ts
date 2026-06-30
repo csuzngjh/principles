@@ -278,7 +278,7 @@ export function generateConfigYamlContent(): string {
     },
   };
 
-  return yaml.dump(config, { lineWidth: -1, quotingType: '"' });
+  return yaml.dump(config, { lineWidth: -1, quoteStyle: 'double' });
 }
 
 /**
