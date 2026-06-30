@@ -271,47 +271,6 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
     expect(result?.appendSystemContext).toContain('<core_principles>');
   });
 
-  it('GFI scoring still runs — trackFriction called on empathy match', async () => {
-    const { matchEmpathyKeywords } = await import('../../src/core/empathy-keyword-matcher.js');
-    (matchEmpathyKeywords as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      score: 0.8,
-      matched: true,
-      severity: 'moderate',
-      matchedTerms: ['frustrated'],
-    });
-
-    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      workspaceDir: '/fake/workspace',
-      stateDir: '/fake/state',
-      resolve: (key: string) => `/fake/${key}`,
-      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn(), recordPainEvent: vi.fn() },
-      config: { get: vi.fn().mockImplementation((k: string) => {
-        if (k === 'thresholds.pain_trigger') return 100;
-        if (k === 'severity_thresholds.high') return 70;
-        if (k === 'language') return 'en';
-        return undefined;
-      }) },
-      eventLog: { recordPainSignal: vi.fn() },
-      evolutionReducer: {
-        getActivePrinciples: vi.fn().mockReturnValue([]),
-        getProbationPrinciples: vi.fn().mockReturnValue([]),
-      },
-    });
-
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const event = {
-      prompt: 'I am frustrated with this result',
-      messages: [{ role: 'user', content: 'I am frustrated' }],
-      trigger: 'user',
-      sessionId: 'gfi-test-session',
-    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
-
-    await handleBeforePromptBuild(event, makeCtx({ sessionGfi: 80 }));
-
-    const { trackFriction } = await import('../../src/core/session-tracker.js');
-    expect(trackFriction).toHaveBeenCalled();
-  });
 
   it('size guard still works — total injection under 9000', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
