@@ -5,6 +5,12 @@
  *
  * 这些函数使用真实 SQLite stores + production services,
  * 不 mock production path (ERR-025)。
+ *
+ * 注意:本文件必须放在 src/ 下 (rootDir 内),不能放回 tests/bdd/support/。
+ * 原因:story-a-acceptance.test.ts 在 src/__tests__/ 内,属于 tsc build 程序,
+ * 若它 import rootDir 之外的文件 (如 tests/bdd/support/helpers.ts) 会触发
+ * TS6059 (File is not under rootDir),导致 npm run build 失败。
+ * BDD steps (tests/bdd/story-a.steps.ts) 不在 build 程序内,可以跨边界 import 本文件。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -19,10 +25,10 @@ import {
   DeferArchiveWriter,
   RuleHostWriter,
   createProductionGateDeps,
-} from '../../../src/runtime-v2/index.js';
+} from '../../index.js';
 import type {
   PIArtifactSnapshot,
-} from '../../../src/runtime-v2/activation/activation-types.js';
+} from '../activation-types.js';
 
 // ── Test workspace setup ────────────────────────────────────────────────────
 
