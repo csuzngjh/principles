@@ -9,12 +9,10 @@
  * 2. Rule Host: Dynamic principle-based evaluation (sole gate)
  */
 
-import { normalizePath } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
-import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
-import { validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
+import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
@@ -41,45 +39,27 @@ export function handleBeforeToolCall(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
 
-  // 2. Resolve the target file path
-  let filePath = event.params?.file_path || event.params?.path || event.params?.file || event.params?.target;
-
-  // Heuristic for bash mutation detection
-  if (isBash && !filePath) {
-    const command = String(event.params?.command || event.params?.args || '');
-    const mutationMatch = /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
-
-    if (mutationMatch) {
-      filePath = mutationMatch[1];
-    } else {
-      // Bash command without a clear file target — let it through to Rule Host
-      filePath = command;
-    }
-  }
-
-  // Write tools without a file path must still go through RuleHost evaluation.
-  // Use a synthetic path so RuleHost can evaluate and potentially block.
-  if (!filePath && isWriteTool) {
-    filePath = `<tool:${event.toolName}>`;
-  }
-
-  if (typeof filePath !== 'string') return;
-
-  const relPath = normalizePath(filePath, ctx.workspaceDir);
+  // 2. Use the same action builder as Golden Trace replay. This is the single
+  // path extraction + normalization contract for production and evaluation.
+  const action = buildRuleHostAction(event.toolName, event.params ?? {}, ctx.workspaceDir, {
+    isBashTool: isBash,
+    isWriteTool,
+  });
+  const relPath = action.normalizedPath;
+  // buildRuleHostAction returns null when no path can be extracted (e.g. bash
+  // command with no file target and no clear mutation operator). Mirror the
+  // legacy guard: no path → no gate evaluation, let the tool through.
+  if (relPath === null) return;
 
   // 3. Rule Host Evaluation — sole gate
   try {
-    const ruleHost = new RuleHost(wctx.stateDir, logger, { workspaceDir: ctx.workspaceDir });
+    const ruleHost = wctx.getRuleHost(logger);
     // PRI-483 Phase 4: assemble RuleContextV2 when `rulecode_context_v2` flag is ON.
     // flag OFF → undefined (v1 zero-change, no trajectory access).
     // flag ON  → RuleContextV2 (available or unavailable). Never throws (ERR-024).
     const ruleContext = _buildRuleContextIfEnabled(wctx, relPath, ctx.sessionId, logger);
     const hostInput: RuleHostInput = {
-      action: {
-        toolName: event.toolName,
-        normalizedPath: relPath,
-        paramsSummary: _extractParamsSummary(event.params ?? {}),
-      },
+      action,
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
         // DEPRECATED (PRI-286): planStatus/hasPlanFile are legacy compatibility fields.
@@ -104,7 +84,27 @@ export function handleBeforeToolCall(
       context: ruleContext,
     };
 
-    const hostResult = ruleHost.evaluate(hostInput);
+    const report = typeof ruleHost.evaluateDetailed === 'function'
+      ? ruleHost.evaluateDetailed(hostInput)
+      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [] };
+    const hostResult = report.liveDecision;
+
+    for (const shadowDecision of report.shadowDecisions) {
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        eventLog.recordRuleHostEvaluated({
+          toolName: event.toolName,
+          filePath: relPath,
+          matched: shadowDecision.matched,
+          decision: shadowDecision.decision,
+          ruleId: shadowDecision.ruleId,
+          activationId: shadowDecision.activationId,
+          activationMode: 'shadow',
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record shadow rulehost_evaluated: ${String(evErr)}`);
+      }
+    }
 
     // Always emit rulehost_evaluated
     try {
@@ -115,6 +115,7 @@ export function handleBeforeToolCall(
         matched: hostResult?.matched ?? false,
         decision: hostResult?.decision ?? 'allow',
         ruleId: hostResult?.ruleId,
+        activationMode: 'live',
       });
     } catch (evErr) {
       logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
@@ -343,21 +344,6 @@ export function handleBeforeToolCall(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-function _extractParamsSummary(params: Record<string, unknown>): Record<string, unknown> {
-  const summary: Record<string, unknown> = {};
-  // NOTE: Do NOT redact here — this feeds into RuleHost.evaluate() which
-  // may match against paramsSummary.command. Redaction happens at
-  // EventLog.record() before persistence.
-  if (params.file_path) summary.file_path = params.file_path;
-  if (params.path) summary.path = params.path;
-  if (params.command) summary.command = params.command;
-  if (params.args) summary.args = params.args;
-  if (params.old_string) summary.old_string = params.old_string;
-  if (params.new_string) summary.new_string = params.new_string;
-  return summary;
-}
-
 
 function _getCurrentGfi(sessionId?: string): number {
   if (!sessionId) return 0;

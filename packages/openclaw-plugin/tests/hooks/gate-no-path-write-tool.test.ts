@@ -79,6 +79,9 @@ vi.mock('../../src/core/workspace-context.js', () => {
         // and the profile falls back to non-risky defaults — keeping this test focused on
         // the RuleHost block behavior without depending on Gate B internals.
         resolve: vi.fn((fileKey: string) => `${ctx.workspaceDir}/.pd/${fileKey}.json`),
+        // PR1: gate.ts uses wctx.getRuleHost(logger) instead of `new RuleHost()`.
+        // Return a fresh object each call so mockEvaluate reassignments take effect.
+        getRuleHost: vi.fn(() => ({ evaluate: mockEvaluate })),
       })),
     },
   };

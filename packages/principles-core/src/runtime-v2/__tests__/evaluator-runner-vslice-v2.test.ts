@@ -217,6 +217,32 @@ function makeV2ArtificerArtifact(): PIArtifactRecord {
   };
 }
 
+function makeRuleContextV2ArtificerArtifact(): PIArtifactRecord {
+  const artifact = makeV2ArtificerArtifact();
+  const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
+  const cases = parsed.goldenTraceCases;
+  if (!Array.isArray(cases)) throw new Error('fixture goldenTraceCases must be an array');
+  const ruleContext = {
+    version: 2,
+    history: { status: 'available', truncated: false, calls: [] },
+    facts: {
+      priorReadOfTarget: 'no',
+      readCount: 0,
+      writeCount: 0,
+      uniqueWritePathCount: 0,
+      sameActionBlockCount: null,
+    },
+  };
+  for (const traceCase of cases) {
+    if (typeof traceCase !== 'object' || traceCase === null || Array.isArray(traceCase)) {
+      throw new Error('fixture case must be an object');
+    }
+    traceCase.ruleContext = ruleContext;
+  }
+  parsed.requiresContextVersion = 2;
+  return { ...artifact, contentJson: JSON.stringify(parsed) };
+}
+
 // ── Evaluator V2 output fixtures ──────────────────────────────────────────────
 
 function makePassingCodeReview() {
@@ -834,6 +860,27 @@ describe('EvaluatorRunner V2 — rule artifact assembly (PRI-427)', () => {
     expect((parsed.goldenTrace as { cases: unknown[] }).cases.length).toBeGreaterThan(0);
     expect(parsed.ruleHostGateDecision).toBe('accepted_shadow');
     expect(Array.isArray(parsed.affectedTools)).toBe(true);
+  });
+
+  it('preserves requiresContextVersion in the assembled rule artifact', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeRuleContextV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const runner = makeRunner(createMockDeps({ artifactStore: store }), gateDeps);
+
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifact = artifacts.find((artifact) => artifact.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    const parsed: unknown = JSON.parse(ruleArtifact?.contentJson ?? 'null');
+    expect(parsed).toEqual(expect.objectContaining({ requiresContextVersion: 2 }));
   });
 
   it('rule artifact goldenTrace is the Artificer full trace (pos+neg), NOT the adversarial-only trace', async () => {

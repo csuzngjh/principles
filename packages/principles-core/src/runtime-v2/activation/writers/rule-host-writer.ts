@@ -136,6 +136,14 @@ export class RuleHostWriter implements ChannelWriter {
     // accepted_shadow decision being activated against v1 expectations.
     // Only literal `2` is treated as a v2 declaration; any other value
     // (including 1, "2", null) falls through to the v1 path unchanged.
+    if (Object.hasOwn(parsed, 'requiresContextVersion') && parsed.requiresContextVersion !== 2) {
+      return {
+        ok: false,
+        reason: 'unsupported_context_version',
+        riskLevel: 'high',
+      };
+    }
+
     if (parsed.requiresContextVersion === 2) {
       const enabled = this.featureFlagProbe
         ? this.featureFlagProbe(RULECODE_CONTEXT_V2_FLAG_ID)
@@ -190,7 +198,7 @@ export class RuleHostWriter implements ChannelWriter {
 
     return {
       activationId: `act_code_${ruleId}`,
-      action: 'code_tool_hook_shadow_activate',
+      action: 'code_tool_hook_live_activate',
       targetRef: `impl://${ruleId}`,
     };
   }
