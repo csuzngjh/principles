@@ -1113,7 +1113,8 @@ describe('PRI-45 RuleHost adapter boundary', () => {
     const src = readFileSync(resolve(
       __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
     ), 'utf-8');
-    expect(src).toMatch(/return mergeDecisions\(/);
+    expect(src).toContain('const liveDecision = mergeDecisions(');
+    expect(src).toContain('return this.evaluateDetailed(input).liveDecision');
   });
 });
 
@@ -2374,12 +2375,12 @@ describe('PRI-146: RuleHostWriter shadow activation boundary', () => {
     expect(src).not.toContain('new Function');
   });
 
-  it('SHADOW_ONLY: rule-host-writer.ts does not implement live mode', async () => {
+  it('LIVE_AFTER_APPROVAL: rule-host-writer.ts uses live action for owner-approved activations', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
-    expect(src).not.toContain('code_tool_hook_live_activate');
-    expect(src).toContain('code_tool_hook_shadow_activate');
+    expect(src).toContain('code_tool_hook_live_activate');
+    expect(src).not.toContain('code_tool_hook_shadow_activate');
     expect(src).toContain('accepted_shadow');
   });
 

@@ -88,6 +88,18 @@ describe('pd runtime internalization run-rulehost — flag wiring (CLI gate rule
     expect(opt?.long).toBe('--json');
   });
 
+  it('parses --behavior-examples as the Owner-labelled evidence file', async () => {
+    const program = freshProgram();
+    const intCmd = program.command('internalization');
+    const runCmd = registerRunRuleHostCommand(intCmd);
+    const captured: CapturedAction = { opts: null };
+    attachCapture(runCmd, captured);
+
+    await program.parseAsync(['node', 'pd', 'internalization', 'run-rulehost', '--pain-id', 'pain-1', '--behavior-examples', 'examples.json']);
+
+    expect(captured.opts?.behaviorExamples).toBe('examples.json');
+  });
+
   it('registers --pain-id as required option', () => {
     const program = freshProgram();
     const intCmd = program.command('internalization');

@@ -503,7 +503,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a "Commander wiring test" checklist item to the PR template. Every new `.option()` must have a corresponding test that calls `program.parseAsync()` with the flag and asserts the opts shape.
 - **Source**: PRI-217 / PR #677
 - **Date**: 2026-05-22
-- **Recurrence**: None
+- **Recurrence**: Yes — handler-only tests miss Commander wiring for new CLI commands.
+  - 2026-06-29 PR #1121 (CodeRabbit review): `pd activation promote` command had 3 handler-level tests in `runtime-activation.test.ts` but no parser-level wiring test, violating `cli-7-test-wiring`. Fix: extracted `registerRuntimeActivationPromoteCommand` helper (mirrors `registerRunRuleHostCommand` pattern) and added `runtime-activation-promote-flag-wiring.test.ts` with 14 parser tests covering option registration, `--no-*` negation absence, required-option rejection, and `-w` shorthand parsing.
+  - Same PR also surfaced a sibling CLI gate violation (Finding 2): `resolveWorkspaceDir()` was called outside the `try` block in `handleRuntimeActivationPromote`, violating `cli-2-exit-stops` — if workspace resolution threw, the exception escaped the catch and broke the `--json` single-object contract. Fix: moved workspace resolution + `RuntimeStateManager` construction inside `try`, used `stateManager?.close()` in `finally`.
 
 ---
 
@@ -790,7 +792,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 89 |
 | Last updated | 2026-06-29 |
 | Top category | Schema & Type |
-| Recurring errors | 38 |
+| Recurring errors | 39 |
 
 ---
 

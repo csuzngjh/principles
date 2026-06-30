@@ -8,6 +8,7 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { ArtificerRuleOutput } from '../internalization/artificer-output.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
+import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
@@ -398,6 +399,55 @@ describe('ArtificerRunner (PRI-111)', () => {
     const artifacts = await store.listBySourceTaskId(ARTIFICER_TASK_ID);
     expect(artifacts).toHaveLength(0);
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+});
+
+describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRabbit PR2 outside-diff)', () => {
+  const pack: BehaviorExamplePack = {
+    sourceNegativeCase: {
+      caseId: 'negative-1', kind: 'negative', toolName: 'write_file',
+      params: { path: '/etc/passwd' }, expectedDecision: 'block',
+    },
+    ownerDesiredOutcome: 'block writes outside the workspace',
+    positiveCounterexamples: [{
+      caseId: 'positive-1', kind: 'positive', toolName: 'write_file',
+      params: { path: '/project/file.txt' }, expectedDecision: 'allow',
+    }],
+    evidenceRefs: ['pain://1'],
+    redactionNotes: [],
+  };
+
+  it('classifies modeErrors as output_invalid when base validator passes', async () => {
+    const deps = {
+      stateManager: {},
+      runtimeAdapter: {},
+      eventEmitter: {},
+      artifactStore: new MemoryPIArtifactStore(),
+      validator: new DefaultArtificerValidator(),
+      contextMode: 'v2' as const,
+      behaviorExamplePack: pack,
+    } as unknown as ArtificerRunnerDeps;
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    // makeArtificerOutput() passes the base validator but lacks
+    // requiresContextVersion: 2, so v2 mode validation fails.
+    const output = makeArtificerOutput();
+    const context = {
+      contextHash: 'test-hash',
+      scribeArtifact: null,
+      sourceScribeArtifactId: null,
+      adversarialFeedback: null,
+    };
+
+    const result = await runner.validateOutput(output, ARTIFICER_TASK_ID, context);
+    expect(result.valid).toBe(false);
+    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.errors.some(e => e.includes('requiresContextVersion'))).toBe(true);
   });
 });
 

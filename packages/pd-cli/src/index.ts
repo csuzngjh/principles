@@ -46,7 +46,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
-import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit } from './commands/runtime-activation.js';
+import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, registerRuntimeActivationPromoteCommand } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -482,6 +482,8 @@ activationTopCmd
       json: opts.json,
     });
   });
+
+registerRuntimeActivationPromoteCommand(activationTopCmd);
 
 const configCmd = program
   .command('config')
