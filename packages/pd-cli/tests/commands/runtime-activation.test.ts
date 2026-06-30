@@ -359,6 +359,9 @@ describe('handleRuntimeActivationList', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // F9-1: by default, all artifact_ids are considered valid (exist in pi_artifacts).
+    // Individual tests override this to simulate dangling references.
+    mockGetArtifactById.mockResolvedValue(makeArtifact());
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -380,6 +383,7 @@ describe('handleRuntimeActivationList', () => {
     expect(output.activations.length).toBe(2);
     expect(output.activations[0]).toHaveProperty('activationId');
     expect(output.activations[0]).toHaveProperty('channel');
+    expect(output.status).toBe('ok');
   });
 
   it('channel=prompt filter calls listPromptActivations', async () => {
@@ -441,6 +445,77 @@ describe('handleRuntimeActivationList', () => {
     expect(errorText).toContain('invalid channel');
     expect(errorText).toContain('Next action');
     expect(process.exitCode).toBe(1);
+  });
+
+  // F9-1 regression: dangling artifact_id must produce degraded status + warning
+  it('F9-1: emits degraded status + warning when activation references non-existent artifact_id (JSON)', async () => {
+    // art-001 exists, art-002 does NOT (dangling)
+    mockGetArtifactById.mockImplementation((artifactId: string) => {
+      if (artifactId === 'art-001') return Promise.resolve(makeArtifact({ artifactId: 'art-001' }));
+      return Promise.resolve(null);
+    });
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('degraded');
+    expect(output.reason).toContain('non-existent artifact_id');
+    expect(output.reason).toContain('art-002');
+    expect(output.nextAction).toContain('pd runtime internalization integrity');
+    // The dangling activation should have a per-record warning
+    const danglingAct = output.activations.find((a: { artifactId: string }) => a.artifactId === 'art-002');
+    expect(danglingAct.warning).toContain('does not exist in pi_artifacts');
+    // The valid activation should NOT have a warning
+    const validAct = output.activations.find((a: { artifactId: string }) => a.artifactId === 'art-001');
+    expect(validAct.warning).toBeUndefined();
+  });
+
+  it('F9-1: text output prints WARNING line for dangling artifact_id', async () => {
+    mockGetArtifactById.mockImplementation((artifactId: string) => {
+      if (artifactId === 'art-001') return Promise.resolve(makeArtifact({ artifactId: 'art-001' }));
+      return Promise.resolve(null);
+    });
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+    });
+
+    const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(text).toContain('WARNING');
+    expect(text).toContain('art-002');
+    const errorText = consoleErrorSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(errorText).toContain('non-existent artifact_id');
+    expect(errorText).toContain('Next action');
+  });
+
+  it('F9-1: treats getArtifactById throw as dangling (fail loud, rc-9)', async () => {
+    mockGetArtifactById.mockRejectedValue(new Error('DB corruption'));
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('degraded');
+    expect(output.reason).toContain('non-existent artifact_id');
+  });
+
+  it('F9-1: status is ok when all artifact_ids exist (negative case)', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact());
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('ok');
+    expect(output.reason).toBeUndefined();
+    expect(output.nextAction).toBeUndefined();
   });
 });
 

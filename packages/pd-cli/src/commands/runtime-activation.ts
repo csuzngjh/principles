@@ -457,14 +457,58 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
       ? records
       : records.filter(r => r.deactivatedAt === null);
 
+    // F9-1: Validate artifact_id → pi_artifacts.artifact_id reference for each
+    // activation. A dangling reference means the activation cannot function
+    // (RuleHost cannot load implementationCode, dispatcher cannot verify
+    // lineage). Emit degraded status with reason + nextAction instead of
+    // silently returning corrupted records (rc-9-no-silent-fallback,
+    // rc-6-lineage-consistency; related ERR: ERR-002).
+    const {piArtifactStore} = stateManager;
+    const uniqueArtifactIds = new Set(filtered.map(r => r.artifactId));
+    const danglingArtifactIds = new Set<string>();
+    for (const artifactId of uniqueArtifactIds) {
+      try {
+        const artifact = await piArtifactStore.getArtifactById(artifactId);
+        if (!artifact) {
+          danglingArtifactIds.add(artifactId);
+        }
+      } catch {
+        // Treat lookup failure as dangling — fail loud rather than silent (rc-9).
+        danglingArtifactIds.add(artifactId);
+      }
+    }
+    const hasDangling = danglingArtifactIds.size > 0;
+
+    // Attach per-record warning for dangling artifact_id (does not mutate DB).
+    const annotated = filtered.map(r => {
+      if (danglingArtifactIds.has(r.artifactId)) {
+        return {
+          ...r,
+          warning: `artifact_id "${r.artifactId}" does not exist in pi_artifacts — activation is orphaned`,
+        };
+      }
+      return r;
+    });
+
     if (opts.json) {
-      // Strict JSON mode: exactly one parseable JSON object on stdout
-      console.log(JSON.stringify({ activations: filtered }, null, 2));
+      // Strict JSON mode: exactly one parseable JSON object on stdout.
+      // When dangling references are detected, emit degraded status with
+      // reason + nextAction so operators can act on the corruption (rc-9,
+      // cli-6-output-next-action).
+      const payload: Record<string, unknown> = { activations: annotated };
+      if (hasDangling) {
+        payload.status = 'degraded';
+        payload.reason = `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`;
+        payload.nextAction = 'Run `pd runtime internalization integrity` for full chain diagnostics. Consider deactivating orphaned activations via `pd runtime activation deactivate` or restoring the missing artifacts.';
+      } else {
+        payload.status = 'ok';
+      }
+      console.log(JSON.stringify(payload, null, 2));
     } else {
-      if (filtered.length === 0) {
+      if (annotated.length === 0) {
         console.log('No active activations found.');
       } else {
-        for (const r of filtered) {
+        for (const r of annotated) {
           const status = r.deactivatedAt ? `[DEACTIVATED ${r.deactivatedAt}]` : '[ACTIVE]';
           console.log(`${status} ${r.activationId}`);
           console.log(`  artifactId: ${r.artifactId}`);
@@ -472,7 +516,14 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
           console.log(`  action: ${r.action}`);
           console.log(`  targetRef: ${r.targetRef}`);
           console.log(`  activatedAt: ${r.activatedAt}`);
+          if ('warning' in r && typeof r.warning === 'string') {
+            console.log(`  ⚠ WARNING: ${r.warning}`);
+          }
           console.log('');
+        }
+        if (hasDangling) {
+          console.error(`Warning: ${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s).`);
+          console.error(`Next action: Run \`pd runtime internalization integrity\` for full chain diagnostics. Consider deactivating orphaned activations or restoring missing artifacts.`);
         }
       }
     }
