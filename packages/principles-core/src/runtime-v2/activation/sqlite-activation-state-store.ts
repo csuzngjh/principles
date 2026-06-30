@@ -56,10 +56,13 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
   async getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null> {
     const db = this.connection.getDb();
+    // Bug-Q fix: filter out deactivated records so that dispatcher allows re-activation.
+    // recordActivation's INSERT OR REPLACE then overwrites the old deactivated row under
+    // the UNIQUE INDEX on idempotency_key — intended behavior (latest activation wins).
     const row = db.prepare(`
       SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
       FROM activations
-      WHERE idempotency_key = ?
+      WHERE idempotency_key = ? AND deactivated_at IS NULL
     `).get(idempotencyKey);
 
     return mapRowToRecord(row);

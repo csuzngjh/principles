@@ -29,6 +29,10 @@ import {
   run as diagnoseRun,
   status as diagnoseStatus,
   PrincipleTreeLedgerAdapter,
+  buildDreamerSeedFromCandidate,
+  CANDIDATE_KIND_TO_ROUTE,
+  ROUTE_CHANNEL_MAP,
+  MVP_ENABLED_CHANNELS,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -486,11 +490,66 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
+    // Defect-004 fix: seed dreamer task for each consumed candidate whose
+    // recommendation_kind routes to an MVP-enabled internalization channel.
+    // Without this, the chain stops at 'consumed' and never reaches internalization
+    // (11 of 18 consumed candidates hit this in production). Mirrors the pattern
+    // in PainSignalBridge.onDiagnosisComplete (pain-signal-bridge.ts L310-338).
+    if (opts.intake !== false && !intakeFailed) {
+      for (const candidate of candidates) {
+        const kind = candidate.recommendationKind;
+        if (kind === 'defer' || kind === 'implementation') continue;
+        try {
+          const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
+          if (!route) continue;
+          const channel = ROUTE_CHANNEL_MAP[route];
+          const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+          // sourcePainId is unavailable in CLI context (opts.taskId is the
+          // diagnostician task ID, not a pain ID). Passing undefined is safe —
+          // buildDreamerSeedFromCandidate omits the field when blank.
+          const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: undefined });
+          if ('decision' in seed) continue; // not_internalizable or invalid — skip
+          const existingTask = await stateManager.getTask(seed.taskId);
+          if (!existingTask) {
+            await stateManager.createTask({
+              taskId: seed.taskId,
+              taskKind: seed.taskKind,
+              inputRef: '',
+              status: seed.status,
+              attemptCount: seed.attemptCount,
+              maxAttempts: seed.maxAttempts,
+              diagnosticJson: seed.diagnosticJson,
+            });
+            intakeResults.push({
+              candidateId: candidate.candidateId,
+              status: 'dreamer_seeded',
+              nextAction: `pd task show ${seed.taskId} | pd dreamer run --task-id ${seed.taskId}`,
+            });
+          }
+        } catch (seedErr) {
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'dreamer_seed_failed',
+            error: seedErr instanceof Error ? seedErr.message : String(seedErr),
+            nextAction: `pd candidate internalize --candidate-id ${candidate.candidateId}`,
+          });
+        }
+      }
+    }
+
     if (opts.json) {
       const candidateIds = candidates.map((c) => c.candidateId);
-      const internalizeNextAction = candidateIds.length > 0
-        ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
-        : 'No candidates were generated from this diagnosis.';
+      // CodeRabbit review fix: reflect dreamer seed status in nextAction so
+      // the owner knows whether internalization has already started or still
+      // needs manual candidate internalize. Previously the message always
+      // said "NOT started automatically" even when dreamer tasks were seeded.
+      const dreamerSeededCount = intakeResults.filter((r) => r.status === 'dreamer_seeded').length;
+      const dreamerSeedFailedCount = intakeResults.filter((r) => r.status === 'dreamer_seed_failed').length;
+      const internalizeNextAction = dreamerSeededCount > 0
+        ? `Dreamer tasks seeded automatically for ${dreamerSeededCount} candidate(s). To continue, run the dreamer tasks shown in intake.candidates[].${dreamerSeedFailedCount > 0 ? ` (${dreamerSeedFailedCount} candidate(s) failed seeding — see intake.candidates[] for retry guidance.)` : ''}`
+        : candidateIds.length > 0
+          ? `Candidates generated but internalization has NOT started automatically. To begin internalization, run:\n  ${candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
+          : 'No candidates were generated from this diagnosis.';
       const jsonOutput = {
         ...result,
         intake: {
@@ -534,6 +593,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
           console.log(`      Next action: pd candidate intake --candidate-id ${ir.candidateId} --workspace "${workspaceDir}"`);
+        } else if (ir.status === 'dreamer_seeded') {
+          // CodeRabbit review fix: surface dreamer seed success in TTY output
+          console.log(`    ${ir.candidateId}: dreamer seeded — ${ir.nextAction}`);
+        } else if (ir.status === 'dreamer_seed_failed') {
+          // CodeRabbit review fix: surface dreamer seed failure in TTY output
+          console.log(`    ${ir.candidateId}: DREAMER SEED FAILED — ${ir.error}`);
+          console.log(`      Next action: ${ir.nextAction}`);
         }
       }
     }
