@@ -354,7 +354,8 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: proposeMessage,
           };
         });
-        if (proposalResult !== null && '_proposeFailed' in proposalResult) {
+        if (proposalResult !== null && // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (ProposalCreatedResult | _proposeFailed)
+        '_proposeFailed' in proposalResult) {
           actions.push({
             taskId: task.taskId,
             taskKind: piTask.taskKind,
@@ -433,6 +434,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: commitMessage,
           };
         });
+        // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (CommitNextTaskResult | commit_failed)
         if ('decision' in commitResult && commitResult.decision === 'commit_failed') {
           actions.push({
             taskId: task.taskId,

@@ -144,11 +144,12 @@ function pd(args: string[], workspace: string, timeoutMs = 300_000): string {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err: unknown) {
-    if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+    if (err instanceof Error && // eslint-disable-next-line no-restricted-syntax -- 'in' required for Error subtype narrowing (err.code access)
+    'code' in err && (err as { code: string }).code === 'ENOENT') {
       throw new Error(`pd CLI not found at ${cliPath} — run: npm run build --workspace=@principles/pd-cli`, { cause: err });
     }
-    if (err && typeof err === 'object' && 'stdout' in err) {
-      return String((err).stdout);
+    if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
+      return String((err as { stdout: unknown }).stdout);
     }
     throw err;
   }

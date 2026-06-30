@@ -508,6 +508,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           // diagnostician task ID, not a pain ID). Passing undefined is safe —
           // buildDreamerSeedFromCandidate omits the field when blank.
           const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: undefined });
+          // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
           if ('decision' in seed) continue; // not_internalizable or invalid — skip
           const existingTask = await stateManager.getTask(seed.taskId);
           if (!existingTask) {

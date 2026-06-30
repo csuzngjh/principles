@@ -353,6 +353,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     }
 
     const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
+    // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
     if ('decision' in seed) {
       const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
       const reason = decisionResult.decision === 'already_exists'
@@ -931,6 +932,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         continue;
       }
       const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
+      // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
       if ('decision' in seed) {
         output.deferred++;
         const decisionResult = seed as { decision: string; reason?: string; taskId?: string };
@@ -1010,6 +1012,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         continue;
       }
       const seed = buildDreamerSeedFromCandidate(candidate, { route: decision.route, ready: decision.ready, sourcePainId });
+      // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
       if ('decision' in seed) {
         output.deferred++;
         const decisionResult = seed as { decision: string; reason?: string; taskId?: string };

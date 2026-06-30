@@ -17,6 +17,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Type guard: narrows a runtime string (from SQLite) to `keyof ApprovalStats`.
+ * Replaces both `in` operator (rc-5) and `as keyof ApprovalStats` cast (rc-2/ERR-001)
+ * with proper TypeScript narrowing via exhaustive literal check.
+ */
+function isApprovalStatsKey(value: string): value is keyof ApprovalStats {
+  return value === 'pending' || value === 'approved' || value === 'rejected' || value === 'cancelled';
+}
+
 function readStringField(row: Record<string, unknown>, key: string): string | null {
   if (!Object.hasOwn(row, key)) return null;
   const val = row[key];
@@ -209,7 +218,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     const rows = db.prepare('SELECT status, COUNT(*) as cnt FROM approvals GROUP BY status').all() as { status: string; cnt: number }[];
     const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
     for (const row of rows) {
-      if (row.status in stats) { stats[row.status as keyof ApprovalStats] = row.cnt; }
+      if (isApprovalStatsKey(row.status)) { stats[row.status] = row.cnt; }
     }
     return stats;
   }
