@@ -86,6 +86,16 @@ export class RuleHost {
   private activationFingerprint: string | null = null;
   private cachedImplementations: readonly LoadedRuleActivation[] = [];
   private sqliteConnection: SqliteConnection | null = null;
+  /**
+   * R2-RH-002: Guards the "armed but empty" warn so it fires at most once per
+   * RuleHost instance. Without this, the 0-rules path (workspaceDir missing OR
+   * zero active code_tool_hook activations) returns [] silently on every
+   * evaluation — an observability gap (rc-9-no-silent-fallback). The warn is
+   * NOT a degradation fallback (RuleHost correctly has no opinion when empty);
+   * it makes the empty-armed state visible so operators can investigate why
+   * no live rules are loaded.
+   */
+  private emptyLoadWarnEmitted: boolean = false;
 
   constructor(stateDir: string, logger: RuleHostLogger = console, options?: RuleHostOptions) {
     this.stateDir = stateDir;
@@ -124,6 +134,7 @@ export class RuleHost {
     this.cachedImplementations = [];
     this.activationFingerprint = null;
     this.implementationSources.clear();
+    this.emptyLoadWarnEmitted = false;
   }
 
   evaluateDetailed(input: RuleHostInput): RuleHostEvaluationReport {
@@ -185,17 +196,47 @@ export class RuleHost {
    */
   private _loadActiveCodeImplementations(supportsContextV2: boolean): LoadedRuleActivation[] {
     if (!this.workspaceDir) {
+      this._emitEmptyLoadWarn(
+        'workspaceDir not configured — RuleHost cannot load active code_tool_hook rules',
+        'Provide workspaceDir when constructing RuleHost (required for code_tool_hook channel)',
+      );
       return [];
     }
 
     try {
-      return this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
+      const loaded = this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
+      if (loaded.length === 0) {
+        this._emitEmptyLoadWarn(
+          'armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval)',
+          'If this is unexpected, run `pd runtime activation list --channel code_tool_hook` to inspect activations, or `pd runtime activation promote` to enable a live rule',
+        );
+      }
+      return loaded;
     } catch (activationError: unknown) {
       this.logger.warn?.(
         `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
       );
       return [];
     }
+  }
+
+  /**
+   * R2-RH-002: Emit the "armed but empty" warn at most once per RuleHost
+   * instance. The warn is cached via `emptyLoadWarnEmitted` so repeated
+   * evaluations (which all hit the empty path) do not spam the log.
+   *
+   * This is an observability signal, NOT a degradation fallback — RuleHost
+   * correctly returns "no opinion" when there are no active rules. The warn
+   * makes the empty state visible so operators can distinguish "RuleHost is
+   * working but has no rules" from "RuleHost is broken" (rc-9-no-silent-fallback).
+   */
+  private _emitEmptyLoadWarn(reason: string, nextAction: string): void {
+    if (this.emptyLoadWarnEmitted) return;
+    this.emptyLoadWarnEmitted = true;
+    this.logger.warn?.(
+      `[RuleHost] ${reason}. ` +
+      `nextAction=${nextAction}`
+    );
   }
 
   /**
@@ -220,7 +261,7 @@ export class RuleHost {
       const db = sqliteConn.getDb();
       const rows = db.prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
-               p.content_json, p.source_rule_id
+               p.content_json, p.source_rule_id, p.source_principle_id
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
@@ -239,7 +280,7 @@ export class RuleHost {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
         fingerprintParts.push([
-          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['content_json'], record['source_rule_id'],
+          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
         ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
       }
       const fingerprint = fingerprintParts.join('\u0002');
@@ -318,6 +359,12 @@ export class RuleHost {
         const artifactId = typeof r['artifact_id'] === 'string' ? r['artifact_id'] : '';
         const contentJson = typeof r['content_json'] === 'string' ? r['content_json'] : '';
         const sourceRuleId = typeof r['source_rule_id'] === 'string' ? r['source_rule_id'] : null;
+        // R2-RH-004: Extract source_principle_id from pi_artifacts (DB lineage field).
+        // Previously this column was never SELECTed, so principleId was always
+        // derived from meta.ruleId (a rule ID, not a principle ID) — violating
+        // rc-6-lineage-consistency. Downstream gate.ts:135/164 recorded the
+        // wrong principleId in eventLog.recordRuleEnforced().
+        const sourcePrincipleId = typeof r['source_principle_id'] === 'string' ? r['source_principle_id'] : null;
         const action = typeof r['action'] === 'string' ? r['action'] : '';
 
         if (!activationId || !artifactId || !contentJson) {
@@ -392,6 +439,16 @@ export class RuleHost {
             ? contentObj['ruleId']
             : (sourceRuleId ?? artifactId);
 
+          // R2-RH-004: Extract principleId from artifact content_json.
+          // Previously this field was never read, so result.principleId was
+          // always set to meta.ruleId (a rule ID) — violating
+          // rc-6-lineage-consistency. Precedence: contentJson.principleId
+          // (artifact payload) → pi_artifacts.source_principle_id (DB lineage)
+          // → meta.ruleId (rule ID fallback) → ruleId (last resort).
+          const contentPrincipleId = typeof contentObj['principleId'] === 'string'
+            ? contentObj['principleId']
+            : null;
+
           const implId = `act-impl-${activationId}`;
           const moduleExports = loadRuleImplementationModule(implementationCode, implId);
 
@@ -440,7 +497,13 @@ export class RuleHost {
               const result = rawResult as RuleHostResult;
               if (result.matched && (result.decision === 'block' || result.decision === 'requireApproval')) {
                 result.ruleId = ruleId;
-                result.principleId = meta.ruleId ?? ruleId;
+                // R2-RH-004: principleId precedence — contentJson.principleId
+                // (artifact payload) → source_principle_id (DB lineage) →
+                // meta.ruleId (rule ID fallback) → ruleId (last resort).
+                // Previously this was `meta.ruleId ?? ruleId`, which always
+                // resolved to a rule ID (never a principle ID) because
+                // isRuleHostMeta guarantees meta.ruleId is a non-empty string.
+                result.principleId = contentPrincipleId ?? sourcePrincipleId ?? meta.ruleId ?? ruleId;
               }
               return result;
             },
