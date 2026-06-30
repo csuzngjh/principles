@@ -172,6 +172,18 @@ cd packages/openclaw-plugin && npm run build && npm run test
 npm run lint
 ```
 
+## Worktree Setup (MANDATORY for new worktrees)
+
+**Before any coding in a new worktree (created by Trae/Qoder/Gemini or manually), run:**
+
+```powershell
+.\scripts\setup-worktree.ps1
+```
+
+This single command handles: PATH fix (Trae bug), private docs junction, `npm install`, `npm run build`, and a health check. Idempotent and fail loud. See `.trae/rules/project_rules.md` § Worktree Setup for options and scenarios.
+
+**AI assistants**: If `docs/.private/` is missing OR `node_modules/@types/node` is missing OR `packages/principles-core/dist` is missing, run the script before proceeding. Do not manually patch these one by one.
+
 ## Linear Workflow
 
 1. Read the issue (including comments) BEFORE writing code
