@@ -224,7 +224,7 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
       ok: false,
       activationId: '',
       reason: 'activation_id_required',
-      nextAction: 'Provide --activation-id <id> from `pd runtime activation list`',
+      nextAction: 'Provide --activation-id <id> from `pd activation list`',
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -254,7 +254,7 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
           ok: false,
           activationId: opts.activationId,
           reason: 'not_found_or_already_deactivated',
-          nextAction: 'Check activation ID with `pd runtime activation list`, or it may already be deactivated',
+          nextAction: 'Check activation ID with `pd activation list`, or it may already be deactivated',
         };
 
     if (opts.json) {
@@ -871,13 +871,26 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         return rec ? toSnapshot(rec) : null;
       },
     };
+    // PRI-489: inject the real workspace `rulecode_context_v2` feature flag
+    // probe into the approve path's RuleHostWriter — same wiring as the
+    // dispatch path (handleRuntimeActivationDispatch) and the Console model
+    // (ApprovalsConsoleModel.dispatchActivationAfterApproval). Previously
+    // this path constructed RuleHostWriter without the probe, so a v2
+    // artifact in a flag-off workspace would pass canActivate here while
+    // being rejected by dispatch/Console — an inconsistent contract that
+    // violated ERR-024 (validator wired in one enforcement path but not
+    // another) and ERR-089 (sibling approval path diverged from dispatch).
+    const featureFlags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
     const dispatcher = new ActivationDispatcher(
       artifactReadModel,
       activationStateStore,
       {
         writers: [
           new PromptWriter(),
-          new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+          new RuleHostWriter({
+            gateDeps: createProductionGateDeps(),
+            featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+          }),
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
