@@ -24,6 +24,8 @@ export interface PlaywrightStepRegistry {
   when(pattern: string | RegExp, fn: PlaywrightStepFn): void;
   then(pattern: string | RegExp, fn: PlaywrightStepFn): void;
   match(step: ParsedStep): PlaywrightStepMatch | null;
+  /** 返回已注册步骤的描述列表，用于 fail-loud 诊断 (rc-3)。 */
+  list(): ReadonlyArray<{ keyword: 'Given' | 'When' | 'Then'; pattern: string }>;
 }
 
 interface RegisteredStep {
@@ -69,6 +71,7 @@ export function createPlaywrightStepRegistry(): PlaywrightStepRegistry {
     when: register('When'),
     then: register('Then'),
     match,
+    list: () => steps.map((s) => ({ keyword: s.keyword, pattern: String(s.pattern) })),
   };
 }
 
@@ -76,13 +79,20 @@ function parseDisabledTag(tags: string[]): { reason: string; owner: string; date
   for (const tag of tags) {
     if (tag.startsWith('@disabled')) {
       // 格式: @disabled(reason="...",owner="...",date="...")
+      // rc-3/rc-9: 三字段必填，缺失即 fail loud，不允许静默 skip。
       const reasonMatch = tag.match(/reason="([^"]+)"/);
       const ownerMatch = tag.match(/owner="([^"]+)"/);
       const dateMatch = tag.match(/date="([^"]+)"/);
+      if (!reasonMatch || !ownerMatch || !dateMatch) {
+        throw new Error(
+          `Malformed @disabled tag: reason, owner, date are all required. ` +
+          `Expected: @disabled(reason="...",owner="...",date="..."). Got: ${tag}`
+        );
+      }
       return {
-        reason: reasonMatch?.[1] ?? '(no reason)',
-        owner: ownerMatch?.[1] ?? '(no owner)',
-        date: dateMatch?.[1] ?? '(no date)',
+        reason: reasonMatch[1],
+        owner: ownerMatch[1],
+        date: dateMatch[1],
       };
     }
   }
@@ -130,10 +140,14 @@ export function defineFeature(
         for (const step of allSteps) {
           const match = registry.match(step);
           if (!match) {
-            // fail loud (rc-3): step 未匹配时列出 scenario 名帮助诊断
+            // fail loud (rc-3): 列出已注册 steps 帮助诊断
+            const registeredList = registry.list().length > 0
+              ? registry.list().map((s) => `  ${s.keyword} ${s.pattern}`).join('\n')
+              : '  (no steps registered)';
             throw new Error(
               `Step not matched: ${step.keyword} ${step.text}\n` +
-              `Scenario: ${scenario.scenarioName}`
+              `Scenario: ${scenario.scenarioName}\n` +
+              `Registered steps:\n${registeredList}`
             );
           }
 
