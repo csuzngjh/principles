@@ -153,22 +153,40 @@ export default defineConfig(
     },
   },
 
-  // ── PRI-450: Core boundary — ban fs/path imports in principles-core/src/ ──
+  // ── PRI-450: Core boundary — ban Node I/O imports in principles-core/src/ ──
   // Production files in core must be pure logic. I/O belongs in openclaw-plugin.
   // Whitelisted files are exempt (they are legacy I/O modules awaiting migration).
+  //
+  // Two pattern groups:
+  //  1. fs/path — strict, no type-import escape hatch. Type-only fs/path imports
+  //     are rare and should go through the registry like any other I/O surface.
+  //  2. child_process / better-sqlite3 — allowTypeImports: true, because
+  //     `import type` is erased at runtime and does not introduce I/O. Runtime
+  //     imports must still be listed in io-seam-registry.json.
   {
     files: ['packages/principles-core/src/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', {
-        patterns: [{
-          group: [
-            'fs', 'fs/*',
-            'node:fs', 'node:fs/*',
-            'path', 'path/*',
-            'node:path', 'node:path/*',
-          ],
-          message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 packages/principles-core/io-seam-registry.json。',
-        }],
+        patterns: [
+          {
+            group: [
+              'fs', 'fs/*',
+              'node:fs', 'node:fs/*',
+              'path', 'path/*',
+              'node:path', 'node:path/*',
+            ],
+            message: 'core 包不允许直接导入 fs/path。如果需要 I/O，请放到 openclaw-plugin 或通过 @principles/core/principle-tree-ledger 子路径暴露。新增 I/O 文件必须更新 packages/principles-core/io-seam-registry.json。',
+          },
+          {
+            group: [
+              'child_process', 'child_process/*',
+              'node:child_process', 'node:child_process/*',
+              'better-sqlite3',
+            ],
+            allowTypeImports: true,
+            message: 'core 包不允许直接导入 child_process / better-sqlite3 的运行时 I/O。`import type` 可用；运行时 import 必须登记到 packages/principles-core/io-seam-registry.json。',
+          },
+        ],
       }],
     },
   },
