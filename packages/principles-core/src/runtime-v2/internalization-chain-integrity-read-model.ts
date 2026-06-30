@@ -192,7 +192,10 @@ export class InternalizationChainIntegrityReadModel {
 
       // Recommendation kinds that do NOT require internalization — they are correctly
       // absent from the internalization pipeline by design (see internalization-route.ts).
-      const NON_INTERNALIZABLE_KINDS = new Set(['defer']);
+      // Defect-004 fix: 'implementation' routes to 'implementation-candidate' which
+      // is consumed by the evaluator/scribe path directly, not via dreamer. Treating
+      // it as missing-dreamer was a false positive (7 of 18 reported candidates).
+      const NON_INTERNALIZABLE_KINDS = new Set(['defer', 'implementation']);
 
       const allTasks = db.prepare(
         'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json FROM tasks'

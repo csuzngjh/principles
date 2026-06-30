@@ -2,8 +2,9 @@ import {
   SqliteConnection,
   SqliteActivationStateStore,
   SqlitePIArtifactStore,
+  extractPrincipleId,
 } from '@principles/core/runtime-v2';
-import type { ActivationStatusRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -28,6 +29,27 @@ export interface ActivationsResponse {
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
+}
+
+/**
+ * Bug-O L2 fix: adapt PIArtifactRecord (DB row) to PIArtifactSnapshot (activation
+ * contract type). The two interfaces have identical fields but different names —
+ * we use explicit field copy instead of `as` to comply with rc-2-no-as-bypass
+ * and to surface future field drift as a compile error.
+ */
+function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
+  return {
+    artifactId: record.artifactId,
+    artifactKind: record.artifactKind,
+    sourceTaskId: record.sourceTaskId,
+    sourcePrincipleId: record.sourcePrincipleId,
+    sourceRuleId: record.sourceRuleId,
+    lineageArtifactIds: record.lineageArtifactIds,
+    validationStatus: record.validationStatus,
+    contentJson: record.contentJson,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
 }
 
 export class ActivationsConsoleModel {
@@ -58,13 +80,19 @@ export class ActivationsConsoleModel {
         throw err;
       }
 
-      // Build artifactId → sourcePrincipleId map from PIArtifactSnapshot
+      // Build artifactId → principleId map. Bug-O L2 fix: use extractPrincipleId
+      // (4-step fallback: column → parsed.principleId → parsed.sourcePrincipleId
+      // → parsed.principleDraft.title) instead of only reading the column.
+      // Without this, dreamer artifacts whose sourcePrincipleId was stripped
+      // (non-core-principle case) would show 'unlinked' even when contentJson
+      // carries a resolvable principleId.
       const artifactPrincipleMap = new Map<string, string | null>();
       for (const activation of allActivations) {
         if (!artifactPrincipleMap.has(activation.artifactId)) {
           try {
             const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(activation.artifactId);
-            artifactPrincipleMap.set(activation.artifactId, artifact?.sourcePrincipleId ?? null);
+            const principleId = artifact ? extractPrincipleId(toSnapshot(artifact)) : null;
+            artifactPrincipleMap.set(activation.artifactId, principleId);
           } catch (err) {
             if (isMissingTableError(err)) {
               artifactPrincipleMap.set(activation.artifactId, null);
