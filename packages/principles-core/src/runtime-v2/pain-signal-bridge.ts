@@ -316,6 +316,7 @@ export class PainSignalBridge {
             const channel = ROUTE_CHANNEL_MAP[route];
             const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
             const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: painId });
+            // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
             if (!('decision' in seed)) {
               const existingTask = await this.stateManager.getTask(seed.taskId);
               if (!existingTask) {

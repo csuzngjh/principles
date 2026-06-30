@@ -18,7 +18,6 @@ import {
   getFallbackDescription,
   type ThinkingModelDefinition,
   type ThinkingModelMatch,
-  type ThinkingScenarioContext,
 } from '@principles/core/runtime-v2';
 
 // Re-export pure logic + types so existing imports from this module keep working.

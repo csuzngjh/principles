@@ -117,6 +117,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
   // Step 1: Resolve painId → taskId
   const resolution = resolveTaskIdFromPainId(opts.painId);
+  // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (taskId vs reason/nextAction)
   if ('reason' in resolution) {
     refuseExit(opts, { painId: opts.painId, reason: resolution.reason, nextAction: resolution.nextAction });
   }

@@ -167,6 +167,7 @@ export class ApprovalsConsoleModel {
 
     // If activation failed, roll back approval to pending so the user can retry.
     if (activation && !isActivationSuccess(activation)) {
+      // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (ActivationDecision)
       const detail = 'reason' in activation ? activation.reason : activation.decision;
       let approvalRolledBack = false;
       try {

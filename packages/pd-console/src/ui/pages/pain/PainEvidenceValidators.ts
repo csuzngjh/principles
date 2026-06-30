@@ -169,7 +169,7 @@ export function derivePainEvidenceFromPrinciplesList(raw: unknown): PainEvidence
  * Check if a parsed result is degraded (missing data).
  */
 export function isDegraded(result: PainEvidenceListData | PainEvidenceDegraded): result is PainEvidenceDegraded {
-  return !('evidence' in result);
+  return !Object.hasOwn(result, 'evidence');
 }
 
 /**

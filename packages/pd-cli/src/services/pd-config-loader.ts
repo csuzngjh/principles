@@ -299,7 +299,7 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
           parsed !== null &&
           typeof parsed === 'object' &&
           !Array.isArray(parsed) &&
-          'workspace' in parsed &&
+          Object.hasOwn(parsed, 'workspace') &&
           typeof (parsed as Record<string, unknown>).workspace === 'string' &&
           ((parsed as Record<string, unknown>).workspace as string).length > 0
         ) {

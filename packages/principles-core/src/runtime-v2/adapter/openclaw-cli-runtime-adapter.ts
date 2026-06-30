@@ -547,7 +547,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       if (
         typeof result !== 'object' ||
         result === null ||
-        !('ok' in result) ||
+        !Object.hasOwn(result, 'ok') ||
         (result as { ok?: unknown }).ok !== true
       ) {
         const excerpt =
