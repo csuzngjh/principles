@@ -38,7 +38,13 @@ const KEYWORD_MAP: Record<string, ParsedStep['keyword']> = {
 
 function normalizeKeyword(keyword: string): ParsedStep['keyword'] {
   const trimmed = keyword.trim();
-  return KEYWORD_MAP[trimmed] ?? 'Given';
+  const mapped = KEYWORD_MAP[trimmed];
+  if (!mapped) {
+    // rc-9: 不静默回退到 'Given'，未知关键词 fail loud。
+    // @cucumber/gherkin parser 理论上只产生已知关键词，这里防御 parser 升级或异常输入。
+    throw new Error(`normalizeKeyword: unknown step keyword "${trimmed}"`);
+  }
+  return mapped;
 }
 
 // 行首中文步骤关键词 → 英文。用于无 # language 指令的混合写法
