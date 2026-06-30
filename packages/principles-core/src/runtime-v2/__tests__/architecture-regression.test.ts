@@ -2375,12 +2375,16 @@ describe('PRI-146: RuleHostWriter shadow activation boundary', () => {
     expect(src).not.toContain('new Function');
   });
 
-  it('LIVE_AFTER_APPROVAL: rule-host-writer.ts uses live action for owner-approved activations', async () => {
+  it('SHADOW_AFTER_APPROVAL: rule-host-writer.ts uses shadow action for owner-approved activations (PRI-489)', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
-    expect(src).toContain('code_tool_hook_live_activate');
-    expect(src).not.toContain('code_tool_hook_shadow_activate');
+    // PRI-489: Owner approval creates a SHADOW activation first. The only
+    // shadow -> live transition is `pd activation promote` (atomic action
+    // rewrite in SqliteActivationStateStore.promoteActivation). Live action
+    // must never appear as a return value from activate(), only in comments
+    // documenting the promote path.
+    expect(src).toContain("action: 'code_tool_hook_shadow_activate'");
     expect(src).toContain('accepted_shadow');
   });
 
