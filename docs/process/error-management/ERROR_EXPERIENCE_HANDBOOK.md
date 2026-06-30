@@ -1,6 +1,6 @@
 # Error Experience Handbook
 
-> **INCIDENT LOG.** For ordinary coding tasks, start with `docs/ERROR_PATTERN_INDEX.md` and then read the detailed entries it references. Read this full file when recording a new error, auditing error history, or when the compact index does not cover the task.
+> **INCIDENT LOG.** For ordinary coding tasks, start with `docs/process/error-management/ERROR_PATTERN_INDEX.md` and then read the detailed entries it references. Read this full file when recording a new error, auditing error history, or when the compact index does not cover the task.
 
 ---
 
@@ -12,7 +12,7 @@ When a code review catches an AI assistant error, use the `record-error` skill. 
 2. **Tag the issue** with `lesson-learned` label (via Linear MCP tool)
 3. **Edit this file** — add a row to the category table AND add a detailed entry in the "Detailed Entries" section
 4. **Update statistics** at the bottom of this file
-5. **Update `docs/ERROR_PATTERN_INDEX.md`** if the error creates or changes a recurring pattern
+5. **Update `docs/process/error-management/ERROR_PATTERN_INDEX.md`** if the error creates or changes a recurring pattern
 6. **Run `npm run check:error-handbook`** to catch duplicate IDs and stale pattern references
 7. **Commit and create a PR** with message `docs: add ERR-XXX to error experience handbook`
 
@@ -1027,7 +1027,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-337 / PR #852
 - **Date**: 2026-06-08
 - **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
-[ERR-064]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
+[ERR-064]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
 
 ---
 
@@ -1040,7 +1040,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-397 / PR #932
 - **Date**: 2026-06-15
 - **Recurrence**: First occurrence (related to EP-04 missing tests; same pattern as ERR-021, ERR-029, ERR-033, ERR-053)
-[ERR-066]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
+[ERR-066]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
 
 ---
 
@@ -1057,7 +1057,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-405
 - **Date**: 2026-06-16
 - **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring)
-[ERR-067]: docs/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
+[ERR-067]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
 
 **[ERR-068]** | Used the wrong package manager (pnpm) in a repo whose CI runs `npm ci`, leaving `package-lock.json` out of sync
 

@@ -8,7 +8,7 @@ import * as path from 'path';
 // without explicit allowlisting. New pure domain logic MUST go to @principles/core.
 //
 // Baseline from PRI-211 inventory (2026-05-21).
-// Reference: docs/reviews/plugin-core-inventory-2026-05.md
+// Reference: docs/archive/reviews/plugin-core-inventory-2026-05.md
 //
 // How to add a new file:
 //   1. Is it pure domain logic? → add to @principles/core, NOT here
@@ -155,7 +155,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
       `Plugin I/O adapter additions must be explicitly allowlisted in`,
       `packages/openclaw-plugin/tests/core-anti-growth.test.ts`,
       `ADR-0005 frozen files must NOT be modified.`,
-      `Reference: docs/reviews/plugin-core-inventory-2026-05.md (PRI-211)`,
+      `Reference: docs/archive/reviews/plugin-core-inventory-2026-05.md (PRI-211)`,
     ].join('\n')).toEqual([]);
 
     expect(missingFiles, [

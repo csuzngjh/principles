@@ -75,20 +75,20 @@ These are **maintainer-driven completeness anxiety**, not external user signal. 
 
 ## Mandatory Pre-Task Reading
 
-Before starting ANY coding task on this project, you MUST read `docs/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/ERROR_EXPERIENCE_HANDBOOK.md`.
+Before starting ANY coding task on this project, you MUST read `docs/process/error-management/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
 
-Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
+Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
 
 ### Error Handbook Reading Protocol
 
 **Default: Index-driven loading**
-1. Read `docs/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
+1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
 2. Match your task to 1-3 EP cards.
-3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
+3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
 4. State which ERR entries you considered and how you avoid them.
 
 **Forbidden: Full-file loading**
-Do NOT read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
+Do NOT read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
 - You are recording a new error (record-error skill)
 - You are auditing the handbook itself
 - The INDEX does not cover your task AND you have confirmed with the user
@@ -101,9 +101,9 @@ If a code review catches your error, record it in the handbook and tag the Linea
 
 Before implementation:
 
-1. Read `docs/ERROR_PATTERN_INDEX.md`.
+1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md`.
 2. Select the relevant pattern cards for the current task.
-3. Read the detailed `docs/ERROR_EXPERIENCE_HANDBOOK.md` entries referenced by those cards.
+3. Read the detailed `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` entries referenced by those cards.
 4. List the relevant ERR entries for the current task (minimum 3). Reference specific IDs and titles.
 5. State how this PR avoids recurrence of each listed ERR. Write this in your implementation brief.
 6. If fixing a bug: note which known ERR class the bug belongs to.
@@ -113,7 +113,7 @@ After code review (if a real bug is found):
 1. **New error class**: Create a new ERR entry in the handbook with full details.
 2. **Recurring error class**: Update the existing entry's Recurrence field with the new date and issue.
 3. Tag the Linear issue with `lesson-learned` label.
-4. If the finding changes a recurring pattern, update `docs/ERROR_PATTERN_INDEX.md`.
+4. If the finding changes a recurring pattern, update `docs/process/error-management/ERROR_PATTERN_INDEX.md`.
 5. Run `npm run check:error-handbook`.
 6. Mention handbook updates in the PR body.
 
@@ -245,8 +245,22 @@ Include in the PR body or completion report:
 
 ## Key Files
 
-- `docs/ERROR_PATTERN_INDEX.md` — Compact error pattern index (READ FIRST)
-- `docs/ERROR_EXPERIENCE_HANDBOOK.md` — Detailed error incident log
-- `docs/ARCHITECTURE.md` — Full system architecture
+- `docs/process/error-management/ERROR_PATTERN_INDEX.md` — Compact error pattern index (READ FIRST)
+- `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` — Detailed error incident log
+- `docs/architecture/ARCHITECTURE.md` — Full system architecture
 - `docs/adr/` — Architecture Decision Records
 - `CLAUDE.md` — Full project guidance (also applies to you)
+
+## Private Docs Access (Symlink)
+
+Private docs live in an independent git repo at `D:/Code/principles-private/` and are accessed transparently via the `docs/.private/` junction:
+- `docs/.private/agents/issue-tracker.md` (issue tracker workflow)
+- `docs/.private/agents/triage-labels.md` (triage labels)
+- `docs/.private/agents/domain.md` (domain workflow)
+- `docs/.private/product/emotional-value.md` (emotional value guideline)
+- `docs/.private/exemplars/` (PR review exemplars)
+- ... etc (see `docs/.private/README.md`)
+
+**CRITICAL: Never run `git clean -fdx`, `git stash -a`, or `git checkout -f` in the main worktree** — these will destroy the junction and untrack private docs.
+
+If `docs/.private/` is missing, run `.\scripts\setup-private-docs-symlink.ps1` to recreate.

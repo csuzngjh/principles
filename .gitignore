@@ -89,29 +89,10 @@ _scratchpad/
 code-concise/
 .trae
 
-# Docs (removed from git tracking - kept locally only)
-docs/*
-# Exception: AI assistant handbook must be committed
-!docs/ERROR_EXPERIENCE_HANDBOOK.md
-!docs/ERROR_PATTERN_INDEX.md
-!docs/ERROR_ARCHIVE.md
-# Exception: release checklist must be committed
-!docs/release-go-no-go-checklist.md
-# Exception: architecture docs must be committed
-!docs/architecture/
-!docs/architecture/**
-# Exception: ADRs must be committed
-!docs/adr/
-!docs/adr/**
-# Exception: brand guidelines must be committed
-!docs/brand/
-!docs/brand/**
-# Exception: post-commit bug analysis reports
-!docs/post-commit-bug-analysis/
-!docs/post-commit-bug-analysis/**
-# Exception: superpowers specs (brainstorming design docs)
-!docs/superpowers/
-!docs/superpowers/**
+# Docs
+# 公开 docs 全部被 git 跟踪;私人 docs 在独立仓库 D:/Code/principles-private/
+# Symlink docs/.private/ 让 AI 助手透明访问私人 docs(不进 git)
+docs/.private/
 # But not design prototypes (reference only, not committed)
 # Exception: two key prototypes are committed as visual baseline for CR1/CR3/CR4
 !packages/pd-console/design-prototype/governance-focus.html

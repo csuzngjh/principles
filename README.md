@@ -73,7 +73,7 @@ Install Principles Disciple if you want to:
 
 **Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All owner-approved behavior changes can be inspected, rolled back, or disabled by you.
 
-👉 **See human guide:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+👉 **See human guide:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
 
 ---
 
@@ -249,7 +249,7 @@ Principles Disciple is an attempt to turn that loop into a local, inspectable, o
 ## ❓ FAQ & Troubleshooting
 
 **Q: AI refuses to modify files?**
-A: Check `docs/PLAN.md` — it needs `STATUS: READY` for risky paths
+A: Check `.planning/plan.md` — it needs `STATUS: READY` for risky paths
 
 **Q: AI seems dumbed down?**
 A: Check your expertise level: `/profile "Domain: Expert"`
