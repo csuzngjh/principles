@@ -50,7 +50,7 @@ Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
 - Bug fixes, evidence collection, documentation alignment, synthetic validation, and ADR-0012 legacy retirement/cutover may proceed without inventing an unused flag file.
 - If a proposed new behavior needs runtime disabling before the registry exists, stop and implement the registry first.
 
-After `PRI-239` merges, every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/feature-flags.yaml` with:
+After `PRI-239` merges, every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/config.yaml` (the unified config file; the legacy `.pd/feature-flags.yaml` is no longer read by production runtime — ADR-0016) with:
 - `category: core | quiet | gone | legacy_retire`
 - `enabled: true | false` (Quiet = false by default)
 - `since: <YYYY-MM-DD>` (when added)
@@ -67,7 +67,7 @@ The following phrases in an issue or PR description are **automatic stop signals
 - `antipattern-adr-accepted` — "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
 - `antipattern-review-missing` — "review 时觉得这块缺失" / "during review I noticed X is missing"
 - `antipattern-prep-next-phase` — "为下个 Phase 准备" / "prep for next Phase"
-- `antipattern-core-io` — "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, update the whitelist in `architecture-regression.test.ts` and the exemption list in `eslint.config.js` (PRI-450).
+- `antipattern-core-io` — "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, add it to `packages/principles-core/io-seam-registry.json` (single source of truth that drives both `architecture-regression.test.ts` and `eslint.config.js`, PRI-450/PRI-462).
 
 These are **maintainer-driven completeness anxiety**, not external user signal. PD does not act on them during MVP stage.
 
@@ -127,7 +127,7 @@ After code review (if a real bug is found):
 
 1. **Core vs Plugin boundary**: `packages/principles-core/` = pure logic only (no I/O, no fs, no DB, no network). `packages/openclaw-plugin/` = I/O boundary. New pure logic → core. New I/O → plugin.
 2. **FROZEN LEGACY (ADR-0005)**: The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them.
-3. **Architecture regression tests**: `packages/principles-core/tests/architecture-regression.test.ts` — never skip or delete.
+3. **Architecture regression tests**: `packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts` — never skip or delete.
 4. **ADR compliance**: `docs/adr/` — code contradicting an ADR is a bug.
 5. **No `any`**: Use `unknown` for truly unknown types. Strict TypeScript mode.
 6. **No AI merge**: Never use `gh pr merge` or auto-merge PRs. User must merge manually.

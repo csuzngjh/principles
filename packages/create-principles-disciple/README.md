@@ -52,7 +52,7 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 
 The installer automatically verifies the installation during setup:
 
-1. **Feature flags** — `.pd/feature-flags.yaml` is generated and validated
+1. **Feature flags** — `.pd/config.yaml` is generated and validated (ADR-0016: replaces the legacy `.pd/feature-flags.yaml`)
 2. **Story A demo** — `pd demo story-a` is executed to confirm runtime integration
 3. **Console health** — `/api/health` is checked on the local console instance
 
@@ -84,7 +84,7 @@ Open `http://127.0.0.1:3100` in your browser to access the console.
 
 ## Rerun / Reinstall
 
-Re-running the installer updates the feature-flags.yaml. All three MVP-Core channels
+Re-running the installer updates the `.pd/config.yaml`. All three MVP-Core channels
 are always enabled — the installer does not allow partial disabling of core channels.
 The installer reads actual enabled channels from disk and reports them in the output.
 

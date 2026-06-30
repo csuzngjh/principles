@@ -65,7 +65,8 @@ const startedWorkspaces = new Set<string>();
 // Implementation moved to avoid circular imports with trajectory-collector.ts.
 
 // ── Feature Flag Loader (plugin I/O boundary) ─────────────────────────────
-// Reads workspace feature-flags.yaml and checks a specific flag.
+// Reads workspace .pd/config.yaml and checks a specific flag.
+// (ADR-0016: the legacy .pd/feature-flags.yaml is no longer read by production runtime.)
 // Returns the flag definition with effective enabled state.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
