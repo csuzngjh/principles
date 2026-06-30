@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { ResolvedOutputLanguage } from '@principles/core/runtime-v2';
 
