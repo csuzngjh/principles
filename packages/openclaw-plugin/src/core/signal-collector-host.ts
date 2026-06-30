@@ -120,7 +120,16 @@ export class SignalCollectorHost {
    * 高精度短语命中 (high) → 直接走 STRONG 分流 (同步,纯内存)。
    * 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞)。
    */
-  detectSync(userMessage: string, sessionId: string, trigger: string): void {
+  /**
+   * 可选入参:lineage 字段(由调用方算好传入,host 不感知 trajectory 结构)。
+   * referencesAssistantTurnId 让诊断 evidence 能 JOIN 到前置 assistant turn。
+   */
+  detectSync(
+    userMessage: string,
+    sessionId: string,
+    trigger: string,
+    options?: { referencesAssistantTurnId?: number | null; turnIndex?: number },
+  ): void {
     // 1. trigger 门控 (保留现有 trigger 门控,仅处理真实用户消息)
     if (trigger !== 'user') {
       return;
@@ -133,11 +142,12 @@ export class SignalCollectorHost {
     //    correctionDetected 含义扩展:isSignal && strength=STRONG (spec §5.2)
     const turnInput: TrajectoryUserTurnInput = {
       sessionId,
-      // host 不维护 turn 索引,由调用方/DB 决定;这里用时间戳递增避免冲突。
-      turnIndex: Date.now(),
+      // turnIndex 由调用方传入(基于 event.messages 的真实计数);未传则用时间戳递增避免冲突。
+      turnIndex: options?.turnIndex ?? Date.now(),
       rawText: userMessage,
       correctionDetected: output.isSignal && output.strength === 'STRONG',
       correctionCue: output.matchedTerms.length > 0 ? output.matchedTerms.join(', ') : null,
+      referencesAssistantTurnId: options?.referencesAssistantTurnId ?? null,
     };
     try {
       this.wctx.trajectory?.recordUserTurn?.(turnInput);

@@ -3,7 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
+import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
@@ -12,35 +12,18 @@ import { defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
-import {
-  matchEmpathyKeywords,
-  loadKeywordStore,
-  saveKeywordStore,
-  applyKeywordUpdates,
-  getKeywordStoreSummary,
-} from '../core/empathy-keyword-matcher.js';
-import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
-import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
-import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
-import { evaluateTriggerController } from '@principles/core/runtime-v2';
-import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
-import { buildEmpathyObservation, resolveSourceKind } from './raw-observation-adapter.js';
-import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
-import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
-  detectCorrectionCue as coreDetectCorrectionCue,
   escapeXml,
   extractMessageContent,
   isMinimalTrigger,
 } from '@principles/core/prompt-builder';
-import { sanitizeForEvidence } from './message-sanitize.js';
 import {
   buildAgentIdentity,
   buildEmpathySilenceConstraint,
@@ -49,8 +32,8 @@ import {
   formatCorePrinciples,
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
-  extractPhrasesFromReason,
 } from './prompt-helpers.js';
+import { SignalCollectorHost } from '../core/signal-collector-host.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
 // ---------------------------------------------------------------------------
@@ -118,34 +101,33 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
 }
 
 /**
- * Per-workspace empathy state. Keyed by workspaceDir to avoid cross-workspace
- * state pollution. Previously module-level variables.
- */
-const _empathyState = new Map<string, { turnCounter: number; keywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null }>();
-
-function getEmpathyState(workspaceDir: string): { turnCounter: number; keywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null } {
-  let state = _empathyState.get(workspaceDir);
-  if (!state) {
-    state = { turnCounter: 0, keywordCache: null };
-    _empathyState.set(workspaceDir, state);
-  }
-  return state;
-}
-
-/**
  * Reset all module-level prompt state for a workspace.
  * Intended for test isolation — call in beforeEach().
  */
 export function resetPromptStateForTest(workspaceDir?: string): void {
   if (workspaceDir) {
     _staticFileCache.delete(workspaceDir);
-    _empathyState.delete(workspaceDir);
     resetIntentDocCacheForTest(workspaceDir);
   } else {
     _staticFileCache.clear();
-    _empathyState.clear();
     resetIntentDocCacheForTest();
   }
+}
+
+/**
+ * SignalCollectorHost 实例缓存(per-workspace)。
+ * 避免每条用户消息 new 一个 host;host 内部有 rate limit 状态需跨消息保留。
+ */
+const _signalCollectorHosts = new Map<string, SignalCollectorHost>();
+
+function getSignalCollectorHost(wctx: WorkspaceContext, _logger?: PluginLogger): SignalCollectorHost {
+  void _logger;
+  let host = _signalCollectorHosts.get(wctx.workspaceDir);
+  if (!host) {
+    host = new SignalCollectorHost(wctx);
+    _signalCollectorHosts.set(wctx.workspaceDir, host);
+  }
+  return host;
 }
 
 function parseContextInjectionConfig(value: unknown): ContextInjectionConfig | null {
@@ -258,26 +240,7 @@ export async function handleBeforePromptBuild(
     if (latestUserIndex) {
       const userText = extractMessageContent(latestUserIndex.message);
 
-      // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
-      let correctionCue: string | null = null;
-      try {
-        const learner = CorrectionCueLearner.get(wctx.stateDir);
-        const matchResult = learner.match(userText);
-        if (matchResult.matched) {
-          correctionCue = matchResult.matchedTerms[0] ?? null;
-          learner.recordHits(matchResult.matchedTerms);
-          // TP for high-confidence; flush hitCount for low-confidence
-          if (correctionCue && matchResult.confidence >= 0.5) {
-            learner.recordTruePositive(correctionCue);
-          } else {
-            learner.flush();
-          }
-        }
-      } catch (learnerErr) {
-        // Fallback to hardcoded detection if learner fails — log for observability
-        correctionCue = coreDetectCorrectionCue(userText);
-        logger?.warn?.(`[PD:Prompt] CorrectionCueLearner.match() failed (${String(learnerErr)}), fallback=${correctionCue ? `matched="${correctionCue}"` : 'no-match'}`);
-      }
+      // lineage: 关联到前置 assistant turn(诊断 evidence JOIN 用)。host 不感知 trajectory 结构,由这里算好传入。
       let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
         .slice(0, latestUserIndex.index)
@@ -288,15 +251,13 @@ export async function handleBeforePromptBuild(
         referencesAssistantTurnId = lastAssistant?.id ?? null;
       }
 
+      // SignalCollectorHost 统一接管 correction 检测(spec §3.3 决策1)。
+      // 替代原 CorrectionCueLearner:含高精度短语直判 + 歧义词异步 LLM 确认。
       const userTurnCount = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
-      wctx.trajectory?.recordUserTurn?.({
-        sessionId,
-        turnIndex: userTurnCount,
-        rawText: userText,
-        correctionDetected: Boolean(correctionCue),
-        correctionCue,
-        referencesAssistantTurnId,
-      });
+      getSignalCollectorHost(wctx, logger).detectSync(
+        userText, sessionId, trigger,
+        { referencesAssistantTurnId, turnIndex: userTurnCount },
+      );
     }
   }
 
@@ -340,423 +301,20 @@ export async function handleBeforePromptBuild(
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
-  // Empathy Observer: keyword fast-path + optional LLM deep analysis (zero latency async dispatch)
-  const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
-
-  logger?.info?.(`[PD:Empathy] Conditions: enabled=${empathyEnabled}, isUser=${isUserInteraction}, sessionId=${!!sessionId}, api=${!!api}, !agentToAgent=${!isAgentToAgent}, workspaceDir=${!!workspaceDir}, hasMessage=${!!latestUserMessage}`);
-
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
+  // 注:原 empathy 检测门控(empathyEnabled)已移除,检测职责由 SignalCollectorHost 接管。
+  // behavioral 约束注入是独立职责,保留门控。
   let shouldInjectBehavioralConstraints = false;
-  if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
+  if (isUserInteraction && sessionId && api && !isAgentToAgent) {
     shouldInjectBehavioralConstraints = true;
-
-    // ── Empathy Hybrid Matching (keyword + subagent sampling) ──
-    // Fast keyword scan on every turn, with strategic subagent sampling
-    // for boundary cases and random discovery of new expressions.
-    if (workspaceDir && latestUserMessage) {
-      try {
-        const msgPreview = latestUserMessage.substring(0, 200).replace(/\n/g, ' ');
-        logger?.info?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger}, promptLen=${latestUserMessage.length})`);
-        const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
-
-        // Load keyword store once, cache per-workspace (Finding #7: avoid per-turn I/O)
-        const empathyState = getEmpathyState(workspaceDir);
-        if (!empathyState.keywordCache || empathyState.keywordCache.lang !== lang) {
-          empathyState.keywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang };
-        }
-        const keywordStore = empathyState.keywordCache.store;
-
-        const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
-
-        // Increment turn counter (Finding #3: session.turnCount doesn't exist)
-        empathyState.turnCounter++;
-        const turnCount = empathyState.turnCounter;
-        const painTrigger = wctx.config.get('thresholds.pain_trigger') || 40;
-        const highGfiThreshold = Math.max(wctx.config.get('severity_thresholds.high') || 70, painTrigger + 30);
-
-        if (matchResult.matched) {
-          const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
-          // trackFriction signature: (sessionId, deltaF: number, hash: string, workspaceDir?, options?)
-          trackFriction(sessionId, penalty, 'empathy_keyword_match', workspaceDir, {
-            source: 'user_empathy',
-          });
-
-          logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}`);
-
-          const currentSession = getSession(sessionId);
-          const currentGfi = currentSession?.currentGfi ?? 0;
-
-          if (currentGfi >= highGfiThreshold) {
-            const gfiPainScore = Math.min(Math.round(currentGfi), 60);
-            logger?.info?.(`[PD:Empathy] GFI-TRIGGERED: currentGfi=${currentGfi.toFixed(1)} >= highGfi=${highGfiThreshold}, emitting pain signal (score=${gfiPainScore})`);
-
-            // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
-            // When either OFF → Gate A (PainDiagnosticGate, rollback).
-            const triageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
-            const defaultFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmissionDefault');
-            const useGateB = triageFlag.enabled && defaultFlag.enabled;
-
-            wctx.eventLog.recordPainSignal(sessionId, {
-              score: gfiPainScore,
-              source: 'user_empathy',
-              reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
-              isRisky: false,
-              origin: 'system_infer',
-              severity: gfiPainScore >= 40 ? 'moderate' : 'mild',
-              confidence: 0.5,
-              detection_mode: 'structured',
-              deduped: false,
-              trigger_text_excerpt: sanitizeForEvidence(latestUserMessage, workspaceDir).substring(0, 120),
-              raw_score: gfiPainScore,
-              calibrated_score: gfiPainScore,
-              eventId: `empathy_gfi_${Date.now()}`,
-            });
-
-            // PRI-453: Generate painId early and write to trajectory.db via legacy
-            // recordPainEvent so that disabling SDK observability path does not lose
-            // trajectory coverage. canonicalPainId enables dedup.
-            const gfiPainId = `empathy_gfi_${Date.now()}`;
-            wctx.trajectory?.recordPainEvent?.({
-              sessionId,
-              source: 'user_empathy',
-              score: gfiPainScore,
-              reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
-              origin: 'system_infer',
-              canonicalPainId: gfiPainId,
-            });
-
-            if (useGateB) {
-              // PRI-454: Gate B path — TriggerController owns admission
-              const rawObs = buildEmpathyObservation({
-                detectionSource: 'user_empathy',
-                isGfiTriggered: true,
-                sessionId,
-              });
-              const sourceKind = resolveSourceKind(rawObs);
-              const triage = evaluateEvidenceTriage(sourceKind, gfiPainScore);
-              if (triage.decision !== 'admit') {
-                logger?.info?.(`[PD:Empathy] Triage ${triage.decision}: ${triage.reason}`);
-              } else {
-                const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'empathy_gfi_threshold');
-                const triggerDecision = evaluateTriggerController({
-                  triageResult: triage,
-                  isOwnerManual: false,
-                  isCooldownActive: cooldownActive,
-                  isValid: true,
-                  score: gfiPainScore,
-                  sessionId,
-                });
-                if (triggerDecision.shouldCreateDiagnosticTask) {
-                  markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'empathy_gfi_threshold');
-                  logger?.info?.(`[PD:Empathy] Gate B approved, calling emitPainDetectedEvent...`);
-                  try {
-                    const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                    await emitPainDetectedEvent(wctx, {
-                      ts: new Date().toISOString(),
-                      type: 'pain_detected',
-                      data: {
-                        painId: gfiPainId,
-                        painType: 'user_frustration',
-                        source: 'user_empathy',
-                        reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
-                        score: gfiPainScore,
-                        sessionId,
-                        agentId: 'main',
-                        provenance: 'openclaw_context_bound',
-                        evidence,
-                      },
-                    }, { recordObservability: false });
-                    logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
-                  } catch (emitErr) {
-                    console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
-                    logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
-                  }
-                } else {
-                  logger?.info?.(`[PD:Empathy] Gate B skipped: ${triggerDecision.reason}`);
-                }
-              }
-            } else {
-              // PRI-454: Gate A path (rollback when either flag is OFF)
-              const gate = evaluatePainDiagnosticGate({
-                source: 'user_empathy',
-                score: gfiPainScore,
-                currentGfi,
-                consecutiveErrors: currentSession?.consecutiveErrors ?? 0,
-                sessionId,
-                errorHash: 'empathy_gfi_threshold',
-                thresholds: {
-                  painTrigger,
-                  highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-                  semanticPain: Math.max(painTrigger, 60),
-                },
-              });
-
-              if (gate.shouldDiagnose) {
-                logger?.info?.(`[PD:Empathy] Gate approved, calling emitPainDetectedEvent...`);
-                try {
-                  const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                  await emitPainDetectedEvent(wctx, {
-                    ts: new Date().toISOString(),
-                    type: 'pain_detected',
-                    data: {
-                      painId: gfiPainId,
-                      painType: 'user_frustration',
-                      source: 'user_empathy',
-                      reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
-                      score: gfiPainScore,
-                      sessionId,
-                      agentId: 'main',
-                      provenance: 'openclaw_context_bound',
-                      evidence,
-                    },
-                  }, { recordObservability: false });
-                  logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
-                } catch (emitErr) {
-                  console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
-                  logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
-                }
-              } else {
-                logger?.info?.(`[PD:Empathy] GFI-triggered gate rejected: ${gate.detail}`);
-              }
-            }
-          }
-
-        } else {
-          // ── Pipeline: Observer only runs when keyword matcher misses ──
-          const observer = resolveEmpathyObserver(wctx, logger);
-          if (observer) {
-            const scheduler = new AgentScheduler();
-            scheduler.register({
-              agentId: 'empathy-observer',
-              mode: 'realtime',
-              runner: observer,
-            });
-
-            logger?.info?.(`[PD:Empathy] Pipeline: Triggering background Empathy Observer for unmatched message: "${msgPreview}"`);
-
-            void scheduler.dispatch('empathy-observer', { userMessage: latestUserMessage })
-              .then(async (result) => {
-                if (result.damageDetected) {
-                  logger?.info?.(`[PD:Empathy] Pipeline: Background Empathy Observer detected damage. Severity: ${result.severity}, Reason: ${result.reason}`);
-
-                  // ── Persistence Contract ──
-                  const painScore = scoreFromSeverityForSpec(result.severity, wctx);
-
-                  trackFriction(
-                    sessionId,
-                    painScore,
-                    `observer_empathy_${result.severity}`,
-                    workspaceDir,
-                    { source: 'user_empathy' }
-                  );
-
-                  // ── Pipeline: feed back newly detected expressions into keyword store ──
-                  if (result.reason) {
-                    const rawLang = wctx.config.get('language');
-                    const lang: 'zh' | 'en' = rawLang === 'en' ? 'en' : 'zh';
-                    const phrases = extractPhrasesFromReason(result.reason, lang);
-                    if (phrases.length > 0) {
-                      const updates: Record<string, { action: 'add'; weight: number; falsePositiveRate: number; reasoning: string }> = {};
-                      for (const phrase of phrases) {
-                        if (!Object.hasOwn(keywordStore.terms, phrase)) {
-                          updates[phrase] = {
-                            action: 'add',
-                            weight: 0.4,
-                            falsePositiveRate: 0.3,
-                            reasoning: `Discovered by empathy observer: ${result.reason.substring(0, 100)}`,
-                          };
-                        }
-                      }
-                      if (Object.keys(updates).length > 0) {
-                        const { added } = applyKeywordUpdates(keywordStore, updates);
-                        if (added > 0) {
-                          saveKeywordStore(wctx.stateDir, keywordStore);
-                          logger?.info?.(`[PD:Empathy] Pipeline: added ${added} new terms from observer feedback`);
-                        }
-                      }
-                    }
-                  }
-
-                  const eventId = `emp_obs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                  wctx.eventLog.recordPainSignal(sessionId, {
-                    score: painScore,
-                    source: 'user_empathy',
-                    reason: result.reason || 'Empathy observer detected likely user frustration.',
-                    isRisky: false,
-                    origin: 'system_infer',
-                    severity: result.severity,
-                    confidence: result.confidence,
-                    detection_mode: 'structured',
-                    deduped: false,
-                    trigger_text_excerpt: sanitizeForEvidence(latestUserMessage, workspaceDir).substring(0, 120),
-                    raw_score: painScore,
-                    calibrated_score: painScore,
-                    eventId,
-                  });
-
-                  // PRI-453: Generate painId early to pass as canonicalPainId for dedup.
-                  // Declared outside try block so it's accessible to emitPainDetectedEvent
-                  // later (lineage consistency: same id for trajectory + emitted event).
-                  const observerPainId = `empathy_gfi_${Date.now()}`;
-                  try {
-                    wctx.trajectory?.recordPainEvent?.({
-                      sessionId,
-                      source: 'user_empathy',
-                      score: painScore,
-                      reason: result.reason || 'Empathy observer detected likely user frustration.',
-                      severity: result.severity,
-                      origin: 'system_infer',
-                      confidence: result.confidence,
-                      text: sanitizeForEvidence(latestUserMessage, workspaceDir),
-                      canonicalPainId: observerPainId,
-                    });
-                  } catch (error) {
-                    logger?.warn?.(`[PD:Empathy] Failed to persist trajectory: ${String(error)}`);
-                  }
-
-                  // Check if GFI triggers a pain event post-LLM validation
-                  const freshSession = getSession(sessionId);
-                  const freshGfi = freshSession?.currentGfi ?? 0;
-                  if (freshGfi >= highGfiThreshold) {
-                    const freshGfiPainScore = Math.min(Math.round(freshGfi), 60);
-                    // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
-                    // When either OFF → Gate A (PainDiagnosticGate, rollback).
-                    const triageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
-                    const defaultFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmissionDefault');
-                    const useGateB = triageFlag.enabled && defaultFlag.enabled;
-
-                    if (useGateB) {
-                      // PRI-454: Gate B path — TriggerController owns admission
-                      const rawObs = buildEmpathyObservation({
-                        detectionSource: 'user_empathy',
-                        isGfiTriggered: true,
-                        sessionId,
-                      });
-                      const sourceKind = resolveSourceKind(rawObs);
-                      const triage = evaluateEvidenceTriage(sourceKind, freshGfiPainScore);
-                      if (triage.decision !== 'admit') {
-                        logger?.info?.(`[PD:Empathy] Pipeline observer triage ${triage.decision}: ${triage.reason}`);
-                      } else {
-                        const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'empathy_gfi_observer');
-                        const triggerDecision = evaluateTriggerController({
-                          triageResult: triage,
-                          isOwnerManual: false,
-                          isCooldownActive: cooldownActive,
-                          isValid: true,
-                          score: freshGfiPainScore,
-                          sessionId,
-                        });
-                        if (triggerDecision.shouldCreateDiagnosticTask) {
-                          markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'empathy_gfi_observer');
-                          logger?.info?.(`[PD:Empathy] Pipeline Gate B approved (observer), calling emitPainDetectedEvent...`);
-                          try {
-                            const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                            // PRI-453: Reuse observerPainId for lineage consistency —
-                            // the same id is used as canonicalPainId in recordPainEvent
-                            // and as painId in the emitted event, so EvidenceChainConsoleModel
-                            // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
-                            await emitPainDetectedEvent(wctx, {
-                              ts: new Date().toISOString(),
-                              type: 'pain_detected',
-                              data: {
-                                painId: observerPainId,
-                                painType: 'user_frustration',
-                                source: 'user_empathy',
-                                reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
-                                score: freshGfiPainScore,
-                                sessionId,
-                                agentId: 'main',
-                                provenance: 'openclaw_context_bound',
-                                evidence,
-                              },
-                            }, { recordObservability: false });
-                          } catch (emitErr) {
-                            logger?.error?.(`[PD:Empathy] Pipeline FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
-                          }
-                        } else {
-                          logger?.info?.(`[PD:Empathy] Pipeline Gate B skipped (observer): ${triggerDecision.reason}`);
-                        }
-                      }
-                    } else {
-                      // PRI-454: Gate A path (rollback when either flag is OFF)
-                      const gate = evaluatePainDiagnosticGate({
-                        source: 'user_empathy',
-                        score: freshGfiPainScore,
-                        currentGfi: freshGfi,
-                        consecutiveErrors: freshSession?.consecutiveErrors ?? 0,
-                        sessionId,
-                        errorHash: 'empathy_gfi_threshold',
-                        thresholds: {
-                          painTrigger,
-                          highSeverity: wctx.config.get('severity_thresholds.high') || 70,
-                          semanticPain: Math.max(painTrigger, 60),
-                        },
-                      });
-
-                      if (gate.shouldDiagnose) {
-                        logger?.info?.(`[PD:Empathy] Pipeline GFI threshold crossed after background observer. Emitting pain signal...`);
-                        try {
-                          const evidence = buildTrajectoryEvidence(wctx, sessionId);
-                          // PRI-453: Reuse observerPainId for lineage consistency —
-                          // the same id is used as canonicalPainId in recordPainEvent
-                          // and as painId in the emitted event, so EvidenceChainConsoleModel
-                          // can JOIN pain_events.canonical_pain_id = tasks.input_ref.
-                          await emitPainDetectedEvent(wctx, {
-                            ts: new Date().toISOString(),
-                            type: 'pain_detected',
-                            data: {
-                              painId: observerPainId,
-                              painType: 'user_frustration',
-                              source: 'user_empathy',
-                              reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
-                              score: freshGfiPainScore,
-                              sessionId,
-                              agentId: 'main',
-                              provenance: 'openclaw_context_bound',
-                              evidence,
-                            },
-                          }, { recordObservability: false });
-                        } catch (emitErr) {
-                          logger?.error?.(`[PD:Empathy] Pipeline FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
-                        }
-                      }
-                    }
-                  }
-                } else {
-                  logger?.info?.(`[PD:Empathy] Pipeline: Background Empathy Observer did not detect any damage.`);
-                }
-              })
-              .catch((err) => {
-                logger?.warn?.(`[PD:Empathy] Pipeline: Background analysis failed or rejected: ${String(err)}`);
-              });
-          }
-
-          // Log unmatched messages periodically for coverage analysis
-          if (turnCount > 0 && turnCount % 50 === 0) {
-            const sampleMsg = latestUserMessage.substring(0, 80).replace(/\n/g, ' ');
-            logger?.debug?.(`[PD:Empathy] NO_MATCH: "${sampleMsg}" (turn ${turnCount}, keywords_in_store=${Object.keys(keywordStore.terms).length})`);
-          }
-        }
-
-        // Periodic summary (every 100 turns)
-        if (turnCount > 0 && turnCount % 100 === 0) {
-          const s = getKeywordStoreSummary(keywordStore);
-          const highFP = s.highFalsePositiveTerms.slice(0, 5).map(t => `${t.term}(${t.falsePositiveRate.toFixed(2)})`).join(', ');
-          logger?.info?.(`[PD:Empathy] SUMMARY(turn=${turnCount}): terms=${s.totalTerms}, hits=${keywordStore.stats.totalHits}, zero_hit=${s.totalTerms - (s.seedTerms + s.discoveredTerms)}, high_fp=[${highFP}]`);
-        }
-
-        // Save keyword store on every match
-        if (matchResult.matched) {
-          saveKeywordStore(wctx.stateDir, keywordStore);
-          const {totalHits} = keywordStore.stats;
-          logger?.info?.(`[PD:Empathy] Keyword store saved after match: terms=${matchResult.matchedTerms.join(',')}, totalHits=${totalHits}`);
-        }
-      } catch (e) {
-        logger?.warn?.(`[PD:Empathy] ERROR: ${String(e)}`);
-      }
-    }
-
   }
+
+  // SignalCollectorHost 统一接管 empathy + correction 检测(spec §3.3 决策1)。
+  // 替代原 matchEmpathyKeywords + EmpathyObserver spawn + GFI 累积 + Gate A/B。
+  if (workspaceDir && latestUserMessage && sessionId && trigger === 'user') {
+    getSignalCollectorHost(wctx, logger).detectSync(latestUserMessage, sessionId, trigger);
+  }
+
 
   // ──── 4. Heartbeat-specific checklist (also fires for cron-triggered sessions) ────
   if (trigger === 'heartbeat' || trigger === 'cron') {
@@ -1093,71 +651,5 @@ export async function handleBeforePromptBuild(
     prependContext,
     appendSystemContext
   };
-}
-
-// ── Empathy Observer Hybrid Deep Analysis Helpers (Unified SDK Migration) ──
-
-function scoreFromSeverityForSpec(severity: string | undefined, wctx: WorkspaceContext): number {
-  if (severity === 'severe') return Number(wctx.config.get('empathy_engine.penalties.severe') ?? 40);
-  if (severity === 'moderate') return Number(wctx.config.get('empathy_engine.penalties.moderate') ?? 25);
-  return Number(wctx.config.get('empathy_engine.penalties.mild') ?? 10);
-}
-
-function resolveEmpathyObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>): EmpathyObserver | null {
-  // F15 (PRI-442): empathy_observer flag is registered as MVP-Quiet (default
-  // off) per ADR-0014 §2.5. Previously this flag was a dead registration —
-  // registered in feature-flag-contract.ts but never read anywhere, violating
-  // the PRI-239 constraint "Only flags with real consumption paths are
-  // registered". Now resolveEmpathyObserver consumes the flag: when disabled
-  // (the default), the LLM observer pipeline is short-circuited and the
-  // keyword-matcher path (gated by empathy_engine.enabled above) continues
-  // to run independently. This mirrors the pattern used by
-  // shouldStartEvolutionWorker / shouldStartCorrectionObserver.
-  const empathyFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'empathy_observer', logger);
-  if (!empathyFlag.enabled) {
-    logger?.debug?.(`[PD:Empathy] empathy_observer flag disabled (source=${empathyFlag.source}) — LLM observer pipeline skipped`);
-    return null;
-  }
-
-  try {
-    const loader = new WorkflowFunnelLoader(wctx.stateDir);
-    const funnel = loader.getFunnel('pd-empathy-observer');
-    const policy = funnel?.policy;
-    if (!policy || policy.runtimeKind !== 'pi-ai') {
-      logger?.debug?.('[PD:Empathy] workflows.yaml pd-empathy-observer policy not found. Falling back to environment variables.');
-      const provider = process.env.PD_EMPATHY_PROVIDER || 'anthropic';
-      const model = process.env.PD_EMPATHY_MODEL || 'anthropic/claude-3-5-sonnet';
-      const apiKeyEnv = process.env.PD_EMPATHY_API_KEY_ENV || 'ANTHROPIC_API_KEY';
-      const baseUrl = process.env.PD_EMPATHY_BASE_URL;
-
-      if (!process.env[apiKeyEnv]) {
-        logger?.debug?.(`[PD:Empathy] Empathy observer API key env ${apiKeyEnv} is not set. Background analysis disabled.`);
-        return null;
-      }
-
-      const adapter = new PiAiRuntimeAdapter({
-        provider,
-        model,
-        apiKeyEnv,
-        baseUrl,
-        workspace: wctx.workspaceDir,
-      });
-      return new EmpathyObserver({ runtimeAdapter: adapter });
-    }
-
-    const adapter = new PiAiRuntimeAdapter({
-      provider: String(policy.provider),
-      model: String(policy.model),
-      apiKeyEnv: String(policy.apiKeyEnv),
-      maxRetries: policy.maxRetries,
-      timeoutMs: policy.timeoutMs ?? 30_000,
-      baseUrl: policy.baseUrl,
-      workspace: wctx.workspaceDir,
-    });
-    return new EmpathyObserver({ runtimeAdapter: adapter }, { timeoutMs: policy.timeoutMs });
-  } catch (err) {
-    logger?.warn?.(`[PD:Empathy] Failed to resolve EmpathyObserver: ${String(err)}`);
-    return null;
-  }
 }
 
