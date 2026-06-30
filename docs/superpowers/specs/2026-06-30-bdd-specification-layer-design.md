@@ -12,11 +12,11 @@
 
 ## 0. 决策摘要
 
-本设计在 PD 项目引入一层**可执行的行为规约**（BDD，Behavior-Driven Development），用 `.feature` 文件描述 Owner 可读的用户旅程契约，通过 `@cucumber/gherkin-utils` 解析后注册为 Vitest / Playwright 测试。
+本设计在 PD 项目引入一层**可执行的行为规约**（BDD，Behavior-Driven Development），用 `.feature` 文件描述 Owner 可读的用户旅程契约，通过 `@cucumber/gherkin` 解析后注册为 Vitest / Playwright 测试。
 
 本次只推进 Phase 1（规约试点，3 条最高价值路径）：
 
-- 引入 `@cucumber/gherkin-utils` 作为 root `devDependency`（**不**进 `@principles/core` 发布包）；
+- 引入 `@cucumber/gherkin` 与 `@cucumber/messages` 作为 root `devDependencies`（**不**进 `@principles/core` 发布包）；
 - 在 `packages/principles-core/tests/bdd/support/` 实现 `gherkin-loader.ts` 与 `vitest-bdd.ts`（测试基础设施，**不**进 src）；
 - 在 `packages/pd-console/tests/bdd/support/` 实现 `playwright-bdd.ts`（复用现有 `e2e-start.mjs`）；
 - 在 `docs/specs/features/` 落地 3 个示范 `.feature` 文件：
@@ -102,7 +102,7 @@ Error Handbook 中 ERR-001/005/007（as bypass validation）、ERR-015/018/019�
 └─────────────────────────────────────────────────────────────┘
                           ↓ 解析
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 2: 解析层 (@cucumber/gherkin-utils 适配)              │
+│  Layer 2: 解析层 (@cucumber/gherkin 适配)                    │
 │  ─────────────────────────────────────────────────────────  │
 │  packages/principles-core/tests/bdd/support/                │
 │    gherkin-loader.ts  — parseFeature() → ParsedScenario[]   │
@@ -130,11 +130,11 @@ Error Handbook 中 ERR-001/005/007（as bypass validation）、ERR-015/018/019�
 
 2. **step definitions 跟着测试代码走**，放 `packages/<pkg>/tests/bdd/*.steps.ts`。step 是实现细节，跟测试基础设施绑定，跟着 `vitest.config.ts` / `playwright.config.ts` 走。
 
-3. **BDD runner 放 `tests/bdd/support/`，不进 `src/`**。理由：(a) `@principles/core` 是公开发布的 SDK（`publishConfig.access: public`，`files: ["dist"]`），放 `src/testing/` 会被 tsc 编译进 dist，把 BDD 工具带进 SDK；(b) 解析器虽然本身是 pure logic，但它的依赖 `@cucumber/gherkin-utils`（含 `@cucumber/gherkin`、`@cucumber/messages`、`commander` 等，unpacked ~213KB）不应进生产依赖；(c) 遵循"测试基础设施属于测试目录"的常规边界。`@cucumber/gherkin-utils` 放 root `devDependency`，所有包共享。
+3. **BDD runner 放 `tests/bdd/support/`，不进 `src/`**。理由：(a) `@principles/core` 是公开发布的 SDK（`publishConfig.access: public`，`files: ["dist"]`），放 `src/testing/` 会被 tsc 编译进 dist，把 BDD 工具带进 SDK；(b) 解析器依赖 `@cucumber/gherkin` 与 `@cucumber/messages`，不应进入生产依赖；(c) 遵循"测试基础设施属于测试目录"的常规边界。这两个包放 root `devDependencies`，所有包共享。
 
 4. **前后端 `.feature` 文件同名不同后缀**：`xxx.feature`（后端切面，数据流验证）vs `xxx-ui.feature`（前端切面，操作旅程验证）。同一个用户旅程的两个切面，文件名共享便于交叉引用。
 
-5. **不引入完整 Cucumber 栈**，只用 `@cucumber/gherkin-utils`（纯解析器）。执行仍由 Vitest/Playwright 负责，0 运行时改造。
+5. **不引入完整 Cucumber 栈**，只用 `@cucumber/gherkin` 解析器与消息类型。执行仍由 Vitest/Playwright 负责，0 运行时改造。
 
 6. **`.feature` 路径解析走 repo-root resolver**，不依赖 `process.cwd()`。理由：`cd packages/principles-core && npm test` 时 cwd 是包目录，相对路径 `docs/specs/...` 找不到文件，可能造成"场景被静默跳过"——这是 ERR-088 的典型失败模式。
 
@@ -156,7 +156,7 @@ Error Handbook 中 ERR-001/005/007（as bypass validation）、ERR-015/018/019�
 
 **位置**：`packages/principles-core/tests/bdd/support/gherkin-loader.ts`
 
-**职责**：把 `@cucumber/gherkin-utils` 解析结果转成 PD 内部用的扁平结构，供 Vitest/Playwright step runner 消费。
+**职责**：把 `@cucumber/gherkin` 解析结果转成 PD 内部用的扁平结构，供 Vitest/Playwright step runner 消费。
 
 **接口**：
 
@@ -357,7 +357,7 @@ registry.then('stdout 是严格的单一 JSON 对象', (ctx) => {
        ↓
 2. *.steps.ts 顶部：defineFeature(readFeature(resolveFeaturePath('xxx.feature')), registry)
        ↓
-3. gherkin-loader.ts 调用 @cucumber/gherkin-utils 解析
+3. gherkin-loader.ts 调用 @cucumber/gherkin 解析
        ↓
 4. 解析得 ParsedScenario[]
        ↓
@@ -557,7 +557,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 **目标**：让 PD 项目第一次有可执行的 `.feature` 规约，验证整个三层架构，覆盖 3 条最高价值路径。
 
 **范围**：
-- 在 root `package.json` 添加 `@cucumber/gherkin-utils` 到 `devDependencies`；
+- 在 root `package.json` 添加 `@cucumber/gherkin` 与 `@cucumber/messages` 到 `devDependencies`；
 - 实现 `gherkin-loader.ts`（解析层，~80 行）；
 - 实现 `vitest-bdd.ts`（Vitest step runner，~150 行，含 `@disabled` 处理）；
 - 实现 `playwright-bdd.ts`（Playwright step runner，~100 行）；
@@ -590,7 +590,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 - ERR 类全部转回归 `.feature`；
 - 把 BDD 纳入 `verify:merge` 或 CI required checks；
 - Cucumber 报告/HTML 输出；
-- scenario outline 矩阵化（虽然 `@cucumber/gherkin-utils` 支持，但 Phase 1 不用）；
+- scenario outline 矩阵化（虽然 Gherkin AST 支持，但 Phase 1 不用）；
 - 双语 `.feature` 文件（Phase 1 全中文）。
 
 ### 6.2 Phase 2（条件性，需新 issue）：覆盖扩展
@@ -619,7 +619,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 - rc-1~rc-9 全部转 `.feature`；
 - ERR-001~ERR-025+ 高频复现类转回归 `.feature`；
 - scenario outline 矩阵化（rc-4 validate-array-elements 这种适合矩阵）；
-- 可选：替换 `@cucumber/gherkin-utils` 为更完整的 cucumber 生态（如果 Phase 2 证明不够用）。
+- 可选：引入更完整的 Cucumber 执行生态（如果 Phase 2 证明现有 runner 不够用）。
 
 ## 7. Emotional Value 评估
 
@@ -642,7 +642,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 本设计实施前考虑的 ERR 条目：
 
 - **ERR-001 / ERR-005 / ERR-007**（as bypass validation 类）：`gherkin-loader.ts` 解析结果类型固定为 `ParsedScenario[]`，step 函数参数通过 `registry.match()` 类型 narrowed，禁止 `as` 强转。
-- **ERR-009 / ERR-010**（fail loud 类）：step 未匹配、fixture 不存在、`@cucumber/gherkin-utils` 解析失败、`.feature` 路径解析失败，全部 fail loud。
+- **ERR-009 / ERR-010**（fail loud 类）：step 未匹配、fixture 不存在、Gherkin 解析失败、`.feature` 路径解析失败，全部 fail loud。
 - **ERR-015 / ERR-018 / ERR-019**（stale loop state 类）：每个 scenario 独立 `StepContext`，禁止跨 scenario 共享 `ctx.state`。
 - **ERR-014 / ERR-016 / ERR-017**（safe serialization 类）：`attachments` 单条 body 硬限 4KB；`redactable` 只输出 step 显式标红字段；不输出 `ctx.state` 全部。
 - **ERR-002**（silent fallback 类）：step 未匹配不 silently skip，直接抛错；`@disabled` 标签不静默通过，输出显式 skip 报告。
@@ -654,7 +654,7 @@ AI 助手在 PD 项目改代码时的新流程（写到 AGENTS.md）：
 
 - **9.1 pd-console e2e 是否在 CI 跑**：实施时需先核查 `.github/workflows/ci.yml` 与 `packages/pd-console/playwright.config.ts`，以及独立的 `pd-console-e2e.yml`。如果不在 CI 跑，前端 BDD 也只在本地跑，PR 描述需注明"前端 BDD 已本地验证"。
 - **9.2 ADR 编号**：实施时确认 `docs/adr/` 下一个可用编号，本设计文档占位为 `00XX`。
-- **9.3 `@cucumber/gherkin-utils` 版本**：实施时确认 npm 上最新稳定版，记录到 ADR。注意它依赖 `@cucumber/gherkin`、`@cucumber/messages`、`commander`，unpacked ~213KB，作为 root devDependency 可接受，但**不**进任何 package 的 `dependencies`。
+- **9.3 Cucumber parser 版本**：实施时锁定兼容的 `@cucumber/gherkin` 与 `@cucumber/messages` 版本并记录到 ADR。两者作为 root devDependencies，可接受，但**不**进任何 package 的 `dependencies`。
 - **9.4 `architecture-regression.test.ts` 守卫加强**：当前守卫可能未覆盖"测试代码不进 `src/`"。Phase 1 实施时核查，如未覆盖，新增规则禁止 `packages/principles-core/src/testing/` 之类的目录存在。
 - **9.5 `docs/.private/product/emotional-value.md` 可读性**：**已解决**（2026-06-30）。根因：private repo `D:\Code\principles-private` 工作区文件被误删（未提交），通过 `git restore docs/` 恢复；同时 Trae worktree 的 `docs\.private` junction 缺失，通过 `.\scripts\setup-private-docs-symlink.ps1` 重建。文件 7752 bytes / 174 行，通过 worktree junction 可读。
 

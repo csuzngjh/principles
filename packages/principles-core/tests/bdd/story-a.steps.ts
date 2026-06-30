@@ -131,6 +131,9 @@ registry.when('owner 拒绝该原则', async (ctx) => {
     'owner-001',
     'Rejected',
   );
+  if (!rejectResult.ok) {
+    throw new Error(`reject failed: ${JSON.stringify(rejectResult)}`);
+  }
   ctx.state.rejectResult = rejectResult;
 });
 

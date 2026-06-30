@@ -12,6 +12,7 @@
  * more reliable and follows the established pattern in this repo.
  */
 import { vi, expect } from 'vitest';
+import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { createStepRegistry, defineFeature } from './support/vitest-bdd.js';
 import { resolveFeaturePath } from './support/repo-root.js';
@@ -154,7 +155,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-import { handlePainRetry } from '../../src/commands/pain-retry.js';
+import { registerPainRetryCommand } from '../../src/commands/pain-retry.js';
 
 // ── Test data ──────────────────────────────────────────────────────────────────
 
@@ -173,25 +174,6 @@ const RETRY_WAIT_TASK = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/**
- * Parse a command string like 'pd pain retry --pain-id pain-001 --json' into options.
- * cli-7: 校验命令名以 'pd pain retry' 开头，否则 fail loud (rc-3)。
- * 这确保 .feature 中的命令名与真实 CLI 注册一致，避免 EP-09 (Test Reality Gap)。
- */
-function parseCommand(command: string): { painId: string; json: boolean } {
-  const trimmed = command.trim();
-  if (!trimmed.startsWith('pd pain retry')) {
-    throw new Error(
-      `parseCommand: expected command to start with 'pd pain retry', got: ${command}`
-    );
-  }
-  const parts = trimmed.split(/\s+/);
-  const painIdIdx = parts.indexOf('--pain-id');
-  const painId = painIdIdx >= 0 ? parts[painIdIdx + 1] : '';
-  const json = parts.includes('--json');
-  return { painId, json };
-}
 
 /** Reset all mocks to a clean default state for the next scenario. */
 function resetMocksForScenario(painId: string): void {
@@ -246,14 +228,18 @@ function resetMocksForScenario(painId: string): void {
 const registry = createStepRegistry();
 
 registry.given('一个可用的 pd-cli 可执行文件', () => {
-  // Mocks are set up at module level. Verify the handler is importable.
-  if (typeof handlePainRetry !== 'function') {
-    throw new Error('pd-cli handlePainRetry not available');
+  if (typeof registerPainRetryCommand !== 'function') {
+    throw new Error('pd-cli pain retry registration not available');
   }
 });
 
 registry.when(/operator 执行 "(.+)"/, async (ctx, command: string) => {
-  const { painId, json } = parseCommand(command as string);
+  const argv = command.trim().split(/\s+/);
+  if (argv.shift() !== 'pd') {
+    throw new Error(`expected command to start with pd: ${command}`);
+  }
+  const painIdIndex = argv.indexOf('--pain-id');
+  const painId = painIdIndex >= 0 ? argv[painIdIndex + 1] : '';
   resetMocksForScenario(painId);
 
   const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -261,21 +247,13 @@ registry.when(/operator 执行 "(.+)"/, async (ctx, command: string) => {
   const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
   try {
-    await handlePainRetry({
-      painId,
-      workspace: '/tmp/fake-workspace',
-      runtime: 'test-double',
-      json,
-    });
-  } catch {
-    // handlePainRetry may throw after process.exit is mocked and refuseExit returns.
-    // The JSON output was already written to console.log before process.exit.
+    const program = new Command().name('pd').exitOverride();
+    registerPainRetryCommand(program.command('pain'));
+    await program.parseAsync(['node', 'pd', ...argv]);
+  } finally {
+    expect(exitSpy).not.toHaveBeenCalledWith(0);
   }
 
-  // Capture stdout: find the first console.log call that is a valid JSON object.
-  // (After process.exit is mocked, refuseExit returns and execution may continue,
-  // producing additional console.log calls. The JSON contract applies to the
-  // primary JSON output, which is the first parseable JSON object on stdout.)
   const allLogCalls = logSpy.mock.calls.map((c) => String(c[0]));
   const jsonCall = allLogCalls.find((s) => {
     try { JSON.parse(s); return true; } catch { return false; }
@@ -284,7 +262,7 @@ registry.when(/operator 执行 "(.+)"/, async (ctx, command: string) => {
   const jsonCallCount = allLogCalls.filter((s) => {
     try { JSON.parse(s); return true; } catch { return false; }
   }).length;
-  const stdout = jsonCall ?? allLogCalls.join('\n');
+  const stdout = allLogCalls.join('\n');
   const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
   ctx.state.cliResult = { stdout, stderr, jsonCallCount, allLogCallCount: allLogCalls.length };
 
@@ -295,25 +273,19 @@ registry.when(/operator 执行 "(.+)"/, async (ctx, command: string) => {
 });
 
 registry.then('stdout 是严格的单一 JSON 对象', (ctx) => {
-  const result = ctx.state.cliResult as { stdout: string; jsonCallCount: number };
+  const result = ctx.state.cliResult as {
+    stdout: string;
+    jsonCallCount: number;
+    allLogCallCount: number;
+  };
   const out = result.stdout.trim();
   // Must start with { and parse as a non-null object
   expect(out.startsWith('{')).toBe(true);
   const parsed = JSON.parse(out);
   expect(typeof parsed).toBe('object');
   expect(parsed).not.toBeNull();
-  // cli-1: --json 输出必须是 stdout 上恰好一个可解析的 JSON 对象。
-  // 注意: 当 refuseExit 路径被触发时,process.exit 被 mock 后不退出,
-  // 执行继续到 catch 块可能输出第二个 JSON。这是测试环境的已知限制,
-  // 生产环境 process.exit 会真正退出。第一个 JSON 是正确的契约输出。
-  // 后续 issue: refuseExit 应在 process.exit 后 throw 以防止 mock 环境下继续执行。
-  if (result.jsonCallCount > 1) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[cli-1 warning] jsonCallCount=${result.jsonCallCount}, expected 1. ` +
-      `First JSON is the contract output; extras are process.exit mock artifacts.`
-    );
-  }
+  expect(result.allLogCallCount).toBe(1);
+  expect(result.jsonCallCount).toBe(1);
 });
 
 registry.then('该 JSON 对象可以被 JSON.parse 解析', (ctx) => {

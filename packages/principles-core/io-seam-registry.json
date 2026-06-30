@@ -64,7 +64,7 @@
     },
     {
       "name": "test-infrastructure",
-      "description": "Shared Story A acceptance test helpers that must live under src/ (rootDir) because story-a-acceptance.test.ts in src/__tests__/ imports them — placing them in tests/ triggers TS6059 (File is not under rootDir). Does I/O for temp workspace setup (mkdtempSync, rmSync) and SQLite connection initialization. NOT production code; lives in src/ solely due to the tsc rootDir constraint. BDD steps (tests/bdd/story-a.steps.ts) cross-import these helpers.",
+      "description": "Shared Story A acceptance helpers under src/__tests__. They create temporary workspaces and SQLite stores for production-path tests, but are excluded from published runtime behavior.",
       "files": [
         "runtime-v2/activation/__tests__/helpers.ts"
       ]
