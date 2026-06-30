@@ -18,7 +18,7 @@ import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
  */
 function errMsg(e: { code?: string } | undefined, err: unknown): string {
   // Check the unknown caught value (err) for a string message first.
-  if (err !== null && err !== undefined && typeof err === 'object' && 'message' in err) {
+  if (err !== null && err !== undefined && typeof err === 'object' && Object.hasOwn(err, 'message')) {
     const msg = (err as { message?: unknown }).message;
     if (typeof msg === 'string') return msg;
   }

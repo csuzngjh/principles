@@ -384,7 +384,7 @@ async function updateOpenClawConfig(): Promise<void> {
     if (existsSync(pkgPath)) {
       try {
         const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-        if (typeof pkg === 'object' && pkg !== null && 'version' in (pkg as Record<string, unknown>)) {
+        if (typeof pkg === 'object' && pkg !== null && Object.hasOwn(pkg, 'version')) {
           version = (pkg as Record<string, unknown>).version as string;
         }
       } catch { /* ignore */ }

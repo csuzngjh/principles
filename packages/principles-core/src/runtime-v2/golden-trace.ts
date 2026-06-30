@@ -151,7 +151,7 @@ export function validateGoldenTrace(input: unknown): GoldenTraceValidationResult
     return { valid: false, errors };
   }
 
-  if ('createdAt' in input && !isParseableTimestamp(input.createdAt)) {
+  if (Object.hasOwn(input, 'createdAt') && !isParseableTimestamp(input.createdAt)) {
     errors.push('createdAt must be a parseable ISO-8601 timestamp');
   }
 

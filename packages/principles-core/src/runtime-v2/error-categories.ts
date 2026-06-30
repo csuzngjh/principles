@@ -102,7 +102,7 @@ export function mapFailureCategory(errorCategory?: string | null): string | null
 
 // Runtime exhaustiveness assertion — verify every PDErrorCategory has a mapping
 for (const cat of PD_ERROR_CATEGORIES) {
-  if (!(cat in FAILURE_CATEGORY_MAP)) {
+  if (!Object.hasOwn(FAILURE_CATEGORY_MAP, cat)) {
     throw new Error(`FAILURE_CATEGORY_MAP is missing mapping for PDErrorCategory: ${cat}`);
   }
 }

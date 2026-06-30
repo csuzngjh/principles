@@ -89,7 +89,7 @@ export class ResilientContextAssembler implements ContextAssembler {
     if (
       error !== null &&
       typeof error === 'object' &&
-      'category' in error
+      Object.hasOwn(error, 'category')
     ) {
       return String((error as { category: PDErrorCategory }).category);
     }

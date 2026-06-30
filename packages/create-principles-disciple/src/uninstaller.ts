@@ -191,7 +191,7 @@ function cleanupOpenClawConfig(): { cleaned: boolean; error?: string } {
       // Remove from plugins.entries
       if (typeof plugins.entries === 'object' && plugins.entries !== null && !Array.isArray(plugins.entries)) {
         const entries = plugins.entries as Record<string, unknown>;
-        if ('principles-disciple' in entries) {
+        if (Object.hasOwn(entries, 'principles-disciple')) {
           delete entries['principles-disciple'];
           modified = true;
         }
@@ -200,7 +200,7 @@ function cleanupOpenClawConfig(): { cleaned: boolean; error?: string } {
       // Remove from plugins.installs (legacy field, but clean it up anyway)
       if (typeof plugins.installs === 'object' && plugins.installs !== null && !Array.isArray(plugins.installs)) {
         const installs = plugins.installs as Record<string, unknown>;
-        if ('principles-disciple' in installs) {
+        if (Object.hasOwn(installs, 'principles-disciple')) {
           delete installs['principles-disciple'];
           modified = true;
         }

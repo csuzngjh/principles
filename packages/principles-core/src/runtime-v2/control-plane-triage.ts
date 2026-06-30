@@ -233,13 +233,13 @@ export function classifyCanaryFindings(canaryOutput: CanaryOutputInput): TriageP
 
     if (check.details && typeof check.details === 'object') {
       const details = check.details as Record<string, unknown>;
-      if ('brokenLinks' in details && Array.isArray(details.brokenLinks) && (details.brokenLinks as unknown[]).length > 0) {
+      if (Object.hasOwn(details, 'brokenLinks') && Array.isArray(details.brokenLinks) && (details.brokenLinks as unknown[]).length > 0) {
         const alreadyHasChain = findings.some(f => f.category === 'internalization_chain_broken');
         if (!alreadyHasChain) {
           findings.push({ category: 'internalization_chain_broken', ...CATEGORY_DEFINITIONS.internalization_chain_broken });
         }
       }
-      if ('missingIndexes' in details && Array.isArray(details.missingIndexes) && (details.missingIndexes as unknown[]).length > 0) {
+      if (Object.hasOwn(details, 'missingIndexes') && Array.isArray(details.missingIndexes) && (details.missingIndexes as unknown[]).length > 0) {
         const alreadyHasSchema = findings.some(f => f.category === 'schema_mismatch');
         if (!alreadyHasSchema) {
           findings.push({ category: 'schema_mismatch', ...CATEGORY_DEFINITIONS.schema_mismatch });

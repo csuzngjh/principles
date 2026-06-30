@@ -107,6 +107,7 @@ export interface RuntimeConfigError {
 export type RuntimeConfigResult = RuntimeConfig | RuntimeConfigError;
 
 export function isRuntimeConfigError(result: RuntimeConfigResult): result is RuntimeConfigError {
+  // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (RuntimeConfig | RuntimeConfigError)
   return 'ok' in result && result.ok === false;
 }
 
