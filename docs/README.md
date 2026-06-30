@@ -59,3 +59,13 @@
 - 私人 docs:通过 `docs/.private/<path>` junction 访问
 - **禁止**在主 worktree 运行 `git clean -fdx`、`git stash -a`、`git checkout -f`(会破坏 junction 和未跟踪私人 docs)
 - 如果 `docs/.private/` 丢失,运行 `.\scripts\setup-private-docs-symlink.ps1` 重建
+
+## 自动化校验
+
+`npm run check:docs-structure` 校验以下不变量(已集成到 `verify:merge`):
+
+1. `docs/.private/` 下无 git 跟踪文件(防止 junction 失效后私人 docs 被误提交)
+2. 9 个关键 docs 文件存在(导航索引引用的路径,防止路径被意外改动)
+3. `docs/` 根目录无散落 `.md` 文件(除 README.md,所有文档应归入 4 层子目录)
+
+违反任何一项都会阻塞 PR 合并。

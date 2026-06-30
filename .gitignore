@@ -151,9 +151,7 @@ evidence/*
 .vscode/
 .codex/
 .opencode/
-.trae/
 .plan/
-.vercel
 
 # Project-specific local tool outputs
 .codex-output/
