@@ -144,22 +144,30 @@ describe('RuleHostWriter', () => {
     expect(result.reason).toContain('gate_decision_not_accepted_shadow');
   });
 
-  it('returns live activation action after owner approval', async () => {
+  // PRI-489: Owner approval creates a SHADOW activation first. The only
+  // shadow -> live transition is `pd activation promote --activation-id ...
+  // --confirm` (SqliteActivationStateStore.promoteActivation). Live blocking
+  // must never happen immediately after approval — that was the seed-MVP
+  // release blocker this test now guards against.
+  it('returns shadow activation action after owner approval (shadow-first)', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact();
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.action).toBe('code_tool_hook_live_activate');
+    expect(result.action).toBe('code_tool_hook_shadow_activate');
     expect(result.targetRef).toContain('R_001');
   });
 
-  it('never returns shadow activation action for owner-approved rules', async () => {
+  it('never returns live activation action directly after owner approval', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact();
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.action).not.toContain('shadow');
-    expect(result.action).toContain('live');
+    // Shadow-first: live must only appear after an explicit promote, never
+    // straight from the writer. This assertion uniquely identifies the
+    // shadow-first contract (ERR-088: assert the specific action value).
+    expect(result.action).not.toContain('live');
+    expect(result.action).toContain('shadow');
   });
 
   it('returns correct activationId format', async () => {

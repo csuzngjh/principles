@@ -413,7 +413,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
         // Enqueue failed — the candidate artifact exists but is not in the
         // approval queue. Degrade gracefully with a structured reason (ERR-002).
         const enqueueErr = err instanceof Error ? err.message : String(err);
-        const degradeReason = `candidate_approved_but_enqueue_failed: ${enqueueErr}. Manual enqueue required: pd runtime activation dispatch --artifact-id ${loopResult.ruleArtifactId} --channel ${channel}`;
+        const degradeReason = `candidate_approved_but_enqueue_failed: ${enqueueErr}. Manual enqueue required: pd activation dispatch --artifact-id ${loopResult.ruleArtifactId} --channel ${channel}`;
         return {
           decision: pipelineDecision,
           painId: opts.painId,
