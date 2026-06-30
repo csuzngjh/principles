@@ -70,6 +70,7 @@ packages/create-principles-disciple/plugin/
 claude/
 .planning/
 plans/
+!docs/superpowers/plans/
 conductor/
 .principles/
 .state/
