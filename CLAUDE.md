@@ -134,6 +134,14 @@ These rules prevent architectural drift. Violating them will break the project.
 - Code that contradicts an ADR is a bug. Fix the code or update the ADR — never silently ignore.
 - See `docs/.private/agents/domain.md` for the full workflow.
 
+## BDD Workflow (AI 助手改代码前)
+
+> **See [AGENTS.md](AGENTS.md) > BDD Workflow**
+>
+> AI 助手改代码前先读 `docs/specs/features/` 下的 `.feature` 文件确认行为契约。
+> AI 可改 step definitions,但不能降低 `.feature` 可观察结果。
+> 禁止删除 `.feature` 或加 `@disabled` 让测试绿(除非 PR 说明原因且 Owner 确认)。
+
 ## Runtime Contract Rules
 
 > **See [AGENTS.md](AGENTS.md) > Runtime Contract Rules** (`rc-1` to `rc-9`)
