@@ -23,7 +23,7 @@ import {
   makeArtifactReadModel,
   seedArtifactToDb,
   type TestWorkspace,
-} from './support/helpers.js';
+} from '../../src/runtime-v2/activation/__tests__/helpers.js';
 import {
   ApprovalCompletionService,
   makeIdempotencyKey,

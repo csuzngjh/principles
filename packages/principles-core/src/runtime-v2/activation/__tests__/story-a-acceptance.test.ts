@@ -46,8 +46,8 @@ import {
   createProductionDispatcher,
   makeArtifactReadModel,
   seedArtifactToDb,
-} from '../../../../tests/bdd/support/helpers.js';
-import type { TestWorkspace } from '../../../../tests/bdd/support/helpers.js';
+} from './helpers.js';
+import type { TestWorkspace } from './helpers.js';
 
 // ── Acceptance Tests ────────────────────────────────────────────────────────
 
