@@ -82,6 +82,7 @@ export interface ActivationStatusRecord {
   action: string;
   targetRef: string;
   activatedAt: string;
+  promotedAt?: string | null;
   deactivatedAt: string | null;
 }
 

@@ -24,6 +24,7 @@ import {
 } from '../../src/core/principle-tree-ledger.js';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { safeRmDir } from '../test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,7 +48,10 @@ function createTestWorkspace(): TestWorkspace {
 
 function disposeTestWorkspace(ws: TestWorkspace): void {
   ws.trajectory.dispose();
-  fs.rmSync(ws.workspaceDir, { recursive: true, force: true });
+  // RuleHost created inside test bodies opens a SQLite connection to ws.stateDir
+  // which locks files on Windows. safeRmDir ignores EPERM/ENOTEMPTY so cleanup
+  // does not crash teardown (OS reclaims temp dir eventually).
+  safeRmDir(ws.workspaceDir);
 }
 
 /**
@@ -94,7 +98,7 @@ function activateCompiledRule(
       idempotencyKey: `${artifactId}::code_tool_hook`,
       artifactId,
       channel: 'code_tool_hook',
-      action: 'code_tool_hook_shadow_activate',
+      action: 'code_tool_hook_live_activate',
       targetRef: `impl://${ruleId}`,
       activatedAt: now,
       deactivatedAt: null,

@@ -390,7 +390,10 @@ export class ApprovalsConsoleModel {
         {
           writers: [
             new PromptWriter(),
-            new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+            new RuleHostWriter({
+              gateDeps: createProductionGateDeps(),
+              featureFlagProbe: (flagId) => pdFlags.flags[flagId]?.enabled === true,
+            }),
             new DeferArchiveWriter(),
           ],
           approvalQueueStore,

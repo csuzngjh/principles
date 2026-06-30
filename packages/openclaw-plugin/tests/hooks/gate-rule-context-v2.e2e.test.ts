@@ -59,8 +59,12 @@ vi.mock('../../src/core/event-log.js', () => ({
 
 let _mockEvaluate = vi.fn().mockReturnValue(undefined);
 vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function (this: { evaluate: typeof _mockEvaluate }, _stateDir: string, _logger: unknown) {
+  RuleHost: vi.fn(function (this: { evaluate: typeof _mockEvaluate; dispose: () => void }, _stateDir: string, _logger: unknown) {
     this.evaluate = _mockEvaluate;
+    // PR1: WorkspaceContext.invalidate() calls this._ruleHost?.dispose() during
+    // clearCache(). Without this, afterEach teardown crashes with
+    // "this._ruleHost?.dispose is not a function".
+    this.dispose = () => {};
   }),
 }));
 

@@ -23,6 +23,7 @@ import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/r
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { EventLogService } from '../../src/core/event-log.js';
 
 // ── Test helpers ───────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ function insertRuleArtifact(): void {
   );
 }
 
-async function insertActivation(): Promise<void> {
+async function insertActivation(action = 'code_tool_hook_live_activate'): Promise<void> {
   const store = new SqliteActivationStateStore(sqliteConn);
   const now = new Date().toISOString();
   await store.recordActivation({
@@ -95,7 +96,7 @@ async function insertActivation(): Promise<void> {
     idempotencyKey: `${ARTIFACT_ID}::code_tool_hook`,
     artifactId: ARTIFACT_ID,
     channel: 'code_tool_hook',
-    action: 'code_tool_hook_shadow_activate',
+    action,
     targetRef: `impl://${RULE_ID}`,
     activatedAt: now,
     deactivatedAt: null,
@@ -143,6 +144,33 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
     expect(result?.blockReason).toContain('GATE_BLOCK_002: system directory');
+  });
+
+  it('shadow block is observed but does not block the tool call', async () => {
+    insertRuleArtifact();
+    await insertActivation('code_tool_hook_shadow_activate');
+    const result = handleBeforeToolCall({
+      toolName: 'write_file',
+      params: { file_path: '/etc/passwd', content: 'shadow probe' },
+    }, {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: 'test-session-shadow',
+      logger: { warn: () => {}, error: () => {}, info: () => {} },
+    });
+
+    expect(result).toBeUndefined();
+    const events = EventLogService.get(path.join(tempWorkspaceDir, '.state')).getBufferedEvents();
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'rulehost_evaluated',
+        data: expect.objectContaining({
+          activationId: ACTIVATION_ID,
+          activationMode: 'shadow',
+          decision: 'block',
+          ruleId: RULE_ID,
+        }),
+      }),
+    ]));
   });
 
   it('valid allow (no match) from SQLite activation → handleBeforeToolCall returns undefined', async () => {
