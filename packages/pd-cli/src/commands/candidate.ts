@@ -495,6 +495,13 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
     if (result.ledgerEntryId) {
       console.log(`  Ledger Entry: ${result.ledgerEntryId}`);
     }
+    // F10-1: surface dangling sourceRunId warning in text mode (rc-9).
+    if (result.warning) {
+      console.log(`  ⚠ WARNING:   ${result.warning}`);
+    }
+    if (result.nextAction) {
+      console.log(`  Next Action: ${result.nextAction}`);
+    }
     console.log('');
   } finally {
     await stateManager.close();

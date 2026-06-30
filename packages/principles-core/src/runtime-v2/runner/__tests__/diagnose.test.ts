@@ -11,7 +11,9 @@ import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { DiagnosticianRunnerLike } from '../../pain-signal-bridge.js';
 import type { RunnerResult } from '../runner-result.js';
 import type { TaskRecord } from '../../task-status.js';
-import { run, status } from '../../cli/diagnose.js';
+import type { CandidateRecord } from '../../store/candidate/candidate-store.js';
+import type { RunRecord } from '../../store/run/run-store.js';
+import { run, status, candidateShow } from '../../cli/diagnose.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -98,5 +100,107 @@ describe('cli/diagnose', () => {
 
     expect(result).toBeNull();
     expect(getTaskMock).toHaveBeenCalledWith(TASK_ID);
+  });
+});
+
+// ── F10-1: candidateShow source_run_id validation ────────────────────────────
+
+function makeCandidateRecord(overrides: Partial<CandidateRecord> = {}): CandidateRecord {
+  return {
+    candidateId: 'c-test-001',
+    artifactId: 'art-test-001',
+    taskId: 'task-test-001',
+    sourceRunId: 'run-test-001',
+    title: 'Test candidate',
+    description: 'Test description',
+    confidence: 0.85,
+    sourceRecommendationJson: '{}',
+    recommendationKind: 'principle',
+    status: 'consumed',
+    createdAt: '2026-06-30T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function makeRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
+  return {
+    runId: 'run-test-001',
+    taskId: 'task-test-001',
+    runtimeKind: 'openclaw',
+    executionStatus: 'succeeded',
+    startedAt: '2026-06-30T00:00:00Z',
+    endedAt: '2026-06-30T00:01:00Z',
+    attemptNumber: 1,
+    createdAt: '2026-06-30T00:00:00Z',
+    updatedAt: '2026-06-30T00:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('candidateShow — F10-1 source_run_id validation', () => {
+  it('returns null when candidate not found', async () => {
+    const getCandidateMock = vi.fn().mockResolvedValue(null);
+    const mockStateManager = { getCandidate: getCandidateMock } as unknown as RuntimeStateManager;
+
+    const result = await candidateShow({ candidateId: 'nonexistent', stateManager: mockStateManager });
+
+    expect(result).toBeNull();
+  });
+
+  it('F10-1: adds warning when sourceRunId does not exist in runs (dangling)', async () => {
+    const candidate = makeCandidateRecord({ sourceRunId: 'run-does-not-exist' });
+    const getCandidateMock = vi.fn().mockResolvedValue(candidate);
+    const getRunMock = vi.fn().mockResolvedValue(null); // run not found → dangling
+    const mockStateManager = {
+      getCandidate: getCandidateMock,
+      getRun: getRunMock,
+    } as unknown as RuntimeStateManager;
+
+    const result = await candidateShow({ candidateId: 'c-test-001', stateManager: mockStateManager });
+
+    expect(result).not.toBeNull();
+    if (!result) return; // narrow for TypeScript
+    expect(result.warning).toContain('does not exist in runs table');
+    expect(result.warning).toContain('run-does-not-exist');
+    expect(result.reason).toContain('dangling_source_run_id');
+    expect(result.nextAction).toContain('pd runtime internalization integrity');
+    expect(result.sourceRunId).toBe('run-does-not-exist'); // still returns the value
+  });
+
+  it('F10-1: does NOT add warning when sourceRunId exists (negative case)', async () => {
+    const candidate = makeCandidateRecord({ sourceRunId: 'run-exists' });
+    const runRecord = makeRunRecord({ runId: 'run-exists' });
+    const getCandidateMock = vi.fn().mockResolvedValue(candidate);
+    const getRunMock = vi.fn().mockResolvedValue(runRecord); // run found → valid
+    const mockStateManager = {
+      getCandidate: getCandidateMock,
+      getRun: getRunMock,
+    } as unknown as RuntimeStateManager;
+
+    const result = await candidateShow({ candidateId: 'c-test-001', stateManager: mockStateManager });
+
+    expect(result).not.toBeNull();
+    if (!result) return; // narrow for TypeScript
+    expect(result.warning).toBeUndefined();
+    expect(result.reason).toBeUndefined();
+    expect(result.nextAction).toBeUndefined();
+  });
+
+  it('F10-1: treats getRun throw as dangling (fail loud, rc-9)', async () => {
+    const candidate = makeCandidateRecord({ sourceRunId: 'run-throw' });
+    const getCandidateMock = vi.fn().mockResolvedValue(candidate);
+    const getRunMock = vi.fn().mockRejectedValue(new Error('DB corruption'));
+    const mockStateManager = {
+      getCandidate: getCandidateMock,
+      getRun: getRunMock,
+    } as unknown as RuntimeStateManager;
+
+    const result = await candidateShow({ candidateId: 'c-test-001', stateManager: mockStateManager });
+
+    expect(result).not.toBeNull();
+    if (!result) return; // narrow for TypeScript
+    expect(result.warning).toContain('could not be verified');
+    expect(result.reason).toContain('source_run_id_lookup_failed');
+    expect(result.nextAction).toContain('database integrity');
   });
 });
