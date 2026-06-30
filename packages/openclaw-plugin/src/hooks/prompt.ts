@@ -33,7 +33,7 @@ import {
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
-import { SignalCollectorHost } from '../core/signal-collector-host.js';
+import { SignalCollectorHost, createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
 // ---------------------------------------------------------------------------
@@ -120,11 +120,13 @@ export function resetPromptStateForTest(workspaceDir?: string): void {
  */
 const _signalCollectorHosts = new Map<string, SignalCollectorHost>();
 
-function getSignalCollectorHost(wctx: WorkspaceContext, _logger?: PluginLogger): SignalCollectorHost {
-  void _logger;
+function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLogger): SignalCollectorHost {
   let host = _signalCollectorHosts.get(wctx.workspaceDir);
   if (!host) {
-    host = new SignalCollectorHost(wctx);
+    // 从 .pd/config.yaml 的 signalCollector runtimeProfile 构造 LLM classifier(配置单轨化)。
+    // 未配置/降级时返回 null,host 走纯关键词模式(spec §3.3 决策3)。
+    const llmClassifier = createSignalLlmClassifierFromConfig(wctx, logger);
+    host = new SignalCollectorHost(wctx, { llmClassifier });
     _signalCollectorHosts.set(wctx.workspaceDir, host);
   }
   return host;

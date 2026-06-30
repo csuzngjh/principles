@@ -21,6 +21,9 @@
 import {
   collectSync,
   mapLlmResultToOutput,
+  buildLlmPrompt,
+  parseLlmClassification,
+  PiAiRuntimeAdapter,
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
@@ -29,6 +32,8 @@ import { emitPainDetectedEvent } from '../hooks/pain.js';
 import { trackFriction } from './session-tracker.js';
 import { SystemLogger } from './system-logger.js';
 import { createTraceId } from './evolution-logger.js';
+import { resolveObserverConfig } from './pd-config-loader.js';
+import type { PluginLogger } from '../openclaw-sdk.js';
 import type { WorkspaceContext } from './workspace-context.js';
 import type { TrajectoryUserTurnInput } from './trajectory-types.js';
 
@@ -294,3 +299,94 @@ export class SignalCollectorHost {
     return true;
   }
 }
+
+/**
+ * 从 .pd/config.yaml 的 signalCollector runtimeProfile 构造 SignalLlmClassifier。
+ * 完成配置单轨化(spec §3.3 决策3):统一走 .pd/config.yaml,移除 empathy 的 workflows.yaml 双轨。
+ *
+ * 返回 null 的情况(走纯关键词降级,rc-9 不静默):
+ * - feature flag signal_collector 关闭
+ * - runtimeProfile 未配置 / apiKeyEnv 缺失
+ * - profile 是 openclaw 类型(observer 不支持)
+ *
+ * 这是 Task 11 的最后一块:让本地 LLM(LMStudio)真正参与检测。
+ */
+export function createSignalLlmClassifierFromConfig(
+  wctx: WorkspaceContext,
+  logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>,
+): SignalLlmClassifier | null {
+  try {
+    const cfg = resolveObserverConfig(
+      wctx.workspaceDir,
+      'signal_collector',
+      'signalCollector',
+      logger,
+    );
+
+    if (!cfg.enabled) {
+      logger?.debug?.(`[PD:Signal] LLM classifier disabled: ${cfg.reason}`);
+      return null;
+    }
+    if (cfg.readiness !== 'not_ready' && cfg.readiness !== 'ready') {
+      // needs_setup / disabled / config_malformed → 降级
+      logger?.debug?.(`[PD:Signal] LLM classifier not ready (${cfg.readiness}): ${cfg.reason}. ${cfg.nextAction}`);
+      return null;
+    }
+    if (!cfg.provider || !cfg.model || !cfg.apiKeyEnv) {
+      logger?.debug?.(`[PD:Signal] LLM classifier missing provider/model/apiKeyEnv`);
+      return null;
+    }
+
+    const adapter = new PiAiRuntimeAdapter({
+      provider: cfg.provider,
+      model: cfg.model,
+      apiKeyEnv: cfg.apiKeyEnv,
+      timeoutMs: cfg.timeoutMs ?? 30_000,
+      baseUrl: cfg.baseUrl ?? undefined,
+      workspace: wctx.workspaceDir,
+    });
+
+    // 包装成 SignalLlmClassifier:内部调 startRun/pollRun/fetchOutput + buildLlmPrompt + parseLlmClassification
+    const classifier: SignalLlmClassifier = async (text: string, _promptTemplate: string) => {
+      void _promptTemplate;  // 用 core 的 buildLlmPrompt(标准化的),不用外部传入
+      const prompt = buildLlmPrompt(text);
+      try {
+        const handle = await adapter.startRun({
+          agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
+          inputPayload: { prompt },
+          contextItems: [],
+          timeoutMs: cfg.timeoutMs ?? 30_000,
+        });
+        let status = await adapter.pollRun(handle.runId);
+        const deadline = Date.now() + (cfg.timeoutMs ?? 30_000);
+        while (status.status === 'running' && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 500));
+          status = await adapter.pollRun(handle.runId);
+        }
+        if (status.status !== 'succeeded') {
+          SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_TIMEOUT', JSON.stringify({ status: status.status }));
+          return null;
+        }
+        const output = await adapter.fetchOutput(handle.runId);
+        const payload = output?.payload;
+        let rawOutput = '';
+        if (typeof payload === 'string') {
+          rawOutput = payload;
+        } else if (typeof payload === 'object' && payload !== null && typeof (payload as Record<string, unknown>).output === 'string') {
+          rawOutput = (payload as Record<string, unknown>).output as string;
+        }
+        const parsed = parseLlmClassification(rawOutput);
+        return parsed.valid ? parsed.value : null;
+      } catch (e) {
+        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_FAILED', String(e).slice(0, 200));
+        return null;
+      }
+    };
+
+    return classifier;
+  } catch (e) {
+    logger?.warn?.(`[PD:Signal] createSignalLlmClassifierFromConfig failed: ${String(e)}`);
+    return null;
+  }
+}
+
