@@ -77,7 +77,7 @@ describe('InternalizationChainIntegrityReadModel', () => {
   it('returns ok when no broken links exist', () => {
     mockDb.prepare.mockImplementation((sql: string) => {
       if (sql.includes('principle_candidates')) {
-        return { all: vi.fn(() => [{ candidate_id: 'c1', task_id: 't1', source_run_id: 'r1' }]), get: vi.fn(() => undefined) };
+        return { all: vi.fn(() => [{ candidate_id: 'c1', task_id: 't1', source_run_id: 'run1' }]), get: vi.fn(() => undefined) };
       }
       if (sql.includes('FROM tasks')) {
         return { all: vi.fn(() => [
@@ -423,5 +423,190 @@ describe('InternalizationChainIntegrityReadModel', () => {
 
     const link = result.brokenLinks.find(l => l.type === 'lease_stuck');
     expect(link?.recommendedAction).toContain('integrity-repair');
+  });
+
+  // F10-2 regression: principle_candidates.source_run_id → runs.run_id dangling reference
+  it('reports candidate_source_run_id_dangling when consumed candidate references non-existent run (F10-2)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-dangling-run',
+            task_id: 't-dangling',
+            source_run_id: 'run-does-not-exist',
+            recommendation_kind: 'principle',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        // runs table is empty — source_run_id 'run-does-not-exist' is a dangling reference
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    const link = result.brokenLinks.find(l => l.type === 'candidate_source_run_id_dangling');
+    expect(link).toBeDefined();
+    expect(link?.severity).toBe('error');
+    expect(link?.candidateId).toBe('c-dangling-run');
+    expect(link?.runId).toBe('run-does-not-exist');
+    expect(link?.reason).toContain('run-does-not-exist');
+    expect(link?.recommendedAction.length).toBeGreaterThan(0);
+    expect(result.overallStatus).not.toBe('ok');
+  });
+
+  it('does NOT report candidate_source_run_id_dangling when source_run_id exists in runs (F10-2 negative)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-ok',
+            task_id: 't-ok',
+            source_run_id: 'run-exists',
+            recommendation_kind: 'defer', // defer → no missing_dreamer_task noise
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => [{ run_id: 'run-exists', task_id: 't-ok', execution_status: 'succeeded' }]), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'candidate_source_run_id_dangling')).toBe(false);
+  });
+
+  it('does NOT report candidate_source_run_id_dangling when source_run_id is null (F10-2 edge)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-null-run',
+            task_id: 't-null',
+            source_run_id: null,
+            recommendation_kind: 'defer',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'candidate_source_run_id_dangling')).toBe(false);
+  });
+
+  // F9-2 regression: activations.artifact_id → pi_artifacts.artifact_id dangling reference
+  it('reports activation_artifact_id_dangling when active activation references non-existent artifact (F9-2)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM pi_artifacts') && !sql.includes('WHERE')) {
+        // pi_artifacts table is empty — artifact_id 'art-does-not-exist' is dangling
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM activations')) {
+        return {
+          all: vi.fn(() => [{
+            activation_id: 'act-1',
+            artifact_id: 'art-does-not-exist',
+            channel: 'code_tool_hook',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    const link = result.brokenLinks.find(l => l.type === 'activation_artifact_id_dangling');
+    expect(link).toBeDefined();
+    expect(link?.severity).toBe('error');
+    expect(link?.artifactId).toBe('art-does-not-exist');
+    expect(link?.reason).toContain('act-1');
+    expect(link?.reason).toContain('code_tool_hook');
+    expect(link?.recommendedAction.length).toBeGreaterThan(0);
+    expect(result.overallStatus).not.toBe('ok');
+  });
+
+  it('does NOT report activation_artifact_id_dangling when artifact_id exists (F9-2 negative)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM tasks')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM runs')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM pi_artifacts') && !sql.includes('WHERE')) {
+        return {
+          all: vi.fn(() => [{ artifact_id: 'art-exists', artifact_kind: 'principle', source_task_id: 't-art' }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      if (sql.includes('FROM activations')) {
+        return {
+          all: vi.fn(() => [{
+            activation_id: 'act-2',
+            artifact_id: 'art-exists',
+            channel: 'prompt',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'activation_artifact_id_dangling')).toBe(false);
+  });
+
+  it('does NOT report activation_artifact_id_dangling for deactivated activations (F9-2 edge)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM pi_artifacts') && !sql.includes('WHERE')) {
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      if (sql.includes('FROM activations')) {
+        // The read-model query filters `WHERE deactivated_at IS NULL` — so this
+        // mock should NOT be hit for deactivated activations. We return empty
+        // to simulate the SQL filter correctly excluding deactivated rows.
+        return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'activation_artifact_id_dangling')).toBe(false);
   });
 });

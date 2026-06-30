@@ -216,6 +216,8 @@ export class InternalizationChainIntegrityReadModel {
         list.push(run);
         runsByTask.set(run.task_id, list);
       }
+      const runIdSet = new Set(allRuns.map(r => r.run_id));
+      const piArtifactIdSet = new Set(piArtifacts.map(a => a.artifact_id));
 
       const dreamerTasks = allTasks.filter(t => t.task_kind === 'dreamer');
       const philosopherTasks = allTasks.filter(t => t.task_kind === 'philosopher');
@@ -249,6 +251,23 @@ export class InternalizationChainIntegrityReadModel {
             candidateId: candidate.candidate_id,
             reason: `Consumed candidate ${candidate.candidate_id} has no corresponding dreamer task`,
             recommendedAction: 'Seed a dreamer task via `pd candidate internalize --candidate-id <id>`.',
+          });
+        }
+      }
+
+      // F10-2: Check principle_candidates.source_run_id → runs.run_id (dangling reference).
+      // A consumed candidate's source_run_id must reference an existing run. If the
+      // run was deleted or the id was corrupted, lineage is broken (rc-6).
+      for (const candidate of consumedCandidates) {
+        if (!candidate.source_run_id) continue;
+        if (!runIdSet.has(candidate.source_run_id)) {
+          brokenLinks.push({
+            type: 'candidate_source_run_id_dangling',
+            severity: 'error',
+            candidateId: candidate.candidate_id,
+            runId: candidate.source_run_id,
+            reason: `Consumed candidate ${candidate.candidate_id} references non-existent source_run_id ${candidate.source_run_id}`,
+            recommendedAction: 'Investigate run deletion or data corruption. Re-run the source task or correct source_run_id.',
           });
         }
       }
@@ -476,6 +495,26 @@ export class InternalizationChainIntegrityReadModel {
             severity: 'warning',
             reason: `Duplicate PI artifact: source_task_id=${sourceTaskId}, artifact_kind=${artifactKind} appears ${count} times`,
             recommendedAction: 'Investigate idempotency violation in artifact commit logic.',
+          });
+        }
+      }
+
+      // F9-2: Check activations.artifact_id → pi_artifacts.artifact_id (dangling reference).
+      // An active activation's artifact_id must reference an existing pi_artifact.
+      // If the artifact was deleted or the id was corrupted, the activation cannot
+      // function (RuleHost cannot load implementationCode, dispatcher cannot verify
+      // lineage). This is an error-level break (rc-6-lineage-consistency).
+      const activations = db.prepare(
+        'SELECT activation_id, artifact_id, channel FROM activations WHERE deactivated_at IS NULL'
+      ).all() as { activation_id: string; artifact_id: string; channel: string }[];
+      for (const act of activations) {
+        if (!piArtifactIdSet.has(act.artifact_id)) {
+          brokenLinks.push({
+            type: 'activation_artifact_id_dangling',
+            severity: 'error',
+            artifactId: act.artifact_id,
+            reason: `Active activation ${act.activation_id} (channel=${act.channel}) references non-existent artifact_id ${act.artifact_id}`,
+            recommendedAction: 'Investigate artifact deletion or data corruption. Deactivate the orphaned activation or restore the artifact.',
           });
         }
       }
