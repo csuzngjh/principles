@@ -120,16 +120,18 @@ insertPiArtifact.run(
 );
 
 // ── 6. 插入 principle_candidates（evidence-chain 候选，需 artifact_id + run_id）
+// F13 (PRI-442): schema 现在强制 CHECK (status != 'consumed' OR consumed_at IS NOT NULL)
+// — consumed 状态的候选必须提供 consumed_at。这里用 created_at 同时间戳。
 stateDb.prepare(`
   INSERT INTO principle_candidates (
     candidate_id, artifact_id, task_id, source_run_id, title, description,
-    confidence, source_recommendation_json, idempotency_key, status, created_at,
+    confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at,
     recommendation_kind, abstracted_principle
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
   'cand-1', 'artifact-diag-output-1', 'task-diag-1', 'run-1',
   '配置变更需确认', 'Agent 修改配置前应先获得 Owner 确认',
-  0.85, '', 'idem-cand-1', 'consumed', eightDaysAgo,
+  0.85, '', 'idem-cand-1', 'consumed', eightDaysAgo, eightDaysAgo,
   'apply', '修改任何配置文件前，必须先向 Owner 确认',
 );
 
