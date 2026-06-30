@@ -13,7 +13,7 @@
  * implementation drift (and the lost-update / silent-field-loss classes it
  * caused) cannot silently return.
  *
- * Related: docs/ERROR_PATTERN_INDEX.md EP-10 (do not re-open merged
+ * Related: docs/process/error-management/ERROR_PATTERN_INDEX.md EP-10 (do not re-open merged
  * convergence — PRI-413/PRI-443/PRI-459).
  */
 

@@ -120,5 +120,5 @@ re-opens the dual-implementation drift and fails this guard.
 - PRI-443 — extract pure codec + types from core ledger
 - PRI-459 — this convergence (file lock into core, plugin → re-export adapter)
 - ADR-0014 — MVP-First strategy; ledger is MVP-Core state
-- `docs/ERROR_PATTERN_INDEX.md` EP-07 (single state source), EP-09 / ERR-025
+- `docs/process/error-management/ERROR_PATTERN_INDEX.md` EP-07 (single state source), EP-09 / ERR-025
   (round-trip field preservation), EP-10 (do not re-open merged convergence)

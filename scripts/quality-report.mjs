@@ -4,10 +4,10 @@
  * Quality Report Generator
  *
  * Aggregates quality metrics from multiple sources and outputs a Markdown
- * monthly report to docs/quality-reports/YYYY-MM.md.
+ * monthly report to docs/.private/quality-reports/YYYY-MM.md (via symlink to private repo).
  *
  * Data sources:
- *   1. ERR data:        docs/ERROR_EXPERIENCE_HANDBOOK.md
+ *   1. ERR data:        docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
  *   2. Test data:        packages/[pkg]/tests/ + src/[pkg]/__tests__ (.test.ts files)
  *   3. Coverage data:    packages/[pkg]/coverage/coverage-final.json
  *   4. Coupling data:    graphify-out/graph.json
@@ -85,7 +85,7 @@ function printHelp() {
 
 Options:
   --month YYYY-MM   Report month (default: current month)
-  --output <path>   Custom output path (default: docs/quality-reports/YYYY-MM.md)
+  --output <path>   Custom output path (default: docs/.private/quality-reports/YYYY-MM.md)
   --help, -h        Show this help
 `);
 }
@@ -375,7 +375,7 @@ function main() {
   }
 
   // Collect data
-  const handbookPath = join(ROOT, 'docs', 'ERROR_EXPERIENCE_HANDBOOK.md');
+  const handbookPath = join(ROOT, 'docs', 'process', 'error-management', 'ERROR_EXPERIENCE_HANDBOOK.md');
   const errStats = parseErrStats(handbookPath);
 
   const testStats = countTestFiles();
@@ -400,7 +400,7 @@ function main() {
   });
 
   // Write output
-  const outputPath = args.output || join(ROOT, 'docs', 'quality-reports', `${args.month}.md`);
+  const outputPath = args.output || join(ROOT, 'docs', '.private', 'quality-reports', `${args.month}.md`);
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });

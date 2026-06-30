@@ -5,7 +5,7 @@ description: Record AI coding assistant errors into the Error Experience Handboo
 
 # Record Error
 
-Record AI coding assistant errors into `docs/ERROR_EXPERIENCE_HANDBOOK.md` so all AI assistants learn from past mistakes.
+Record AI coding assistant errors into `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` so all AI assistants learn from past mistakes.
 
 ## Trigger Conditions
 
@@ -20,7 +20,7 @@ Record AI coding assistant errors into `docs/ERROR_EXPERIENCE_HANDBOOK.md` so al
 
 Before assigning a new number, you MUST:
 
-1. Read `docs/ERROR_PATTERN_INDEX.md` — check if any EP card's "Failure mode" matches your incident.
+1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` — check if any EP card's "Failure mode" matches your incident.
 2. If a match exists → you MUST update recurrence on one of the EP card's "Representative ERRs", NOT create a new ERR.
 3. Only if NO EP card covers the failure mode → consider a new ERR + new EP card.
 
@@ -47,7 +47,7 @@ Add `lesson-learned` label via the Linear MCP save_issue tool with `labels: ["le
 
 ### Step 6: Edit Handbook
 
-Edit `docs/ERROR_EXPERIENCE_HANDBOOK.md`:
+Edit `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`:
 
 1. Add row to the relevant category table: `| ERR-XXX | <summary> | <issue ID> |`
 2. Add detailed entry in "Detailed Entries" section (use format from Step 3)
@@ -58,7 +58,7 @@ Edit `docs/ERROR_EXPERIENCE_HANDBOOK.md`:
 
 ```bash
 git checkout -b docs/err-XXX
-git add docs/ERROR_EXPERIENCE_HANDBOOK.md
+git add docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
 git commit -m "docs: add ERR-XXX to error experience handbook"
 git push origin docs/err-XXX
 gh pr create --title "docs: add ERR-XXX to error experience handbook" --body "Record error ERR-XXX found during code review."

@@ -73,7 +73,7 @@ Install Principles Disciple if you want to:
 
 **Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All owner-approved behavior changes can be inspected, rolled back, or disabled by you.
 
-👉 **See human guide:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+👉 **See human guide:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
 
 ---
 
