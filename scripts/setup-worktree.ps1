@@ -127,13 +127,14 @@ $inWorktree = $false
 
 $rootOk = Invoke-Step -Name "Detect PD repo root" -Action {
   # 向上查找含 principles-disciple-monorepo 的 package.json
-  $dir = Get-Location
-  while ($dir -and $dir.Path -ne $dir.Parent.Path) {
-    $pkg = Join-Path $dir.Path 'package.json'
+  # 注意: Get-Location 返回 PathInfo,没有 .Parent 属性,必须转 DirectoryInfo
+  $dir = Get-Item (Get-Location).Path
+  while ($dir) {
+    $pkg = Join-Path $dir.FullName 'package.json'
     if (Test-Path $pkg) {
       $content = Get-Content $pkg -Raw -ErrorAction SilentlyContinue
       if ($content -match '"principles-disciple-monorepo"') {
-        $script:repoRoot = $dir.Path
+        $script:repoRoot = $dir.FullName
         $script:inWorktree = $true
         return
       }
