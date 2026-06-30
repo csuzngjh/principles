@@ -29,9 +29,10 @@
     },
     {
       "name": "cli-runtime-adapter",
-      "description": "PDRuntimeAdapter implementation that spawns the openclaw CLI process. Uses node:fs/promises for temp-dir scratch space and node:path for tmpdir joins. Cannot live in plugin because core runners depend on the adapter interface.",
+      "description": "PDRuntimeAdapter implementation that spawns the openclaw CLI process, plus the child_process runner it depends on. Uses node:fs/promises for temp-dir scratch space, node:path for tmpdir joins, and child_process (spawn/execSync) to resolve and launch the CLI binary. Cannot live in plugin because core runners depend on the adapter interface.",
       "files": [
-        "runtime-v2/adapter/openclaw-cli-runtime-adapter.ts"
+        "runtime-v2/adapter/openclaw-cli-runtime-adapter.ts",
+        "runtime-v2/utils/cli-process-runner.ts"
       ]
     },
     {
