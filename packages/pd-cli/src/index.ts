@@ -462,6 +462,27 @@ activationTopCmd
     await handleRuntimeActivationDeactivate({ activationId: opts.activationId, workspace: opts.workspace, json: opts.json });
   });
 
+// Bug-M fix: CLI closed loop — approve a pending approval and dispatch its activation.
+// Reuses the same ApprovalQueue + ApprovalCompletionService as the Console model.
+activationTopCmd
+  .command('approve')
+  .description('Approve a pending approval and dispatch its activation')
+  .requiredOption('-a, --approval-id <id>', 'Approval ID to approve')
+  .option('--decided-by <user>', 'Reviewer name (default: cli-operator)')
+  .option('--note <text>', 'Optional approval note')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleActivationApprove } = await import('./commands/runtime-activation.js');
+    await handleActivationApprove({
+      approvalId: opts.approvalId,
+      decidedBy: opts.decidedBy,
+      note: opts.note,
+      workspace: opts.workspace,
+      json: opts.json,
+    });
+  });
+
 const configCmd = program
   .command('config')
   .description('PD configuration discovery and diagnosis');

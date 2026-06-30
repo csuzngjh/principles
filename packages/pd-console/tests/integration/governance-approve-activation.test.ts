@@ -33,7 +33,10 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
+  PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
+import { loadLedger } from '@principles/core/principle-tree-ledger';
+import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from '../../src/server/routes/approvals-grouped.js';
 import { handleActivationsRoute, disposeActivationsModels } from '../../src/server/routes/activations.js';
@@ -452,5 +455,121 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         expect(getStringField(grp, 'status')).toBe('approved');
       }
     }
+  });
+
+  // ── 7. Bug-O L3b: approve upgrades ledger principle 'candidate' -> 'active'
+
+  it('approve upgrades the linked ledger principle from candidate to active (Bug-O L3b)', async () => {
+    // The principle ID on the artifact MUST match the ledger principle id
+    // — that is how ApprovalsConsoleModel.upgradeLedgerPrinciple resolves the
+    // link via extractPrincipleId (column → contentJson fallback).
+    const principleId = `P_LEDGER_UPGRADE_${Date.now()}`;
+    const artifactId = `art-ledger-upgrade-${Date.now()}`;
+    const approvalId = `apr-ledger-upgrade-${Date.now()}`;
+
+    // Seed the ledger with a candidate principle before approving.
+    // stateDir matches what ApprovalsConsoleModel uses:
+    //   path.join(workspaceDir, '.state')  (see test-utils.ts createTestWorkspace)
+    const stateDir = path.join(tmpDir, '.state');
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    const probationEntry: LedgerPrincipleEntry = {
+      id: principleId,
+      title: `Ledger upgrade test principle ${principleId}`,
+      text: 'Owner-approved behavior — must transition to active after approve.',
+      triggerPattern: 'before_tool_call',
+      action: 'inject review note',
+      status: 'probation',
+      evaluability: 'weak_heuristic',
+      sourceRef: `candidate://candidate-${principleId}`,
+      createdAt: new Date().toISOString(),
+    };
+    ledgerAdapter.writeProbationEntry(probationEntry);
+
+    // Sanity check: ledger principle is a candidate before approve.
+    const ledgerBefore = loadLedger(stateDir);
+    expect(ledgerBefore.tree.principles[principleId]).toBeDefined();
+    expect(ledgerBefore.tree.principles[principleId]?.status).toBe('candidate');
+
+    // Seed artifact + pending approval pointing at the same principleId.
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'Ledger upgrade test principle' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    // Approve — this must trigger the ledger upgrade via
+    // ApprovalsConsoleModel.upgradeLedgerPrinciple (Bug-O L3b).
+    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'Ledger upgrade test' }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    // Verify the activation succeeded (no warning indicates ledger upgrade OK).
+    const approveData = getDataObject(approveRes.body);
+    expect(approveData).toBeDefined();
+    expect(getStringField(approveData, 'status')).toBe('approved');
+    const activation = approveData?.activation;
+    expect(isRecord(activation)).toBe(true);
+    if (isRecord(activation)) {
+      expect(getStringField(activation, 'decision')).toBe('activated');
+    }
+    // No warning expected — the ledger upgrade should succeed silently.
+    const warning = getStringField(approveData, 'warning');
+    expect(warning).withContext(`Unexpected ledger warning: ${warning ?? '<none>'}`).toBeUndefined();
+
+    // Cross-table verification: ledger principle status must now be 'active'.
+    const ledgerAfter = loadLedger(stateDir);
+    const stored = ledgerAfter.tree.principles[principleId];
+    expect(stored).withContext('Ledger principle must still exist after approve').toBeDefined();
+    expect(stored?.status).toBe('active');
+    // updatedAt must be refreshed by activatePrinciple, not stay at the
+    // original probation timestamp (rc-7 loop-state freshness).
+    expect(stored?.updatedAt).not.toBe(probationEntry.createdAt);
+  });
+
+  // ── 8. Bug-O L3b: missing ledger principle surfaces a non-fatal warning
+
+  it('approve surfaces a non-fatal warning when the ledger principle is missing (Bug-O L3b, rc-9)', async () => {
+    // Artifact points at a principleId that does NOT exist in the ledger.
+    // The activation must still succeed (it is committed to SQLite first);
+    // the ledger upgrade failure must surface as a `warning` field on the
+    // approve response, NOT roll back the activation (rc-9-no-silent-fallback).
+    const principleId = `P_LEDGER_MISSING_${Date.now()}`;
+    const artifactId = `art-ledger-missing-${Date.now()}`;
+    const approvalId = `apr-ledger-missing-${Date.now()}`;
+
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'Principle with no ledger entry' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'Missing ledger test' }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    const approveData = getDataObject(approveRes.body);
+    expect(approveData).toBeDefined();
+    expect(getStringField(approveData, 'status')).toBe('approved');
+
+    // Activation must still be recorded as 'activated' — the ledger failure
+    // did NOT roll back the SQLite activation (rc-9).
+    const activation = approveData?.activation;
+    expect(isRecord(activation)).toBe(true);
+    if (isRecord(activation)) {
+      expect(getStringField(activation, 'decision')).toBe('activated');
+    }
+
+    // Warning must be present + structured + actionable (cli-6-output-next-action).
+    const warning = getStringField(approveData, 'warning');
+    expect(warning).withContext('Missing ledger upgrade must surface a warning').toBeDefined();
+    expect(warning).toContain('ledger_activate_failed');
+    expect(warning).toContain('Cannot update missing principle');
+    expect(warning).toContain(principleId);
   });
 });

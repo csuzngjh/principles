@@ -35,6 +35,7 @@ import type { PeerRunnerResult, PeerRunnerResultStatus } from '../runner/peer-ru
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
+import { PDRuntimeError } from '../error-categories.js';
 import { createPITaskDiagnosticJson } from './pitask-metadata.js';
 
 // ── Dependencies ─────────────────────────────────────────────────────────────
@@ -93,6 +94,32 @@ export class SplitDiagnosticianRunner {
    * Returns a RunnerResult compatible with DiagnosticianRunner.run().
    */
   async run(parentTaskId: string): Promise<RunnerResult> {
+    // Bug-N fix: acquire lease on the parent task so markTaskSucceeded (called
+    // at the end of run()) has a run record to update. Without this, the
+    // parent task is marked succeeded in the tasks table but no run record
+    // is created, leaving runs/tasks truth out of sync (8 diagnosis_manual_*
+    // tasks hit this in production). The parent task is created by
+    // PainSignalBridge but never lease-acquired — this runner must do it.
+    try {
+      await this.stateManager.acquireLease({
+        taskId: parentTaskId,
+        owner: 'split-diagnostician-orchestrator',
+        runtimeKind: 'openclaw',
+      });
+    } catch (error) {
+      // lease_conflict = another worker is already running this task.
+      // Non-mutating: do not call markTaskFailed/markTaskRetryWait (rc-3 fail-loud).
+      const isLeaseConflict = error instanceof PDRuntimeError && error.category === 'lease_conflict';
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: isLeaseConflict ? 'lease_conflict' : 'execution_failed',
+        failureReason: `Parent task ${parentTaskId} lease acquisition failed: ${errorMessage}`,
+        attemptCount: 1,
+      };
+    }
+
     // ── Stage A: Root Cause ────────────────────────────────────────────────
     const stageATaskId = `diag_rootcause-${parentTaskId}`;
 
