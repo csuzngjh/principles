@@ -84,8 +84,8 @@ Summarize:
 评审输出使用中文。在 Phase 7 报告后，主动评估是否需要更新治理资产：
 
 1. **发现值得重复的好决策** → 建议创建 exemplar
-   - 路径：`docs/exemplars/pr-{name}.md`
-   - 格式见 `docs/exemplars/README.md`
+   - 路径：`docs/.private/exemplars/pr-{name}.md`
+   - 格式见 `docs/.private/exemplars/README.md`
    - 引用规则 ID：`rc-*` / `cli-*` / `mvp-q-*` / `antipattern-*`
 
 2. **发现规则缺失或过时** → 建议更新 AGENTS.md 对应段

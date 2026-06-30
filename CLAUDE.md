@@ -74,20 +74,20 @@ docs/                    # Architecture docs, design documents, maps
 
 ## ⚠️ MANDATORY: Read Error Pattern Index Before Tasks
 
-**Before starting ANY coding task**, you MUST read `docs/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/ERROR_EXPERIENCE_HANDBOOK.md`.
+**Before starting ANY coding task**, you MUST read `docs/process/error-management/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
 
-Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
+Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
 
 ### Error Handbook Reading Protocol
 
 **Default: Index-driven loading**
-1. Read `docs/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
+1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
 2. Match your task to 1-3 EP cards.
-3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
+3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
 4. State which ERR entries you considered and how you avoid them.
 
 **Forbidden: Full-file loading**
-Do NOT read `docs/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
+Do NOT read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
 - You are recording a new error (record-error skill)
 - You are auditing the handbook itself
 - The INDEX does not cover your task AND you have confirmed with the user
@@ -100,7 +100,7 @@ For work subject to the product-boundary gate above, read `docs/product/PRODUCT_
 
 > **See [AGENTS.md](AGENTS.md) > Error Handbook Gate**
 >
-> 实施前必读 `docs/ERROR_PATTERN_INDEX.md`,匹配 1-3 个 EP 卡片,读取对应 ERR 详细条目;
+> 实施前必读 `docs/process/error-management/ERROR_PATTERN_INDEX.md`,匹配 1-3 个 EP 卡片,读取对应 ERR 详细条目;
 > 列出至少 3 条相关 ERR ID 并说明本 PR 如何避免每条;
 > 修复 bug 时归类到已知 ERR class。
 
@@ -132,7 +132,7 @@ These rules prevent architectural drift. Violating them will break the project.
 ### ADR compliance
 - Architecture decisions are recorded in `docs/adr/` .
 - Code that contradicts an ADR is a bug. Fix the code or update the ADR — never silently ignore.
-- See `docs/agents/domain.md` for the full workflow.
+- See `docs/.private/agents/domain.md` for the full workflow.
 
 ## Runtime Contract Rules
 
@@ -189,14 +189,14 @@ These rules prevent architectural drift. Violating them will break the project.
 | `packages/openclaw-plugin/src/index.ts` | Plugin entry point — registers all hooks, commands, services |
 | `packages/openclaw-plugin/openclaw.plugin.json` | Plugin manifest — defines routes, hooks, dependencies |
 | `conductor/workflow.md` | AI agent orchestration workflow |
-| `docs/ARCHITECTURE.md` | System design and component relationships |
+| `docs/architecture/ARCHITECTURE.md` | System design and component relationships |
 | `MEMORY.md` | Project context and progress tracking |
 
 ## Related Documentation
 
-- `docs/ARCHITECTURE.md` — Full system architecture
-- `docs/DEVELOPMENT.md` — Local setup, build, test commands
-- `docs/TESTING.md` — Test patterns and coverage requirements
+- `docs/architecture/ARCHITECTURE.md` — Full system architecture
+- `docs/process/DEVELOPMENT.md` — Local setup, build, test commands
+- `docs/process/TESTING.md` — Test patterns and coverage requirements
 - `packages/openclaw-plugin/SKILL.md` — AI agent skill definitions
 
 ## graphify
@@ -239,7 +239,7 @@ This project has a graphify knowledge graph at `.git/graphify/` (git hook auto-r
 ### Issue tracker
 
 Linear (`Principles_disciple` team, MCP tools `mcp__plugin_linear_linear__*`).
-See `docs/agents/issue-tracker.md`.
+See `docs/.private/agents/issue-tracker.md`.
 
 **MANDATORY LINEAR WORKFLOW:**
 1. **Start**: Use `get_issue` to read the latest comments and updates BEFORE writing any code.
@@ -250,9 +250,23 @@ See `docs/agents/issue-tracker.md`.
 ### Triage labels
 
 5 canonical labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`).
-See `docs/agents/triage-labels.md`.
+See `docs/.private/agents/triage-labels.md`.
 
 ### Domain docs
 
 Multi-context (`CONTEXT-MAP.md` at root → per-package `CONTEXT.md`).
-See `docs/agents/domain.md`.
+See `docs/.private/agents/domain.md`.
+
+## Private Docs Access (Symlink)
+
+Private docs live in an independent git repo (example path: `D:/Code/principles-private/` — adjust per your environment) and are accessed transparently via the `docs/.private/` junction:
+- `docs/.private/agents/issue-tracker.md` (issue tracker workflow)
+- `docs/.private/agents/triage-labels.md` (triage labels)
+- `docs/.private/agents/domain.md` (domain workflow)
+- `docs/.private/product/emotional-value.md` (emotional value guideline)
+- `docs/.private/exemplars/` (PR review exemplars)
+- ... etc (see `docs/.private/README.md`)
+
+**CRITICAL: Never run `git clean -fdx`, `git stash -a`, or `git checkout -f` in the main worktree** — these will destroy the junction and untrack private docs.
+
+If `docs/.private/` is missing, run `.\scripts\setup-private-docs-symlink.ps1` to recreate.

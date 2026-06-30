@@ -2,7 +2,7 @@
  * Runtime Contract Rules — PRI-441 / Issue #996
  *
  * Pure single-line checker for the three Runtime Contract violation patterns
- * that map to real ERR entries (see docs/ERROR_PATTERN_INDEX.md EP-01):
+ * that map to real ERR entries (see docs/process/error-management/ERROR_PATTERN_INDEX.md EP-01):
  *   - ERR-001: `as` type-assertion bypasses runtime validation on untrusted data
  *   - ERR-005: `as Foo[]` array-element cast without per-element validation
  *   - ERR-013: `'key' in obj` on untrusted objects matches inherited properties
