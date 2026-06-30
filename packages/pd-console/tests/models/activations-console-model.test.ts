@@ -144,21 +144,52 @@ describe('ActivationsConsoleModel — data computation', () => {
   it('handles unlinked artifacts (missing principleId)', async () => {
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();
-    
+
     const now = new Date().toISOString();
-    
+
     db.exec(`
       INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-unlinked', 'idem-unlinked', 'artifact-unlinked', 'prompt', 'inject', 'test.md', '${now}', NULL)
     `);
-    
+
     // No artifact record
     conn.close();
 
     const result = await model.getActivations();
-    
+
     expect(result.activations).toHaveLength(1);
     expect(result.activations[0].principleId).toBe('unlinked');
+  });
+
+  // Bug-O L2: when sourcePrincipleId column is null/empty but contentJson carries
+  // a resolvable principleId, extractPrincipleId must fall back to contentJson.
+  // Without this fix, dreamer artifacts whose sourcePrincipleId was stripped
+  // (non-core-principle case) would show 'unlinked' even when the principle
+  // link is recoverable from contentJson.
+  it('extracts principleId from contentJson when sourcePrincipleId column is null (Bug-O L2)', async () => {
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+
+    const now = new Date().toISOString();
+    const contentJson = JSON.stringify({ principleId: 'P_fallback_001', text: 'Test principle' });
+
+    db.exec(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-fallback', 'idem-fallback', 'artifact-fallback', 'prompt', 'inject', 'test.md', '${now}', NULL)
+    `);
+
+    // source_principle_id is NULL, but content_json carries principleId
+    db.exec(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, content_json, created_at, updated_at)
+      VALUES ('artifact-fallback', 'principle', 'task-fallback', NULL, '${contentJson}', '${now}', '${now}')
+    `);
+
+    conn.close();
+
+    const result = await model.getActivations();
+
+    expect(result.activations).toHaveLength(1);
+    expect(result.activations[0].principleId).toBe('P_fallback_001');
   });
 
   it('handles null activatedAt correctly', async () => {
