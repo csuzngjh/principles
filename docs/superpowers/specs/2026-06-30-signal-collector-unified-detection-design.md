@@ -124,9 +124,12 @@ PD 当前有两套并行、互相割裂的"用户反馈检测"系统——**corr
 
 1. **SignalCollector 是唯一入口**，替代当前 `prompt.ts:262`（CorrectionCueLearner）和 `prompt.ts:350`（matchEmpathyKeywords）两处分散调用，合并为一次 `collect(message)`。
 2. **三阶段流水线**（本地优先 + 关键词降级，用户决策）：
-   - Stage 1 关键词快扫：合并 correction+empathy 词库为一套，零成本同步。命中直接判定，不走 LLM。
-   - Stage 2 本地 LLM 判断：关键词未命中时，调本地 LLM 判断"这是不是对 AI 行为的不满/纠错，强度多少"。LLM 不可用 → 降级纯关键词（接受召回率低）。
+   - Stage 1 关键词快扫：合并 correction+empathy 词库为一套，零成本同步。**关键词分两级精度**（评审意见4）：
+     - **高精度短语**（如"你不应该…/下次先确认/这是错的，因为…"）→ 命中可直接判定，不走 LLM。
+     - **普通歧义词**（如"wrong/不对/搞错了"，上下文歧义大）→ 仅作 evidence 候选，**强制过 Stage2 LLM 二次确认**，不直接触发 STRONG。
+   - Stage 2 本地 LLM 判断：普通歧义词命中或关键词全未命中时，调本地 LLM 判断"这是不是对 AI 行为的不满/纠错，强度多少"。LLM 不可用 → 降级纯关键词（此时普通歧义词不触发 STRONG，仅高精度短语能触发，避免误判泛滥）。
    - Stage 3 强度分流：输出 `{ isSignal, type, strength, evidence }`，按 strength 走不同下游。
+   - **LLM 判断异步执行**（评审意见5）：见 §4.2，同步路径只做关键词 + 入队，LLM 不阻塞 prompt hook。
 3. **Provider 配置统一为单轨**（用户决策）：SignalCollector 统一走 `.pd/config.yaml` runtimeProfile，web console binding 真正生效。移除 `resolveEmpathyObserver` 的 `workflows.yaml` 分支 + `ANTHROPIC_API_KEY` 硬编码 fallback。
 4. **旧组件降级为 collector 子模块**（不删，复用）：`CorrectionCueLearner.match()` 和 `matchEmpathyKeywords()` 成为 Stage 1 的子调用，两套词库**逻辑合并**为统一 store。
 5. **下游接桥**（修断裂 ③④）：STRONG 信号调 `emitPainDetectedEvent`；修复 `recordCorrectionRejectedPain` 假桥改调 `emitPainDetectedEvent`。
@@ -163,7 +166,9 @@ interface SignalCollectorOutput {
   type: 'correction' | 'empathy' | null; // 信号类型
   strength: 'STRONG' | 'WEAK' | null;    // 强度（correction→STRONG, empathy→WEAK）
   matchedTerms: string[];                // Stage1 命中词（可能为空,表示走LLM）
-  detectionSource: 'keyword' | 'llm' | 'none';  // 哪个阶段判定的
+  matchedPrecision: 'high' | 'ambiguous' | null;  // 命中精度(评审意见4)
+  detectionSource: 'keyword' | 'llm' | 'none';    // 哪个阶段判定的
+  needsLlmConfirmation: boolean;         // 普通歧义词命中→需 LLM 二次确认
   llmReason?: string;                    // LLM 判断理由（Stage2）
   evidence: {                            // 给诊断的证据片段
     excerpt: string;
@@ -174,10 +179,16 @@ interface SignalCollectorOutput {
 // 配置（纯数据,由 plugin 注入）
 interface SignalCollectorConfig {
   enableLlmStage: boolean;               // Stage2 开关（默认 true）
-  llmTimeoutMs: number;                  // 默认 30000
+  llmTimeoutMs: number;                  // 异步 LLM 超时（默认 30000,不阻塞 hook,见§4.2）
   promptTemplate: string;                // LLM 判断 prompt（见 4.3）
+  highPrecisionTerms: string[];          // 高精度短语清单(可直接判定)
 }
 ```
+
+**Stage1 精度分级逻辑**（评审意见4）：
+- 高精度短语命中（`matchedPrecision: 'high'`）→ 直接出 `strength`，`needsLlmConfirmation: false`。
+- 普通歧义词命中（`matchedPrecision: 'ambiguous'`）→ `needsLlmConfirmation: true`，**不立即出 strength**，等 Stage2 LLM 确认。
+- 全未命中 → `needsLlmConfirmation: true`（走 LLM 发现新信号）。
 
 **降级契约**（rc-9-no-silent-fallback）：
 - `adapter === null` 或 `enableLlmStage === false`：Stage2 跳过，输出 `detectionSource: 'keyword'`（或 `'none'`），并在 plugin 层日志记录降级原因（不静默）。
@@ -193,22 +204,35 @@ class SignalCollectorHost {
   // 构造时从 .pd/config.yaml 读 runtimeProfile → 构造 PDRuntimeAdapter（复用 resolveObserverConfig）
   constructor(wctx: WorkspaceContext, logger: PluginLogger) { ... }
 
-  // 唯一对外方法：在 prompt.ts 钩子里调用一次
-  async detectAndRoute(
-    userMessage: string,
-    sessionId: string,
-    trigger: string,
+  // ★ 同步路径（在 prompt.ts before_prompt_build 钩子里调用,绝不能阻塞）
+  //    只做：trigger 门控 + Stage1 关键词快扫 + 写 user_turns
+  //    不做：任何 LLM 调用
+  detectSync(userMessage: string, sessionId: string, trigger: string): void {
+    // 1. trigger !== 'user' → return（保留现有 trigger 门控）
+    // 2. Stage1 关键词快扫（同步,零成本）
+    // 3. 写 user_turns（复用 recordUserTurn,带 correctionDetected/cue）
+    // 4. 高精度短语命中(high) → 直接走 STRONG 分流(同步,见下)
+    // 5. 普通歧义词/未命中 → 入队异步 LLM 确认(不阻塞)
+  }
+
+  // ★ 异步路径（fire-and-forget,仿现有 prompt.ts:537 的 void scheduler.dispatch 模式）
+  //    LLM 判断 + 后续分流都在这里,失败不影响用户消息处理
+  private async detectAsyncAndRoute(
+    pendingSignal: PendingSignal,   // 来自 detectSync 入队的候选
   ): Promise<void> {
-    // 1. trigger !== 'user' → 直接 return（保留现有 trigger 门控）
-    // 2. 调 core SignalCollector.collect(input) 拿 output
-    // 3. 写 user_turns（复用现有 recordUserTurn，带 correctionDetected/cue）
-    // 4. 按 output.strength 分流:
+    // 1. Stage2 LLM 确认（超时 30s,但已在后台,不阻塞用户）
+    // 2. LLM 不可用 → 降级：丢弃 ambiguous 候选(不触发 STRONG),仅高精度短语保留
+    // 3. 按 strength 分流:
     //    STRONG → emitPainDetectedEvent（修断裂 ③）
     //    WEAK   → trackFriction 累积 GFI + 写 evidence
-    //    none   → 仅写 user_turns
+    //    none   → 仅记录,无副作用
   }
 }
 ```
+
+**为什么必须异步（评审意见5）**：`prompt.ts` 的 `before_prompt_build` 是**同步阻塞**钩子——用户发消息后，openclaw 要等这个钩子返回才能继续构建 prompt 发给 LLM。原设计 `detectAndRoute(): Promise<void>` 同步等 LLM（默认超时 30s）会让普通用户消息卡 30 秒。现有 EmpathyObserver 已用 `void scheduler.dispatch(...)` 异步模式（`prompt.ts:537`），本设计沿用此范式。
+
+**同步路径的唯一副作用**：高精度短语命中时直接走 STRONG 分流（极快，纯内存）。普通歧义词一律入队异步确认，绝不阻塞。
 
 **配置读取**（消除双轨）：
 - 复用 `resolveObserverConfig(workspaceDir, 'signal_collector', 'signalCollector')` —— 新增一个 internal agent name，走 `.pd/config.yaml` 同一套机制。
@@ -260,7 +284,12 @@ class SignalCollectorHost {
 
 **迁移**：旧 `correction_keywords.json`（16 词）+ `empathy_keywords.json`（52 词）的 seed 词按 category 合并去重；新增"这是错的/不要自作主张/下次应该先"等中文纠正句式（修断裂 ① 的召回率）。
 
-**LLM 发现词回喂**（统一一个出口）：Stage 2 LLM 若发现新的纠正/情绪表达，回写到 `signal_keywords.json` 的统一 store（source = `llm`），替代当前分散在两套 store 的回写逻辑。
+**LLM 发现词的处理（owner-governed，评审意见3）**：Stage 2 LLM 发现的新词**不直接写入触发词库**——这违反 PRODUCT_IDENTITY 的"owner-reviewed behavior internalization"核心边界（未审核的检测规则自演化会固化误判）。正确流程：
+1. LLM 发现的新词写入 `signal_pending_terms.json`（候选池，source = `llm_candidate`），**不参与检测**。
+2. owner/maintainer 通过 CLI 或 console 审核候选词 → promote 进 `signal_keywords.json` 的触发词库（source 标记 `owner_promoted`）。
+3. 候选词带 LLM 给出的 `reason` 和 `suggestedCategory`，供 owner 决策。
+
+这把"自动回写"改成"owner-governed promote"，符合 PD 的产品边界。
 
 ### 5.2 下游落库（复用现有表，不新增表）
 
@@ -379,11 +408,24 @@ internalAgents:
 
 **LMStudio 兼容性已验证（实现可行性前提）**：`PiAiRuntimeAdapter.resolveModel`（`principles-core/src/runtime-v2/adapter/pi-ai-runtime-adapter.ts:104-145`）原生支持自定义 OpenAI 兼容 provider——当 provider 不在内置注册表（`lmstudio` 不在）且提供了 `baseUrl` 时，自动构造 `api: 'openai-completions'` 的 Model 对象。这正是 `openclaw.json` 里 lmstudio 的现有配置方式（`api: openai-completions, baseUrl: /v1, port 12341`）。**无需改 adapter，仅需 config.yaml 指向它。**
 
-### 8.2 feature flag 注册（ADR-0014 MVP 纪律）
+### 8.2 feature flag 注册（ADR-0014 MVP 纪律，评审意见2）
 
-新增 feature flag `signal_collector`（category: core, enabled: true）。旧的 `empathy_observer` / `correction_observer` flag 保留但标记 deprecated（运行时不再读，留作迁移期兼容）。
+新增 feature flag `signal_collector`（**category: quiet, enabled: false** —— dogfood-only 默认关）。
+
+**为什么是 quiet 而非 core（评审意见2纠正）**：
+- `INTERNAL_AGENT_NAMES`（`principles-core/src/runtime-v2/config/pd-config-types.ts:64-73`）是 `as const` 封闭列表，目前不含 `signalCollector`。新增它要牵动 config schema、console metadata、installer、doctor、测试矩阵——**这不是只加 YAML，是 schema 变更**。
+- 我原设计写 `core, enabled: true` 并声称"flag 改 false 即回退"，但新增 InternalAgentName 本身不可逆，rollback 路径是假的。
+- **正确做法**：先以 `quiet` + 默认关 ship，在 owner 的 dogfood 环境手动 `enabled: true` 验证一段时间，确认无误判泛滥后再考虑升 core。这符合 ADR-0014 "新功能默认 MVP-Quiet（off + flag-registered）"。
+
+旧的 `empathy_observer` / `correction_observer` flag 保留但标记 deprecated（运行时不再读，留作迁移期兼容）。
 
 **Feature flag 注册依赖**：按 AGENTS.md，`PRI-239`（feature flag registry）需先合并。本设计的 flag 注册动作在 PRI-239 合并后执行；在那之前，配置可读但不上线新 flag 文件（遵循"bug fix / 配置对齐可先行"例外）。
+
+**InternalAgentName schema 变更清单**（quiet ship 也要做，但作为一次性 schema 扩展，不随每次部署开关）：
+- `pd-config-types.ts:64-73`：`INTERNAL_AGENT_NAMES` 数组追加 `'signalCollector'`
+- console metadata（AgentCard 列表）：新增 signalCollector 行
+- installer / doctor：新工作区初始化时写入 signalCollector quiet 默认值
+- 测试矩阵：config 解析测试覆盖新 name
 
 ---
 
@@ -406,12 +448,18 @@ internalAgents:
   - "搞什么啊" → 应判 WEAK → 累积 GFI
   - "[System] gateway restart..." → 应判 none（修误报）
 
-### 9.3 验收标准（owner-visible）
+### 9.3 验收标准（owner-visible，评审意见6 纠正）
 
+**主验收标准（必须满足）**：
 1. 用前序验证的 id=942 真纠正消息，SignalCollector 判定 STRONG 且 `emitPainDetectedEvent` 被调用（可在 event_log 看到 `source='user_correction'`）。
-2. `correction_samples` 表从 0 增长（断裂 ②③ 修复）。
-3. LMStudio 不可用时，系统降级为纯关键词不报错，且 SystemLogger 有记录。
-4. `.pd/config.yaml` 里改 `signalCollector.runtimeProfile` 能真正改变检测用的 LLM（配置单轨生效）。
+2. **该 user_correction pain event 触发了诊断任务创建**（tasks 表出现新 diagnostician task，`input_ref` 关联到该 pain）——这是"断裂 ③ 真接通"的直接证据。
+3. **诊断 evidence 带上前置 assistant turn**（验证断裂 ② 的 `references_assistant_turn_id` 正确填充，evidence chain 完整）。
+4. LMStudio 不可用时，系统降级为纯关键词不报错，且 SystemLogger 有记录；**普通歧义词在降级模式下不触发 STRONG**（避免误判泛滥）。
+5. `.pd/config.yaml` 里改 `signalCollector.runtimeProfile` 能真正改变检测用的 LLM（配置单轨生效）。
+6. **prompt hook 不阻塞**：从用户消息到 openclaw 开始构建 prompt 的延迟 < 200ms（验证意见5 的异步化生效）。
+
+**二级验收标准（软指标，不强求）**：
+- `correction_samples` 表从 0 增长——**不作为主验收**（评审意见6：依赖会话结构/时序，不够稳）。仅作为接通后的副作用观察。
 
 ---
 
@@ -422,14 +470,16 @@ internalAgents:
 - `packages/openclaw-plugin/src/core/signal-collector-host.ts`（I/O 外壳）
 
 ### 修改
-- `packages/openclaw-plugin/src/hooks/prompt.ts`：合并 `:262` + `:350` 两处为一次 `SignalCollectorHost.detectAndRoute` 调用；移除 `resolveEmpathyObserver` 的 workflows.yaml 分支 + ANTHROPIC fallback（`:1106-1148`）。
+- `packages/openclaw-plugin/src/hooks/prompt.ts`：合并 `:262` + `:350` 两处为 `SignalCollectorHost.detectSync`（同步）+ `detectAsyncAndRoute`（异步）调用；移除 `resolveEmpathyObserver` 的 workflows.yaml 分支 + ANTHROPIC fallback（`:1106-1148`）。
 - `packages/openclaw-plugin/src/core/trajectory.ts`：`recordCorrectionRejectedPain` 配合 host 层 emit（断裂 ④）。
 - `packages/openclaw-plugin/src/commands/samples.ts`：reject 路径加 emitPainDetectedEvent（断裂 ④）。
+- `packages/principles-core/src/runtime-v2/config/pd-config-types.ts`：`INTERNAL_AGENT_NAMES` 追加 `'signalCollector'`（评审意见2 schema 变更）。
 
 ### 配置/数据
 - `.pd/config.yaml`：新增 `signalCollector` agent binding + runtimeProfile（指向本地 LMStudio）。
-- `signal_keywords.json`：新建统一词库（合并 + 补中文纠正句式）。
-- feature flag：`signal_collector`（core, enabled）—— 待 PRI-239。
+- `signal_keywords.json`：新建统一触发词库（合并 + 补中文纠正句式）。
+- `signal_pending_terms.json`：新建候选词池（LLM 发现词暂存，owner 审核后 promote，评审意见3）。
+- feature flag：`signal_collector`（**quiet, enabled: false** —— 待 PRI-239）。
 
 ### 不动（明确边界）
 - `CorrectionCueLearner` / `empathy-keyword-matcher`：保留，降级为子模块。
