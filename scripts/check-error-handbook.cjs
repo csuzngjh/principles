@@ -2,8 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = process.cwd();
-const handbookPath = path.join(root, 'docs', 'ERROR_EXPERIENCE_HANDBOOK.md');
-const indexPath = path.join(root, 'docs', 'ERROR_PATTERN_INDEX.md');
+const handbookPath = path.join(root, 'docs', 'process', 'error-management', 'ERROR_EXPERIENCE_HANDBOOK.md');
+const indexPath = path.join(root, 'docs', 'process', 'error-management', 'ERROR_PATTERN_INDEX.md');
 const auditMode = process.argv.includes('--audit');
 
 function read(filePath) {
@@ -96,7 +96,7 @@ for (const id of detailEntries.keys()) {
 // === New check 1: Handbook size guard ===
 const handbookSizeKB = Buffer.byteLength(handbook, 'utf8') / 1024;
 if (handbookSizeKB > 200) {
-  errors.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (> 200KB). Archive stale entries to docs/ERROR_ARCHIVE.md.`);
+  errors.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (> 200KB). Archive stale entries to docs/process/error-management/ERROR_ARCHIVE.md.`);
 } else if (handbookSizeKB > 120) {
   warnings.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (approaching 200KB limit). Consider archiving stale entries.`);
 }
@@ -159,7 +159,7 @@ if (auditMode) {
     for (const e of staleEntries) {
       console.log(`  ${e.id} — last activity ${e.lastDate} (${e.daysSince} days ago)`);
     }
-    console.log('[check:error-handbook] Move these to docs/ERROR_ARCHIVE.md and mark as [archived] in ERROR_PATTERN_INDEX.md.');
+    console.log('[check:error-handbook] Move these to docs/process/error-management/ERROR_ARCHIVE.md and mark as [archived] in ERROR_PATTERN_INDEX.md.');
   }
   process.exit(0);
 }

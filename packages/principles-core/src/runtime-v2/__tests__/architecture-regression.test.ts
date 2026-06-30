@@ -215,7 +215,7 @@ const REQUIRED_SOURCE_FILES = [
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
 //
-// Baseline: PRI-211 inventory (docs/reviews/plugin-core-inventory-2026-05.md)
+// Baseline: PRI-211 inventory (docs/archive/reviews/plugin-core-inventory-2026-05.md)
 // Prevents silent growth of packages/openclaw-plugin/src/core/ by requiring
 // explicit classification for every new file.
 //
@@ -395,7 +395,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
         'Each new file in plugin core must be explicitly classified:',
         '  1. New pure domain logic → packages/principles-core (zero I/O, testable with no mocks)',
         '  2. New plugin I/O adapter → add to KNOWN_PLUGIN_CORE_FILES with classification comment',
-        '  3. See docs/reviews/plugin-core-inventory-2026-05.md for the PRI-211 baseline',
+        '  3. See docs/archive/reviews/plugin-core-inventory-2026-05.md for the PRI-211 baseline',
         'ERR-011: never bypass architecture boundary facades',
         'ERR-012: baseline entries must survive rebase — check diff for unintended deletions',
       ].join('\n');
@@ -406,7 +406,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
   it('known baseline count is self-consistent (92 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
-    // See docs/reviews/plugin-core-inventory-2026-05.md §7
+    // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
     // PRI-307: Added pd-config-loader.ts (96 → 97)
     // PRI-346: Added config-health.ts (97 → 98)

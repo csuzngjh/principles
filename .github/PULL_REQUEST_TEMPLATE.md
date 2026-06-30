@@ -86,7 +86,7 @@ PR 模板分层说明：
   - 规则引用: `ERR-083` — 共享 store 契约变更必须审计跨包 caller
 
 ### ERR Checklist（必填）
-<!-- 列出本 PR 考虑过的 ERR 条目（最少 3 个），及如何避免复发。参考 docs/ERROR_PATTERN_INDEX.md -->
+<!-- 列出本 PR 考虑过的 ERR 条目（最少 3 个），及如何避免复发。参考 docs/process/error-management/ERROR_PATTERN_INDEX.md -->
 <!-- 示例：ERR-001 (parsed JSON as any) — 本 PR 使用 typeof 类型守卫，未使用 as 绕过 -->
 
 - ERR-___:
