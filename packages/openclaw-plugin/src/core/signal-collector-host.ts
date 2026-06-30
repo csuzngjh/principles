@@ -368,12 +368,15 @@ export function createSignalLlmClassifierFromConfig(
           return null;
         }
         const output = await adapter.fetchOutput(handle.runId);
-        const payload = output?.payload;
+        const payload: unknown = output?.payload;
         let rawOutput = '';
         if (typeof payload === 'string') {
           rawOutput = payload;
-        } else if (typeof payload === 'object' && payload !== null && typeof (payload as Record<string, unknown>).output === 'string') {
-          rawOutput = (payload as Record<string, unknown>).output as string;
+        } else if (typeof payload === 'object' && payload !== null && Object.hasOwn(payload, 'output')) {
+          const maybeOutput = (payload as Record<string, unknown>)['output'];
+          if (typeof maybeOutput === 'string') {
+            rawOutput = maybeOutput;
+          }
         }
         const parsed = parseLlmClassification(rawOutput);
         return parsed.valid ? parsed.value : null;

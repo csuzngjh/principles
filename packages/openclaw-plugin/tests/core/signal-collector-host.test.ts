@@ -81,6 +81,15 @@ describe('SignalCollectorHost.detectSync', () => {
     }));
   });
 
+  it('single detectSync call writes user_turns exactly once (no double-write regression)', () => {
+    // 回归测试: 防止 prompt.ts 两处 detectSync 调用点导致同一消息双重写入。
+    // 详见 PR review Phase 3 P1: empathy 段 + correction 段曾重复调用。
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-once', 'user');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledTimes(1);
+  });
+
   it('high-precision correction → fires emitPainDetectedEvent (async, source=user_correction)', async () => {
     const wctx = makeMockWctx();
     const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });

@@ -311,11 +311,9 @@ export async function handleBeforePromptBuild(
     shouldInjectBehavioralConstraints = true;
   }
 
-  // SignalCollectorHost 统一接管 empathy + correction 检测(spec §3.3 决策1)。
-  // 替代原 matchEmpathyKeywords + EmpathyObserver spawn + GFI 累积 + Gate A/B。
-  if (workspaceDir && latestUserMessage && sessionId && trigger === 'user') {
-    getSignalCollectorHost(wctx, logger).detectSync(latestUserMessage, sessionId, trigger);
-  }
+  // 注:SignalCollectorHost.detectSync 已在上文 correction 段(:259)统一调用一次,
+  // 覆盖 correction + empathy 全部检测职责(含 lineage + turnIndex)。
+  // 此处不再重复调用,避免同一消息双重写入 user_turns 和重复触发 STRONG 分流。
 
 
   // ──── 4. Heartbeat-specific checklist (also fires for cron-triggered sessions) ────
