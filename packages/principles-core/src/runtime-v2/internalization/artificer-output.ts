@@ -281,7 +281,15 @@ export class DefaultArtificerValidator implements ArtificerValidator {
       const cases = rec.goldenTraceCases as readonly unknown[];
       for (let i = 0; i < cases.length; i++) {
         const entry = cases[i];
-        if (!isRecord(entry) || !Object.hasOwn(entry, 'ruleContext')) {
+        if (!isRecord(entry)) {
+          continue;
+        }
+        if (!Object.hasOwn(entry, 'ruleContext')) {
+          if (isV2Declared) {
+            errors.push(
+              `goldenTraceCases[${i}].ruleContext is required when requiresContextVersion: 2 is declared`,
+            );
+          }
           continue;
         }
         const ctxValue = entry.ruleContext;
@@ -292,8 +300,10 @@ export class DefaultArtificerValidator implements ArtificerValidator {
           continue;
         }
         // v2 declared: validate the ruleContext structurally (ERR-001, ERR-076).
-        // `undefined` is allowed — the field is optional even for v2 cases.
         if (ctxValue === undefined) {
+          errors.push(
+            `goldenTraceCases[${i}].ruleContext is required when requiresContextVersion: 2 is declared`,
+          );
           continue;
         }
         const ctxResult = validateRuleContextV2(ctxValue);

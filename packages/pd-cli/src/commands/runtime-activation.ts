@@ -340,11 +340,28 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     await stateManager.initialize();
     const store = new SqliteActivationStateStore(stateManager.connection);
     const activeHooks = await store.listCodeToolHookActivations(false);
-    const activation = activeHooks.find((record) => record.activationId === activationId);
-    if (!activation || activation.action !== 'code_tool_hook_shadow_activate') {
+    // CodeRabbit PR2 Comment 3: dry-run must apply the same eligibility checks
+    // as the real promote path. `promoteActivation` runs a COUNT guard inside a
+    // BEGIN IMMEDIATE transaction and refuses when the count of matching shadow
+    // rows is not exactly 1. The previous dry-run branch used `find()` (returns
+    // the first match) and reported `would_promote` even when duplicates would
+    // make the confirm path throw. Mirror the store's uniqueness check here so
+    // dry-run and confirm agree (cli-5: failure paths must not mutate state;
+    // cli-6: degraded/refused results carry a structured reason + nextAction).
+    const matchingShadows = activeHooks.filter(
+      (record) => record.activationId === activationId && record.action === 'code_tool_hook_shadow_activate',
+    );
+    if (matchingShadows.length === 0) {
       refuse(
         'not_found_inactive_or_not_shadow',
         'Refresh `pd activation list --channel code_tool_hook`; only active shadow activations can be promoted.',
+      );
+      return;
+    }
+    if (matchingShadows.length > 1) {
+      refuse(
+        'duplicate_shadow_activations',
+        `${matchingShadows.length} shadow activations share activation_id=${activationId}; resolve duplicates before promoting.`,
       );
       return;
     }
