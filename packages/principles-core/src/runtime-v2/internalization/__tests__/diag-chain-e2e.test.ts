@@ -164,6 +164,7 @@ function makeDefaultInternalAgents(): EffectivePdConfig['config']['internalAgent
       rolloutReviewer: { enabled: true },
       correctionObserver: { enabled: true },
       empathyObserver: { enabled: true },
+      signalCollector: { enabled: false },
     },
   };
 }

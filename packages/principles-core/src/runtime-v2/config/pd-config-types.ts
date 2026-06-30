@@ -72,6 +72,7 @@ export const INTERNAL_AGENT_NAMES = [
   'rolloutReviewer',
   'correctionObserver',
   'empathyObserver',
+  'signalCollector',
 ] as const;
 
 export type InternalAgentName = (typeof INTERNAL_AGENT_NAMES)[number];
