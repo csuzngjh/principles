@@ -20,18 +20,23 @@
  * `@principles/core/runtime-v2` → `behavior-example-pack.ts`.
  */
 import {
+  buildRuleHostAction,
+  computeBehaviorFacts,
   validateBehaviorExamplePack,
 } from '@principles/core/runtime-v2';
 import type {
+  RuleContextV2,
   BehaviorExamplePack,
   GoldenTraceCaseInput,
 } from '@principles/core/runtime-v2';
 import type { TrajectoryDatabase } from './trajectory.js';
 import { TrajectoryRegistry } from './trajectory.js';
 import type {
+  RuleHostEvidenceRow,
   RuleHostContextRow,
   RuleHostContextResult,
 } from './trajectory-types.js';
+import { assembleHistoryFromRows } from './rule-context-assembler.js';
 
 // ── public types ───────────────────────────────────────────────────────────
 
@@ -50,6 +55,10 @@ export interface BehaviorExamplePackAssemblerInput {
   readonly sourcePainId: string;
   /** Owner's natural-language desired outcome — must be non-empty. */
   readonly ownerDesiredOutcome: string;
+  /** Owner-selected call that demonstrates behaviour to block. */
+  readonly sourceNegativeToolCallId: number;
+  /** Owner-selected calls that demonstrate behaviour to allow (1..3). */
+  readonly positiveToolCallIds: readonly number[];
   /**
    * Project directory, used to detect absolute paths that should be redacted
    * to relative/basename form in the assembled pack.
@@ -96,19 +105,8 @@ export class BehaviorExamplePackAssembler {
     this.db = TrajectoryRegistry.get(opts.workspaceDir);
   }
 
-  /**
-   * Assemble a BehaviorExamplePack from the pain lineage anchored at
-   * `input.sourcePainId`.
-   *
-   * Fail-loud contract (spec §7.2, ERR-069):
-   *   - pain event not found → throws
-   *   - empty trajectory → throws
-   *   - no failing tool call to anchor sourceNegativeCase → throws
-   *   - no successful tool call for positiveCounterexamples → throws
-   *   - assembled pack fails validateBehaviorExamplePack → throws
-   */
+  /** Assemble only from explicit Owner labels; execution outcome is not a label. */
   assemble(input: BehaviorExamplePackAssemblerInput): BehaviorExamplePack {
-    // ── 1. Look up the anchoring pain event ──
     const pain = this.db.getPainEventByCanonicalId(input.sourcePainId);
     if (!pain) {
       throw new Error(
@@ -116,98 +114,24 @@ export class BehaviorExamplePackAssembler {
       );
     }
 
-    // ── 2. Pull the recent trajectory for the pain's session ──
-    // getRuleHostContextRows returns rows WITH params_json (which
-    // listToolCallsForSession does not), so we use it here.
-    const ctxResult: RuleHostContextResult = this.db.getRuleHostContextRows(
-      pain.sessionId,
-      HISTORY_LIMIT,
-    );
-    const rows: readonly RuleHostContextRow[] = ctxResult.rows;
-    if (rows.length === 0) {
-      throw new Error(
-        `[BehaviorExamplePackAssembler] empty trajectory (no tool calls) for sessionId="${pain.sessionId}" (pain=${input.sourcePainId}, ERR-069 fail loud)`,
-      );
-    }
-
-    // ── 3. Partition into failures (negative candidates) and successes (positives) ──
-    const failures: RuleHostContextRow[] = [];
-    const successes: RuleHostContextRow[] = [];
-    for (const row of rows) {
-      if (row.outcome === 'failure') {
-        failures.push(row);
-      } else if (row.outcome === 'success') {
-        successes.push(row);
+    validateOwnerSelection(input);
+    const negativeRow = requireSelectedRow(this.db.getRuleHostEvidenceRow(input.sourceNegativeToolCallId), input.sourceNegativeToolCallId);
+    const positiveRows = input.positiveToolCallIds.map((id) => requireSelectedRow(this.db.getRuleHostEvidenceRow(id), id));
+    for (const row of [negativeRow, ...positiveRows]) {
+      if (row.sessionId !== pain.sessionId) {
+        throw new Error(`[BehaviorExamplePackAssembler] selected tool call ${row.id} session mismatch; all examples must belong to pain session ${pain.sessionId}`);
       }
-      // 'blocked' rows are not used as either positive or negative cases.
     }
 
-    if (failures.length === 0) {
-      throw new Error(
-        `[BehaviorExamplePackAssembler] no failing tool call in sessionId="${pain.sessionId}" — cannot build sourceNegativeCase (pain=${input.sourcePainId}, ERR-069 fail loud)`,
-      );
-    }
-    if (successes.length === 0) {
-      throw new Error(
-        `[BehaviorExamplePackAssembler] no successful tool call in sessionId="${pain.sessionId}" — cannot build positiveCounterexamples (pain=${input.sourcePainId}, ERR-069 fail loud)`,
-      );
-    }
-
-    // ── 4. Build sourceNegativeCase from the most recent failure ──
-    const sourceFailure = failures[failures.length - 1];
-    if (!sourceFailure) {
-      // Defensive: should be unreachable due to the failures.length === 0 check
-      // above, but noUncheckedIndexedAccess requires the guard.
-      throw new Error(
-        `[BehaviorExamplePackAssembler] internal error: sourceFailure undefined (pain=${input.sourcePainId})`,
-      );
-    }
-    const sourceNegativeCase = buildCaseFromRow(sourceFailure, 'negative', 'block', input.projectDir);
-
-    // ── 5. Build positiveCounterexamples from successes (≤3, most recent first) ──
-    const positiveRows = successes.slice(-MAX_POSITIVES); // most recent ≤3
-    const positiveCounterexamples: GoldenTraceCaseInput[] = [];
-    for (const row of positiveRows) {
-      positiveCounterexamples.push(
-        buildCaseFromRow(row, 'positive', 'allow', input.projectDir),
-      );
-    }
-
-    // ── 6. Build evidenceRefs from pain events + gate blocks (≤5) ──
-    const evidenceRefs: string[] = [];
-    const sessionPainEvents = this.db.listPainEventsForSession(pain.sessionId);
-    for (const p of sessionPainEvents) {
-      if (evidenceRefs.length >= MAX_EVIDENCE_REFS) break;
-      evidenceRefs.push(`pain:${p.id}`);
-    }
-    const gateBlocks = this.db.listGateBlocksForSession(pain.sessionId);
-    for (const g of gateBlocks) {
-      if (evidenceRefs.length >= MAX_EVIDENCE_REFS) break;
-      evidenceRefs.push(`gate:${g.id}`);
-    }
-    if (evidenceRefs.length === 0) {
-      // The anchor pain event itself always provides at least one evidenceRef.
-      evidenceRefs.push(`pain:${pain.id}`);
-    }
-
-    // ── 7. Apply redaction (spec §7.2: "经过脱敏") ──
-    const redactionResult = redactParams(sourceNegativeCase.params, input.projectDir);
-    const redactedNegativeCase: GoldenTraceCaseInput = {
-      ...sourceNegativeCase,
-      params: redactionResult.redacted,
-    };
-    const redactedPositives: GoldenTraceCaseInput[] = positiveCounterexamples.map((c) => {
-      const r = redactParams(c.params, input.projectDir);
-      return { ...c, params: r.redacted };
-    });
-    const redactionNotes: string[] = [...redactionResult.notes];
-
-    // ── 8. Assemble the pack ──
+    const redactionNotes: string[] = [];
+    const buildCtx = { projectDir: input.projectDir, redactionNotes };
+    const sourceNegativeCase = this.buildSelectedCase(negativeRow, 'negative', 'block', buildCtx);
+    const positiveCounterexamples = positiveRows.map((row) => this.buildSelectedCase(row, 'positive', 'allow', buildCtx));
     const pack: BehaviorExamplePack = {
-      sourceNegativeCase: redactedNegativeCase,
+      sourceNegativeCase,
       ownerDesiredOutcome: input.ownerDesiredOutcome,
-      positiveCounterexamples: redactedPositives,
-      evidenceRefs,
+      positiveCounterexamples,
+      evidenceRefs: [`pain:${pain.id}`, `tool_call:${negativeRow.id}`, ...positiveRows.map((row) => `tool_call:${row.id}`)].slice(0, MAX_EVIDENCE_REFS),
       redactionNotes,
     };
 
@@ -221,6 +145,41 @@ export class BehaviorExamplePackAssembler {
 
     return pack;
   }
+
+  private buildSelectedCase(
+    row: RuleHostEvidenceRow,
+    kind: 'positive' | 'negative',
+    expectedDecision: 'allow' | 'block',
+    ctx: { projectDir: string; redactionNotes: string[] },
+  ): GoldenTraceCaseInput {
+    const { projectDir, redactionNotes } = ctx;
+    const base = buildCaseFromRow(row, kind, expectedDecision, projectDir);
+    const redaction = redactParams(base.params, projectDir);
+    redactionNotes.push(...redaction.notes);
+    const historyResult: RuleHostContextResult = this.db.getRuleHostContextRowsBefore(row.sessionId, row.id, HISTORY_LIMIT);
+    const history = assembleHistoryFromRows(historyResult.rows, historyResult.truncated, projectDir);
+    const action = buildRuleHostAction(row.toolName, redaction.redacted, projectDir);
+    const ruleContext: RuleContextV2 = { version: 2, history, facts: computeBehaviorFacts(history, action.normalizedPath || null, null) };
+    return { ...base, params: redaction.redacted, ruleContext };
+  }
+}
+
+function validateOwnerSelection(input: BehaviorExamplePackAssemblerInput): void {
+  if (!Number.isSafeInteger(input.sourceNegativeToolCallId) || input.sourceNegativeToolCallId <= 0) {
+    throw new Error('[BehaviorExamplePackAssembler] sourceNegativeToolCallId must be a positive integer');
+  }
+  if (!Array.isArray(input.positiveToolCallIds) || input.positiveToolCallIds.length === 0 || input.positiveToolCallIds.length > MAX_POSITIVES) {
+    throw new Error('[BehaviorExamplePackAssembler] positiveToolCallIds must contain 1 to at most 3 IDs');
+  }
+  const allIds = [input.sourceNegativeToolCallId, ...input.positiveToolCallIds];
+  if (allIds.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(allIds).size !== allIds.length) {
+    throw new Error('[BehaviorExamplePackAssembler] selected tool call IDs must be unique positive integers');
+  }
+}
+
+function requireSelectedRow(row: RuleHostEvidenceRow | null, id: number): RuleHostEvidenceRow {
+  if (!row) throw new Error(`[BehaviorExamplePackAssembler] selected tool call id=${id} not found`);
+  return row;
 }
 
 // ── internal: case builder ─────────────────────────────────────────────────

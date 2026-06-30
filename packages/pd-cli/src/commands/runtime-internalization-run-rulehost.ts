@@ -24,6 +24,7 @@
  *   - --dry-run and --confirm are mutually exclusive
  */
 import * as path from 'path';
+import * as fs from 'node:fs';
 import type { Command } from 'commander';
 import { runRuleHostPipeline } from '../services/rulehost-pipeline-runner.js';
 import type { RuleHostPipelineResult, CodeRuleCapability, RuleHostAgentAdapters } from '../services/rulehost-pipeline-runner.js';
@@ -37,6 +38,7 @@ import {
   isFeatureEnabled,
 } from '@principles/core/runtime-v2';
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
 import type { RuleHostReadinessResult } from '../services/rulehost-readiness.js';
@@ -47,6 +49,7 @@ export interface RunRuleHostOptions {
   channel?: string;
   maxRounds?: number;
   timeoutMs?: number;
+  behaviorExamples?: string;
   json?: boolean;
   /** Dry-run mode (default). Validates inputs + config, reports capability status, does NOT run the pipeline. */
   dryRun?: boolean;
@@ -68,6 +71,49 @@ interface ResolvedRunRuleHostRuntime {
   readonly agentRuntimeProfiles: Partial<Record<InternalAgentName, string>>;
   readonly capability: CodeRuleCapability;
   readonly capabilityStatus: string;
+  readonly contextV2Enabled: boolean;
+}
+
+interface OwnerBehaviorExamplesInput {
+  readonly ownerDesiredOutcome: string;
+  readonly sourceNegativeToolCallId: number;
+  readonly positiveToolCallIds: readonly number[];
+}
+
+type OwnerBehaviorExamplesResult =
+  | { readonly ok: true; readonly value: OwnerBehaviorExamplesInput }
+  | { readonly ok: false; readonly reason: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readOwnerBehaviorExamples(filePath: string): OwnerBehaviorExamplesResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    return { ok: false, reason: `behavior_examples_unreadable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!isRecord(parsed)) return { ok: false, reason: 'behavior_examples_invalid: root must be an object' };
+  if (typeof parsed.ownerDesiredOutcome !== 'string' || parsed.ownerDesiredOutcome.trim() === '') {
+    return { ok: false, reason: 'behavior_examples_invalid: ownerDesiredOutcome must be a non-empty string' };
+  }
+  if (!Number.isSafeInteger(parsed.sourceNegativeToolCallId) || Number(parsed.sourceNegativeToolCallId) <= 0) {
+    return { ok: false, reason: 'behavior_examples_invalid: sourceNegativeToolCallId must be a positive integer' };
+  }
+  if (!Array.isArray(parsed.positiveToolCallIds) || parsed.positiveToolCallIds.length === 0 || parsed.positiveToolCallIds.length > 3
+    || parsed.positiveToolCallIds.some((id) => !Number.isSafeInteger(id) || Number(id) <= 0)) {
+    return { ok: false, reason: 'behavior_examples_invalid: positiveToolCallIds must contain 1 to 3 positive integers' };
+  }
+  return {
+    ok: true,
+    value: {
+      ownerDesiredOutcome: parsed.ownerDesiredOutcome,
+      sourceNegativeToolCallId: Number(parsed.sourceNegativeToolCallId),
+      positiveToolCallIds: parsed.positiveToolCallIds.map((id) => Number(id)),
+    },
+  };
 }
 
 function resolvePiAiAgentAdapter(
@@ -120,6 +166,8 @@ function resolveRunRuleHostRuntime(
   }
 
   const { effective } = configLoadResult;
+  const featureFlags = computeFeatureFlagsFromConfig(effective);
+  const contextV2Enabled = isFeatureEnabled(featureFlags, 'rulecode_context_v2');
   const adapterOptions = { workspaceDir, timeoutMs };
   const dreamer = resolvePiAiAgentAdapter(effective, 'dreamer', adapterOptions);
   const philosopher = resolvePiAiAgentAdapter(effective, 'philosopher', adapterOptions);
@@ -135,15 +183,16 @@ function resolveRunRuleHostRuntime(
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: readiness.reason },
       capabilityStatus: `code_rule_capability: OFF (${readiness.reason})`,
+      contextV2Enabled,
     };
   }
-  const featureFlags = computeFeatureFlagsFromConfig(effective);
   if (!isFeatureEnabled(featureFlags, 'code_rule_capability')) {
     return {
       agentAdapters: { dreamer: dreamer.adapter, philosopher: philosopher.adapter, scribe: scribe.adapter, evaluator: scribe.adapter },
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: 'code_rule_capability feature flag is disabled' },
       capabilityStatus: 'code_rule_capability: OFF (feature flag disabled)',
+      contextV2Enabled,
     };
   }
 
@@ -157,6 +206,7 @@ function resolveRunRuleHostRuntime(
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer agent disabled: ${artificerBinding.reason}` },
       capabilityStatus: `code_rule_capability: OFF (artificer disabled — ${artificerBinding.reason})`,
+      contextV2Enabled,
     };
   }
   if (!evaluatorBinding.ok) {
@@ -165,6 +215,7 @@ function resolveRunRuleHostRuntime(
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `evaluator agent disabled: ${evaluatorBinding.reason}` },
       capabilityStatus: `code_rule_capability: OFF (evaluator disabled — ${evaluatorBinding.reason})`,
+      contextV2Enabled,
     };
   }
 
@@ -177,6 +228,7 @@ function resolveRunRuleHostRuntime(
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer runtime profile is not pi-ai (got '${artificerProfile.type}')` },
       capabilityStatus: `code_rule_capability: OFF (artificer profile type='${artificerProfile.type}', expected pi-ai)`,
+      contextV2Enabled,
     };
   }
 
@@ -187,6 +239,7 @@ function resolveRunRuleHostRuntime(
       agentRuntimeProfiles,
       capability: { enabled: false, disabledReason: `artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' is not set in environment` },
       capabilityStatus: `code_rule_capability: OFF (artificer apiKeyEnv '${artificerProfile.apiKeyEnv}' not set)`,
+      contextV2Enabled,
     };
   }
 
@@ -209,6 +262,7 @@ function resolveRunRuleHostRuntime(
     agentRuntimeProfiles,
     capability: { enabled: true, artificerAdapter },
     capabilityStatus: `code_rule_capability: ON (artificer profile='${artificerBinding.profileId}', evaluator profile='${evaluatorBinding.profileId}')`,
+    contextV2Enabled,
   };
 }
 
@@ -374,6 +428,91 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     return;
   }
 
+  let effectiveCapability = resolvedRuntime.capability;
+  let contextMode: 'v1' | 'v2' = 'v1';
+  let behaviorExamplePack: BehaviorExamplePack | undefined;
+  let behaviorExamplesReason: string | undefined;
+  const behaviorExamplesPath = opts.behaviorExamples
+    ? path.resolve(workspaceDir, opts.behaviorExamples)
+    : undefined;
+
+  if (!resolvedRuntime.contextV2Enabled && behaviorExamplesPath) {
+    const reason = 'behavior_examples_not_allowed: rulecode_context_v2 is disabled';
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ status: 'failed', reason, nextAction: 'enable rulecode_context_v2 or remove --behavior-examples' }) + '\n');
+    } else {
+      console.error(`Error: ${reason}. Enable rulecode_context_v2 or remove --behavior-examples.`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (resolvedRuntime.contextV2Enabled) {
+    contextMode = 'v2';
+    if (!behaviorExamplesPath) {
+      behaviorExamplesReason = 'behavior_examples_missing';
+    } else {
+      const examplesResult = readOwnerBehaviorExamples(behaviorExamplesPath);
+      if (!examplesResult.ok) {
+        // P1 fix (CodeRabbit PR2 Comment 1): fail fast on parse failure instead
+        // of silently degrading to text_principle_only (rc-9-no-silent-fallback).
+        // examplesResult.reason already carries a stable prefix
+        // (behavior_examples_unreadable: | behavior_examples_invalid:).
+        const { reason } = examplesResult;
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({
+            status: 'failed',
+            reason,
+            nextAction: 'fix the --behavior-examples JSON payload and retry',
+          }) + '\n');
+        } else {
+          console.error(`Error: ${reason}. Fix the --behavior-examples JSON payload and retry.`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.confirm) {
+        // Lazy import: avoids loading `principles-disciple` at module init time.
+        // `pd --version` (and the create-principles-disciple smoke test) loads
+        // this file statically via index.ts. If we used a static import, the
+        // module would fail with MODULE_NOT_FOUND in bundled environments where
+        // `principles-disciple` is not resolvable from pd-cli's node_modules.
+        // The import only executes when `--confirm` is actually used.
+        const { BehaviorExamplePackAssembler, RuleHostEvidenceRegistry } = await import('principles-disciple/rulehost-evidence');
+        try {
+          const assembler = new BehaviorExamplePackAssembler({ workspaceDir, stateDir: path.join(workspaceDir, '.state') });
+          behaviorExamplePack = assembler.assemble({
+            sourcePainId: opts.painId,
+            ownerDesiredOutcome: examplesResult.value.ownerDesiredOutcome,
+            sourceNegativeToolCallId: examplesResult.value.sourceNegativeToolCallId,
+            positiveToolCallIds: examplesResult.value.positiveToolCallIds,
+            projectDir: workspaceDir,
+          });
+        } catch (error) {
+          // P1 fix (CodeRabbit PR2 Comment 1): fail fast on assembly failure
+          // instead of silently degrading to text_principle_only.
+          const reason = `behavior_examples_unreliable: ${error instanceof Error ? error.message : String(error)}`;
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({
+              status: 'failed',
+              reason,
+              nextAction: 'verify pain lineage and tool call IDs reference existing trajectory rows; rerun pd pain record if needed',
+            }) + '\n');
+          } else {
+            console.error(`Error: ${reason}. Verify pain lineage and tool call IDs reference existing trajectory rows; rerun pd pain record if needed.`);
+          }
+          process.exitCode = 1;
+          return;
+        } finally {
+          RuleHostEvidenceRegistry.dispose(workspaceDir);
+        }
+      }
+    }
+    if (behaviorExamplesReason) {
+      effectiveCapability = { enabled: false, disabledReason: `${behaviorExamplesReason}; nextAction: provide reliable Owner-labelled tool call IDs with --behavior-examples` };
+    }
+  }
+
   // ── Dry-run mode: report what would happen, don't run the pipeline ──
   // Default is dry-run (CLI gate rule 4: mutating commands default to dry-run).
   const isDryRun = opts.dryRun || !opts.confirm;
@@ -386,9 +525,15 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         channel,
         readiness,
         readinessStatus: readiness.status,
-        capabilityStatus: resolvedRuntime.capabilityStatus,
+        capabilityStatus: behaviorExamplesReason
+          ? `code_rule_capability: OFF (${behaviorExamplesReason})`
+          : resolvedRuntime.capabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
-        codeRuleCapability: { enabled: resolvedRuntime.capability.enabled, disabledReason: resolvedRuntime.capability.disabledReason },
+        codeRuleCapability: { enabled: effectiveCapability.enabled, disabledReason: effectiveCapability.disabledReason },
+        contextMode,
+        behaviorExamples: behaviorExamplesPath
+          ? { path: behaviorExamplesPath, status: behaviorExamplesReason ? 'unreliable' : 'provided' }
+          : { status: resolvedRuntime.contextV2Enabled ? 'missing' : 'not_required' },
         nextAction: readiness.status === 'ready'
           ? 'pass --confirm to run the full pipeline'
           : readiness.status === 'text_principle_only'
@@ -396,7 +541,12 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
             : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: resolvedRuntime.capabilityStatus, workspaceDir, readiness }) + '\n');
+      // P2 fix (CodeRabbit PR2 Comment 2): text branch must use the same v2-aware
+      // capabilityStatus source as the JSON branch (behaviorExamplesReason-aware).
+      const effectiveCapabilityStatus = behaviorExamplesReason
+        ? `code_rule_capability: OFF (${behaviorExamplesReason})`
+        : resolvedRuntime.capabilityStatus;
+      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness }) + '\n');
     }
     return;
   }
@@ -409,7 +559,9 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
       painId: opts.painId,
       runtimeAdapter: resolvedRuntime.agentAdapters.dreamer,
       agentAdapters: resolvedRuntime.agentAdapters,
-      codeRuleCapability: resolvedRuntime.capability,
+      codeRuleCapability: effectiveCapability,
+      contextMode,
+      behaviorExamplePack,
       channel: channel as RuleHostChannel,
       maxRounds: opts.maxRounds,
       timeoutMs: opts.timeoutMs,
@@ -465,10 +617,11 @@ export function registerRunRuleHostCommand(internalizationCmd: Command): Command
     .option('--channel <channel>', 'Activation channel: code_tool_hook, prompt, defer_archive (default: code_tool_hook)', 'code_tool_hook')
     .option('--max-rounds <n>', 'Max adversarial rounds (PRD cap = 2)', parseInt)
     .option('--timeout-ms <ms>', 'Per-LLM-call timeout in milliseconds (default: 300000)', parseInt)
+    .option('--behavior-examples <json>', 'Owner-labelled negative/positive tool call IDs for RuleContext v2')
     .option('--dry-run', 'Validate inputs + config, report capability status, do NOT run the pipeline (default)')
     .option('--confirm', 'Actually run the pipeline (mutually exclusive with --dry-run)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
-      await handleRunRuleHost({ workspace: opts.workspace, painId: opts.painId, channel: opts.channel, maxRounds: opts.maxRounds, timeoutMs: opts.timeoutMs, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
+      await handleRunRuleHost({ workspace: opts.workspace, painId: opts.painId, channel: opts.channel, maxRounds: opts.maxRounds, timeoutMs: opts.timeoutMs, behaviorExamples: opts.behaviorExamples, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
     });
 }

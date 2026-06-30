@@ -357,10 +357,24 @@ describe('DefaultArtificerValidator — PRI-484 requiresContextVersion + ruleCon
 
   // ── requiresContextVersion field is accepted ─────────────────────────────
 
-  it('accepts output with requiresContextVersion: 2', async () => {
-    const result = await validator.validate(makeOutput({ requiresContextVersion: 2 }), ARTIFICER_TASK_ID);
+  it('accepts output with requiresContextVersion: 2 when every case has context', async () => {
+    const output = makeOutput({ requiresContextVersion: 2, attachRuleContextTo: 0 });
+    const cases = output.goldenTraceCases as Record<string, unknown>[];
+    const [, secondCase] = cases;
+    if (!secondCase) throw new Error('fixture must have two cases');
+    secondCase.ruleContext = makeValidRuleContext();
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it('rejects v2 output when any golden trace case omits ruleContext', async () => {
+    const result = await validator.validate(
+      makeOutput({ requiresContextVersion: 2, attachRuleContextTo: 0 }),
+      ARTIFICER_TASK_ID,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('goldenTraceCases[1].ruleContext is required when requiresContextVersion: 2 is declared');
   });
 
   it('accepts output without requiresContextVersion (v1 rule, backward compatible)', async () => {
@@ -381,14 +395,6 @@ describe('DefaultArtificerValidator — PRI-484 requiresContextVersion + ruleCon
   });
 
   // ── ruleContext on golden trace cases ────────────────────────────────────
-
-  it('accepts ruleContext on a case when requiresContextVersion: 2', async () => {
-    const result = await validator.validate(
-      makeOutput({ requiresContextVersion: 2, attachRuleContextTo: 0 }),
-      ARTIFICER_TASK_ID,
-    );
-    expect(result.valid).toBe(true);
-  });
 
   it('rejects ruleContext on a case when requiresContextVersion is absent (v1 must not read context)', async () => {
     const result = await validator.validate(

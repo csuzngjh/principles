@@ -53,6 +53,7 @@ import type {
   RefinerRuleHostGateDeps,
   PIArtifactStore,
   ApprovalRecord,
+  BehaviorExamplePack,
 } from '@principles/core/runtime-v2';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
@@ -113,6 +114,10 @@ export interface RuleHostPipelineOptions {
    * capability is treated as OFF with reason 'code_rule_capability not provided'.
    */
   readonly codeRuleCapability?: CodeRuleCapability;
+  /** Explicit Artificer contract selected by the workspace feature flag. */
+  readonly contextMode?: 'v1' | 'v2';
+  /** Required in v2 mode; assembled from Owner-labelled production evidence. */
+  readonly behaviorExamplePack?: BehaviorExamplePack;
   /** Internalization channel for created tasks (default 'code_tool_hook'). */
   readonly channel?: 'prompt' | 'code_tool_hook' | 'defer_archive';
   /** Max adversarial rounds (PRD cap = 2). */
@@ -352,7 +357,10 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     }
     onProgress('adversarial_loop', 'start');
     const artificerRunner = new ArtificerRunner(
-      { stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore },
+      {
+        stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
+        contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack,
+      },
       runnerOptsFor(capability.artificerAdapter),
     );
     const evaluatorRunner = new EvaluatorRunner(

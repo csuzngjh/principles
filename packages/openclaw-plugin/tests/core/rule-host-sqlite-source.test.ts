@@ -17,6 +17,7 @@ import * as path from 'path';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
 import { RuleHost } from '../../src/core/rule-host.js';
+import type { RuleHostLogger } from '../../src/core/rule-host.js';
 
 // ── Test helpers ───────────────────────────────────────────────────────────
 
@@ -38,6 +39,25 @@ var meta = { name: 'test-sqlite-rule', version: '1', ruleId: '${RULE_ID}', cover
 let tempWorkspaceDir: string;
 let tempStateDir: string;
 let sqliteConn: SqliteConnection;
+
+// CodeRabbit PR2 Comment 2: track every RuleHost created in a test so we can
+// dispose() (close its lazily-opened SqliteConnection) in afterEach. Without
+// this, each `new RuleHost(...)` leaked a SQLite file handle that survived
+// sqliteConn.close() in the existing teardown — on Windows the open handle
+// also blocked fs.rmSync(tempWorkspaceDir) and made subsequent tests flaky.
+let createdRuleHosts: RuleHost[] = [];
+
+/**
+ * Create a RuleHost for the current test and register it for disposal.
+ * Use this instead of `new RuleHost(...)` so teardown can close the host's
+ * internal SqliteConnection (the test's own `sqliteConn` is a separate
+ * connection used only for fixture inserts).
+ */
+function makeRuleHost(logger: RuleHostLogger = console): RuleHost {
+  const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
+  createdRuleHosts.push(host);
+  return host;
+}
 
 function setupTempDirs(): void {
   const baseTmp = os.tmpdir();
@@ -170,9 +190,18 @@ beforeEach(() => {
   setupTempDirs();
   sqliteConn = new SqliteConnection(tempWorkspaceDir);
   sqliteConn.getDb();
+  createdRuleHosts = [];
 });
 
 afterEach(() => {
+  // Dispose every RuleHost created in this test before closing the fixture
+  // connection and removing the temp dir. RuleHost lazily opens its own
+  // SqliteConnection on first evaluate(); without dispose() the handle leaks
+  // and on Windows blocks fs.rmSync below.
+  for (const host of createdRuleHosts) {
+    try { host.dispose(); } catch { /* best-effort */ }
+  }
+  createdRuleHosts = [];
   try { sqliteConn?.close(); } catch { /* best-effort */ }
   try { fs.rmSync(tempWorkspaceDir, { recursive: true, force: true }); } catch { /* Windows */ }
 });
@@ -184,7 +213,7 @@ describe('PRI-436 Slice 1: SQLite-only RuleHost executes exactly once', () => {
     insertRuleArtifact();
     await insertCodeToolHookActivation();
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     expect(result).toBeDefined();
@@ -197,7 +226,7 @@ describe('PRI-436 Slice 1: SQLite-only RuleHost executes exactly once', () => {
     insertRuleArtifact();
     await insertCodeToolHookActivation();
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/safe/project/file.txt'));
 
     // No match → undefined (no opinion) or allow
@@ -208,7 +237,7 @@ describe('PRI-436 Slice 1: SQLite-only RuleHost executes exactly once', () => {
     // Artifact exists but no activation
     insertRuleArtifact();
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     expect(result).toBeUndefined();
@@ -218,7 +247,7 @@ describe('PRI-436 Slice 1: SQLite-only RuleHost executes exactly once', () => {
     insertRuleArtifact();
     await insertCodeToolHookActivation({ deactivatedAt: new Date().toISOString() });
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     expect(result).toBeUndefined();
@@ -234,7 +263,7 @@ describe('RuleContext v2 activation compatibility', () => {
       }),
     });
     await insertCodeToolHookActivation({ action: 'code_tool_hook_live_activate' });
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
 
     expect(ruleHost.evaluate(makeInput('/etc/passwd'))).toBeUndefined();
   });
@@ -247,7 +276,7 @@ describe('RuleContext v2 activation compatibility', () => {
       }),
     });
     await insertCodeToolHookActivation({ action: 'code_tool_hook_live_activate' });
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
 
     expect(ruleHost.evaluate(makeV2Input('/etc/passwd'))?.decision).toBe('block');
   });
@@ -257,7 +286,7 @@ describe('RuleHost shadow and live activation modes', () => {
   it('evaluates a shadow activation without returning an enforcement decision', async () => {
     insertRuleArtifact();
     await insertCodeToolHookActivation({ action: 'code_tool_hook_shadow_activate' });
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
 
     const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
 
@@ -385,7 +414,7 @@ describe('PRI-436 Slice 2: Legacy filesystem file is never read/compiled', () =>
       ruleId: SQLITE_RULE_ID,
     });
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     expect(result).toBeDefined();
@@ -400,7 +429,7 @@ describe('PRI-436 Slice 2: Legacy filesystem file is never read/compiled', () =>
     // Filesystem ledger exists but RuleHost should not read it
     writeLegacyFilesystemLedger(tempStateDir);
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     // No SQLite activation → no opinion, even though filesystem ledger has an active impl
@@ -480,7 +509,7 @@ describe('PRI-436 Slice 3: Duplicate active DB rows execute zero times + structu
       warn: (message: string) => { warnCalls.push(message); },
     };
 
-    const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost(spyLogger);
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     // Zero executions for the duplicate rule → no opinion (undefined)
@@ -576,7 +605,7 @@ var meta = { name: 'other-rule', version: '1', ruleId: '${OTHER_RULE_ID}', cover
       warn: (message: string) => { warnCalls.push(message); },
     };
 
-    const ruleHost = new RuleHost(tempStateDir, spyLogger, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost(spyLogger);
     const result = ruleHost.evaluate(makeInput('/etc/passwd'));
 
     // Non-duplicate rule still executes and blocks
@@ -646,7 +675,7 @@ describe('PRI-436 Slice 4: edit/reactivate selects only new version; deactivate 
       ruleId: EDIT_RULE_ID,
     });
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
 
     // v1 is active → v1 executes
     const resultV1 = ruleHost.evaluate(makeInput('/etc/passwd'));
@@ -705,7 +734,7 @@ describe('PRI-436 Slice 4: edit/reactivate selects only new version; deactivate 
       ruleId: EDIT_RULE_ID,
     });
 
-    const ruleHost = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost = makeRuleHost();
 
     // Rule is active → blocks
     const resultBefore = ruleHost.evaluate(makeInput('/etc/passwd'));
@@ -762,14 +791,14 @@ describe('PRI-436 Slice 5: Restart preserves the one active version', () => {
     });
 
     // Instance 1 (original process)
-    const ruleHost1 = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost1 = makeRuleHost();
     const result1 = ruleHost1.evaluate(makeInput('/etc/passwd'));
     expect(result1?.decision).toBe('block');
     expect(result1?.reason).toBe('RESTART_BLOCK');
     expect(result1?.ruleId).toBe(RESTART_RULE_ID);
 
     // Instance 2 (simulated restart — new RuleHost, same SQLite state)
-    const ruleHost2 = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost2 = makeRuleHost();
     const result2 = ruleHost2.evaluate(makeInput('/etc/passwd'));
     expect(result2?.decision).toBe('block');
     expect(result2?.reason).toBe('RESTART_BLOCK');
@@ -779,7 +808,7 @@ describe('PRI-436 Slice 5: Restart preserves the one active version', () => {
     const store = new SqliteActivationStateStore(sqliteConn);
     await store.deactivateActivation(RESTART_ACTIVATION_ID, new Date().toISOString());
 
-    const ruleHost3 = new RuleHost(tempStateDir, console, { workspaceDir: tempWorkspaceDir });
+    const ruleHost3 = makeRuleHost();
     const result3 = ruleHost3.evaluate(makeInput('/etc/passwd'));
     expect(result3).toBeUndefined();
   });
