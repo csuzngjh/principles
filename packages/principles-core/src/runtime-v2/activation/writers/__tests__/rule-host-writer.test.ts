@@ -144,22 +144,22 @@ describe('RuleHostWriter', () => {
     expect(result.reason).toContain('gate_decision_not_accepted_shadow');
   });
 
-  it('always returns shadowMode=true in activate even if input context suggests live', async () => {
+  it('returns live activation action after owner approval', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact();
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.action).toBe('code_tool_hook_shadow_activate');
+    expect(result.action).toBe('code_tool_hook_live_activate');
     expect(result.targetRef).toContain('R_001');
   });
 
-  it('never returns live activation action', async () => {
+  it('never returns shadow activation action for owner-approved rules', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact();
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.action).not.toContain('live');
-    expect(result.action).toContain('shadow');
+    expect(result.action).not.toContain('shadow');
+    expect(result.action).toContain('live');
   });
 
   it('returns correct activationId format', async () => {
@@ -500,7 +500,7 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
     expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
   });
 
-  it('ignores requiresContextVersion values other than 2 (treats as v1)', async () => {
+  it('rejects declared context versions other than 2', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({
@@ -509,12 +509,15 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
         goldenTrace: makeGoldenTrace(),
         ruleHostGateDecision: 'accepted_shadow',
         affectedTools: ['read_file'],
-        // Not 2 — must be treated as v1 (not gated by the flag).
         requiresContextVersion: 1,
       }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      reason: 'unsupported_context_version',
+      riskLevel: 'high',
+    });
   });
 });
 

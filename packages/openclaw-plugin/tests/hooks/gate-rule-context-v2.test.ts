@@ -75,6 +75,9 @@ vi.mock('../../src/core/workspace-context.js', () => ({
       workspaceDir,
       stateDir: '/mock/state',
       trajectory: { getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
+      // PR1: gate.ts uses wctx.getRuleHost(logger) instead of `new RuleHost()`.
+      // Return a fresh object each call so _mockEvaluate reassignments take effect.
+      getRuleHost: () => ({ evaluate: _mockEvaluate }),
     })),
   },
 }));

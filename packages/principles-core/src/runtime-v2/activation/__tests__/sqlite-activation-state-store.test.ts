@@ -5,6 +5,7 @@ import type { ActivationStatusRecord } from '../activation-types.js';
 
 const mockDb = {
   prepare: vi.fn(),
+  exec: vi.fn(),
 };
 
 const mockConnection = {
@@ -57,6 +58,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'prompt_activate',
         targetRef: 'ledger://P_001',
         activatedAt: '2026-05-17T00:00:00.000Z',
+        promotedAt: null,
         deactivatedAt: null,
       });
     });
@@ -85,6 +87,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'defer_archive',
         targetRef: 'ledger://P_002#archived',
         activatedAt: '2026-05-17T01:00:00.000Z',
+        promotedAt: null,
         deactivatedAt: null,
       });
     });
@@ -206,6 +209,7 @@ describe('SqliteActivationStateStore', () => {
         'ledger://P_001',
         '2026-05-17T00:00:00.000Z',
         null,
+        null,
       );
     });
 
@@ -240,7 +244,84 @@ describe('SqliteActivationStateStore', () => {
         'ledger://P_003#archived',
         '2026-05-17T02:00:00.000Z',
         null,
+        null,
       );
+    });
+  });
+
+  describe('promoteActivation', () => {
+    it('atomically promotes only an active code_tool_hook shadow activation', async () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      const mockGet = vi.fn().mockReturnValue({ cnt: 1 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      const promoted = await store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z');
+
+      expect(promoted).toBe(true);
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("action = 'code_tool_hook_shadow_activate'"));
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("SET action = 'code_tool_hook_live_activate'"));
+      expect(mockRun).toHaveBeenCalledWith('2026-06-29T00:00:00.000Z', 'act_code_001');
+      // PR #1122 fix: COUNT guard + UPDATE run inside a single IMMEDIATE transaction.
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('COMMIT');
+    });
+
+    it('returns false when the activation is not an active shadow activation', async () => {
+      const mockGet = vi.fn().mockReturnValue({ cnt: 0 });
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z')).resolves.toBe(false);
+      // UPDATE should not be called when COUNT guard returns 0
+      expect(mockRun).not.toHaveBeenCalled();
+      // Empty-result path still commits the transaction cleanly (no ROLLBACK).
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('COMMIT');
+      expect(mockDb.exec).not.toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('throws when multiple shadow activations share the same activation_id', async () => {
+      const mockGet = vi.fn().mockReturnValue({ cnt: 2 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: vi.fn() };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(
+        store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z'),
+      ).rejects.toThrow(/refused: 2 shadow activations share activation_id/);
+      // Duplicate-detection path rolls back the transaction.
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('throws when UPDATE affects != 1 rows (TOCTOU detection inside transaction)', async () => {
+      // Simulate a concurrent insert sneaking in between COUNT and UPDATE:
+      // COUNT sees 1 row, but UPDATE matches 2 rows (changes=2). The post-
+      // UPDATE row-count check must fail loud and roll back the transaction.
+      const mockGet = vi.fn().mockReturnValue({ cnt: 1 });
+      const mockRun = vi.fn().mockReturnValue({ changes: 2 });
+      mockDb.prepare.mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) return { get: mockGet };
+        return { run: mockRun };
+      });
+      const store = new SqliteActivationStateStore(mockConnection);
+
+      await expect(
+        store.promoteActivation('act_code_001', '2026-06-29T00:00:00.000Z'),
+      ).rejects.toThrow(/expected to update 1 row, updated 2/);
+      expect(mockDb.exec).toHaveBeenCalledWith('BEGIN IMMEDIATE');
+      expect(mockDb.exec).toHaveBeenCalledWith('ROLLBACK');
+      expect(mockDb.exec).not.toHaveBeenCalledWith('COMMIT');
     });
   });
 });
