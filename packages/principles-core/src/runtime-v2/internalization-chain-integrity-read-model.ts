@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { DEFAULT_RETRY_WAIT_STALE_TTL_MS } from './internalization/internalization-task-guards.js';
 import { assertMainlineContract, type MainlineSnapshot } from './mainline-contract.js';
 
 export interface BrokenLink {
@@ -198,8 +199,8 @@ export class InternalizationChainIntegrityReadModel {
       const NON_INTERNALIZABLE_KINDS = new Set(['defer', 'implementation']);
 
       const allTasks = db.prepare(
-        'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json FROM tasks'
-      ).all() as { task_id: string; task_kind: string; status: string; result_ref: string | null; lease_owner: string | null; lease_expires_at: string | null; attempt_count: number; max_attempts: number; diagnostic_json: string | null }[];
+        'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json, updated_at FROM tasks'
+      ).all() as { task_id: string; task_kind: string; status: string; result_ref: string | null; lease_owner: string | null; lease_expires_at: string | null; attempt_count: number; max_attempts: number; diagnostic_json: string | null; updated_at: string }[];
 
       const allRuns = db.prepare(
         'SELECT run_id, task_id, execution_status FROM runs'
@@ -449,6 +450,26 @@ export class InternalizationChainIntegrityReadModel {
             reason: `Task ${task.task_id} in retry_wait with attempt_count=${task.attempt_count} >= max_attempts=${task.max_attempts}`,
             recommendedAction: 'Investigate persistent failure. Consider marking as failed or increasing max_attempts.',
           });
+        }
+
+        // F7-6 (PRI-442): detect time-based staleness — a task in retry_wait
+        // longer than the TTL without recovery. Previously a task could cycle
+        // retry_wait → pending → leased → retry_wait indefinitely without
+        // exceeding max_attempts, leaving it silently stuck for weeks.
+        // Uses updated_at as the entry-time proxy (set when the task last
+        // transitioned into retry_wait). rc-9: observability gap fix.
+        if (task.status === 'retry_wait' && task.updated_at) {
+          const updatedAtMs = new Date(task.updated_at).getTime();
+          if (!Number.isNaN(updatedAtMs) && (Date.now() - updatedAtMs) >= DEFAULT_RETRY_WAIT_STALE_TTL_MS) {
+            const staleHours = Math.floor((Date.now() - updatedAtMs) / (60 * 60 * 1000));
+            brokenLinks.push({
+              type: 'retry_wait_stale',
+              severity: 'warning',
+              taskId: task.task_id,
+              reason: `Task ${task.task_id} in retry_wait for ~${staleHours}h (updated_at=${task.updated_at}), exceeding stale TTL of ${DEFAULT_RETRY_WAIT_STALE_TTL_MS / (60 * 60 * 1000)}h`,
+              recommendedAction: 'Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task.',
+            });
+          }
         }
       }
 
