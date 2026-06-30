@@ -97,3 +97,65 @@ export function evaluateCandidateAdmissions(
     };
   });
 }
+
+/**
+ * CLI-time admission gate check using only the candidate record's stored fields.
+ *
+ * This is a CONSERVATIVE PARTIAL check that prevents CLI commands (intake /
+ * repair / internalization-backfill) from bypassing the admission gate's
+ * strongest signals. It covers:
+ *   - `recommendationKind === 'defer'`  → deferred (definitive)
+ *   - `confidence === null`             → needs_evidence (fail loud: rc-3)
+ *   - `confidence < threshold`          → needs_evidence (definitive)
+ *
+ * It does NOT re-check evidence-level gates (inputEvidenceCount === 0 or
+ * evidenceCount === 0) because those require the diagnostician output and
+ * pain signal, which are not stored on the candidate record. The production
+ * path (PainSignalBridge.onDiagnosisComplete) already ran those checks when
+ * the candidate was created.
+ *
+ * Runtime Contract:
+ *   - rc-3-fail-loud-missing: null confidence fails loud, not silent
+ *   - rc-9-no-silent-fallback: refusal includes reason + nextAction
+ *
+ * @param candidate - fields available on CandidateRecord
+ * @returns AdmissionGateResult with decision, reason, nextAction
+ */
+export function evaluateCandidateAdmissionFromRecord(candidate: {
+  recommendationKind: RecommendationKind;
+  confidence: number | null;
+}): AdmissionGateResult {
+  if (candidate.recommendationKind === 'defer') {
+    return {
+      decision: 'deferred',
+      reason: 'recommendation_kind_defer_not_actionable',
+      nextAction: 'review_defer_disposition_manually',
+      evidenceStatus: 'unknown',
+    };
+  }
+
+  if (candidate.confidence === null) {
+    return {
+      decision: 'needs_evidence',
+      reason: 'confidence_missing_on_candidate_record',
+      nextAction: 're_run_diagnosis_to_populate_confidence_or_manual_review',
+      evidenceStatus: 'unknown',
+    };
+  }
+
+  if (candidate.confidence < ADMISSION_CONFIDENCE_THRESHOLD) {
+    return {
+      decision: 'needs_evidence',
+      reason: `confidence_below_threshold:${candidate.confidence.toFixed(2)}<${ADMISSION_CONFIDENCE_THRESHOLD}`,
+      nextAction: 'provide_additional_evidence_or_manual_review',
+      evidenceStatus: 'unknown',
+    };
+  }
+
+  return {
+    decision: 'admitted',
+    reason: 'cli_partial_check_passed_confidence_and_kind',
+    nextAction: 'none',
+    evidenceStatus: 'unknown',
+  };
+}

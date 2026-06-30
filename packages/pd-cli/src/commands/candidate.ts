@@ -21,7 +21,9 @@ import {
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
   PrincipleTreeLedgerAdapter,
+  evaluateCandidateAdmissionFromRecord,
   type LedgerPrincipleEntry,
+  type AdmissionGateResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -111,6 +113,28 @@ async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: 
   const now = new Date().toISOString();
   db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, candidateId);
   return now;
+}
+
+/**
+ * Check admission gate for a candidate at CLI time. Returns the result if
+ * the candidate is NOT admitted (caller should refuse); returns null if
+ * the candidate IS admitted (caller may proceed).
+ *
+ * PRI-442 Stage 4: prevents CLI commands (intake/repair/backfill) from
+ * bypassing the admission gate. Uses evaluateCandidateAdmissionFromRecord
+ * which checks recommendationKind and confidence from the candidate record.
+ *
+ * Runtime Contract: rc-9-no-silent-fallback (refusal includes reason + nextAction)
+ */
+function checkAdmissionGate(
+  candidate: { recommendationKind: string; confidence: number | null },
+): AdmissionGateResult | null {
+  const admission = evaluateCandidateAdmissionFromRecord({
+    recommendationKind: candidate.recommendationKind as Parameters<typeof evaluateCandidateAdmissionFromRecord>[0]['recommendationKind'],
+    confidence: candidate.confidence,
+  });
+  if (admission.decision === 'admitted') return null;
+  return admission;
 }
 
 interface ResolvedRecommendation {
@@ -528,12 +552,37 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
-    if (opts.dryRun) {
-      const candidate = await stateManager.getCandidate(opts.candidateId);
-      if (!candidate) {
-        console.error(`Candidate not found: ${opts.candidateId}`);
-        process.exit(1);
+    // Fetch candidate once for admission gate check and downstream paths.
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      console.error(`Candidate not found: ${opts.candidateId}`);
+      process.exit(1);
+      return;
+    }
+
+    // PRI-442 Stage 4: admission gate check — refuse non-admitted candidates
+    // to prevent CLI from bypassing the production admission gate.
+    const admissionBlock = checkAdmissionGate(candidate);
+    if (admissionBlock) {
+      const result = {
+        candidateId: opts.candidateId,
+        status: 'refused',
+        admissionDecision: admissionBlock.decision,
+        reason: admissionBlock.reason,
+        nextAction: admissionBlock.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
+        console.error(`  Reason:      ${admissionBlock.reason}`);
+        console.error(`  Next Action: ${admissionBlock.nextAction}`);
       }
+      process.exit(1);
+      return;
+    }
+
+    if (opts.dryRun) {
       const artifact = await stateManager.getArtifact(candidate.artifactId);
       if (!artifact) {
         console.error(`Artifact not found for candidate: ${opts.candidateId}`);
@@ -572,7 +621,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     const entry = await service.intake(opts.candidateId);
 
     // Check if already consumed before this call
-    const candidate = await stateManager.getCandidate(opts.candidateId);
     if (candidate?.status === 'consumed') {
       const infoMessage = `Candidate ${opts.candidateId} was already consumed. Ledger entry: ${entry.id}`;
       if (opts.json) {
@@ -730,6 +778,30 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     if (candidate.status !== 'consumed') {
       console.error(`Candidate ${opts.candidateId} is not consumed (status=${candidate.status}). Repair only handles consumed candidates.`);
       process.exit(1);
+    }
+
+    // PRI-442 Stage 4: admission gate check — even for consumed candidates,
+    // re-verify admission before re-intaking to prevent bypassing the gate.
+    // A consumed candidate that would fail the gate indicates data corruption
+    // or a prior bypass; refuse and surface the reason.
+    const admissionBlock = checkAdmissionGate(candidate);
+    if (admissionBlock) {
+      const result = {
+        candidateId: opts.candidateId,
+        status: 'refused',
+        admissionDecision: admissionBlock.decision,
+        reason: admissionBlock.reason,
+        nextAction: admissionBlock.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${admissionBlock.decision}`);
+        console.error(`  Reason:      ${admissionBlock.reason}`);
+        console.error(`  Next Action: ${admissionBlock.nextAction}`);
+      }
+      process.exit(1);
+      return;
     }
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
@@ -1004,6 +1076,15 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       if (!candidate) {
         output.errors++;
         output.results.push({ candidateId, route: 'unknown', status: 'error', reason: 'Pending candidate not found in DB', statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'Investigate why pending candidate is missing from DB' });
+        continue;
+      }
+
+      // PRI-442 Stage 4: admission gate check — refuse non-admitted pending
+      // candidates to prevent backfill from bypassing the admission gate.
+      const admissionBlock = checkAdmissionGate(candidate);
+      if (admissionBlock) {
+        output.intakeFailed++;
+        output.results.push({ candidateId, route: 'unknown', status: 'intake_failed', reason: `Admission gate refused: ${admissionBlock.reason}`, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: admissionBlock.nextAction });
         continue;
       }
 

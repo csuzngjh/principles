@@ -96,6 +96,18 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+  evaluateCandidateAdmissionFromRecord: vi.fn((candidate: { recommendationKind: string; confidence: number | null }) => {
+    if (candidate.recommendationKind === 'defer') {
+      return { decision: 'deferred', reason: 'recommendation_kind_defer_not_actionable', nextAction: 'review_defer_disposition_manually', evidenceStatus: 'unknown' };
+    }
+    if (candidate.confidence === null) {
+      return { decision: 'needs_evidence', reason: 'confidence_missing_on_candidate_record', nextAction: 're_run_diagnosis_to_populate_confidence_or_manual_review', evidenceStatus: 'unknown' };
+    }
+    if (candidate.confidence !== undefined && candidate.confidence < 0.5) {
+      return { decision: 'needs_evidence', reason: `confidence_below_threshold:${candidate.confidence.toFixed(2)}<0.5`, nextAction: 'provide_additional_evidence_or_manual_review', evidenceStatus: 'unknown' };
+    }
+    return { decision: 'admitted', reason: 'cli_partial_check_passed_confidence_and_kind', nextAction: 'none', evidenceStatus: 'unknown' };
+  }),
 }));
 
 // PRI-443 Phase 5: loadLedger and getLedgerFilePathPublic now imported from
@@ -340,5 +352,70 @@ describe('pd candidate repair', () => {
       expect.stringContaining('is not consumed'),
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  // PRI-442 Stage 4: admission gate bypass prevention for repair
+  describe('admission gate bypass prevention (PRI-442 Stage 4)', () => {
+    it('refuses repair when recommendationKind is defer', async () => {
+      mockStateManager.getCandidate.mockResolvedValue({
+        candidateId: 'c-defer',
+        status: 'consumed',
+        artifactId: 'a1',
+        title: 'Deferred',
+        description: 'desc',
+        recommendationKind: 'defer',
+        confidence: 0.9,
+      });
+
+      await handleCandidateRepair({ candidateId: 'c-defer', workspace: '/tmp/test-workspace', json: true });
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"status": "refused"'),
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"admissionDecision": "deferred"'),
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('refuses repair when confidence is null (rc-3 fail loud)', async () => {
+      mockStateManager.getCandidate.mockResolvedValue({
+        candidateId: 'c-null',
+        status: 'consumed',
+        artifactId: 'a1',
+        title: 'Null conf',
+        description: 'desc',
+        recommendationKind: 'principle',
+        confidence: null,
+      });
+
+      await handleCandidateRepair({ candidateId: 'c-null', workspace: '/tmp/test-workspace', json: false });
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Admission gate refused'),
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('needs_evidence'),
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('allows repair when candidate passes admission gate', async () => {
+      mockStateManager.getCandidate.mockResolvedValue({
+        candidateId: 'c-ok',
+        status: 'consumed',
+        artifactId: 'a1',
+        title: 'OK',
+        description: 'desc',
+        recommendationKind: 'principle',
+        confidence: 0.8,
+      });
+      mockAdapter.existsForCandidate.mockReturnValue(null);
+      mockService.intake.mockResolvedValue({ id: 'entry-1', title: 'OK', text: 'text', status: 'probation' });
+
+      await handleCandidateRepair({ candidateId: 'c-ok', workspace: '/tmp/test-workspace', json: true });
+
+      expect(mockService.intake).toHaveBeenCalledWith('c-ok');
+    });
   });
 });
