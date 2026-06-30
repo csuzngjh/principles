@@ -1819,7 +1819,6 @@ export type {
   PendingTerm,
   PendingTermStore,
   SignalCollectorConfig,
-  SignalCollectorInput,
   SignalStrength,
   DetectionSource,
   MatchedPrecision,

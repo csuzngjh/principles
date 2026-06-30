@@ -42,13 +42,6 @@ export interface SignalCollectorConfig {
   strongRateLimitPerHour: number; // 单 session 每小时 STRONG 上限,默认 5
 }
 
-export interface SignalCollectorInput {
-  text: string;
-  sessionId: string;
-  keywordStore: UnifiedKeywordStore;
-  config: SignalCollectorConfig;
-}
-
 export type SignalStrength = 'STRONG' | 'WEAK';
 export type DetectionSource = 'keyword' | 'llm' | 'none';
 export type MatchedPrecision = 'high' | 'ambiguous' | null;
