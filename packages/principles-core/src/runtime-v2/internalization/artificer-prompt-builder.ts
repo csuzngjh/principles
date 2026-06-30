@@ -1,6 +1,10 @@
 import { serializePromptInput } from './prompt-serializer.js';
+import { validateBehaviorExamplePack } from './behavior-example-pack.js';
+import type { BehaviorExamplePack } from './behavior-example-pack.js';
 
 export interface ArtificerPromptBuilderInput {
+  contextMode: 'v1' | 'v2';
+  behaviorExamplePack?: BehaviorExamplePack;
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -14,6 +18,8 @@ export interface ArtificerPromptBuilderInput {
 }
 
 export interface ArtificerPromptInput {
+  contextMode: 'v1' | 'v2';
+  behaviorExamplePack?: BehaviorExamplePack;
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -55,7 +61,6 @@ OUTPUT FORMAT (pure JSON, no markdown):
     {"caseId":"positive-1","kind":"positive","toolName":"write_file","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
   ],
   "affectedTools": ["write_file"],
-  "requiresContextVersion": 2,
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -75,11 +80,7 @@ CONSTRAINTS:
 - GOOD: return { decision: 'block', matched: true, reason: 'write to system path outside workspace' }
 - BAD:  return { matched: false } — missing decision and reason, will be rejected
 - BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
-- input.action contains toolName, normalizedPath, and paramsSummary; you may inspect input.action for v1-style rules
-- For v2 rules: you may also inspect input.context (RuleContext v2 surface). input.context is OPTIONAL — when it is undefined or context.history.status === "unavailable", the rule MUST return { decision: "allow", matched: false, reason: "context unavailable" } and MUST NOT treat missing context as evidence of "not done" or "no history".
-- Prefer context.facts (deterministic, host-computed) over raw context.history.calls. Use canonicalKind from facts for kind-based logic; only fall back to raw calls when facts cannot express the needed pattern.
-- Do NOT infer "not done" from an empty calls array. An empty or truncated history window means the host did not provide enough data, not that the action did not happen.
-- A rule declares itself as a v2 rule by setting requiresContextVersion: 2 in its output. v2 rules must handle context unavailability gracefully (return allow). v1 rules (no requiresContextVersion) must NOT read input.context and must behave exactly as before.
+- input.action contains toolName, normalizedPath, and paramsSummary
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block/propose_correction case
 - propose_correction cases MUST include expectedProposedParams and expectedApplicationMode (shadow or live)
@@ -91,18 +92,49 @@ PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
 `;
 
+const V1_CONTEXT_INSTRUCTION = `
+CONTEXT MODE: v1
+- You MUST NOT read input.context.
+- You MUST NOT output requiresContextVersion or case-level ruleContext.
+- Generate an action-only rule from the Scribe principle.
+`;
+
+const V2_CONTEXT_INSTRUCTION = `
+CONTEXT MODE: v2 (Owner-labelled evidence is present)
+- Treat behaviorExamplePack labels as authoritative: sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow.
+- You MUST output requiresContextVersion: 2.
+- Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
+- You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
+- Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
+- An empty or truncated history is insufficient evidence; do not infer "not done" from it.
+`;
+
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v2';
 
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: ArtificerPromptBuilderInput): ArtificerPromptBuildResult {
+    if (input.contextMode === 'v2') {
+      const validation = validateBehaviorExamplePack(input.behaviorExamplePack);
+      if (!validation.valid) {
+        throw new Error(`behaviorExamplePack is required and must be valid in v2 mode: ${validation.errors.join('; ')}`);
+      }
+    } else if (input.behaviorExamplePack !== undefined) {
+      throw new Error('behaviorExamplePack is forbidden in v1 mode');
+    }
+    const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
+      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION);
     const promptInput: ArtificerPromptInput = {
+      contextMode: input.contextMode,
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,
       scribeArtifact: input.scribeArtifact,
-      artificerInstruction: ARTIFICER_PROTOCOL_INSTRUCTION,
+      artificerInstruction,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
+      ...(input.contextMode === 'v2' && input.behaviorExamplePack !== undefined
+        ? { behaviorExamplePack: input.behaviorExamplePack }
+        : {}),
       // Only include adversarialFeedback when present + non-empty, so
       // Round-1 prompts stay backward-compatible (test asserts absence).
       ...(typeof input.adversarialFeedback === 'string' && input.adversarialFeedback.trim() !== ''

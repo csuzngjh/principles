@@ -260,6 +260,11 @@ export interface RuleHostContextRow {
   readonly paramsJson: string;
 }
 
+/** A single tool call selected by an Owner as labelled RuleHost evidence. */
+export interface RuleHostEvidenceRow extends RuleHostContextRow {
+  readonly sessionId: string;
+}
+
 /**
  * Result of getRuleHostContextRows: FIFO-ordered rows + truncated flag.
  * truncated=true when more than `limit` rows existed (limit+1 read trick).

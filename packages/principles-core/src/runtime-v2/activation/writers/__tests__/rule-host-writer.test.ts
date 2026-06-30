@@ -500,7 +500,13 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
     expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
   });
 
-  it('rejects declared context versions other than 2', async () => {
+  it.each([
+    { label: 'numeric 1', value: 1 },
+    { label: 'numeric 3', value: 3 },
+    { label: 'string "2" (not strict-equal to 2)', value: '2' },
+    { label: 'null', value: null },
+    { label: 'boolean true', value: true },
+  ])('rejects declared context versions other than 2 ($label)', async ({ value }: { label: string; value: unknown }) => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({
@@ -509,7 +515,7 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
         goldenTrace: makeGoldenTrace(),
         ruleHostGateDecision: 'accepted_shadow',
         affectedTools: ['read_file'],
-        requiresContextVersion: 1,
+        requiresContextVersion: value,
       }),
     });
     const result = await writer.canActivate(artifact);

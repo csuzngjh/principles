@@ -41,7 +41,13 @@ export function handleBeforeToolCall(
 
   // 2. Use the same action builder as Golden Trace replay. This is the single
   // path extraction + normalization contract for production and evaluation.
-  const action = buildRuleHostAction(event.toolName, event.params ?? {}, ctx.workspaceDir, {
+  // CodeRabbit PR2 Comment 1: pass the normalized workspace root from
+  // WorkspaceContext (wctx.workspaceDir) rather than the raw ctx.workspaceDir,
+  // so action.normalizedPath is consistent with the rest of the hook path
+  // (which uses WorkspaceContext.fromHookContext's normalized root). Mixing
+  // the raw value here produced paths that disagreed with the normalized root
+  // used downstream by the rule host / rule-context assembler.
+  const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     isBashTool: isBash,
     isWriteTool,
   });
