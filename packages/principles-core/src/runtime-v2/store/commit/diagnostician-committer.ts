@@ -228,6 +228,7 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
    * Extract SQLite constraint name from an error object.
    */
   private static extractConstraint(err: unknown): string | undefined {
+    // eslint-disable-next-line no-restricted-syntax -- 'in' required for Error subtype narrowing (err.code access)
     if (err instanceof Error && 'code' in err) {
       const sqliteErr = err as { code: string };
       const msg = err.message;

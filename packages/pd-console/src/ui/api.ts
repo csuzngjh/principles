@@ -171,7 +171,7 @@ async function request<T = unknown>(
     }
 
     const raw = await response.json();
-    const apiData = (raw && typeof raw === "object" && "success" in raw && "data" in raw)
+    const apiData = (raw && typeof raw === "object" && Object.hasOwn(raw, "success") && Object.hasOwn(raw, "data"))
       ? (raw as { data: unknown }).data
       : raw;
 

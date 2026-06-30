@@ -71,7 +71,7 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
   async countByStatus(): Promise<ApprovalStats> {
     const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
     for (const r of this.records.values()) {
-      if (r.status in stats) {
+      if (Object.hasOwn(stats, r.status)) {
         stats[r.status]++;
       }
     }

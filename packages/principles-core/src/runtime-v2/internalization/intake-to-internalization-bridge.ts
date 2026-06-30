@@ -226,6 +226,7 @@ export async function seedIntakeTask(
   }
 
   const seed = buildDreamerTaskSeed(input);
+  // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
   if ('decision' in seed) {
     return seed;
   }

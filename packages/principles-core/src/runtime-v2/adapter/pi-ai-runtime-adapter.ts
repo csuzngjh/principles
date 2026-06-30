@@ -416,7 +416,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       if (
         typeof parsed !== 'object' ||
         parsed === null ||
-        !('ok' in parsed) ||
+        !Object.hasOwn(parsed, 'ok') ||
         (parsed as { ok?: unknown }).ok !== true
       ) {
         return {
@@ -929,7 +929,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       const toolCallBlock = response.content.find(
         (block): block is { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> } =>
-          typeof block === 'object' && block !== null && 'type' in block && block.type === 'toolCall',
+          typeof block === 'object' && block !== null && Object.hasOwn(block, 'type') && block.type === 'toolCall',
       );
 
       if (!toolCallBlock) {
