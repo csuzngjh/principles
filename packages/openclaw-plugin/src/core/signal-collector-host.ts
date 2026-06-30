@@ -254,10 +254,13 @@ export class SignalCollectorHost {
 
   /**
    * WEAK 分流 → trackFriction 累积 GFI + 写 evidence (维持现状,spec §3.2)。
+   *
+   * WEAK 是 Layer 3 弱信号,用较小的摩擦分(20)累积,过 highGfi 阈值(70)才触发诊断。
+   * 不用 strongPainScore(70),因为 WEAK 单条不该直接顶满 GFI。
    */
   private routeWeak(output: SignalCollectorOutput, sessionId: string): void {
     const hash = (output.evidence.detectedAt + sessionId).slice(0, 32);
-    trackFriction(sessionId, this.config.strongPainScore, hash, this.wctx.workspaceDir, {
+    trackFriction(sessionId, 20, hash, this.wctx.workspaceDir, {
       source: 'user_empathy',
     });
   }
