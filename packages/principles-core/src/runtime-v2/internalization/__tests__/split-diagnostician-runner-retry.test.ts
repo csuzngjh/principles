@@ -15,6 +15,7 @@ import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-o
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
+import { PDRuntimeError } from '../../error-categories.js';
 import type { TaskRecord } from '../../task-status.js';
 import type { RetryPolicy } from '../../store/lifecycle/retry-policy.js';
 
@@ -275,5 +276,144 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
 
     expect(result.status).toBe('failed');
     expect(rootCauseRunner.run).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Bug-N fix: parent task lease acquisition ─────────────────────────────────
+//
+// Bug-N: SplitDiagnosticianRunner marked parent task succeeded but had no
+// corresponding run record (8 diagnosis_manual_* tasks hit this in production).
+// Fix: call acquireLease on the parent task at the start of run() so the
+// runs table has a record to update when markTaskSucceeded is called.
+//
+// ERR entries considered:
+//   - ERR-009/ERR-010: fail loud on missing required state — lease failure must surface, not silently skip
+//   - ERR-015/ERR-018/ERR-019: stale loop state — without lease, markTaskSucceeded silently no-ops on runs
+//   - ERR-002: silent degradation — lease_conflict must be observable, not swallowed
+
+describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => {
+  it('should call acquireLease on parent task at the start of run()', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+
+    rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
+    distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
+    routerRunner.run.mockResolvedValue(makeSucceededResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: distillerRunner as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    // Bug-N core assertion: acquireLease must be called with the parent task ID
+    expect(stateManager.acquireLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: PARENT_TASK_ID,
+        owner: 'split-diagnostician-orchestrator',
+        runtimeKind: 'openclaw',
+      }),
+    );
+    // markTaskSucceeded must be called for the parent task
+    expect(stateManager.markTaskSucceeded).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
+  });
+
+  it('should return failed with lease_conflict when parent task is already leased', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'leased' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    // Override acquireLease to throw lease_conflict (matches real DefaultLeaseManager behavior)
+    stateManager.acquireLease = vi.fn().mockRejectedValue(
+      new PDRuntimeError('lease_conflict', `Task ${PARENT_TASK_ID} is leased, expected pending/retry_wait`),
+    );
+
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('lease_conflict');
+    expect(result.failureReason).toContain(PARENT_TASK_ID);
+    // Sub-runners must NOT be called when lease acquisition fails (non-mutating)
+    expect(rootCauseRunner.run).not.toHaveBeenCalled();
+    // Mutation methods must NOT be called for lease_conflict
+    expect(stateManager.markTaskFailed).not.toHaveBeenCalled();
+    expect(stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+  });
+
+  it('should return failed with execution_failed when acquireLease throws non-lease error', async () => {
+    const tasks: Record<string, TaskRecord> = {};
+    const stateManager = makeMockStateManager(tasks);
+    // Override acquireLease to throw storage_unavailable (task doesn't exist)
+    stateManager.acquireLease = vi.fn().mockRejectedValue(
+      new PDRuntimeError('storage_unavailable', `Task not found: ${PARENT_TASK_ID}`),
+    );
+
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('execution_failed');
+    expect(result.failureReason).toContain('storage_unavailable');
+    // Sub-runners must NOT be called
+    expect(rootCauseRunner.run).not.toHaveBeenCalled();
+  });
+
+  it('should propagate sub-stage failure correctly even with parent lease acquired', async () => {
+    // Regression: ensure acquireLease change does not affect error propagation
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+
+    // Stage A fails — should propagate as parent failure
+    rootCauseRunner.run.mockResolvedValue(
+      makeFailedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Stage A failed'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    // Parent task must be marked failed (via failParent helper)
+    expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
   });
 });

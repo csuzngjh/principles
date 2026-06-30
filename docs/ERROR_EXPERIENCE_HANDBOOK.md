@@ -156,6 +156,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
 | ERR-080 | Size bound applied to raw input then content escaped — escaped output exceeds budget due to entity expansion | PRI-467 / PR #1059 |
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
+| ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 
 ---
 
@@ -206,6 +207,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-171
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction.
+  - 2026-06-29 PR#1122: behavior-examples parse/assemble failure silently degraded to text_principle_only; artificer-runner validateOutput left errorCategory undefined for modeErrors (permanent errors retried) — both fixed with fail-fast structured errors (rc-9-no-silent-fallback)
   - 2026-06-28 PRI-483 (PR#1098): `_buildRuleContextIfEnabled` ignored `ok:false` from `loadPdConfigForPlugin` — added `!configResult.ok` guard + warn log (rc-9)
   - 2026-06-19 PRI-408 (PR#972): approval-completion silent catch + `refused` paths missing nextAction; PRI-431 (PR#975) `ConfigResolutionError` catch dropped `nextAction`
   - Earlier (PR#699-#966): catch→skip, malformed yaml→`[]`, false success on null, missing nextAction. Pattern: degrade lacks reason+nextAction. Fix: every catch/fallback emits structured reason + nextAction.
@@ -785,7 +787,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 87 |
+| Total lessons | 89 |
 | Last updated | 2026-06-29 |
 | Top category | Schema & Type |
 | Recurring errors | 38 |
@@ -1350,5 +1352,28 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts` (status assertion before timing loop); `packages/openclaw-plugin/tests/hooks/gate-rule-context-v2.vm-e2e.test.ts` (K3 probe rule + `recordRuleHostRequireApproval` assertion with `reason` containing 'K3 probe').
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
+- **Date**: 2026-06-29
+- **Recurrence**: None
+
+---
+
+**[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
+
+- **What happened**: In PR #1124 (Bug-O/Q/M/P cascade fix), the assistant fixed 4 bugs across `runtime-activation.ts`, `pain-record.ts`, `ApprovalsConsoleModel.ts`, and `diagnose.ts`. CodeRabbit review found 10 inline issues (4 P1 + 4 P2 + 2 P3) where the fixes introduced new defects:
+  1. `pain-record.ts` --json failure path emitted text to stderr instead of structured JSON + missing `return` after `process.exit(1)` (cli-1/cli-2/cli-5).
+  2. `runtime-activation.ts` `resolveWorkspaceDir()` called outside `try`, bypassing --json error routing (cli-1).
+  3. `runtime-activation.ts` `completeApproval` failure left approval in 'approved' state with no activation — no rollback to 'pending' (cli-5-failure-no-mutation).
+  4. `runtime-activation.ts` catch-block rollback-failure branch still used wrong command path `pd runtime activation dispatch` instead of registered `pd activation dispatch` — the !ok branch was fixed but the catch (throw) branch was missed.
+  5. `ApprovalsConsoleModel.ts` ledger upgrade used pre-read `existing.artifactId` instead of post-approve `approvalResult.record.artifactId` (data consistency).
+  6. `ApprovalsConsoleModel.ts` `upgradeLedgerPrinciple` let read-side exceptions (getArtifactById, missing table) propagate and fail the approval flow after activation was committed (rc-9-no-silent-fallback).
+  7. `diagnose.ts` dreamer_seeded/dreamer_seed_failed intake statuses invisible in TTY output and JSON nextAction (observability gap).
+  8. Tests only called handler directly, no Commander parser test (cli-7-test-wiring).
+- **Why it's wrong**: When fixing a bug that touches a multi-branch failure path (happy / !ok / catch-throw), fixing only the primary branch leaves sibling branches with stale state, wrong command paths, or CLI contract violations. The fix appears complete (primary path works) but reviewers find the sibling branches still broken. This is the fix-side sibling of ERR-074 (inner try/catch exit tunnel bypasses outer cleanup) — same root cause (incomplete branch coverage), opposite side (fix vs. original code).
+- **Generalized failure mode**: When fixing a bug in a function with multiple failure branches (happy / !ok / catch-throw / degraded), assistants must audit ALL sibling branches for the same defect, not just the primary failure path that triggered the bug report. Each branch must satisfy the same CLI contract (--json / exit / return / no-mutation) and use the same post-state source of truth.
+- **Correct approach**: (1) After fixing the primary branch, grep for sibling branches (other `if (!ok)`, `catch`, `throw` paths) and apply the same fix. (2) For nextAction strings, verify the command path matches the actual Commander registration (grep `program.command` in index.ts). (3) For post-mutation reads, use the result returned by the mutation, not a pre-read value. (4) Wrap read-side lookups in try/catch when they run after an already-committed write. (5) Add a Commander parser test (buildXxxCommand + exitOverride + parseAsync) covering required options.
+- **How to prevent**: When fixing a multi-branch failure path, enumerate all branches (happy / !ok / catch / throw / degraded) and verify each one: (a) emits structured JSON on --json, (b) stops execution after exit (return or throw), (c) does not leave stale state (rollback to pending if needed), (d) uses post-mutation source of truth, (e) has the correct command path in nextAction. Add a regression test per branch.
+- **Regression guard**: `packages/pd-cli/tests/commands/runtime-activation.test.ts` AP-06/AP-06b/AP-06c (rollback success/throw/failure) + AP-07 (Commander parser wiring); `packages/pd-cli/tests/commands/pain-record.test.ts` RL-04 (--json failure path); `packages/pd-console/tests/integration/governance-approve-activation.test.ts` (ledger upgrade + warning on missing artifact).
+- **Related ERRs**: ERR-022 (process.exit without return — cli-2 sibling), ERR-029 (CLI unknown input silently dropped — cli-1 sibling), ERR-074 (inner try/catch exit tunnel — same "incomplete branch coverage" root cause), ERR-033 (operator failure path returns success — cli-5 sibling).
+- **Source**: PR #1124 (CodeRabbit review, 10 inline comments)
 - **Date**: 2026-06-29
 - **Recurrence**: None

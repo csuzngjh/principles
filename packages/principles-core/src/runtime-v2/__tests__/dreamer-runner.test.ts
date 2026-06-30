@@ -76,7 +76,10 @@ function makeDreamerOutput(overrides: Partial<DreamerOutput> = {}): DreamerOutpu
     valid: true,
     taskId: TASK_ID,
     candidates: [makeDreamerCandidate(0), makeDreamerCandidate(1)],
-    sourcePrincipleId: 'principle-001',
+    // Bug-O L1 test: use a valid core principle ID (T-01) so it survives
+    // stripFabricatedCorePrincipleIds in postFetchTransform. Non-core IDs
+    // are intentionally stripped to prevent LLM fabrication.
+    sourcePrincipleId: 'T-01',
     sourcePainId: 'pain-001',
     contextRefs: ['trajectory-001'],
     generatedAt: '2026-05-01T00:00:00Z',
@@ -166,6 +169,9 @@ function createMocks() {
     emit: vi.fn(),
   };
 
+  // Bug-O L1 test: expose the artifact store so tests can assert what was written.
+  const artifactStore = new MemoryPIArtifactStore();
+
   return {
     mockStateManager: mockStateManager as unknown as RuntimeStateManager,
     mockRuntimeAdapter: mockRuntimeAdapter as unknown as PDRuntimeAdapter,
@@ -178,6 +184,7 @@ function createMocks() {
     _runtimeAdapter: mockRuntimeAdapter,
     _validator: mockValidator,
     _eventEmitter: mockEventEmitter,
+    _artifactStore: artifactStore,
   };
 }
 
@@ -188,7 +195,7 @@ function createRunner(mocks: ReturnType<typeof createMocks>) {
       runtimeAdapter: mocks.mockRuntimeAdapter,
       eventEmitter: mocks.mockEventEmitter,
       validator: mocks.mockValidator,
-      artifactStore: new MemoryPIArtifactStore(),
+      artifactStore: mocks._artifactStore,
     },
     {
       owner: OWNER,
@@ -241,6 +248,14 @@ describe('DreamerRunner', () => {
       RUN_ID,
       expect.any(String),
     );
+
+    // Bug-O L1: artifact must carry sourcePrincipleId so downstream activation
+    // dispatch can resolve the principle link. Without this, ActivationsConsoleModel
+    // shows 'unlinked' for dreamer artifacts even after successful activation.
+    const expectedArtifactId = `pi-art-${TASK_ID}-${RUN_ID}`;
+    const storedArtifact = await mocks._artifactStore.getArtifactById(expectedArtifactId);
+    expect(storedArtifact).not.toBeNull();
+    expect(storedArtifact?.sourcePrincipleId).toBe('T-01');
   });
 
   // 2. Runtime method call order
