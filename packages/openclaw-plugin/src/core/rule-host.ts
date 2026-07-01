@@ -386,18 +386,19 @@ export class RuleHost {
           continue;
         }
         if (activationMode === 'shadow') {
-          // CodeRabbit PR #1121: shadow activations are observation-only and do
-          // NOT enter mergeDecisions (no block / requireApproval). Historical
-          // owner-approved records persisted with action=code_tool_hook_shadow_activate
-          // (before RuleHostWriter was fixed to write code_tool_hook_live_activate)
-          // silently lost execution after the dual-mode change. Surface a
+          // PRI-489 (seed-MVP readiness): shadow activations are
+          // observation-only and do NOT enter mergeDecisions (no block /
+          // requireApproval). Owner approval creates a shadow activation
+          // first; the only shadow -> live transition is `pd activation
+          // promote --activation-id ... --confirm` (atomic action rewrite
+          // in SqliteActivationStateStore.promoteActivation). Surface a
           // structured reason + nextAction so the degradation is observable
-          // (rc-9-no-silent-fallback), not silent. Fires once per fingerprint
-          // change (cached), not per evaluation.
+          // (rc-9-no-silent-fallback), not silent. Fires once per
+          // fingerprint change (cached), not per evaluation.
           this.logger.warn?.(
             `[RuleHost] Activation ${activationId}: loaded in shadow (observation-only) mode; ` +
             'it will NOT block or require approval (shadowDecisions only). ' +
-            `nextAction=run \`pd runtime activation promote --activation-id ${activationId} --confirm\` to enable live blocking, ` +
+            `nextAction=run \`pd activation promote --activation-id ${activationId} --confirm\` to enable live blocking, ` +
             'or leave as-is for shadow observation.',
           );
         }

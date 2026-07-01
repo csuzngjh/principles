@@ -8,7 +8,7 @@
 
 import { Command } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
-import { handlePainRetry } from './commands/pain-retry.js';
+import { registerPainRetryCommand } from './commands/pain-retry.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
 import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
@@ -85,26 +85,7 @@ painCmd
     await handlePainRecord(opts);
   });
 
-painCmd
-  .command('retry')
-  .description('Retry a failed diagnosis by pain ID')
-  .requiredOption('-p, --pain-id <painId>', 'Pain ID to retry diagnosis for')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double', 'pi-ai'")
-  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
-  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
-  .option('-a, --agent <agentId>', 'Agent ID to invoke')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
-  .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
-  .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
-  .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
-  .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
-  .option('--force', 'Allow retry of already-succeeded tasks')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handlePainRetry(opts);
-  });
+registerPainRetryCommand(painCmd);
 
 painCmd
   .command('evidence')

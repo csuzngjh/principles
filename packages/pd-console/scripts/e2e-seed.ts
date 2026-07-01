@@ -5,7 +5,7 @@
  * 完成后 pd-console server 用 readonly 模式打开，读取这些预置数据。
  *
  * Seed 内容覆盖 3 个 flow test 的需求：
- * - focus-approve-flow: governance queue (2 pending approvals)
+ * - focus-approve-flow + BDD: isolated prompt approvals for each mutable flow
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
@@ -68,6 +68,10 @@ const insertPiArtifact = stateDb.prepare(`
 insertPiArtifact.run(
   'artifact-prompt-1', 'principle', 'task-diag-1', 'p-001',
   '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '配置变更需确认' }), now, now,
+);
+insertPiArtifact.run(
+  'artifact-prompt-bdd', 'principle', 'task-diag-bdd', 'p-002',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: 'BDD 审批隔离原则' }), now, now,
 );
 insertPiArtifact.run(
   'artifact-hook-1', 'principle', 'task-diag-2', 'p-001',
@@ -135,7 +139,16 @@ stateDb.prepare(`
   'apply', '修改任何配置文件前，必须先向 Owner 确认',
 );
 
-// ── 7. 插入 approvals（2 行 pending，MVP proven channels）───────────────────
+// ── 7. 插入 approvals（E2E 与 BDD 使用独立的可变记录）──────────────────────
+stateDb.prepare(`
+  INSERT INTO approvals (
+    approval_id, artifact_id, channel, risk_level, status, confidence,
+    requested_at, summary, trigger_reason
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+  'apr-prompt-bdd', 'artifact-prompt-bdd', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, 'BDD 场景专用 prompt 原则', 'Owner 审批：BDD 隔离记录',
+);
 stateDb.prepare(`
   INSERT INTO approvals (
     approval_id, artifact_id, channel, risk_level, status, confidence,
@@ -171,7 +184,7 @@ stateDb.prepare(`
 );
 
 stateConn.close();
-console.log('[e2e-seed] state.db seeded: 3 approvals (incl. 1 bad-trace regression), 3 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
+console.log('[e2e-seed] state.db seeded: 4 approvals (incl. 1 BDD-isolated, 1 bad-trace regression), 4 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
 
 // ── 8. 初始化 trajectory.db + pain_events ───────────────────────────────────
 const trajectoryDir = path.join(workspaceDir, '.state');

@@ -914,6 +914,7 @@ describe('handleActivationApprove', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRuleHostWriterConfigs.length = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockGetArtifactById.mockResolvedValue(makeArtifact());
@@ -1151,5 +1152,42 @@ describe('handleActivationApprove', () => {
     expect(captured.decidedBy).toBe('alice');
     expect(captured.note).toBe('lgtm');
     expect(captured.json).toBe(true);
+  });
+
+  // PRI-489 AP-08: The approve path must inject the real workspace
+  // `rulecode_context_v2` feature flag probe into RuleHostWriter — same
+  // wiring as the dispatch path (tested at line 136-146) and the Console
+  // model (ApprovalsConsoleModel.dispatchActivationAfterApproval).
+  // Previously this path constructed RuleHostWriter without the probe, so a
+  // v2 artifact in a flag-off workspace would pass canActivate here while
+  // being rejected by dispatch/Console — an inconsistent contract that
+  // violated ERR-024 (validator wired in one enforcement path but not
+  // another) and ERR-089 (sibling approval path diverged from dispatch).
+  it('AP-08: wires the effective workspace feature flags into RuleHostWriter (ERR-024/ERR-089)', async () => {
+    mockApprovalApprove.mockResolvedValue({
+      ok: true,
+      record: { approvalId: 'appr-001', artifactId: 'art-001', status: 'approved' },
+    });
+    mockCompletionComplete.mockResolvedValue({
+      ok: true,
+      activationId: 'act-001',
+      decision: { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' },
+    });
+
+    await handleActivationApprove({
+      workspace: WS,
+      approvalId: 'appr-001',
+      decidedBy: 'test-owner',
+      json: true,
+    });
+
+    // The RuleHostWriter mock captures its constructor config — verify the
+    // featureFlagProbe was injected and reflects the mocked feature flags
+    // (rulecode_context_v2: enabled=true, see mockFeatureFlags at top).
+    expect(mockRuleHostWriterConfigs).toHaveLength(1);
+    expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe).toBeDefined();
+    expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe?.('rulecode_context_v2')).toBe(true);
+    // Unknown flags must not be reported as enabled (rc-2-no-as-bypass).
+    expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe?.('nonexistent_flag')).toBe(false);
   });
 });

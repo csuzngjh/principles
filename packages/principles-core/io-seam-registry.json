@@ -61,6 +61,13 @@
         "runtime-v2/internalization-integrity-remediation.ts",
         "runtime-v2/pruning-review-log.ts"
       ]
+    },
+    {
+      "name": "test-infrastructure",
+      "description": "Shared Story A acceptance helpers under src/__tests__. They create temporary workspaces and SQLite stores for production-path tests, but are excluded from published runtime behavior.",
+      "files": [
+        "runtime-v2/activation/__tests__/helpers.ts"
+      ]
     }
   ]
 }

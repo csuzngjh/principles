@@ -196,9 +196,23 @@ export class RuleHostWriter implements ChannelWriter {
       ? artifact.sourceRuleId.trim()
       : input.principleId;
 
+    // PRI-489 (seed-MVP readiness): Owner approval creates a SHADOW
+    // activation first. Shadow activations are observation-only — the
+    // runtime RuleHost (rule-host.ts) records would-block/would-allow into
+    // `shadowDecisions` but never blocks or modifies the tool call. The
+    // only shadow -> live transition is `pd activation promote
+    // --activation-id ... --confirm`, which atomically rewrites the action
+    // to `code_tool_hook_live_activate` inside a BEGIN IMMEDIATE
+    // transaction (SqliteActivationStateStore.promoteActivation).
+    //
+    // Returning `code_tool_hook_live_activate` here was the seed-MVP
+    // release blocker: a newly approved rule would immediately block
+    // production tool calls with no observation window. Shadow-first
+    // gives the owner a reversible observation phase before any live
+    // enforcement.
     return {
       activationId: `act_code_${ruleId}`,
-      action: 'code_tool_hook_live_activate',
+      action: 'code_tool_hook_shadow_activate',
       targetRef: `impl://${ruleId}`,
     };
   }
