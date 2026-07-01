@@ -153,6 +153,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
+  // New user onboarding wizard — first-visit redirect to /welcome + demo story-a
+  // trigger endpoint. Default true to guide new users; can be disabled in
+  // .pd/config.yaml or Settings page. Quiet flag: overrideable via config.
+  { id: 'new_user_onboarding', category: 'quiet', enabled: true, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Default true to guide new users; can be disabled in .pd/config.yaml or Settings page.' },
 ];
 
 export function computeEffectiveFlags(

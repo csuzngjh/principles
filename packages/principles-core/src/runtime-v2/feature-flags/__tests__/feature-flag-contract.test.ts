@@ -234,6 +234,8 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'pain_evidence_admission') continue;
       if (flag.id === 'painEvidenceAdmissionDefault') continue;
       if (flag.id === 'pain_evidence_admission_default') continue;
+      // new_user_onboarding: default-on quiet flag (guides new users)
+      if (flag.id === 'new_user_onboarding') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -514,5 +516,33 @@ describe('prototype pollution defense', () => {
     const src = readFileSync(resolve(__dirname, '..', 'feature-flag-contract.ts'), 'utf-8');
     const overrideReads = src.match(/Object\.hasOwn\(/g);
     expect(overrideReads && overrideReads.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('new_user_onboarding flag', () => {
+  // Given the DEFAULT_FEATURE_FLAGS registry, when looking up new_user_onboarding,
+  // then it must be present with quiet category, default-on, a valid since date, and
+  // a description mentioning onboarding. This guards the production wiring path
+  // (EP-02) and fails loud on missing required fields (EP-03).
+  it('Given DEFAULT_FEATURE_FLAGS, When looked up by id, Then new_user_onboarding is registered with quiet category and default true', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'new_user_onboarding');
+    expect(flag).toBeDefined();
+    expect(flag?.category).toBe('quiet');
+    expect(flag?.enabled).toBe(true);
+    expect(flag?.since).toBe('2026-07-01');
+    expect(flag?.description).toContain('onboarding');
+  });
+
+  it('Given a quiet-category flag, When config omits the flag, Then it stays default-on but remains overridable (quiet flag semantics)', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'new_user_onboarding');
+    expect(flag?.category).toBe('quiet');
+    // quiet flags can be overridden by config — verify the override path is honored
+    const result = computeEffectiveFlags(
+      { new_user_onboarding: { enabled: false } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/config.yaml',
+    );
+    expect(result.flags.new_user_onboarding?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('new_user_onboarding') && w.includes('unknown'))).toBe(false);
   });
 });
