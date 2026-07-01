@@ -25,9 +25,6 @@ interface PendingTermsSectionProps {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Phase 2 功能的 tooltip 文案 */
-const PHASE2_TOOLTIP = "此操作将在后续版本中启用";
-
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function PendingTermsSection({
@@ -45,8 +42,8 @@ export function PendingTermsSection({
 
   // 分类中文映射
   const categoryLabel: Record<string, string> = {
-    correction: "Correction",
-    empathy: "Empathy",
+    correction: t("pages.signalKeywords.categoryCorrection"),
+    empathy: t("pages.signalKeywords.categoryEmpathy"),
   };
 
   // 切换选中
@@ -76,7 +73,7 @@ export function PendingTermsSection({
         </div>
         {/* 计数 */}
         <span className="text-[12px] text-ink-4 tabular-nums">
-          {terms.length} terms
+          {t("pages.signalKeywords.nTerms", { count: terms.length })}
         </span>
       </div>
 
@@ -85,8 +82,8 @@ export function PendingTermsSection({
         <div className="flex items-center justify-between mb-3 px-3 py-2 bg-surface border border-line rounded-[4px]">
           <span className="text-[12px] text-ink-4">
             {selected.size > 0
-              ? `Selected ${selected.size} of ${terms.length}`
-              : `${terms.length} terms pending review`}
+              ? t("pages.signalKeywords.selectedNOfTotal", { selected: selected.size, total: terms.length })
+              : t("pages.signalKeywords.nTermsPendingReview", { count: terms.length })}
           </span>
           <div className="flex items-center gap-2">
             <Tooltip>
@@ -101,7 +98,7 @@ export function PendingTermsSection({
                   {t("pages.signalKeywords.pendingTerms.confirmBatch")}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+              <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -115,7 +112,7 @@ export function PendingTermsSection({
                   {t("pages.signalKeywords.pendingTerms.ignoreBatch")}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+              <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -136,11 +133,11 @@ export function PendingTermsSection({
             {/* checkbox 占位 */}
             <span />
 
-            <span>Term</span>
-            <span>Category</span>
-            <span>Precision</span>
-            <span>Reason</span>
-            {hasRowOps && <span className="text-right">Actions</span>}
+            <span>{t("pages.signalKeywords.colTerm")}</span>
+            <span>{t("pages.signalKeywords.colCategory")}</span>
+            <span>{t("pages.signalKeywords.colPrecision")}</span>
+            <span>{t("pages.signalKeywords.colReason")}</span>
+            {hasRowOps && <span className="text-right">{t("pages.signalKeywords.colActions")}</span>}
           </div>
 
           {/* 行 */}
@@ -160,7 +157,7 @@ export function PendingTermsSection({
                     className="mt-0.5 h-3.5 w-3.5 rounded border-line text-gov disabled:opacity-30 disabled:cursor-not-allowed"
                   />
                 </TooltipTrigger>
-                <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+                <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
               </Tooltip>
 
               {/* Term + 发现时间 */}
@@ -181,9 +178,9 @@ export function PendingTermsSection({
               {/* Precision */}
               <span className="text-[12px] text-ink-3">
                 {term.suggestedPrecision === "high" ? (
-                  <span className="text-green">High</span>
+                  <span className="text-green">{t("pages.signalKeywords.precisionHigh")}</span>
                 ) : (
-                  <span className="text-amber">Ambiguous</span>
+                  <span className="text-amber">{t("pages.signalKeywords.precisionAmbiguous")}</span>
                 )}
               </span>
 
@@ -209,7 +206,7 @@ export function PendingTermsSection({
                           <Check className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+                      <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
                     </Tooltip>
                   )}
 
@@ -227,7 +224,7 @@ export function PendingTermsSection({
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+                      <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
                     </Tooltip>
                   )}
                 </div>

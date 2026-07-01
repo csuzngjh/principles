@@ -23,9 +23,6 @@ interface KeywordListSectionProps {
 
 type FilterTab = "all" | "active";
 
-/** Phase 2 功能的 tooltip 文案 */
-const PHASE2_TOOLTIP = "此操作将在后续版本中启用";
-
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function KeywordListSection({
@@ -60,8 +57,8 @@ export function KeywordListSection({
 
   // 分类中文映射
   const categoryLabel: Record<string, string> = {
-    correction: t("pages.signalKeywords.filterActive"),
-    empathy: "Empathy",
+    correction: t("pages.signalKeywords.categoryCorrection"),
+    empathy: t("pages.signalKeywords.categoryEmpathy"),
   };
 
   const hasWriteOps = !!onDelete || !!onToggleArchive;
@@ -122,11 +119,11 @@ export function KeywordListSection({
         <div className="border border-line rounded-[4px] overflow-hidden">
           {/* 表头 */}
           <div className="grid grid-cols-[1fr_100px_90px_90px_80px] gap-3 px-4 py-2.5 bg-surface text-[11px] font-medium text-ink-4 uppercase tracking-[var(--tracking-wide)] border-b border-line">
-            <span>{t("pages.signalKeywords.title")}</span>
-            <span>{t("pages.signalKeywords.filterActive")}</span>
-            <span>Precision</span>
-            <span>Weight</span>
-            {hasWriteOps && <span className="text-right">Actions</span>}
+            <span>{t("pages.signalKeywords.colTerm")}</span>
+            <span>{t("pages.signalKeywords.colCategory")}</span>
+            <span>{t("pages.signalKeywords.colPrecision")}</span>
+            <span>{t("pages.signalKeywords.colWeight")}</span>
+            {hasWriteOps && <span className="text-right">{t("pages.signalKeywords.colActions")}</span>}
           </div>
 
           {/* 行 */}
@@ -148,9 +145,9 @@ export function KeywordListSection({
               {/* Precision */}
               <span className="text-[12px] text-ink-3">
                 {kw.precision === "high" ? (
-                  <span className="text-green">High</span>
+                  <span className="text-green">{t("pages.signalKeywords.precisionHigh")}</span>
                 ) : (
-                  <span className="text-amber">Ambiguous</span>
+                  <span className="text-amber">{t("pages.signalKeywords.precisionAmbiguous")}</span>
                 )}
               </span>
 
@@ -184,7 +181,7 @@ export function KeywordListSection({
                           <Archive className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+                      <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
                     </Tooltip>
                   )}
 
@@ -202,7 +199,7 @@ export function KeywordListSection({
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+                      <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
                     </Tooltip>
                   )}
                 </div>

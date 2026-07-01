@@ -24,6 +24,8 @@ import {
   validatePendingTermStore,
 } from "../../src/ui/utils/signal-keywords-validators.js";
 import {
+  listActiveSignalKeywords,
+  listPendingSignalTerms,
   fetchKeywordStore,
   fetchPendingTerms,
   updateKeywordStore,
@@ -234,6 +236,20 @@ describe("validatePendingTermStore", () => {
 // ── API stubs ─────────────────────────────────────────────────────────────────
 
 describe("signal-keywords API stubs", () => {
+  it("listActiveSignalKeywords returns endpoint_not_implemented", async () => {
+    const result = await listActiveSignalKeywords();
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe("endpoint_not_implemented");
+    expect(typeof result.nextAction).toBe("string");
+  });
+
+  it("listPendingSignalTerms returns endpoint_not_implemented", async () => {
+    const result = await listPendingSignalTerms();
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe("endpoint_not_implemented");
+    expect(typeof result.nextAction).toBe("string");
+  });
+
   it("fetchKeywordStore returns endpoint_not_implemented", async () => {
     const result = await fetchKeywordStore("correction");
     expect(result.success).toBe(false);

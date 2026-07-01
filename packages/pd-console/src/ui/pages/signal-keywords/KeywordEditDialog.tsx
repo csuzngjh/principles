@@ -31,8 +31,6 @@ interface KeywordEditDialogProps {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const PHASE2_TOOLTIP = "此操作将在后续版本中启用";
-
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
@@ -69,7 +67,7 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
               </Button>
             </span>
           </TooltipTrigger>
-          <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>
+          <TooltipContent>{t("pages.signalKeywords.phase2Tooltip")}</TooltipContent>
         </Tooltip>
       ) : (
         <DialogTrigger asChild>
@@ -90,7 +88,9 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
         <div className="space-y-4">
           {/* Term */}
           <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-ink-3">Term</label>
+            <label className="text-[12px] font-medium text-ink-3">
+              {t("pages.signalKeywords.colTerm")}
+            </label>
             <input
               type="text"
               value={term}
@@ -103,36 +103,50 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
 
           {/* Category */}
           <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-ink-3">Category</label>
+            <label className="text-[12px] font-medium text-ink-3">
+              {t("pages.signalKeywords.colCategory")}
+            </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as KeywordCategory)}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "correction" || v === "empathy") {
+                  setCategory(v);
+                }
+              }}
               disabled={isDisabled}
               className="w-full h-9 px-3 text-[13px] bg-surface border border-line rounded-[4px] text-ink outline-none focus:border-gov transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <option value="correction">Correction</option>
-              <option value="empathy">Empathy</option>
+              <option value="correction">{t("pages.signalKeywords.categoryCorrection")}</option>
+              <option value="empathy">{t("pages.signalKeywords.categoryEmpathy")}</option>
             </select>
           </div>
 
           {/* Precision */}
           <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-ink-3">Precision</label>
+            <label className="text-[12px] font-medium text-ink-3">
+              {t("pages.signalKeywords.colPrecision")}
+            </label>
             <select
               value={precision}
-              onChange={(e) => setPrecision(e.target.value as "high" | "ambiguous")}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "high" || v === "ambiguous") {
+                  setPrecision(v);
+                }
+              }}
               disabled={isDisabled}
               className="w-full h-9 px-3 text-[13px] bg-surface border border-line rounded-[4px] text-ink outline-none focus:border-gov transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <option value="high">High</option>
-              <option value="ambiguous">Ambiguous</option>
+              <option value="high">{t("pages.signalKeywords.precisionHigh")}</option>
+              <option value="ambiguous">{t("pages.signalKeywords.precisionAmbiguous")}</option>
             </select>
           </div>
 
           {/* Weight */}
           <div className="space-y-1.5">
             <label className="text-[12px] font-medium text-ink-3">
-              Weight: {Math.round(weight * 100)}%
+              {t("pages.signalKeywords.weightLabel", { percent: Math.round(weight * 100) })}
             </label>
             <input
               type="range"
