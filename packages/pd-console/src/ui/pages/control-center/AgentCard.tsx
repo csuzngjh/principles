@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "../../../lib/utils.js";
 import type { AgentMeta } from "../../utils/agent-metadata.js";
@@ -123,6 +124,7 @@ export function AgentCard({
   locale,
 }: AgentCardProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const isSaving = saving === agent.name;
 
   // L2 / L3 / confirm 状态
@@ -138,17 +140,19 @@ export function AgentCard({
   const impact = isZh ? meta.impactZh : meta.impactEn;
   const techDetail = isZh ? meta.techDetailZh : meta.techDetailEn;
   const mvpNote = isZh ? meta.mvpNoteZh : meta.mvpNoteEn;
+  const actionLinkText = isZh ? meta.action?.linkTextZh : meta.action?.linkTextEn;
 
   // 段落用 \n\n 分隔
   const detailParagraphs = detail.split("\n\n").filter((p) => p.length > 0);
 
-  // 头部点击：toggle isOpen（但点击 toggle 按钮 / confirm-bar / tech-toggle 不触发）
+  // 头部点击：toggle isOpen（但点击 toggle 按钮 / confirm-bar / tech-toggle / action-row 不触发）
   const handleHeadClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (
       target.closest("[data-agent-toggle]") ||
       target.closest("[data-confirm-bar]") ||
-      target.closest("[data-tech-toggle]")
+      target.closest("[data-tech-toggle]") ||
+      target.closest("[data-action-row]")
     ) {
       return;
     }
@@ -313,6 +317,26 @@ export function AgentCard({
             </span>
             {impact}
           </div>
+
+          {/* action-row（当 meta.action 存在时） */}
+          {meta.action && actionLinkText && (
+            <div
+              data-action-row
+              className="mt-[12px] pt-[12px] border-t border-line-2"
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(meta.action!.to);
+                }}
+                className="flex items-center gap-[6px] text-[12px] text-gov hover:text-gov-2 transition-colors font-medium"
+              >
+                <span>{actionLinkText}</span>
+                <ChevronRight className="w-[12px] h-[12px]" aria-hidden="true" />
+              </button>
+            </div>
+          )}
 
           {/* L3: 技术细节（嵌套折叠，仅当有 techDetail 内容时显示） */}
           {Object.keys(techDetail).length > 0 && (
