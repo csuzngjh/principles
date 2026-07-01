@@ -4,11 +4,11 @@
   --vp-font-family-mono: 'JetBrains Mono', monospace;
 
   /* Light mode defaults */
-  --accent: #5B8DFF;
-  --accent-dim: rgba(91, 141, 255, 0.08);
-  --accent-border: rgba(91, 141, 255, 0.15);
-  
-  --surface: #F7F8FA;
+  --accent: #243B53;
+  --accent-dim: rgba(36, 59, 83, 0.08);
+  --accent-border: rgba(36, 59, 83, 0.15);
+
+  --surface: #F7F6F2;
   --border: rgba(0, 0, 0, 0.08);
   --text-main: #1A1D23;
   --text-secondary: #5A5F6B;

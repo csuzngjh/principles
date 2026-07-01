@@ -997,6 +997,61 @@
       "demoteTooltip": "Demote endpoint under development",
       "principleAriaLabel": "Debt Principle {{id}}",
       "listAriaLabel": "Debt principles list"
+    },
+    "welcome": {
+      "title": "Welcome to Principles Disciple",
+      "subtitle": "Turn your repeated corrections into reviewed, reversible principles.",
+      "stateSaveError": "Couldn't save onboarding progress. Check browser storage permissions and retry.",
+      "stepIndicator": "Step {{current}} of {{total}}",
+      "step1": {
+        "title": "What is PD?",
+        "description": "An owner-governed behavior internalization system. PD turns behavioral evidence into reviewed, reversible principles that shape future agent behavior.",
+        "circuitLabel": "Core governance loop",
+        "circuitNodes": {
+          "evidence": "Evidence",
+          "principle": "Principle",
+          "ownerGate": "Owner Gate",
+          "behavior": "Behavior Change"
+        },
+        "startButton": "Start",
+        "skipButton": "Skip onboarding"
+      },
+      "step2": {
+        "title": "See the full governance loop in action",
+        "description": "This is a controlled demo using simulated evidence. In real use, your agent produces evidence through the pd-pain-signal skill.",
+        "runDemoButton": "Run demo",
+        "demoRunning": "Running demo...",
+        "demoComplete": "Demo complete",
+        "demoFailed": "Demo failed",
+        "demoSimulatedNote": "This evidence is simulated for demo purposes.",
+        "nextButton": "Next",
+        "evidenceLabel": "Evidence (simulated)",
+        "candidateLabel": "Candidate Principle",
+        "ownerGateLabel": "Owner Gate: Review and approve",
+        "activationLabel": "Activation Result",
+        "rollbackLabel": "Rollback path available"
+      },
+      "step3": {
+        "title": "Ready to record real evidence",
+        "description": "When your agent makes a mistake or you repeatedly correct it, tell the agent: 'Use pd-pain-signal to record this.'",
+        "examplePrompt": "Example prompt to agent:",
+        "examplePromptText": "I just corrected you on X. Use pd-pain-signal to record this as a pain signal.",
+        "tryNowButton": "Try it now (2-hour window)",
+        "goToFocusButton": "Got it, go to Focus",
+        "skipButton": "Skip for now",
+        "windowHint": "We'll check back in 2 hours. No pressure — you can always record evidence later.",
+        "pollingActive": "Listening for evidence... We'll check every 30 seconds for 2 hours.",
+        "stopPollingButton": "Stop and continue",
+        "evidenceFound": "Evidence detected! You can now review it in the Focus page.",
+        "timeoutHint": "No evidence detected in 2 hours. That's okay — you can record evidence anytime with pd-pain-signal.",
+        "pollingError": "Couldn't check for evidence. The evidence service may be unavailable.",
+        "retryButton": "Retry"
+      },
+      "progress": {
+        "step1": "Welcome",
+        "step2": "Demo",
+        "step3": "Invite"
+      }
     }
   },
   "components": {
@@ -1105,6 +1160,23 @@
       "tooShort": "Reason must be at least 10 characters",
       "cancel": "Cancel",
       "submit": "Confirm Rejection"
+    },
+    "onboardingReset": {
+      "title": "Onboarding",
+      "resetButton": "Reset onboarding state",
+      "resetConfirm": "This will restart the onboarding wizard on next login. Continue?",
+      "resetSuccess": "Onboarding state reset. You'll see the welcome page on next visit.",
+      "resetFailed": "Couldn't reset onboarding. Check browser storage permissions and retry."
+    },
+    "onboardingFlag": {
+      "title": "Onboarding Feature",
+      "label": "New user onboarding wizard",
+      "description": "Show the welcome wizard on first visit. Disable for experienced users.",
+      "toggleAriaLabel": "Toggle new user onboarding feature",
+      "enabled": "Onboarding wizard enabled",
+      "disabled": "Onboarding wizard disabled",
+      "toggleFailed": "Failed to toggle onboarding feature",
+      "loadFailed": "Failed to load onboarding flag state"
     }
   }
 }

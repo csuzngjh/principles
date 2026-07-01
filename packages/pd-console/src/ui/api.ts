@@ -603,6 +603,7 @@ async function dispatchFollowUp(
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
+  request,
   // signal-keywords (UI stubs, see signal-keywords-api.ts)
   listActiveSignalKeywords,
   listPendingSignalTerms,
