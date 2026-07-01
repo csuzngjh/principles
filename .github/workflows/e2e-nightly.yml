@@ -91,7 +91,7 @@ jobs:
 
       - name: Close failure issue on success
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -119,7 +119,7 @@ jobs:
 
       - name: Create or update failure issue
         if: always() && failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
