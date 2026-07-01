@@ -997,6 +997,61 @@
       "demoteTooltip": "降权端点开发中",
       "principleAriaLabel": "原则债务 {{id}}",
       "listAriaLabel": "原则债务列表"
+    },
+    "welcome": {
+      "title": "欢迎使用 Principles Disciple",
+      "subtitle": "把你对智能体的反复纠正，沉淀为可审查、可撤回的行为原则。",
+      "stateSaveError": "无法保存引导进度，请检查浏览器存储权限后重试。",
+      "stepIndicator": "第 {{current}} 步 / 共 {{total}} 步",
+      "step1": {
+        "title": "PD 是什么？",
+        "description": "拥有者治理下的智能体行为内化系统。PD 把行为证据沉淀为可审查、可回滚的原则，让原则进入智能体的后续行为。",
+        "circuitLabel": "核心治理回路",
+        "circuitNodes": {
+          "evidence": "行为证据",
+          "principle": "原则",
+          "ownerGate": "拥有者审查",
+          "behavior": "行为变更"
+        },
+        "startButton": "开始",
+        "skipButton": "跳过引导"
+      },
+      "step2": {
+        "title": "看一次完整治理回路演示",
+        "description": "这是用模拟证据做的受控演示。真实使用时，由你的智能体通过 pd-pain-signal 技能产生证据。",
+        "runDemoButton": "运行演示",
+        "demoRunning": "演示运行中...",
+        "demoComplete": "演示完成",
+        "demoFailed": "演示失败",
+        "demoSimulatedNote": "此证据为演示模拟数据。",
+        "nextButton": "下一步",
+        "evidenceLabel": "证据（模拟）",
+        "candidateLabel": "候选原则",
+        "ownerGateLabel": "拥有者审查：批准 / 修改 / 拒绝",
+        "activationLabel": "激活结果",
+        "rollbackLabel": "可回滚路径已就绪"
+      },
+      "step3": {
+        "title": "准备好记录真实证据",
+        "description": "当你下次使用智能体时，如果智能体犯错或你重复纠正了它，告诉智能体：'用 pd-pain-signal 记录一下'。",
+        "examplePrompt": "给智能体的示例提示：",
+        "examplePromptText": "我刚纠正了你关于 X 的问题。用 pd-pain-signal 把这个记录为 pain signal。",
+        "tryNowButton": "我现在就试试（2 小时窗口）",
+        "goToFocusButton": "知道了，先看 Focus",
+        "skipButton": "暂时跳过",
+        "windowHint": "我们会在 2 小时后查看。不强制——你随时可以稍后记录证据。",
+        "pollingActive": "正在监听证据... 我们会每 30 秒检查一次，持续 2 小时。",
+        "stopPollingButton": "停止并继续",
+        "evidenceFound": "检测到证据！你现在可以在 Focus 页面查看。",
+        "timeoutHint": "2 小时内未检测到证据。没关系——你随时可以用 pd-pain-signal 记录证据。",
+        "pollingError": "无法检查证据。证据服务可能不可用。",
+        "retryButton": "重试"
+      },
+      "progress": {
+        "step1": "欢迎",
+        "step2": "演示",
+        "step3": "邀请"
+      }
     }
   },
   "components": {
@@ -1105,6 +1160,23 @@
       "tooShort": "拒绝原因至少需要10个字符",
       "cancel": "取消",
       "submit": "确认拒绝"
+    },
+    "onboardingReset": {
+      "title": "引导流程",
+      "resetButton": "重置引导状态",
+      "resetConfirm": "这将在下次登录时重新启动引导向导。继续吗？",
+      "resetSuccess": "引导状态已重置。下次访问时会看到欢迎页。",
+      "resetFailed": "无法重置引导，请检查浏览器存储权限后重试。"
+    },
+    "onboardingFlag": {
+      "title": "引导功能",
+      "label": "新用户引导向导",
+      "description": "首次访问时显示欢迎向导。熟练用户可关闭。",
+      "toggleAriaLabel": "切换新用户引导功能",
+      "enabled": "引导向导已启用",
+      "disabled": "引导向导已关闭",
+      "toggleFailed": "切换引导功能失败",
+      "loadFailed": "加载引导开关状态失败"
     }
   }
 }

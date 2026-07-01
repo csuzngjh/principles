@@ -61,11 +61,11 @@
           <div class="active-step success-step"><span class="step-lbl">Better Decision</span></div>
         </div>
         <div class="card-footer-text">
-          <p class="summary-highlight active-highlight">{{ lang === 'zh-CN' ? '慢一点，但更稳、更准、可进化。' : 'Slower, but safer, precise, and evolutionary.' }}</p>
+          <p class="summary-highlight active-highlight">{{ lang === 'zh-CN' ? '慢一点，但更稳、更准、可沉淀。' : 'Slower, but safer, more precise, and owner-governed.' }}</p>
           <p class="desc-text">
             {{ lang === 'zh-CN'
               ? '在关键节点产生建设性摩擦主动拦截，通过原则校准、风险质疑与反思闭环，让 AI 在执行前先深度确认，构筑高阶心智护城河。'
-              : 'Triggers active constructive friction at key points. Pauses to evaluate constraints and goals, leading to self-evolution and robust decisions.'
+              : 'Triggers active constructive friction at key points. Pauses to evaluate constraints and goals, leading to owner-reviewed principles and robust decisions.'
             }}
           </p>
         </div>

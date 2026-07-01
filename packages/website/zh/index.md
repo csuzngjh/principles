@@ -6,10 +6,9 @@ description: 通过原则、反思与建设性摩擦，让 AI 在执行前先停
 
 <div class="pd-home-wrapper">
   <HeroSection />
+  <QuickInstallCard />
   <MottoSection />
   <ValueProposition />
   <AgentContrast />
-  <SystemPipeline />
-  <EvolutionMenu />
   <ThinkingLogCard />
 </div>
