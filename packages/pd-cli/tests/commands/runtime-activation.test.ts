@@ -517,6 +517,313 @@ describe('handleRuntimeActivationList', () => {
     expect(output.reason).toBeUndefined();
     expect(output.nextAction).toBeUndefined();
   });
+
+  // ── PRI-491: owner observability (mode / status / contextVersion / evidenceRefs) ──
+  //
+  // The CLI list command must surface enough information for the owner to
+  // answer "will this rule block now?" without opening SQLite or reading
+  // logs. The four essential signals are:
+  //   1. mode (shadow / live / undefined for unrecognized)
+  //   2. status (active / suspended_by_flag / deactivated)
+  //   3. contextVersion (v1 / v2) — needed to interpret suspended_by_flag
+  //   4. nextAction (promote / deactivate / enable flag)
+  //
+  // ERR entries:
+  // - ERR-002: suspended_by_flag is a degradation; it MUST carry a reason
+  //   via nextAction (rc-9-no-silent-fallback).
+  // - ERR-088: tests must assert the unique status field, not only absence
+  //   of "active".
+  // - ERR-023/033: --json output must remain a single parseable object.
+
+  it('PRI-491: shadow v2 activation with flag off shows status=suspended_by_flag (JSON)', async () => {
+    // Override the artifact to a v2 artifact with evidenceRefs.
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v2-shadow',
+      contentJson: JSON.stringify({
+        requiresContextVersion: 2,
+        evidenceRefs: ['ex-1', 'ex-2'],
+        implementationCode: 'return { decision: "allow" };',
+      }),
+    }));
+    // Override listCodeToolHookActivations to return a v2 shadow activation.
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v2-shadow',
+        artifactId: 'art-v2-shadow',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: null,
+        deactivatedAt: null,
+      },
+    ]);
+    // Default mockFeatureFlags has rulecode_context_v2 enabled. Flip it off
+    // to simulate the production default (the flag is quiet/default-off).
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = false;
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.activations).toHaveLength(1);
+    const rec = output.activations[0];
+    expect(rec.status).toBe('suspended_by_flag');
+    expect(rec.mode).toBe('shadow');
+    expect(rec.contextVersion).toBe('v2');
+    expect(rec.evidenceRefs).toEqual(['ex-1', 'ex-2']);
+    expect(rec.evidenceSummary).toContain('2 evidence ref(s)');
+    expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
+    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow --confirm');
+
+    // Restore the mock for subsequent tests.
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = true;
+  });
+
+  it('PRI-491: text output shows [SUSPENDED by flag] for v2 flag-off activation', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v2-shadow',
+      contentJson: JSON.stringify({
+        requiresContextVersion: 2,
+        evidenceRefs: ['ex-1'],
+        implementationCode: 'return { decision: "allow" };',
+      }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v2-shadow',
+        artifactId: 'art-v2-shadow',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: null,
+        deactivatedAt: null,
+      },
+    ]);
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = false;
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+    });
+
+    const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(text).toContain('[SUSPENDED by flag]');
+    expect(text).toContain('(shadow)');
+    expect(text).toContain('contextVersion: v2');
+    expect(text).toContain('evidence:');
+    expect(text).toContain('nextAction:');
+
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = true;
+  });
+
+  it('PRI-491: shadow v1 activation shows status=active and promote nextAction (JSON)', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v1-shadow',
+      contentJson: JSON.stringify({ implementationCode: 'return { decision: "allow" };' }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v1-shadow',
+        artifactId: 'art-v1-shadow',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: null,
+        deactivatedAt: null,
+      },
+    ]);
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    const rec = output.activations[0];
+    expect(rec.status).toBe('active');
+    expect(rec.mode).toBe('shadow');
+    expect(rec.contextVersion).toBe('v1');
+    expect(rec.evidenceRefs).toBeUndefined();
+    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v1-shadow --confirm');
+  });
+
+  it('PRI-491: live v1 activation shows status=active and deactivate nextAction (JSON)', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v1-live',
+      contentJson: JSON.stringify({ implementationCode: 'return { decision: "allow" };' }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v1-live',
+        artifactId: 'art-v1-live',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_live_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: '2026-06-19T00:00:00.000Z',
+        deactivatedAt: null,
+      },
+    ]);
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    const rec = output.activations[0];
+    expect(rec.status).toBe('active');
+    expect(rec.mode).toBe('live');
+    expect(rec.promotedAt).toBe('2026-06-19T00:00:00.000Z');
+    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live --confirm');
+  });
+
+  it('PRI-491: text output shows promotedAt timestamp when present', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v1-live',
+      contentJson: JSON.stringify({ implementationCode: 'return { decision: "allow" };' }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v1-live',
+        artifactId: 'art-v1-live',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_live_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: '2026-06-19T00:00:00.000Z',
+        deactivatedAt: null,
+      },
+    ]);
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+    });
+
+    const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
+    expect(text).toContain('(live)');
+    expect(text).toContain('promotedAt: 2026-06-19T00:00:00.000Z');
+    expect(text).toContain('nextAction: pd activation deactivate --activation-id act-v1-live --confirm');
+  });
+
+  it('PRI-491: deactivated activation shows [DEACTIVATED <ts>] regardless of contextVersion (precedence)', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-v2-dead',
+      contentJson: JSON.stringify({
+        requiresContextVersion: 2,
+        evidenceRefs: ['ex-1'],
+        implementationCode: 'return { decision: "allow" };',
+      }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v2-dead',
+        artifactId: 'art-v2-dead',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_live_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: '2026-06-19T00:00:00.000Z',
+        deactivatedAt: '2026-06-20T00:00:00.000Z',
+      },
+    ]);
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = false;
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      includeDeactivated: true,
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    const rec = output.activations[0];
+    // deactivated > suspended_by_flag > active — a deactivated record is NOT
+    // reported as suspended_by_flag even when v2 + flag-off.
+    expect(rec.status).toBe('deactivated');
+    expect(rec.deactivatedAt).toBe('2026-06-20T00:00:00.000Z');
+    expect(rec.nextAction).toBeUndefined();
+
+    mockFeatureFlags.flags.rulecode_context_v2.enabled = true;
+  });
+
+  it('PRI-491: unrecognized action yields undefined mode and undefined nextAction (no false label)', async () => {
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      artifactId: 'art-unknown',
+      contentJson: JSON.stringify({ implementationCode: 'return { decision: "allow" };' }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-unknown',
+        artifactId: 'art-unknown',
+        channel: 'code_tool_hook',
+        action: 'some_future_action',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: null,
+        deactivatedAt: null,
+      },
+    ]);
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    const rec = output.activations[0];
+    expect(rec.mode).toBeUndefined();
+    expect(rec.status).toBe('active');
+    // No false nextAction — the owner must inspect manually.
+    expect(rec.nextAction).toBeUndefined();
+  });
+
+  it('PRI-491: JSON output remains a single parseable object (cli-1-strict-json)', async () => {
+    // Even with rich enrichment fields, the --json contract requires exactly
+    // one parseable JSON object on stdout (no banners, no extra log lines).
+    mockGetArtifactById.mockResolvedValue(makeArtifact({
+      contentJson: JSON.stringify({
+        requiresContextVersion: 2,
+        evidenceRefs: ['ex-1'],
+        implementationCode: 'return { decision: "allow" };',
+      }),
+    }));
+    mockListCodeToolHookActivations.mockResolvedValue([
+      {
+        activationId: 'act-v2',
+        artifactId: 'art-001',
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        targetRef: 'edit_tool',
+        activatedAt: '2026-06-18T00:00:00.000Z',
+        promotedAt: null,
+        deactivatedAt: null,
+      },
+    ]);
+
+    await handleRuntimeActivationList({
+      workspace: WS,
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    // Exactly one console.log call on stdout (the JSON payload).
+    expect(consoleLogSpy.mock.calls).toHaveLength(1);
+    // And it parses cleanly.
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output).toHaveProperty('activations');
+    expect(output).toHaveProperty('status');
+  });
 });
 
 describe('handleRuntimeActivationPromote', () => {

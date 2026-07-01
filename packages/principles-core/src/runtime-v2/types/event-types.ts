@@ -31,7 +31,9 @@ export type EventType =
       | 'rulehost_auto_correct_applied'
       | 'runtime_v2_prompt_activations_injected'
       // PRI-437: RuleHost health — approved rule failed to compile/load
-      | 'rulehost_unhealthy';
+      | 'rulehost_unhealthy'
+      // PRI-491: RuleHost skipped — active activation skipped at load (flag-off, unsupported action, etc.)
+      | 'rulehost_skipped';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -57,6 +59,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_auto_correct_applied'),
   Type.Literal('runtime_v2_prompt_activations_injected'),
   Type.Literal('rulehost_unhealthy'),
+  Type.Literal('rulehost_skipped'),
 ]);
 
 export type EventCategory =
@@ -633,6 +636,47 @@ export const RuleHostUnhealthyEventDataSchema = Type.Object({
   nextAction: Type.String(),
 });
 export type RuleHostUnhealthyEventDataStatic = Static<typeof RuleHostUnhealthyEventDataSchema>;
+
+// ============== RuleHost Skipped Activations (PRI-491) ==============
+
+/**
+ * rulehost_skipped — An active activation was skipped at load time for a
+ * structured reason (not a compile/load failure — those use rulehost_unhealthy).
+ *
+ * PRI-491: Skipped activations must be visible to the owner, not just
+ * logger.warn. Skip reasons include:
+ *   - flag-off v2 rule suspended (rulecode_context_v2 disabled)
+ *   - unsupported context version
+ *   - unsupported action
+ *   - missing target_ref
+ *
+ * ERR-002: degradation/suspension includes reason + nextAction (rc-9).
+ */
+export interface RuleHostSkippedEventData {
+  activationId: string;
+  artifactId: string;
+  ruleId: string;
+  /**
+   * 'shadow' or 'live' — the mode the activation WOULD have had if loaded.
+   * Optional: when the action itself is unrecognized (neither shadow nor
+   * live), mode is genuinely indeterminate.
+   */
+  mode?: 'shadow' | 'live';
+  /** Why the activation was skipped (structured reason code + detail) */
+  reason: string;
+  /** What the operator should do to resolve the skip */
+  nextAction: string;
+}
+
+export const RuleHostSkippedEventDataSchema = Type.Object({
+  activationId: Type.String(),
+  artifactId: Type.String(),
+  ruleId: Type.String(),
+  mode: Type.Optional(Type.Union([Type.Literal('shadow'), Type.Literal('live')])),
+  reason: Type.String(),
+  nextAction: Type.String(),
+});
+export type RuleHostSkippedEventDataStatic = Static<typeof RuleHostSkippedEventDataSchema>;
 
 // ============== Daily Statistics ==============
 
