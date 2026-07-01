@@ -768,6 +768,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     readonly goldenTraceCases: unknown;
     readonly affectedTools: unknown;
     readonly requiresContextVersion: unknown;
+    readonly evidenceRefs: unknown;
   } | null {
     let parsed: unknown;
     try {
@@ -781,6 +782,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       goldenTraceCases: parsed.goldenTraceCases,
       affectedTools: parsed.affectedTools,
       requiresContextVersion: parsed.requiresContextVersion,
+      evidenceRefs: parsed.evidenceRefs,
     };
   }
 
@@ -1003,7 +1005,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
-    const { implementationCode, goldenTraceCases, affectedTools, requiresContextVersion } = artificerParsed;
+    const { implementationCode, goldenTraceCases, affectedTools, requiresContextVersion, evidenceRefs } = artificerParsed;
     if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
@@ -1060,6 +1062,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
       adversarialResult: output.adversarialResult,
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
+      // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.
+      // Only include when the array is valid (non-empty strings) — v1 rules may omit.
+      ...(requiresContextVersion === 2 && Array.isArray(evidenceRefs) && evidenceRefs.every((e: unknown) => typeof e === 'string' && e.trim() !== '')
+        ? { evidenceRefs: evidenceRefs as string[] }
+        : {}),
     };
 
     // P1 #7 (cross-package acceptance test discovery): resolve the scribe

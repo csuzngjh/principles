@@ -240,6 +240,10 @@ function makeRuleContextV2ArtificerArtifact(): PIArtifactRecord {
     traceCase.ruleContext = ruleContext;
   }
   parsed.requiresContextVersion = 2;
+  // PRI-490: v2 artifacts must carry evidenceRefs preserved from
+  // BehaviorExamplePack. The fixture includes them so downstream tests
+  // can verify the evaluator preserves them into the assembled rule artifact.
+  parsed.evidenceRefs = ['pain:1', 'tool_call:abc'];
   return { ...artifact, contentJson: JSON.stringify(parsed) };
 }
 
@@ -881,6 +885,33 @@ describe('EvaluatorRunner V2 — rule artifact assembly (PRI-427)', () => {
     expect(ruleArtifact).toBeDefined();
     const parsed: unknown = JSON.parse(ruleArtifact?.contentJson ?? 'null');
     expect(parsed).toEqual(expect.objectContaining({ requiresContextVersion: 2 }));
+  });
+
+  // PRI-490: the evaluator must preserve evidenceRefs from the Artificer
+  // artifact into the assembled rule artifact. This is a stated acceptance
+  // criterion: "Evaluator assembled rule artifact contains
+  // requiresContextVersion: 2 and evidenceRefs".
+  it('preserves evidenceRefs in the assembled rule artifact (PRI-490)', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeRuleContextV2ArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const gateDeps = makeRecordingGate({}, {
+      decision: 'accepted_shadow',
+      applicationMode: 'shadow',
+      sandboxResult: sandboxResultSuccess(),
+      reasons: [],
+    });
+    const runner = makeRunner(createMockDeps({ artifactStore: store }), gateDeps);
+
+    await runner.run(EVALUATOR_TASK_ID);
+
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const ruleArtifact = artifacts.find((artifact) => artifact.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    const parsed = JSON.parse(ruleArtifact?.contentJson ?? 'null') as Record<string, unknown>;
+    expect(parsed.requiresContextVersion).toBe(2);
+    expect(Array.isArray(parsed.evidenceRefs)).toBe(true);
+    expect(parsed.evidenceRefs).toEqual(['pain:1', 'tool_call:abc']);
   });
 
   it('rule artifact goldenTrace is the Artificer full trace (pos+neg), NOT the adversarial-only trace', async () => {

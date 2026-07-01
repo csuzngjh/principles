@@ -107,6 +107,8 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
+- SEED RULE CONSTRAINT: goldenTraceCases expectedDecision MUST be only "allow" or "block". Do NOT emit "propose_correction" — seed-user MVP does not support auto-correct.
+- You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
 `;
 
 export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v2';

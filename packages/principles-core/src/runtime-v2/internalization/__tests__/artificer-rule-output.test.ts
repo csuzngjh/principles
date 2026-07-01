@@ -321,6 +321,8 @@ describe('DefaultArtificerValidator — PRI-484 requiresContextVersion + ruleCon
       sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
       implementationCode:
         'function evaluate(input, helpers) { return helpers.getToolName(input) === "edit" ? { decision: "block", matched: true, reason: "x" } : { decision: "allow", matched: false, reason: "x" }; }',
+      // PRI-490: v2 output requires evidenceRefs — include in fixture.
+      evidenceRefs: ['pain:1', 'tool_call:abc'],
       goldenTraceCases: [
         {
           caseId: 'negative-1',
@@ -433,5 +435,160 @@ describe('DefaultArtificerValidator — PRI-484 requiresContextVersion + ruleCon
     const result = await validator.validate(output, ARTIFICER_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.toLowerCase().includes('rulecontext'))).toBe(true);
+  });
+});
+
+// ── PRI-490: v2 seed rules allow/block-only + evidenceRefs ──────────────
+
+describe('DefaultArtificerValidator — PRI-490 v2 seed rules allow/block-only + evidenceRefs', () => {
+  const validator = new DefaultArtificerValidator();
+
+  function makeValidRuleContext(): Record<string, unknown> {
+    return {
+      version: 2,
+      history: {
+        status: 'available',
+        truncated: false,
+        calls: [
+          {
+            sequenceId: 1,
+            toolName: 'read_file',
+            canonicalKind: 'read',
+            normalizedPath: '/workspace/foo.txt',
+            paramsSummary: { path: '/workspace/foo.txt' },
+            outcome: 'success',
+          },
+        ],
+      },
+      facts: {
+        priorReadOfTarget: 'yes',
+        readCount: 1,
+        writeCount: 0,
+        uniqueWritePathCount: 0,
+        sameActionBlockCount: 0,
+      },
+    };
+  }
+
+  function makeV2Output(): Record<string, unknown> {
+    return {
+      taskId: ARTIFICER_TASK_ID,
+      sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
+      implementationCode:
+        'function evaluate(input, helpers) { return helpers.getToolName(input) === "edit" ? { decision: "block", matched: true, reason: "x" } : { decision: "allow", matched: false, reason: "x" }; }',
+      goldenTraceCases: [
+        {
+          caseId: 'negative-1',
+          kind: 'negative',
+          toolName: 'edit',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'block',
+          ruleContext: makeValidRuleContext(),
+        },
+        {
+          caseId: 'positive-1',
+          kind: 'positive',
+          toolName: 'read',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'allow',
+          ruleContext: makeValidRuleContext(),
+        },
+      ],
+      affectedTools: ['edit'],
+      implementationSummary: 'Block writes to system directories',
+      risks: [],
+      sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
+      generatedAt: '2026-06-17T00:00:00.000Z',
+      requiresContextVersion: 2,
+      evidenceRefs: ['pain:1', 'tool_call:abc'],
+    };
+  }
+
+  // ── propose_correction is forbidden in v2 ──
+
+  it('rejects v2 output with propose_correction in goldenTraceCases', async () => {
+    const output = makeV2Output();
+    const cases = output.goldenTraceCases as Record<string, unknown>[];
+    cases[0] = {
+      ...cases[0],
+      expectedDecision: 'propose_correction',
+      expectedProposedParams: { path: '/safe/path' },
+      expectedApplicationMode: 'shadow',
+    };
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('propose_correction') && e.includes('forbidden'))).toBe(true);
+  });
+
+  // ── evidenceRefs is required for v2 ──
+
+  it('rejects v2 output missing evidenceRefs', async () => {
+    const output = makeV2Output();
+    delete output.evidenceRefs;
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('evidencerefs'))).toBe(true);
+  });
+
+  it('rejects v2 output with empty evidenceRefs array', async () => {
+    const output = makeV2Output();
+    output.evidenceRefs = [];
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('evidencerefs'))).toBe(true);
+  });
+
+  it('rejects v2 output with non-array evidenceRefs', async () => {
+    const output = makeV2Output();
+    output.evidenceRefs = 'pain:1';
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('evidencerefs'))).toBe(true);
+  });
+
+  it('rejects v2 output with evidenceRefs containing non-string elements', async () => {
+    const output = makeV2Output();
+    output.evidenceRefs = ['pain:1', 42];
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('evidencerefs'))).toBe(true);
+  });
+
+  it('rejects v2 output with evidenceRefs containing empty strings', async () => {
+    const output = makeV2Output();
+    output.evidenceRefs = ['pain:1', '  '];
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.toLowerCase().includes('evidencerefs'))).toBe(true);
+  });
+
+  // ── v1 does not require evidenceRefs (backward compatible) ──
+
+  it('accepts v1 output without evidenceRefs (v1 zero-change)', async () => {
+    const output: Record<string, unknown> = {
+      taskId: ARTIFICER_TASK_ID,
+      sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
+      implementationCode:
+        'function evaluate(input, helpers) { return helpers.getToolName(input) === "edit" ? { decision: "block", matched: true, reason: "x" } : { decision: "allow", matched: false, reason: "x" }; }',
+      goldenTraceCases: [
+        { caseId: 'negative-1', kind: 'negative', toolName: 'edit', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'positive-1', kind: 'positive', toolName: 'read', params: { path: '/etc/passwd' }, expectedDecision: 'allow' },
+      ],
+      affectedTools: ['edit'],
+      implementationSummary: 'Block writes to system directories',
+      risks: [],
+      sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
+      generatedAt: '2026-06-17T00:00:00.000Z',
+    };
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
+
+  // ── v2 output with valid evidenceRefs is accepted ──
+
+  it('accepts valid v2 output with evidenceRefs', async () => {
+    const result = await validator.validate(makeV2Output(), ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 });
