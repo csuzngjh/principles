@@ -142,7 +142,9 @@ export type {
   CandidateIntakeOutput,
   LedgerPrincipleEntry,
   LedgerAdapter,
+  Recommendation,
 } from './candidate-intake.js';
+export { validateRecommendation } from './candidate-intake.js';
 export { CandidateIntakeService } from './candidate-intake-service.js';
 export type { CandidateIntakeServiceOptions } from './candidate-intake-service.js';
 
