@@ -354,7 +354,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // V2: Migrate queue to current schema if needed
-        let queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+        let queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
 
         // Runtime v2 owns pain diagnosis. Drop legacy pain_diagnosis queue items so
         // EvolutionWorker cannot revive the old .pain_flag -> prompt path.
@@ -421,11 +421,6 @@ export async function registerEvolutionTaskSession(
         // Previously this inlined JSON.parse + migrate cast without validating,
         // so malformed queue items could reach the find() below. Reusing the
         // shared loader keeps a single chokepoint for queue validation.
-        // Note: loadEvolutionQueue returns core/evolution-types.EvolutionQueueItem,
-        // which saveEvolutionQueue also accepts. We deliberately avoid annotating
-        // with the local EvolutionQueueItem interface (line 87) to prevent the
-        // known type-drift between the two definitions (see follow-up: unify the
-        // three EvolutionQueueItem copies).
         const queue = loadEvolutionQueue(queuePath);
 
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
