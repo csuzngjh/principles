@@ -67,7 +67,10 @@ function AuthRoutes() {
     fetchWorkspaces()
       .then((result) => {
         if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-          setCurrentWorkspaceId(result.data[0].name);
+          const firstWorkspace = result.data[0];
+          if (firstWorkspace) {
+            setCurrentWorkspaceId(firstWorkspace.name);
+          }
         }
       })
       .catch(() => {
