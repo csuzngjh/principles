@@ -67,6 +67,7 @@ function makeValidConfig(): PdConfig {
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
+        signalCollector: { enabled: false },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },

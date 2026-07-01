@@ -1801,3 +1801,30 @@ export type {
   ThinkingScenarioContext,
   BuiltinPatternEntry,
 } from './thinking-models/index.js';
+
+// SignalCollector — 统一信号采集层 (correction + empathy 上游融合)
+export {
+  scanKeywords,
+  buildLlmPrompt,
+  parseLlmClassification,
+  collectSync,
+  mapLlmResultToOutput,
+  buildEvidence,
+} from './signal-collector/index.js';
+export type {
+  KeywordCategory,
+  TermSource,
+  UnifiedKeyword,
+  UnifiedKeywordStore,
+  PendingTerm,
+  PendingTermStore,
+  SignalCollectorConfig,
+  SignalStrength,
+  DetectionSource,
+  MatchedPrecision,
+  SignalEvidence,
+  SignalCollectorOutput,
+  LlmClassificationResult,
+  KeywordScanResult,
+  ParseResult,
+} from './signal-collector/index.js';

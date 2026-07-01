@@ -92,6 +92,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'file-store.ts',
     'pd-task-store.ts',
     'empathy-keyword-matcher.ts',
+    // SignalCollector: unified signal collection I/O host (correction + empathy merge).
+    'signal-collector-host.ts',
     'session-tracker.ts',
     'principle-tree-ledger.ts',
     'evolution-logger.ts',
