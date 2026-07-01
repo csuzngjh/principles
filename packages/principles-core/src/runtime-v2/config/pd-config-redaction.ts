@@ -14,6 +14,7 @@ import {
   type RedactedFeatureSummary,
   type RedactedRuntimeProfileSummary,
   type RedactedAgentSummary,
+  type RedactedProfileSummary,
   type RuntimeProfile,
   type InternalAgentName,
   DANGEROUS_KEYS,
@@ -164,6 +165,14 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
     });
   }
 
+  // Profile summary (PRI-304/PRI-466)
+  const profile: RedactedProfileSummary | undefined = effective.resolvedProfile ? {
+    audit_level: effective.resolvedProfile.audit_level,
+    evolution_mode: effective.resolvedProfile.evolution_mode,
+    risk_path_count: effective.resolvedProfile.risk_paths.length,
+    custom_guard_count: effective.resolvedProfile.custom_guards.length,
+  } : undefined;
+
   return {
     version: config.version,
     source,
@@ -173,6 +182,8 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
     defaultRuntime: config.internalAgents.defaultRuntime,
     agents,
     ui: config.ui,
+    profile,
+    contextInjection: effective.resolvedContextInjection,
     warnings,
   };
 }

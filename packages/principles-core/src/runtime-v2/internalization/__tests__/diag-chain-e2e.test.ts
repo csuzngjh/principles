@@ -35,7 +35,7 @@ import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../../config/pd-config-feature-flags.js';
-import { computeEffectivePdConfig } from '../../config/index.js';
+import { computeEffectivePdConfig, resolveProfile } from '../../config/index.js';
 import type { EffectivePdConfig, PdConfig } from '../../config/pd-config-types.js';
 import { createPainSignalBridge } from '../../pain-signal-runtime-factory.js';
 import type { LedgerAdapter } from '../../candidate-intake.js';
@@ -394,6 +394,12 @@ describe('Diag chain e2e', () => {
       },
       source: 'user_config',
       warnings: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
     };
 
     const featureFlags = computeFeatureFlagsFromConfig(effectiveConfig);
@@ -419,6 +425,12 @@ describe('Diag chain e2e', () => {
       source: 'user_config',
       warnings: [],
       featuresChangedFromDefault: ['diagnostician_split_pipeline'],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
     };
 
     // Use os.tmpdir() to avoid polluting disk root with /invalid-path-a on Windows
@@ -549,6 +561,12 @@ describe('Diag chain e2e', () => {
       },
       source: 'user_config',
       warnings: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
     };
 
     const featureFlags = computeFeatureFlagsFromConfig(effectiveConfig);
