@@ -26,6 +26,7 @@ const EXPECTED_AGENT_NAMES = [
   "rolloutReviewer",
   "correctionObserver",
   "empathyObserver",
+  "signalCollector",
 ] as const;
 
 const EXPECTED_GROUP_IDS = [
@@ -36,11 +37,11 @@ const EXPECTED_GROUP_IDS = [
 ] as const;
 
 describe("AGENT_METADATA: coverage", () => {
-  it("covers all 9 internal agent names", () => {
+  it("covers all 10 internal agent names", () => {
     for (const name of EXPECTED_AGENT_NAMES) {
       expect(Object.hasOwn(AGENT_METADATA, name)).toBe(true);
     }
-    expect(Object.keys(AGENT_METADATA)).toHaveLength(9);
+    expect(Object.keys(AGENT_METADATA)).toHaveLength(10);
   });
 
   it("each agent has non-empty bilingual display name, role, detail, impact", () => {
@@ -64,6 +65,7 @@ describe("AGENT_METADATA: coverage", () => {
     const sidechainAgentsWithEmptyTechDetail = new Set([
       "correctionObserver",
       "empathyObserver",
+      "signalCollector",
     ]);
     for (const name of EXPECTED_AGENT_NAMES) {
       const meta = AGENT_METADATA[name];
