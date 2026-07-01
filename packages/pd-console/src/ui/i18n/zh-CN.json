@@ -735,6 +735,10 @@
       "selectedNOfTotal": "已选 {{selected}} / {{total}}",
       "nTermsPendingReview": "{{count}} 条待审",
       "weightLabel": "权重：{{percent}}%",
+      "addKeyword": "添加关键词",
+      "addKeywordDialogTitle": "添加信号关键词",
+      "submitAdd": "添加",
+      "noSearchResults": "无匹配关键词",
       "pendingTerms": {
         "title": "待确认信号词",
         "subtitle": "信号采集器建议以下术语从未匹配消息中提取为潜在关键词。审查后确认或忽略。",

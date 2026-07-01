@@ -735,6 +735,10 @@
       "selectedNOfTotal": "Selected {{selected}} of {{total}}",
       "nTermsPendingReview": "{{count}} terms pending review",
       "weightLabel": "Weight: {{percent}}%",
+      "addKeyword": "Add Keyword",
+      "addKeywordDialogTitle": "Add Signal Keyword",
+      "submitAdd": "Add",
+      "noSearchResults": "No matching keywords",
       "pendingTerms": {
         "title": "Pending Signal Terms",
         "subtitle": "The signal collector suggests the following terms as potential keywords from unmatched messages. Review and confirm or ignore.",

@@ -88,6 +88,22 @@ describe("validateUnifiedKeywordStore", () => {
     expect(validateUnifiedKeywordStore(raw)).toBeNull();
   });
 
+  it("rejects term with NaN weight", () => {
+    const raw = {
+      version: 1,
+      terms: {
+        test: {
+          term: "test",
+          category: "correction",
+          weight: NaN,
+          precision: "high",
+          source: "seed",
+        },
+      },
+    };
+    expect(validateUnifiedKeywordStore(raw)).toBeNull();
+  });
+
   it("rejects term with out-of-range weight", () => {
     const raw = {
       version: 1,

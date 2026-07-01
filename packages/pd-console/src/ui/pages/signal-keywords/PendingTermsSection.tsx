@@ -34,7 +34,7 @@ export function PendingTermsSection({
   onConfirmAll,
   onIgnoreAll,
 }: PendingTermsSectionProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const hasBatchOps = !!onConfirmAll || !!onIgnoreAll;
@@ -166,7 +166,7 @@ export function PendingTermsSection({
                   {term.term}
                 </span>
                 <span className="text-[11px] text-ink-4 mt-0.5 block">
-                  {new Date(term.discoveredAt).toLocaleDateString()}
+                  {new Date(term.discoveredAt).toLocaleDateString(i18n.language)}
                 </span>
               </div>
 

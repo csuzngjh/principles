@@ -60,6 +60,7 @@ export function validateUnifiedKeywordStore(
       t.term.length === 0 ||
       (t.category !== 'correction' && t.category !== 'empathy') ||
       typeof t.weight !== 'number' ||
+      Number.isNaN(t.weight) ||
       t.weight < 0 ||
       t.weight > 1 ||
       (t.precision !== 'high' && t.precision !== 'ambiguous') ||

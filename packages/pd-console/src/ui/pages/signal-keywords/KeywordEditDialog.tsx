@@ -63,7 +63,7 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
             <span>
               <Button disabled variant="default" size="sm">
                 <Plus className="h-4 w-4 mr-1" />
-                {t("pages.signalKeywords.title")}
+                {t("pages.signalKeywords.addKeyword")}
               </Button>
             </span>
           </TooltipTrigger>
@@ -73,7 +73,7 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
         <DialogTrigger asChild>
           <Button variant="default" size="sm">
             <Plus className="h-4 w-4 mr-1" />
-            {t("pages.signalKeywords.title")}
+            {t("pages.signalKeywords.addKeyword")}
           </Button>
         </DialogTrigger>
       )}
@@ -81,7 +81,7 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
           <DialogTitle className="text-[15px] font-semibold text-ink">
-            {t("pages.signalKeywords.title")}
+            {t("pages.signalKeywords.addKeywordDialogTitle")}
           </DialogTitle>
         </DialogHeader>
 
@@ -179,7 +179,7 @@ export function KeywordEditDialog({ onSubmit }: KeywordEditDialogProps) {
             onClick={handleSubmit}
             disabled={isDisabled || !term.trim()}
           >
-            {t("pages.signalKeywords.saving")}
+            {t("pages.signalKeywords.submitAdd")}
           </Button>
         </div>
       </DialogContent>

@@ -112,7 +112,7 @@ export function KeywordListSection({
       {filtered.length === 0 ? (
         <div className="px-4 py-12 text-center text-[13px] text-ink-4 border border-dashed border-line-2 rounded-[4px]">
           {search.trim()
-            ? t("pages.signalKeywords.searchPlaceholder")
+            ? t("pages.signalKeywords.noSearchResults")
             : t("pages.signalKeywords.empty")}
         </div>
       ) : (
