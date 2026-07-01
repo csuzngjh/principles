@@ -176,7 +176,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
 | ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
 | ERR-078 | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification | PRI-454 / PR #1043 |
-| ERR-083 | Tightening shared store contract by adding rejection guard (FK check) without auditing cross-package callers — downstream packages break | PRI-473 / PR #1066 |
+| ERR-083 | Changing a shared contract (store guard, type union, service method) without auditing all cross-package consumers (callers, validators, tests, mocks) — downstream packages break | PRI-473 / PR #1066; PRI-491 / PR #1137 |
 | ERR-084 | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA | PR #1068 |
 
 ---
@@ -192,9 +192,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-189
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — `as`-bypass at trust boundaries (JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, test fixtures).
+  - 2026-07-01 PR #1137 (PRI-491): `runtime-activation.ts` and `ActivationsConsoleModel.ts` used `parsed as Record<string, unknown>` to narrow `JSON.parse(artifact.contentJson)` — runtime-contract scanner blocked the push; replaced with `isRecord()` type guard (`value is Record<string, unknown>`) (rc-2-no-as-bypass)
+  - 2026-06-30 PR #1132: `createSignalLlmClassifierFromConfig` used `as Record<string, unknown>` + `as string` to access `payload.output` from LLM adapter output — replaced with `Object.hasOwn()` + `typeof` type guard (rc-2-no-as-bypass)
   - 2026-06-29 PR #1104: `parseIntentDocSections` used `as Record<string,string>` for index signature — removed cast (direct assignment is type-safe)
   - 2026-06-28 PR #1098 (PRI-483): test fixtures used `any`/`as any` in mock constructors — replaced with `as unknown as T`
-  - 2026-06-30 PR #1132: `createSignalLlmClassifierFromConfig` used `as Record<string, unknown>` + `as string` to access `payload.output` from LLM adapter output — replaced with `Object.hasOwn()` + `typeof` type guard (rc-2-no-as-bypass)
   - Earlier recurrences (PR#688-#1072): same `as`-bypass pattern across JSON parsing, SQLite rows, CLI inputs, LLM outputs, test fixtures. See git history.
 
 ---
@@ -791,9 +792,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 89 |
-| Last updated | 2026-06-30 |
+| Last updated | 2026-07-01 |
 | Top category | Schema & Type |
-| Recurring errors | 40 |
+| Recurring errors | 41 |
 
 ---
 
@@ -1266,18 +1267,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-083]** | Tightening shared store contract by adding rejection guard (FK check) without auditing cross-package callers — downstream packages break
+**[ERR-083]** | Changing a shared contract (store guard, type union, service method) without auditing all cross-package consumers (callers, validators, tests, mocks) — downstream packages break
 
-- **What happened**: In PRI-473, FK validation guards (throw if parent records missing) were added to three `principles-core` store methods (`createArtifact`, `enqueue`, `recordActivation`). Same-package tests seeded parent records, but cross-package callers were NOT audited — `pd-cli`, `pd-console`, and `openclaw-plugin` tests called these methods without seeding parents, causing 5 CI failures across 4 packages.
-- **Why it's wrong**: Adding a rejection guard tightens the contract: every existing caller must satisfy the new precondition. Same-package tests don't prove cross-package paths still work. EP-02 family — isolated tests pass while real paths break.
-- **Generalized failure mode**: When tightening a shared store/API contract by adding a rejection guard that throws, assistants must audit ALL cross-package callers, otherwise downstream packages break at runtime/CI.
-- **Correct approach**: Before adding a rejection guard: (1) grep all cross-package call sites; (2) verify each caller satisfies the new precondition; (3) run cross-package tests.
-- **How to prevent**: When adding `throw` guards to `principles-core` store methods consumed by other packages, the PR must grep all cross-package callers, confirm each satisfies the precondition, and run tests in each consuming package. Review trigger: new `throw` in `sqlite-*-store.ts` — check cross-package callers audited.
-- **Regression guard**: Cross-package CI tests now seed parent records in `pd-cli`, `pd-console`, and `openclaw-plugin`. Tests fail if FK guard is re-added without caller updates.
+- **What happened**: In PRI-473, FK validation guards (throw if parent records missing) were added to three `principles-core` store methods (`createArtifact`, `enqueue`, `recordActivation`). Same-package tests seeded parent records, but cross-package callers were NOT audited — `pd-cli`, `pd-console`, and `openclaw-plugin` tests called these methods without seeding parents, causing 5 CI failures across 4 packages. In PRI-491 (PR #1137), two contract changes were not propagated to all consumers: (1) the `ActivationRecord.status` type union changed from `'active' | 'inactive'` to `'active' | 'deactivated' | 'suspended_by_flag'`, but the UI-side `VALID_ACTIVATION_STATUSES` set, the integration test assertion, and the UI test were not updated; (2) a new `recordRuleHostSkipped` method was added to `EventLogService`, but the mock in `gate-rule-context-v2.vm-e2e.test.ts` was not updated, causing a `TypeError: eventLog.recordRuleHostSkipped is not a function` and a stale assertion expecting the old skip-message format.
+- **Why it's wrong**: Changing a shared contract (adding a `throw` guard, changing a type union, adding a service method) tightens or shifts the contract: every existing consumer — callers, validators, tests, AND mocks — must satisfy the new shape. Same-package tests don't prove cross-package paths still work. EP-02 family — isolated tests pass while real paths break.
+- **Generalized failure mode**: When changing ANY shared contract (store guard, type union, service method signature, new service method) that crosses package boundaries, assistants must audit ALL cross-package consumers (callers, validators, tests, AND mocks), otherwise downstream packages break at runtime/CI.
+- **Correct approach**: Before changing a shared contract: (1) grep all cross-package call sites AND consumers (validators, tests, mocks); (2) verify each consumer satisfies the new shape; (3) run cross-package tests. For type-union changes: grep for `Set<string>` validators and `as` narrowing in UI layers. For new service methods: grep all `vi.mock` of that service and add the new method.
+- **How to prevent**: When changing a contract consumed by other packages, the PR must grep all cross-package consumers (callers, validators, tests, mocks), confirm each satisfies the new contract, and run tests in each consuming package. Review triggers: (a) new `throw` in `sqlite-*-store.ts`; (b) type-union change on a shared interface — grep `Set<string>` validators and `as` narrowing; (c) new method on a service that has `vi.mock` in tests — grep `vi.mock('../../src/core/<service>.js')` and update each mock.
+- **Regression guard**: Cross-package CI tests now seed parent records in `pd-cli`, `pd-console`, and `openclaw-plugin`. Tests fail if FK guard is re-added without caller updates. For PRI-491: `ActivationValidators.ts` `VALID_ACTIVATION_STATUSES` set includes the new enum values; vm-e2e mock includes `recordRuleHostSkipped`.
 - **Related ERRs**: ERR-070, ERR-077, EP-02
-- **Source**: PRI-473 / PR #1066
+- **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137
 - **Date**: 2026-06-26
-- **Recurrence**: None
+- **Recurrence**: Yes
+  - 2026-07-01 PR #1137 (PRI-491): status enum change `'active' | 'inactive'` → `'active' | 'deactivated' | 'suspended_by_flag'` not propagated to UI validator `VALID_ACTIVATION_STATUSES` set, integration test assertion, and UI test; new `recordRuleHostSkipped` method added to `EventLogService` but mock in `gate-rule-context-v2.vm-e2e.test.ts` not updated (TypeError) + assertion expected old skip-message format ("suspended because..." vs new "suspended_by_flag: ...")
 
 ---
 
