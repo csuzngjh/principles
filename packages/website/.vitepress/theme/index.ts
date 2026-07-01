@@ -7,6 +7,8 @@ import SystemPipeline from './components/SystemPipeline.vue'
 import EvolutionMenu from './components/EvolutionMenu.vue'
 import ThinkingLogCard from './components/ThinkingLogCard.vue'
 import MottoSection from './components/MottoSection.vue'
+import QuickInstallCard from './components/QuickInstallCard.vue'
+import InstallGuide from './components/InstallGuide.vue'
 
 export default {
   extends: DefaultTheme,
@@ -18,5 +20,7 @@ export default {
     app.component('EvolutionMenu', EvolutionMenu)
     app.component('ThinkingLogCard', ThinkingLogCard)
     app.component('MottoSection', MottoSection)
+    app.component('QuickInstallCard', QuickInstallCard)
+    app.component('InstallGuide', InstallGuide)
   }
 }

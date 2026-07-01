@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as childProcess from 'child_process';
+import * as path from 'path';
 import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir } from '../src/utils/env.js';
 
 vi.mock('fs');
@@ -88,7 +89,49 @@ describe('environment detection utilities', () => {
     });
   });
 
+  describe('OpenClaw readiness check', () => {
+    it('Given OpenClaw is installed, When checkEnvironment runs, Then hasOpenClaw is true with version', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          return 'openclaw 1.2.0';
+        }
+        return '';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(true);
+      expect(result.openclawVersion).toBe('openclaw 1.2.0');
+    });
+
+    it('Given OpenClaw is missing, When checkEnvironment runs, Then hasOpenClaw is false and version is absent', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          throw new Error('command not found');
+        }
+        return 'v18.0.0';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(false);
+      expect(result.openclawVersion).toBeUndefined();
+    });
+
+    it('Given only clawd alias is available, When checkEnvironment runs, Then hasOpenClaw is true via fallback', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version')) {
+          throw new Error('not found');
+        }
+        if (cmd.includes('clawd --version')) {
+          return 'clawd 2.1.3';
+        }
+        return 'v20.0.0';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(true);
+      expect(result.openclawVersion).toBe('clawd 2.1.3');
+    });
+  });
+
   describe('detectWorkspace', () => {
+    const defaultWorkspace = path.join('/home/user', 'clawd');
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
       delete process.env.PD_WORKSPACE_DIR;
@@ -118,7 +161,7 @@ describe('environment detection utilities', () => {
 
       const result = detectWorkspace();
 
-      expect(result.detectedPath).toBe('/home/user/clawd');
+      expect(result.detectedPath).toBe(defaultWorkspace);
       expect(result.exists).toBe(false);
       expect(result.isFirstInstall).toBe(true);
     });
@@ -127,8 +170,8 @@ describe('environment detection utilities', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
-        if (p.toString() === '/home/user/clawd') return true;
-        if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return true;
+        if (p.toString() === defaultWorkspace) return true;
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return true;
         return false;
       });
 
@@ -142,9 +185,9 @@ describe('environment detection utilities', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
-        if (p.toString() === '/home/user/clawd') return true;
-        if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return false;
-        if (p.toString() === '/home/user/clawd/AGENTS.md') return true;
+        if (p.toString() === defaultWorkspace) return true;
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return false;
+        if (p.toString() === path.join(defaultWorkspace, 'AGENTS.md')) return true;
         return false;
       });
 
@@ -158,13 +201,13 @@ describe('environment detection utilities', () => {
 
   describe('getOpenClawConfigDir', () => {
     it('returns correct config directory', () => {
-      expect(getOpenClawConfigDir()).toBe('/home/user/.openclaw');
+      expect(getOpenClawConfigDir()).toBe(path.join('/home/user', '.openclaw'));
     });
   });
 
   describe('getPluginExtDir', () => {
     it('returns correct plugin extension directory', () => {
-      expect(getPluginExtDir()).toBe('/home/user/.openclaw/extensions/principles-disciple');
+      expect(getPluginExtDir()).toBe(path.join('/home/user', '.openclaw', 'extensions', 'principles-disciple'));
     });
   });
 });

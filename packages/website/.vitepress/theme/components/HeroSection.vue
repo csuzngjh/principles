@@ -9,17 +9,20 @@
         </div>
         <h1 class="hero-title">
           Principles Disciple
-          <span class="hero-highlight">{{ lang === 'zh-CN' ? '让 AI 在关键决策时刻，不那么听话' : 'Make AI Less Obedient in Critical Moments' }}</span>
+          <span class="hero-highlight">{{ lang === 'zh-CN' ? '把你对 Agent 的反复纠正，沉淀为可审查、可撤回的行为原则' : 'Turn your repeated corrections into reviewed, reversible principles' }}</span>
         </h1>
         <p class="hero-desc">
           {{ lang === 'zh-CN' 
-            ? '硅基生命的思维操作系统。通过原则、反思与建设性摩擦，让 AI 在执行前先停顿、质疑、校准，摆脱"零摩擦陷阱"。' 
-            : 'A Thinking OS for silicon lifeforms. Injecting principles, reflection, and constructive friction to make AI pause, question, and calibrate before executing.' 
+            ? 'Owner 治理下的 Agent 行为内化系统。把行为证据沉淀为可审查、可回滚的原则，让原则进入 Agent 的后续行为。' 
+            : 'An owner-governed behavior internalization system. Turns repeated, owner-relevant behavioral evidence into reviewed, reversible principles that shape future agent behavior.' 
           }}
         </p>
         <div class="hero-actions">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/01-the-helmsman-crisis' : '/abyss/01-the-helmsman-crisis'" class="pd-btn pd-btn-brand">
-            {{ lang === 'zh-CN' ? '阅读思维深渊 (Abyss)' : 'Enter the Abyss' }}
+          <a :href="lang === 'zh-CN' ? '/zh/install' : '/install'" class="pd-btn pd-btn-brand">
+            {{ lang === 'zh-CN' ? '快速开始' : 'Quick Start' }}
+          </a>
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/01-the-helmsman-crisis' : '/abyss/01-the-helmsman-crisis'" class="pd-btn pd-btn-alt">
+            {{ lang === 'zh-CN' ? '阅读思维深渊' : 'Enter the Abyss' }}
           </a>
           <a href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener" class="pd-btn pd-btn-alt">
             {{ lang === 'zh-CN' ? 'GitHub 开源' : 'GitHub Repository' }}

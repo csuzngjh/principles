@@ -61,11 +61,25 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   if (!jsonMode) {
     logger.success(`Node.js ${env.nodeVersion}`);
-    if (!env.hasOpenClaw) {
-      logger.warn(t('openclaw_not_detected'));
+  }
+
+  if (!env.hasOpenClaw) {
+    if (jsonMode) {
+      console.log(JSON.stringify(buildFailureOutput(
+        'openclaw_not_found',
+        `${t('openclaw_required')} ${t('openclaw_install_hint')} | ${t('next_action')}: ${t('openclaw_rerun_hint')}`,
+      ), null, 2));
     } else {
-      logger.success(`OpenClaw ${env.openclawVersion}`);
+      logger.error(`\u274C ${t('openclaw_required')}`);
+      logger.info(`   ${t('openclaw_install_hint')}`);
+      logger.info(`   ${t('next_action')}: ${t('openclaw_rerun_hint')}`);
     }
+    process.exit(1);
+    return;
+  }
+
+  if (!jsonMode) {
+    logger.success(`OpenClaw ${env.openclawVersion}`);
   }
 
   if (jsonMode && !options.yes && !options.nonInteractive) {

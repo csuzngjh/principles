@@ -18,6 +18,7 @@ import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governa
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
 import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './routes/intent-decisions.js';
+import { handleOnboardingRoute, disposeOnboardingModels } from './routes/onboarding.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
@@ -271,6 +272,7 @@ async function closeServices(): Promise<void> {
   disposeEvidenceChainModels();
   disposeIntentModels();
   disposeIntentDecisionModels();
+  disposeOnboardingModels();
 }
 
 // ── Route handler ───────────────────────────────────────────────────────────
@@ -403,6 +405,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/v1/intent-decisions' || urlPath.startsWith('/api/v1/intent-decisions/')) {
         const subPath = urlPath.slice('/api/v1/intent-decisions'.length);
         asyncHandler(() => handleIntentDecisionsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // Onboarding wizard: POST /api/v1/onboarding/run-demo — spawns `pd demo story-a`
+      // (spec 2026-06-30-new-user-onboarding-design.md §6.3 改动 5)
+      if (urlPath === '/api/v1/onboarding' || urlPath.startsWith('/api/v1/onboarding/')) {
+        const subPath = urlPath === '/api/v1/onboarding' ? '' : urlPath.slice('/api/v1/onboarding'.length);
+        asyncHandler(() => handleOnboardingRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
