@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CircuitDiagram } from '../../components/onboarding/CircuitDiagram.js';
 import { DemoResultView, type DemoResultData, type DemoStage } from '../../components/onboarding/DemoResultView.js';
 import { getOnboardingState, setOnboardingState, type OnboardingState } from '../../utils/onboarding-state.js';
 import { request } from '../../api.js';
+
+// Polling configuration for step 3 evidence detection (spec §6.5.2).
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const POLL_INTERVAL_MS = 30 * 1000;
 
 interface WelcomePageProps {
   workspaceId: string;
@@ -50,6 +54,12 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const [demoStatus, setDemoStatus] = useState<DemoStatus>('idle');
   const [demoResult, setDemoResult] = useState<DemoResultData | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
+  const [pollingActive, setPollingActive] = useState(false);
+  const [pollingStatus, setPollingStatus] = useState<'idle' | 'polling' | 'timeout' | 'evidence-found'>('idle');
+
+  // Refs for polling cleanup (spec 6.5.2 test case 3: unmount clears timers).
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // If onboarding was already completed for this workspace, skip the wizard.
   useEffect(() => {
@@ -93,6 +103,62 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const skipOnboarding = useCallback(() => {
     completeOnboarding('skipped');
   }, [completeOnboarding]);
+
+  // EP-05 (Loop State Freshness): each poll fetches fresh evidence.
+  // rc-1: evidence-chain response is treated as unknown and validated.
+  const stopPolling = useCallback(() => {
+    setPollingActive(false);
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    setPollingActive(true);
+    setPollingStatus('polling');
+
+    // Set 2-hour timeout (spec 6.5.2 test case 2: friendly hint on timeout).
+    pollingTimeoutRef.current = setTimeout(() => {
+      setPollingStatus('timeout');
+      stopPolling();
+    }, TWO_HOURS_MS);
+
+    // Poll every 30 seconds for new evidence (spec 6.5.2 test case 1).
+    const checkForEvidence = async () => {
+      try {
+        const response = await request('/api/v1/evidence-chain');
+        if (response.success && response.data) {
+          // rc-1: treat parsed JSON as unknown, validate shape before use.
+          // rc-5: use Object.hasOwn, not `in`, for untrusted keys.
+          const data = response.data;
+          if (typeof data === 'object' && data !== null && Object.hasOwn(data, 'records')) {
+            const records = (data as { records: unknown }).records;
+            if (Array.isArray(records) && records.length > 0) {
+              setPollingStatus('evidence-found');
+              stopPolling();
+            }
+          }
+        }
+      } catch {
+        // Continue polling on transient errors (rc-9: status reflects polling).
+      }
+    };
+
+    checkForEvidence();
+    pollingIntervalRef.current = setInterval(checkForEvidence, POLL_INTERVAL_MS);
+  }, [stopPolling]);
+
+  // Cleanup on unmount (spec 6.5.2 test case 3: no memory leak).
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
 
   return (
     <div className="welcome-page" role="main">
@@ -164,18 +230,53 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
             <span className="prompt-label">{t('pages.welcome.step3.examplePrompt')}</span>
             <code className="prompt-text">{t('pages.welcome.step3.examplePromptText')}</code>
           </div>
-          <p className="window-hint">{t('pages.welcome.step3.windowHint')}</p>
-          <div className="welcome-actions">
-            <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('demo')}>
-              {t('pages.welcome.step3.tryNowButton')}
-            </button>
-            <button className="pd-btn pd-btn-alt" onClick={() => completeOnboarding('demo')}>
-              {t('pages.welcome.step3.goToFocusButton')}
-            </button>
-            <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
-              {t('pages.welcome.step3.skipButton')}
-            </button>
-          </div>
+
+          {pollingStatus === 'idle' && (
+            <>
+              <p className="window-hint">{t('pages.welcome.step3.windowHint')}</p>
+              <div className="welcome-actions">
+                <button className="pd-btn pd-btn-brand" onClick={() => { startPolling(); }}>
+                  {t('pages.welcome.step3.tryNowButton')}
+                </button>
+                <button className="pd-btn pd-btn-alt" onClick={() => completeOnboarding('demo')}>
+                  {t('pages.welcome.step3.goToFocusButton')}
+                </button>
+                <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
+                  {t('pages.welcome.step3.skipButton')}
+                </button>
+              </div>
+            </>
+          )}
+
+          {pollingStatus === 'polling' && (
+            <div className="polling-active" role="status" aria-live="polite">
+              <p>{t('pages.welcome.step3.pollingActive')}</p>
+              <button className="pd-btn pd-btn-alt" onClick={() => { stopPolling(); completeOnboarding('demo'); }}>
+                {t('pages.welcome.step3.stopPollingButton')}
+              </button>
+            </div>
+          )}
+
+          {pollingStatus === 'evidence-found' && (
+            <div className="polling-success" role="status">
+              <p>{t('pages.welcome.step3.evidenceFound')}</p>
+              <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('demo')}>
+                {t('pages.welcome.step3.goToFocusButton')}
+              </button>
+            </div>
+          )}
+
+          {pollingStatus === 'timeout' && (
+            <div className="polling-timeout" role="status">
+              <p>{t('pages.welcome.step3.timeoutHint')}</p>
+              <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('demo')}>
+                {t('pages.welcome.step3.goToFocusButton')}
+              </button>
+              <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
+                {t('pages.welcome.step3.skipButton')}
+              </button>
+            </div>
+          )}
         </section>
       )}
     </div>

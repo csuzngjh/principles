@@ -1038,7 +1038,11 @@
         "tryNowButton": "Try it now (2-hour window)",
         "goToFocusButton": "Got it, go to Focus",
         "skipButton": "Skip for now",
-        "windowHint": "We'll check back in 2 hours. No pressure — you can always record evidence later."
+        "windowHint": "We'll check back in 2 hours. No pressure — you can always record evidence later.",
+        "pollingActive": "Listening for evidence... We'll check every 30 seconds for 2 hours.",
+        "stopPollingButton": "Stop and continue",
+        "evidenceFound": "Evidence detected! You can now review it in the Focus page.",
+        "timeoutHint": "No evidence detected in 2 hours. That's okay — you can record evidence anytime with pd-pain-signal."
       },
       "progress": {
         "step1": "Welcome",

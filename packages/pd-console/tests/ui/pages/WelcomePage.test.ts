@@ -102,3 +102,32 @@ describe('WelcomePage component contract', () => {
     expect(componentSource).toContain("'demo'");
   });
 });
+
+describe('WelcomePage step 3 polling (spec 6.5.2)', () => {
+  it('Given WelcomePage, When parsed, Then has polling logic with 2-hour timeout', () => {
+    expect(componentSource).toContain('TWO_HOURS_MS');
+    expect(componentSource).toContain('2 * 60 * 60 * 1000');
+  });
+
+  it('Given WelcomePage, When parsed, Then has polling interval (30 seconds)', () => {
+    expect(componentSource).toContain('POLL_INTERVAL_MS');
+    expect(componentSource).toContain('30 * 1000');
+  });
+
+  it('Given WelcomePage, When parsed, Then has unmount cleanup (clearInterval + clearTimeout)', () => {
+    expect(componentSource).toContain('clearInterval');
+    expect(componentSource).toContain('clearTimeout');
+    expect(componentSource).toContain('return () =>');
+  });
+
+  it('Given WelcomePage, When parsed, Then polling statuses: idle/polling/timeout/evidence-found', () => {
+    expect(componentSource).toContain("'idle'");
+    expect(componentSource).toContain("'polling'");
+    expect(componentSource).toContain("'timeout'");
+    expect(componentSource).toContain("'evidence-found'");
+  });
+
+  it('Given WelcomePage, When parsed, Then calls /api/v1/evidence-chain for polling', () => {
+    expect(componentSource).toContain('/api/v1/evidence-chain');
+  });
+});

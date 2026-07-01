@@ -1038,7 +1038,11 @@
         "tryNowButton": "我现在就试试（2 小时窗口）",
         "goToFocusButton": "知道了，先看 Focus",
         "skipButton": "暂时跳过",
-        "windowHint": "我们会在 2 小时后查看。不强制——你随时可以稍后记录证据。"
+        "windowHint": "我们会在 2 小时后查看。不强制——你随时可以稍后记录证据。",
+        "pollingActive": "正在监听证据... 我们会每 30 秒检查一次，持续 2 小时。",
+        "stopPollingButton": "停止并继续",
+        "evidenceFound": "检测到证据！你现在可以在 Focus 页面查看。",
+        "timeoutHint": "2 小时内未检测到证据。没关系——你随时可以用 pd-pain-signal 记录证据。"
       },
       "progress": {
         "step1": "欢迎",
