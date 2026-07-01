@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getNestedRecord, getNestedString, parseJsonRecord } from "../i18n-test-helper.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // __dirname = packages/pd-console/tests/ui/components
@@ -54,8 +55,8 @@ describe("CircuitDiagram: i18n string routing (EP-11)", () => {
 });
 
 describe("CircuitDiagram: i18n keys exist in both locale files (EP-11)", () => {
-  const en = JSON.parse(readSrc("i18n/en.json")) as Record<string, unknown>;
-  const zh = JSON.parse(readSrc("i18n/zh-CN.json")) as Record<string, unknown>;
+  const en = getNestedRecord(parseJsonRecord(readSrc("i18n/en.json")), ["pages", "welcome", "step1"]);
+  const zh = getNestedRecord(parseJsonRecord(readSrc("i18n/zh-CN.json")), ["pages", "welcome", "step1"]);
 
   // pages.welcome.step1.circuitLabel + circuitNodes.{evidence,principle,ownerGate,behavior}
   const requiredKeys = [
@@ -68,23 +69,13 @@ describe("CircuitDiagram: i18n keys exist in both locale files (EP-11)", () => {
 
   for (const key of requiredKeys) {
     it(`en.json has pages.welcome.step1.${key}`, () => {
-      const step1 = (en as { pages: { welcome: { step1: Record<string, unknown> } } }).pages.welcome.step1;
       const parts = key.split(".");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let node: any = step1;
-      for (const p of parts) node = node[p];
-      expect(typeof node, `en.json missing pages.welcome.step1.${key}`).toBe("string");
-      expect((node as string).length).toBeGreaterThan(0);
+      expect(getNestedString(en, parts).length).toBeGreaterThan(0);
     });
 
     it(`zh-CN.json has pages.welcome.step1.${key}`, () => {
-      const step1 = (zh as { pages: { welcome: { step1: Record<string, unknown> } } }).pages.welcome.step1;
       const parts = key.split(".");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let node: any = step1;
-      for (const p of parts) node = node[p];
-      expect(typeof node, `zh-CN.json missing pages.welcome.step1.${key}`).toBe("string");
-      expect((node as string).length).toBeGreaterThan(0);
+      expect(getNestedString(zh, parts).length).toBeGreaterThan(0);
     });
   }
 });
@@ -121,7 +112,7 @@ describe("CircuitDiagram: brand charter compliance", () => {
   it("uses thin lines (strokeWidth 1.5) for connecting lines", () => {
     // All 4 connecting lines share strokeWidth="1.5"
     const lineStrokeMatches =
-      COMPONENT_SOURCE.match(/stroke="var\(--accent\)" strokeWidth="1\.5"/g) ?? [];
+      COMPONENT_SOURCE.match(/stroke="var\(--color-gov\)" strokeWidth="1\.5"/g) ?? [];
     expect(lineStrokeMatches.length).toBe(4);
   });
 
@@ -135,10 +126,10 @@ describe("CircuitDiagram: brand charter compliance", () => {
   });
 
   it("uses brand CSS variables for fill/stroke, not raw colors", () => {
-    expect(COMPONENT_SOURCE).toContain("var(--accent)");
-    expect(COMPONENT_SOURCE).toContain("var(--surface)");
-    expect(COMPONENT_SOURCE).toContain("var(--border)");
-    expect(COMPONENT_SOURCE).toContain("var(--text-main)");
+    expect(COMPONENT_SOURCE).toContain("var(--color-gov)");
+    expect(COMPONENT_SOURCE).toContain("var(--color-surface)");
+    expect(COMPONENT_SOURCE).toContain("var(--color-border)");
+    expect(COMPONENT_SOURCE).toContain("var(--color-ink)");
   });
 });
 
@@ -151,7 +142,7 @@ describe("CircuitDiagram: prop contracts", () => {
 
   it("drives node fill from highlightNode (accent when highlighted)", () => {
     expect(COMPONENT_SOURCE).toContain(
-      "fill={isHighlighted ? 'var(--accent)' : 'var(--surface)'}",
+      "fill={isHighlighted ? 'var(--color-gov)' : 'var(--color-surface)'}",
     );
   });
 

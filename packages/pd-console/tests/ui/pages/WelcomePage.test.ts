@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getNestedRecord, parseJsonRecord } from '../i18n-test-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // __dirname = packages/pd-console/tests/ui/pages
@@ -32,6 +33,14 @@ function readSrc(relPath: string): string {
 const componentSource = readSrc('pages/welcome/WelcomePage.tsx');
 
 describe('WelcomePage component contract', () => {
+  it('rejects malformed demo stages instead of filtering them into partial success', () => {
+    expect(componentSource).toContain('d.stages.every(isDemoStage)');
+    expect(componentSource).not.toContain('d.stages.filter(isDemoStage)');
+  });
+  it('does not navigate away when onboarding state cannot be persisted', () => {
+    expect(componentSource).toContain('if (!setOnboardingState(workspaceId');
+    expect(componentSource).toContain('pages.welcome.stateSaveError');
+  });
   it('Given WelcomePage source, When parsed, Then has 3 steps with step state', () => {
     expect(componentSource).toContain('useState<1 | 2 | 3>(1)');
     expect(componentSource).toContain('step === 1');
@@ -76,16 +85,12 @@ describe('WelcomePage component contract', () => {
   });
 
   it('Given i18n keys, When checked, Then all exist in en.json and zh-CN.json', () => {
-    const enJson = JSON.parse(readSrc('i18n/en.json')) as {
-      pages: { welcome: { title: unknown; step1: { title: unknown } } };
-    };
-    const zhJson = JSON.parse(readSrc('i18n/zh-CN.json')) as {
-      pages: { welcome: { title: unknown; step1: { title: unknown } } };
-    };
-    expect(enJson.pages.welcome.title).toBeDefined();
-    expect(zhJson.pages.welcome.title).toBeDefined();
-    expect(enJson.pages.welcome.step1.title).toBeDefined();
-    expect(zhJson.pages.welcome.step1.title).toBeDefined();
+    const en = getNestedRecord(parseJsonRecord(readSrc('i18n/en.json')), ['pages', 'welcome']);
+    const zh = getNestedRecord(parseJsonRecord(readSrc('i18n/zh-CN.json')), ['pages', 'welcome']);
+    expect(en.title).toBeDefined();
+    expect(zh.title).toBeDefined();
+    expect(getNestedRecord(en, ['step1']).title).toBeDefined();
+    expect(getNestedRecord(zh, ['step1']).title).toBeDefined();
   });
 
   it('Given WelcomePage, When parsed, Then has accessibility roles', () => {

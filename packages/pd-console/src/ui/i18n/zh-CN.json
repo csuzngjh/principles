@@ -1001,6 +1001,7 @@
     "welcome": {
       "title": "欢迎使用 Principles Disciple",
       "subtitle": "把你对智能体的反复纠正，沉淀为可审查、可撤回的行为原则。",
+      "stateSaveError": "无法保存引导进度，请检查浏览器存储权限后重试。",
       "stepIndicator": "第 {{current}} 步 / 共 {{total}} 步",
       "step1": {
         "title": "PD 是什么？",
@@ -1164,7 +1165,8 @@
       "title": "引导流程",
       "resetButton": "重置引导状态",
       "resetConfirm": "这将在下次登录时重新启动引导向导。继续吗？",
-      "resetSuccess": "引导状态已重置。下次访问时会看到欢迎页。"
+      "resetSuccess": "引导状态已重置。下次访问时会看到欢迎页。",
+      "resetFailed": "无法重置引导，请检查浏览器存储权限后重试。"
     },
     "onboardingFlag": {
       "title": "引导功能",

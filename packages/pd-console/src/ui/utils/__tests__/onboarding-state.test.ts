@@ -19,6 +19,14 @@ describe('Onboarding state with workspaceId dimension', () => {
     localStorageMock.clear();
     localStorageMock.getItem.mockClear();
     localStorageMock.setItem.mockClear();
+    localStorageMock.removeItem.mockClear();
+  });
+
+  it('reports write and reset failures so callers cannot show false success', () => {
+    localStorageMock.setItem.mockImplementationOnce(() => { throw new Error('quota'); });
+    expect(setOnboardingState('ws-full', { completed: true, step: 3, status: 'demo' })).toBe(false);
+    localStorageMock.removeItem.mockImplementationOnce(() => { throw new Error('blocked'); });
+    expect(resetOnboardingState('ws-full')).toBe(false);
   });
 
   it('Given new workspace, When getOnboardingState called, Then returns default incomplete state', () => {
@@ -57,6 +65,15 @@ describe('Onboarding state with workspaceId dimension', () => {
     const state = getOnboardingState('ws-broken');
     expect(state.completed).toBe(false);
     expect(state.status).toBe('pending');
+  });
+
+  it('Given non-string completedAt, When state is loaded, Then rejects the malformed contract', () => {
+    localStorageMock.getItem.mockReturnValueOnce(JSON.stringify({
+      completed: true, step: 3, status: 'evidence_found', completedAt: 123,
+    }));
+    expect(getOnboardingState('ws-invalid-date')).toEqual({
+      completed: false, step: 0, status: 'pending',
+    });
   });
 
   it('Given localStorage key prefix, Then key format is pd_onboarding_<workspaceId>', () => {

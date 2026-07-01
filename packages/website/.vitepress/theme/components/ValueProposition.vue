@@ -58,12 +58,12 @@
         <h3>{{ lang === 'zh-CN' ? '行为内化系统' : 'Behavior Internalization' }}</h3>
         <p class="card-text">
           {{ lang === 'zh-CN'
-            ? '彻底告别静态提示词硬编码。PD 构建起"硬拦截、软推理、重训练"的三层内化引擎，使得原则能够根据痛觉反馈进行分层沉淀与自适应进化。'
-            : 'Break free from static hard-coded prompts. PD coordinates L1 prompts, L2 sandbox guards, and L3 micro-tuning weights to let your system dynamically evolve over time.'
+            ? '不再依赖反复修改静态提示词。PD 把 Owner 审核过的纠正沉淀为可追溯、可撤回的行为原则。'
+            : 'Move beyond repeatedly editing static prompts. PD turns owner-reviewed corrections into traceable, reversible behavior principles.'
           }}
         </p>
         <div class="card-footer">
-          <span class="pill">{{ lang === 'zh-CN' ? '三层内化' : '3-Tier Logic' }}</span>
+          <span class="pill">{{ lang === 'zh-CN' ? 'Owner 审核' : 'Owner Reviewed' }}</span>
           <span class="pill">{{ lang === 'zh-CN' ? '持续原则沉淀' : 'Ongoing Principle Distillation' }}</span>
         </div>
       </div>

@@ -28,11 +28,15 @@ function storageKey(workspaceId: string): string {
  */
 function isOnboardingState(value: unknown): value is OnboardingState {
   if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
+  const completed = Object.hasOwn(value, 'completed') ? Reflect.get(value, 'completed') : undefined;
+  const step = Object.hasOwn(value, 'step') ? Reflect.get(value, 'step') : undefined;
+  const status = Object.hasOwn(value, 'status') ? Reflect.get(value, 'status') : undefined;
+  const completedAt = Object.hasOwn(value, 'completedAt') ? Reflect.get(value, 'completedAt') : undefined;
   return (
-    typeof v.completed === 'boolean' &&
-    typeof v.step === 'number' &&
-    (v.status === 'pending' || v.status === 'demo' || v.status === 'skipped' || v.status === 'evidence_found')
+    typeof completed === 'boolean' &&
+    typeof step === 'number' &&
+    (status === 'pending' || status === 'demo' || status === 'skipped' || status === 'evidence_found') &&
+    (!Object.hasOwn(value, 'completedAt') || typeof completedAt === 'string')
   );
 }
 
@@ -58,22 +62,26 @@ export function getOnboardingState(workspaceId: string): OnboardingState {
 /**
  * Set onboarding state for a specific workspace.
  */
-export function setOnboardingState(workspaceId: string, state: OnboardingState): void {
+export function setOnboardingState(workspaceId: string, state: OnboardingState): boolean {
   try {
     localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
+    return true;
   } catch (err) {
     // rc-9: surface the failure — don't silently swallow.
     console.error('[onboarding-state] Failed to save onboarding state:', err);
+    return false;
   }
 }
 
 /**
  * Reset onboarding state for a specific workspace (Settings page "reset" button).
  */
-export function resetOnboardingState(workspaceId: string): void {
+export function resetOnboardingState(workspaceId: string): boolean {
   try {
     localStorage.removeItem(storageKey(workspaceId));
-  } catch {
-    // fail gracefully
+    return true;
+  } catch (err) {
+    console.error('[onboarding-state] Failed to reset onboarding state:', err);
+    return false;
   }
 }

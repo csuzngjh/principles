@@ -74,7 +74,7 @@ beforeAll(() => {
   const fakeOpenclawName = process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw';
   const fakeOpenclawPath = path.join(fakeBinDir, fakeOpenclawName);
   const fakeOpenclawContent = process.platform === 'win32'
-    ? '@echo off\recho openclaw version 1.0.0-smoke\r\n'
+    ? '@echo off\r\necho openclaw version 1.0.0-smoke\r\n'
     : '#!/usr/bin/env sh\necho "openclaw version 1.0.0-smoke"\n';
   fs.writeFileSync(fakeOpenclawPath, fakeOpenclawContent, 'utf-8');
   if (process.platform !== 'win32') {

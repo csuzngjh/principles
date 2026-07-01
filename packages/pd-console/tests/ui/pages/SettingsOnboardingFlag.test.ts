@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getNestedRecord, parseJsonRecord } from '../i18n-test-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // __dirname = packages/pd-console/tests/ui/pages
@@ -31,10 +32,10 @@ const settingsSource = readFileSync(
   'utf8',
 );
 const apiSource = readFileSync(join(SRC_ROOT, 'ui', 'api.ts'), 'utf8');
-const enJson = JSON.parse(
+const enJson = parseJsonRecord(
   readFileSync(join(SRC_ROOT, 'ui', 'i18n', 'en.json'), 'utf8'),
 );
-const zhJson = JSON.parse(
+const zhJson = parseJsonRecord(
   readFileSync(join(SRC_ROOT, 'ui', 'i18n', 'zh-CN.json'), 'utf8'),
 );
 
@@ -65,6 +66,12 @@ describe('SettingsPage onboarding flag toggle', () => {
     expect(settingsSource).toContain('components.onboardingFlag.loadFailed');
   });
 
+  it('reloads the flag after saving a token and does not collapse a missing flag to false', () => {
+    expect(settingsSource).toContain('await loadOnboardingFlag()');
+    expect(settingsSource).toContain('if (!flag)');
+    expect(settingsSource).not.toContain('setOnboardingFlagEnabled(flag?.enabled ?? false)');
+  });
+
   it('Given api.ts, When parsed, Then patchFeatureFlag wires PATCH /features/:name (EP-02)', () => {
     expect(apiSource).toContain('PATCH');
     expect(apiSource).toContain('/api/v1/config/features/');
@@ -72,10 +79,10 @@ describe('SettingsPage onboarding flag toggle', () => {
   });
 
   it('Given i18n keys, When checked, Then onboardingFlag exists in en + zh with parity', () => {
-    expect(enJson.components.onboardingFlag).toBeDefined();
-    expect(zhJson.components.onboardingFlag).toBeDefined();
-    const enKeys = Object.keys(enJson.components.onboardingFlag).sort();
-    const zhKeys = Object.keys(zhJson.components.onboardingFlag).sort();
+    const enFlag = getNestedRecord(enJson, ['components', 'onboardingFlag']);
+    const zhFlag = getNestedRecord(zhJson, ['components', 'onboardingFlag']);
+    const enKeys = Object.keys(enFlag).sort();
+    const zhKeys = Object.keys(zhFlag).sort();
     expect(enKeys).toEqual(zhKeys);
     // Spot-check the required keys
     for (const key of [
@@ -88,8 +95,8 @@ describe('SettingsPage onboarding flag toggle', () => {
       'toggleFailed',
       'loadFailed',
     ]) {
-      expect(enJson.components.onboardingFlag[key]).toBeDefined();
-      expect(zhJson.components.onboardingFlag[key]).toBeDefined();
+      expect(enFlag[key]).toBeDefined();
+      expect(zhFlag[key]).toBeDefined();
     }
   });
 });

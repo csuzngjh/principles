@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getNestedRecord, getNestedString, parseJsonRecord } from "../i18n-test-helper.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // __dirname = packages/pd-console/tests/ui/components
@@ -48,8 +49,8 @@ describe("DemoResultView: i18n string routing (EP-11)", () => {
 });
 
 describe("DemoResultView: i18n keys exist in both locale files (EP-11)", () => {
-  const en = JSON.parse(readSrc("i18n/en.json")) as Record<string, unknown>;
-  const zh = JSON.parse(readSrc("i18n/zh-CN.json")) as Record<string, unknown>;
+  const en = getNestedRecord(parseJsonRecord(readSrc("i18n/en.json")), ["pages", "welcome", "step2"]);
+  const zh = getNestedRecord(parseJsonRecord(readSrc("i18n/zh-CN.json")), ["pages", "welcome", "step2"]);
 
   const keysToCheck = [
     "demoRunning",
@@ -65,15 +66,11 @@ describe("DemoResultView: i18n keys exist in both locale files (EP-11)", () => {
 
   for (const key of keysToCheck) {
     it(`en.json has pages.welcome.step2.${key}`, () => {
-      const step2 = (en as { pages: { welcome: { step2: Record<string, unknown> } } }).pages.welcome.step2;
-      expect(typeof step2[key], `en.json missing pages.welcome.step2.${key}`).toBe("string");
-      expect((step2[key] as string).length).toBeGreaterThan(0);
+      expect(getNestedString(en, [key]).length).toBeGreaterThan(0);
     });
 
     it(`zh-CN.json has pages.welcome.step2.${key}`, () => {
-      const step2 = (zh as { pages: { welcome: { step2: Record<string, unknown> } } }).pages.welcome.step2;
-      expect(typeof step2[key], `zh-CN.json missing pages.welcome.step2.${key}`).toBe("string");
-      expect((step2[key] as string).length).toBeGreaterThan(0);
+      expect(getNestedString(zh, [key]).length).toBeGreaterThan(0);
     });
   }
 });
@@ -103,8 +100,8 @@ describe("DemoResultView: demo result rendering shape", () => {
     expect(COMPONENT_SOURCE).toContain("demo-stages");
   });
 
-  it("renders the narrative when present", () => {
-    expect(COMPONENT_SOURCE).toContain("result.narrative");
+  it("does not expose the raw technical narrative to first-time users", () => {
+    expect(COMPONENT_SOURCE).not.toContain("result.narrative");
   });
 });
 

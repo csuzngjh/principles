@@ -6,7 +6,7 @@
     <div class="command-row">
       <code class="command-text">npx create-principles-disciple</code>
       <button class="copy-btn" @click="copyCommand">
-        {{ copied ? (lang === 'zh-CN' ? '已复制' : 'Copied') : (lang === 'zh-CN' ? '复制' : 'Copy') }}
+        {{ copyStatus === 'copied' ? (lang === 'zh-CN' ? '已复制' : 'Copied') : copyStatus === 'failed' ? (lang === 'zh-CN' ? '复制失败' : 'Copy failed') : (lang === 'zh-CN' ? '复制' : 'Copy') }}
       </button>
     </div>
     <div class="card-footer">
@@ -23,16 +23,16 @@ import { ref } from 'vue'
 import { useData } from 'vitepress'
 
 const { lang } = useData()
-const copied = ref(false)
+const copyStatus = ref<'idle' | 'copied' | 'failed'>('idle')
 
 async function copyCommand() {
   try {
     await navigator.clipboard.writeText('npx create-principles-disciple')
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
+    copyStatus.value = 'copied'
   } catch {
-    // fallback for older browsers
+    copyStatus.value = 'failed'
   }
+  setTimeout(() => { copyStatus.value = 'idle' }, 2000)
 }
 </script>
 

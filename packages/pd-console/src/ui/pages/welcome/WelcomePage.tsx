@@ -25,9 +25,10 @@ interface DemoResponse {
 // The backend owns this shape, but parsed JSON is treated as unknown.
 function isDemoStage(value: unknown): value is DemoStage {
   if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  if (typeof v.name !== 'string' || typeof v.status !== 'string') return false;
-  return v.status === 'passed' || v.status === 'failed' || v.status === 'degraded' || v.status === 'skipped';
+  const name = Object.hasOwn(value, 'name') ? Reflect.get(value, 'name') : undefined;
+  const status = Object.hasOwn(value, 'status') ? Reflect.get(value, 'status') : undefined;
+  if (typeof name !== 'string') return false;
+  return status === 'passed' || status === 'failed' || status === 'degraded' || status === 'skipped';
 }
 
 function parseDemoResponse(value: unknown): DemoResponse | null {
@@ -43,7 +44,10 @@ function parseDemoResponse(value: unknown): DemoResponse | null {
   if (typeof d.narrative === 'string') demo.narrative = d.narrative;
   if (typeof d.storyDescription === 'string') demo.storyDescription = d.storyDescription;
   if (typeof d.simulated === 'boolean') demo.simulated = d.simulated;
-  if (Array.isArray(d.stages)) demo.stages = d.stages.filter(isDemoStage);
+  if (Object.hasOwn(d, 'stages')) {
+    if (!Array.isArray(d.stages) || !d.stages.every(isDemoStage)) return null;
+    demo.stages = d.stages;
+  }
   return { demo, simulated: v.simulated };
 }
 export function WelcomePage({ workspaceId }: WelcomePageProps) {
@@ -53,6 +57,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const [demoStatus, setDemoStatus] = useState<DemoStatus>('idle');
   const [demoResult, setDemoResult] = useState<DemoResultData | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
   const [pollingActive, setPollingActive] = useState(false);
   const [pollingStatus, setPollingStatus] = useState<'idle' | 'polling' | 'timeout' | 'evidence-found' | 'error'>('idle');
   const [pollingError, setPollingError] = useState<string | null>(null);
@@ -77,14 +82,17 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   }, [workspaceId, navigate]);
 
   const completeOnboarding = useCallback((status: OnboardingState['status']) => {
-    setOnboardingState(workspaceId, {
+    if (!setOnboardingState(workspaceId, {
       completed: true,
       step: 3,
       status,
       completedAt: new Date().toISOString(),
-    });
+    })) {
+      setStateError(t('pages.welcome.stateSaveError'));
+      return;
+    }
     navigate('/focus', { replace: true });
-  }, [workspaceId, navigate]);
+  }, [workspaceId, navigate, t]);
 
   const runDemo = useCallback(async () => {
     setDemoStatus('loading');
@@ -173,7 +181,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
         // swallowing it. After 3 consecutive errors, stop polling and show the
         // error UI so the user can retry rather than waiting up to 2 hours.
         errorCountRef.current += 1;
-        setPollingError('Failed to check for evidence. Will retry...');
+        setPollingError(t('pages.welcome.step3.pollingError'));
         if (errorCountRef.current >= 3) {
           setPollingStatus('error');
           stopPolling();
@@ -183,7 +191,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
 
     checkForEvidence();
     pollingIntervalRef.current = setInterval(checkForEvidence, POLL_INTERVAL_MS);
-  }, [stopPolling]);
+  }, [stopPolling, t]);
 
   // Cleanup on unmount (spec 6.5.2 test case 3: no memory leak).
   useEffect(() => {
@@ -209,6 +217,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
           ))}
         </div>
       </header>
+      {stateError && <p className="polling-error" role="alert">{stateError}</p>}
 
       {step === 1 && (
         <section className="welcome-step welcome-step-1" aria-labelledby="step1-title">

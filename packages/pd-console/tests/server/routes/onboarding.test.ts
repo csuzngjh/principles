@@ -182,7 +182,8 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     // P1-A: cmd is process.execPath (Node) when pd-cli's dist/index.js is
     // resolvable, or 'pd' as a PATH-based fallback. Accept either — the
     // behavioral contract is the argv, not the binary name.
-    expect([process.execPath, 'pd']).toContain(bin);
+    expect(bin).toBe(process.execPath);
+    expect(argv[0]).toMatch(/[\\/]pd-cli[\\/]dist[\\/]index\.js$/);
     expect(argv).toEqual(expect.arrayContaining(['demo', 'story-a', '--json']));
     // P1-1: demo must run in a TEMP workspace, not the user's real workspaceDir,
     // to avoid polluting {workspace}/.pd/state.db with simulated demo data.
@@ -202,6 +203,19 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     expect(body.data.simulated).toBe(true);
     expect(body.data.demo).toBeDefined();
     expect((body.data.demo as Record<string, unknown>).status).toBe('passed');
+  });
+
+  it('Given malformed stage elements, When POST run-demo, Then rejects the whole demo result', async () => {
+    vi.mocked(spawn).mockReturnValue(makeMockChildEmitSuccess({
+      status: 'passed', generatedAt: '2026-07-01T00:00:00Z', narrative: 'Demo',
+      stages: [{ name: 'valid', status: 'passed' }, null],
+    }) as never);
+    const res = makeRes();
+    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir, subPath: '/run-demo',
+    });
+    expect(getStatus(res)).toBe(500);
+    expect(parseError(res).error).toBe('demo_invalid_stdout');
   });
   it('Given flag disabled, When POST run-demo, Then returns 403 with reason and nextAction', async () => {
     writeConfig(false);

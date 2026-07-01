@@ -108,7 +108,7 @@ const translations: Record<Language, Record<string, string>> = {
     openclaw_not_detected: '未检测到 OpenClaw — PD CLI 命令仍可在独立模式下工作',
     openclaw_required: 'PD 需要 OpenClaw 宿主已安装。',
     openclaw_install_hint: '请先安装 OpenClaw: https://github.com/openclaw/openclaw',
-    openclaw_rerun_hint: '安装 OpenClaw 后,重新运行: npx create-principles-disciple',
+    openclaw_rerun_hint: '安装 OpenClaw 后，重新运行：npx create-principles-disciple',
     first_install_detected: '检测到首次安装 — 将复制所有文件',
     existing_install_detected: '检测到现有安装 — 将使用智能合并模式',
     existing_core_files: '现有核心文件：',

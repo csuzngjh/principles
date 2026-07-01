@@ -177,37 +177,32 @@ export function SettingsPage() {
   // Non-blocking — failures keep the toggle disabled (null) and surface a toast
   // (rc-9: no silent fallback). The flag list comes from GET /api/v1/config/summary
   // because there is no dedicated GET /features list endpoint.
-  useEffect(() => {
-    let cancelled = false;
-    fetchConfigSummary()
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.success || !result.data) {
-          // rc-9: degrade with reason — keep null so the button stays disabled
-          // rather than silently reporting a wrong "off" state.
-          toast.error(t("components.onboardingFlag.loadFailed"));
-          return;
-        }
-        const flag = result.data.features.find((f) => f.id === "new_user_onboarding");
-        setOnboardingFlagEnabled(flag?.enabled ?? false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        toast.error(t("components.onboardingFlag.loadFailed"));
-      });
-    return () => {
-      cancelled = true;
-    };
+  const loadOnboardingFlag = useCallback(async () => {
+    setOnboardingFlagEnabled(null);
+    const result = await fetchConfigSummary();
+    if (!result.success || !result.data) {
+      toast.error(t("components.onboardingFlag.loadFailed"));
+      return;
+    }
+    const flag = result.data.features.find((f) => f.id === "new_user_onboarding");
+    if (!flag) {
+      toast.error(t("components.onboardingFlag.loadFailed"));
+      return;
+    }
+    setOnboardingFlagEnabled(flag.enabled);
   }, [t]);
+
+  useEffect(() => { void loadOnboardingFlag(); }, [loadOnboardingFlag]);
 
   // ── Auth token handlers ────────────────────────────────────────────────
 
-  const handleSaveToken = useCallback(() => {
+  const handleSaveToken = useCallback(async () => {
     const trimmed = tokenInput.trim();
     if (trimmed.length === 0) return;
     setToken(trimmed);
+    await loadOnboardingFlag();
     toast.success(t("pages.settings.tokenSaved"));
-  }, [tokenInput, t]);
+  }, [tokenInput, loadOnboardingFlag, t]);
 
   // ── Workspace handlers ─────────────────────────────────────────────────
 
@@ -322,7 +317,10 @@ export function SettingsPage() {
       t("components.onboardingReset.resetConfirm"),
     );
     if (confirmed) {
-      resetOnboardingState(currentWorkspaceId);
+      if (!resetOnboardingState(currentWorkspaceId)) {
+        toast.error(t("components.onboardingReset.resetFailed"));
+        return;
+      }
       toast.success(t("components.onboardingReset.resetSuccess"));
     }
   }, [currentWorkspaceId, t]);

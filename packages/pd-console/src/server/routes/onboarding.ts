@@ -27,15 +27,12 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { sendError, sendJson } from '../utils/response.js';
-
-// ESM-safe require for cross-package require.resolve (pd-cli package lookup).
-const require = createRequire(import.meta.url);
 
 export interface OnboardingRouteContext {
   workspaceDir: string;
@@ -98,29 +95,17 @@ function loadOnboardingFlagEnabled(workspaceDir: string): boolean {
  *     Windows the spawn will emit 'error', which the caller handles with a
  *     clear nextAction (rc-9-no-silent-fallback).
  */
-function findPdCli(): { cmd: string; extraArgs: string[] } {
-  try {
-    // Resolve the pd-cli package.json cross-package (npm workspaces hoist this).
-    const pdCliPkg = require.resolve('@principles/pd-cli/package.json');
-    const pdCliDir = path.dirname(pdCliPkg);
-    const pkg = JSON.parse(fs.readFileSync(pdCliPkg, 'utf-8')) as {
-      bin?: Record<string, string>;
-    };
-    // rc-5-object-hasown-not-in: read the bin map via a typed access, not `in`.
-    const binPath = pkg.bin?.pd ?? pkg.bin?.['pd-cli'];
-    if (binPath) {
-      const entryPath = path.resolve(pdCliDir, binPath);
-      if (fs.existsSync(entryPath)) {
-        return { cmd: process.execPath, extraArgs: [entryPath] };
-      }
-    }
-  } catch {
-    // pd-cli not resolvable from console, or package.json unreadable — fall
-    // through to the bare 'pd' fallback (rc-9: caller surfaces a clear error).
-  }
-  // Fallback: bare 'pd' resolved via PATH. Works on Linux/macOS; may fail on
-  // Windows with ENOENT (handled by the caller's 'error' event path).
-  return { cmd: 'pd', extraArgs: [] };
+function findPdCli(): { cmd: string; extraArgs: string[] } | null {
+  // Both the monorepo and installed extension place pd-cli beside console.
+  // source: pd-console/src/server/routes -> packages/pd-cli
+  // install: console/dist/server/routes -> principles-disciple/pd-cli
+  const entryPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../../pd-cli/dist/index.js',
+  );
+  return fs.existsSync(entryPath)
+    ? { cmd: process.execPath, extraArgs: [entryPath] }
+    : null;
 }
 
 /**
@@ -143,12 +128,19 @@ function parseDemoStdout(stdout: string): Record<string, unknown> | null {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
-  const v = parsed as Record<string, unknown>;
-  if (typeof v.status !== 'string') return null;
-  if (typeof v.generatedAt !== 'string') return null;
-  if (typeof v.narrative !== 'string') return null;
-  if (!Array.isArray(v.stages)) return null;
-  return v;
+  const status = Object.hasOwn(parsed, 'status') ? Reflect.get(parsed, 'status') : undefined;
+  const generatedAt = Object.hasOwn(parsed, 'generatedAt') ? Reflect.get(parsed, 'generatedAt') : undefined;
+  const narrative = Object.hasOwn(parsed, 'narrative') ? Reflect.get(parsed, 'narrative') : undefined;
+  const stages = Object.hasOwn(parsed, 'stages') ? Reflect.get(parsed, 'stages') : undefined;
+  if (typeof status !== 'string' || typeof generatedAt !== 'string' || typeof narrative !== 'string') return null;
+  if (!Array.isArray(stages) || !stages.every((stage) => {
+    if (typeof stage !== 'object' || stage === null) return false;
+    const name = Object.hasOwn(stage, 'name') ? Reflect.get(stage, 'name') : undefined;
+    const stageStatus = Object.hasOwn(stage, 'status') ? Reflect.get(stage, 'status') : undefined;
+    return typeof name === 'string' &&
+      (stageStatus === 'passed' || stageStatus === 'failed' || stageStatus === 'degraded' || stageStatus === 'skipped');
+  })) return null;
+  return parsed as Record<string, unknown>;
 }
 /**
  * Spawn `pd demo story-a --json`, wait for it to complete, validate stdout,
@@ -178,7 +170,18 @@ async function handleRunDemo(
 
   let child: ChildProcess;
   try {
-    const { cmd, extraArgs } = findPdCli();
+    const invocation = findPdCli();
+    if (!invocation) {
+      cleanupTempWorkspace(tempWorkspace);
+      sendStructuredError(res, {
+        statusCode: 500,
+        error: 'demo_cli_missing',
+        reason: 'pd CLI entry was not found beside the installed Console.',
+        nextAction: 'Re-run: npx create-principles-disciple',
+      });
+      return;
+    }
+    const { cmd, extraArgs } = invocation;
     // P1-A: spawn process.execPath (Node) with the pd-cli entry JS path to
     // avoid the Windows .cmd resolution problem. P1-2: no shell:true — argv is
     // passed directly to the OS, eliminating command-injection risk from

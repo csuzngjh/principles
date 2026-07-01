@@ -1001,6 +1001,7 @@
     "welcome": {
       "title": "Welcome to Principles Disciple",
       "subtitle": "Turn your repeated corrections into reviewed, reversible principles.",
+      "stateSaveError": "Couldn't save onboarding progress. Check browser storage permissions and retry.",
       "stepIndicator": "Step {{current}} of {{total}}",
       "step1": {
         "title": "What is PD?",
@@ -1164,7 +1165,8 @@
       "title": "Onboarding",
       "resetButton": "Reset onboarding state",
       "resetConfirm": "This will restart the onboarding wizard on next login. Continue?",
-      "resetSuccess": "Onboarding state reset. You'll see the welcome page on next visit."
+      "resetSuccess": "Onboarding state reset. You'll see the welcome page on next visit.",
+      "resetFailed": "Couldn't reset onboarding. Check browser storage permissions and retry."
     },
     "onboardingFlag": {
       "title": "Onboarding Feature",

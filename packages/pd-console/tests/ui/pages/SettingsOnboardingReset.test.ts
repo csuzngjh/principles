@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getNestedRecord, parseJsonRecord } from '../i18n-test-helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // __dirname = packages/pd-console/tests/ui/pages
@@ -50,6 +51,11 @@ describe('SettingsPage onboarding reset', () => {
     expect(settingsSource).toContain('components.onboardingReset.resetSuccess');
   });
 
+  it('does not report success when localStorage reset fails', () => {
+    expect(settingsSource).toContain('if (!resetOnboardingState(currentWorkspaceId))');
+    expect(settingsSource).toContain('components.onboardingReset.resetFailed');
+  });
+
   it('Given SettingsPage, When parsed, Then derives currentWorkspaceId from workspaces[0] (EP-09: avoid silent no-op reset)', () => {
     // Critical invariant: App.tsx stores onboarding state under
     // workspaces[0].name (or "default" if none). SettingsPage must reset the
@@ -64,19 +70,11 @@ describe('SettingsPage onboarding reset', () => {
   });
 
   it('Given i18n keys, When checked, Then onboardingReset exists in en + zh', () => {
-    const enJson = JSON.parse(readSrc('i18n/en.json')) as {
-      components: { onboardingReset: { title: unknown; resetButton: unknown; resetConfirm: unknown; resetSuccess: unknown } };
-    };
-    const zhJson = JSON.parse(readSrc('i18n/zh-CN.json')) as {
-      components: { onboardingReset: { title: unknown; resetButton: unknown; resetConfirm: unknown; resetSuccess: unknown } };
-    };
-    expect(enJson.components.onboardingReset).toBeDefined();
-    expect(zhJson.components.onboardingReset).toBeDefined();
-    expect(enJson.components.onboardingReset.resetButton).toBeDefined();
-    expect(zhJson.components.onboardingReset.resetButton).toBeDefined();
-    expect(enJson.components.onboardingReset.resetConfirm).toBeDefined();
-    expect(zhJson.components.onboardingReset.resetConfirm).toBeDefined();
-    expect(enJson.components.onboardingReset.resetSuccess).toBeDefined();
-    expect(zhJson.components.onboardingReset.resetSuccess).toBeDefined();
+    const en = getNestedRecord(parseJsonRecord(readSrc('i18n/en.json')), ['components', 'onboardingReset']);
+    const zh = getNestedRecord(parseJsonRecord(readSrc('i18n/zh-CN.json')), ['components', 'onboardingReset']);
+    for (const key of ['resetButton', 'resetConfirm', 'resetSuccess', 'resetFailed']) {
+      expect(en[key]).toBeDefined();
+      expect(zh[key]).toBeDefined();
+    }
   });
 });
