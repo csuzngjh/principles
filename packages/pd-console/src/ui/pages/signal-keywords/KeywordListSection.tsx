@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Trash2, Archive, RotateCcw } from "lucide-react";
+import { Search, Trash2, Archive } from "lucide-react";
 import { type SignalKeyword } from "../../api.js";
 import { Badge } from "../../components/ui/badge.js";
 import {
@@ -21,7 +21,7 @@ interface KeywordListSectionProps {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-type FilterTab = "all" | "active" | "archived";
+type FilterTab = "all" | "active";
 
 /** Phase 2 功能的 tooltip 文案 */
 const PHASE2_TOOLTIP = "此操作将在后续版本中启用";
@@ -45,11 +45,9 @@ export function KeywordListSection({
     let list = keywords;
 
     // 按 filter tab 过滤
-    if (filterTab === "active") {
-      list = list.filter((kw) => kw.source !== "archived");
-    } else if (filterTab === "archived") {
-      list = list.filter((kw) => kw.source === "archived");
-    }
+	    // Phase 1: 无 archived 状态，暂不过滤
+	    // Phase 2: 添加对 archived 状态的过滤
+	    void filterTab;
 
     // 按 search 文本过滤
     if (search.trim()) {
@@ -96,7 +94,7 @@ export function KeywordListSection({
 
         {/* Filter tabs */}
         <div className="flex items-center gap-1 p-0.5 bg-surface border border-line rounded-[4px]">
-          {(["all", "active", "archived"] as const).map((tab) => (
+	          {(["all", "active"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -181,17 +179,9 @@ export function KeywordListSection({
                           onClick={() => onToggleArchive(kw.term)}
                           disabled
                           className="p-1.5 text-ink-4 hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          aria-label={
-                            kw.source === "archived"
-                              ? t("pages.signalKeywords.unarchiveSuccess")
-                              : t("pages.signalKeywords.archiveSuccess")
-                          }
+                          aria-label={t("pages.signalKeywords.archiveSuccess")}
                         >
-                          {kw.source === "archived" ? (
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          ) : (
-                            <Archive className="h-3.5 w-3.5" />
-                          )}
+                          <Archive className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent>{PHASE2_TOOLTIP}</TooltipContent>

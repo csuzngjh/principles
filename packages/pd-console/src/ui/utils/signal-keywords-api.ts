@@ -14,7 +14,7 @@
  * - rc-9: 降级/失败路径含 reason
  */
 
-import type { ApiResponse } from '../types.js';
+import type { ApiResponse } from '../../types.js';
 import type {
   UnifiedKeywordStore,
   PendingTermStore,
