@@ -33,6 +33,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: 'Home', link: '/' },
+          { text: 'Install', link: '/install' },
           { text: 'Docs', link: '/docs/getting-started' },
           { text: 'Abyss', link: '/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
@@ -73,6 +74,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: '首页', link: '/zh/' },
+          { text: '安装', link: '/zh/install' },
           { text: '文档', link: '/zh/docs/getting-started' },
           { text: '思维深渊', link: '/zh/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
