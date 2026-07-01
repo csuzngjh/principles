@@ -12,7 +12,7 @@ import { createHash } from 'crypto';
 import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { LockUnavailableError } from '../config/errors.js';
-import { migrateQueueToV2 } from './queue-migration.js';
+import { migrateQueueToV2, validateQueueItem } from './queue-migration.js';
 import type { EvolutionQueueItem } from '../core/evolution-types.js';
 import type { RawQueueItem } from './queue-migration.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
@@ -100,7 +100,19 @@ export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
       rawQueue = [];
     }
   }
-  return migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+  // rc-1/rc-4 (ERR-007): every element of the parsed array is untrusted disk
+  // JSON — validate before returning. Malformed items are filtered out and
+  // reported via console.warn (rc-9: no silent drop). This is the single
+  // chokepoint that loadEvolutionQueue callers inherit.
+  const migrated = migrateQueueToV2(rawQueue);
+  return migrated.filter((item) => {
+    const errors = validateQueueItem(item);
+    if (errors.length > 0) {
+      console.warn(`[queue-io] Dropping malformed queue item: ${errors.join(', ')} | id=${(item as { id?: string })?.id ?? 'N/A'}`);
+      return false;
+    }
+    return true;
+  });
 }
 
 export function saveEvolutionQueue(queuePath: string, queue: EvolutionQueueItem[]): void {

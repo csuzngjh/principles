@@ -261,6 +261,78 @@ describe('CandidateIntakeService', () => {
       }
     });
 
+    // ── rc-1/rc-2 (ERR-001/ERR-005): reject well-formed JSON with wrong shape ──
+    // Previously the service cast parsed JSON directly to Recommendation; a
+    // valid-JSON-but-wrong-shape payload (e.g. `{"x":1}`) silently produced an
+    // empty ledger entry. These cases pin the validateRecommendation guard.
+
+    it('throws INPUT_INVALID when contentJson is valid JSON but wrong shape (rc-2)', async () => {
+      const candidate = createCandidate({ sourceRecommendationJson: '' });
+      const badArtifact = createArtifact({ contentJson: JSON.stringify({ x: 1 }) });
+      vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+      vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+      vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(badArtifact);
+
+      try {
+        await service.intake('test-candidate-001');
+        throw new Error('expected intake to throw INPUT_INVALID');
+      } catch (err: unknown) {
+        expectCandidateError(err, INTAKE_ERROR_CODES.INPUT_INVALID);
+      }
+    });
+
+    it('throws INPUT_INVALID when contentJson is a JSON primitive (rc-2)', async () => {
+      const candidate = createCandidate({ sourceRecommendationJson: '' });
+      const badArtifact = createArtifact({ contentJson: '42' });
+      vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+      vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+      vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(badArtifact);
+
+      try {
+        await service.intake('test-candidate-001');
+        throw new Error('expected intake to throw INPUT_INVALID');
+      } catch (err: unknown) {
+        expectCandidateError(err, INTAKE_ERROR_CODES.INPUT_INVALID);
+      }
+    });
+
+    it('falls back to contentJson when sourceRecommendationJson has wrong shape (rc-2)', async () => {
+      // sourceRec malformed shape → null → fall through to contentJson (valid)
+      const candidate = createCandidate({
+        sourceRecommendationJson: JSON.stringify({ text: 123 }), // number, not string
+      });
+      const artifact = createArtifact(); // valid contentJson
+      const written = createLedgerEntry();
+      vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+      vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+      vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(artifact);
+      vi.spyOn(mockLedgerAdapter, 'writeProbationEntry').mockReturnValue(written);
+
+      const result = await service.intake('test-candidate-001');
+      // Should succeed using the contentJson fallback (not throw).
+      // The service returns the written LedgerPrincipleEntry (status 'probation'),
+      // not the CandidateIntakeOutput ('consumed' is set by the CLI handler).
+      expect(result.status).toBe('probation');
+      expect(mockLedgerAdapter.writeProbationEntry).toHaveBeenCalled();
+    });
+
+    it('throws INPUT_INVALID when both sourceRec and contentJson have wrong shape, candidate stays pending', async () => {
+      const candidate = createCandidate({
+        sourceRecommendationJson: JSON.stringify({ text: 123 }), // bad shape
+      });
+      const badArtifact = createArtifact({ contentJson: JSON.stringify({ x: 1 }) }); // bad shape
+      vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
+      vi.spyOn(mockStateManager, 'getCandidate').mockResolvedValue(candidate);
+      vi.spyOn(mockStateManager, 'getArtifact').mockResolvedValue(badArtifact);
+
+      try {
+        await service.intake('test-candidate-001');
+        throw new Error('expected intake to throw INPUT_INVALID');
+      } catch (err: unknown) {
+        expectCandidateError(err, INTAKE_ERROR_CODES.INPUT_INVALID);
+      }
+    });
+
     it('throws LEDGER_WRITE_FAILED when adapter write fails with CandidateIntakeError', async () => {
       const candidate = createCandidate();
       const artifact = createArtifact();
