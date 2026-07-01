@@ -463,6 +463,33 @@ describe('Scenario 7: Feature flags from new config contract', () => {
     expect(effective.warnings.some(w => w.includes('core flag explicitly disabled') && w.includes('prompt'))).toBe(true);
   });
 
+  it('F14-1: core flag emergency disable preserves category as core (not userEntry.category)', () => {
+    // Previously `category: userEntry.category` allowed an operator to
+    // override a core flag's category to 'gone' or 'quiet' — a privilege
+    // escalation. The category must be preserved as defaultFlag.category.
+    const raw = makeValidConfig();
+    // Operator attempts to emergency-disable prompt AND demote its category
+    raw.features.prompt = { category: 'gone', enabled: false };
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+    const flags = computeFeatureFlagsFromConfig(effective);
+    expect(nn(flags.flags.prompt).enabled).toBe(false);
+    expect(nn(flags.flags.prompt).category).toBe('core');
+    expect(effective.warnings.some(w => w.includes('core flag explicitly disabled'))).toBe(true);
+  });
+
+  it('F14-1: core flag emergency disable with quiet category still preserves core', () => {
+    const raw = makeValidConfig();
+    raw.features.code_tool_hook = { category: 'quiet', enabled: false };
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+    const flags = computeFeatureFlagsFromConfig(effective);
+    expect(nn(flags.flags.code_tool_hook).enabled).toBe(false);
+    expect(nn(flags.flags.code_tool_hook).category).toBe('core');
+  });
+
   it('gone flags cannot be re-enabled via config', () => {
     const raw = makeValidConfig();
     raw.features.nocturnal = { category: 'gone', enabled: true };

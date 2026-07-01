@@ -64,6 +64,17 @@ export class SqliteCandidateStore implements CandidateStore {
 
   async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<boolean> {
     const db = this.connection.getDb();
+    // F13 (PRI-442): when transitioning to 'consumed', set consumed_at in
+    // the same statement so the row satisfies the schema CHECK constraint
+    // (status='consumed' → consumed_at IS NOT NULL). Previously this method
+    // left consumed_at NULL and a separate ensureConsumedAt() patch fixed it
+    // post-hoc — but that left a window where the row violated the invariant.
+    if (patch.status === 'consumed') {
+      const now = new Date().toISOString();
+      const info = db.prepare('UPDATE principle_candidates SET status = ?, consumed_at = COALESCE(consumed_at, ?) WHERE candidate_id = ?')
+        .run(patch.status, now, candidateId);
+      return info.changes > 0;
+    }
     const info = db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
       .run(patch.status, candidateId);
     return info.changes > 0;
@@ -71,6 +82,14 @@ export class SqliteCandidateStore implements CandidateStore {
 
   async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
     const db = this.connection.getDb();
+    // F13 (PRI-442): same CHECK-constraint fix as updateCandidateStatus —
+    // set consumed_at atomically when the new status is 'consumed'.
+    if (newStatus === 'consumed') {
+      const now = new Date().toISOString();
+      const info = db.prepare('UPDATE principle_candidates SET status = ?, consumed_at = COALESCE(consumed_at, ?) WHERE candidate_id = ? AND status = ?')
+        .run(newStatus, now, candidateId, expectedStatus);
+      return info.changes > 0;
+    }
     const info = db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ? AND status = ?')
       .run(newStatus, candidateId, expectedStatus);
     return info.changes > 0;

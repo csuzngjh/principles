@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   evaluateAdmission,
   evaluateCandidateAdmissions,
+  evaluateCandidateAdmissionFromRecord,
   ADMISSION_CONFIDENCE_THRESHOLD,
 } from '../admission-gate.js';
 import type { AdmissionGateInput } from '../admission-gate.js';
@@ -298,5 +299,74 @@ describe('PRI-345: input-evidence hard gate', () => {
     );
     expect(result.decision).toBe('needs_evidence');
     expect(result.reason).toBe('input_evidence_empty');
+  });
+});
+
+describe('evaluateCandidateAdmissionFromRecord (CLI partial check)', () => {
+  it('admits when recommendationKind is actionable and confidence >= threshold', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'principle',
+      confidence: 0.8,
+    });
+    expect(result.decision).toBe('admitted');
+    expect(result.reason).toBe('cli_partial_check_passed_confidence_and_kind');
+    expect(result.nextAction).toBe('none');
+  });
+
+  it('admits at exactly the threshold (boundary)', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'principle',
+      confidence: ADMISSION_CONFIDENCE_THRESHOLD,
+    });
+    expect(result.decision).toBe('admitted');
+  });
+
+  it('defers when recommendationKind is defer', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'defer',
+      confidence: 0.9,
+    });
+    expect(result.decision).toBe('deferred');
+    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
+    expect(result.nextAction).toBe('review_defer_disposition_manually');
+  });
+
+  it('needs_evidence when confidence is below threshold', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'principle',
+      confidence: 0.35,
+    });
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toContain('confidence_below_threshold');
+    expect(result.reason).toContain('0.35');
+    expect(result.nextAction).toBe('provide_additional_evidence_or_manual_review');
+  });
+
+  it('needs_evidence when confidence is null (rc-3 fail loud)', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'principle',
+      confidence: null,
+    });
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toBe('confidence_missing_on_candidate_record');
+    expect(result.nextAction).toContain('re_run_diagnosis');
+  });
+
+  it('defers even when confidence is null (defer takes precedence)', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'defer',
+      confidence: null,
+    });
+    expect(result.decision).toBe('deferred');
+    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
+  });
+
+  it('needs_evidence at confidence = 0 (below threshold)', () => {
+    const result = evaluateCandidateAdmissionFromRecord({
+      recommendationKind: 'principle',
+      confidence: 0,
+    });
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toContain('confidence_below_threshold');
   });
 });

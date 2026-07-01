@@ -586,6 +586,27 @@ function syncPdCli(pluginDir: string): boolean {
     }
   }
 
+  // Create node_modules/principles-disciple symlink so pd-cli can resolve
+  // its principles-disciple dependency (the plugin package, rewritten to
+  // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
+  // extension dir root (getPluginExtDir()), so the symlink target is the
+  // ext dir itself — Node resolves `import 'principles-disciple'` via the
+  // plugin's package.json exports field.
+  // Without this, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
+  // because runtime-init.ts statically imports initTrajectorySchema/initWorkflowSchema.
+  const pdLinkDir = path.join(installedPdCliDir, 'node_modules');
+  const pdLinkTarget = getPluginExtDir();
+  mkdirSync(pdLinkDir, { recursive: true });
+  const pdLinkPath = path.join(pdLinkDir, 'principles-disciple');
+  if (!existsSync(pdLinkPath)) {
+    if (isWindows()) {
+      symlinkSync(pdLinkTarget, pdLinkPath, 'junction');
+    } else {
+      // Relative from <ext>/pd-cli/node_modules/ to <ext>/: go up twice (node_modules → pd-cli → ext)
+      symlinkSync('../../', pdLinkPath, 'dir');
+    }
+  }
+
   tryUpgradePdCliFromNpm(installedPdCliDir);
 
   const installedBinDir = getInstalledBinDir();

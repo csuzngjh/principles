@@ -107,7 +107,7 @@ export class ActivationDispatcher {
 
     const idempotencyKey = input.idempotencyKey ?? makeIdempotencyKey(input.artifactId, input.channel);
 
-    const existingResult = await this.checkIdempotency(idempotencyKey);
+    const existingResult = await this.checkIdempotency(idempotencyKey, input.artifactId);
     if (existingResult.decision) return existingResult.decision;
 
     if (input.rolloutDecision === 'reject') {
@@ -351,7 +351,10 @@ export class ActivationDispatcher {
     }
   }
 
-  private async checkIdempotency(idempotencyKey: string): Promise<{ decision: ActivationDecision | null }> {
+  private async checkIdempotency(
+    idempotencyKey: string,
+    inputArtifactId: string,
+  ): Promise<{ decision: ActivationDecision | null }> {
     // Bug-Q fix: getActivationStatus (both SQLite and Memory stores) now filters out
     // deactivated records. So `existing` is non-null ONLY for currently-active activations.
     // When a record is deactivated, getActivationStatus returns null, allowing re-activation.
@@ -360,6 +363,22 @@ export class ActivationDispatcher {
     try {
       const existing = await this.stateReadModel.getActivationStatus(idempotencyKey);
       if (existing) {
+        // F9-3: Validate that the existing activation's artifactId matches the
+        // input artifactId. The idempotency key is derived from
+        // ${artifactId}::${channel}, so if the DB row's artifact_id was
+        // UPDATEd to a corrupted/different value post-activation, the key
+        // stays the same but the lineage is broken. Detect and refuse rather
+        // than silently returning already_activated (rc-6-lineage-consistency;
+        // related ERR: ERR-004, ERR-008).
+        if (existing.artifactId !== inputArtifactId) {
+          return {
+            decision: {
+              decision: 'refused',
+              reason: `idempotency_artifact_mismatch: existing=${existing.artifactId} input=${inputArtifactId}`,
+              nextAction: 'Investigate data corruption. The existing activation references a different artifact_id than the dispatch input. Run `pd runtime internalization integrity` for full chain diagnostics.',
+            },
+          };
+        }
         return {
           decision: {
             decision: 'already_activated',

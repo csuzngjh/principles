@@ -299,7 +299,7 @@ export { PainToPrincipleService } from './pain-to-principle-service.js';
 export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput, FailureCategory } from './pain-to-principle-service.js';
 
 // Admission gate (PRI-256)
-export { evaluateAdmission, evaluateCandidateAdmissions, ADMISSION_CONFIDENCE_THRESHOLD } from './admission-gate.js';
+export { evaluateAdmission, evaluateCandidateAdmissions, evaluateCandidateAdmissionFromRecord, ADMISSION_CONFIDENCE_THRESHOLD } from './admission-gate.js';
 export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
 
 // Evidence guards (PRI-345) — shared owner-exemption + short-circuit logic
