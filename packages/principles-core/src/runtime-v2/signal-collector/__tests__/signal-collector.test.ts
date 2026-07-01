@@ -96,10 +96,21 @@ describe('collectSync', () => {
   });
 
   it('keyword matching is case-insensitive', () => {
-    const out = collectSync('这是错的', 'sess1', store, config, FIXED_TS);
-    expect(out.isSignal).toBe(true);
-    const outUpper = collectSync('这是错的', 'sess1', store, config, FIXED_TS);
+    const caseStore: UnifiedKeywordStore = {
+      version: 1,
+      terms: {
+        'Wrong': { term: 'Wrong', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
+      },
+    };
+    const outLower = collectSync('this is wrong', 'sess1', caseStore, config, FIXED_TS);
+    expect(outLower.isSignal).toBe(true);
+    expect(outLower.matchedTerms).toContain('Wrong');
+    const outUpper = collectSync('THIS IS WRONG', 'sess1', caseStore, config, FIXED_TS);
     expect(outUpper.isSignal).toBe(true);
+    expect(outUpper.matchedTerms).toContain('Wrong');
+    const outMixed = collectSync('ThIs Is WrOnG', 'sess1', caseStore, config, FIXED_TS);
+    expect(outMixed.isSignal).toBe(true);
+    expect(outMixed.matchedTerms).toContain('Wrong');
   });
 
   it('partial keyword match does NOT trigger high-precision hit', () => {

@@ -338,7 +338,10 @@ describe('SignalCollectorHost edge cases and error handling', () => {
       stateDir: '/tmp/test-ws/.state',
       trajectory: null,
     };
-    const host = makeHost(wctx as any, { keywordStore: testStore, config: testConfig });
+    const host = makeHost(
+      wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0],
+      { keywordStore: testStore, config: testConfig },
+    );
     expect(() => {
       host.detectSync('这是错的', 'sess-no-trajectory', 'user');
     }).not.toThrow();
