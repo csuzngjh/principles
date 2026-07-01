@@ -76,12 +76,8 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/\{ recordObservability: false \}/);
     });
 
-    it('prompt.ts passes recordObservability: false (both GFI and Observer paths)', () => {
-      const source = read(PROMPT);
-      const matches = source.match(/\{ recordObservability: false \}/g);
-      expect(matches).not.toBeNull();
-      expect(matches!.length).toBeGreaterThanOrEqual(2);
-    });
+    // prompt.ts GFI/Observer paths migrated to SignalCollectorHost (spec §3.3)
+    // recordObservability invariant now covered by signal-collector-host.ts
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -104,12 +100,7 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/canonicalPainId:\s*painId/);
     });
 
-    it('prompt.ts passes canonicalPainId (both GFI and Observer paths)', () => {
-      const source = read(PROMPT);
-      const matches = source.match(/canonicalPainId:/g);
-      expect(matches).not.toBeNull();
-      expect(matches!.length).toBeGreaterThanOrEqual(2);
-    });
+    // prompt.ts canonicalPainId paths migrated to SignalCollectorHost
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -122,11 +113,7 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/wctx\.trajectory\?\.recordPainEvent\??\.\(/);
     });
 
-    it('prompt.ts GFI path calls recordPainEvent (added in PRI-453)', () => {
-      const source = read(PROMPT);
-      // The GFI path's recordPainEvent uses gfiPainId as canonicalPainId
-      expect(source).toMatch(/canonicalPainId:\s*gfiPainId/);
-    });
+    // prompt.ts GFI recordPainEvent migrated to SignalCollectorHost
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -210,17 +197,9 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
   // (lineage consistency — ERR-004/ERR-008)
   // ═══════════════════════════════════════════════════════════════════════
 
-  describe('Observer path uses same painId for trajectory and emit (lineage consistency)', () => {
-    it('prompt.ts Observer path uses observerPainId for both canonicalPainId and emitted painId', () => {
-      const source = read(PROMPT);
-      // The Observer path should use observerPainId as canonicalPainId in recordPainEvent
-      expect(source).toMatch(/canonicalPainId:\s*observerPainId/);
-      // The Observer path should use observerPainId as painId in the emitted event
-      expect(source).toMatch(/painId:\s*observerPainId/);
-      // There should be NO separate observerEmitPainId variable (lineage gap fixed)
-      expect(source).not.toMatch(/observerEmitPainId/);
-    });
-  });
+  // Observer path migrated to SignalCollectorHost — lineage invariant now
+  // covered by signal-collector-host.ts routeStrong (single painId path)
+
 
   // ═══════════════════════════════════════════════════════════════════════
   // Invariant 8: gate-block-helper does NOT have legacy recordPainEvent

@@ -49,6 +49,7 @@ const DEFAULT_AGENT_ENABLED: Record<InternalAgentName, boolean> = {
   rolloutReviewer: false,
   correctionObserver: false,
   empathyObserver: false,
+  signalCollector: false,
 };
 
 export function getDefaultInternalAgents(): InternalAgentsConfig {

@@ -349,4 +349,22 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailEn: {},
     isCore: true,
   },
+  signalCollector: {
+    name: 'signalCollector',
+    group: 'sidechain',
+    displayNameZh: '信号采集器',
+    displayNameEn: 'Signal Collector',
+    roleZh: '统一捕捉用户纠正与情绪反馈（合并原 correction + empathy）',
+    roleEn: 'Unified capture of user corrections and emotional feedback (merges former correction + empathy)',
+    detailZh:
+      '以前有两套并行的用户反馈检测：correction（抓"你错了"）和 empathy（抓情绪挫败），词库重叠且各自维护。\n\n信号采集器把两者合并成一套：关键词快扫 + 本地 LLM 深度判断，按信号强度分流——明确纠错直接触发诊断，情绪推测走 GFI 累积。',
+    detailEn:
+      'Previously there were two parallel user-feedback detectors: correction (catching "you are wrong") and empathy (catching emotional frustration), with overlapping keyword stores maintained separately.\n\nThe Signal Collector merges them into one: keyword fast-scan + local LLM deep judgment, routed by signal strength — explicit corrections trigger diagnosis directly, emotional inference accumulates via GFI.',
+    impactLevel: 'amber',
+    impactZh: '退回纯关键词检测（高精度短语仍工作），LLM 深度判断关闭。歧义词和未命中场景召回率下降。',
+    impactEn: 'Falls back to keyword-only detection (high-precision phrases still work); LLM deep judgment disabled. Recall drops for ambiguous terms and missed cases.',
+    techDetailZh: {},
+    techDetailEn: {},
+    isCore: false,
+  },
 };

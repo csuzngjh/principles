@@ -331,6 +331,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'file-store.ts',
   'pd-task-store.ts',
   'empathy-keyword-matcher.ts',
+  // SignalCollector: unified signal collection host (correction + empathy upstream merge).
+  // I/O shell: reads .pd/config.yaml, constructs PiAiRuntimeAdapter, writes trajectory.
+  // Pure detection logic lives in @principles/core/runtime-v2/signal-collector/.
+  'signal-collector-host.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
   // PRI-459: now a thin re-export adapter over @principles/core/principle-tree-ledger.
@@ -403,7 +407,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (92 files)', async () => {
+  it('known baseline count is self-consistent (94 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -430,9 +434,17 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // calculatePercentageThreshold) removed.
     // Stage-3 sink: Removed surface-guard.ts (93 → 92) — pure guard logic
     // migrated to @principles/core/runtime-v2/feature-flags/surface-guard-policy.
+    // SignalCollector: Added signal-collector-host.ts (92 → 93) — unified signal
+    // collection I/O host (correction + empathy upstream merge). Reads
+    // .pd/config.yaml, constructs PiAiRuntimeAdapter, writes trajectory. Pure
+    // detection logic lives in @principles/core/runtime-v2/signal-collector/.
     // PRI-484: Added behavior-example-pack-assembler.ts (92 → 93) — plugin I/O
     // boundary assembling BehaviorExamplePack from pain lineage + trajectory.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // SignalCollector: Added signal-collector-host.ts (93 → 94) — unified signal
+    // collection I/O host (correction + empathy upstream merge). Reads
+    // .pd/config.yaml, constructs PiAiRuntimeAdapter, writes trajectory. Pure
+    // detection logic lives in @principles/core/runtime-v2/signal-collector/.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 

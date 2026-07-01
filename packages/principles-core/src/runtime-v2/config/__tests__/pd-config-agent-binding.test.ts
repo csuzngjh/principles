@@ -58,6 +58,7 @@ function makeConfigWithPdLocalProfile(): PdConfig {
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
+        signalCollector: { enabled: false },
       },
     },
   });
@@ -85,6 +86,7 @@ function makeConfigWithOpenClawProfile(): PdConfig {
         rolloutReviewer: { enabled: false },
         correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
+        signalCollector: { enabled: false },
       },
     },
   });
@@ -179,6 +181,7 @@ describe('resolveAgentRuntimeBinding', () => {
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },
           empathyObserver: { enabled: false },
+          signalCollector: { enabled: false },
         },
       },
     });
@@ -213,6 +216,7 @@ describe('resolveAgentRuntimeBinding', () => {
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },
           empathyObserver: { enabled: false },
+          signalCollector: { enabled: false },
         },
       },
     });
@@ -256,6 +260,7 @@ describe('resolveAgentRuntimeBinding', () => {
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },
           empathyObserver: { enabled: false },
+          signalCollector: { enabled: false },
         },
       },
     });
@@ -287,6 +292,7 @@ describe('resolveAgentRuntimeBinding', () => {
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },
           empathyObserver: { enabled: false },
+          signalCollector: { enabled: false },
         },
       },
     });
@@ -743,6 +749,7 @@ describe('createAdapterConfigFromProfile', () => {
           rolloutReviewer: { enabled: false },
           correctionObserver: { enabled: false },
           empathyObserver: { enabled: false },
+          signalCollector: { enabled: false },
         },
       },
     });

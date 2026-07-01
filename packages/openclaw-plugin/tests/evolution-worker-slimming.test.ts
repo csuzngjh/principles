@@ -388,13 +388,14 @@ describe('F15 (PRI-442): empathy_observer flag is not a dead registration', () =
     expect(flag!.enabled).toBe(false);
   });
 
-  it('empathy_observer flag is consumed in prompt.ts (not a dead registration)', () => {
-    // Scan prompt.ts source for the flag consumption pattern. The flag must
-    // be loaded via loadFeatureFlagFromConfig with 'empathy_observer'.
-    const promptPath = path.resolve(__dirname, '../src/hooks/prompt.ts');
-    const src = fs.readFileSync(promptPath, 'utf-8');
-    // Must have at least one consumption call
-    const consumptionMatches = src.match(/loadFeatureFlagFromConfig\([^)]*['"]empathy_observer['"]/g) ?? [];
+  it('empathy_observer flag superseded by signal_collector in signal-collector-host.ts', () => {
+    // SignalCollector 重构后,empathy 检测职责迁移到 signal-collector-host.ts。
+    // empathy_observer flag 在 prompt.ts 不再被消费(deprecated);
+    // 其消费路径由 signal_collector flag 在 host 的 createSignalLlmClassifierFromConfig 接管。
+    const hostPath = path.resolve(__dirname, '../src/core/signal-collector-host.ts');
+    const src = fs.readFileSync(hostPath, 'utf-8');
+    // signal_collector flag 必须在 host 里有真实消费
+    const consumptionMatches = src.match(/resolveObserverConfig\([^)]*['"]signal_collector['"]/g) ?? [];
     expect(consumptionMatches.length).toBeGreaterThanOrEqual(1);
   });
 });
