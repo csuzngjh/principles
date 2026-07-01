@@ -20,7 +20,7 @@ import { atomicWriteFileSync } from '../utils/io.js';
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { saveEvolutionQueue, requireQueueLock } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, loadEvolutionQueue } from './queue-io.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 
 
@@ -119,8 +119,8 @@ export interface EvolutionQueueItem {
 }
 
 // ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
-import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, type RawQueueItem } from './queue-migration.js';
-export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES };
+import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, validateQueueItem, VALID_TASK_KINDS, isValidQueueItem, type RawQueueItem } from './queue-migration.js';
+export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, validateQueueItem, VALID_TASK_KINDS, isValidQueueItem };
 export type { RawQueueItem };
 
 
@@ -398,23 +398,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // Validate queue items — filter out malformed entries before processing.
-        // Malformed items are logged + skipped; they never crash the evolution cycle.
+        // rc-1/rc-4 (ERR-007): consolidated in validateQueueItem (queue-migration.ts)
+        // so every load path applies the same filter. Malformed items are logged +
+        // skipped; they never crash the evolution cycle.
         const beforeValidation = queue.length;
         queue = queue.filter((item) => {
-            const errors: string[] = [];
-            if (!item.id || typeof item.id !== 'string') errors.push('missing/invalid id');
-            if (!item.source || typeof item.source !== 'string') errors.push('missing/invalid source');
-            if (typeof item.score !== 'number') errors.push('missing/invalid score');
-            if (!item.status || typeof item.status !== 'string') errors.push('missing/invalid status');
-            if (!item.taskKind || typeof item.taskKind !== 'string') errors.push('missing/invalid taskKind');
-            else {
-                const validTaskKinds = ['model_eval'];
-                if (!validTaskKinds.includes(item.taskKind)) {
-                    errors.push(`invalid taskKind value '${item.taskKind}' (expected one of: ${validTaskKinds.join(', ')})`);
-                }
-            }
-            if (typeof item.retryCount !== 'number') errors.push('missing/invalid retryCount');
-            if (typeof item.maxRetries !== 'number') errors.push('missing/invalid maxRetries');
+            const errors = validateQueueItem(item);
             if (errors.length > 0) {
                 logger?.warn?.(`[PD:EvolutionWorker] Skipping malformed queue item: ${errors.join(', ')} | ${JSON.stringify(item).slice(0, 200)}`);
                 SystemLogger.log(wctx.workspaceDir, 'QUEUE_ITEM_MALFORMED', `Skipped: ${errors.join(', ')} | id=${item.id || 'N/A'}`);
@@ -461,18 +450,16 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
-         
-         
-        let rawQueue: RawQueueItem[];
-        try {
-            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-        } catch (parseErr) {
-            logger?.warn?.(`[PD:EvolutionWorker] Failed to parse EVOLUTION_QUEUE for session registration: ${queuePath} - ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
-            return false;
-        }
-        
-        // V2: Migrate queue to current schema
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+        // loadEvolutionQueue handles JSON parse + migrate + validate (rc-1/rc-4).
+        // Previously this inlined JSON.parse + migrate cast without validating,
+        // so malformed queue items could reach the find() below. Reusing the
+        // shared loader keeps a single chokepoint for queue validation.
+        // Note: loadEvolutionQueue returns core/evolution-types.EvolutionQueueItem,
+        // which saveEvolutionQueue also accepts. We deliberately avoid annotating
+        // with the local EvolutionQueueItem interface (line 87) to prevent the
+        // known type-drift between the two definitions (see follow-up: unify the
+        // three EvolutionQueueItem copies).
+        const queue = loadEvolutionQueue(queuePath);
 
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
         if (!task) {

@@ -120,3 +120,57 @@ export function isLegacyQueueItem(item: RawQueueItem): boolean {
 export function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
     return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
 }
+
+// ── Validation (rc-1/rc-2, rc-4: validate array elements from untrusted JSON) ─
+
+/**
+ * Canonical set of valid taskKind values. Single source of truth — mirrors
+ * TaskKind in trajectory-types.ts. Previously the inline validator in
+ * evolution-worker.ts hard-coded `['model_eval']`, which silently rejected
+ * three legitimate taskKind values (pain_diagnosis / sleep_reflection /
+ * keyword_optimization). Keep this in sync with TaskKind.
+ */
+export const VALID_TASK_KINDS: readonly TaskKind[] = [
+    'pain_diagnosis',
+    'sleep_reflection',
+    'model_eval',
+    'keyword_optimization',
+] as const;
+
+/**
+ * Validate a single queue item loaded from untrusted disk JSON.
+ *
+ * Returns an array of human-readable error reasons; an empty array means the
+ * item is valid. Use {@link isValidQueueItem} for a type-guard form.
+ *
+ * This consolidates the inline validation that lived in processEvolutionQueue
+ * (evolution-worker.ts) so every queue load path (loadEvolutionQueue,
+ * registerEvolutionTaskSession) applies the same filter. rc-4 (ERR-007):
+ * array elements from parsed JSON must be element-wise validated.
+ */
+export function validateQueueItem(item: unknown): string[] {
+    const errors: string[] = [];
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        return ['item is not an object'];
+    }
+    const it = item as Record<string, unknown>;
+    if (!it.id || typeof it.id !== 'string') errors.push('missing/invalid id');
+    if (!it.source || typeof it.source !== 'string') errors.push('missing/invalid source');
+    if (typeof it.score !== 'number') errors.push('missing/invalid score');
+    if (!it.status || typeof it.status !== 'string') errors.push('missing/invalid status');
+    if (!it.taskKind || typeof it.taskKind !== 'string') errors.push('missing/invalid taskKind');
+    else if (!VALID_TASK_KINDS.includes(it.taskKind as TaskKind)) {
+        errors.push(`invalid taskKind value '${it.taskKind}' (expected one of: ${VALID_TASK_KINDS.join(', ')})`);
+    }
+    if (typeof it.retryCount !== 'number') errors.push('missing/invalid retryCount');
+    if (typeof it.maxRetries !== 'number') errors.push('missing/invalid maxRetries');
+    return errors;
+}
+
+/**
+ * Type-guard convenience over {@link validateQueueItem}.
+ * Drops the reason strings (callers that need them should call validateQueueItem).
+ */
+export function isValidQueueItem(item: unknown): item is EvolutionQueueItem {
+    return validateQueueItem(item).length === 0;
+}
