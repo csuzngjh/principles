@@ -790,9 +790,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 89 |
-| Last updated | 2026-06-29 |
+| Last updated | 2026-06-30 |
 | Top category | Schema & Type |
-| Recurring errors | 39 |
+| Recurring errors | 40 |
 
 ---
 
@@ -1355,7 +1355,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: None
+- **Recurrence**: 2026-06-30 PR #1131 — BDD tests accepted non-unique signals in three forms: the CLI step searched for one parseable JSON object and only warned when stdout contained extras; the UI step accepted any active activation instead of the activation just returned; and two mutating Playwright journeys consumed the same seed approval. The same PR also duplicated CLI option parsing instead of exercising the production Commander registration (ERR-025 sibling). Fixed by asserting exactly one stdout call/JSON object through the production registration function, carrying the returned activation ID into the read assertion, and assigning isolated seed records to each mutating journey.
 
 ---
 

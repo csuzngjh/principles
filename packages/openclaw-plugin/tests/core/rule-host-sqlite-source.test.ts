@@ -813,3 +813,168 @@ describe('PRI-436 Slice 5: Restart preserves the one active version', () => {
     expect(result3).toBeUndefined();
   });
 });
+
+// ── R2-RH-004: principleId lineage correctness ─────────────────────────────
+//
+// Bug: result.principleId was always set to `meta.ruleId ?? ruleId` (a rule
+// ID, never a principle ID), because:
+//   1. SQL query never SELECTed pi_artifacts.source_principle_id
+//   2. content_json.principleId was never extracted
+//   3. isRuleHostMeta guarantees meta.ruleId is a non-empty string, so the
+//      `?? ruleId` fallback was unreachable
+// Downstream impact: gate.ts recordRuleEnforced() logged the wrong principleId.
+//
+// Fix precedence: contentJson.principleId → source_principle_id → meta.ruleId → ruleId
+
+describe('R2-RH-004: principleId lineage correctness', () => {
+  it('result.principleId comes from contentJson.principleId (primary source)', async () => {
+    insertRuleArtifact(); // contentJson has principleId: 'P_TEST_001', DB has source_principle_id: 'P_TEST_001'
+    await insertCodeToolHookActivation();
+
+    const ruleHost = makeRuleHost();
+    const result = ruleHost.evaluate(makeInput('/etc/passwd'));
+
+    expect(result).toBeDefined();
+    expect(result?.decision).toBe('block');
+    expect(result?.matched).toBe(true);
+    expect(result?.principleId).toBe('P_TEST_001');
+    // ruleId must remain the rule ID, not the principle ID
+    expect(result?.ruleId).toBe(RULE_ID);
+  });
+
+  it('result.principleId falls back to source_principle_id when contentJson lacks principleId', async () => {
+    // contentJson WITHOUT principleId field; DB source_principle_id = 'P_TEST_001'
+    insertRuleArtifact({
+      contentJson: JSON.stringify({
+        ruleId: RULE_ID,
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 'trace-test-001', cases: [], createdAt: new Date().toISOString(), version: 1 },
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['write_file'],
+        painReasonSummary: 'Test: no principleId in content',
+      }),
+    });
+    await insertCodeToolHookActivation();
+
+    const ruleHost = makeRuleHost();
+    const result = ruleHost.evaluate(makeInput('/etc/passwd'));
+
+    expect(result).toBeDefined();
+    expect(result?.decision).toBe('block');
+    expect(result?.principleId).toBe('P_TEST_001');
+  });
+
+  it('result.principleId falls back to meta.ruleId when both contentJson and DB lack principleId', async () => {
+    // contentJson WITHOUT principleId; DB source_principle_id = NULL
+    insertRuleArtifact({
+      contentJson: JSON.stringify({
+        ruleId: RULE_ID,
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 'trace-test-001', cases: [], createdAt: new Date().toISOString(), version: 1 },
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['write_file'],
+        painReasonSummary: 'Test: no principleId anywhere',
+      }),
+    });
+    // Manually null out source_principle_id in DB
+    const db = sqliteConn.getDb();
+    db.prepare('UPDATE pi_artifacts SET source_principle_id = NULL WHERE artifact_id = ?').run(ARTIFACT_ID);
+    await insertCodeToolHookActivation();
+
+    const ruleHost = makeRuleHost();
+    const result = ruleHost.evaluate(makeInput('/etc/passwd'));
+
+    expect(result).toBeDefined();
+    expect(result?.decision).toBe('block');
+    // meta.ruleId is RULE_ID (from the RuleCode meta export in BLOCKING_CODE)
+    expect(result?.principleId).toBe(RULE_ID);
+  });
+
+  it('principleId is NOT set for non-matching (allow) results', async () => {
+    insertRuleArtifact();
+    await insertCodeToolHookActivation();
+
+    const ruleHost = makeRuleHost();
+    const result = ruleHost.evaluate(makeInput('/safe/file.txt'));
+
+    // Non-matching → decision is allow, principleId should not be set
+    expect(result?.decision ?? 'allow').toBe('allow');
+    // When matched=false or decision=allow, the principleId assignment block is skipped
+    if (result && result.matched === false) {
+      expect(result.principleId).toBeUndefined();
+    }
+  });
+});
+
+// ── R2-RH-002: armed-but-empty warn (observability, not degradation) ────────
+//
+// Bug: When _loadActiveCodeImplementations returned [] (either because
+// workspaceDir was missing OR because 0 active code_tool_hook activations
+// existed), RuleHost returned [] silently on every evaluation — an
+// observability gap (rc-9-no-silent-fallback).
+//
+// Fix: emit a structured warn once per RuleHost instance (cached via
+// emptyLoadWarnEmitted) so operators can distinguish "RuleHost is working
+// but has no rules" from "RuleHost is broken".
+
+describe('R2-RH-002: armed-but-empty warn (observability)', () => {
+  it('emits warn once when 0 active code_tool_hook activations exist', () => {
+    const warnings: string[] = [];
+    const captureLogger: RuleHostLogger = {
+      warn: (msg?: string) => { if (msg) warnings.push(msg); },
+    };
+
+    const ruleHost = new RuleHost(tempStateDir, captureLogger, { workspaceDir: tempWorkspaceDir });
+    createdRuleHosts.push(ruleHost);
+
+    // No activations inserted → empty load
+    const result1 = ruleHost.evaluate(makeInput('/etc/passwd'));
+    expect(result1).toBeUndefined();
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    expect(warnings.some((w) => w.includes('armed but empty'))).toBe(true);
+
+    // Second evaluation → warn should NOT fire again (cached)
+    warnings.length = 0;
+    const result2 = ruleHost.evaluate(makeInput('/etc/passwd'));
+    expect(result2).toBeUndefined();
+    expect(warnings.some((w) => w.includes('armed but empty'))).toBe(false);
+  });
+
+  it('emits warn once when workspaceDir is not configured', () => {
+    const warnings: string[] = [];
+    const captureLogger: RuleHostLogger = {
+      warn: (msg?: string) => { if (msg) warnings.push(msg); },
+    };
+
+    // No workspaceDir → empty load
+    const ruleHost = new RuleHost(tempStateDir, captureLogger);
+    createdRuleHosts.push(ruleHost);
+
+    const result1 = ruleHost.evaluate(makeInput('/etc/passwd'));
+    expect(result1).toBeUndefined();
+    expect(warnings.some((w) => w.includes('workspaceDir not configured'))).toBe(true);
+
+    // Second evaluation → warn should NOT fire again (cached)
+    warnings.length = 0;
+    const result2 = ruleHost.evaluate(makeInput('/etc/passwd'));
+    expect(result2).toBeUndefined();
+    expect(warnings.some((w) => w.includes('workspaceDir not configured'))).toBe(false);
+  });
+
+  it('does NOT emit armed-but-empty warn when activations exist', async () => {
+    const warnings: string[] = [];
+    const captureLogger: RuleHostLogger = {
+      warn: (msg?: string) => { if (msg) warnings.push(msg); },
+    };
+
+    insertRuleArtifact();
+    await insertCodeToolHookActivation();
+
+    const ruleHost = new RuleHost(tempStateDir, captureLogger, { workspaceDir: tempWorkspaceDir });
+    createdRuleHosts.push(ruleHost);
+
+    const result = ruleHost.evaluate(makeInput('/etc/passwd'));
+    expect(result?.decision).toBe('block');
+    expect(warnings.some((w) => w.includes('armed but empty'))).toBe(false);
+  });
+});

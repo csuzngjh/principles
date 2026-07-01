@@ -332,6 +332,12 @@ export class SqliteConnection {
     `);
 
     // M5: principle_candidates table
+    // F13 (PRI-442): added CHECK constraint so DB-level defense enforces
+    //   consumed_at IS NOT NULL whenever status = 'consumed'. The application
+    //   layer (pd-cli/src/commands/candidate.ts ensureConsumedAt) already
+    //   patches Bug-J, but schema had no defense. CREATE TABLE IF NOT EXISTS
+    //   means existing databases keep their old (unconstrained) table; the
+    //   CHECK applies to fresh databases and any future table rebuild.
     db.exec(`
       CREATE TABLE IF NOT EXISTS principle_candidates (
         candidate_id TEXT PRIMARY KEY,
@@ -352,7 +358,8 @@ export class SqliteConnection {
         abstracted_principle TEXT,
         FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
         FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
-        FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+        FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+        CHECK (status != 'consumed' OR consumed_at IS NOT NULL)
       );
       CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
       CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
@@ -546,6 +553,21 @@ export class SqliteConnection {
       db.exec("CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind)");
     } catch {
       // index may already exist
+    }
+
+    // F12 (PRI-442): Record schema version after migrations are applied or
+    // verified. If any migration column exists, the schema is at least
+    // version '001'. Only upgrade from '000' to '001' once (idempotent —
+    // getSchemaVersion returns the MAX version, so subsequent calls are
+    // no-ops). Previously migrateSchema never called setSchemaVersion, so
+    // the version stayed at the seed '000' forever (rc-9: silent state
+    // drift — callers reading getSchemaVersion() got a misleading value).
+    const hasAnyMigrationColumn = candidateMigrations.some((m) => existingNames.has(m.name));
+    if (hasAnyMigrationColumn) {
+      const currentVersion = this.getSchemaVersion();
+      if (currentVersion === '000') {
+        this.setSchemaVersion('001');
+      }
     }
   }
 

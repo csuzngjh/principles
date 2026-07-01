@@ -38,6 +38,7 @@ import {
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
+import type { Command } from 'commander';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
@@ -93,7 +94,7 @@ function readNonBlankString(value: unknown): string | null {
 }
 
 /** Output a refused/not_found result, respecting --json mode. Exits with code 1. */
-function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: string; taskId?: string; reason: string; message?: string; nextAction: string }): never {
+function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: string; taskId?: string; reason: string; message?: string; nextAction: string }): void {
   if (opts.json) {
     console.log(JSON.stringify({
       status: payload.status ?? 'refused',
@@ -119,7 +120,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   const resolution = resolveTaskIdFromPainId(opts.painId);
   // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (taskId vs reason/nextAction)
   if ('reason' in resolution) {
-    refuseExit(opts, { painId: opts.painId, reason: resolution.reason, nextAction: resolution.nextAction });
+    return refuseExit(opts, { painId: opts.painId, reason: resolution.reason, nextAction: resolution.nextAction });
   }
 
   const { taskId } = resolution;
@@ -132,7 +133,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     const task = await stateManager.getTask(taskId);
     if (!task) {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         status: 'not_found',
         painId: opts.painId,
         taskId,
@@ -143,7 +144,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
 
     if (task.taskKind !== 'diagnostician') {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: 'wrong_task_kind',
@@ -156,7 +157,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const previousLastError = task.lastError ?? null;
 
     if (task.status === 'succeeded' && !opts.force) {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: 'already_succeeded',
@@ -166,7 +167,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
 
     if (!RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: 'status_not_retryable',
@@ -179,7 +180,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // P1 fix: --openclaw-local and --openclaw-gateway are mutually exclusive.
     // Must output JSON when --json is set (CLI operator gate).
     if (opts.openclawLocal && opts.openclawGateway) {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: 'conflicting_flags',
@@ -201,7 +202,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
 
     if (!runtimeKind) {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: 'missing_runtime',
@@ -217,14 +218,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       const resolved = resolveRuntimeFromPdConfig(workspaceDir);
       const configResult = resolved.result;
       if (isRuntimeConfigError(configResult)) {
-        refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
+        return refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
       }
       const { openclawMode } = configResult;
       // CLI flags override config (PRI-393)
       const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
       const effectiveMode = flagMode ?? openclawMode;
       if (!effectiveMode) {
-        refuseExit(opts, {
+        return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: 'missing_openclaw_mode',
@@ -288,7 +289,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       if (readNonBlankString(model) === null) missing.push('model');
       if (readNonBlankString(apiKeyEnv) === null) missing.push('apiKeyEnv');
       if (missing.length > 0) {
-        refuseExit(opts, {
+        return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: `missing_required_config: ${missing.join(', ')}`,
@@ -306,7 +307,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         invalidNumeric.push(`timeoutMs (got: ${effectiveTimeoutMs})`);
       }
       if (invalidNumeric.length > 0) {
-        refuseExit(opts, {
+        return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: `invalid_numeric_config: ${invalidNumeric.join(', ')}`,
@@ -320,7 +321,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       const validModel = readNonBlankString(model);
       const validApiKeyEnv = readNonBlankString(apiKeyEnv);
       if (validProvider === null || validModel === null || validApiKeyEnv === null) {
-        refuseExit(opts, {
+        return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: 'internal_validation_error',
@@ -330,7 +331,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       }
 
       if (!process.env[validApiKeyEnv]) {
-        refuseExit(opts, {
+        return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: 'missing_api_key',
@@ -349,7 +350,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         workspace: workspaceDir,
       });
     } else {
-      refuseExit(opts, {
+      return refuseExit(opts, {
         painId: opts.painId,
         taskId,
         reason: `unknown_runtime: '${runtimeKind}'`,
@@ -549,6 +550,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     if (intakeFailed) {
       process.exit(1);
+      return;
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -569,7 +571,35 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       console.error(`error: ${message} (${errorCategory})`);
     }
     process.exit(1);
+    return;
   } finally {
     await stateManager.close();
   }
+}
+
+/** Register the production `pd pain retry` command and its complete option contract. */
+export function registerPainRetryCommand(
+  painCmd: Command,
+  handler: (opts: PainRetryOptions) => Promise<void> = handlePainRetry,
+): Command {
+  return painCmd
+    .command('retry')
+    .description('Retry a failed diagnosis by pain ID')
+    .requiredOption('-p, --pain-id <painId>', 'Pain ID to retry diagnosis for')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double', 'pi-ai'")
+    .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+    .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+    .option('-a, --agent <agentId>', 'Agent ID to invoke')
+    .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
+    .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
+    .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
+    .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
+    .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
+    .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
+    .option('--force', 'Allow retry of already-succeeded tasks')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts: PainRetryOptions) => {
+      await handler(opts);
+    });
 }

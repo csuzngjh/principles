@@ -61,6 +61,18 @@ CREATE TABLE IF NOT EXISTS artifacts (
   content_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_ref TEXT NOT NULL,
+  activated_at TEXT NOT NULL,
+  promoted_at TEXT,
+  deactivated_at TEXT
+);
 `;
 
 function setupDb(dbPath: string): void {
@@ -89,6 +101,13 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     db.prepare(
       `INSERT OR REPLACE INTO principle_candidates (candidate_id, task_id, source_run_id, status, recommendation_kind) VALUES (?, ?, ?, ?, ?)`,
     ).run(opts.candidateId, opts.taskId, opts.sourceRunId, opts.status ?? 'consumed', opts.recommendationKind ?? 'principle');
+    // F10-2: Insert a matching run so source_run_id → runs.run_id FK is valid.
+    // Without this, the new F10-2 integrity check reports a false positive
+    // dangling reference. These tests focus on dreamer/artifact lineage, not
+    // source_run_id integrity.
+    db.prepare(
+      `INSERT OR REPLACE INTO runs (run_id, task_id, execution_status) VALUES (?, ?, ?)`,
+    ).run(opts.sourceRunId, opts.taskId, 'succeeded');
     db.close();
   }
 

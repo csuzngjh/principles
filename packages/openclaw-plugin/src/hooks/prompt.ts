@@ -1104,6 +1104,21 @@ function scoreFromSeverityForSpec(severity: string | undefined, wctx: WorkspaceC
 }
 
 function resolveEmpathyObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>): EmpathyObserver | null {
+  // F15 (PRI-442): empathy_observer flag is registered as MVP-Quiet (default
+  // off) per ADR-0014 §2.5. Previously this flag was a dead registration —
+  // registered in feature-flag-contract.ts but never read anywhere, violating
+  // the PRI-239 constraint "Only flags with real consumption paths are
+  // registered". Now resolveEmpathyObserver consumes the flag: when disabled
+  // (the default), the LLM observer pipeline is short-circuited and the
+  // keyword-matcher path (gated by empathy_engine.enabled above) continues
+  // to run independently. This mirrors the pattern used by
+  // shouldStartEvolutionWorker / shouldStartCorrectionObserver.
+  const empathyFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'empathy_observer', logger);
+  if (!empathyFlag.enabled) {
+    logger?.debug?.(`[PD:Empathy] empathy_observer flag disabled (source=${empathyFlag.source}) — LLM observer pipeline skipped`);
+    return null;
+  }
+
   try {
     const loader = new WorkflowFunnelLoader(wctx.stateDir);
     const funnel = loader.getFunnel('pd-empathy-observer');

@@ -176,29 +176,35 @@ for (const item of CORE_REQUIRED) {
 
 console.log(`   Core: ${CORE_DEST}`);
 
-console.log('\n🔧 Rewriting @principles/core dependency in bundled packages...');
+console.log('\n🔧 Rewriting bundled dependencies (@principles/core, principles-disciple)...');
 
-function removeCoreDependency(pkgPath, label, coreRef) {
+function rewriteBundledDependency(pkgPath, label, depName, replacement) {
   if (!existsSync(pkgPath)) return;
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   let changed = false;
-  if (pkg.dependencies && '@principles/core' in pkg.dependencies) {
-    pkg.dependencies['@principles/core'] = coreRef;
+  if (pkg.dependencies && depName in pkg.dependencies) {
+    pkg.dependencies[depName] = replacement;
     changed = true;
   }
-  if (pkg.devDependencies && '@principles/core' in pkg.devDependencies) {
-    delete pkg.devDependencies['@principles/core'];
+  if (pkg.devDependencies && depName in pkg.devDependencies) {
+    delete pkg.devDependencies[depName];
     changed = true;
   }
   if (changed) {
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-    console.log(`  ✅ Rewrote @principles/core → ${coreRef} in ${label}/package.json`);
+    console.log(`  ✅ Rewrote ${depName} → ${replacement} in ${label}/package.json`);
   }
 }
 
-removeCoreDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', 'file:./core');
-removeCoreDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'file:../core');
-removeCoreDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'file:../core');
+rewriteBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core', 'file:./core');
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
+// pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
+// file reference so the bundled package is self-contained. The installer's syncPdCli()
+// creates a node_modules/principles-disciple symlink to the installed plugin directory.
+// Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
+// because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
 
 console.log('\n🔍 Verifying hook activation contract...');
 
