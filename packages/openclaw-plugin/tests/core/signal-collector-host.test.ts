@@ -199,4 +199,151 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
     expect(trackFriction).not.toHaveBeenCalled();
   });
+
+  it('LLM classifier throws exception → gracefully degraded to none', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => {
+        throw new Error('LLM service unavailable');
+      },
+    });
+    host.detectSync('这个不对', 'sess-except', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    expect(trackFriction).not.toHaveBeenCalled();
+  });
+
+  it('LLM classifier returns null → treated as none', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => null,
+    });
+    host.detectSync('这个不对', 'sess-null', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    expect(trackFriction).not.toHaveBeenCalled();
+  });
+
+  it('emitPainDetectedEvent throws → does not crash host', async () => {
+    vi.mocked(emitPainDetectedEvent).mockRejectedValue(new Error('emit failed'));
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-emit-fail', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalled();
+  });
+
+  it('trackFriction throws → does not crash host', async () => {
+    vi.mocked(trackFriction).mockImplementation(() => {
+      throw new Error('trackFriction failed');
+    });
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'empathy', confidence: 0.7, reason: 'frustration',
+      }),
+    });
+    host.detectSync('这个不对', 'sess-friction-fail', 'user');
+    await flushAsync();
+    expect(trackFriction).toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 边界条件和异常处理
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SignalCollectorHost edge cases and error handling', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('empty user message → no signal, writes user_turns', () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('', 'sess-empty', 'user');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+      correctionDetected: false,
+    }));
+  });
+
+  it('whitespace-only message → no signal', () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('   \n\t  ', 'sess-whitespace', 'user');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('recordUserTurn throws → does not crash detectSync', () => {
+    const wctx = makeMockWctx();
+    wctx.trajectory.recordUserTurn = vi.fn().mockImplementation(() => {
+      throw new Error('DB error');
+    });
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync('这是错的', 'sess-db-fail', 'user');
+    }).not.toThrow();
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('different sessions have independent rate limits', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    for (let i = 0; i < 5; i++) {
+      host.detectSync('这是错的', 'sess-a', 'user');
+      host.detectSync('这是错的', 'sess-b', 'user');
+    }
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(10);
+  });
+
+  it('rate limit resets after one hour', async () => {
+    vi.useFakeTimers();
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    for (let i = 0; i < 5; i++) {
+      host.detectSync('这是错的', 'sess-reset', 'user');
+    }
+    vi.advanceTimersByTime(100);
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(5);
+    vi.clearAllMocks();
+    vi.advanceTimersByTime(60 * 60 * 1000 + 100);
+    host.detectSync('这是错的', 'sess-reset', 'user');
+    vi.advanceTimersByTime(100);
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('LLM disabled in config → no async enqueue even for ambiguous terms', () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, enableLlmStage: false },
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: 'test',
+      }),
+    });
+    host.detectSync('这个不对', 'sess-no-llm', 'user');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('no trajectory → detectSync continues without writing user_turns', () => {
+    const wctx = {
+      workspaceDir: '/tmp/test-ws',
+      stateDir: '/tmp/test-ws/.state',
+      trajectory: null,
+    };
+    const host = makeHost(
+      wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0],
+      { keywordStore: testStore, config: testConfig },
+    );
+    expect(() => {
+      host.detectSync('这是错的', 'sess-no-trajectory', 'user');
+    }).not.toThrow();
+  });
 });
