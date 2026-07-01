@@ -30,10 +30,14 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
     if (!kw) continue;
     if (normalized.includes(term.toLowerCase())) {
       if (kw.precision === 'high') {
-        highHit = { term, category: kw.category };
-        break;  // high 优先,找到即停
+        // CodeRabbit #10: 不 break,遍历所有 high 命中,correction 优先于 empathy
+        // (避免结果依赖 terms 对象的键插入顺序)
+        if (!highHit || kw.category === 'correction') {
+          highHit = { term, category: kw.category };
+        }
+      } else {
+        ambiguousHits.push({ term, category: kw.category });
       }
-      ambiguousHits.push({ term, category: kw.category });
     }
   }
 

@@ -6,15 +6,15 @@ import type {
 
 const MAX_EXCERPT = 200;
 
-export function buildEvidence(text: string): SignalEvidence {
+export function buildEvidence(text: string, detectedAt: string): SignalEvidence {
   const excerpt = text.length > MAX_EXCERPT ? text.slice(0, MAX_EXCERPT) : text;
-  return { excerpt, detectedAt: new Date().toISOString() };
+  return { excerpt, detectedAt };
 }
 
 /**
  * 同步阶段(prompt hook 内调用,绝不阻塞):Stage1 关键词快扫。
  * - high 精度命中 → 直接返回 final output(needsLlmConfirmation=false)
- * - ambiguous / 未命中 → 返回 pending output(needsLlmConfirmation=true, isSignal=false)
+ * - ambiguous / 未命中 → 返回 pending output(needsLlmConfirmation 取决于 enableLlmStage)
  *   由 plugin 层异步调 mapLlmResultToOutput 完成 Stage2。
  *
  * 注意:这个函数不调 LLM。LLM 在 plugin 层。
@@ -24,12 +24,12 @@ export function collectSync(
   text: string,
   sessionId: string,
   store: UnifiedKeywordStore,
-  _config: SignalCollectorConfig,
+  config: SignalCollectorConfig,
+  detectedAt: string,
 ): SignalCollectorOutput {
   void sessionId;
-  void _config;
   const scan = scanKeywords(text, store);
-  const evidence = buildEvidence(text);
+  const evidence = buildEvidence(text, detectedAt);
 
   if (scan.matched && scan.matchedPrecision === 'high' && scan.suggestedType) {
     return {
@@ -44,6 +44,7 @@ export function collectSync(
     };
   }
 
+  // CodeRabbit #12: LLM 阶段关闭时,needsLlmConfirmation 应为 false(不会发生二阶段确认)
   return {
     isSignal: false,
     type: null,
@@ -51,7 +52,7 @@ export function collectSync(
     matchedTerms: scan.matchedTerms,
     matchedPrecision: scan.matchedPrecision,
     detectionSource: 'none',
-    needsLlmConfirmation: true,
+    needsLlmConfirmation: config.enableLlmStage,
     evidence,
   };
 }
@@ -64,11 +65,12 @@ export function mapLlmResultToOutput(
   llm: LlmClassificationResult,
   text: string,
   _sessionId: string,
-  config: SignalCollectorConfig,
+  _config: SignalCollectorConfig,
+  detectedAt: string,
 ): SignalCollectorOutput {
   void _sessionId;
-  void config;
-  const evidence = buildEvidence(text);
+  void _config;
+  const evidence = buildEvidence(text, detectedAt);
 
   if (!llm.is_feedback || llm.type === 'none') {
     return {

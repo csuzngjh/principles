@@ -112,6 +112,8 @@ export function resetPromptStateForTest(workspaceDir?: string): void {
     _staticFileCache.clear();
     resetIntentDocCacheForTest();
   }
+  // CodeRabbit #6: 清理 host 缓存,避免 rate-limit/classifier 状态跨测试泄漏
+  _signalCollectorHosts.clear();
 }
 
 /**
@@ -233,6 +235,12 @@ export async function handleBeforePromptBuild(
     wctx.trajectory?.recordSession?.({ sessionId });
   }
 
+  // 提前计算 lineage + userTurnCount(不依赖 isAgentToAgent),供后续 detectSync 使用。
+  // detectSync 调用延后到 isAgentToAgent 解析之后(CodeRabbit #7: 避免 agent-to-agent 误判)。
+  let correctionUserText: string | null = null;
+  let correctionReferencesAssistantTurnId: number | null = null;
+  let correctionTurnIndex = 0;
+
   if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
     const latestUserIndex = [...event.messages]
       .map((message, index) => ({ message, index }))
@@ -240,26 +248,18 @@ export async function handleBeforePromptBuild(
       .find((entry) => (entry.message as { role?: unknown })?.role === 'user');
 
     if (latestUserIndex) {
-      const userText = extractMessageContent(latestUserIndex.message);
+      correctionUserText = extractMessageContent(latestUserIndex.message);
 
       // lineage: 关联到前置 assistant turn(诊断 evidence JOIN 用)。host 不感知 trajectory 结构,由这里算好传入。
-      let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
         .slice(0, latestUserIndex.index)
         .some((message) => (message as { role?: unknown })?.role === 'assistant');
       if (hasPriorAssistant) {
         const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
         const lastAssistant = turns[turns.length - 1];
-        referencesAssistantTurnId = lastAssistant?.id ?? null;
+        correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
       }
-
-      // SignalCollectorHost 统一接管 correction 检测(spec §3.3 决策1)。
-      // 替代原 CorrectionCueLearner:含高精度短语直判 + 歧义词异步 LLM 确认。
-      const userTurnCount = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
-      getSignalCollectorHost(wctx, logger).detectSync(
-        userText, sessionId, trigger,
-        { referencesAssistantTurnId, turnIndex: userTurnCount },
-      );
+      correctionTurnIndex = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
     }
   }
 
@@ -309,6 +309,15 @@ export async function handleBeforePromptBuild(
   let shouldInjectBehavioralConstraints = false;
   if (isUserInteraction && sessionId && api && !isAgentToAgent) {
     shouldInjectBehavioralConstraints = true;
+  }
+
+  // SignalCollectorHost 统一接管 correction + empathy 检测(spec §3.3 决策1)。
+  // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
+  if (correctionUserText && sessionId && trigger === 'user' && !isAgentToAgent) {
+    getSignalCollectorHost(wctx, logger).detectSync(
+      correctionUserText, sessionId, trigger,
+      { referencesAssistantTurnId: correctionReferencesAssistantTurnId, turnIndex: correctionTurnIndex },
+    );
   }
 
   // 注:SignalCollectorHost.detectSync 已在上文 correction 段(:259)统一调用一次,

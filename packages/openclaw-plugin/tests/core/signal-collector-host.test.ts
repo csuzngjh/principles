@@ -50,7 +50,7 @@ function makeMockWctx() {
 }
 
 function makeHost(wctx: ReturnType<typeof makeMockWctx>, opts?: ConstructorParameters<typeof SignalCollectorHost>[1]) {
-  return new SignalCollectorHost(wctx as any, opts);
+  return new SignalCollectorHost(wctx as unknown as ConstructorParameters<typeof SignalCollectorHost>[0], opts);
 }
 
 // 等待 host 的 fire-and-forget 异步路径 (routeStrong 的 void emit / detectAsyncAndRoute) 完成
@@ -97,10 +97,10 @@ describe('SignalCollectorHost.detectSync', () => {
     // 异步,等微任务
     await flushAsync();
     expect(emitPainDetectedEvent).toHaveBeenCalled();
-    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1];
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; score?: number; reason?: string } };
     expect(callArg.type).toBe('pain_detected');
-    expect((callArg as any).data.source).toBe('user_correction');
-    expect((callArg as any).data.score).toBe(70);
+    expect(callArg.data.source).toBe('user_correction');
+    expect(callArg.data.score).toBe(70);
   });
 
   it('ambiguous term → writes user_turns correctionDetected=false, no immediate STRONG emit', () => {
@@ -155,9 +155,9 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     host.detectSync('这个不对', 'sess-llm', 'user');
     await flushAsync();
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
-    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1];
-    expect((callArg as any).data.source).toBe('user_correction');
-    expect((callArg as any).data.reason).toContain('明确纠错');
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; reason?: string } };
+    expect(callArg.data.source).toBe('user_correction');
+    expect(callArg.data.reason).toContain('明确纠错');
   });
 
   it('LLM says empathy → WEAK → trackFriction (no emit)', async () => {

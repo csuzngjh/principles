@@ -28,6 +28,7 @@ import {
   type SignalCollectorConfig,
   type SignalCollectorOutput,
 } from '@principles/core/runtime-v2';
+import { createHash } from 'node:crypto';
 import { emitPainDetectedEvent } from '../hooks/pain.js';
 import { trackFriction } from './session-tracker.js';
 import { SystemLogger } from './system-logger.js';
@@ -140,8 +141,9 @@ export class SignalCollectorHost {
       return;
     }
 
-    // 2. Stage1 关键词快扫 (同步,零成本)
-    const output = collectSync(userMessage, sessionId, this.store, this.config);
+    // 2. Stage1 关键词快扫 (同步,零成本)。detectedAt 由 plugin 层注入(core 不取时间,CodeRabbit #11)
+    const detectedAt = new Date().toISOString();
+    const output = collectSync(userMessage, sessionId, this.store, this.config, detectedAt);
 
     // 3. 写 user_turns (复用 recordUserTurn)
     //    correctionDetected 含义扩展:isSignal && strength=STRONG (spec §5.2)
@@ -196,14 +198,15 @@ export class SignalCollectorHost {
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
       }
+      const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
-        confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config);
+        confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
         // LLM 返回非法结果 → 当 none 处理 (rc-1),降级不静默
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, treating as none');
         confirmed = mapLlmResultToOutput(
           { is_feedback: false, type: 'none', confidence: 1, reason: 'LLM parse failed' },
-          pending.text, pending.sessionId, this.config,
+          pending.text, pending.sessionId, this.config, llmDetectedAt,
         );
       }
     } else {
@@ -230,7 +233,7 @@ export class SignalCollectorHost {
   private routeStrong(output: SignalCollectorOutput, sessionId: string): void {
     if (!this.tryConsumeRateLimit(sessionId)) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STRONG_RATE_LIMITED',
-        `STRONG signal suppressed by rate limit for session ${sessionId}`);
+        'STRONG signal suppressed by rate limit');  // 不记录 sessionId(隐私,CodeRabbit #2)
       return;
     }
 
@@ -247,7 +250,7 @@ export class SignalCollectorHost {
         ts: new Date().toISOString(),
         type: 'pain_detected',
         data: {
-          painId: `correction_${Date.now()}`,
+          painId: `correction_${createTraceId()}`,  // 唯一 ID,避免同毫秒碰撞(CodeRabbit #3)
           painType: 'user_frustration',
           source: 'user_correction',          // Layer 2 强信号 (spec §6.1)
           reason,
@@ -274,7 +277,11 @@ export class SignalCollectorHost {
    * 不用 strongPainScore(70),因为 WEAK 单条不该直接顶满 GFI。
    */
   private routeWeak(output: SignalCollectorOutput, sessionId: string): void {
-    const hash = (output.evidence.detectedAt + sessionId).slice(0, 32);
+    // 单向摘要,不暴露 sessionId 明文(CodeRabbit #4)
+    const hash = createHash('sha256')
+      .update(`${output.evidence.detectedAt}:${sessionId}`)
+      .digest('hex')
+      .slice(0, 32);
     trackFriction(sessionId, 20, hash, this.wctx.workspaceDir, {
       source: 'user_empathy',
     });
@@ -373,7 +380,7 @@ export function createSignalLlmClassifierFromConfig(
         if (typeof payload === 'string') {
           rawOutput = payload;
         } else if (typeof payload === 'object' && payload !== null && Object.hasOwn(payload, 'output')) {
-          const maybeOutput = (payload as Record<string, unknown>)['output'];
+          const maybeOutput = (payload as { output?: unknown }).output;
           if (typeof maybeOutput === 'string') {
             rawOutput = maybeOutput;
           }
