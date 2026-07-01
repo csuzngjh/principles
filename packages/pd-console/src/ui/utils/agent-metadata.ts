@@ -47,6 +47,20 @@ export interface AgentMeta {
   /** MVP 状态说明（可选，仅 philosopher/rolloutReviewer 有） */
   mvpNoteZh?: string;
   mvpNoteEn?: string;
+  /** 操作入口（可选，仅侧链代理用于跳转管理页面） */
+  action?: ActionMeta;
+}
+
+/**
+ * 操作入口（可选，仅侧链代理用于跳转管理页面）
+ */
+export interface ActionMeta {
+  /** 链接文本（中） */
+  linkTextZh: string;
+  /** 链接文本（英） */
+  linkTextEn: string;
+  /** 路由路径 */
+  to: string;
 }
 
 export interface AgentGroupMeta {
@@ -329,6 +343,11 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {},
     techDetailEn: {},
     isCore: true,
+    action: {
+      linkTextZh: '管理关键词',
+      linkTextEn: 'Manage Keywords',
+      to: '/control-center/signal-keywords?category=correction',
+    },
   },
 
   empathyObserver: {
@@ -348,6 +367,11 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {},
     techDetailEn: {},
     isCore: true,
+    action: {
+      linkTextZh: '管理关键词',
+      linkTextEn: 'Manage Keywords',
+      to: '/control-center/signal-keywords?category=empathy',
+    },
   },
   signalCollector: {
     name: 'signalCollector',

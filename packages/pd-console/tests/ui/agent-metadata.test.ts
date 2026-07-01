@@ -119,6 +119,29 @@ describe("AGENT_METADATA: isCore assignment", () => {
   });
 });
 
+describe("AGENT_METADATA: action field", () => {
+  it("correctionObserver and empathyObserver have action with bilingual linkText and to", () => {
+    const agentsWithAction = ["correctionObserver", "empathyObserver"];
+    for (const name of agentsWithAction) {
+      const meta = AGENT_METADATA[name];
+      expect(meta.action).toBeDefined();
+      expect(typeof meta.action).toBe("object");
+      expect(meta.action!.linkTextZh.length).toBeGreaterThan(0);
+      expect(meta.action!.linkTextEn.length).toBeGreaterThan(0);
+      expect(meta.action!.to.length).toBeGreaterThan(0);
+      expect(meta.action!.to).toMatch(/^\/control-center\/signal-keywords\?category=/);
+    }
+    // correction → ?category=correction
+    expect(AGENT_METADATA.correctionObserver.action!.to).toContain("category=correction");
+    // empathy → ?category=empathy
+    expect(AGENT_METADATA.empathyObserver.action!.to).toContain("category=empathy");
+  });
+
+  it("signalCollector does not have action (infrastructure, not an agent)", () => {
+    expect(Object.hasOwn(AGENT_METADATA.signalCollector, "action")).toBe(false);
+  });
+});
+
 describe("AGENT_METADATA: group assignment", () => {
   it("core_trio = diagnostician, dreamer, scribe", () => {
     expect(AGENT_METADATA.diagnostician.group).toBe("core_trio");
