@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as childProcess from 'child_process';
+import * as path from 'path';
 import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir } from '../src/utils/env.js';
 
 vi.mock('fs');
@@ -130,6 +131,7 @@ describe('environment detection utilities', () => {
   });
 
   describe('detectWorkspace', () => {
+    const defaultWorkspace = path.join('/home/user', 'clawd');
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
       delete process.env.PD_WORKSPACE_DIR;
@@ -159,7 +161,7 @@ describe('environment detection utilities', () => {
 
       const result = detectWorkspace();
 
-      expect(result.detectedPath).toBe('/home/user/clawd');
+      expect(result.detectedPath).toBe(defaultWorkspace);
       expect(result.exists).toBe(false);
       expect(result.isFirstInstall).toBe(true);
     });
@@ -168,8 +170,8 @@ describe('environment detection utilities', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
-        if (p.toString() === '/home/user/clawd') return true;
-        if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return true;
+        if (p.toString() === defaultWorkspace) return true;
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return true;
         return false;
       });
 
@@ -183,9 +185,9 @@ describe('environment detection utilities', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
-        if (p.toString() === '/home/user/clawd') return true;
-        if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return false;
-        if (p.toString() === '/home/user/clawd/AGENTS.md') return true;
+        if (p.toString() === defaultWorkspace) return true;
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return false;
+        if (p.toString() === path.join(defaultWorkspace, 'AGENTS.md')) return true;
         return false;
       });
 
@@ -199,13 +201,13 @@ describe('environment detection utilities', () => {
 
   describe('getOpenClawConfigDir', () => {
     it('returns correct config directory', () => {
-      expect(getOpenClawConfigDir()).toBe('/home/user/.openclaw');
+      expect(getOpenClawConfigDir()).toBe(path.join('/home/user', '.openclaw'));
     });
   });
 
   describe('getPluginExtDir', () => {
     it('returns correct plugin extension directory', () => {
-      expect(getPluginExtDir()).toBe('/home/user/.openclaw/extensions/principles-disciple');
+      expect(getPluginExtDir()).toBe(path.join('/home/user', '.openclaw', 'extensions', 'principles-disciple'));
     });
   });
 });
