@@ -447,5 +447,118 @@ describe('EventLog', () => {
       expect(content).toContain('Simulated getter crash');
     });
   });
+
+  describe('PRI-491: recordRuleHostSkipped', () => {
+    function readEvents(): unknown[] {
+      const eventsFile = path.join(
+        tempDir,
+        'logs',
+        'events_' + new Date().toISOString().slice(0, 10) + '.jsonl',
+      );
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      return content
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+    }
+
+    it('persists a rulehost_skipped event with mode, reason, and nextAction', () => {
+      eventLog.recordRuleHostSkipped({
+        activationId: 'act-skip-1',
+        artifactId: 'art-skip-1',
+        ruleId: 'R_SKIP_1',
+        mode: 'shadow',
+        reason: 'suspended_by_flag: rulecode_context_v2 is disabled',
+        nextAction: 'Enable rulecode_context_v2 flag or deactivate this activation',
+      });
+      eventLog.flush();
+
+      const events = readEvents();
+      const skipEvent = events.find(
+        (e) => (e as Record<string, unknown>)['type'] === 'rulehost_skipped',
+      ) as Record<string, unknown> | undefined;
+
+      expect(skipEvent).toBeDefined();
+      const data = skipEvent!['data'] as Record<string, unknown>;
+      expect(data['activationId']).toBe('act-skip-1');
+      expect(data['artifactId']).toBe('art-skip-1');
+      expect(data['ruleId']).toBe('R_SKIP_1');
+      expect(data['mode']).toBe('shadow');
+      expect(data['reason']).toContain('suspended_by_flag');
+      expect(data['nextAction']).toContain('Enable rulecode_context_v2');
+    });
+
+    it('persists a rulehost_skipped event without mode for unsupported action', () => {
+      eventLog.recordRuleHostSkipped({
+        activationId: 'act-bad-action',
+        artifactId: 'art-bad',
+        ruleId: 'R_BAD',
+        reason: 'unsupported action: some_future_action',
+        nextAction: 'Deactivate and recreate the activation through RuleHostWriter',
+      });
+      eventLog.flush();
+
+      const events = readEvents();
+      const skipEvent = events.find(
+        (e) => (e as Record<string, unknown>)['type'] === 'rulehost_skipped',
+      ) as Record<string, unknown> | undefined;
+
+      expect(skipEvent).toBeDefined();
+      const data = skipEvent!['data'] as Record<string, unknown>;
+      expect(data['mode']).toBeUndefined();
+      expect(data['reason']).toContain('unsupported action');
+    });
+
+    it('records multiple skip events without overwriting', () => {
+      eventLog.recordRuleHostSkipped({
+        activationId: 'act-skip-a',
+        artifactId: 'art-a',
+        ruleId: 'R_A',
+        mode: 'shadow',
+        reason: 'suspended_by_flag: rulecode_context_v2 is disabled',
+        nextAction: 'Enable rulecode_context_v2 flag',
+      });
+      eventLog.recordRuleHostSkipped({
+        activationId: 'act-skip-b',
+        artifactId: 'art-b',
+        ruleId: 'R_B',
+        mode: 'live',
+        reason: 'unsupported context version: 3',
+        nextAction: 'Regenerate artifact with requiresContextVersion 1 or 2',
+      });
+      eventLog.flush();
+
+      const events = readEvents();
+      const skipEvents = events.filter(
+        (e) => (e as Record<string, unknown>)['type'] === 'rulehost_skipped',
+      );
+
+      expect(skipEvents).toHaveLength(2);
+      const ids = skipEvents.map(
+        (e) => ((e as Record<string, unknown>)['data'] as Record<string, unknown>)['activationId'],
+      );
+      expect(ids).toEqual(expect.arrayContaining(['act-skip-a', 'act-skip-b']));
+    });
+
+    it('uses failure category for skipped events', () => {
+      eventLog.recordRuleHostSkipped({
+        activationId: 'act-cat-test',
+        artifactId: 'art-cat',
+        ruleId: 'R_CAT',
+        mode: 'shadow',
+        reason: 'suspended_by_flag',
+        nextAction: 'Enable flag',
+      });
+      eventLog.flush();
+
+      const events = readEvents();
+      const skipEvent = events.find(
+        (e) => (e as Record<string, unknown>)['type'] === 'rulehost_skipped',
+      ) as Record<string, unknown> | undefined;
+
+      expect(skipEvent).toBeDefined();
+      expect(skipEvent!['category']).toBe('failure');
+    });
+  });
 });
 
