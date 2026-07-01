@@ -65,6 +65,23 @@ beforeAll(() => {
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
   fs.mkdirSync(tempHomeDir, { recursive: true });
   fs.mkdirSync(tempWorkspaceDir, { recursive: true });
+
+  // Create a fake `openclaw` binary on PATH so the installer's readiness
+  // check (spec §6.2 — terminate if OpenClaw missing) passes in CI.
+  // The real OpenClaw detection logic is covered by env.test.ts BDD tests.
+  const fakeBinDir = path.join(tempHomeDir, 'bin');
+  fs.mkdirSync(fakeBinDir, { recursive: true });
+  const fakeOpenclawName = process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw';
+  const fakeOpenclawPath = path.join(fakeBinDir, fakeOpenclawName);
+  const fakeOpenclawContent = process.platform === 'win32'
+    ? '@echo off\recho openclaw version 1.0.0-smoke\r\n'
+    : '#!/usr/bin/env sh\necho "openclaw version 1.0.0-smoke"\n';
+  fs.writeFileSync(fakeOpenclawPath, fakeOpenclawContent, 'utf-8');
+  if (process.platform !== 'win32') {
+    fs.chmodSync(fakeOpenclawPath, 0o755);
+  }
+  // Prepend fakeBinDir to PATH so checkEnvironment finds the fake openclaw.
+  process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH}`;
 }, 180_000);
 
 afterAll(() => {

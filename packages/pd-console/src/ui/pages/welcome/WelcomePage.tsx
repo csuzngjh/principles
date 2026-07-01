@@ -6,7 +6,7 @@ import { DemoResultView, type DemoResultData, type DemoStage } from '../../compo
 import { getOnboardingState, setOnboardingState, type OnboardingState } from '../../utils/onboarding-state.js';
 import { request } from '../../api.js';
 
-// Polling configuration for step 3 evidence detection (spec §6.5.2).
+// Polling configuration for step 3 evidence detection (spec 6.5.2).
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 30 * 1000;
 
@@ -27,7 +27,7 @@ function isDemoStage(value: unknown): value is DemoStage {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.name !== 'string' || typeof v.status !== 'string') return false;
-  return v.status === 'pending' || v.status === 'running' || v.status === 'completed' || v.status === 'failed';
+  return v.status === 'passed' || v.status === 'failed' || v.status === 'degraded' || v.status === 'skipped';
 }
 
 function parseDemoResponse(value: unknown): DemoResponse | null {
@@ -46,7 +46,6 @@ function parseDemoResponse(value: unknown): DemoResponse | null {
   if (Array.isArray(d.stages)) demo.stages = d.stages.filter(isDemoStage);
   return { demo, simulated: v.simulated };
 }
-
 export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -60,6 +59,10 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   // Refs for polling cleanup (spec 6.5.2 test case 3: unmount clears timers).
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // P2-3: baseline record count captured when polling starts, so we only
+  // trigger evidence-found on NEW evidence (not pre-existing records).
+  const baselineCountRef = useRef<number>(0);
 
   // If onboarding was already completed for this workspace, skip the wizard.
   useEffect(() => {
@@ -105,7 +108,6 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   }, [completeOnboarding]);
 
   // EP-05 (Loop State Freshness): each poll fetches fresh evidence.
-  // rc-1: evidence-chain response is treated as unknown and validated.
   const stopPolling = useCallback(() => {
     setPollingActive(false);
     if (pollingIntervalRef.current) {
@@ -122,25 +124,33 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
     setPollingActive(true);
     setPollingStatus('polling');
 
-    // Set 2-hour timeout (spec 6.5.2 test case 2: friendly hint on timeout).
     pollingTimeoutRef.current = setTimeout(() => {
       setPollingStatus('timeout');
       stopPolling();
     }, TWO_HOURS_MS);
 
-    // Poll every 30 seconds for new evidence (spec 6.5.2 test case 1).
+    // P2-3: capture baseline count on first poll, then only trigger
+    // evidence-found when count exceeds baseline (NEW evidence appeared).
+    let baselineCaptured = false;
+
     const checkForEvidence = async () => {
       try {
         const response = await request('/api/v1/evidence-chain');
         if (response.success && response.data) {
-          // rc-1: treat parsed JSON as unknown, validate shape before use.
-          // rc-5: use Object.hasOwn, not `in`, for untrusted keys.
           const data = response.data;
           if (typeof data === 'object' && data !== null && Object.hasOwn(data, 'records')) {
             const records = (data as { records: unknown }).records;
-            if (Array.isArray(records) && records.length > 0) {
-              setPollingStatus('evidence-found');
-              stopPolling();
+            if (Array.isArray(records)) {
+              if (!baselineCaptured) {
+                // First poll: capture baseline count, do not trigger.
+                baselineCountRef.current = records.length;
+                baselineCaptured = true;
+                return;
+              }
+              if (records.length > baselineCountRef.current) {
+                setPollingStatus('evidence-found');
+                stopPolling();
+              }
             }
           }
         }
@@ -159,7 +169,6 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
       stopPolling();
     };
   }, [stopPolling]);
-
   return (
     <div className="welcome-page" role="main">
       <header className="welcome-header">
@@ -210,18 +219,12 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
                 {t('pages.welcome.step2.runDemoButton')}
               </button>
             )}
-            {demoStatus === 'success' && (
-              <button className="pd-btn pd-btn-brand" onClick={() => setStep(3)}>
-                {t('pages.welcome.step2.nextButton')}
-              </button>
-            )}
             <button className="pd-btn pd-btn-alt" onClick={() => setStep(3)}>
               {t('pages.welcome.step2.nextButton')}
             </button>
           </div>
         </section>
       )}
-
       {step === 3 && (
         <section className="welcome-step welcome-step-3" aria-labelledby="step3-title">
           <h2 id="step3-title">{t('pages.welcome.step3.title')}</h2>

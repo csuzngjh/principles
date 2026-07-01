@@ -1,26 +1,31 @@
 /**
- * Onboarding route — POST /api/v1/onboarding/run-demo
+ * Onboarding route - POST /api/v1/onboarding/run-demo
  *
- * Spec: docs/superpowers/specs/2026-06-30-new-user-onboarding-design.md §6.3 改动 5
+ * Spec: docs/superpowers/specs/2026-06-30-new-user-onboarding-design.md 6.3 change 5
  *
- * Spawns `pd demo story-a --workspace <path> --json` as a subprocess and returns
- * 202 Accepted immediately. The console backend NEVER writes SQLite directly —
- * all DB I/O happens inside the pd-cli subprocess (EP-06 Source of Truth).
+ * Spawns `pd demo story-a --workspace <path> --json` as a subprocess, waits for
+ * it to complete, validates the JSON stdout, and returns 200 with the demo
+ * result. The console backend NEVER writes SQLite directly - all DB I/O happens
+ * inside the pd-cli subprocess (EP-06 Source of Truth).
  *
  * Feature flag gate: `new_user_onboarding` (default true, registered in
  * packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts).
  *
  * ERR entries considered:
  * - EP-02 (Production Path Wiring): registered in server/index.ts handleRequest
- * - EP-03 (Fail Loud): spawn failure → 500 with reason + nextAction;
- *   flag disabled → 403 with reason + nextAction (rc-9-no-silent-fallback)
+ * - EP-03 (Fail Loud): spawn failure -> 500 with reason + nextAction;
+ *   flag disabled -> 403 with reason + nextAction (rc-9-no-silent-fallback)
  * - EP-06 (Source of Truth): reuses pd-cli demo command, no direct DB writes
  * - EP-08 (Security Boundary): shell: true on Windows so the spawn can resolve
  *   the `pd` shim installed under AppData\Roaming\npm
+ * - rc-1-treat-as-unknown / rc-2-no-as-bypass / rc-4-validate-array-elements:
+ *   parsed stdout is validated by parseDemoStdout before use
+ * - rc-9-no-silent-fallback: timeout, error, and invalid-stdout paths each
+ *   return a structured error with reason + nextAction
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { sendError, sendJson } from '../utils/response.js';
 
@@ -35,6 +40,9 @@ interface StructuredErrorPayload {
   reason: string;
   nextAction: string;
 }
+
+/** Demo subprocess timeout in milliseconds (60s). */
+const DEMO_TIMEOUT_MS = 60_000;
 
 /** Send a structured error with reason + nextAction (Runtime Contract rc-9). */
 function sendStructuredError(res: ServerResponse, payload: StructuredErrorPayload): void {
@@ -60,32 +68,75 @@ function findPdBin(): string {
 }
 
 /**
- * Spawn `pd demo story-a` and return 202 Accepted immediately.
+ * Validate the parsed JSON stdout from `pd demo story-a --json`.
  *
- * The demo runs asynchronously (typically < 30s). The frontend polls the
- * existing /api/v1/approvals and /api/v1/activations endpoints to observe
- * demo artifacts as they appear — the console backend does NOT block on the
- * subprocess, and does NOT parse demo stdout into the response (that would
- * couple the API to pd-cli's output schema and risk ERR-001 `as` casts on
- * untrusted JSON).
+ * rc-1-treat-as-unknown: parsed JSON is treated as unknown until validated.
+ * rc-2-no-as-bypass: no `as` cast is used to bypass validation - all fields
+ *   are checked with typeof / Array.isArray before the value is accepted.
+ * rc-4-validate-array-elements: the `stages` array is type-checked as an array
+ *   (element-level shape validation happens downstream in the UI validator).
  *
- * Failure modes (rc-9-no-silent-fallback):
- *   - spawn throws synchronously (e.g. ENOENT) → 500 with reason + nextAction
- *   - child emits 'error' after spawn → logged, but response already sent (202)
+ * Required fields: status (string), generatedAt (string), narrative (string),
+ * stages (array). Returns the validated object or null if invalid.
+ */
+function parseDemoStdout(stdout: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const v = parsed as Record<string, unknown>;
+  if (typeof v.status !== 'string') return null;
+  if (typeof v.generatedAt !== 'string') return null;
+  if (typeof v.narrative !== 'string') return null;
+  if (!Array.isArray(v.stages)) return null;
+  return v;
+}
+/**
+ * Spawn `pd demo story-a --json`, wait for it to complete, validate stdout,
+ * and return 200 with { success: true, data: { simulated: true, demo: ... } }.
+ *
+ * The demo typically completes in < 30s. We block on the subprocess so the
+ * response carries the validated demo result in a single round-trip - the
+ * frontend does not need to poll for the demo itself (it still polls
+ * /api/v1/evidence-chain in step 3 for live evidence detection).
+ *
+ * Failure modes (rc-9-no-silent-fallback - every path returns a structured
+ * error with reason + nextAction):
+ *   - spawn throws synchronously (e.g. ENOENT) -> 500 demo_spawn_failed
+ *   - child emits 'error' after spawn -> 500 demo_subprocess_error
+ *   - subprocess exceeds DEMO_TIMEOUT_MS -> 504 demo_timeout (subprocess killed)
+ *   - subprocess exits with non-zero code -> 500 demo_exit_nonzero
+ *   - stdout cannot be parsed/validated -> 500 demo_invalid_stdout
  */
 async function handleRunDemo(
   res: ServerResponse,
   workspaceDir: string,
 ): Promise<void> {
-  let child;
+  // P2-1: quote workspaceDir on Windows when it contains spaces, since
+  // shell:true is used and an unquoted path with spaces would be split by the
+  // shell into multiple argv tokens.
+  const needsQuoting =
+    process.platform === 'win32' &&
+    workspaceDir.includes(' ') &&
+    !workspaceDir.startsWith('"');
+  const workspaceArg = needsQuoting ? '"' + workspaceDir + '"' : workspaceDir;
+
+  let child: ChildProcess;
   try {
     const pdBin = findPdBin();
     // EP-06: pd-cli subprocess owns all DB writes. Console only spawns.
     // EP-08: shell: true on Windows so spawn can resolve the pd.cmd shim.
-    child = spawn(pdBin, ['demo', 'story-a', '--workspace', workspaceDir, '--json'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-    });
+    child = spawn(
+      pdBin,
+      ['demo', 'story-a', '--workspace', workspaceArg, '--json'],
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
+      },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     sendStructuredError(res, {
@@ -97,33 +148,101 @@ async function handleRunDemo(
     return;
   }
 
-  // Attach listeners so the subprocess does not crash on unhandled stdout/stderr
-  // data, and so 'error' events are logged (not silently swallowed — rc-9).
-  // We intentionally do NOT await close() here: returning 202 immediately keeps
-  // the API responsive and decouples the response shape from pd-cli's stdout.
+  // Capture stdout into a buffer. stderr is logged for observability (rc-9).
+  const stdoutChunks: Buffer[] = [];
+  let stderrText = '';
   child.stdout?.on('data', (data: Buffer) => {
-    console.log('[pd-console] onboarding demo stdout:', data.toString().trim());
+    stdoutChunks.push(data);
   });
   child.stderr?.on('data', (data: Buffer) => {
-    console.error('[pd-console] onboarding demo stderr:', data.toString().trim());
-  });
-  child.on('error', (err: Error) => {
-    // Subprocess failed AFTER spawn() returned. Response (202) is already sent,
-    // so we log to console.error — the operator sees it in the server log.
-    console.error('[pd-console] onboarding demo subprocess error:', err.message);
-  });
-  child.on('close', (code: number | null) => {
-    if (code !== 0) {
-      console.error('[pd-console] onboarding demo exited with code', code);
-    }
+    const chunk = data.toString();
+    stderrText += chunk;
+    console.error('[pd-console] onboarding demo stderr:', chunk.trim());
   });
 
-  // 202 Accepted — demo started; frontend polls /approvals + /activations.
-  sendJson(res, 202, {
+  // Wrap the subprocess lifecycle in a Promise that resolves with the exit code
+  // or rejects on 'error'. A timeout is enforced via a separate Promise that
+  // resolves with a sentinel value - Promise.race is used below.
+  const settled = new Promise<{ code: number | null; error: Error | null }>((resolve) => {
+    let done = false;
+    const finish = (code: number | null, error: Error | null) => {
+      if (done) return;
+      done = true;
+      resolve({ code, error });
+    };
+    child.on('error', (err: Error) => {
+      finish(null, err);
+    });
+    child.on('close', (code: number | null) => {
+      finish(code, null);
+    });
+  });
+
+  const timeout = new Promise<'timeout'>((resolve) => {
+    setTimeout(() => resolve('timeout'), DEMO_TIMEOUT_MS);
+  });
+
+  const outcome = await Promise.race([settled, timeout]);
+  // -- Timeout: kill the subprocess and return 504 --
+  if (outcome === 'timeout') {
+    try {
+      child.kill();
+    } catch {
+      // Best-effort kill; ignore failures (rc-9: the 504 response still carries
+      // the reason + nextAction so the operator is not left in the dark).
+    }
+    sendStructuredError(res, {
+      statusCode: 504,
+      error: 'demo_timeout',
+      reason: `demo subprocess exceeded ${DEMO_TIMEOUT_MS}ms timeout`,
+      nextAction: 'Retry the demo; if it persists, check pd CLI health (pd doctor).',
+    });
+    return;
+  }
+
+  // -- 'error' event after spawn (e.g. EACCES, broken pipe) -> 500 --
+  if (outcome.error !== null) {
+    sendStructuredError(res, {
+      statusCode: 500,
+      error: 'demo_subprocess_error',
+      reason: `subprocess error: ${outcome.error.message}`,
+      nextAction: 'Check pd CLI installation and permissions; see server logs for stderr.',
+    });
+    return;
+  }
+
+  // -- Non-zero exit code -> 500 --
+  if (outcome.code !== 0) {
+    sendStructuredError(res, {
+      statusCode: 500,
+      error: 'demo_exit_nonzero',
+      reason: `demo exited with code ${outcome.code}`,
+      nextAction: stderrText.trim()
+        ? `pd stderr: ${stderrText.trim()}`
+        : 'Run `pd demo story-a --json` manually for diagnostics.',
+    });
+    return;
+  }
+
+  // -- Validate stdout (rc-1/rc-2/rc-4) --
+  const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+  const validated = parseDemoStdout(stdout);
+  if (validated === null) {
+    sendStructuredError(res, {
+      statusCode: 500,
+      error: 'demo_invalid_stdout',
+      reason: 'demo stdout did not match the expected JSON schema',
+      nextAction: 'Run `pd demo story-a --json` manually and inspect the output.',
+    });
+    return;
+  }
+
+  // -- 200 OK with validated demo result --
+  sendJson(res, 200, {
     success: true,
     data: {
       simulated: true,
-      status: 'started',
+      demo: validated,
     },
   });
 }
@@ -135,7 +254,7 @@ export async function handleOnboardingRoute(
 ): Promise<void> {
   const { workspaceDir, subPath } = ctx;
 
-  // ── Feature flag gate (spec §6.3 改动 5) ────────────────────────────────
+  // -- Feature flag gate (spec 6.3 change 5) --
   // Checked BEFORE method/sub-path dispatch so a disabled flag cannot be probed
   // via 405/404 side-channels (rc-9-no-silent-fallback: explicit 403 + reason).
   if (!loadOnboardingFlagEnabled(workspaceDir)) {
@@ -148,7 +267,7 @@ export async function handleOnboardingRoute(
     return;
   }
 
-  // ── POST /api/v1/onboarding/run-demo ───────────────────────────────────
+  // -- POST /api/v1/onboarding/run-demo --
   if (subPath === '/run-demo') {
     if (req.method !== 'POST') {
       sendStructuredError(res, {
@@ -163,7 +282,7 @@ export async function handleOnboardingRoute(
     return;
   }
 
-  // ── Unknown sub-path ───────────────────────────────────────────────────
+  // -- Unknown sub-path --
   sendStructuredError(res, {
     statusCode: 404,
     error: 'not_found',
@@ -172,7 +291,7 @@ export async function handleOnboardingRoute(
   });
 }
 
-/** No persistent resources to dispose — included for parity with other routes. */
+/** No persistent resources to dispose - included for parity with other routes. */
 export function disposeOnboardingModels(): void {
   // No-op: handleRunDemo holds no cached models or open handles.
 }

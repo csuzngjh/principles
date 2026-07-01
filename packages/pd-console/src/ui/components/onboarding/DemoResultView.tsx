@@ -2,8 +2,10 @@ import { useTranslation } from 'react-i18next';
 
 export interface DemoStage {
   name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  detail?: string;
+  status: 'passed' | 'failed' | 'degraded' | 'skipped';
+  reason?: string;
+  nextAction?: string;
+  evidenceRef?: string;
 }
 
 export interface DemoResultData {
@@ -64,7 +66,7 @@ export function DemoResultView({ result, loading, error }: DemoResultViewProps) 
           {result.stages.map((stage, idx) => (
             <li key={idx} className={`demo-stage demo-stage-${stage.status}`}>
               <span className="demo-stage-name">{stage.name}</span>
-              {stage.detail && <span className="demo-stage-detail">{stage.detail}</span>}
+              {stage.reason && <span className="demo-stage-detail">{stage.reason}</span>}
             </li>
           ))}
         </ol>

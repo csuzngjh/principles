@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import * as yaml from 'js-yaml';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-// ── Mock child_process.spawn — we never want to actually run pd in tests ──
+// -- Mock child_process.spawn -- we never want to actually run pd in tests --
 // EP-06 (Source of Truth): the route must spawn `pd demo story-a`, not write
 // SQLite directly. We mock spawn so we can assert argv without touching the DB.
 vi.mock('child_process', () => ({
@@ -19,7 +19,7 @@ import {
   disposeOnboardingModels,
 } from '../../../src/server/routes/onboarding.js';
 
-// ── Workspace fixtures ──────────────────────────────────────────────────────
+// -- Workspace fixtures --
 
 let workspaceDir: string;
 let pdDir: string;
@@ -61,7 +61,7 @@ afterEach(() => {
   }
 });
 
-// ── Mock req/res helpers (mirror intent.test.ts pattern) ────────────────────
+// -- Mock req/res helpers (mirror intent.test.ts pattern) --
 
 function makePostReq(url: string): IncomingMessage {
   const req = new EventEmitter();
@@ -122,26 +122,53 @@ function parseError(res: ServerResponse): {
     nextAction?: string;
   };
 }
-
-/** Build a mock ChildProcess-like object whose stdout/stderr are vi.fn() sinks. */
-function makeMockChild(): {
-  on: ReturnType<typeof vi.fn>;
-  stdout: { on: ReturnType<typeof vi.fn> };
-  stderr: { on: ReturnType<typeof vi.fn> };
-} {
-  return {
-    on: vi.fn(),
-    stdout: { on: vi.fn() },
-    stderr: { on: vi.fn() },
+/**
+ * Build a mock ChildProcess that emits stdout data (the demo JSON) and then
+ * fires the 'close' event with exit code 0 on the next tick, so the awaiting
+ * Promise in handleRunDemo can resolve and return 200 with the demo result.
+ */
+function makeMockChildEmitSuccess(demoJson: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+  const child = {
+    on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      if (!handlers[event]) handlers[event] = [];
+      handlers[event].push(cb);
+      return child;
+    }),
+    stdout: {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        if (event === 'data') {
+          cb(Buffer.from(JSON.stringify(demoJson)));
+        }
+        return child;
+      }),
+    },
+    stderr: {
+      on: vi.fn(() => child),
+    },
+    kill: vi.fn(() => true),
   };
+  // Schedule 'close' event emission on next tick so the Promise can attach listeners
+  setTimeout(() => {
+    handlers.close?.forEach(cb => cb(0));
+  }, 0);
+  return child as never;
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests --
 
 describe('POST /api/v1/onboarding/run-demo', () => {
-  it('Given flag enabled, When POST run-demo, Then spawns pd demo story-a and returns 202', async () => {
-    const mockChild = makeMockChild();
-    vi.mocked(spawn).mockReturnValue(mockChild as never);
+  it('Given flag enabled, When POST run-demo, Then spawns pd demo story-a and returns 200 with demo result', async () => {
+    const demoResult = {
+      status: 'passed',
+      generatedAt: '2026-07-01T00:00:00Z',
+      narrative: 'Demo narrative',
+      storyDescription: 'Demo story',
+      stages: [{ name: 'evidence_seed', status: 'passed' }],
+      channelOutcomes: [],
+      isRuntimeV2Exclusive: true,
+    };
+    vi.mocked(spawn).mockReturnValue(makeMockChildEmitSuccess(demoResult) as never);
 
     const res = makeRes();
     await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
@@ -158,14 +185,14 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     // EP-08: shell: true on Windows so spawn can resolve the pd shim
     expect(options).toEqual(expect.objectContaining({ shell: process.platform === 'win32' }));
 
-    // 202 Accepted — demo runs async; response returns immediately.
-    expect(getStatus(res)).toBe(202);
+    // 200 OK with validated demo result
+    expect(getStatus(res)).toBe(200);
     const body = parseBody(res);
     expect(body.success).toBe(true);
     expect(body.data.simulated).toBe(true);
-    expect(body.data.status).toBe('started');
+    expect(body.data.demo).toBeDefined();
+    expect((body.data.demo as Record<string, unknown>).status).toBe('passed');
   });
-
   it('Given flag disabled, When POST run-demo, Then returns 403 with reason and nextAction', async () => {
     writeConfig(false);
 
@@ -175,7 +202,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
       subPath: '/run-demo',
     });
 
-    // EP-03: fail loud, observable degradation — must include reason + nextAction
+    // EP-03: fail loud, observable degradation - must include reason + nextAction
     expect(spawn).not.toHaveBeenCalled();
     expect(getStatus(res)).toBe(403);
     const body = parseError(res);
@@ -203,9 +230,6 @@ describe('POST /api/v1/onboarding/run-demo', () => {
   });
 
   it('Given GET method on /run-demo, When called, Then returns 405 method_not_allowed', async () => {
-    const mockChild = makeMockChild();
-    vi.mocked(spawn).mockReturnValue(mockChild as never);
-
     const res = makeRes();
     await handleOnboardingRoute(makeGetReq('/api/v1/onboarding/run-demo'), res, {
       workspaceDir,

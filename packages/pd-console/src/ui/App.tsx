@@ -60,38 +60,44 @@ function AuthRoutes() {
   }, [authed, showSplash, navigate]);
 
   // Fetch workspace list + feature flags after auth for onboarding redirect.
+  // P2-5: use Promise.all so both states update together — prevents the
+  // redirect effect from firing with the wrong workspaceId (race condition).
   // rc-9: on fetch failure, set featureFlags to {} so the redirect effect
   // fires (defaults to /focus — safe, no onboarding forced).
   useEffect(() => {
     if (authed !== true) return;
-    fetchWorkspaces()
-      .then((result) => {
-        if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-          const firstWorkspace = result.data[0];
-          if (firstWorkspace) {
-            setCurrentWorkspaceId(firstWorkspace.name);
-          }
+
+    Promise.all([
+      fetchWorkspaces().catch(() => null),
+      fetchConfigSummary().catch(() => null),
+    ]).then(([wsResult, cfgResult]) => {
+      // Update workspaceId first (if we have a real workspace)
+      if (
+        wsResult &&
+        wsResult.success &&
+        Array.isArray(wsResult.data) &&
+        wsResult.data.length > 0
+      ) {
+        const firstWorkspace = wsResult.data[0];
+        if (firstWorkspace) {
+          setCurrentWorkspaceId(firstWorkspace.name);
         }
-      })
-      .catch(() => {
-        // keep default workspaceId — onboarding state defaults to incomplete
-      });
-    fetchConfigSummary()
-      .then((result) => {
-        if (result.success && result.data) {
-          const summary: ConfigSummaryData = result.data;
-          const flags: Record<string, { enabled: boolean }> = {};
-          for (const f of summary.features) {
-            flags[f.id] = { enabled: f.enabled };
-          }
-          setFeatureFlags(flags);
-        } else {
-          setFeatureFlags({});
+      }
+      // Then update featureFlags — the redirect effect waits for this.
+      // rc-9: on any failure, default to {} so redirect fires to /focus.
+      const flags: Record<string, { enabled: boolean }> = {};
+      if (
+        cfgResult &&
+        cfgResult.success &&
+        cfgResult.data
+      ) {
+        const summary: ConfigSummaryData = cfgResult.data;
+        for (const f of summary.features) {
+          flags[f.id] = { enabled: f.enabled };
         }
-      })
-      .catch(() => {
-        setFeatureFlags({});
-      });
+      }
+      setFeatureFlags(flags);
+    });
   }, [authed]);
 
   // First-visit redirect: check new_user_onboarding flag + onboarding state.
