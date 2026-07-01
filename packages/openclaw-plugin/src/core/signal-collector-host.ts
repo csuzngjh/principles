@@ -185,7 +185,8 @@ export class SignalCollectorHost {
    * ★ 异步路径 (fire-and-forget)。
    *
    * 1. Stage2 LLM 确认 (后台,不阻塞用户)
-   * 2. LLM 不可用 → 降级:丢弃 ambiguous 候选 (不触发 STRONG,避免误判泛滥)
+   * 2. LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(保留旧版 GFI 累积);
+   *    correction ambiguous / 未命中候选丢弃(不触发 STRONG,避免误判泛滥)
    * 3. 按 strength 分流:STRONG → emitPainDetectedEvent;WEAK → trackFriction 累积 GFI;none → 仅记录
    */
   private async detectAsyncAndRoute(pending: PendingSignal): Promise<void> {
@@ -210,10 +211,31 @@ export class SignalCollectorHost {
         );
       }
     } else {
-      // LLM 不可用 → 降级纯关键词:丢弃 ambiguous 候选 (不触发 STRONG,避免误判泛滥)
-      // (Stage1 已对该候选标 needsLlmConfirmation=true 且 isSignal=false,这里维持不触发)
+      // LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(累积 GFI,不触发 STRONG)。
+      // 保留旧版 empathy keyword matcher 的 GFI 累积行为,避免 LLM 未配置(默认)时
+      // empathy 检测完全失效。correction ambiguous 候选仍然丢弃(旧版 correction cue
+      // 不触发 trackFriction,仅 recordUserTurn,已在 detectSync 中完成)。
+      if (pending.output.matchedPrecision === 'ambiguous' && pending.output.matchedTerms.length > 0) {
+        const hasEmpathyMatch = pending.output.matchedTerms.some(
+          (term) => this.store.terms[term]?.category === 'empathy',
+        );
+        if (hasEmpathyMatch) {
+          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED_WEAK',
+            'LLM unavailable, routing empathy ambiguous as WEAK (GFI accumulation, no STRONG trigger)');
+          const degradedOutput: SignalCollectorOutput = {
+            ...pending.output,
+            isSignal: true,
+            type: 'empathy',
+            strength: 'WEAK',
+            detectionSource: 'keyword',
+            needsLlmConfirmation: false,
+          };
+          this.routeWeak(degradedOutput, pending.sessionId);
+          return;
+        }
+      }
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED',
-        'LLM unavailable, dropping ambiguous candidate (no STRONG trigger)');
+        'LLM unavailable, dropping candidate (no STRONG trigger)');
       return;
     }
 
