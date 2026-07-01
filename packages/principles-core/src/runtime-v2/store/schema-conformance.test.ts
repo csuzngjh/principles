@@ -312,6 +312,46 @@ describe('ArtifactRegistrySchema', () => {
     expect(columns).toHaveLength(16);
   });
 
+  // PRI-442 F13: schema CHECK constraint enforces consumed_at IS NOT NULL
+  // when status = 'consumed'. Defense in depth for Bug-J (consumed_at never
+  // filled). The application layer (ensureConsumedAt + updateCandidateStatus)
+  // is the primary fix; this CHECK is the DB-level backstop.
+  it('F13: CHECK constraint rejects status=consumed with NULL consumed_at', () => {
+    const db = connection.getDb();
+    // Insert a valid task + run + artifact first to satisfy FK constraints
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('task-f13', 'diagnostician', 'pending', now, now);
+    db.prepare('INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('run-f13', 'task-f13', 'test-double', 'queued', now, now, now);
+    db.prepare('INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('art-f13', 'run-f13', 'task-f13', 'principle', '{}', now);
+
+    // Attempt to insert status='consumed' with NULL consumed_at — must throw
+    expect(() => {
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind)
+         VALUES ('cand-f13-bad', 'art-f13', 'task-f13', 'run-f13', 't', 'd', 'idem-f13-bad', 'consumed', ?, 'principle')`,
+      ).run(now);
+    }).toThrow(/CHECK constraint failed/);
+
+    // Insert with status='consumed' AND consumed_at — must succeed
+    expect(() => {
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, consumed_at, recommendation_kind)
+         VALUES ('cand-f13-ok', 'art-f13', 'task-f13', 'run-f13', 't', 'd', 'idem-f13-ok', 'consumed', ?, ?, 'principle')`,
+      ).run(now, now);
+    }).not.toThrow();
+
+    // Insert with status='pending' and NULL consumed_at — must succeed
+    expect(() => {
+      db.prepare(
+        `INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind)
+         VALUES ('cand-f13-pending', 'art-f13', 'task-f13', 'run-f13', 't', 'd', 'idem-f13-pending', 'pending', ?, 'principle')`,
+      ).run(now);
+    }).not.toThrow();
+  });
+
   it('all three tables created idempotently on re-open', () => {
     const db = connection.getDb();
     // Verify all three tables exist on first open

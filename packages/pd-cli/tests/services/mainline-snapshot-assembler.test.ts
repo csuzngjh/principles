@@ -401,11 +401,14 @@ describe('assembleMainlineSnapshot', () => {
     await sm.updateCandidateStatus(candidate!.candidateId, { status: 'consumed' });
 
     // Insert a row with empty candidate_id to exercise the malformed-row path.
+    // F13 (PRI-442): include consumed_at so the row satisfies the schema
+    // CHECK constraint (status='consumed' → consumed_at IS NOT NULL). The
+    // malformation under test is the empty candidate_id, not the timestamp.
     const db = sm.connection.getDb();
     db.prepare(
-      `INSERT INTO principle_candidates (candidate_id, task_id, artifact_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind)
-       VALUES ('', ?, ?, ?, 'malformed', '', ?, 'consumed', ?, 'principle')`,
-    ).run(taskId, candidate!.artifactId, candidate!.sourceRunId, `idemp-${Date.now()}`, new Date().toISOString());
+      `INSERT INTO principle_candidates (candidate_id, task_id, artifact_id, source_run_id, title, description, idempotency_key, status, created_at, consumed_at, recommendation_kind)
+       VALUES ('', ?, ?, ?, 'malformed', '', ?, 'consumed', ?, ?, 'principle')`,
+    ).run(taskId, candidate!.artifactId, candidate!.sourceRunId, `idemp-${Date.now()}`, new Date().toISOString(), new Date().toISOString());
 
     const { snapshot, warnings } = await assembleMainlineSnapshot({ workspaceDir, painId, readiness: healthyReadiness() });
 

@@ -95,7 +95,10 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     super(deps, options, {
       runnerName: 'diag_router',
       expectedTaskKind: 'diag_router',
-      defaultAgentId: 'diag_router',
+      // PRI-442 Bug-B-005: Use 'diagnostician' (the registered OpenClaw agent)
+      // as the agentId. 'diag_router' is an internal stage name, not an
+      // OpenClaw-registered agent. See diag-rootcause-runner.ts for details.
+      defaultAgentId: 'diagnostician',
       resultRefPrefix: 'diag-router',
     });
     this.committer = deps.committer;

@@ -44,6 +44,10 @@ export interface CandidateShowResult {
   readonly status: 'pending' | 'consumed' | 'expired';
   readonly createdAt: string;
   readonly ledgerEntryId: string | null;
+  /** F10-1: present when sourceRunId references a non-existent run (lineage corruption). */
+  readonly warning?: string;
+  readonly reason?: string;
+  readonly nextAction?: string;
 }
 
 /** Options for pd artifact show */
@@ -202,6 +206,28 @@ export async function candidateShow(
     }
   }
 
+  // F10-1: Validate source_run_id → runs.run_id reference. A dangling
+  // sourceRunId means the lineage chain is broken — the candidate's origin
+  // cannot be traced. Emit warning + reason + nextAction instead of silently
+  // returning corrupted data (rc-9-no-silent-fallback, rc-6-lineage-
+  // consistency; related ERR: ERR-002).
+  let warning: string | undefined;
+  let reason: string | undefined;
+  let nextAction: string | undefined;
+  try {
+    const runRecord = await options.stateManager.getRun(candidate.sourceRunId);
+    if (!runRecord) {
+      warning = `source_run_id "${candidate.sourceRunId}" does not exist in runs table — lineage is broken`;
+      reason = `dangling_source_run_id: ${candidate.sourceRunId}`;
+      nextAction = 'Run `pd runtime internalization integrity` for full chain diagnostics. Investigate run deletion or data corruption.';
+    }
+  } catch {
+    // Treat lookup failure as dangling — fail loud rather than silent (rc-9).
+    warning = `source_run_id "${candidate.sourceRunId}" could not be verified (run lookup failed) — lineage may be broken`;
+    reason = `source_run_id_lookup_failed: ${candidate.sourceRunId}`;
+    nextAction = 'Run `pd runtime internalization integrity` for full chain diagnostics. Check database integrity.';
+  }
+
   return {
     candidateId: candidate.candidateId,
     artifactId: candidate.artifactId,
@@ -213,6 +239,9 @@ export async function candidateShow(
     status: candidate.status,
     createdAt: candidate.createdAt,
     ledgerEntryId,
+    ...(warning ? { warning } : {}),
+    ...(reason ? { reason } : {}),
+    ...(nextAction ? { nextAction } : {}),
   };
 }
 

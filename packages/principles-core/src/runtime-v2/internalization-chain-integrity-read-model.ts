@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { DEFAULT_RETRY_WAIT_STALE_TTL_MS } from './internalization/internalization-task-guards.js';
 import { assertMainlineContract, type MainlineSnapshot } from './mainline-contract.js';
 
 export interface BrokenLink {
@@ -198,8 +199,8 @@ export class InternalizationChainIntegrityReadModel {
       const NON_INTERNALIZABLE_KINDS = new Set(['defer', 'implementation']);
 
       const allTasks = db.prepare(
-        'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json FROM tasks'
-      ).all() as { task_id: string; task_kind: string; status: string; result_ref: string | null; lease_owner: string | null; lease_expires_at: string | null; attempt_count: number; max_attempts: number; diagnostic_json: string | null }[];
+        'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json, updated_at FROM tasks'
+      ).all() as { task_id: string; task_kind: string; status: string; result_ref: string | null; lease_owner: string | null; lease_expires_at: string | null; attempt_count: number; max_attempts: number; diagnostic_json: string | null; updated_at: string }[];
 
       const allRuns = db.prepare(
         'SELECT run_id, task_id, execution_status FROM runs'
@@ -216,6 +217,8 @@ export class InternalizationChainIntegrityReadModel {
         list.push(run);
         runsByTask.set(run.task_id, list);
       }
+      const runIdSet = new Set(allRuns.map(r => r.run_id));
+      const piArtifactIdSet = new Set(piArtifacts.map(a => a.artifact_id));
 
       const dreamerTasks = allTasks.filter(t => t.task_kind === 'dreamer');
       const philosopherTasks = allTasks.filter(t => t.task_kind === 'philosopher');
@@ -249,6 +252,23 @@ export class InternalizationChainIntegrityReadModel {
             candidateId: candidate.candidate_id,
             reason: `Consumed candidate ${candidate.candidate_id} has no corresponding dreamer task`,
             recommendedAction: 'Seed a dreamer task via `pd candidate internalize --candidate-id <id>`.',
+          });
+        }
+      }
+
+      // F10-2: Check principle_candidates.source_run_id → runs.run_id (dangling reference).
+      // A consumed candidate's source_run_id must reference an existing run. If the
+      // run was deleted or the id was corrupted, lineage is broken (rc-6).
+      for (const candidate of consumedCandidates) {
+        if (!candidate.source_run_id) continue;
+        if (!runIdSet.has(candidate.source_run_id)) {
+          brokenLinks.push({
+            type: 'candidate_source_run_id_dangling',
+            severity: 'error',
+            candidateId: candidate.candidate_id,
+            runId: candidate.source_run_id,
+            reason: `Consumed candidate ${candidate.candidate_id} references non-existent source_run_id ${candidate.source_run_id}`,
+            recommendedAction: 'Investigate run deletion or data corruption. Re-run the source task or correct source_run_id.',
           });
         }
       }
@@ -431,6 +451,26 @@ export class InternalizationChainIntegrityReadModel {
             recommendedAction: 'Investigate persistent failure. Consider marking as failed or increasing max_attempts.',
           });
         }
+
+        // F7-6 (PRI-442): detect time-based staleness — a task in retry_wait
+        // longer than the TTL without recovery. Previously a task could cycle
+        // retry_wait → pending → leased → retry_wait indefinitely without
+        // exceeding max_attempts, leaving it silently stuck for weeks.
+        // Uses updated_at as the entry-time proxy (set when the task last
+        // transitioned into retry_wait). rc-9: observability gap fix.
+        if (task.status === 'retry_wait' && task.updated_at) {
+          const updatedAtMs = new Date(task.updated_at).getTime();
+          if (!Number.isNaN(updatedAtMs) && (Date.now() - updatedAtMs) >= DEFAULT_RETRY_WAIT_STALE_TTL_MS) {
+            const staleHours = Math.floor((Date.now() - updatedAtMs) / (60 * 60 * 1000));
+            brokenLinks.push({
+              type: 'retry_wait_stale',
+              severity: 'warning',
+              taskId: task.task_id,
+              reason: `Task ${task.task_id} in retry_wait for ~${staleHours}h (updated_at=${task.updated_at}), exceeding stale TTL of ${DEFAULT_RETRY_WAIT_STALE_TTL_MS / (60 * 60 * 1000)}h`,
+              recommendedAction: 'Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task.',
+            });
+          }
+        }
       }
 
       // Detect stale running runs (orphan runs where task is no longer leased)
@@ -476,6 +516,26 @@ export class InternalizationChainIntegrityReadModel {
             severity: 'warning',
             reason: `Duplicate PI artifact: source_task_id=${sourceTaskId}, artifact_kind=${artifactKind} appears ${count} times`,
             recommendedAction: 'Investigate idempotency violation in artifact commit logic.',
+          });
+        }
+      }
+
+      // F9-2: Check activations.artifact_id → pi_artifacts.artifact_id (dangling reference).
+      // An active activation's artifact_id must reference an existing pi_artifact.
+      // If the artifact was deleted or the id was corrupted, the activation cannot
+      // function (RuleHost cannot load implementationCode, dispatcher cannot verify
+      // lineage). This is an error-level break (rc-6-lineage-consistency).
+      const activations = db.prepare(
+        'SELECT activation_id, artifact_id, channel FROM activations WHERE deactivated_at IS NULL'
+      ).all() as { activation_id: string; artifact_id: string; channel: string }[];
+      for (const act of activations) {
+        if (!piArtifactIdSet.has(act.artifact_id)) {
+          brokenLinks.push({
+            type: 'activation_artifact_id_dangling',
+            severity: 'error',
+            artifactId: act.artifact_id,
+            reason: `Active activation ${act.activation_id} (channel=${act.channel}) references non-existent artifact_id ${act.artifact_id}`,
+            recommendedAction: 'Investigate artifact deletion or data corruption. Deactivate the orphaned activation or restore the artifact.',
           });
         }
       }
