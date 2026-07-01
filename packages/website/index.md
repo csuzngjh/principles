@@ -10,7 +10,5 @@ description: Empowering AI with principles, reflection, and constructive frictio
   <MottoSection />
   <ValueProposition />
   <AgentContrast />
-  <SystemPipeline />
-  <EvolutionMenu />
   <ThinkingLogCard />
 </div>

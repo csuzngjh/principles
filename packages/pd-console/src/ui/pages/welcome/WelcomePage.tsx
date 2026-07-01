@@ -54,11 +54,15 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const [demoResult, setDemoResult] = useState<DemoResultData | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
   const [pollingActive, setPollingActive] = useState(false);
-  const [pollingStatus, setPollingStatus] = useState<'idle' | 'polling' | 'timeout' | 'evidence-found'>('idle');
+  const [pollingStatus, setPollingStatus] = useState<'idle' | 'polling' | 'timeout' | 'evidence-found' | 'error'>('idle');
+  const [pollingError, setPollingError] = useState<string | null>(null);
 
   // Refs for polling cleanup (spec 6.5.2 test case 3: unmount clears timers).
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // P2-2B: track consecutive polling errors; after 3, stop polling and surface
+  // the failure (rc-9: no silent fallback). Reset to 0 on any successful poll.
+  const errorCountRef = useRef(0);
 
   // P2-3: baseline record count captured when polling starts, so we only
   // trigger evidence-found on NEW evidence (not pre-existing records).
@@ -123,6 +127,8 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const startPolling = useCallback(() => {
     setPollingActive(true);
     setPollingStatus('polling');
+    setPollingError(null);
+    errorCountRef.current = 0;
 
     pollingTimeoutRef.current = setTimeout(() => {
       setPollingStatus('timeout');
@@ -141,6 +147,8 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
           if (typeof data === 'object' && data !== null && Object.hasOwn(data, 'records')) {
             const records = (data as { records: unknown }).records;
             if (Array.isArray(records)) {
+              // P2-2B: a successful poll with valid data resets the error streak.
+              errorCountRef.current = 0;
               if (!baselineCaptured) {
                 // First poll: capture baseline count, do not trigger.
                 baselineCountRef.current = records.length;
@@ -155,7 +163,15 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
           }
         }
       } catch {
-        // Continue polling on transient errors (rc-9: status reflects polling).
+        // P2-2B (rc-9: no silent fallback) — surface the failure instead of
+        // swallowing it. After 3 consecutive errors, stop polling and show the
+        // error UI so the user can retry rather than waiting up to 2 hours.
+        errorCountRef.current += 1;
+        setPollingError('Failed to check for evidence. Will retry...');
+        if (errorCountRef.current >= 3) {
+          setPollingStatus('error');
+          stopPolling();
+        }
       }
     };
 
@@ -219,9 +235,11 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
                 {t('pages.welcome.step2.runDemoButton')}
               </button>
             )}
-            <button className="pd-btn pd-btn-alt" onClick={() => setStep(3)}>
-              {t('pages.welcome.step2.nextButton')}
-            </button>
+            {(demoStatus === 'success' || demoStatus === 'error') && (
+              <button className="pd-btn pd-btn-alt" onClick={() => setStep(3)}>
+                {t('pages.welcome.step2.nextButton')}
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -263,7 +281,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
           {pollingStatus === 'evidence-found' && (
             <div className="polling-success" role="status">
               <p>{t('pages.welcome.step3.evidenceFound')}</p>
-              <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('demo')}>
+              <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('evidence_found')}>
                 {t('pages.welcome.step3.goToFocusButton')}
               </button>
             </div>
@@ -278,6 +296,20 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
               <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
                 {t('pages.welcome.step3.skipButton')}
               </button>
+            </div>
+          )}
+
+          {pollingStatus === 'error' && (
+            <div className="polling-error" role="alert">
+              <p>{pollingError ?? t('pages.welcome.step3.pollingError')}</p>
+              <div className="welcome-actions">
+                <button className="pd-btn pd-btn-brand" onClick={() => { startPolling(); }}>
+                  {t('pages.welcome.step3.retryButton')}
+                </button>
+                <button className="pd-btn pd-btn-alt" onClick={() => completeOnboarding('demo')}>
+                  {t('pages.welcome.step3.goToFocusButton')}
+                </button>
+              </div>
             </div>
           )}
         </section>

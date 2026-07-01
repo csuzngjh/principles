@@ -55,12 +55,6 @@ export function DemoResultView({ result, loading, error }: DemoResultViewProps) 
         </div>
       )}
 
-      {result.narrative && (
-        <div className="demo-narrative">
-          <p>{result.narrative}</p>
-        </div>
-      )}
-
       {result.stages && result.stages.length > 0 && (
         <ol className="demo-stages">
           {result.stages.map((stage, idx) => (

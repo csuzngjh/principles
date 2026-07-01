@@ -16,8 +16,9 @@
  * - EP-03 (Fail Loud): spawn failure -> 500 with reason + nextAction;
  *   flag disabled -> 403 with reason + nextAction (rc-9-no-silent-fallback)
  * - EP-06 (Source of Truth): reuses pd-cli demo command, no direct DB writes
- * - EP-08 (Security Boundary): shell: true on Windows so the spawn can resolve
- *   the `pd` shim installed under AppData\Roaming\npm
+ * - EP-08 (Security Boundary): no shell:true — argv passed directly to OS,
+ *   eliminating command-injection risk; demo runs in a temp workspace so no
+ *   user-controlled path enters the command at all
  * - rc-1-treat-as-unknown / rc-2-no-as-bypass / rc-4-validate-array-elements:
  *   parsed stdout is validated by parseDemoStdout before use
  * - rc-9-no-silent-fallback: timeout, error, and invalid-stdout paths each
@@ -26,6 +27,9 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, type ChildProcess } from 'node:child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { sendError, sendJson } from '../utils/response.js';
 
@@ -43,6 +47,14 @@ interface StructuredErrorPayload {
 
 /** Demo subprocess timeout in milliseconds (60s). */
 const DEMO_TIMEOUT_MS = 60_000;
+// P1-1: Best-effort removal of the temp demo workspace.
+function cleanupTempWorkspace(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup — temp dir will be cleaned by OS eventually.
+  }
+}
 
 /** Send a structured error with reason + nextAction (Runtime Contract rc-9). */
 function sendStructuredError(res: ServerResponse, payload: StructuredErrorPayload): void {
@@ -59,11 +71,13 @@ function loadOnboardingFlagEnabled(workspaceDir: string): boolean {
   return flagsResult.flags.new_user_onboarding?.enabled === true;
 }
 
-/** Resolve the pd CLI binary name. Uses PATH resolution via shell on Windows. */
+/** Resolve the pd CLI binary name. Resolved through PATH (no shell). */
 function findPdBin(): string {
   // The `pd` binary is installed globally (npm i -g @principles/pd-cli) and
-  // resolved through PATH. On Windows we spawn with shell: true so the OS
-  // resolves the `pd.cmd` shim under AppData\Roaming\npm.
+  // resolved through PATH. We spawn WITHOUT shell:true so argv is passed
+  // directly to the OS, eliminating command-injection risk. On Windows the
+  // pd.cmd shim is resolved by Node's CreateProcess; if not found, spawn
+  // emits 'error' which we handle with a clear nextAction.
   return 'pd';
 }
 
@@ -113,32 +127,31 @@ function parseDemoStdout(stdout: string): Record<string, unknown> | null {
  */
 async function handleRunDemo(
   res: ServerResponse,
-  workspaceDir: string,
+  _workspaceDir: string,  // unused — demo runs in temp workspace to avoid pollution
 ): Promise<void> {
-  // P2-1: quote workspaceDir on Windows when it contains spaces, since
-  // shell:true is used and an unquoted path with spaces would be split by the
-  // shell into multiple argv tokens.
-  const needsQuoting =
-    process.platform === 'win32' &&
-    workspaceDir.includes(' ') &&
-    !workspaceDir.startsWith('"');
-  const workspaceArg = needsQuoting ? '"' + workspaceDir + '"' : workspaceDir;
+  // P1-1: Use a temporary workspace so the demo's simulated DB writes
+  // (tasks, artifacts, approvals, activations) do NOT pollute the user's
+  // real workspace state.db.
+  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-onboarding-demo-'));
 
   let child: ChildProcess;
   try {
     const pdBin = findPdBin();
-    // EP-06: pd-cli subprocess owns all DB writes. Console only spawns.
-    // EP-08: shell: true on Windows so spawn can resolve the pd.cmd shim.
+    // P1-2: no shell:true — pass args as argv array, eliminating command
+    // injection risk from user-controlled paths. The `pd` binary is resolved
+    // via PATH; on Windows, if pd.cmd is not found, the spawn will emit 'error'
+    // which we handle below with a clear nextAction.
     child = spawn(
       pdBin,
-      ['demo', 'story-a', '--workspace', workspaceArg, '--json'],
+      ['demo', 'story-a', '--workspace', tempWorkspace, '--json'],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: process.platform === 'win32',
+        // No shell:true — argv is passed directly to the OS.
       },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    cleanupTempWorkspace(tempWorkspace);
     sendStructuredError(res, {
       statusCode: 500,
       error: 'demo_spawn_failed',
@@ -148,104 +161,111 @@ async function handleRunDemo(
     return;
   }
 
-  // Capture stdout into a buffer. stderr is logged for observability (rc-9).
-  const stdoutChunks: Buffer[] = [];
-  let stderrText = '';
-  child.stdout?.on('data', (data: Buffer) => {
-    stdoutChunks.push(data);
-  });
-  child.stderr?.on('data', (data: Buffer) => {
-    const chunk = data.toString();
-    stderrText += chunk;
-    console.error('[pd-console] onboarding demo stderr:', chunk.trim());
-  });
-
-  // Wrap the subprocess lifecycle in a Promise that resolves with the exit code
-  // or rejects on 'error'. A timeout is enforced via a separate Promise that
-  // resolves with a sentinel value - Promise.race is used below.
-  const settled = new Promise<{ code: number | null; error: Error | null }>((resolve) => {
-    let done = false;
-    const finish = (code: number | null, error: Error | null) => {
-      if (done) return;
-      done = true;
-      resolve({ code, error });
-    };
-    child.on('error', (err: Error) => {
-      finish(null, err);
+  try {
+    // Capture stdout into a buffer. stderr is logged for observability (rc-9).
+    const stdoutChunks: Buffer[] = [];
+    let stderrText = '';
+    child.stdout?.on('data', (data: Buffer) => {
+      stdoutChunks.push(data);
     });
-    child.on('close', (code: number | null) => {
-      finish(code, null);
+    child.stderr?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stderrText += chunk;
+      console.error('[pd-console] onboarding demo stderr:', chunk.trim());
     });
-  });
 
-  const timeout = new Promise<'timeout'>((resolve) => {
-    setTimeout(() => resolve('timeout'), DEMO_TIMEOUT_MS);
-  });
+    // Wrap the subprocess lifecycle in a Promise that resolves with the exit code
+    // or rejects on 'error'. A timeout is enforced via a separate Promise that
+    // resolves with a sentinel value - Promise.race is used below.
+    const settled = new Promise<{ code: number | null; error: Error | null }>((resolve) => {
+      let done = false;
+      const finish = (code: number | null, error: Error | null) => {
+        if (done) return;
+        done = true;
+        resolve({ code, error });
+      };
+      child.on('error', (err: Error) => {
+        finish(null, err);
+      });
+      child.on('close', (code: number | null) => {
+        finish(code, null);
+      });
+    });
 
-  const outcome = await Promise.race([settled, timeout]);
-  // -- Timeout: kill the subprocess and return 504 --
-  if (outcome === 'timeout') {
-    try {
-      child.kill();
-    } catch {
-      // Best-effort kill; ignore failures (rc-9: the 504 response still carries
-      // the reason + nextAction so the operator is not left in the dark).
+    const timeout = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), DEMO_TIMEOUT_MS);
+    });
+
+    const outcome = await Promise.race([settled, timeout]);
+    // -- Timeout: kill the subprocess and return 504 --
+    if (outcome === 'timeout') {
+      try {
+        child.kill();
+      } catch {
+        // Best-effort kill; ignore failures (rc-9: the 504 response still carries
+        // the reason + nextAction so the operator is not left in the dark).
+      }
+      sendStructuredError(res, {
+        statusCode: 504,
+        error: 'demo_timeout',
+        reason: `demo subprocess exceeded ${DEMO_TIMEOUT_MS}ms timeout`,
+        nextAction: 'Retry the demo; if it persists, check pd CLI health (pd doctor).',
+      });
+      return;
     }
-    sendStructuredError(res, {
-      statusCode: 504,
-      error: 'demo_timeout',
-      reason: `demo subprocess exceeded ${DEMO_TIMEOUT_MS}ms timeout`,
-      nextAction: 'Retry the demo; if it persists, check pd CLI health (pd doctor).',
-    });
-    return;
-  }
 
-  // -- 'error' event after spawn (e.g. EACCES, broken pipe) -> 500 --
-  if (outcome.error !== null) {
-    sendStructuredError(res, {
-      statusCode: 500,
-      error: 'demo_subprocess_error',
-      reason: `subprocess error: ${outcome.error.message}`,
-      nextAction: 'Check pd CLI installation and permissions; see server logs for stderr.',
-    });
-    return;
-  }
+    // -- 'error' event after spawn (e.g. EACCES, broken pipe) -> 500 --
+    if (outcome.error !== null) {
+      sendStructuredError(res, {
+        statusCode: 500,
+        error: 'demo_subprocess_error',
+        reason: `subprocess error: ${outcome.error.message}`,
+        nextAction: 'Check pd CLI installation and permissions; see server logs for stderr.',
+      });
+      return;
+    }
 
-  // -- Non-zero exit code -> 500 --
-  if (outcome.code !== 0) {
-    sendStructuredError(res, {
-      statusCode: 500,
-      error: 'demo_exit_nonzero',
-      reason: `demo exited with code ${outcome.code}`,
-      nextAction: stderrText.trim()
-        ? `pd stderr: ${stderrText.trim()}`
-        : 'Run `pd demo story-a --json` manually for diagnostics.',
-    });
-    return;
-  }
+    // -- Non-zero exit code -> 500 --
+    if (outcome.code !== 0) {
+      sendStructuredError(res, {
+        statusCode: 500,
+        error: 'demo_exit_nonzero',
+        reason: `demo exited with code ${outcome.code}`,
+        nextAction: stderrText.trim()
+          ? `pd stderr: ${stderrText.trim()}`
+          : 'Run `pd demo story-a --json` manually for diagnostics.',
+      });
+      return;
+    }
 
-  // -- Validate stdout (rc-1/rc-2/rc-4) --
-  const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-  const validated = parseDemoStdout(stdout);
-  if (validated === null) {
-    sendStructuredError(res, {
-      statusCode: 500,
-      error: 'demo_invalid_stdout',
-      reason: 'demo stdout did not match the expected JSON schema',
-      nextAction: 'Run `pd demo story-a --json` manually and inspect the output.',
-    });
-    return;
-  }
+    // -- Validate stdout (rc-1/rc-2/rc-4) --
+    const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+    const validated = parseDemoStdout(stdout);
+    if (validated === null) {
+      sendStructuredError(res, {
+        statusCode: 500,
+        error: 'demo_invalid_stdout',
+        reason: 'demo stdout did not match the expected JSON schema',
+        nextAction: 'Run `pd demo story-a --json` manually and inspect the output.',
+      });
+      return;
+    }
 
-  // -- 200 OK with validated demo result --
-  sendJson(res, 200, {
-    success: true,
-    data: {
-      simulated: true,
-      demo: validated,
-    },
-  });
+    // -- 200 OK with validated demo result --
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        simulated: true,
+        demo: validated,
+      },
+    });
+  } finally {
+    // P1-1: always clean up the temp workspace, whether the demo succeeded,
+    // failed, timed out, or threw. Best-effort — OS will reap temp dirs eventually.
+    cleanupTempWorkspace(tempWorkspace);
+  }
 }
+
 
 export async function handleOnboardingRoute(
   req: IncomingMessage,

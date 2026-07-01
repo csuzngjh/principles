@@ -100,23 +100,28 @@ function AuthRoutes() {
     });
   }, [authed]);
 
-  // First-visit redirect: check new_user_onboarding flag + onboarding state.
-  // Waits for featureFlags to load before redirecting (avoids wrong default).
+  // P1-4: After splash finishes, if user is not authenticated, go to login.
+  // (The authed === true case is handled by the redirect effect below.)
   useEffect(() => {
-    if (authed === true && featureFlags !== null) {
-      const currentPath = window.location.hash;
-      // Only redirect from login/splash/root
-      if (currentPath === "#/login" || currentPath === "#/splash" || currentPath === "#/" || currentPath === "") {
-        const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
-        if (flagEnabled) {
-          const onboardingState = getOnboardingState(currentWorkspaceId);
-          navigate(onboardingState.completed ? '/focus' : '/welcome', { replace: true });
-        } else {
-          navigate('/focus', { replace: true });
-        }
-      }
+    if (showSplash || authed !== false) return;
+    navigate('/login', { replace: true });
+  }, [showSplash, authed, navigate]);
+
+  // First-visit redirect: check new_user_onboarding flag + onboarding state.
+  // P1-4: Only redirect AFTER splash is done AND featureFlags are loaded.
+  // This prevents the race where splash navigates to /focus before flags
+  // load, which would bypass the onboarding redirect entirely.
+  useEffect(() => {
+    if (authed !== true || featureFlags === null || showSplash) return;
+
+    const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
+    if (flagEnabled) {
+      const onboardingState = getOnboardingState(currentWorkspaceId);
+      navigate(onboardingState.completed ? '/focus' : '/welcome', { replace: true });
+    } else {
+      navigate('/focus', { replace: true });
     }
-  }, [authed, navigate, currentWorkspaceId, featureFlags]);
+  }, [authed, featureFlags, showSplash, currentWorkspaceId, navigate]);
 
   const handleAuthSuccess = useCallback(() => {
     setAuthed(true);
@@ -128,11 +133,6 @@ function AuthRoutes() {
     <Routes>
       <Route path="/splash" element={<SplashScreen onComplete={() => {
         setShowSplash(false);
-        if (authed) {
-          navigate("/focus", { replace: true });
-        } else {
-          navigate("/login", { replace: true });
-        }
       }} />} />
       <Route path="/login" element={<LoginForm onAuthSuccess={handleAuthSuccess} />} />
       <Route

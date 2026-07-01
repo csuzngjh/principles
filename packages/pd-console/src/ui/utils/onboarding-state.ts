@@ -7,7 +7,7 @@
 export interface OnboardingState {
   completed: boolean;
   step: number; // 0=not started, 1=welcome, 2=demo, 3=invite
-  status: 'pending' | 'demo' | 'skipped';
+  status: 'pending' | 'demo' | 'skipped' | 'evidence_found';
   completedAt?: string; // ISO timestamp
 }
 
@@ -32,7 +32,7 @@ function isOnboardingState(value: unknown): value is OnboardingState {
   return (
     typeof v.completed === 'boolean' &&
     typeof v.step === 'number' &&
-    (v.status === 'pending' || v.status === 'demo' || v.status === 'skipped')
+    (v.status === 'pending' || v.status === 'demo' || v.status === 'skipped' || v.status === 'evidence_found')
   );
 }
 

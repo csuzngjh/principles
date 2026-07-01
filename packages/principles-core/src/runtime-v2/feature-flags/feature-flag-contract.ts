@@ -154,9 +154,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
   // New user onboarding wizard — first-visit redirect to /welcome + demo story-a
-  // trigger endpoint. Default true to guide new users; can be disabled in
-  // .pd/config.yaml or Settings page. Quiet flag: overrideable via config.
-  { id: 'new_user_onboarding', category: 'quiet', enabled: true, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Default true to guide new users; can be disabled in .pd/config.yaml or Settings page.' },
+  // trigger endpoint. Default-on, user-facing MVP-Core feature. Core flag: can be
+  // emergency-disabled via explicit `enabled: false` in .pd/config.yaml (surfaced
+  // with a warning) or toggled off from the Settings page.
+  { id: 'new_user_onboarding', category: 'core', enabled: true, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Default true to guide new users; can be disabled in .pd/config.yaml or Settings page.' },
 ];
 
 export function computeEffectiveFlags(

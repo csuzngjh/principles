@@ -29,16 +29,16 @@ export function CircuitDiagram({ highlightNode = null, compact = false }: Circui
         xmlns="http://www.w3.org/2000/svg"
       >
         {/* Connecting lines (thin, brand-aligned) */}
-        <line x1={NODES[0].cx} y1={NODES[0].cy} x2={NODES[1].cx} y2={NODES[1].cy} stroke="var(--accent)" strokeWidth="1.5" />
-        <line x1={NODES[1].cx} y1={NODES[1].cy} x2={NODES[2].cx} y2={NODES[2].cy} stroke="var(--accent)" strokeWidth="1.5" />
-        <line x1={NODES[2].cx} y1={NODES[2].cy} x2={NODES[3].cx} y2={NODES[3].cy} stroke="var(--accent)" strokeWidth="1.5" />
-        <line x1={NODES[3].cx} y1={NODES[3].cy} x2={NODES[0].cx} y2={NODES[0].cy} stroke="var(--accent)" strokeWidth="1.5" />
+        <line x1={NODES[0].cx} y1={NODES[0].cy} x2={NODES[1].cx} y2={NODES[1].cy} stroke="var(--color-gov)" strokeWidth="1.5" />
+        <line x1={NODES[1].cx} y1={NODES[1].cy} x2={NODES[2].cx} y2={NODES[2].cy} stroke="var(--color-gov)" strokeWidth="1.5" />
+        <line x1={NODES[2].cx} y1={NODES[2].cy} x2={NODES[3].cx} y2={NODES[3].cy} stroke="var(--color-gov)" strokeWidth="1.5" />
+        <line x1={NODES[3].cx} y1={NODES[3].cy} x2={NODES[0].cx} y2={NODES[0].cy} stroke="var(--color-gov)" strokeWidth="1.5" />
 
         {/* Arrow markers */}
-        <polygon points={`${NODES[1].cx - 8},${NODES[1].cy - 4} ${NODES[1].cx - 8},${NODES[1].cy + 4} ${NODES[1].cx},${NODES[1].cy}`} fill="var(--accent)" />
-        <polygon points={`${NODES[2].cx + 4},${NODES[2].cy - 8} ${NODES[2].cx - 4},${NODES[2].cy - 8} ${NODES[2].cx},${NODES[2].cy}`} fill="var(--accent)" />
-        <polygon points={`${NODES[3].cx + 8},${NODES[3].cy - 4} ${NODES[3].cx + 8},${NODES[3].cy + 4} ${NODES[3].cx},${NODES[3].cy}`} fill="var(--accent)" />
-        <polygon points={`${NODES[0].cx - 4},${NODES[0].cy + 8} ${NODES[0].cx + 4},${NODES[0].cy + 8} ${NODES[0].cx},${NODES[0].cy}`} fill="var(--accent)" />
+        <polygon points={`${NODES[1].cx - 8},${NODES[1].cy - 4} ${NODES[1].cx - 8},${NODES[1].cy + 4} ${NODES[1].cx},${NODES[1].cy}`} fill="var(--color-gov)" />
+        <polygon points={`${NODES[2].cx + 4},${NODES[2].cy - 8} ${NODES[2].cx - 4},${NODES[2].cy - 8} ${NODES[2].cx},${NODES[2].cy}`} fill="var(--color-gov)" />
+        <polygon points={`${NODES[3].cx + 8},${NODES[3].cy - 4} ${NODES[3].cx + 8},${NODES[3].cy + 4} ${NODES[3].cx},${NODES[3].cy}`} fill="var(--color-gov)" />
+        <polygon points={`${NODES[0].cx - 4},${NODES[0].cy + 8} ${NODES[0].cx + 4},${NODES[0].cy + 8} ${NODES[0].cx},${NODES[0].cy}`} fill="var(--color-gov)" />
 
         {/* Nodes */}
         {NODES.map((node) => {
@@ -50,8 +50,8 @@ export function CircuitDiagram({ highlightNode = null, compact = false }: Circui
                 cx={node.cx}
                 cy={node.cy}
                 r={nodeRadius}
-                fill={isHighlighted ? 'var(--accent)' : 'var(--surface)'}
-                stroke={isOwnerGate ? 'var(--accent)' : 'var(--border)'}
+                fill={isHighlighted ? 'var(--color-gov)' : 'var(--color-surface)'}
+                stroke={isOwnerGate ? 'var(--color-gov)' : 'var(--color-border)'}
                 strokeWidth={isOwnerGate ? 2.5 : 1.5}
               />
               <text
@@ -60,7 +60,7 @@ export function CircuitDiagram({ highlightNode = null, compact = false }: Circui
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fontSize={compact ? 9 : 11}
-                fill={isHighlighted ? 'white' : 'var(--text-main)'}
+                fill={isHighlighted ? 'white' : 'var(--color-ink)'}
                 fontFamily="var(--font-sans)"
               >
                 {t(node.labelKey)}

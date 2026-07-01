@@ -234,8 +234,6 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'pain_evidence_admission') continue;
       if (flag.id === 'painEvidenceAdmissionDefault') continue;
       if (flag.id === 'pain_evidence_admission_default') continue;
-      // new_user_onboarding: default-on quiet flag (guides new users)
-      if (flag.id === 'new_user_onboarding') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -521,28 +519,29 @@ describe('prototype pollution defense', () => {
 
 describe('new_user_onboarding flag', () => {
   // Given the DEFAULT_FEATURE_FLAGS registry, when looking up new_user_onboarding,
-  // then it must be present with quiet category, default-on, a valid since date, and
+  // then it must be present with core category, default-on, a valid since date, and
   // a description mentioning onboarding. This guards the production wiring path
   // (EP-02) and fails loud on missing required fields (EP-03).
-  it('Given DEFAULT_FEATURE_FLAGS, When looked up by id, Then new_user_onboarding is registered with quiet category and default true', () => {
+  it('Given DEFAULT_FEATURE_FLAGS, When looked up by id, Then new_user_onboarding is registered with core category and default true', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'new_user_onboarding');
     expect(flag).toBeDefined();
-    expect(flag?.category).toBe('quiet');
+    expect(flag?.category).toBe('core');
     expect(flag?.enabled).toBe(true);
     expect(flag?.since).toBe('2026-07-01');
     expect(flag?.description).toContain('onboarding');
   });
 
-  it('Given a quiet-category flag, When config omits the flag, Then it stays default-on but remains overridable (quiet flag semantics)', () => {
+  it('Given a core-category flag, When config explicitly disables the flag, Then it is honored as an emergency disable (core flag semantics)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'new_user_onboarding');
-    expect(flag?.category).toBe('quiet');
-    // quiet flags can be overridden by config — verify the override path is honored
+    expect(flag?.category).toBe('core');
+    // core flags can be emergency-disabled via explicit enabled: false — verify the override path is honored
     const result = computeEffectiveFlags(
       { new_user_onboarding: { enabled: false } },
       DEFAULT_FEATURE_FLAGS,
       '/test/.pd/config.yaml',
     );
     expect(result.flags.new_user_onboarding?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('new_user_onboarding') && w.includes('core'))).toBe(true);
     expect(result.warnings.some(w => w.includes('new_user_onboarding') && w.includes('unknown'))).toBe(false);
   });
 });

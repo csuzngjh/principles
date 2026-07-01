@@ -181,9 +181,16 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     const [bin, argv, options] = vi.mocked(spawn).mock.calls[0]!;
     expect(bin).toEqual(expect.stringContaining('pd'));
     expect(argv).toEqual(expect.arrayContaining(['demo', 'story-a', '--json']));
-    expect(argv).toEqual(expect.arrayContaining(['--workspace', workspaceDir]));
-    // EP-08: shell: true on Windows so spawn can resolve the pd shim
-    expect(options).toEqual(expect.objectContaining({ shell: process.platform === 'win32' }));
+    // P1-1: demo must run in a TEMP workspace, not the user's real workspaceDir,
+    // to avoid polluting {workspace}/.pd/state.db with simulated demo data.
+    const wsIndex = argv.indexOf('--workspace');
+    expect(wsIndex).toBeGreaterThan(-1);
+    const demoWorkspace = argv[wsIndex + 1];
+    expect(demoWorkspace).not.toBe(workspaceDir);
+    expect(demoWorkspace.startsWith(os.tmpdir())).toBe(true);
+    expect(demoWorkspace).toContain('pd-onboarding-demo-');
+    // P1-2: no shell:true — argv passed directly to OS to avoid command injection
+    expect(options).toEqual(expect.not.objectContaining({ shell: true }));
 
     // 200 OK with validated demo result
     expect(getStatus(res)).toBe(200);

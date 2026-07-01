@@ -90,7 +90,7 @@ const CONSOLE_PORT_RANGE_MAX = 3199;
 
 // Task 8: auto-launch console via `pd console open` after successful install
 const CONSOLE_AUTOLAUNCH_BASE_PORT = 3100;
-const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 6; // 3100..3105 (covers pd console open fallback)
+const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // 3100..3119 (matches pd console open PORT_FALLBACK_LIMIT)
 const CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS = 12_000;
 const CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS = 500;
 
@@ -902,7 +902,14 @@ function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean>
       res.on('end', () => {
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
-          resolve(typeof body === 'object' && body !== null);
+          // P1-5: verify PD-specific fields, not just any 200+JSON response.
+          // Matches console-launcher.ts probeConsoleHealth contract (rc-5-object-hasown-not-in).
+          const isPdConsole = typeof body === 'object' && body !== null
+            && (
+              (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
+              (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true)
+            );
+          resolve(isPdConsole);
         } catch { resolve(false); }
       });
     });

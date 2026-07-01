@@ -1042,7 +1042,9 @@
         "pollingActive": "正在监听证据... 我们会每 30 秒检查一次，持续 2 小时。",
         "stopPollingButton": "停止并继续",
         "evidenceFound": "检测到证据！你现在可以在 Focus 页面查看。",
-        "timeoutHint": "2 小时内未检测到证据。没关系——你随时可以用 pd-pain-signal 记录证据。"
+        "timeoutHint": "2 小时内未检测到证据。没关系——你随时可以用 pd-pain-signal 记录证据。",
+        "pollingError": "无法检查证据。证据服务可能不可用。",
+        "retryButton": "重试"
       },
       "progress": {
         "step1": "欢迎",
