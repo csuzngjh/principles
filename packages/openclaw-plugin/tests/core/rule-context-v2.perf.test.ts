@@ -108,12 +108,18 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     const connection = new SqliteConnection(tempWorkspaceDir);
     const db = connection.getDb();
     const now = new Date().toISOString();
+    // ERR-088 fix (PRI-494): rule blocks with a UNIQUE marker so the test
+    // can prove the rule actually executed, not just that timing was fast.
+    // A timing-only assertion could pass even if the rule was silently
+    // skipped (stale cache, flag off, action mismatch). The marker
+    // PERF_BASELINE_BLOCK is asserted in every iteration below.
+    const PERF_BASELINE_BLOCK = 'PERF_BASELINE_BLOCK';
     db.prepare(`
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('perf-rule-artifact', 'rule', 'perf-task', 'perf-rule', '[]', 'validated', JSON.stringify({
+    `).run('perf-rule-artifact', 'rule', 'perf-task-perf-rule-artifact', 'perf-rule', '[]', 'validated', JSON.stringify({
       ruleId: 'perf-rule', requiresContextVersion: 2,
-      implementationCode: "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'perf allow' }; } var meta = { name: 'perf', version: '1', ruleId: 'perf-rule', coversCondition: 'write' };",
+      implementationCode: "function evaluate(input, helpers) { var p = input.action.normalizedPath || ''; if (p === '/etc/passwd') { return { decision: 'block', matched: true, reason: '" + PERF_BASELINE_BLOCK + "' }; } return { decision: 'allow', matched: false, reason: 'perf allow' }; } var meta = { name: 'perf', version: '1', ruleId: 'perf-rule', coversCondition: 'write' };",
     }), now, now);
     const store = new SqliteActivationStateStore(connection);
     await store.recordActivation({
@@ -122,14 +128,25 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     });
     connection.close();
 
-    const event = { toolName: 'write_file', params: { file_path: 'src/perf.ts', content: 'x' } };
+    // Target /etc/passwd so the rule matches and blocks (ERR-088 execution proof)
+    const event = { toolName: 'write_file', params: { file_path: '/etc/passwd', content: 'x' } };
     const hookContext = { workspaceDir: tempWorkspaceDir, sessionId: 'perf-hook-session', logger: { warn: () => {}, info: () => {}, error: () => {} } };
-    handleBeforeToolCall(event, hookContext);
+
+    // ERR-088: assert the rule ACTUALLY blocked before measuring timing.
+    // This is the regression guard — if a future change silently skips the
+    // rule, this assertion fails even if timing is fast.
+    const proofResult = handleBeforeToolCall(event, hookContext);
+    expect(proofResult?.block).toBe(true);
+    expect(proofResult?.blockReason).toContain(PERF_BASELINE_BLOCK);
+
     const timings: number[] = [];
     for (let i = 0; i < 100; i++) {
       const start = performance.now();
-      handleBeforeToolCall(event, hookContext);
+      const result = handleBeforeToolCall(event, hookContext);
       timings.push(performance.now() - start);
+      // ERR-088: every iteration must prove the rule executed
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain(PERF_BASELINE_BLOCK);
     }
     timings.sort((a, b) => a - b);
     const p50 = percentile(timings, 50);
