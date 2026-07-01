@@ -194,6 +194,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — `as`-bypass at trust boundaries (JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, test fixtures).
   - 2026-06-29 PR #1104: `parseIntentDocSections` used `as Record<string,string>` for index signature — removed cast (direct assignment is type-safe)
   - 2026-06-28 PR #1098 (PRI-483): test fixtures used `any`/`as any` in mock constructors — replaced with `as unknown as T`
+  - 2026-06-30 PR #1132: `createSignalLlmClassifierFromConfig` used `as Record<string, unknown>` + `as string` to access `payload.output` from LLM adapter output — replaced with `Object.hasOwn()` + `typeof` type guard (rc-2-no-as-bypass)
   - Earlier recurrences (PR#688-#1072): same `as`-bypass pattern across JSON parsing, SQLite rows, CLI inputs, LLM outputs, test fixtures. See git history.
 
 ---
@@ -1378,4 +1379,5 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-022 (process.exit without return — cli-2 sibling), ERR-029 (CLI unknown input silently dropped — cli-1 sibling), ERR-074 (inner try/catch exit tunnel — same "incomplete branch coverage" root cause), ERR-033 (operator failure path returns success — cli-5 sibling).
 - **Source**: PR #1124 (CodeRabbit review, 10 inline comments)
 - **Date**: 2026-06-29
-- **Recurrence**: None
+- **Recurrence**: Yes — same "incomplete coverage" root cause, call-site flavor (not failure branches):
+  - 2026-06-30 PR #1132: When merging two scattered detectSync call sites (correction segment + empathy segment) into a unified SignalCollectorHost, the empathy-segment call was left in place. Both fired for the same `trigger==='user'` message → double `user_turns` write + double STRONG rate-limit consumption. Fix: removed the redundant call; added `toHaveBeenCalledTimes(1)` regression test. Lesson: when consolidating N call sites into 1, grep for ALL old call sites and remove every one — the new unified call doesn't "replace" them implicitly.
