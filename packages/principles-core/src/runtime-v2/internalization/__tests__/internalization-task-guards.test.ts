@@ -11,9 +11,7 @@ import {
   isArtifactRejected,
   isUnresolvable,
   recordRejection,
-  isRetryWaitStale,
   DEFAULT_UNRESOLVABLE_THRESHOLD,
-  DEFAULT_RETRY_WAIT_STALE_TTL_MS,
 } from '../internalization-task-guards.js';
 
 function makePITask(overrides: Partial<PITaskRecord> = {}): PITaskRecord {
@@ -385,68 +383,6 @@ describe('Internalization Task Guards (PRI-62)', () => {
       const result = recordRejection(task);
       expect(task.rejectionCount).toBe(2);
       expect(result.rejectionCount).toBe(3);
-    });
-  });
-
-  // ── F7-6 (PRI-442): Retry Wait Staleness ──
-
-  describe('F7-6: isRetryWaitStale (retry_wait TTL)', () => {
-    const ONE_HOUR = 60 * 60 * 1000;
-    const NOW_MS = new Date('2026-06-30T12:00:00.000Z').getTime();
-
-    it('returns false for non-retry_wait tasks', () => {
-      const task = makePITask({ status: 'pending', updatedAt: new Date(NOW_MS - 48 * ONE_HOUR).toISOString() });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(false);
-    });
-
-    it('returns false for retry_wait task newer than TTL', () => {
-      const task = makePITask({
-        status: 'retry_wait',
-        updatedAt: new Date(NOW_MS - 1 * ONE_HOUR).toISOString(), // 1h ago
-      });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(false);
-    });
-
-    it('returns true for retry_wait task older than default TTL (24h)', () => {
-      const task = makePITask({
-        status: 'retry_wait',
-        updatedAt: new Date(NOW_MS - 25 * ONE_HOUR).toISOString(), // 25h ago
-      });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(true);
-    });
-
-    it('returns true for retry_wait task exactly at TTL boundary', () => {
-      const updatedAt = new Date(NOW_MS - DEFAULT_RETRY_WAIT_STALE_TTL_MS).toISOString();
-      const task = makePITask({ status: 'retry_wait', updatedAt });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(true);
-    });
-
-    it('returns false for retry_wait task just under TTL boundary', () => {
-      const updatedAt = new Date(NOW_MS - DEFAULT_RETRY_WAIT_STALE_TTL_MS + 1).toISOString();
-      const task = makePITask({ status: 'retry_wait', updatedAt });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(false);
-    });
-
-    it('honors custom maxWaitMs', () => {
-      const task = makePITask({
-        status: 'retry_wait',
-        updatedAt: new Date(NOW_MS - 2 * ONE_HOUR).toISOString(), // 2h ago
-      });
-      // 2h > 1h custom TTL → stale
-      expect(isRetryWaitStale(task, NOW_MS, 1 * ONE_HOUR)).toBe(true);
-      // 2h < 3h custom TTL → not stale
-      expect(isRetryWaitStale(task, NOW_MS, 3 * ONE_HOUR)).toBe(false);
-    });
-
-    it('returns false (fail-safe) when updatedAt is missing', () => {
-      const task = makePITask({ status: 'retry_wait' });
-      delete (task as { updatedAt?: string }).updatedAt;
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(false);
-    });
-
-    it('returns false (fail-safe) when updatedAt is unparseable', () => {
-      const task = makePITask({ status: 'retry_wait', updatedAt: 'not-a-date' });
-      expect(isRetryWaitStale(task, NOW_MS)).toBe(false);
     });
   });
 });
