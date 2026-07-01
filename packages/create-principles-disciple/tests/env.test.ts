@@ -88,6 +88,47 @@ describe('environment detection utilities', () => {
     });
   });
 
+  describe('OpenClaw readiness check', () => {
+    it('Given OpenClaw is installed, When checkEnvironment runs, Then hasOpenClaw is true with version', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          return 'openclaw 1.2.0';
+        }
+        return '';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(true);
+      expect(result.openclawVersion).toBe('openclaw 1.2.0');
+    });
+
+    it('Given OpenClaw is missing, When checkEnvironment runs, Then hasOpenClaw is false and version is absent', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          throw new Error('command not found');
+        }
+        return 'v18.0.0';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(false);
+      expect(result.openclawVersion).toBeUndefined();
+    });
+
+    it('Given only clawd alias is available, When checkEnvironment runs, Then hasOpenClaw is true via fallback', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version')) {
+          throw new Error('not found');
+        }
+        if (cmd.includes('clawd --version')) {
+          return 'clawd 2.1.3';
+        }
+        return 'v20.0.0';
+      });
+      const result = checkEnvironment();
+      expect(result.hasOpenClaw).toBe(true);
+      expect(result.openclawVersion).toBe('clawd 2.1.3');
+    });
+  });
+
   describe('detectWorkspace', () => {
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
