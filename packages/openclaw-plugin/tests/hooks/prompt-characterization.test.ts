@@ -268,7 +268,13 @@ describe('Minimal trigger skips project context', () => {
     const yaml = await import('js-yaml');
     fs.writeFileSync(
       path.join(workspaceDir, '.pd', 'config.yaml'),
-      yaml.dump({ contextInjection: { projectFocus: 'full' } }),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { projectFocus: 'full' },
+      }),
       'utf-8',
     );
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');

@@ -326,11 +326,11 @@ export function validateProfileConfig(raw: unknown, path = 'profile'): ProfileVa
   if (pgRaw !== undefined) {
     const warnings2: ProfileValidationWarning[] = [];
     const pgResult: Record<string, unknown> = {};
-    const pgRecord = pgRaw as Record<string, unknown>;
     if (isRecord(pgRaw)) {
-      const pgEnabled = readOwn(pgRecord, 'enabled');
+      // Inside isRecord guard, TypeScript narrows pgRaw to Record<string, unknown>
+      const pgEnabled = readOwn(pgRaw, 'enabled');
       if (pgEnabled !== undefined) { if (isBoolean(pgEnabled)) pgResult.enabled = pgEnabled; else warnings2.push(warn(`${path}.progressive_gate.enabled`, `must be boolean`)); }
-      const paRaw = readOwn(pgRecord, 'plan_approvals');
+      const paRaw = readOwn(pgRaw, 'plan_approvals');
       if (paRaw !== undefined) {
         const r = validatePlanApprovals(paRaw, `${path}.progressive_gate.plan_approvals`);
         if (r.value) pgResult.plan_approvals = r.value;

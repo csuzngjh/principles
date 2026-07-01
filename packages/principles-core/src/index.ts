@@ -261,53 +261,6 @@ export type {
   WorkflowFunnelConfig,
 } from './workflow-funnel-loader.js';
 
-// PD Config — context injection, feature flags, profiles, validation
-export type {
-  ContextInjectionConfig,
-  EvolutionContextConfig,
-  ProjectFocusMode,
-  PdConfig,
-  PdConfigVersion,
-  FeatureCategory,
-  FeatureFlagEntry,
-  RuntimeProfileType,
-  OpenClawRuntimeProfile,
-  PdLocalRuntimeProfile,
-  RuntimeProfile,
-  EffectivePdConfig,
-  PdConfigValidationError,
-  PdConfigValidationResultOk,
-  PdConfigValidationResultErr,
-  PdConfigValidationResult,
-  ProfileConfig,
-  ProfileAuditLevel,
-  ProfileEvolutionMode,
-  ProfileTestLevel,
-  RedactedPdConfigSummary,
-  RedactedRuntimeProfileSummary,
-  RedactedAgentSummary,
-  RedactedFeatureSummary,
-} from './runtime-v2/config/index.js';
-
-export {
-  DEFAULT_CONTEXT_INJECTION,
-  PD_CONFIG_VERSION,
-  DEFAULT_RUNTIME_PROFILE_ID,
-  DEFAULT_RUNTIME_PROFILE,
-  DEFAULT_FEATURE_FLAGS,
-  getDefaultPdConfig,
-  computeEffectivePdConfig,
-  validatePdConfig,
-  validateProfileConfig,
-  redactPdConfig,
-  redactConfigValue,
-  PROFILE_DEFAULTS,
-  resolveProfile,
-  MVP_CHANNEL_IDS,
-  computeFeatureFlagsFromConfig,
-  isFeatureEnabled,
-  getEnabledFlagIds,
-  resolveAgentRuntimeBinding,
-  checkAgentRuntimeReadiness,
-  createAdapterConfigFromProfile,
-} from './runtime-v2/config/index.js';
+// PD Config — context injection types re-exported for openclaw-plugin consumers
+export type { ContextInjectionConfig, EvolutionContextConfig, ProjectFocusMode } from './runtime-v2/config/index.js';
+export { DEFAULT_CONTEXT_INJECTION } from './runtime-v2/config/index.js';
