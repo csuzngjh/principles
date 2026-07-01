@@ -430,7 +430,11 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
     return { RuleHostWriter };
   }
 
-  /** Build a v2-declaring artifact (requiresContextVersion: 2 in contentJson). */
+  /** Build a v2-declaring artifact (requiresContextVersion: 2 in contentJson).
+   *  PRI-490: v2 artifacts MUST carry evidenceRefs (preserved verbatim from
+   *  BehaviorExamplePack) — the fixture includes a valid evidenceRefs array
+   *  so the existing "accepts v2 when flag ON" test continues to pass once
+   *  the v2 evidenceRefs requirement is enforced by validateV2SeedRuleContent. */
   function makeV2Artifact(): PIArtifactSnapshot {
     const goldenTrace = makeGoldenTrace();
     return {
@@ -447,6 +451,7 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
         ruleHostGateDecision: 'accepted_shadow',
         affectedTools: ['read_file'],
         requiresContextVersion: 2,
+        evidenceRefs: ['pain:1', 'tool_call:abc'],
       }),
       createdAt: '2026-06-27T00:00:00.000Z',
       updatedAt: '2026-06-27T00:00:00.000Z',
@@ -535,6 +540,214 @@ describe('RuleHostWriter.canActivate — PRI-484 rulecode_context_v2 gating', ()
   });
 });
 
+describe('RuleHostWriter.canActivate — PRI-490 v2 seed rule allow/block-only + evidenceRefs', () => {
+  async function importWriter() {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    return { RuleHostWriter };
+  }
+
+  /** Build a v2 artifact with full overrides applied to its contentJson. */
+  function makeV2ArtifactWithContent(contentOverrides: Record<string, unknown> = {}): PIArtifactSnapshot {
+    const goldenTrace = makeGoldenTrace();
+    const baseContent: Record<string, unknown> = {
+      implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "v2 rule" }; }',
+      goldenTrace,
+      ruleHostGateDecision: 'accepted_shadow',
+      affectedTools: ['read_file'],
+      requiresContextVersion: 2,
+      evidenceRefs: ['pain:1', 'tool_call:abc'],
+      ...contentOverrides,
+    };
+    return {
+      artifactId: 'art-rule-v2-pri490',
+      artifactKind: 'rule',
+      sourceTaskId: 'task-v2-pri490',
+      sourcePrincipleId: 'P_v2_490',
+      sourceRuleId: 'R_v2_490',
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify(baseContent),
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+    };
+  }
+
+  it('rejects v2 artifact with propose_correction in goldenTraceCases (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    // Build a v2 artifact whose negative case expects propose_correction.
+    // This is structurally valid (goldenTrace validator accepts it for v1)
+    // but forbidden for v2 seed rules per PRI-490.
+    const badTrace = {
+      ...makeGoldenTrace(),
+      cases: [
+        {
+          caseId: 'case-propose',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'propose_correction',
+          expectedProposedParams: { path: '/safe/path' },
+          expectedApplicationMode: 'shadow',
+        },
+        {
+          caseId: 'case-allow',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/project/src/safe.ts' },
+          expectedDecision: 'allow',
+        },
+      ],
+    };
+    const artifact = makeV2ArtifactWithContent({ goldenTrace: badTrace });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    // PRI-490: rejection reason must surface the forbidden decision so the
+    // owner knows exactly what to fix (ERR-088: assert the specific reason,
+    // not just `result.ok === false`).
+    expect(result.reason).toContain('v2_seed_rule_forbidden_decision');
+    expect(result.reason).toContain('propose_correction');
+  });
+
+  it('rejects v2 artifact missing evidenceRefs (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    // v2 artifact without evidenceRefs field — should be rejected.
+    const artifact = makeV2ArtifactWithContent({});
+    const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
+    delete parsed.evidenceRefs;
+    artifact.contentJson = JSON.stringify(parsed);
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('v2_seed_rule_missing_evidence_refs');
+  });
+
+  it('rejects v2 artifact with empty evidenceRefs array (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const artifact = makeV2ArtifactWithContent({ evidenceRefs: [] });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('v2_seed_rule_invalid_evidence_refs');
+  });
+
+  it('rejects v2 artifact with non-string evidenceRefs entries (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const artifact = makeV2ArtifactWithContent({ evidenceRefs: ['pain:1', 42, null] });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('v2_seed_rule_invalid_evidence_refs');
+  });
+
+  it('rejects v2 artifact with whitespace-only evidenceRefs entries (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const artifact = makeV2ArtifactWithContent({ evidenceRefs: ['pain:1', '   '] });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('v2_seed_rule_invalid_evidence_refs');
+  });
+
+  it('does NOT invoke sandbox when rejecting v2 artifact with propose_correction (defense before sandbox)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const gateDeps = makeGateDeps();
+    const writer = new RuleHostWriter({
+      gateDeps,
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    const badTrace = {
+      ...makeGoldenTrace(),
+      cases: [
+        {
+          caseId: 'case-propose',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'propose_correction',
+          expectedProposedParams: { path: '/safe/path' },
+          expectedApplicationMode: 'shadow',
+        },
+        {
+          caseId: 'case-allow',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/safe' },
+          expectedDecision: 'allow',
+        },
+      ],
+    };
+    const artifact = makeV2ArtifactWithContent({ goldenTrace: badTrace });
+    await writer.canActivate(artifact);
+    expect(gateDeps.evaluateInSandbox).not.toHaveBeenCalled();
+  });
+
+  it('accepts valid v2 artifact with allow/block-only + evidenceRefs (PRI-490 happy path)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({
+      gateDeps: makeGateDeps(),
+      featureFlagProbe: (flagId: string) => flagId === 'rulecode_context_v2',
+    });
+    // makeV2ArtifactWithContent() defaults to a valid v2 artifact.
+    const result = await writer.canActivate(makeV2ArtifactWithContent());
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not run v2 content checks on v1 artifacts (v1 behavior unchanged)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // No featureFlagProbe — v1 path must still pass.
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    // v1 artifact with propose_correction is allowed (v1 contract unchanged).
+    const v1TraceWithPropose = {
+      ...makeGoldenTrace(),
+      cases: [
+        {
+          caseId: 'case-propose-v1',
+          kind: 'negative',
+          toolName: 'write_file',
+          params: { path: '/etc/passwd' },
+          expectedDecision: 'propose_correction',
+          expectedProposedParams: { path: '/safe' },
+          expectedApplicationMode: 'shadow',
+        },
+        {
+          caseId: 'case-allow-v1',
+          kind: 'positive',
+          toolName: 'write_file',
+          params: { path: '/safe' },
+          expectedDecision: 'allow',
+        },
+      ],
+    };
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: v1TraceWithPropose,
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['read_file'],
+        // Note: no requiresContextVersion, no evidenceRefs — v1 path.
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe('RuleHostWriter.buildApprovalContext', () => {
   async function importWriter() {
     const { RuleHostWriter } = await import('../rule-host-writer.js');
@@ -572,6 +785,46 @@ describe('RuleHostWriter.buildApprovalContext', () => {
 
     expect(ctx.effectDescription).toContain('edit_file');
     expect(ctx.effectDescription).toContain('bash');
+  });
+
+  // PRI-490 — evidence refs must be surfaced in approval context so the owner
+  // has provenance context during approval review. Surfaced only when the
+  // artifact carries a valid evidenceRefs array.
+  it('surfaces evidenceRefs in effectDescription when present (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['edit_file'],
+        evidenceRefs: ['pain:42', 'tool_call:def'],
+      }),
+    });
+    const ctx = writer.buildApprovalContext(makeWriterInput(), artifact);
+
+    expect(ctx.effectDescription).toContain('pain:42');
+    expect(ctx.effectDescription).toContain('tool_call:def');
+  });
+
+  it('does not surface evidenceRefs clause when absent (PRI-490)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['edit_file'],
+        // No evidenceRefs field — effectDescription must not surface an
+        // evidence clause.
+      }),
+    });
+    const ctx = writer.buildApprovalContext(makeWriterInput(), artifact);
+
+    expect(ctx.effectDescription).not.toContain('Evidence backing');
+    expect(ctx.effectDescription).toContain('edit_file');
   });
 
   it('has stable fallback for effectDescription when affectedTools is missing', async () => {

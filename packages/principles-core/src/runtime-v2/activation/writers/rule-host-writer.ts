@@ -105,6 +105,66 @@ function assessRiskLevel(parsed: Record<string, unknown>): ActivationRiskLevel {
   return hasDestructive ? 'critical' : 'high';
 }
 
+/**
+ * PRI-490 — extract and validate the `evidenceRefs` field from parsed artifact
+ * contentJson. Returns the validated `string[]` when present and well-formed,
+ * or `null` when absent / malformed. Callers treat `null` as "no evidenceRefs".
+ *
+ * ERR-001/ERR-005 (rc-1/rc-2/rc-4): the parsed value is `unknown`; we never
+ * `as`-cast. Each element is type-narrowed via `typeof` before acceptance.
+ */
+function extractEvidenceRefs(parsed: Record<string, unknown>): string[] | null {
+  if (!Object.hasOwn(parsed, 'evidenceRefs')) return null;
+  const refs = parsed.evidenceRefs;
+  if (!Array.isArray(refs) || refs.length === 0) return null;
+  const valid: string[] = [];
+  for (const ref of refs) {
+    if (typeof ref !== 'string' || ref.trim() === '') return null;
+    valid.push(ref);
+  }
+  return valid;
+}
+
+/**
+ * PRI-490 — validate v2 seed-rule content constraints BEFORE the sandbox runs.
+ *
+ * v2 seed rules (Owner-labelled evidence path) may only emit `allow` / `block`
+ * decisions. `propose_correction` is forbidden because seed-user MVP does not
+ * support auto-correct. v2 also requires `evidenceRefs` to be preserved from
+ * the BehaviorExamplePack through the artifact chain.
+ *
+ * Returns `null` when the v2 content is valid, or a rejection reason string
+ * describing the first violation. v1 artifacts skip this check entirely.
+ *
+ * ERR-009 (rc-3): missing required v2 fields fail loud with an actionable
+ * reason rather than a silent skip.
+ * ERR-089: we check BOTH the propose_correction ban AND the evidenceRefs
+ * requirement; fixing one violation must not mask the other.
+ */
+function validateV2SeedRuleContent(
+  parsed: Record<string, unknown>,
+  goldenTrace: GoldenTrace,
+): string | null {
+  // 1. v2 seed rules forbid propose_correction in goldenTrace.cases.
+  //    Only `allow` and `block` are permitted (seed-user MVP scope).
+  for (const c of goldenTrace.cases) {
+    if (c.expectedDecision === 'propose_correction') {
+      return 'v2_seed_rule_forbidden_decision:propose_correction';
+    }
+  }
+
+  // 2. v2 artifacts MUST carry evidenceRefs (non-empty array of non-empty
+  //    strings) preserved verbatim from BehaviorExamplePack.
+  const refs = extractEvidenceRefs(parsed);
+  if (refs === null) {
+    return Object.hasOwn(parsed, 'evidenceRefs')
+      ? 'v2_seed_rule_invalid_evidence_refs'
+      : 'v2_seed_rule_missing_evidence_refs';
+  }
+
+  return null;
+}
+
 export class RuleHostWriter implements ChannelWriter {
   readonly channel = 'code_tool_hook' as const;
 
@@ -173,6 +233,18 @@ export class RuleHostWriter implements ChannelWriter {
       return { ok: false, reason: 'gate_decision_not_accepted_shadow', riskLevel: 'high' };
     }
 
+    // PRI-490 — v2 seed-rule content constraints (allow/block-only +
+    // evidenceRefs required). v1 artifacts skip this check entirely, so
+    // v1 behavior is unchanged. This runs BEFORE the sandbox so the owner
+    // sees an actionable reason rather than an opaque sandbox failure
+    // (mirrors the existing extractGoldenTrace defense-in-depth pattern).
+    if (parsed.requiresContextVersion === 2) {
+      const v2Violation = validateV2SeedRuleContent(parsed, goldenTrace);
+      if (v2Violation) {
+        return { ok: false, reason: v2Violation, riskLevel: 'high' };
+      }
+    }
+
     const gateResult: RefinerRuleHostGateResult = evaluateRefinerRuleHostGate(
       { code: implementationCode, goldenTrace },
       this.gateDeps,
@@ -235,6 +307,10 @@ export class RuleHostWriter implements ChannelWriter {
     const affectedTools = Array.isArray(parsed?.affectedTools)
       ? (parsed.affectedTools as unknown[]).filter((t): t is string => typeof t === 'string')
       : [];
+    // PRI-490 — surface evidence refs in approval context so the owner can
+    // see the provenance of the rule when reviewing the approval. Only
+    // included when the artifact carries a valid evidenceRefs array.
+    const evidenceRefs = parsed ? extractEvidenceRefs(parsed) : null;
 
     const summary = `Rule activation request for code_tool_hook: ${ruleId}`;
 
@@ -247,9 +323,15 @@ export class RuleHostWriter implements ChannelWriter {
       ? `Confidence: ${Math.round(confidence * 100)}%. Evaluated through shadow replay and sandbox gate.`
       : 'Confidence score unavailable. Manual review recommended.';
 
-    const effectDescription = affectedTools.length > 0
+    const toolsClause = affectedTools.length > 0
       ? `This rule will intercept tool calls: ${affectedTools.join(', ')}. After approval, matching calls will be evaluated against the rule logic.`
       : 'This candidate may affect code_tool_hook behavior after approval. Tool scope is not specified.';
+    // PRI-490 — append evidence refs to the effect description when present,
+    // so the owner has provenance context during approval review.
+    const evidenceClause = evidenceRefs && evidenceRefs.length > 0
+      ? ` Evidence backing this rule: ${evidenceRefs.join(', ')}.`
+      : '';
+    const effectDescription = `${toolsClause}${evidenceClause}`;
 
     const rejectionEffect = 'The rule will not be activated. Current tool calls will continue unchanged.';
 
