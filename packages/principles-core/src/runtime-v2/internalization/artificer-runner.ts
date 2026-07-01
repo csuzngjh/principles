@@ -179,6 +179,18 @@ function validateContextModeOutput(
       }
     }
   }
+  // PRI-490: v2 output evidenceRefs must match pack evidenceRefs exactly.
+  // LLM must copy evidenceRefs verbatim — no omission, reordering, or rewriting.
+  const outputEvidenceRefs = output.evidenceRefs;
+  if (!Array.isArray(outputEvidenceRefs)) {
+    errors.push('v2 Artificer output must include evidenceRefs array');
+  } else {
+    const packRefs = [...pack.evidenceRefs];
+    if (outputEvidenceRefs.length !== packRefs.length
+      || !outputEvidenceRefs.every((ref: unknown, i: number) => typeof ref === 'string' && ref === packRefs[i])) {
+      errors.push('v2 Artificer output evidenceRefs must exactly match behaviorExamplePack.evidenceRefs');
+    }
+  }
   return errors;
 }
 

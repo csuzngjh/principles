@@ -60,6 +60,12 @@ export interface ArtificerRuleOutput {
   readonly generatedAt: string;
   /** PRI-484 — declare v2 rule that reads input.context. Only `2` is supported. */
   readonly requiresContextVersion?: 2;
+  /**
+   * PRI-490 — evidence references from BehaviorExamplePack, preserved through
+   * the full artifact chain. Required when requiresContextVersion: 2; optional
+   * for v1 rules (v1 does not require evidenceRefs).
+   */
+  readonly evidenceRefs?: readonly string[];
 }
 
 export const ArtificerSourceTraceSchema = Type.Object({
@@ -95,6 +101,8 @@ export const ArtificerRuleOutputSchema = Type.Object({
   generatedAt: Type.String({ minLength: 1 }),
   // PRI-484 — optional v2 context declaration. Only literal `2` is supported.
   requiresContextVersion: Type.Optional(Type.Literal(2)),
+  // PRI-490 — evidence references, required for v2 rules.
+  evidenceRefs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
 
 export type ArtificerRuleOutputTB = Static<typeof ArtificerRuleOutputSchema>;
@@ -273,16 +281,26 @@ export class DefaultArtificerValidator implements ArtificerValidator {
       }
     }
 
-    // ── ruleContext consistency (PRI-484) ──
+    // ── ruleContext consistency (PRI-484) + v2 propose_correction ban (PRI-490) ──
     // Walk the cases once more to enforce the v1/v2 contract on ruleContext.
     // Only runs when the array shape was already accepted (avoid noise on
     // malformed arrays that already produced errors above).
+    // PRI-490: v2 seed rules must only emit allow/block — propose_correction
+    // is forbidden because seed-user MVP does not support auto-correct.
     if (Array.isArray(rec.goldenTraceCases)) {
       const cases = rec.goldenTraceCases as readonly unknown[];
       for (let i = 0; i < cases.length; i++) {
         const entry = cases[i];
         if (!isRecord(entry)) {
           continue;
+        }
+        // PRI-490: v2 rules forbid propose_correction
+        if (isV2Declared
+          && Object.hasOwn(entry, 'expectedDecision')
+          && entry.expectedDecision === 'propose_correction') {
+          errors.push(
+            `goldenTraceCases[${i}].expectedDecision 'propose_correction' is forbidden in v2 seed rules (only allow/block permitted)`,
+          );
         }
         if (!Object.hasOwn(entry, 'ruleContext')) {
           if (isV2Declared) {
@@ -362,6 +380,17 @@ export class DefaultArtificerValidator implements ArtificerValidator {
     // ── generatedAt ──
     if (!Object.hasOwn(rec, 'generatedAt') || typeof rec.generatedAt !== 'string' || rec.generatedAt.trim() === '') {
       errors.push('generatedAt must be non-empty string');
+    }
+
+    // ── evidenceRefs (PRI-490) ──
+    // v2 rules MUST have evidenceRefs (non-empty array of non-empty strings).
+    // v1 rules MAY have evidenceRefs but are not required to (backward compatible).
+    if (isV2Declared) {
+      if (!Object.hasOwn(rec, 'evidenceRefs') || !Array.isArray(rec.evidenceRefs) || rec.evidenceRefs.length === 0) {
+        errors.push('evidenceRefs is required and must be a non-empty array for v2 rules');
+      } else if (!rec.evidenceRefs.every((e: unknown) => typeof e === 'string' && e.trim() !== '')) {
+        errors.push('evidenceRefs must be an array of non-empty strings');
+      }
     }
 
     return errors.length > 0
