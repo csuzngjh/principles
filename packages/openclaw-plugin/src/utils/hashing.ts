@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
  * to allow for consistent loop detection even if the raw text varies slightly.
  */
 export function denoiseError(text: string): string {
-    if (!text) return '';
+    if (!text || typeof text !== 'string') return '';
     
     return text
         // Strip ISO timestamps and common date formats

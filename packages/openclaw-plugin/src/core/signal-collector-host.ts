@@ -277,14 +277,17 @@ export class SignalCollectorHost {
    * 不用 strongPainScore(70),因为 WEAK 单条不该直接顶满 GFI。
    */
   private routeWeak(output: SignalCollectorOutput, sessionId: string): void {
-    // 单向摘要,不暴露 sessionId 明文(CodeRabbit #4)
-    const hash = createHash('sha256')
-      .update(`${output.evidence.detectedAt}:${sessionId}`)
-      .digest('hex')
-      .slice(0, 32);
-    trackFriction(sessionId, 20, hash, this.wctx.workspaceDir, {
-      source: 'user_empathy',
-    });
+    try {
+      const hash = createHash('sha256')
+        .update(`${output.evidence.detectedAt}:${sessionId}`)
+        .digest('hex')
+        .slice(0, 32);
+      trackFriction(sessionId, 20, hash, this.wctx.workspaceDir, {
+        source: 'user_empathy',
+      });
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRACK_FRICTION_FAIL', `trackFriction threw: ${String(e)}`);
+    }
   }
 
   /**
