@@ -13,6 +13,7 @@ import {
   ApprovalQueue,
   ApprovalCompletionService,
   isArtifactRevisionOf,
+  extractEvidenceRefs,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -24,6 +25,14 @@ import type {
 import type { PIArtifactRecord, ActivationStatusRecord } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+
+/**
+ * Type guard for parsed JSON objects (rc-2-no-as-bypass).
+ * Replaces `as Record<string, unknown>` casts on untrusted contentJson.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
+}
 
 interface ActivationDispatchOptions {
   workspace?: string;
@@ -466,31 +475,108 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
     const {piArtifactStore} = stateManager;
     const uniqueArtifactIds = new Set(filtered.map(r => r.artifactId));
     const danglingArtifactIds = new Set<string>();
+    // PRI-491: Map artifactId to { contextVersion, evidenceRefs } extracted
+    // from contentJson. rc-1/rc-2: contentJson is parsed as unknown and
+    // type-narrowed; never `as`-cast without prior typeof check.
+    const artifactMetadata = new Map<string, { contextVersion: 'v1' | 'v2'; evidenceRefs: string[] | null }>();
     for (const artifactId of uniqueArtifactIds) {
       try {
         const artifact = await piArtifactStore.getArtifactById(artifactId);
         if (!artifact) {
           danglingArtifactIds.add(artifactId);
+          continue;
         }
+        // PRI-491: Parse contentJson to extract contextVersion + evidenceRefs.
+        // rc-1: treat parsed JSON as unknown; rc-2: narrow with typeof before use.
+        let parsedContent: Record<string, unknown> | null = null;
+        try {
+          const parsed: unknown = JSON.parse(artifact.contentJson);
+          if (isRecord(parsed)) {
+            parsedContent = parsed;
+          }
+        } catch {
+          // Malformed contentJson - treat as no metadata (not dangling, just unreadable)
+        }
+        const requiresCtxV2 = parsedContent !== null
+          && Object.hasOwn(parsedContent, 'requiresContextVersion')
+          && parsedContent.requiresContextVersion === 2;
+        const contextVersion: 'v1' | 'v2' = requiresCtxV2 ? 'v2' : 'v1';
+        const evidenceRefs = parsedContent !== null ? extractEvidenceRefs(parsedContent) : null;
+        artifactMetadata.set(artifactId, { contextVersion, evidenceRefs });
       } catch {
-        // Treat lookup failure as dangling — fail loud rather than silent (rc-9).
+        // Treat lookup failure as dangling - fail loud rather than silent (rc-9).
         danglingArtifactIds.add(artifactId);
       }
     }
     const hasDangling = danglingArtifactIds.size > 0;
 
-    // Attach per-record warning for dangling artifact_id (does not mutate DB).
+    // PRI-491: Probe rulecode_context_v2 flag to determine suspended_by_flag
+    // status for v2 activations. When the flag is off, v2 activations are
+    // suspended (not executing) even though they remain active in the DB.
+    const featureFlags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+    const v2FlagEnabled = featureFlags.flags.rulecode_context_v2?.enabled === true;
+
+    // PRI-491: Enriched activation record with owner-observable fields.
+    // mode/status/contextVersion/evidenceRefs/nextAction let the owner
+    // understand rule state without reading SQLite or logs.
     interface AnnotatedActivation extends ActivationStatusRecord {
+      mode?: 'shadow' | 'live';
+      status: 'active' | 'deactivated' | 'suspended_by_flag';
+      contextVersion?: 'v1' | 'v2';
+      evidenceRefs?: string[];
+      evidenceSummary?: string;
+      nextAction?: string;
       warning?: string;
     }
     const annotated: AnnotatedActivation[] = filtered.map(r => {
-      if (danglingArtifactIds.has(r.artifactId)) {
-        return {
-          ...r,
-          warning: `artifact_id "${r.artifactId}" does not exist in pi_artifacts — activation is orphaned`,
-        };
+      // Derive mode from action (shadow_activate -> shadow, live_activate -> live)
+      const mode: 'shadow' | 'live' | undefined = r.action === 'code_tool_hook_shadow_activate'
+        ? 'shadow'
+        : r.action === 'code_tool_hook_live_activate'
+          ? 'live'
+          : undefined;
+
+      // Look up artifact metadata (contextVersion, evidenceRefs)
+      const meta = artifactMetadata.get(r.artifactId);
+      const contextVersion = meta?.contextVersion;
+      const evidenceRefs = meta?.evidenceRefs ?? undefined;
+      const evidenceSummary = evidenceRefs && evidenceRefs.length > 0
+        ? `${evidenceRefs.length} evidence ref(s): ${evidenceRefs.slice(0, 3).join(', ')}${evidenceRefs.length > 3 ? '...' : ''}`
+        : undefined;
+
+      // Derive status: deactivated > suspended_by_flag > active
+      let status: 'active' | 'deactivated' | 'suspended_by_flag';
+      let nextAction: string | undefined;
+      if (r.deactivatedAt) {
+        status = 'deactivated';
+        nextAction = undefined;
+      } else if (contextVersion === 'v2' && !v2FlagEnabled) {
+        status = 'suspended_by_flag';
+        nextAction = `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${r.activationId} --confirm`;
+      } else {
+        status = 'active';
+        if (mode === 'shadow') {
+          nextAction = `pd activation promote --activation-id ${r.activationId} --confirm`;
+        } else if (mode === 'live') {
+          nextAction = `pd activation deactivate --activation-id ${r.activationId} --confirm`;
+        } else {
+          nextAction = undefined;
+        }
       }
-      return r;
+
+      const record: AnnotatedActivation = {
+        ...r,
+        mode,
+        status,
+        contextVersion,
+        evidenceRefs,
+        evidenceSummary,
+        nextAction,
+      };
+      if (danglingArtifactIds.has(r.artifactId)) {
+        record.warning = `artifact_id "${r.artifactId}" does not exist in pi_artifacts - activation is orphaned`;
+      }
+      return record;
     });
 
     if (opts.json) {
@@ -512,15 +598,34 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
         console.log('No active activations found.');
       } else {
         for (const r of annotated) {
-          const status = r.deactivatedAt ? `[DEACTIVATED ${r.deactivatedAt}]` : '[ACTIVE]';
-          console.log(`${status} ${r.activationId}`);
+          // PRI-491: Text output shows mode/status/contextVersion so the owner
+          // can tell at a glance whether a rule will block now.
+          const statusLabel = r.deactivatedAt
+            ? `[DEACTIVATED ${r.deactivatedAt}]`
+            : r.status === 'suspended_by_flag'
+              ? `[SUSPENDED by flag]`
+              : `[ACTIVE]`;
+          const modeLabel = r.mode ? ` (${r.mode})` : '';
+          console.log(`${statusLabel}${modeLabel} ${r.activationId}`);
           console.log(`  artifactId: ${r.artifactId}`);
           console.log(`  channel: ${r.channel}`);
           console.log(`  action: ${r.action}`);
           console.log(`  targetRef: ${r.targetRef}`);
           console.log(`  activatedAt: ${r.activatedAt}`);
+          if (r.promotedAt) {
+            console.log(`  promotedAt: ${r.promotedAt}`);
+          }
+          if (r.contextVersion) {
+            console.log(`  contextVersion: ${r.contextVersion}`);
+          }
+          if (r.evidenceSummary) {
+            console.log(`  evidence: ${r.evidenceSummary}`);
+          }
+          if (r.nextAction) {
+            console.log(`  nextAction: ${r.nextAction}`);
+          }
           if (r.warning) {
-            console.log(`  ⚠ WARNING: ${r.warning}`);
+            console.log(`  WARNING: ${r.warning}`);
           }
           console.log('');
         }

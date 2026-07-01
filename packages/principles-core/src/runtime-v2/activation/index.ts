@@ -63,7 +63,7 @@ export { MemoryApprovalQueueStore } from './memory-approval-store.js';
 
 export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
 
-export { RuleHostWriter } from './writers/rule-host-writer.js';
+export { RuleHostWriter, extractEvidenceRefs } from './writers/rule-host-writer.js';
 export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
 
 // Story A (PRI-408): Production gate deps factory — canonical vm-based rule
