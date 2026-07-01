@@ -1,12 +1,10 @@
  
  
 import * as fs from 'fs';
-import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import type { ContextInjectionConfig} from '../types.js';
-import { defaultContextConfig } from '../types.js';
+import type { ContextInjectionConfig } from '../types.js';
 // local-worker-routing module and its routing helpers removed entirely per PRI-448.
 // Routing guidance is no longer injected into prompts.
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
@@ -15,7 +13,7 @@ import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/
 import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
-import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
@@ -134,49 +132,6 @@ function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLogger): 
   return host;
 }
 
-function parseContextInjectionConfig(value: unknown): ContextInjectionConfig | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-
-  const config: ContextInjectionConfig = { ...defaultContextConfig };
-  const thinkingOs = getOwnValue(value, 'thinkingOs');
-  const projectFocus = getOwnValue(value, 'projectFocus');
-  const evolutionContext = getOwnValue(value, 'evolutionContext');
-
-  if (thinkingOs !== undefined) {
-    if (typeof thinkingOs !== 'boolean') return null;
-    config.thinkingOs = thinkingOs;
-  }
-
-  if (projectFocus !== undefined) {
-    if (projectFocus !== 'full' && projectFocus !== 'summary' && projectFocus !== 'off') return null;
-    config.projectFocus = projectFocus;
-  }
-
-  if (evolutionContext !== undefined) {
-    if (typeof evolutionContext !== 'object' || evolutionContext === null || Array.isArray(evolutionContext)) return null;
-
-    config.evolutionContext = { ...defaultContextConfig.evolutionContext };
-    const enabled = getOwnValue(evolutionContext, 'enabled');
-    const maxMessages = getOwnValue(evolutionContext, 'maxMessages');
-    const maxCharsPerMessage = getOwnValue(evolutionContext, 'maxCharsPerMessage');
-
-    if (enabled !== undefined) {
-      if (typeof enabled !== 'boolean') return null;
-      config.evolutionContext.enabled = enabled;
-    }
-    if (maxMessages !== undefined) {
-      if (typeof maxMessages !== 'number' || !Number.isFinite(maxMessages)) return null;
-      config.evolutionContext.maxMessages = maxMessages;
-    }
-    if (maxCharsPerMessage !== undefined) {
-      if (typeof maxCharsPerMessage !== 'number' || !Number.isFinite(maxCharsPerMessage)) return null;
-      config.evolutionContext.maxCharsPerMessage = maxCharsPerMessage;
-    }
-  }
-
-  return config;
-}
-
 /**
  * OpenClaw API Prompt Hook
  * Constructs the system prompt injected into LLM context for Principles Disciple
@@ -184,36 +139,14 @@ function parseContextInjectionConfig(value: unknown): ContextInjectionConfig | n
 
 
 /**
- * Loads context injection config from .principles/PROFILE.json
- * Parses contextInjection configuration from PROFILE.json for context injection
+ * Loads context injection config from .pd/config.yaml via loadPdConfigForPlugin.
+ * The resolved config is computed by the core config layer (pd-config-effective.ts),
+ * which merges user partial input with DEFAULT_CONTEXT_INJECTION defaults.
  * @internal Used by evolution engine for context settings
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
-  const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
-
-  try {
-    const raw = cachedReadFile(profilePath, workspaceDir);
-    if (raw) {
-      const profile = JSON.parse(raw);
-      if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
-        const contextInjection = getOwnValue(profile, 'contextInjection');
-        if (contextInjection !== undefined) {
-          const parsed = parseContextInjectionConfig(contextInjection);
-          if (!parsed) {
-            console.warn(`[PD:Prompt] Invalid contextInjection config in ${profilePath}; using defaults.`);
-            return { ...defaultContextConfig };
-          }
-          return parsed;
-        }
-      }
-    }
-  } catch (e) {
-    // Failed to load config — continue with defaults, but log for diagnostics
-     
-    console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
-  }
-  
-  return { ...defaultContextConfig };
+  const result = loadPdConfigForPlugin(workspaceDir);
+  return { ...result.effective.resolvedContextInjection };
 }
 
 export async function handleBeforePromptBuild(

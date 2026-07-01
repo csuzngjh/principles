@@ -339,12 +339,13 @@ describe('Golden fixture: prompt output', () => {
     }
   });
 
-  it('rejects malformed contextInjection fields from PROFILE.json', async () => {
+  it('rejects malformed contextInjection fields from .pd/config.yaml', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-profile-'));
-    fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
     fs.writeFileSync(
-      path.join(workspaceDir, '.principles', 'PROFILE.json'),
-      JSON.stringify({
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
         contextInjection: {
           thinkingOs: 'true',
           projectFocus: 'full',
@@ -369,10 +370,17 @@ describe('Golden fixture: prompt output', () => {
     const { workingMemoryToInjection } = await import('../../src/core/focus-history.js');
     const { parseWorkingMemorySection } = await import('../../src/core/focus-history.js');
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-golden-'));
-    fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
     fs.writeFileSync(
-      path.join(workspaceDir, '.principles', 'PROFILE.json'),
-      JSON.stringify({ contextInjection: { thinkingOs: true, projectFocus: 'full' } }),
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { thinkingOs: true, projectFocus: 'full' },
+      }),
       'utf-8',
     );
     fs.writeFileSync(
@@ -436,10 +444,17 @@ describe('Golden fixture: prompt output', () => {
     const { workingMemoryToInjection } = await import('../../src/core/focus-history.js');
     const { parseWorkingMemorySection } = await import('../../src/core/focus-history.js');
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-order-'));
-    fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
     fs.writeFileSync(
-      path.join(workspaceDir, '.principles', 'PROFILE.json'),
-      JSON.stringify({ contextInjection: { thinkingOs: true, projectFocus: 'full' } }),
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { thinkingOs: true, projectFocus: 'full' },
+      }),
       'utf-8',
     );
     fs.writeFileSync(path.join(workspaceDir, 'THINKING_OS.md'), 'Think step by step before acting', 'utf-8');

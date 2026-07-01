@@ -24,13 +24,18 @@ import {
   type UiConfig,
   type DiagnosticsMode,
   type WorkspaceConfig,
+  type ProfileConfig,
+  type ContextInjectionConfig,
+  type ProjectFocusMode,
   PD_CONFIG_VERSION,
   VALID_FEATURE_CATEGORIES,
   VALID_PROFILE_TYPES,
   INTERNAL_AGENT_NAMES,
   VALID_DIAGNOSTICS_MODES,
+  VALID_PROJECT_FOCUS_MODES,
   DANGEROUS_KEYS,
 } from './pd-config-types.js';
+import { validateProfileConfig } from './pd-validate-profile.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -460,6 +465,110 @@ function validateWorkspaceConfig(
   };
 }
 
+// ── Context Injection Validation ────────────────────────────────────────────
+
+function validateEvolutionContextConfig(
+  raw: unknown,
+  path: string,
+): { ok: true; value: ContextInjectionConfig['evolutionContext'] } | { ok: false; errors: PdConfigValidationError[] } {
+  const errors: PdConfigValidationError[] = [];
+
+  if (!isRecord(raw)) {
+    return { ok: false, errors: [err(path, 'evolutionContext must be an object', 'Fix evolutionContext to be an object with enabled, maxMessages, maxCharsPerMessage')] };
+  }
+
+  const enabled = readOwn(raw, 'enabled');
+  if (enabled !== undefined && !isBoolean(enabled)) {
+    errors.push(err(`${path}.enabled`, 'evolutionContext.enabled must be a boolean', 'Set evolutionContext.enabled to true or false'));
+  }
+
+  const maxMessages = readOwn(raw, 'maxMessages');
+  if (maxMessages !== undefined && (!isNumber(maxMessages) || !Number.isInteger(maxMessages) || maxMessages < 0)) {
+    errors.push(err(`${path}.maxMessages`, 'evolutionContext.maxMessages must be a non-negative integer', 'Set evolutionContext.maxMessages to a non-negative integer'));
+  }
+
+  const maxCharsPerMessage = readOwn(raw, 'maxCharsPerMessage');
+  if (maxCharsPerMessage !== undefined && (!isNumber(maxCharsPerMessage) || !Number.isInteger(maxCharsPerMessage) || maxCharsPerMessage < 0)) {
+    errors.push(err(`${path}.maxCharsPerMessage`, 'evolutionContext.maxCharsPerMessage must be a non-negative integer', 'Set evolutionContext.maxCharsPerMessage to a non-negative integer'));
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    value: {
+      enabled: isBoolean(enabled) ? enabled : true,
+      maxMessages: isNumber(maxMessages) ? maxMessages : 4,
+      maxCharsPerMessage: isNumber(maxCharsPerMessage) ? maxCharsPerMessage : 200,
+    },
+  };
+}
+
+function validateContextInjectionConfig(
+  raw: unknown,
+  path: string,
+): { ok: true; value: Partial<ContextInjectionConfig> } | { ok: false; errors: PdConfigValidationError[] } {
+  const errors: PdConfigValidationError[] = [];
+
+  if (!isRecord(raw)) {
+    return { ok: false, errors: [err(path, 'contextInjection must be an object', 'Fix contextInjection to be an object with optional thinkingOs, projectFocus, evolutionContext fields')] };
+  }
+
+  // Reject dangerous keys
+  for (const dk of DANGEROUS_KEYS) {
+    if (Object.hasOwn(raw, dk)) {
+      return { ok: false, errors: [err(`${path}.${dk}`, `contextInjection contains dangerous key '${dk}'`, `Remove '${dk}' from contextInjection`)] };
+    }
+  }
+
+  const result: Partial<ContextInjectionConfig> = {};
+
+  const thinkingOs = readOwn(raw, 'thinkingOs');
+  if (thinkingOs !== undefined) {
+    if (!isBoolean(thinkingOs)) {
+      errors.push(err(`${path}.thinkingOs`, 'contextInjection.thinkingOs must be a boolean', 'Set contextInjection.thinkingOs to true or false'));
+    } else {
+      result.thinkingOs = thinkingOs;
+    }
+  }
+
+  const projectFocus = readOwn(raw, 'projectFocus');
+  if (projectFocus !== undefined) {
+    if (!isString(projectFocus) || !VALID_PROJECT_FOCUS_MODES.includes(projectFocus as ProjectFocusMode)) {
+      errors.push(err(`${path}.projectFocus`, `contextInjection.projectFocus must be one of: ${VALID_PROJECT_FOCUS_MODES.join(', ')}, got ${safePreview(projectFocus)}`, `Set contextInjection.projectFocus to one of: ${VALID_PROJECT_FOCUS_MODES.join(', ')}`));
+    } else {
+      result.projectFocus = projectFocus as ProjectFocusMode;
+    }
+  }
+
+  const evolutionContext = readOwn(raw, 'evolutionContext');
+  if (evolutionContext !== undefined) {
+    const ecResult = validateEvolutionContextConfig(evolutionContext, `${path}.evolutionContext`);
+    if (ecResult.ok) {
+      result.evolutionContext = ecResult.value;
+    } else {
+      errors.push(...ecResult.errors);
+    }
+  }
+
+  // Reject unknown keys
+  const knownKeys = new Set(['thinkingOs', 'projectFocus', 'evolutionContext']);
+  for (const key of Object.keys(raw)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    if (!knownKeys.has(key)) {
+      errors.push(err(`${path}.${key}`, `unknown key '${key}' in contextInjection`, `Remove unknown key '${key}' from contextInjection`));
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  return { ok: true, value: result };
+}
+
 // ── Top-Level Validation ────────────────────────────────────────────────────
 
 /**
@@ -582,6 +691,32 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // profile (optional — PRI-304/PRI-466)
+  const profileRaw = readOwn(raw, 'profile');
+  let profile: Partial<ProfileConfig> | undefined;
+  if (profileRaw !== undefined) {
+    const profileResult = validateProfileConfig(profileRaw);
+    if (profileResult.ok) {
+      profile = profileResult.value;
+    } else {
+      for (const pe of profileResult.errors) {
+        errors.push(err(pe.path, pe.message, 'Fix profile section in .pd/config.yaml'));
+      }
+    }
+  }
+
+  // contextInjection (optional — PRI-xxx)
+  const contextInjectionRaw = readOwn(raw, 'contextInjection');
+  let contextInjection: Partial<ContextInjectionConfig> | undefined;
+  if (contextInjectionRaw !== undefined) {
+    const ciResult = validateContextInjectionConfig(contextInjectionRaw, 'contextInjection');
+    if (ciResult.ok) {
+      contextInjection = ciResult.value;
+    } else {
+      errors.push(...ciResult.errors);
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -597,6 +732,8 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     runtimeProfiles,
     internalAgents,
     ui: ui ?? { diagnostics: { mode: 'simple' } },
+    ...(profile ? { profile } : {}),
+    ...(contextInjection ? { contextInjection } : {}),
   };
 
   return { ok: true, value: config };

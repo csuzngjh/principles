@@ -13,6 +13,7 @@ import {
   type InternalAgentName,
   type InternalAgentsConfig,
   type UiConfig,
+  type ContextInjectionConfig,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
 } from './pd-config-types.js';
@@ -72,6 +73,18 @@ export const DEFAULT_UI: UiConfig = {
   diagnostics: { mode: 'simple' },
 };
 
+// ── Default Context Injection ──────────────────────────────────────────────
+
+export const DEFAULT_CONTEXT_INJECTION: ContextInjectionConfig = {
+  thinkingOs: false,
+  projectFocus: 'off',
+  evolutionContext: {
+    enabled: true,
+    maxMessages: 4,
+    maxCharsPerMessage: 200,
+  },
+};
+
 // ── Full Default Config ─────────────────────────────────────────────────────
 
 export function getDefaultPdConfig(): PdConfig {
@@ -84,5 +97,6 @@ export function getDefaultPdConfig(): PdConfig {
     internalAgents: getDefaultInternalAgents(),
     ui: { ...DEFAULT_UI },
     principles: { outputLanguage: undefined },
+    contextInjection: undefined,
   };
 }
