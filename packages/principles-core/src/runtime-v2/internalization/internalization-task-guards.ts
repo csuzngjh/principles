@@ -174,7 +174,7 @@ export function recordRejection(task: PITaskRecord): PITaskRecord {
   };
 }
 
-// ── Retry Wait Staleness (F7-6, PRI-442) ────────────────────────────────────
+// ── Retry Wait Staleness TTL (PRI-442) ───────────────────────────────────────
 
 /**
  * Default maximum time a task may remain in `retry_wait` before being

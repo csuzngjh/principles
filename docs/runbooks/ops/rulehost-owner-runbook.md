@@ -64,7 +64,7 @@ gate.ts: 根据决策阻断 / 要求人审 / 放行
 | 通道 | 实现入口 | 风险等级 | Owner 介入点 |
 |---|---|---|---|
 | `prompt` | `low-risk-writers.ts` `PromptWriter` | 低（自动） | 无需介入；`pd activation list --channel prompt` 可查看 |
-| `defer_archive` | `low-risk-writers.ts` `DeferArchiveWriter` | 低（自动） | 无需介入；`pd activation list --channel prompt` 同列 |
+| `defer_archive` | `low-risk-writers.ts` `DeferArchiveWriter` | 低（自动） | 无需介入；`pd activation list`（不带 `--channel`）可查看，含 defer_archive |
 | `code_tool_hook` | `writers/rule-host-writer.ts` `RuleHostWriter` | **高（强制人审 + shadow）** | **本 runbook 主要对象** |
 | `RuleHost`（运行时执行器） | `openclaw-plugin/src/core/rule-host.ts` | — | 加载并执行 active impl |
 
