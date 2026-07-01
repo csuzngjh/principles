@@ -56,9 +56,38 @@ export interface RuleHostObservedDecision extends RuleHostResult {
   readonly activationId: string;
 }
 
+/**
+ * PRI-491 — A structured record of an activation that was skipped at load
+ * time (flag-off v2, unsupported action, unsupported context version,
+ * missing target_ref, content_json not an object, no implementationCode).
+ *
+ * Unlike compile/load failures (which emit rulehost_unhealthy), skipped
+ * activations have a configuration/flag reason — the RuleCode itself may be
+ * valid, but the runtime chose not to execute it.
+ *
+ * ERR-002 (rc-9): every skip carries a reason + nextAction, never silent.
+ */
+export interface SkippedActivation {
+  readonly activationId: string;
+  readonly ruleId: string;
+  /**
+   * The mode the activation WOULD have had if loaded. Optional for cases
+   * where the action itself is unrecognized (neither shadow nor live).
+   */
+  readonly mode?: RuleHostActivationMode;
+  readonly reason: string;
+  readonly nextAction: string;
+}
+
 export interface RuleHostEvaluationReport {
   readonly liveDecision: RuleHostResult | undefined;
   readonly shadowDecisions: readonly RuleHostObservedDecision[];
+  /**
+   * PRI-491 — Activations that were skipped at load time. Empty when all
+   * active activations loaded successfully. Each entry carries a structured
+   * reason + nextAction so the owner can act without reading SQLite rows.
+   */
+  readonly skippedActivations: readonly SkippedActivation[];
 }
 
 /**
@@ -85,6 +114,12 @@ export class RuleHost {
   private readonly implementationSources = new Map<string, { activationId: string; artifactId: string; ruleId: string }>();
   private activationFingerprint: string | null = null;
   private cachedImplementations: readonly LoadedRuleActivation[] = [];
+  /**
+   * PRI-491: Cached skipped activations from the last load. Returned alongside
+   * cachedImplementations on fingerprint hit so evaluateDetailed can surface
+   * them without re-scanning SQLite.
+   */
+  private cachedSkipped: readonly SkippedActivation[] = [];
   private sqliteConnection: SqliteConnection | null = null;
   /**
    * R2-RH-002: Guards the "armed but empty" warn so it fires at most once per
@@ -132,6 +167,7 @@ export class RuleHost {
     this.sqliteConnection?.close();
     this.sqliteConnection = null;
     this.cachedImplementations = [];
+    this.cachedSkipped = [];
     this.activationFingerprint = null;
     this.implementationSources.clear();
     this.emptyLoadWarnEmitted = false;
@@ -139,7 +175,7 @@ export class RuleHost {
 
   evaluateDetailed(input: RuleHostInput): RuleHostEvaluationReport {
     try {
-      const activeImpls = this._loadActiveCodeImplementations(input.context?.version === 2);
+      const { loaded: activeImpls, skipped } = this._loadActiveCodeImplementations(input.context?.version === 2);
       const liveImpls = activeImpls.filter((impl) => impl.activationMode === 'live');
       const shadowImpls = activeImpls.filter((impl) => impl.activationMode === 'shadow');
       const shadowDecisions: RuleHostObservedDecision[] = [];
@@ -174,13 +210,13 @@ export class RuleHost {
           );
         },
       });
-      return { liveDecision, shadowDecisions };
+      return { liveDecision, shadowDecisions, skippedActivations: skipped };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
         `[RuleHost] Host evaluation failed, degrading conservatively: ${String(hostError)}`
       );
-      return { liveDecision: undefined, shadowDecisions: [] };
+      return { liveDecision: undefined, shadowDecisions: [], skippedActivations: [] };
     }
   }
 
@@ -194,29 +230,29 @@ export class RuleHost {
    * Source: activations table (code_tool_hook channel, deactivated_at IS NULL)
    *   → JOIN pi_artifacts for content_json → extract implementationCode → compile
    */
-  private _loadActiveCodeImplementations(supportsContextV2: boolean): LoadedRuleActivation[] {
+  private _loadActiveCodeImplementations(supportsContextV2: boolean): { loaded: LoadedRuleActivation[]; skipped: SkippedActivation[] } {
     if (!this.workspaceDir) {
       this._emitEmptyLoadWarn(
         'workspaceDir not configured — RuleHost cannot load active code_tool_hook rules',
         'Provide workspaceDir when constructing RuleHost (required for code_tool_hook channel)',
       );
-      return [];
+      return { loaded: [], skipped: [] };
     }
 
     try {
-      const loaded = this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
+      const { loaded, skipped } = this._loadFromActivationsTable(this.workspaceDir, supportsContextV2);
       if (loaded.length === 0) {
         this._emitEmptyLoadWarn(
           'armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval)',
           'If this is unexpected, run `pd runtime activation list --channel code_tool_hook` to inspect activations, or `pd runtime activation promote` to enable a live rule',
         );
       }
-      return loaded;
+      return { loaded, skipped };
     } catch (activationError: unknown) {
       this.logger.warn?.(
         `[RuleHost] Failed to load code_tool_hook activations: ${String(activationError)}`
       );
-      return [];
+      return { loaded: [], skipped: [] };
     }
   }
 
@@ -254,7 +290,7 @@ export class RuleHost {
    *
    * All data from SQLite is treated as unknown and validated before use.
    */
-  private _loadFromActivationsTable(workspaceDir: string, supportsContextV2: boolean): LoadedRuleActivation[] {
+  private _loadFromActivationsTable(workspaceDir: string, supportsContextV2: boolean): { loaded: LoadedRuleActivation[]; skipped: SkippedActivation[] } {
     const sqliteConn = this.sqliteConnection ?? new SqliteConnection(workspaceDir);
     this.sqliteConnection = sqliteConn;
     {
@@ -272,7 +308,7 @@ export class RuleHost {
         this.logger.warn?.(
           '[RuleHost] Activations table query returned non-array, skipping'
         );
-        return [];
+        return { loaded: [], skipped: [] };
       }
 
       const fingerprintParts: string[] = [supportsContextV2 ? 'context-v2' : 'context-v1'];
@@ -285,7 +321,7 @@ export class RuleHost {
       }
       const fingerprint = fingerprintParts.join('\u0002');
       if (fingerprint === this.activationFingerprint) {
-        return [...this.cachedImplementations];
+        return { loaded: [...this.cachedImplementations], skipped: [...this.cachedSkipped] };
       }
       this.implementationSources.clear();
 
@@ -353,6 +389,7 @@ export class RuleHost {
       }
 
       const loaded: LoadedRuleActivation[] = [];
+      const skipped: SkippedActivation[] = [];
 
       for (const r of validRows) {
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
@@ -379,10 +416,19 @@ export class RuleHost {
             ? 'live'
             : null;
         if (!activationMode) {
+          const reason = `unsupported action: ${action || '(missing)'}`;
+          const nextAction = 'Deactivate and recreate the activation through RuleHostWriter with action code_tool_hook_shadow_activate or code_tool_hook_live_activate';
           this.logger.warn?.(
-            `[RuleHost] Activation ${activationId}: unsupported action ${action || '(missing)'}, skipping. ` +
-            'nextAction=deactivate and recreate the activation through RuleHostWriter',
+            `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`,
           );
+          const skipRecord: SkippedActivation = {
+            activationId,
+            ruleId: sourceRuleId ?? artifactId,
+            reason,
+            nextAction,
+          };
+          skipped.push(skipRecord);
+          this._recordSkipped(activationId, artifactId, sourceRuleId ?? artifactId, undefined, reason, nextAction);
           continue;
         }
         if (activationMode === 'shadow') {
@@ -405,34 +451,72 @@ export class RuleHost {
         try {
           const content = JSON.parse(contentJson) as unknown;
           if (!content || typeof content !== 'object' || Array.isArray(content)) {
+            const reason = 'content_json is not a valid object';
+            const nextAction = 'Regenerate the rule artifact with valid JSON content_json';
             this.logger.warn?.(
-              `[RuleHost] Activation ${activationId}: content_json is not an object, skipping`
+              `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`
             );
+            skipped.push({
+              activationId,
+              ruleId: sourceRuleId ?? artifactId,
+              mode: activationMode,
+              reason,
+              nextAction,
+            });
+            this._recordSkipped(activationId, artifactId, sourceRuleId ?? artifactId, activationMode, reason, nextAction);
             continue;
           }
 
           const contentObj = content as Record<string, unknown>;
           if (Object.hasOwn(contentObj, 'requiresContextVersion')) {
             if (contentObj['requiresContextVersion'] !== 2) {
+              const reason = `unsupported context version: ${String(contentObj['requiresContextVersion'])}`;
+              const nextAction = 'Regenerate the rule artifact with requiresContextVersion: 2 or omit the field for v1';
               this.logger.warn?.(
-                `[RuleHost] Activation ${activationId}: unsupported context version; skipping. ` +
-                'nextAction=regenerate the rule artifact with requiresContextVersion: 2 or omit the field for v1',
+                `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`,
               );
+              skipped.push({
+                activationId,
+                ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+                mode: activationMode,
+                reason,
+                nextAction,
+              });
+              this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
               continue;
             }
             if (!supportsContextV2) {
+              const reason = 'suspended_by_flag: rulecode_context_v2 is disabled or unavailable';
+              const nextAction = 'Enable rulecode_context_v2 with valid config, or deactivate this activation';
               this.logger.warn?.(
-                `[RuleHost] Activation ${activationId}: suspended because rulecode_context_v2 is disabled or unavailable; skipping. ` +
-                'nextAction=enable rulecode_context_v2 with valid config or deactivate this activation',
+                `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`,
               );
+              skipped.push({
+                activationId,
+                ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+                mode: activationMode,
+                reason,
+                nextAction,
+              });
+              this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
               continue;
             }
           }
           const implementationCode = contentObj['implementationCode'];
           if (typeof implementationCode !== 'string' || implementationCode.length === 0) {
+            const reason = 'no implementationCode in artifact';
+            const nextAction = 'Regenerate the rule artifact with a non-empty implementationCode field';
             this.logger.warn?.(
-              `[RuleHost] Activation ${activationId}: no implementationCode in artifact, skipping`
+              `[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`
             );
+            skipped.push({
+              activationId,
+              ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+              mode: activationMode,
+              reason,
+              nextAction,
+            });
+            this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
             continue;
           }
 
@@ -525,7 +609,8 @@ export class RuleHost {
 
       this.activationFingerprint = fingerprint;
       this.cachedImplementations = loaded;
-      return loaded;
+      this.cachedSkipped = skipped;
+      return { loaded, skipped };
     }
   }
 
@@ -563,6 +648,43 @@ export class RuleHost {
       // EventLog recording must never break RuleHost evaluation
       this.logger.warn?.(
         `[RuleHost] Failed to record unhealthy event for activation ${activationId}: ${String(recordError)}`
+      );
+    }
+  }
+
+  /**
+   * PRI-491: Record a skipped activation to EventLog.
+   *
+   * Unlike _recordUnhealthy (compile/load failures), skipped activations have
+   * a configuration/flag reason — the RuleCode itself may be valid, but the
+   * runtime chose not to execute it (flag-off v2, unsupported context version,
+   * unsupported action, content_json not object, no implementationCode).
+   *
+   * ERR-002: degradation includes a reason and nextAction (rc-9-no-silent-fallback).
+   * Failures in EventLog recording are caught and logged (never throw).
+   */
+  private _recordSkipped(
+    activationId: string,
+    artifactId: string,
+    ruleId: string,
+    mode: RuleHostActivationMode | undefined,
+    reason: string,
+    nextAction: string,
+  ): void {
+    try {
+      const eventLog = EventLogService.get(this.stateDir);
+      eventLog.recordRuleHostSkipped({
+        activationId,
+        artifactId,
+        ruleId,
+        mode,
+        reason,
+        nextAction,
+      });
+    } catch (recordError: unknown) {
+      // EventLog recording must never break RuleHost evaluation
+      this.logger.warn?.(
+        `[RuleHost] Failed to record skipped event for activation ${activationId}: ${String(recordError)}`
       );
     }
   }

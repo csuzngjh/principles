@@ -3,11 +3,30 @@ import {
   SqliteActivationStateStore,
   SqlitePIArtifactStore,
   extractPrincipleId,
+  extractEvidenceRefs,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+/**
+ * Type guard for parsed JSON objects (rc-2-no-as-bypass).
+ * Replaces `as Record<string, unknown>` casts on untrusted contentJson.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * PRI-491 — owner-observable activation record.
+ *
+ * Mirrors the CLI's `AnnotatedActivation` so the Console surfaces the same
+ * mode / status / contextVersion / evidenceRefs / nextAction fields the owner
+ * sees in `pd activation list`. Without this enrichment the Console would
+ * hide suspended-by-flag state, silently showing v2 activations as "active"
+ * even when the rulecode_context_v2 flag is off.
+ */
 export interface ActivationRecord {
   id: string;
   artifactId: string;
@@ -16,7 +35,34 @@ export interface ActivationRecord {
   action: string;
   targetRef: string;
   activatedAt: string | null;
-  status: 'active' | 'inactive';
+  /** When this activation was promoted from shadow to live (null for never-promoted). */
+  promotedAt: string | null;
+  /** When this activation was deactivated (null for active). */
+  deactivatedAt: string | null;
+  /**
+   * Lifecycle mode derived from action.
+   * - 'shadow' for code_tool_hook_shadow_activate
+   * - 'live'   for code_tool_hook_live_activate
+   * - undefined for unrecognized actions (cannot be safely mode-tagged).
+   */
+  mode?: 'shadow' | 'live';
+  /**
+   * Owner-visible status. Precedence: deactivated > suspended_by_flag > active.
+   * - 'deactivated'      — deactivatedAt is non-null.
+   * - 'suspended_by_flag' — v2 artifact but rulecode_context_v2 flag is off.
+   * - 'active'           — loaded and (for v2) flag is on.
+   */
+  status: 'active' | 'deactivated' | 'suspended_by_flag';
+  /** Artifact context version derived from requiresContextVersion field. */
+  contextVersion?: 'v1' | 'v2';
+  /** Owner-labelled evidence refs preserved from the artifact (PRI-490). */
+  evidenceRefs?: string[];
+  /** Human-readable summary of evidenceRefs for display. */
+  evidenceSummary?: string;
+  /** Next CLI command the owner should run to act on this activation. */
+  nextAction?: string;
+  /** Present when the activation references a non-existent artifact. */
+  warning?: string;
 }
 
 export interface ActivationsResponse {
@@ -86,13 +132,44 @@ export class ActivationsConsoleModel {
       // Without this, dreamer artifacts whose sourcePrincipleId was stripped
       // (non-core-principle case) would show 'unlinked' even when contentJson
       // carries a resolvable principleId.
+      //
+      // PRI-491: also collect contextVersion + evidenceRefs from contentJson so
+      // the Console can show whether a rule will block and why. rc-1/rc-2:
+      // contentJson is parsed as unknown and type-narrowed with typeof; never
+      // `as`-cast without a prior typeof check.
       const artifactPrincipleMap = new Map<string, string | null>();
+      const artifactMetadata = new Map<string, { contextVersion: 'v1' | 'v2'; evidenceRefs: string[] | null }>();
+      const danglingArtifactIds = new Set<string>();
       for (const activation of allActivations) {
         if (!artifactPrincipleMap.has(activation.artifactId)) {
           try {
             const artifact: PIArtifactRecord | null = await artifactStore.getArtifactById(activation.artifactId);
-            const principleId = artifact ? extractPrincipleId(toSnapshot(artifact)) : null;
-            artifactPrincipleMap.set(activation.artifactId, principleId);
+            if (!artifact) {
+              danglingArtifactIds.add(activation.artifactId);
+              artifactPrincipleMap.set(activation.artifactId, null);
+            } else {
+              const principleId = extractPrincipleId(toSnapshot(artifact));
+              artifactPrincipleMap.set(activation.artifactId, principleId);
+
+              // PRI-491: extract contextVersion + evidenceRefs from contentJson.
+              // rc-1: treat parsed JSON as unknown; rc-2: narrow with typeof.
+              let parsedContent: Record<string, unknown> | null = null;
+              try {
+                const parsed: unknown = JSON.parse(artifact.contentJson);
+                if (isRecord(parsed)) {
+                  parsedContent = parsed;
+                }
+              } catch {
+                // Malformed contentJson — treat as no metadata. Not dangling,
+                // just unreadable; the principleId may still resolve via column.
+              }
+              const requiresCtxV2 = parsedContent !== null
+                && Object.hasOwn(parsedContent, 'requiresContextVersion')
+                && parsedContent.requiresContextVersion === 2;
+              const contextVersion: 'v1' | 'v2' = requiresCtxV2 ? 'v2' : 'v1';
+              const evidenceRefs = parsedContent !== null ? extractEvidenceRefs(parsedContent) : null;
+              artifactMetadata.set(activation.artifactId, { contextVersion, evidenceRefs });
+            }
           } catch (err) {
             if (isMissingTableError(err)) {
               artifactPrincipleMap.set(activation.artifactId, null);
@@ -103,16 +180,78 @@ export class ActivationsConsoleModel {
         }
       }
 
-      const facts: ActivationRecord[] = allActivations.map((record) => ({
-        id: record.activationId,
-        artifactId: record.artifactId,
-        principleId: artifactPrincipleMap.get(record.artifactId) ?? 'unlinked',
-        channel: record.channel,
-        action: record.action,
-        targetRef: record.targetRef,
-        activatedAt: record.activatedAt,
-        status: record.deactivatedAt === null ? 'active' as const : 'inactive' as const,
-      }));
+      // PRI-491: Probe rulecode_context_v2 flag to determine suspended_by_flag
+      // status for v2 activations. When the flag is off, v2 activations are
+      // suspended (not executing) even though they remain active in the DB.
+      const featureFlags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
+      const v2FlagEnabled = featureFlags.flags.rulecode_context_v2?.enabled === true;
+
+      const facts: ActivationRecord[] = allActivations.map((record) => {
+        const meta = artifactMetadata.get(record.artifactId);
+        const contextVersion = meta?.contextVersion;
+        const evidenceRefs = meta?.evidenceRefs ?? undefined;
+        const evidenceSummary = evidenceRefs && evidenceRefs.length > 0
+          ? `${evidenceRefs.length} evidence ref(s): ${evidenceRefs.slice(0, 3).join(', ')}${evidenceRefs.length > 3 ? '...' : ''}`
+          : undefined;
+
+        // Derive mode from action (shadow_activate -> shadow, live_activate -> live).
+        const mode: 'shadow' | 'live' | undefined = record.action === 'code_tool_hook_shadow_activate'
+          ? 'shadow'
+          : record.action === 'code_tool_hook_live_activate'
+            ? 'live'
+            : undefined;
+
+        // Derive status: deactivated > suspended_by_flag > active (matches CLI).
+        let status: 'active' | 'deactivated' | 'suspended_by_flag';
+        let nextAction: string | undefined;
+        if (record.deactivatedAt) {
+          status = 'deactivated';
+          nextAction = undefined;
+        } else if (contextVersion === 'v2' && !v2FlagEnabled) {
+          status = 'suspended_by_flag';
+          nextAction = `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${record.activationId} --confirm`;
+        } else {
+          status = 'active';
+          if (mode === 'shadow') {
+            nextAction = `pd activation promote --activation-id ${record.activationId} --confirm`;
+          } else if (mode === 'live') {
+            nextAction = `pd activation deactivate --activation-id ${record.activationId} --confirm`;
+          } else {
+            nextAction = undefined;
+          }
+        }
+
+        const enriched: ActivationRecord = {
+          id: record.activationId,
+          artifactId: record.artifactId,
+          principleId: artifactPrincipleMap.get(record.artifactId) ?? 'unlinked',
+          channel: record.channel,
+          action: record.action,
+          targetRef: record.targetRef,
+          activatedAt: record.activatedAt,
+          promotedAt: record.promotedAt ?? null,
+          deactivatedAt: record.deactivatedAt,
+          mode,
+          status,
+          contextVersion,
+          evidenceRefs,
+          evidenceSummary,
+          nextAction,
+        };
+        if (danglingArtifactIds.has(record.artifactId)) {
+          enriched.warning = `artifact_id "${record.artifactId}" does not exist in pi_artifacts - activation is orphaned`;
+        }
+        return enriched;
+      });
+
+      // rc-9: surface dangling references instead of silently returning a degraded list.
+      if (danglingArtifactIds.size > 0) {
+        return {
+          activations: facts,
+          generatedAt: new Date().toISOString(),
+          note: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
+        };
+      }
 
       return {
         activations: facts,
