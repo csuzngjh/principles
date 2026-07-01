@@ -1,23 +1,27 @@
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function parseJsonRecord(text: string): Record<string, unknown> {
   const value: unknown = JSON.parse(text);
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error('Expected locale root to be an object');
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
 export function getNestedRecord(root: Record<string, unknown>, path: string[]): Record<string, unknown> {
   let current: unknown = root;
   for (const key of path) {
-    if (typeof current !== 'object' || current === null || Array.isArray(current) || !Object.hasOwn(current, key)) {
+    if (!isRecord(current) || !Object.hasOwn(current, key)) {
       throw new Error(`Missing locale object: ${path.join('.')}`);
     }
     current = Reflect.get(current, key);
   }
-  if (typeof current !== 'object' || current === null || Array.isArray(current)) {
+  if (!isRecord(current)) {
     throw new Error(`Expected locale object: ${path.join('.')}`);
   }
-  return current as Record<string, unknown>;
+  return current;
 }
 
 export function getNestedString(root: Record<string, unknown>, path: string[]): string {
