@@ -7,7 +7,8 @@ import { AppSidebar } from "./components/layout/app-sidebar.js";
 import { SplashScreen } from "./components/auth/splash-screen.js";
 import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
-import { checkAuth, getToken } from "./api.js";
+import { checkAuth, getToken, fetchConfigSummary, fetchWorkspaces } from "./api.js";
+import type { ConfigSummaryData } from "./api.js";
 import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
 import { Toaster } from "./components/ui/sonner.js";
 
@@ -25,6 +26,8 @@ import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
+import { WelcomePage } from "./pages/welcome/WelcomePage.js";
+import { getOnboardingState } from "./utils/onboarding-state.js";
 
 // Vite replaces import.meta.env.DEV with a boolean literal at build time.
 // The cast avoids TS2339 without needing a generated .d.ts file.
@@ -33,6 +36,10 @@ const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
 function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [showSplash, setShowSplash] = useState(true);
+  // Onboarding redirect needs workspaceId (for onboarding-state lookup) and
+  // feature flags (to gate the redirect). Both are fetched after auth.
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>("default");
+  const [featureFlags, setFeatureFlags] = useState<Record<string, { enabled: boolean }> | null>(null);
   const navigate = useNavigate();
 
   const verifyAuth = useCallback(async () => {
@@ -52,19 +59,61 @@ function AuthRoutes() {
     // This effect only handles the case where auth resolves after splash is done
   }, [authed, showSplash, navigate]);
 
+  // Fetch workspace list + feature flags after auth for onboarding redirect.
+  // rc-9: on fetch failure, set featureFlags to {} so the redirect effect
+  // fires (defaults to /focus — safe, no onboarding forced).
   useEffect(() => {
-    if (authed === true) {
+    if (authed !== true) return;
+    fetchWorkspaces()
+      .then((result) => {
+        if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+          setCurrentWorkspaceId(result.data[0].name);
+        }
+      })
+      .catch(() => {
+        // keep default workspaceId — onboarding state defaults to incomplete
+      });
+    fetchConfigSummary()
+      .then((result) => {
+        if (result.success && result.data) {
+          const summary: ConfigSummaryData = result.data;
+          const flags: Record<string, { enabled: boolean }> = {};
+          for (const f of summary.features) {
+            flags[f.id] = { enabled: f.enabled };
+          }
+          setFeatureFlags(flags);
+        } else {
+          setFeatureFlags({});
+        }
+      })
+      .catch(() => {
+        setFeatureFlags({});
+      });
+  }, [authed]);
+
+  // First-visit redirect: check new_user_onboarding flag + onboarding state.
+  // Waits for featureFlags to load before redirecting (avoids wrong default).
+  useEffect(() => {
+    if (authed === true && featureFlags !== null) {
       const currentPath = window.location.hash;
-      if (currentPath === "#/login" || currentPath === "#/splash" || currentPath === "#/") {
-        navigate("/focus", { replace: true });
+      // Only redirect from login/splash/root
+      if (currentPath === "#/login" || currentPath === "#/splash" || currentPath === "#/" || currentPath === "") {
+        const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
+        if (flagEnabled) {
+          const onboardingState = getOnboardingState(currentWorkspaceId);
+          navigate(onboardingState.completed ? '/focus' : '/welcome', { replace: true });
+        } else {
+          navigate('/focus', { replace: true });
+        }
       }
     }
-  }, [authed, navigate]);
+  }, [authed, navigate, currentWorkspaceId, featureFlags]);
 
   const handleAuthSuccess = useCallback(() => {
     setAuthed(true);
-    navigate("/focus", { replace: true });
-  }, [navigate]);
+    // Post-auth redirect is handled by the authed + featureFlags effect above,
+    // which fires once feature flags have loaded.
+  }, []);
 
   return (
     <Routes>
@@ -98,6 +147,7 @@ function AuthRoutes() {
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Navigate to="/focus" replace />} />
+                    <Route path="/welcome" element={<WelcomePage workspaceId={currentWorkspaceId} />} />
                     <Route path="/focus" element={<FocusPage />} />
                     <Route path="/pain" element={<PainPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
