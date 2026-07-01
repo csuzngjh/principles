@@ -920,7 +920,9 @@ export function ControlCenterPage() {
                 <AgentGroup
                   key={groupMeta.id}
                   groupMeta={groupMeta}
-                  agents={groups[groupMeta.id]}
+                  agents={(groups[groupMeta.id] ?? []).filter(
+                    (a) => a.name !== AGENT_METADATA.signalCollector.name,
+                  )}
                   profiles={availableProfiles}
                   onBindingChange={handleBindingChange}
                   saving={savingAgent}
