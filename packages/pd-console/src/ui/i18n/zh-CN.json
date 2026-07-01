@@ -1159,6 +1159,16 @@
       "resetButton": "重置引导状态",
       "resetConfirm": "这将在下次登录时重新启动引导向导。继续吗？",
       "resetSuccess": "引导状态已重置。下次访问时会看到欢迎页。"
+    },
+    "onboardingFlag": {
+      "title": "引导功能",
+      "label": "新用户引导向导",
+      "description": "首次访问时显示欢迎向导。熟练用户可关闭。",
+      "toggleAriaLabel": "切换新用户引导功能",
+      "enabled": "引导向导已启用",
+      "disabled": "引导向导已关闭",
+      "toggleFailed": "切换引导功能失败",
+      "loadFailed": "加载引导开关状态失败"
     }
   }
 }

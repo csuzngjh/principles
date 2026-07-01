@@ -15,6 +15,8 @@ import {
   syncWorkspace,
   fetchOutputLanguage,
   updateOutputLanguage,
+  fetchConfigSummary,
+  patchFeatureFlag,
 } from "../../api.js";
 import type { WorkspaceEntry } from "../../api.js";
 import { resetOnboardingState } from "../../utils/onboarding-state.js";
@@ -120,6 +122,10 @@ export function SettingsPage() {
   // PRI-332: Principle output language state
   const [outputLanguage, setOutputLanguage] = useState<"zh-CN" | "en">("zh-CN");
 
+  // spec 2026-06-30 §12.5: new_user_onboarding feature flag toggle state.
+  // null = loading/unknown (button disabled); true/false = persisted state.
+  const [onboardingFlagEnabled, setOnboardingFlagEnabled] = useState<boolean | null>(null);
+
   // Inline confirm for remove (J.1 pattern)
   const [confirmRemove, setConfirmRemove] = useState<ConfirmState | null>(null);
 
@@ -166,6 +172,33 @@ export function SettingsPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // spec 2026-06-30 §12.5: load new_user_onboarding flag state from config summary.
+  // Non-blocking — failures keep the toggle disabled (null) and surface a toast
+  // (rc-9: no silent fallback). The flag list comes from GET /api/v1/config/summary
+  // because there is no dedicated GET /features list endpoint.
+  useEffect(() => {
+    let cancelled = false;
+    fetchConfigSummary()
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success || !result.data) {
+          // rc-9: degrade with reason — keep null so the button stays disabled
+          // rather than silently reporting a wrong "off" state.
+          toast.error(t("components.onboardingFlag.loadFailed"));
+          return;
+        }
+        const flag = result.data.features.find((f) => f.id === "new_user_onboarding");
+        setOnboardingFlagEnabled(flag?.enabled ?? false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        toast.error(t("components.onboardingFlag.loadFailed"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   // ── Auth token handlers ────────────────────────────────────────────────
 
@@ -253,6 +286,29 @@ export function SettingsPage() {
     },
     [t],
   );
+
+  // ── Onboarding flag toggle handler (spec 2026-06-30 §12.5) ────────────
+  // Calls the validated PATCH /api/v1/config/features/new_user_onboarding
+  // wrapper (patchFeatureFlag). Response is runtime-validated by validateFeatureFlagUpdate
+  // (rc-1/rc-3) before state is updated.
+  const handleToggleOnboardingFlag = useCallback(async () => {
+    if (onboardingFlagEnabled === null) return;
+    const newEnabled = !onboardingFlagEnabled;
+    const result = await patchFeatureFlag("new_user_onboarding", newEnabled);
+    if (!result.success || !result.data) {
+      // rc-9: surface reason via toast instead of silent rollback
+      toast.error(t("components.onboardingFlag.toggleFailed"));
+      return;
+    }
+    setOnboardingFlagEnabled(result.data.enabled);
+    toast.success(
+      t(
+        newEnabled
+          ? "components.onboardingFlag.enabled"
+          : "components.onboardingFlag.disabled",
+      ),
+    );
+  }, [onboardingFlagEnabled, t]);
 
   // ── Onboarding reset handler ───────────────────────────────────────────
   // Mirror App.tsx currentWorkspaceId derivation (App.tsx default="default",
@@ -543,6 +599,49 @@ export function SettingsPage() {
               className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {t("pages.settings.addWorkspace")}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Section: Onboarding feature flag toggle (spec 2026-06-30 §12.5) */}
+      <section className="mb-8" aria-labelledby="section-onboarding-flag">
+        <SectionTitle id="section-onboarding-flag">
+          {t("components.onboardingFlag.title")}
+        </SectionTitle>
+
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <label
+                htmlFor="onboarding-flag-toggle"
+                className="block text-sm font-medium text-ink"
+              >
+                {t("components.onboardingFlag.label")}
+              </label>
+              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+                {t("components.onboardingFlag.description")}
+              </p>
+            </div>
+            <button
+              id="onboarding-flag-toggle"
+              type="button"
+              role="switch"
+              aria-checked={onboardingFlagEnabled ?? false}
+              aria-label={t("components.onboardingFlag.toggleAriaLabel")}
+              onClick={handleToggleOnboardingFlag}
+              disabled={onboardingFlagEnabled === null}
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
+                onboardingFlagEnabled ? "bg-gov" : "bg-line",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-paper transition-transform",
+                  onboardingFlagEnabled ? "translate-x-6" : "translate-x-1",
+                )}
+              />
             </button>
           </div>
         </div>

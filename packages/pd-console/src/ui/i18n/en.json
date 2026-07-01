@@ -1159,6 +1159,16 @@
       "resetButton": "Reset onboarding state",
       "resetConfirm": "This will restart the onboarding wizard on next login. Continue?",
       "resetSuccess": "Onboarding state reset. You'll see the welcome page on next visit."
+    },
+    "onboardingFlag": {
+      "title": "Onboarding Feature",
+      "label": "New user onboarding wizard",
+      "description": "Show the welcome wizard on first visit. Disable for experienced users.",
+      "toggleAriaLabel": "Toggle new user onboarding feature",
+      "enabled": "Onboarding wizard enabled",
+      "disabled": "Onboarding wizard disabled",
+      "toggleFailed": "Failed to toggle onboarding feature",
+      "loadFailed": "Failed to load onboarding flag state"
     }
   }
 }
