@@ -518,34 +518,34 @@ describe('prototype pollution defense', () => {
 });
 
 describe('new_user_onboarding flag', () => {
-  // P1-D: per AGENTS.md, "Adding a new feature to MVP-Core REQUIRES maintainer's
-  // explicit approval." No approval was obtained for this PR, so the flag must ship
-  // as MVP-Quiet with default-off. A maintainer can enable it via .pd/config.yaml
-  // (new_user_onboarding: { enabled: true }) or approve it as MVP-Core in a follow-up.
-  it('Given DEFAULT_FEATURE_FLAGS, When looked up by id, Then new_user_onboarding is registered as quiet with default-off (no maintainer approval for MVP-Core)', () => {
+  // Maintainer-approved MVP-Core (2026-07-01): promoted from MVP-Quiet (default-off)
+  // to MVP-Core (default-on) after explicit maintainer approval. As a core flag it
+  // defaults ON and cannot be disabled by omission; explicit emergency disable via
+  // `enabled: false` is honored with a warning (see computeEffectiveFlags core branch).
+  it('Given DEFAULT_FEATURE_FLAGS, When looked up by id, Then new_user_onboarding is registered as core with default-on (maintainer-approved MVP-Core, 2026-07-01)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'new_user_onboarding');
     expect(flag).toBeDefined();
-    expect(flag?.category).toBe('quiet');
-    expect(flag?.enabled).toBe(false);
+    expect(flag?.category).toBe('core');
+    expect(flag?.enabled).toBe(true);
     expect(flag?.since).toBe('2026-07-01');
     expect(flag?.description).toContain('onboarding');
-    // description must surface the maintainer-approval requirement so the safe
-    // default is not silently mistaken for "feature ready".
-    expect(flag?.description).toContain('maintainer approval');
+    // description must surface the maintainer-approval milestone so the
+    // default-on state is traceable to an explicit decision.
+    expect(flag?.description).toContain('Maintainer-approved MVP-Core');
   });
 
-  it('Given a quiet default-off flag, When config explicitly enables it, Then the override is honored (maintainer opt-in path)', () => {
+  it('Given a core default-on flag, When config explicitly disables it, Then the emergency disable is honored with a warning', () => {
     const result = computeEffectiveFlags(
-      { new_user_onboarding: { enabled: true } },
+      { new_user_onboarding: { enabled: false } },
       DEFAULT_FEATURE_FLAGS,
       '/test/.pd/config.yaml',
     );
-    expect(result.flags.new_user_onboarding?.enabled).toBe(true);
-    expect(result.warnings.some(w => w.includes('new_user_onboarding') && w.includes('unknown'))).toBe(false);
+    expect(result.flags.new_user_onboarding?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('new_user_onboarding') && w.includes('core'))).toBe(true);
   });
 
-  it('Given a quiet default-off flag, When no config is provided, Then new_user_onboarding stays disabled', () => {
+  it('Given a core default-on flag, When no config is provided, Then new_user_onboarding stays enabled by default', () => {
     const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
-    expect(result.flags.new_user_onboarding?.enabled).toBe(false);
+    expect(result.flags.new_user_onboarding?.enabled).toBe(true);
   });
 });
