@@ -978,3 +978,299 @@ describe('R2-RH-002: armed-but-empty warn (observability)', () => {
     expect(warnings.some((w) => w.includes('armed but empty'))).toBe(false);
   });
 });
+
+// ── PRI-491: skippedActivations (owner observability for load-time skips) ──
+//
+// PRI-491 requires the RuleHost detailed report to surface activations that
+// were skipped at load time. Without this signal, the owner cannot tell
+// "RuleHost ran my rule and decided not to block" from "RuleHost never
+// loaded my rule at all".
+//
+// Skip points covered:
+//   1. Unsupported action (action is neither shadow nor live)
+//   2. content_json is not a valid object
+//   3. Unsupported context version (requiresContextVersion !== 2)
+//   4. suspended_by_flag (v2 artifact + v1 input context)
+//   5. No implementationCode
+//
+// ERR entries:
+// - ERR-002: every skip MUST carry reason + nextAction (rc-9).
+// - ERR-088: tests must assert the unique skippedActivations structure,
+//   not only absence of blocking.
+// - ERR-024/025: production wiring — these tests exercise the real
+//   SQLite activation → artifact join → load chain.
+
+describe('PRI-491: RuleHost.evaluateDetailed returns skippedActivations', () => {
+  it('reports an unsupported-action skip with undefined mode and structured reason + nextAction', async () => {
+    insertRuleArtifact({
+      artifactId: 'art-bad-action',
+      ruleId: 'R_BAD_ACTION',
+      contentJson: JSON.stringify({
+        principleId: 'P_BAD_ACTION',
+        ruleId: 'R_BAD_ACTION',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-bad-action',
+      artifactId: 'art-bad-action',
+      ruleId: 'R_BAD_ACTION',
+      action: 'some_future_action',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    // The unsupported activation must NOT appear as a live or shadow decision.
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.shadowDecisions).toHaveLength(0);
+
+    // ERR-088: assert the unique skippedActivations structure.
+    expect(report.skippedActivations).toHaveLength(1);
+    const skip = report.skippedActivations[0]!;
+    expect(skip.activationId).toBe('act-bad-action');
+    expect(skip.ruleId).toBe('R_BAD_ACTION');
+    expect(skip.mode).toBeUndefined(); // action is unrecognized — mode is indeterminate
+    expect(skip.reason).toContain('unsupported action');
+    expect(skip.nextAction).toContain('Deactivate and recreate');
+  });
+
+  it('reports a content_json-not-object skip with shadow mode and structured reason', async () => {
+    // Insert artifact with malformed contentJson (a JSON string, not an object).
+    sqliteConn.getDb().prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'art-bad-json',
+      'rule',
+      'task-bad',
+      'P_BAD_JSON',
+      'R_BAD_JSON',
+      '[]',
+      'validated',
+      '"this is a string not an object"',
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    await insertCodeToolHookActivation({
+      activationId: 'act-bad-json',
+      artifactId: 'art-bad-json',
+      ruleId: 'R_BAD_JSON',
+      action: 'code_tool_hook_shadow_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.skippedActivations).toHaveLength(1);
+    const skip = report.skippedActivations[0]!;
+    expect(skip.activationId).toBe('act-bad-json');
+    expect(skip.mode).toBe('shadow');
+    expect(skip.reason).toContain('content_json is not a valid object');
+    expect(skip.nextAction).toContain('Regenerate the rule artifact');
+  });
+
+  it('reports an unsupported-context-version skip (requiresContextVersion: 3)', async () => {
+    insertRuleArtifact({
+      artifactId: 'art-v3',
+      ruleId: 'R_V3',
+      contentJson: JSON.stringify({
+        principleId: 'P_V3',
+        ruleId: 'R_V3',
+        requiresContextVersion: 3, // unsupported — only v1 (omitted) and v2 are valid
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-v3',
+      artifactId: 'art-v3',
+      ruleId: 'R_V3',
+      action: 'code_tool_hook_live_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.skippedActivations).toHaveLength(1);
+    const skip = report.skippedActivations[0]!;
+    expect(skip.activationId).toBe('act-v3');
+    expect(skip.mode).toBe('live');
+    expect(skip.reason).toContain('unsupported context version: 3');
+    expect(skip.nextAction).toContain('requiresContextVersion: 2 or omit');
+  });
+
+  it('reports suspended_by_flag when a v2 artifact is loaded via a v1 input context', async () => {
+    // makeInput (without context.version=2) → supportsContextV2=false →
+    // v2 artifacts are skipped as suspended_by_flag.
+    insertRuleArtifact({
+      artifactId: 'art-v2-flag-off',
+      ruleId: 'R_V2_FLAG_OFF',
+      contentJson: JSON.stringify({
+        principleId: 'P_V2',
+        ruleId: 'R_V2_FLAG_OFF',
+        requiresContextVersion: 2,
+        implementationCode: BLOCKING_CODE,
+        evidenceRefs: ['ex-1', 'ex-2'],
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-v2-flag-off',
+      artifactId: 'art-v2-flag-off',
+      ruleId: 'R_V2_FLAG_OFF',
+      action: 'code_tool_hook_shadow_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    // The v2 rule must NOT execute under v1 context.
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.shadowDecisions).toHaveLength(0);
+
+    // ERR-088: assert the unique suspended_by_flag reason.
+    expect(report.skippedActivations).toHaveLength(1);
+    const skip = report.skippedActivations[0]!;
+    expect(skip.activationId).toBe('act-v2-flag-off');
+    expect(skip.mode).toBe('shadow');
+    expect(skip.reason).toContain('suspended_by_flag');
+    expect(skip.reason).toContain('rulecode_context_v2');
+    expect(skip.nextAction).toContain('Enable rulecode_context_v2');
+    expect(skip.nextAction).toContain('deactivate this activation');
+  });
+
+  it('does NOT skip a v2 artifact when evaluated with a v2 input context (flag on path)', async () => {
+    // makeV2Input sets input.context.version = 2 → supportsContextV2=true.
+    insertRuleArtifact({
+      artifactId: 'art-v2-flag-on',
+      ruleId: 'R_V2_FLAG_ON',
+      contentJson: JSON.stringify({
+        principleId: 'P_V2',
+        ruleId: 'R_V2_FLAG_ON',
+        requiresContextVersion: 2,
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-v2-flag-on',
+      artifactId: 'art-v2-flag-on',
+      ruleId: 'R_V2_FLAG_ON',
+      action: 'code_tool_hook_live_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeV2Input('/etc/passwd'));
+
+    // Loaded successfully — no skips.
+    expect(report.skippedActivations).toHaveLength(0);
+    // And the rule did execute (live block on /etc/passwd).
+    expect(report.liveDecision?.decision).toBe('block');
+  });
+
+  it('reports a no-implementationCode skip with structured reason + nextAction', async () => {
+    insertRuleArtifact({
+      artifactId: 'art-no-code',
+      ruleId: 'R_NO_CODE',
+      contentJson: JSON.stringify({
+        principleId: 'P_NO_CODE',
+        ruleId: 'R_NO_CODE',
+        // intentionally missing implementationCode
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-no-code',
+      artifactId: 'art-no-code',
+      ruleId: 'R_NO_CODE',
+      action: 'code_tool_hook_live_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.skippedActivations).toHaveLength(1);
+    const skip = report.skippedActivations[0]!;
+    expect(skip.activationId).toBe('act-no-code');
+    expect(skip.mode).toBe('live');
+    expect(skip.reason).toBe('no implementationCode in artifact');
+    expect(skip.nextAction).toContain('Regenerate the rule artifact with a non-empty implementationCode');
+  });
+
+  it('skippedActivations are cached: a second evaluate does NOT re-emit skip records', async () => {
+    insertRuleArtifact({
+      artifactId: 'art-bad-action-cached',
+      ruleId: 'R_BAD_ACTION_CACHED',
+      contentJson: JSON.stringify({
+        principleId: 'P_BAD_ACTION',
+        ruleId: 'R_BAD_ACTION_CACHED',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-bad-action-cached',
+      artifactId: 'art-bad-action-cached',
+      ruleId: 'R_BAD_ACTION_CACHED',
+      action: 'some_future_action',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report1 = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+    expect(report1.skippedActivations).toHaveLength(1);
+
+    // Second evaluate hits the cache (fingerprint unchanged).
+    const report2 = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+    expect(report2.skippedActivations).toHaveLength(1);
+    expect(report2.skippedActivations[0]!.activationId).toBe('act-bad-action-cached');
+  });
+
+  it('multiple skipped activations are all returned (no early-exit dropping later records)', async () => {
+    // Two unsupported-action activations for different target_refs — both must
+    // appear in skippedActivations. The duplicate-target_ref guard runs BEFORE
+    // the per-row skip loop, so two distinct target_refs are needed.
+    insertRuleArtifact({
+      artifactId: 'art-bad-1',
+      ruleId: 'R_BAD_1',
+      contentJson: JSON.stringify({
+        principleId: 'P_BAD',
+        ruleId: 'R_BAD_1',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-bad-1',
+      artifactId: 'art-bad-1',
+      ruleId: 'R_BAD_1',
+      action: 'some_future_action',
+    });
+
+    insertRuleArtifact({
+      artifactId: 'art-bad-2',
+      ruleId: 'R_BAD_2',
+      sourceTaskId: 'task-bad-2',
+      contentJson: JSON.stringify({
+        principleId: 'P_BAD',
+        ruleId: 'R_BAD_2',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-bad-2',
+      artifactId: 'art-bad-2',
+      ruleId: 'R_BAD_2',
+      action: 'another_future_action',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.skippedActivations).toHaveLength(2);
+    const ids = report.skippedActivations.map(s => s.activationId).sort();
+    expect(ids).toEqual(['act-bad-1', 'act-bad-2']);
+  });
+});

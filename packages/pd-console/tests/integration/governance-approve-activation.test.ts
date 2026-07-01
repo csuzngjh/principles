@@ -12,7 +12,7 @@
  *   3. GET /api/v1/approvals shows status='approved'
  *   4. GET /api/v1/approvals/grouped shows group status='approved'
  *   5. Idempotent re-approve → already_activated
- *   6. Approve then disable → GET activations shows 'inactive'
+ *   6. Approve then disable → GET activations shows 'deactivated'
  *
  * ERR entries considered:
  *   - ERR-004/008 (rc-6): lineage consistency — artifactId + channel must be
@@ -330,9 +330,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(secondRes.status).toBe(409);
   });
 
-  // ── 5. Approve then disable → GET activations shows 'inactive' ───────────
+  // ── 5. Approve then disable → GET activations shows 'deactivated' ───────
 
-  it('approve then disable activation → status becomes inactive in GET /activations', async () => {
+  it('approve then disable activation → status becomes deactivated in GET /activations', async () => {
     const artifactId = `art-disable-${Date.now()}`;
     const approvalId = `apr-disable-${Date.now()}`;
     await seedPrincipleArtifact(artifactId);
@@ -371,7 +371,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     expect(disableRes.status).toBe(200);
 
-    // Verify status is now 'inactive'
+    // Verify status is now 'deactivated'
     const afterRes = await fetchJson('/api/v1/activations');
     expect(afterRes.status).toBe(200);
     const afterData = getDataObject(afterRes.body);
@@ -383,7 +383,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       );
       expect(found).toBeDefined();
       if (isRecord(found)) {
-        expect(getStringField(found, 'status')).toBe('inactive');
+        expect(getStringField(found, 'status')).toBe('deactivated');
       }
     }
   });
