@@ -106,10 +106,10 @@ describe("validateActivationRecord", () => {
     expect(result?.activatedAt).toBeNull();
   });
 
-  it("validates record with inactive status", () => {
-    const result = validateActivationRecord(makeActivationRecord({ status: "inactive" }));
+  it("validates record with deactivated status", () => {
+    const result = validateActivationRecord(makeActivationRecord({ status: "deactivated" }));
     expect(result).not.toBeNull();
-    expect(result?.status).toBe("inactive");
+    expect(result?.status).toBe("deactivated");
   });
 
   it("rejects null input", () => {

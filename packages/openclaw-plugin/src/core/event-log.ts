@@ -28,6 +28,7 @@ import type {
   RuleHostAutoCorrectAppliedEventData,
   RuntimeV2PromptActivationsInjectedEventData,
   RuleHostUnhealthyEventData,
+  RuleHostSkippedEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -220,6 +221,19 @@ export class EventLog {
   }
 
   /**
+   * PRI-491: Record that an active activation was skipped at load time for a
+   * structured reason (flag-off v2, unsupported action, unsupported context
+   * version, missing target_ref). Unlike rulehost_unhealthy (compile/load
+   * failures), these are configuration/flag issues — the RuleCode itself may
+   * be valid, but the runtime chose not to execute it.
+   *
+   * ERR-002: degradation/suspension includes reason + nextAction (rc-9).
+   */
+  recordRuleHostSkipped(data: RuleHostSkippedEventData): void {
+    this.record('rulehost_skipped', 'failure', undefined, data);
+  }
+
+  /**
    * Redact telemetry-sensitive string values in event data before persistence.
    * Applies redactTelemetryString to known high-risk fields (filePath, command,
    * reason, args, new_string, old_string, text, paramsSummary values) and to all
@@ -241,6 +255,7 @@ export class EventLog {
         'rulehost_requireApproval',
         'rulehost_auto_correct_proposed',
         'rulehost_auto_correct_applied',
+        'rulehost_skipped',
         'rule_enforced',
         'hook_execution',
         'gate_block',

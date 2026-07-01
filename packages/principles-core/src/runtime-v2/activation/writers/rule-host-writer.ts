@@ -110,10 +110,13 @@ function assessRiskLevel(parsed: Record<string, unknown>): ActivationRiskLevel {
  * contentJson. Returns the validated `string[]` when present and well-formed,
  * or `null` when absent / malformed. Callers treat `null` as "no evidenceRefs".
  *
+ * PRI-491 — exported for reuse by CLI/Console display paths that need to show
+ * evidenceRefs without reimplementing the validation logic (DRY).
+ *
  * ERR-001/ERR-005 (rc-1/rc-2/rc-4): the parsed value is `unknown`; we never
  * `as`-cast. Each element is type-narrowed via `typeof` before acceptance.
  */
-function extractEvidenceRefs(parsed: Record<string, unknown>): string[] | null {
+export function extractEvidenceRefs(parsed: Record<string, unknown>): string[] | null {
   if (!Object.hasOwn(parsed, 'evidenceRefs')) return null;
   const refs = parsed.evidenceRefs;
   if (!Array.isArray(refs) || refs.length === 0) return null;
