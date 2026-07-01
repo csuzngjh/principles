@@ -12,7 +12,6 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -79,47 +78,15 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Pain diagnosis is Runtime v2 only: after_tool_call / pd pain record ->
  * PainSignalBridge -> SplitDiagnosticianRunner. EvolutionWorker does not read
  * .pain_flag or process pain_diagnosis queue items.
+ *
+ * Types (QueueStatus / TaskResolution / EvolutionQueueItem) are re-exported
+ * from queue-migration.ts, which sources them from evolution-types.ts
+ * (canonical single source of truth).
  */
-/** @deprecated Use PDTaskStatus from '@principles/core/runtime-v2'. M2 migration will replace this. */
-export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'noise_classified' | 'retired';
-
-export interface EvolutionQueueItem {
-    // Core identity
-    id: string;
-    taskKind: TaskKind;          // V2: distinguishes task types
-    priority: TaskPriority;      // V2: scheduling priority
-    source: string;
-    traceId?: string;           // Trace ID for linking events across the evolution lifecycle
-    
-    // Legacy fields kept for existing queue records and background task metadata.
-    task?: string;
-    score: number;
-    reason: string;
-    timestamp: string;
-    enqueued_at?: string;
-    started_at?: string;
-    completed_at?: string;
-    assigned_session_key?: string;
-    trigger_text_preview?: string;
-    status: QueueStatus;        // V2: includes 'failed' and 'canceled'
-    resolution?: TaskResolution;
-    session_id?: string;
-    agent_id?: string;
-    
-    // V2 retry support
-    retryCount: number;         // V2: number of retry attempts
-    maxRetries: number;         // V2: maximum retry attempts allowed
-    lastError?: string;         // V2: last error message if failed
-    
-    // V2 result reference
-    resultRef?: string;         // V2: reference to result artifact
-
-    painEventId?: number;
-}
+export type { QueueStatus, TaskResolution, EvolutionQueueItem } from './queue-migration.js';
 
 // ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
-import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, validateQueueItem, VALID_TASK_KINDS, isValidQueueItem, type RawQueueItem } from './queue-migration.js';
+import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, validateQueueItem, VALID_TASK_KINDS, isValidQueueItem, type RawQueueItem, type EvolutionQueueItem } from './queue-migration.js';
 export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, validateQueueItem, VALID_TASK_KINDS, isValidQueueItem };
 export type { RawQueueItem };
 
