@@ -192,6 +192,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-189
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — `as`-bypass at trust boundaries (JSON parsing, SQLite rows, CLI inputs, LLM/runtime outputs, DOM values, test fixtures).
+  - 2026-07-01 PR #1143: KeywordEditDialog used `e.target.value as KeywordCategory` and `as "high"|"ambiguous"` for DOM `<select>` event values — replaced with `if (v === "seed" || ...)` type guard (rc-2-no-as-bypass). Same PR: `listRelevantRulesSource` string-literal narrowed via `includes()` check instead of `as` cast.
   - 2026-07-01 PR #1137 (PRI-491): `runtime-activation.ts` and `ActivationsConsoleModel.ts` used `parsed as Record<string, unknown>` to narrow `JSON.parse(artifact.contentJson)` — runtime-contract scanner blocked the push; replaced with `isRecord()` type guard (`value is Record<string, unknown>`) (rc-2-no-as-bypass)
   - 2026-06-30 PR #1132: `createSignalLlmClassifierFromConfig` used `as Record<string, unknown>` + `as string` to access `payload.output` from LLM adapter output — replaced with `Object.hasOwn()` + `typeof` type guard (rc-2-no-as-bypass)
   - 2026-06-29 PR #1104: `parseIntentDocSections` used `as Record<string,string>` for index signature — removed cast (direct assignment is type-safe)
@@ -794,7 +795,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 89 |
 | Last updated | 2026-07-01 |
 | Top category | Schema & Type |
-| Recurring errors | 41 |
+| Recurring errors | 42 |
 
 ---
 
@@ -1156,7 +1157,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: None
 - **Source**: PR #979 (CodeRabbit review)
 - **Date**: 2026-06-20
-- **Recurrence**: None
+- **Recurrence**: Yes — same EP-11 pattern (i18n-enabled component gets hardcoded source-language strings for new UI elements).
+  - 2026-07-01 PR #1143: Three signal-keywords components (KeywordListSection, PendingTermsSection, KeywordEditDialog) hardcoded PHASE2_TOOLTIP, table headers (Term/Category/Precision/Weight/Reason/Actions), category labels, and "X terms" count in English while the component already imported useTranslation — 15 i18n keys added in fix commit b566e886
 
 ---
 
