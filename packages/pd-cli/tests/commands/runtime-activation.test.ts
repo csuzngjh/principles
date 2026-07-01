@@ -257,6 +257,50 @@ describe('handleRuntimeActivationDispatch', () => {
     expect(text).toContain('Activation:');
     expect(text).toContain('would_activate');
   });
+
+  // PRI-493 cli-5 no-mutation: missing-artifact failure path must not construct
+  // the activation state store or dispatcher. Production code returns before
+  // instantiating either (runtime-activation.ts lines 148-157). ERR-088
+  // positive path marker: assert the constructors were never invoked, not just
+  // that the output shape is invalid_artifact.
+  it('missing-artifact failure path does not construct SqliteActivationStateStore or ActivationDispatcher', async () => {
+    mockGetArtifactById.mockResolvedValue(null);
+    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime-v2');
+
+    vi.mocked(SqliteActivationStateStore).mockClear();
+    vi.mocked(ActivationDispatcher).mockClear();
+
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'nonexistent',
+      channel: 'prompt',
+      json: true,
+    });
+
+    expect(SqliteActivationStateStore).not.toHaveBeenCalled();
+    expect(ActivationDispatcher).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  // PRI-493 cli-5 no-mutation: --dry-run/--confirm mutex failure must not open
+  // any DB-backed store. Production code exits before stateManager.initialize()
+  // (runtime-activation.ts lines 127-131). ERR-088 positive marker.
+  it('mutex failure path (--dry-run + --confirm) does not construct RuntimeStateManager', async () => {
+    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    vi.mocked(RuntimeStateManager).mockClear();
+
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'prompt',
+      dryRun: true,
+      confirm: true,
+      json: true,
+    });
+
+    expect(RuntimeStateManager).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
 });
 
 // PRI-408 Contract E: Deactivate (rollback) command tests
@@ -349,6 +393,38 @@ describe('handleRuntimeActivationDeactivate', () => {
     const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
     expect(text).toContain('Deactivated: act-001');
     expect(text).toContain('deactivatedAt:');
+  });
+
+  // PRI-493 cli-5 no-mutation: not-found failure path must not call insert on
+  // the activation state store. Production code (runtime-activation.ts
+  // lines 253-267) calls deactivateActivation which returns false; no other
+  // mutating method should be invoked. ERR-088 positive path marker: capture
+  // the store instance and assert insert was never called.
+  it('not-found failure path does not call insert on the activation store', async () => {
+    const { SqliteActivationStateStore } = await import('@principles/core/runtime-v2');
+    const capturedInsert = vi.fn().mockResolvedValue(undefined);
+    const capturedDeactivate = vi.fn().mockResolvedValue(false);
+    vi.mocked(SqliteActivationStateStore).mockImplementationOnce(function () {
+      return {
+        findByArtifactId: vi.fn().mockResolvedValue(null),
+        insert: capturedInsert,
+        deactivateActivation: capturedDeactivate,
+        listPromptActivations: vi.fn().mockResolvedValue([]),
+        listCodeToolHookActivations: vi.fn().mockResolvedValue([]),
+        listAllActivations: vi.fn().mockResolvedValue([]),
+      } as never;
+    });
+
+    await handleRuntimeActivationDeactivate({
+      workspace: WS,
+      activationId: 'act-gone',
+      json: true,
+    });
+
+    expect(capturedDeactivate).toHaveBeenCalledTimes(1);
+    expect(capturedDeactivate).toHaveBeenCalledWith('act-gone', expect.any(String));
+    expect(capturedInsert).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 });
 

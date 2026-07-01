@@ -106,6 +106,34 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
     const { normalizePathPure } = await getModule();
     expect(normalizePathPure('<tool:apply_patch>', '/project')).toBe('<tool:apply_patch>');
   });
+
+  // ── Edge cases: mixed separators, drive case, trailing slashes ───────────
+
+  it('type 2: mixed separators within a single path relativizes correctly', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('D:\\project/src\\index.ts', 'D:\\project')).toBe('src/index.ts');
+  });
+
+  it('drive letter case insensitivity: D: vs d: produces same result', async () => {
+    const { normalizePathPure } = await getModule();
+    const upper = normalizePathPure('D:\\project\\src\\index.ts', 'D:\\project');
+    const lower = normalizePathPure('d:\\project\\src\\index.ts', 'd:\\project');
+    expect(upper).toBe('src/index.ts');
+    expect(lower).toBe('src/index.ts');
+    expect(upper).toBe(lower);
+  });
+
+  it('trailing slash on path is handled', async () => {
+    const { normalizePathPure } = await getModule();
+    // Trailing slash is dropped by split('/').filter(s => s.length > 0),
+    // so '/project/src/' relativized against '/project' yields 'src' (no trailing slash).
+    expect(normalizePathPure('/project/src/', '/project')).toBe('src');
+  });
+
+  it('workspace root with trailing slash relativizes correctly', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('/project/src/index.ts', '/project/')).toBe('src/index.ts');
+  });
 });
 
 // ── extractFilePathFromParams ────────────────────────────────────────────────
