@@ -1,12 +1,14 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
-import type { ContextInjectionConfig} from '../types.js';
+import type { ContextInjectionConfig } from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { loadContextInjectionConfig } from '../hooks/prompt.js';
+import { getPdConfigPath } from '../core/pd-config-loader.js';
 
 /**
  * Get workspace directory from context
@@ -17,30 +19,34 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
 }
 
 /**
- * Save context injection config to PROFILE.json
+ * Save context injection config to .pd/config.yaml
  */
 function saveConfig(workspaceDir: string, config: ContextInjectionConfig): boolean {
-    const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
+    const configPath = getPdConfigPath(workspaceDir);
     
     try {
         // Ensure directory exists
-        const dir = path.dirname(profilePath);
+        const dir = path.dirname(configPath);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
         
-        // Load existing profile or create new one
-        let profile: Record<string, unknown> = {};
-        if (fs.existsSync(profilePath)) {
-            const raw = fs.readFileSync(profilePath, 'utf-8');
-            profile = JSON.parse(raw);
+        // Load existing config or start fresh
+        let rawConfig: Record<string, unknown> = {};
+        if (fs.existsSync(configPath)) {
+            const raw = fs.readFileSync(configPath, 'utf-8');
+            const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                rawConfig = parsed as Record<string, unknown>;
+            }
         }
         
         // Update contextInjection
-        profile.contextInjection = config;
+        rawConfig.contextInjection = config;
         
-        // Write back
-        atomicWriteFileSync(profilePath, JSON.stringify(profile, null, 2));
+        // Write back as YAML
+        const yamlStr = yaml.dump(rawConfig, { indent: 2, lineWidth: 120, noRefs: true, forceQuotes: false });
+        atomicWriteFileSync(configPath, yamlStr);
         return true;
     } catch (e) {
         console.error(`[PD:Context] Failed to save config: ${String(e)}`);

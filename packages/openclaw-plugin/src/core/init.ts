@@ -3,7 +3,6 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
-import { defaultContextConfig } from '../types.js';
 import { loadStore, setPrincipleState, type PrincipleTrainingState } from './principle-training-state.js';
 import { addPrincipleToLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
@@ -13,11 +12,11 @@ import { CORE_PRINCIPLES } from '@principles/core/runtime-v2';
 
 /**
  * Default PROFILE.json content
+ * Note: contextInjection is migrated to .pd/config.yaml — not initialized here.
  */
 const DEFAULT_PROFILE = {
   name: "Principles Disciple Agent",
   version: "1.0.0",
-  contextInjection: defaultContextConfig
 };
 
 const CORE_GUIDANCE_VERSION = 'pd-core-guidance-v2';
@@ -98,7 +97,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
             copyRecursiveSync(painTemplatesDir, painDestDir, api);
         }
 
-        // 4. Initialize PROFILE.json with default contextInjection config
+        // 4. Initialize PROFILE.json with project identity metadata
         const principlesDir = path.join(workspaceDir, PD_DIRS.IDENTITY);
         const profilePath = path.join(principlesDir, 'PROFILE.json');
         
@@ -108,7 +107,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 fs.mkdirSync(principlesDir, { recursive: true });
             }
             atomicWriteFileSync(profilePath, JSON.stringify(DEFAULT_PROFILE, null, 2));
-            api.logger.info(`[PD] Initialized PROFILE.json with default contextInjection config`);
+            api.logger.info(`[PD] Initialized PROFILE.json with identity metadata (contextInjection migrated to .pd/config.yaml)`);
         }
     } catch (err) {
         api.logger.error(`[PD] Failed to initialize workspace templates: ${String(err)}`);

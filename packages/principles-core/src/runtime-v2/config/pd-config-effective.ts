@@ -13,6 +13,7 @@ import {
   type InternalAgentBinding,
   type InternalAgentsConfig,
   type RuntimeProfile,
+  type ContextInjectionConfig,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
   DANGEROUS_KEYS,
@@ -22,9 +23,27 @@ import {
   DEFAULT_RUNTIME_PROFILE_ID,
   DEFAULT_RUNTIME_PROFILE,
   DEFAULT_UI,
+  DEFAULT_CONTEXT_INJECTION,
   getDefaultInternalAgents,
   getDefaultPdConfig,
 } from './pd-config-defaults.js';
+import { resolveProfile } from './pd-profile-constants.js';
+
+function resolveContextInjection(
+  userPartial: Partial<ContextInjectionConfig> | undefined,
+): ContextInjectionConfig {
+  if (!userPartial) return { ...DEFAULT_CONTEXT_INJECTION };
+  return {
+    thinkingOs: userPartial.thinkingOs ?? DEFAULT_CONTEXT_INJECTION.thinkingOs,
+    projectFocus: userPartial.projectFocus ?? DEFAULT_CONTEXT_INJECTION.projectFocus,
+    evolutionContext: {
+      enabled: userPartial.evolutionContext?.enabled ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.enabled,
+      maxMessages: userPartial.evolutionContext?.maxMessages ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.maxMessages,
+      maxCharsPerMessage:
+        userPartial.evolutionContext?.maxCharsPerMessage ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.maxCharsPerMessage,
+    },
+  };
+}
 
 /**
  * Compute effective PD config by merging validated user config with defaults.
@@ -37,6 +56,8 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       source: 'defaults',
       warnings: [],
       featuresChangedFromDefault: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: resolveContextInjection(undefined),
     };
   }
 
@@ -144,6 +165,12 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
   // Principles: use user config or default (PRI-336)
   const principles = userConfig.principles ?? { outputLanguage: undefined };
 
+  // Profile: resolve user partial over profile defaults (PRI-304/PRI-466)
+  const resolvedProfile = resolveProfile(userConfig.profile ?? {});
+
+  // Context injection: resolve user partial over defaults
+  const resolvedContextInjection = resolveContextInjection(userConfig.contextInjection);
+
   const config: PdConfig = {
     version: PD_CONFIG_VERSION,
     ...(userConfig.workspace ? { workspace: userConfig.workspace } : {}),
@@ -152,6 +179,8 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     internalAgents,
     ui,
     principles,
+    ...(userConfig.profile ? { profile: userConfig.profile } : {}),
+    ...(userConfig.contextInjection ? { contextInjection: userConfig.contextInjection } : {}),
   };
 
   return {
@@ -159,5 +188,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     source: 'user_config',
     warnings,
     featuresChangedFromDefault,
+    resolvedProfile,
+    resolvedContextInjection,
   };
 }
