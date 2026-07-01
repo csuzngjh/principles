@@ -52,6 +52,7 @@ const mockEventLogInstance = {
   recordRuleHostRequireApproval: vi.fn(),
   recordRuleHostAutoCorrectProposed: vi.fn(),
   recordRuleHostAutoCorrectApplied: vi.fn(),
+  recordRuleHostSkipped: vi.fn(),
 };
 vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => mockEventLogInstance) },
@@ -335,7 +336,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
 
     const result = handleBeforeToolCall(event, ctx);
     expect(result).toBeUndefined();
-    expect(warn.mock.calls.flat().join(' ')).toContain('suspended because rulecode_context_v2 is disabled or unavailable');
+    expect(warn.mock.calls.flat().join(' ')).toContain('suspended_by_flag: rulecode_context_v2 is disabled or unavailable');
     expect(mockEventLogInstance.recordRuleHostRequireApproval).not.toHaveBeenCalled();
   });
 });
