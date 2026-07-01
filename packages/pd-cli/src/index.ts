@@ -45,8 +45,16 @@ import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtim
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
-import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
-import { handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, registerRuntimeActivationPromoteCommand } from './commands/runtime-activation.js';
+import {
+  handleRuntimeActivationDeactivate,
+  handleRuntimeActivationList,
+  handleRuntimeActivationEdit,
+  registerRuntimeActivationPromoteCommand,
+  registerRuntimeActivationDeactivateCommand,
+  registerRuntimeActivationListCommand,
+  registerRuntimeActivationDispatchCommand,
+  registerRuntimeActivationApproveCommand,
+} from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
@@ -417,52 +425,13 @@ const activationTopCmd = program
   .command('activation')
   .description('Activation management — list active activations, deactivate (Story A\' Steps 5-6)');
 
-activationTopCmd
-  .command('list')
-  .description('List all activations for a workspace')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('-c, --channel <channel>', 'Filter by channel (prompt|code_tool_hook)')
-  .option('--include-deactivated', 'Include deactivated records in output')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleRuntimeActivationList({
-      workspace: opts.workspace,
-      channel: opts.channel,
-      includeDeactivated: opts.includeDeactivated,
-      json: opts.json,
-    });
-  });
+registerRuntimeActivationListCommand(activationTopCmd);
 
-activationTopCmd
-  .command('deactivate')
-  .description('Deactivate an activation by activation ID')
-  .requiredOption('--activation-id <id>', 'Activation ID to deactivate')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleRuntimeActivationDeactivate({ activationId: opts.activationId, workspace: opts.workspace, json: opts.json });
-  });
+registerRuntimeActivationDeactivateCommand(activationTopCmd);
 
 // Bug-M fix: CLI closed loop — approve a pending approval and dispatch its activation.
 // Reuses the same ApprovalQueue + ApprovalCompletionService as the Console model.
-activationTopCmd
-  .command('approve')
-  .description('Approve a pending approval and dispatch its activation')
-  .requiredOption('-a, --approval-id <id>', 'Approval ID to approve')
-  .option('--decided-by <user>', 'Reviewer name (default: cli-operator)')
-  .option('--note <text>', 'Optional approval note')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    const { handleActivationApprove } = await import('./commands/runtime-activation.js');
-    await handleActivationApprove({
-      approvalId: opts.approvalId,
-      decidedBy: opts.decidedBy,
-      note: opts.note,
-      workspace: opts.workspace,
-      json: opts.json,
-    });
-  });
+registerRuntimeActivationApproveCommand(activationTopCmd);
 
 registerRuntimeActivationPromoteCommand(activationTopCmd);
 
@@ -640,25 +609,7 @@ const activationCmd = runtimeCmd
   .command('activation', { hidden: true })
   .description('Activation dispatch operations (hidden — use pd activation for list/deactivate)');
 
-activationCmd
-  .command('dispatch')
-  .description('Dispatch an activation for a rollout-reviewed artifact')
-  .option('-a, --artifact-id <id>', 'PIArtifact ID to activate')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
-  .option('--dry-run', 'Dry-run mode (default, no writes)')
-  .option('--confirm', 'Confirm and write activation record')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleRuntimeActivationDispatch({
-      workspace: opts.workspace,
-      artifactId: opts.artifactId,
-      channel: opts.channel,
-      dryRun: opts.dryRun,
-      confirm: opts.confirm,
-      json: opts.json,
-    });
-  });
+registerRuntimeActivationDispatchCommand(activationCmd);
 
 // PRI-408 Contract E: Owner-initiated rollback/deactivate of an activation.
 // Idempotent — calling twice on the same ID is safe and returns ok=false with reason.

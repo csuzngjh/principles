@@ -111,4 +111,44 @@ describe('BehaviorExamplePackAssembler — Owner-labelled examples', () => {
       positiveToolCallIds: [2, 3, 4, 5], projectDir,
     })).toThrow(/at most 3/i);
   });
+
+  it('fails loud when sourcePainId refers to a non-existent pain', () => {
+    const { db, assembler, projectDir } = setup();
+    // Seed a real pain with a different canonical ID.
+    seedPain(db, 'session-real', 'pain-real-1');
+    const negativeId = db.recordToolCall({ sessionId: 'session-real', toolName: 'write_file', outcome: 'success', paramsJson: { path: path.join(projectDir, 'a.txt') } });
+    const positiveId = db.recordToolCall({ sessionId: 'session-real', toolName: 'write_file', outcome: 'success', paramsJson: { path: path.join(projectDir, 'b.txt') } });
+
+    expect(() => assembler.assemble({
+      sourcePainId: 'pain-nonexistent', ownerDesiredOutcome: 'Owner outcome',
+      sourceNegativeToolCallId: negativeId, positiveToolCallIds: [positiveId], projectDir,
+    })).toThrow(/pain event not found/i);
+  });
+
+  it('fails loud when positiveToolCallIds is empty', () => {
+    const { db, assembler, projectDir } = setup();
+    seedPain(db, 'session-empty-pos');
+    const negativeId = db.recordToolCall({ sessionId: 'session-empty-pos', toolName: 'write_file', outcome: 'success', paramsJson: { path: path.join(projectDir, 'a.txt') } });
+
+    expect(() => assembler.assemble({
+      sourcePainId: 'pain-owner-1', ownerDesiredOutcome: 'Owner outcome',
+      sourceNegativeToolCallId: negativeId, positiveToolCallIds: [], projectDir,
+    })).toThrow(/must contain 1/i);
+  });
+
+  it('fails loud when a tool call has invalid (non-object) paramsJson', () => {
+    const { db, assembler, projectDir } = setup();
+    seedPain(db, 'session-bad-params');
+    // A non-object paramsJson (string scalar) survives safeJson() serialization
+    // but must fail loud in the assembler's plain-object guard (rc-9, ERR-001).
+    // Note: null/undefined are gracefully coerced to {} by safeJson(); only a
+    // non-object, non-null value reaches the assembler as a non-object payload.
+    const negativeId = db.recordToolCall({ sessionId: 'session-bad-params', toolName: 'write_file', outcome: 'success', paramsJson: 'just-a-string' });
+    const positiveId = db.recordToolCall({ sessionId: 'session-bad-params', toolName: 'write_file', outcome: 'success', paramsJson: { path: path.join(projectDir, 'ok.txt') } });
+
+    expect(() => assembler.assemble({
+      sourcePainId: 'pain-owner-1', ownerDesiredOutcome: 'Owner outcome',
+      sourceNegativeToolCallId: negativeId, positiveToolCallIds: [positiveId], projectDir,
+    })).toThrow(/must parse to a non-array object/i);
+  });
 });

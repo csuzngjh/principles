@@ -1189,3 +1189,83 @@ export function registerRuntimeActivationPromoteCommand(parent: Command): Comman
       });
     });
 }
+
+// PRI-493: Extracted helpers for parser-level flag-wiring tests (cli-7).
+// Mirrors registerRuntimeActivationPromoteCommand — single source of truth
+// shared with index.ts. Flag typos in production surface at parseAsync time.
+
+export function registerRuntimeActivationDeactivateCommand(parent: Command): Command {
+  return parent
+    .command('deactivate')
+    .description('Deactivate an activation by activation ID')
+    .requiredOption('--activation-id <id>', 'Activation ID to deactivate')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleRuntimeActivationDeactivate({
+        activationId: opts.activationId,
+        workspace: opts.workspace,
+        json: opts.json,
+      });
+    });
+}
+
+export function registerRuntimeActivationListCommand(parent: Command): Command {
+  return parent
+    .command('list')
+    .description('List all activations for a workspace')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('-c, --channel <channel>', 'Filter by channel (prompt|code_tool_hook)')
+    .option('--include-deactivated', 'Include deactivated records in output')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleRuntimeActivationList({
+        workspace: opts.workspace,
+        channel: opts.channel,
+        includeDeactivated: opts.includeDeactivated,
+        json: opts.json,
+      });
+    });
+}
+
+export function registerRuntimeActivationDispatchCommand(parent: Command): Command {
+  return parent
+    .command('dispatch')
+    .description('Dispatch an activation for a rollout-reviewed artifact')
+    .option('-a, --artifact-id <id>', 'PIArtifact ID to activate')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
+    .option('--dry-run', 'Dry-run mode (default, no writes)')
+    .option('--confirm', 'Confirm and write activation record')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleRuntimeActivationDispatch({
+        workspace: opts.workspace,
+        artifactId: opts.artifactId,
+        channel: opts.channel,
+        dryRun: opts.dryRun,
+        confirm: opts.confirm,
+        json: opts.json,
+      });
+    });
+}
+
+export function registerRuntimeActivationApproveCommand(parent: Command): Command {
+  return parent
+    .command('approve')
+    .description('Approve a pending approval and dispatch its activation')
+    .requiredOption('-a, --approval-id <id>', 'Approval ID to approve')
+    .option('--decided-by <user>', 'Reviewer name (default: cli-operator)')
+    .option('--note <text>', 'Optional approval note')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--json', 'Output raw JSON')
+    .action(async (opts) => {
+      await handleActivationApprove({
+        approvalId: opts.approvalId,
+        decidedBy: opts.decidedBy,
+        note: opts.note,
+        workspace: opts.workspace,
+        json: opts.json,
+      });
+    });
+}
