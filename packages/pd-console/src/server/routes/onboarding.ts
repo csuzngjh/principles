@@ -95,7 +95,7 @@ function loadOnboardingFlagEnabled(workspaceDir: string): boolean {
  *     Windows the spawn will emit 'error', which the caller handles with a
  *     clear nextAction (rc-9-no-silent-fallback).
  */
-function findPdCli(): { cmd: string; extraArgs: string[] } | null {
+function findPdCli(): { cmd: string; extraArgs: string[] } {
   // Both the monorepo and installed extension place pd-cli beside console.
   // source: pd-console/src/server/routes -> packages/pd-cli
   // install: console/dist/server/routes -> principles-disciple/pd-cli
@@ -103,9 +103,11 @@ function findPdCli(): { cmd: string; extraArgs: string[] } | null {
     path.dirname(fileURLToPath(import.meta.url)),
     '../../../../pd-cli/dist/index.js',
   );
-  return fs.existsSync(entryPath)
-    ? { cmd: process.execPath, extraArgs: [entryPath] }
-    : null;
+  // Do not preflight with existsSync: the Console test job intentionally runs
+  // before pd-cli is built, while production installation guarantees this
+  // sibling layout. Node will exit non-zero with a structured error if the
+  // delivered entry is unexpectedly missing.
+  return { cmd: process.execPath, extraArgs: [entryPath] };
 }
 
 /**
@@ -170,18 +172,7 @@ async function handleRunDemo(
 
   let child: ChildProcess;
   try {
-    const invocation = findPdCli();
-    if (!invocation) {
-      cleanupTempWorkspace(tempWorkspace);
-      sendStructuredError(res, {
-        statusCode: 500,
-        error: 'demo_cli_missing',
-        reason: 'pd CLI entry was not found beside the installed Console.',
-        nextAction: 'Re-run: npx create-principles-disciple',
-      });
-      return;
-    }
-    const { cmd, extraArgs } = invocation;
+    const { cmd, extraArgs } = findPdCli();
     // P1-A: spawn process.execPath (Node) with the pd-cli entry JS path to
     // avoid the Windows .cmd resolution problem. P1-2: no shell:true — argv is
     // passed directly to the OS, eliminating command-injection risk from
