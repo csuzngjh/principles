@@ -139,7 +139,7 @@ overview-light.png
 .pnpm-store/
 
 graphify-out/
-ops/
+/ops/
 
 # E2E harness workspace (isolated, never commit real runs)
 tests/e2e-workspace/*

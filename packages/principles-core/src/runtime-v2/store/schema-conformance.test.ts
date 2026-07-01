@@ -10,6 +10,7 @@ import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { TaskRecordSchema, type PDTaskStatus } from '../task-status.js';
 import { RunRecordSchema, type RunExecutionStatus } from '../runtime-protocol.js';
+import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
 
 describe('SchemaConformance', () => {
    
@@ -849,5 +850,55 @@ describe('SchemaMigration', () => {
     ).all() as { name: string }[];
     expect(indexes).toHaveLength(1);
     expect(indexes[0]?.name).toBe('idx_candidates_recommendation_kind');
+  });
+
+  it('F13 store fallback: updateCandidateStatus sets consumed_at on old-schema db (no CHECK)', async () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection(tmpdir); // triggers migrateSchema: adds 4 cols, no CHECK
+    const db = connection.getDb();
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?,?,?,?,?)').run('t-f13a', 'diagnostician', 'pending', now, now);
+    db.prepare('INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)').run('r-f13a', 't-f13a', 'test', 'queued', now, 1, now, now);
+    db.prepare('INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?,?,?,?,?,?)').run('a-f13a', 'r-f13a', 't-f13a', 'principle', '{}', now);
+    db.prepare(`INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind) VALUES (?,?,?,?,?,?,?, 'pending', ?, 'principle')`).run('c-f13a', 'a-f13a', 't-f13a', 'r-f13a', 't', 'd', 'idem-f13a', now);
+
+    const store = new SqliteCandidateStore(connection);
+    const ok = await store.updateCandidateStatus('c-f13a', { status: 'consumed' });
+    expect(ok).toBe(true);
+
+    // store path wrote consumed_at via COALESCE fallback
+    const row = db.prepare('SELECT status, consumed_at FROM principle_candidates WHERE candidate_id = ?').get('c-f13a') as { status: string; consumed_at: string | null };
+    expect(row.status).toBe('consumed');
+    expect(row.consumed_at).not.toBeNull();
+
+    // control: old-schema db has no CHECK, so direct UPDATE with NULL consumed_at does NOT throw
+    expect(() => db.prepare("UPDATE principle_candidates SET status = 'consumed', consumed_at = NULL WHERE candidate_id = 'c-f13a'").run()).not.toThrow();
+  });
+
+  it('F13 store fallback: transitionCandidateStatus sets consumed_at on old-schema db', async () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection(tmpdir);
+    const db = connection.getDb();
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?,?,?,?,?)').run('t-f13b', 'diagnostician', 'pending', now, now);
+    db.prepare('INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)').run('r-f13b', 't-f13b', 'test', 'queued', now, 1, now, now);
+    db.prepare('INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?,?,?,?,?,?)').run('a-f13b', 'r-f13b', 't-f13b', 'principle', '{}', now);
+    db.prepare(`INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at, recommendation_kind) VALUES (?,?,?,?,?,?,?, 'pending', ?, 'principle')`).run('c-f13b', 'a-f13b', 't-f13b', 'r-f13b', 't', 'd', 'idem-f13b', now);
+
+    const store = new SqliteCandidateStore(connection);
+
+    // wrong expected status → returns false (guard生效), row unchanged
+    const okWrong = await store.transitionCandidateStatus('c-f13b', 'archived', 'consumed');
+    expect(okWrong).toBe(false);
+    const rowBefore = db.prepare('SELECT status, consumed_at FROM principle_candidates WHERE candidate_id = ?').get('c-f13b') as { status: string; consumed_at: string | null };
+    expect(rowBefore.status).toBe('pending');
+    expect(rowBefore.consumed_at).toBeNull();
+
+    // correct expected status → success, consumed_at set via COALESCE fallback
+    const ok = await store.transitionCandidateStatus('c-f13b', 'pending', 'consumed');
+    expect(ok).toBe(true);
+    const rowAfter = db.prepare('SELECT status, consumed_at FROM principle_candidates WHERE candidate_id = ?').get('c-f13b') as { status: string; consumed_at: string | null };
+    expect(rowAfter.status).toBe('consumed');
+    expect(rowAfter.consumed_at).not.toBeNull();
   });
 });
