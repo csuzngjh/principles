@@ -104,9 +104,21 @@ describe('plugin-surface-registry', () => {
       expect(gone).toBeUndefined();
     });
 
-    it('ignores core surface disable override', () => {
+    it('F14-2: honors core surface disable override (emergency disable)', () => {
+      // Previously the registry forced core surfaces enabled even when an
+      // explicit `false` override was provided, contradicting the feature-flag
+      // contract (F14-1). Operators must be able to halt a core hook in an
+      // emergency (e.g. a broken RuleHost pipeline).
       const enabled = getEnabledSurfaces(PLUGIN_SURFACE_REGISTRY, {
         'hook:before_prompt_build': false,
+      });
+      const promptHook = enabled.find(s => s.id === 'hook:before_prompt_build');
+      expect(promptHook).toBeUndefined();
+    });
+
+    it('F14-2: core surface override:true still enables (default preserved)', () => {
+      const enabled = getEnabledSurfaces(PLUGIN_SURFACE_REGISTRY, {
+        'hook:before_prompt_build': true,
       });
       const promptHook = enabled.find(s => s.id === 'hook:before_prompt_build');
       expect(promptHook).toBeDefined();

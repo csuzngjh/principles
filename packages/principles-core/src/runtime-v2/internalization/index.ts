@@ -133,6 +133,8 @@ export {
   isResultRefImmutable,
   canUpdateLastError,
   isArtifactRejected,
+  isRetryWaitStale,
+  DEFAULT_RETRY_WAIT_STALE_TTL_MS,
 } from './internalization-task-guards.js';
 
 export type {

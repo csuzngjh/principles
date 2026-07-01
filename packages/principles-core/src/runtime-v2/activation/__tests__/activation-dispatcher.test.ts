@@ -92,6 +92,65 @@ describe('ActivationDispatcher', () => {
     }
   });
 
+  // F9-3 regression: idempotency hit must verify artifact_id consistency
+  it('F9-3: refuses when existing activation artifactId differs from input (idempotency_artifact_mismatch)', async () => {
+    const { artifactStore, dispatcher, stateStore } = makeDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact());
+
+    // Simulate data corruption: insert an activation record with the SAME
+    // idempotencyKey (art-001::prompt) but a DIFFERENT artifactId. This is
+    // what happens when someone UPDATEs activations.artifact_id post-
+    // activation — the idempotency_key is unchanged, but the lineage is
+    // broken (rc-6-lineage-consistency; related ERR: ERR-004, ERR-008).
+    const key = makeIdempotencyKey('art-001', 'prompt');
+    await stateStore.recordActivation({
+      activationId: 'act-corrupt',
+      idempotencyKey: key,
+      artifactId: 'corrupted-art-id', // ← corrupted/different artifactId
+      channel: 'prompt',
+      action: 'prompt_activate',
+      targetRef: 'ledger://P_001',
+      activatedAt: '2026-01-01T00:00:00.000Z',
+      promotedAt: null,
+      deactivatedAt: null,
+    });
+
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('idempotency_artifact_mismatch');
+      expect(result.reason).toContain('existing=corrupted-art-id');
+      expect(result.reason).toContain('input=art-001');
+      expect(result.nextAction).toBeDefined();
+      expect(result.nextAction).toContain('pd runtime internalization integrity');
+    }
+  });
+
+  it('F9-3: still returns already_activated when existing artifactId matches input (negative case)', async () => {
+    const { artifactStore, dispatcher, stateStore } = makeDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact());
+
+    // Normal case: insert a record with the SAME idempotencyKey AND same artifactId.
+    const key = makeIdempotencyKey('art-001', 'prompt');
+    await stateStore.recordActivation({
+      activationId: 'act-match',
+      idempotencyKey: key,
+      artifactId: 'art-001', // ← matches input artifactId
+      channel: 'prompt',
+      action: 'prompt_activate',
+      targetRef: 'ledger://P_001',
+      activatedAt: '2026-01-01T00:00:00.000Z',
+      promotedAt: null,
+      deactivatedAt: null,
+    });
+
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt', confirm: true }));
+    expect(result.decision).toBe('already_activated');
+    if (result.decision === 'already_activated') {
+      expect(result.activationId).toBe('act-match');
+    }
+  });
+
   it('high-risk code_tool_hook → refused', async () => {
     const { artifactStore, dispatcher } = makeDispatcher();
     artifactStore.addArtifact(makePrincipleArtifact());

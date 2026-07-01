@@ -72,6 +72,19 @@ vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: MockRuntimeStateManager,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
+  evaluateCandidateAdmissionFromRecord: vi.fn((candidate: { recommendationKind: string; confidence: number | null }) => {
+    // Mirror the real implementation for test purposes
+    if (candidate.recommendationKind === 'defer') {
+      return { decision: 'deferred', reason: 'recommendation_kind_defer_not_actionable', nextAction: 'review_defer_disposition_manually', evidenceStatus: 'unknown' };
+    }
+    if (candidate.confidence === null) {
+      return { decision: 'needs_evidence', reason: 'confidence_missing_on_candidate_record', nextAction: 're_run_diagnosis_to_populate_confidence_or_manual_review', evidenceStatus: 'unknown' };
+    }
+    if (candidate.confidence < 0.5) {
+      return { decision: 'needs_evidence', reason: `confidence_below_threshold:${candidate.confidence.toFixed(2)}<0.5`, nextAction: 'provide_additional_evidence_or_manual_review', evidenceStatus: 'unknown' };
+    }
+    return { decision: 'admitted', reason: 'cli_partial_check_passed_confidence_and_kind', nextAction: 'none', evidenceStatus: 'unknown' };
+  }),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({
@@ -348,29 +361,37 @@ describe('pd candidate intake', () => {
 
   // Test 4: Non-existent candidate
   it('Test 4 (non-existent candidate): throws CANDIDATE_NOT_FOUND error', async () => {
-    // Setup: service.intake throws CANDIDATE_NOT_FOUND when candidate doesn't exist
-    mockService.intake.mockImplementation(() => {
-      throw new MockCandidateIntakeError(
-        `Candidate invalid-id not found`,
-        'CANDIDATE_NOT_FOUND',
-        { candidateId: 'invalid-id' }
-      );
-    });
+    // PRI-442 Stage 4: getCandidate now returns null before service.intake is called.
+    // The CLI exits with "Candidate not found" instead of relying on service.intake
+    // to throw CANDIDATE_NOT_FOUND.
+    mockStateManager.getCandidate.mockResolvedValue(null);
 
     await handleCandidateIntake({
       candidateId: 'invalid-id',
       workspace: '/tmp/test-workspace',
     });
 
-    // Verify error output contains CANDIDATE_NOT_FOUND
+    // Verify error output contains "Candidate not found"
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('CANDIDATE_NOT_FOUND')
+      expect.stringContaining('Candidate not found')
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
   // Test 5: Invalid candidateId (empty string)
   it('Test 5 (invalid candidateId): empty string throws INPUT_INVALID error', async () => {
+    // PRI-442 Stage 4: getCandidate is called before service.intake, so we need
+    // to mock it to return a valid candidate so service.intake is reached.
+    const mockCandidate = {
+      candidateId: '',
+      artifactId: 'artifact-1',
+      taskId: 'task-1',
+      title: 'Test',
+      description: 'Test',
+      status: 'pending',
+    };
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+
     // Setup: service.intake throws INPUT_INVALID for empty candidateId
     mockService.intake.mockImplementation(() => {
       throw new MockCandidateIntakeError(
@@ -475,6 +496,18 @@ describe('pd candidate intake', () => {
 
   // Test 7: Generic error (non-CandidateIntakeError, covers line 247)
   it('Test 7 (generic error): handles non-CandidateIntakeError errors', async () => {
+    // PRI-442 Stage 4: getCandidate is called before service.intake, so we need
+    // to mock it to return a valid candidate so service.intake is reached.
+    const mockCandidate = {
+      candidateId: 'valid-id',
+      artifactId: 'artifact-1',
+      taskId: 'task-1',
+      title: 'Test',
+      description: 'Test',
+      status: 'pending',
+    };
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+
     // Setup: service.intake throws a generic Error (not CandidateIntakeError)
     mockService.intake.mockImplementation(() => {
       throw new Error('Some unexpected error');
@@ -583,5 +616,117 @@ describe('pd candidate intake', () => {
     } finally {
       mockStateManager.connection = originalConnection;
     }
+  });
+
+  // PRI-442 Stage 4: admission gate bypass tests
+  describe('admission gate bypass prevention (PRI-442 Stage 4)', () => {
+    it('refuses intake when recommendationKind is defer', async () => {
+      const mockCandidate = {
+        candidateId: 'defer-cand',
+        artifactId: 'artifact-1',
+        taskId: 'task-1',
+        title: 'Deferred candidate',
+        description: 'Should not be intakeable',
+        status: 'pending',
+        recommendationKind: 'defer',
+        confidence: 0.9,
+      };
+      mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+
+      await handleCandidateIntake({
+        candidateId: 'defer-cand',
+        workspace: '/tmp/test-workspace',
+        json: true,
+      });
+
+      // Should NOT call service.intake
+      expect(mockService.intake).not.toHaveBeenCalled();
+      // Should output refused status
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"status": "refused"')
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"admissionDecision": "deferred"')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('refuses intake when confidence is below threshold', async () => {
+      const mockCandidate = {
+        candidateId: 'low-conf-cand',
+        artifactId: 'artifact-1',
+        taskId: 'task-1',
+        title: 'Low confidence candidate',
+        description: 'Should not be intakeable',
+        status: 'pending',
+        recommendationKind: 'principle',
+        confidence: 0.3,
+      };
+      mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+
+      await handleCandidateIntake({
+        candidateId: 'low-conf-cand',
+        workspace: '/tmp/test-workspace',
+        json: false,
+      });
+
+      expect(mockService.intake).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Admission gate refused')
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('needs_evidence')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('refuses intake when confidence is null (rc-3 fail loud)', async () => {
+      const mockCandidate = {
+        candidateId: 'null-conf-cand',
+        artifactId: 'artifact-1',
+        taskId: 'task-1',
+        title: 'Null confidence candidate',
+        description: 'Should not be intakeable',
+        status: 'pending',
+        recommendationKind: 'principle',
+        confidence: null,
+      };
+      mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+
+      await handleCandidateIntake({
+        candidateId: 'null-conf-cand',
+        workspace: '/tmp/test-workspace',
+        json: true,
+      });
+
+      expect(mockService.intake).not.toHaveBeenCalled();
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('confidence_missing_on_candidate_record')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('allows intake when candidate passes admission gate', async () => {
+      const mockCandidate = {
+        candidateId: 'admitted-cand',
+        artifactId: 'artifact-1',
+        taskId: 'task-1',
+        title: 'Admitted candidate',
+        description: 'Should be intakeable',
+        status: 'pending',
+        recommendationKind: 'principle',
+        confidence: 0.8,
+      };
+      mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+      mockService.intake.mockResolvedValue({ id: 'entry-1', title: 'Test', text: 'Test', status: 'probation' });
+
+      await handleCandidateIntake({
+        candidateId: 'admitted-cand',
+        workspace: '/tmp/test-workspace',
+        json: true,
+      });
+
+      expect(mockService.intake).toHaveBeenCalledWith('admitted-cand');
+    });
   });
 });

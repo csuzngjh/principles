@@ -225,7 +225,14 @@ export function getEnabledSurfaces(
       const override = overrides[entry.id];
       if (typeof override !== 'boolean') return entry.enabledByDefault;
       if (entry.category === 'gone') return false;
-      if (entry.category === 'core' && !override) return true;
+      // F14-2 (PRI-442): previously `core` surfaces ignored `override:false`
+      // (forced enabled), contradicting the feature-flag contract which
+      // allows explicit emergency disable of core flags via `enabled: false`
+      // (see pd-config-feature-flags.ts F14-1). The registry must mirror
+      // that behavior so operators can halt a core hook (e.g. emergency
+      // disable `hook:before_tool_call` to unblock a broken RuleHost
+      // pipeline). Removing the early `return true` makes `override:false`
+      // fall through to `return override` and actually disable the surface.
       return override;
     }
     return entry.enabledByDefault;

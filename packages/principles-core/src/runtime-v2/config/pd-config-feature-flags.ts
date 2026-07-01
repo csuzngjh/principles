@@ -74,11 +74,16 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
       // (e.g. `code_rule_capability.enabled: false` to halt the RuleHost pipeline).
       // This deliberate override is honored with a warning so the disable is observable
       // in logs/telemetry. Per-rule rollback remains `deactivate`.
+      // F14-1 (PRI-442): category must be preserved as defaultFlag.category —
+      // previously used userEntry.category, allowing operators to override a
+      // core flag's category to 'gone' or 'quiet', which is a privilege
+      // escalation. The old system (feature-flag-contract.ts) used
+      // `{ ...def, enabled: false }` to preserve def.category.
       if (defaultFlag.category === 'core' && !userEntry.enabled) {
         warnings.push(`feature '${id}': core flag explicitly disabled via config (emergency disable)`);
         flags[id] = {
           id,
-          category: userEntry.category,
+          category: defaultFlag.category,
           enabled: false,
         };
         continue;
