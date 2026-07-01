@@ -23,7 +23,11 @@
  *   - ERR-024: cache must NOT bypass enforcement (deactivated rule must not block)
  *   - ERR-079: stale cache must not re-open races (deactivate/promote must be visible immediately)
  *   - ERR-088: tests assert rule actually executed (unique block markers), not just timing
- *   - ERR-002: every skip carries reason + nextAction (verified via skippedActivations)
+ *
+ * NOTE on ERR-002 (rc-9 no silent fallback): skippedActivations reason/nextAction
+ * is NOT asserted in this file — that contract is verified in PRI-491 tests
+ * (governance-approve-activation, activation-page). This file focuses on the
+ * cache invalidation matrix and logger/handle freshness only.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -170,17 +174,27 @@ function updateArtifactContent(artifactId: string, newCode: string, ruleId: stri
   `).run(JSON.stringify(contentJson), now, artifactId);
 }
 
+/**
+ * Build a RuleHostInput fixture matching the real RuleHostInput contract
+ * (rule-host-contracts.ts). No `as` bypass — every field matches the
+ * declared type so a future contract change surfaces as a compile error
+ * here instead of being silently masked.
+ *
+ * rc-2-no-as-bypass: test fixtures must also respect the contract shape;
+ * `as unknown as` would hide field renames (e.g., rawParams → paramsSummary)
+ * and enum drift (e.g., bashRisk 'low' → 'safe'|'normal'|'dangerous'|'unknown').
+ */
 function makeHostInput(): RuleHostInput {
   return {
     action: {
       toolName: 'write_file',
       normalizedPath: '/etc/passwd',
-      rawParams: { file_path: '/etc/passwd', content: 'x' },
-    } as unknown as RuleHostInput['action'],
+      paramsSummary: { file_path: '/etc/passwd', content: 'x' },
+    },
     workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
     session: { sessionId: 'cache-inval-session', currentGfi: 0, recentThinking: false },
     evolution: { epTier: 3 },
-    derived: { estimatedLineChanges: 1, bashRisk: { level: 'low' as const, reason: 'test' } },
+    derived: { estimatedLineChanges: 1, bashRisk: 'unknown' },
     context: undefined,
   };
 }
@@ -198,6 +212,26 @@ function makeLogger(warnSink: (msg: string) => void = () => {}): RuleHostLogger 
     debug: () => {},
     warns,
   } as unknown as RuleHostLogger & { warns: string[] };
+}
+
+/**
+ * Shared setup helper: insert a rule artifact + activation and construct a
+ * RuleHost with a spy logger. Reduces boilerplate across the 8 test cases
+ * that all start with the same 3-line setup (insert → activate → new RuleHost).
+ *
+ * Returns { host, input, logger } so each test can destructure exactly what
+ * it needs. Tests with extra setup (e.g., dispose tests inserting a second
+ * rule) call this for the initial state, then do their own additional setup.
+ */
+async function setupHostWithActivation(
+  action: 'code_tool_hook_shadow_activate' | 'code_tool_hook_live_activate',
+  reason: string = LIVE_BLOCK_REASON,
+): Promise<{ host: RuleHost; input: RuleHostInput; logger: RuleHostLogger & { warns: string[] } }> {
+  insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(reason));
+  await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, action);
+  const logger = makeLogger();
+  const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
+  return { host, input: makeHostInput(), logger };
 }
 
 // ── Setup / Teardown ───────────────────────────────────────────────────────
@@ -218,12 +252,7 @@ afterEach(() => {
 
 describe('PRI-494 — RuleHost cache invalidation matrix', () => {
   it('cache hit: repeated evaluate with no mutation returns same behavior (baseline)', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // First call: cold load (cache miss)
     const r1 = host.evaluateDetailed(input);
@@ -239,12 +268,7 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
   });
 
   it('promote (shadow → live) invalidates cache: shadow no-block → live blocks', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_shadow_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_shadow_activate');
 
     // Shadow: no live block
     const r1 = host.evaluateDetailed(input);
@@ -265,12 +289,7 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
   });
 
   it('deactivate invalidates cache: live block → no block (ERR-079 stale cache regression)', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // Live block
     const r1 = host.evaluateDetailed(input);
@@ -287,12 +306,7 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
   });
 
   it('artifact content change invalidates cache: old reason → new reason', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // Original content
     const r1 = host.evaluateDetailed(input);
@@ -309,12 +323,7 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
   });
 
   it('action change (live → shadow) invalidates cache: live block → shadow no-block', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // Live block
     const r1 = host.evaluateDetailed(input);
@@ -339,15 +348,10 @@ describe('PRI-494 — RuleHost cache invalidation matrix', () => {
 
 describe('PRI-494 — RuleHost logger sink + SQLite handle freshness', () => {
   it('updateLogger on cached RuleHost routes new warn to new logger (not old sink)', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger1 = makeLogger();
+    const { host, input, logger: logger1 } = await setupHostWithActivation('code_tool_hook_live_activate');
     const logger2 = makeLogger();
-    const host = new RuleHost(tempStateDir, logger1, { workspaceDir: tempWorkspaceDir });
 
     // Trigger an evaluation to cache the RuleHost instance + populate fingerprint
-    const input = makeHostInput();
     const r1 = host.evaluateDetailed(input);
     expect(r1.liveDecision?.decision).toBe('block');
 
@@ -378,12 +382,7 @@ describe('PRI-494 — RuleHost logger sink + SQLite handle freshness', () => {
   });
 
   it('dispose() closes SQLite handle and next load opens fresh (ERR-024)', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // First load: caches the rule
     const r1 = host.evaluateDetailed(input);
@@ -411,12 +410,7 @@ describe('PRI-494 — RuleHost logger sink + SQLite handle freshness', () => {
   });
 
   it('dispose() clears cached implementations (no stale enforcement after dispose + reactivate)', async () => {
-    insertRuleArtifact(ARTIFACT_ID, RULE_ID, makeBlockCode(LIVE_BLOCK_REASON));
-    await insertActivation(ACTIVATION_ID, ARTIFACT_ID, RULE_ID, 'code_tool_hook_live_activate');
-
-    const logger = makeLogger();
-    const host = new RuleHost(tempStateDir, logger, { workspaceDir: tempWorkspaceDir });
-    const input = makeHostInput();
+    const { host, input } = await setupHostWithActivation('code_tool_hook_live_activate');
 
     // Live block
     const r1 = host.evaluateDetailed(input);
