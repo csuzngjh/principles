@@ -477,6 +477,36 @@ describe('Commander wiring for backfill --include-pending', () => {
     expect(output.details.totalPending).toBe(1);
   });
 
+  // PRI-442 Stage 4: admission gate bypass prevention for backfill --include-pending
+  it('--include-pending refuses deferred candidate (admission gate bypass prevention)', async () => {
+    mockPrepareAll.mockImplementation((sql: string) => {
+      if (sql.includes("'consumed'")) return [];
+      if (sql.includes("'pending'")) return [{ candidate_id: 'cand-defer-1' }];
+      return [];
+    });
+    mockGetCandidate.mockResolvedValue({
+      candidateId: 'cand-defer-1',
+      taskId: 'diag-task-cand-defer-1',
+      description: 'deferred candidate',
+      recommendationKind: 'defer',
+      confidence: 0.9,
+      sourceRecommendationJson: JSON.stringify({ kind: 'defer', description: 'deferred' }),
+    });
+
+    const program = createBackfillTestProgram();
+    await program.parseAsync(['node', 'pd', 'candidate', 'internalization', 'backfill', '--workspace', WS, '--include-pending', '--confirm', '--json']);
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    // Should NOT have called intake for the deferred candidate
+    expect(mockIntake).not.toHaveBeenCalled();
+    // Should have an intake_failed result with admission gate reason
+    const failedResult = output.details.results.find(
+      (r: { status: string; reason: string }) => r.status === 'intake_failed' && r.reason.includes('Admission gate refused'),
+    );
+    expect(failedResult).toBeDefined();
+    expect(output.details.intakeFailed).toBe(1);
+  });
+
   it('--dry-run -> RuntimeStateManager readonly=true', async () => {
     const program = createBackfillTestProgram();
     await program.parseAsync(['node', 'pd', 'candidate', 'internalization', 'backfill', '--workspace', WS, '--dry-run', '--json']);

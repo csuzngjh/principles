@@ -129,6 +129,20 @@ PR 模板分层说明：
 - [ ] N/A — 本 PR 未引入新功能子系统
 - 或填写注册情况:
 
+### BDD 影响评估（条件性 — 仅当修改 MVP-Core 旅程/CLI 命令/ERR 类/删除 .feature 时填写）
+<!-- 若本 PR 修改了 MVP-Core 用户旅程、CLI 命令、触发 ERR 类，或删除了 .feature 文件，需填写 -->
+<!-- 参考 AGENTS.md "BDD Workflow" 章节 -->
+
+- [ ] N/A — 本 PR 未触及 BDD 行为契约
+- 或填写评估结果:
+  - [ ] 本 PR 是否修改了 MVP-Core 用户旅程?如果是,对应 `.feature` 是:
+        - [ ] 保持不变(行为契约未变)
+        - [ ] 更新(行为契约变化,已在 PR 描述说明原因)
+        - [ ] 不适用(说明为什么这条旅程不再适用)
+  - [ ] 本 PR 是否新增/修改了 CLI 命令?如果是,cli-1~cli-7 对应 `.feature` 是否更新?
+  - [ ] 本 PR 是否触发了 ERR 类?如果是,是否新增了回归 `.feature` scenario?
+  - [ ] 本 PR 是否删除了 `.feature` 文件?如果是,是否在 PR 描述说明了"行为契约被移除的原因"?
+
 ### 反模式触发词检查
 <!-- 检查 PR 描述/issue 是否包含触发词。引用 antipattern-* -->
 - [ ] 无 `antipattern-future-extensibility`（"为未来铺路"）

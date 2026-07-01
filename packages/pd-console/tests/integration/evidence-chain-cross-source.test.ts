@@ -206,10 +206,14 @@ function insertCandidate(conn: SqliteConnection, candidate: {
   status?: string;
 }): void {
   const now = new Date().toISOString();
+  // F13 (PRI-442): include consumed_at when status='consumed' to satisfy
+  // the schema CHECK constraint. Default status is 'consumed'.
+  const status = candidate.status ?? 'consumed';
+  const consumedAt = status === 'consumed' ? now : null;
   conn.getDb().prepare(
     `INSERT INTO principle_candidates
-      (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, abstracted_principle)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at, recommendation_kind, abstracted_principle)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     candidate.candidateId,
     `artifact-for-${candidate.candidateId}`,
@@ -220,8 +224,9 @@ function insertCandidate(conn: SqliteConnection, candidate: {
     0.85,
     '',
     `idem-${candidate.candidateId}`,
-    candidate.status ?? 'consumed',
+    status,
     now,
+    consumedAt,
     'apply',
     'Test abstracted principle',
   );

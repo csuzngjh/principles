@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS principle_candidates (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_ref TEXT NOT NULL,
+  activated_at TEXT NOT NULL,
+  promoted_at TEXT,
+  deactivated_at TEXT
+);
 `;
 
 function createTempWorkspace(): { workspaceDir: string; db: Database.Database } {

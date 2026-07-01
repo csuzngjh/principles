@@ -5,7 +5,7 @@
  * 完成后 pd-console server 用 readonly 模式打开，读取这些预置数据。
  *
  * Seed 内容覆盖 3 个 flow test 的需求：
- * - focus-approve-flow: governance queue (2 pending approvals)
+ * - focus-approve-flow + BDD: isolated prompt approvals for each mutable flow
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
@@ -70,6 +70,10 @@ insertPiArtifact.run(
   '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '配置变更需确认' }), now, now,
 );
 insertPiArtifact.run(
+  'artifact-prompt-bdd', 'principle', 'task-diag-bdd', 'p-002',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: 'BDD 审批隔离原则' }), now, now,
+);
+insertPiArtifact.run(
   'artifact-hook-1', 'principle', 'task-diag-2', 'p-001',
   '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '错误后必须分析根因' }), now, now,
 );
@@ -120,20 +124,31 @@ insertPiArtifact.run(
 );
 
 // ── 6. 插入 principle_candidates（evidence-chain 候选，需 artifact_id + run_id）
+// F13 (PRI-442): schema 现在强制 CHECK (status != 'consumed' OR consumed_at IS NOT NULL)
+// — consumed 状态的候选必须提供 consumed_at。这里用 created_at 同时间戳。
 stateDb.prepare(`
   INSERT INTO principle_candidates (
     candidate_id, artifact_id, task_id, source_run_id, title, description,
-    confidence, source_recommendation_json, idempotency_key, status, created_at,
+    confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at,
     recommendation_kind, abstracted_principle
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
   'cand-1', 'artifact-diag-output-1', 'task-diag-1', 'run-1',
   '配置变更需确认', 'Agent 修改配置前应先获得 Owner 确认',
-  0.85, '', 'idem-cand-1', 'consumed', eightDaysAgo,
+  0.85, '', 'idem-cand-1', 'consumed', eightDaysAgo, eightDaysAgo,
   'apply', '修改任何配置文件前，必须先向 Owner 确认',
 );
 
-// ── 7. 插入 approvals（2 行 pending，MVP proven channels）───────────────────
+// ── 7. 插入 approvals（E2E 与 BDD 使用独立的可变记录）──────────────────────
+stateDb.prepare(`
+  INSERT INTO approvals (
+    approval_id, artifact_id, channel, risk_level, status, confidence,
+    requested_at, summary, trigger_reason
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+  'apr-prompt-bdd', 'artifact-prompt-bdd', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, 'BDD 场景专用 prompt 原则', 'Owner 审批：BDD 隔离记录',
+);
 stateDb.prepare(`
   INSERT INTO approvals (
     approval_id, artifact_id, channel, risk_level, status, confidence,
@@ -169,7 +184,7 @@ stateDb.prepare(`
 );
 
 stateConn.close();
-console.log('[e2e-seed] state.db seeded: 3 approvals (incl. 1 bad-trace regression), 3 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
+console.log('[e2e-seed] state.db seeded: 4 approvals (incl. 1 BDD-isolated, 1 bad-trace regression), 4 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
 
 // ── 8. 初始化 trajectory.db + pain_events ───────────────────────────────────
 const trajectoryDir = path.join(workspaceDir, '.state');

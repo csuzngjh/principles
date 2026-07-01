@@ -173,3 +173,43 @@ export function recordRejection(task: PITaskRecord): PITaskRecord {
     updatedAt: new Date().toISOString(),
   };
 }
+
+// ── Retry Wait Staleness (F7-6, PRI-442) ────────────────────────────────────
+
+/**
+ * Default maximum time a task may remain in `retry_wait` before being
+ * considered stale. 24 hours — conservative threshold; if a task has been
+ * in retry_wait this long without recovery, something is likely wrong
+ * (e.g. recovery sweep not running, persistent transient failure).
+ */
+export const DEFAULT_RETRY_WAIT_STALE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Returns true if a `retry_wait` task has been stale longer than the TTL.
+ *
+ * F7-6 (PRI-442): previously a task could cycle retry_wait → pending → leased
+ * → retry_wait indefinitely without ever reaching `failed`. The integrity
+ * read model already detects `retry_wait_exceeded` (attempt_count >=
+ * max_attempts) but NOT time-based staleness. This function closes that
+ * observability gap (rc-9: no silent degradation).
+ *
+ * Uses `updatedAt` as the entry-time proxy: when a task transitions to
+ * retry_wait, `updatedAt` is set to the transition timestamp. If
+ * `updatedAt` is missing or unparseable, returns false (fail-safe — do not
+ * false-positive on malformed data).
+ *
+ * @param task - The task record to evaluate
+ * @param nowMs - Current time in milliseconds (default: Date.now())
+ * @param maxWaitMs - Maximum allowed wait in ms (default: 24h)
+ */
+export function isRetryWaitStale(
+  task: PITaskRecord,
+  nowMs: number = Date.now(),
+  maxWaitMs: number = DEFAULT_RETRY_WAIT_STALE_TTL_MS,
+): boolean {
+  if (task.status !== 'retry_wait') return false;
+  if (!task.updatedAt) return false;
+  const updatedAtMs = new Date(task.updatedAt).getTime();
+  if (Number.isNaN(updatedAtMs)) return false;
+  return (nowMs - updatedAtMs) >= maxWaitMs;
+}

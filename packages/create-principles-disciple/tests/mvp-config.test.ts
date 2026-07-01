@@ -1828,3 +1828,113 @@ describe('validateConfigYamlFull catches incomplete config', () => {
     }
   });
 });
+
+// ── PRI-442 P0: principles-disciple dependency rewrite + symlink (Bug-B-001/002/003/004) ──
+// Root cause: bundle-plugin.mjs only rewrote @principles/core, not principles-disciple.
+// installer.ts syncPdCli() only created @principles/core symlink, not principles-disciple.
+// Result: `pd runtime init` crashed with ERR_MODULE_NOT_FOUND because runtime-init.ts
+// statically imports initTrajectorySchema/initWorkflowSchema from principles-disciple.
+
+describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mjs (Bug-B-002)', () => {
+  const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+  const content = fs.readFileSync(scriptPath, 'utf-8');
+
+  it('bundle-plugin.mjs has rewriteBundledDependency function (generalized from removeCoreDependency)', () => {
+    expect(content).toContain('function rewriteBundledDependency');
+    // Old name must be gone to avoid dead code
+    expect(content).not.toContain('function removeCoreDependency');
+  });
+
+  it('rewriteBundledDependency accepts depName parameter (not hardcoded to @principles/core)', () => {
+    expect(content).toMatch(/rewriteBundledDependency\(.*depName.*replacement/);
+  });
+
+  it('bundle-plugin.mjs rewrites principles-disciple dependency in pd-cli to file:../plugin', () => {
+    // Must rewrite principles-disciple → file:../plugin for pd-cli (the only consumer)
+    expect(content).toContain("'principles-disciple'");
+    expect(content).toContain("'file:../plugin'");
+    // The rewrite call must target PD_CLI_DEST
+    const rewriteCallIdx = content.indexOf("'principles-disciple', 'file:../plugin'");
+    const pdCliDestIdx = content.indexOf('PD_CLI_DEST');
+    expect(rewriteCallIdx).toBeGreaterThan(0);
+    expect(pdCliDestIdx).toBeGreaterThan(0);
+  });
+
+  it('bundle-plugin.mjs still rewrites @principles/core for all three packages', () => {
+    // Regression guard: the core rewrite must still work after generalizing the function
+    expect(content).toContain("'@principles/core', 'file:./core'");
+    expect(content).toContain("'@principles/core', 'file:../core'");
+  });
+});
+
+describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {
+  const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+  const content = fs.readFileSync(installerPath, 'utf-8');
+
+  it('syncPdCli creates node_modules/principles-disciple symlink', () => {
+    // Must create a principles-disciple symlink in pd-cli's node_modules
+    expect(content).toContain("'principles-disciple'");
+    // The symlink path must be under node_modules
+    const pdLinkIdx = content.indexOf("pdLinkPath");
+    expect(pdLinkIdx).toBeGreaterThan(0);
+    const symlinkSection = content.substring(pdLinkIdx, pdLinkIdx + 500);
+    expect(symlinkSection).toContain('node_modules');
+    expect(symlinkSection).toContain('symlinkSync');
+  });
+
+  it('principles-disciple symlink target is getPluginExtDir() (the installed plugin root)', () => {
+    // The plugin (principles-disciple package) is installed at <ext-dir>/ root
+    const pdLinkTargetIdx = content.indexOf('pdLinkTarget');
+    expect(pdLinkTargetIdx).toBeGreaterThan(0);
+    const targetSection = content.substring(pdLinkTargetIdx, pdLinkTargetIdx + 200);
+    expect(targetSection).toContain('getPluginExtDir()');
+  });
+
+  it('syncPdCli creates symlink on Windows using junction', () => {
+    // Windows must use junction (no elevated privileges)
+    // Extract from pdLinkDir to the tryUpgradePdCliFromNpm *call* (not the function definition)
+    const pdLinkStart = content.indexOf('const pdLinkDir');
+    const upgradeCallIdx = content.indexOf('tryUpgradePdCliFromNpm(installedPdCliDir)', pdLinkStart);
+    expect(upgradeCallIdx).toBeGreaterThan(pdLinkStart);
+    const pdLinkSection = content.substring(pdLinkStart, upgradeCallIdx);
+    expect(pdLinkSection).toContain("isWindows()");
+    expect(pdLinkSection).toContain("'junction'");
+  });
+
+  it('syncPdCli creates symlink on Unix using relative path ../../', () => {
+    // Unix must use relative symlink for portability
+    const pdLinkStart = content.indexOf('const pdLinkDir');
+    const upgradeCallIdx = content.indexOf('tryUpgradePdCliFromNpm(installedPdCliDir)', pdLinkStart);
+    expect(upgradeCallIdx).toBeGreaterThan(pdLinkStart);
+    const pdLinkSection = content.substring(pdLinkStart, upgradeCallIdx);
+    expect(pdLinkSection).toContain("'../../'");
+  });
+
+  it('syncPdCli still creates @principles/core symlink (regression guard)', () => {
+    // The existing core symlink must still be present
+    expect(content).toContain('coreLinkDir');
+    expect(content).toContain('coreLinkTarget');
+    expect(content).toContain("'../../../core'");
+  });
+});
+
+describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', () => {
+  const rootDir = path.resolve(__dirname, '..', '..', '..');
+  const runtimeInitPath = path.join(rootDir, 'packages', 'pd-cli', 'src', 'commands', 'runtime-init.ts');
+
+  it('runtime-init.ts imports from principles-disciple (the plugin package)', () => {
+    // This import is the crash point — it must resolve via the symlink created by syncPdCli
+    const content = fs.readFileSync(runtimeInitPath, 'utf-8');
+    expect(content).toContain("from 'principles-disciple'");
+    expect(content).toContain('initTrajectorySchema');
+    expect(content).toContain('initWorkflowSchema');
+  });
+
+  it('principles-disciple (openclaw-plugin) exports initTrajectorySchema and initWorkflowSchema', () => {
+    // The plugin's index.ts must export these functions so the import resolves
+    const pluginIndexPath = path.join(rootDir, 'packages', 'openclaw-plugin', 'src', 'index.ts');
+    const content = fs.readFileSync(pluginIndexPath, 'utf-8');
+    expect(content).toContain('export { initTrajectorySchema }');
+    expect(content).toContain('export { initWorkflowSchema }');
+  });
+});
