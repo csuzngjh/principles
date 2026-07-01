@@ -17,6 +17,7 @@ import {
   updateOutputLanguage,
 } from "../../api.js";
 import type { WorkspaceEntry } from "../../api.js";
+import { resetOnboardingState } from "../../utils/onboarding-state.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
 
@@ -253,6 +254,23 @@ export function SettingsPage() {
     [t],
   );
 
+  // ── Onboarding reset handler ───────────────────────────────────────────
+  // Mirror App.tsx currentWorkspaceId derivation (App.tsx default="default",
+  // then workspaces[0].name after fetch). Using the same key ensures
+  // resetOnboardingState targets the same localStorage entry the onboarding
+  // wizard wrote — avoids a silent no-op reset (EP-09 test-reality gap).
+  const currentWorkspaceId = workspaces[0]?.name ?? "default";
+
+  const handleResetOnboarding = useCallback(() => {
+    const confirmed = window.confirm(
+      t("components.onboardingReset.resetConfirm"),
+    );
+    if (confirmed) {
+      resetOnboardingState(currentWorkspaceId);
+      toast.success(t("components.onboardingReset.resetSuccess"));
+    }
+  }, [currentWorkspaceId, t]);
+
   // ── Loading state ────────────────────────────────────────────────────────
 
   if (loadingState === "loading") {
@@ -407,7 +425,7 @@ export function SettingsPage() {
       </section>
 
       {/* Section 3: Workspaces */}
-      <section aria-labelledby="section-workspaces">
+      <section className="mb-8" aria-labelledby="section-workspaces">
         <SectionTitle id="section-workspaces">
           {t("pages.settings.workspace")}
         </SectionTitle>
@@ -527,6 +545,22 @@ export function SettingsPage() {
               {t("pages.settings.addWorkspace")}
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Section 4: Onboarding reset */}
+      <section aria-labelledby="section-onboarding-reset">
+        <SectionTitle id="section-onboarding-reset">
+          {t("components.onboardingReset.title")}
+        </SectionTitle>
+
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <button
+            onClick={handleResetOnboarding}
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          >
+            {t("components.onboardingReset.resetButton")}
+          </button>
         </div>
       </section>
       </div>
