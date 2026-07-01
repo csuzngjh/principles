@@ -264,10 +264,17 @@ describe('Minimal trigger skips project context', () => {
 
   it('regular user trigger DOES inject project_context when focus is configured', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prompt-characterization-'));
-    fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const yaml = await import('js-yaml');
     fs.writeFileSync(
-      path.join(workspaceDir, '.principles', 'PROFILE.json'),
-      JSON.stringify({ contextInjection: { projectFocus: 'full' } }),
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: {},
+        runtimeProfiles: { default: { type: 'openclaw' } },
+        internalAgents: { defaultRuntime: 'default', agents: {} },
+        contextInjection: { projectFocus: 'full' },
+      }),
       'utf-8',
     );
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');

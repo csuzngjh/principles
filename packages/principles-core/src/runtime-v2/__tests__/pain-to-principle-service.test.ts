@@ -10,6 +10,7 @@ import type { PainSignalBridgeResult, PainDetectedData } from '../pain-signal-br
 import type { RecordPainSignalObservabilityOptions, PainSignalObservabilityResult } from '../pain-signal-observability.js';
 import type { PainSignalRuntimeFactoryOptions } from '../pain-signal-runtime-factory.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import { resolveProfile } from '../config/pd-profile-constants.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,12 @@ describe('PainToPrincipleService', () => {
       },
       source: 'user_config',
       warnings: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
     };
 
     const svc = new PainToPrincipleService(makeOpts({ effectiveConfig, getEnvVar: mockGetEnvVar }));

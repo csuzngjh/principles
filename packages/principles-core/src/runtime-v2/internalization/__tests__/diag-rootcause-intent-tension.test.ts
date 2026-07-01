@@ -28,6 +28,7 @@ import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { MOCK_ROOT_CAUSE_OUTPUTS } from './__fixtures__/split-pipeline-mock-outputs.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import { getDefaultPdConfig } from '../../config/pd-config-defaults.js';
+import { resolveProfile } from '../../config/pd-profile-constants.js';
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -113,6 +114,12 @@ function makeEffectiveConfig(opts: { intentEngineering?: boolean; coreGrounding?
     source: 'user_config',
     warnings: [],
     featuresChangedFromDefault: opts.intentEngineering ? ['intent_engineering'] : [],
+    resolvedProfile: resolveProfile({}),
+    resolvedContextInjection: {
+      thinkingOs: false,
+      projectFocus: 'off',
+      evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+    },
   };
 }
 

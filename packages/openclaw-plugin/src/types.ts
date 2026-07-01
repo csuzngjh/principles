@@ -4,36 +4,13 @@
 //   export type { PluginCommandContext, PluginCommandResult } from 'openclaw/plugin-sdk/core';
 export type { PluginCommandContext, PluginCommandResult } from './openclaw-sdk.js';
 
-/**
- * Context Injection Configuration
- * Controls what content gets injected into the LLM prompt.
- * 
- * NOTE: Core Principles (PRINCIPLES.md) are ALWAYS injected and cannot be disabled.
- * This is by design - principles are the foundation of the agent's behavior.
- */
-export type ProjectFocusMode = 'full' | 'summary' | 'off';
-
-export interface EvolutionContextConfig {
-  /** Enable conversation context in evolution task (default: true) */
-  enabled: boolean;
-
-  /** Max recent messages included in evolution task (default: 4) */
-  maxMessages: number;
-
-  /** Max chars per message snippet (default: 200) */
-  maxCharsPerMessage: number;
-}
-
-export interface ContextInjectionConfig {
-  /** Thinking OS (mental models) - can be toggled */
-  thinkingOs: boolean;
-  
-  /** Project context (CURRENT_FOCUS.md) mode */
-  projectFocus: ProjectFocusMode;
-  
-  /** Evolution task context injection settings */
-  evolutionContext: EvolutionContextConfig;
-}
+// Context Injection types — migrated to @principles/core as part of .pd/config.yaml unification (PR-xxx).
+// Re-exported here so plugin consumers keep the same import path.
+export type {
+  ContextInjectionConfig,
+  EvolutionContextConfig,
+  ProjectFocusMode,
+} from '@principles/core';
 
 /**
  * Default context injection configuration
@@ -41,13 +18,8 @@ export interface ContextInjectionConfig {
  * - principles: always on (not configurable)
  * - thinkingOs: false by default (MVP-Quiet, user can opt-in via /pd-context)
  * - projectFocus: 'off' (default closed, user can enable)
+ *
+ * Migrated to DEFAULT_CONTEXT_INJECTION in @principles/core.
+ * Re-exported for backward compatibility.
  */
-export const defaultContextConfig: ContextInjectionConfig = {
-  thinkingOs: false,
-  projectFocus: 'off',
-  evolutionContext: {
-    enabled: true,
-    maxMessages: 4,
-    maxCharsPerMessage: 200,
-  },
-};
+export { DEFAULT_CONTEXT_INJECTION as defaultContextConfig } from '@principles/core';

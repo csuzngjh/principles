@@ -129,6 +129,120 @@ export interface WorkspaceConfig {
   default: string;
 }
 
+// ── Profile Config (PRI-304 / PRI-466) ───────────────────────────────────────
+
+export const PROFILE_AUDIT_LEVELS = ['low', 'medium', 'high'] as const;
+export type ProfileAuditLevel = (typeof PROFILE_AUDIT_LEVELS)[number];
+
+export const PROFILE_EVOLUTION_MODES = ['realtime', 'async'] as const;
+export type ProfileEvolutionMode = (typeof PROFILE_EVOLUTION_MODES)[number];
+
+export const PROFILE_TEST_LEVELS = ['smoke', 'unit', 'full'] as const;
+export type ProfileTestLevel = (typeof PROFILE_TEST_LEVELS)[number];
+
+export interface ProfileGateConfig {
+  require_plan_for_risk_paths: boolean;
+  require_audit_before_write: boolean;
+  require_reviewer_after_write: boolean;
+}
+
+export interface ProfileTestsConfig {
+  on_change: ProfileTestLevel;
+  on_risk_change: ProfileTestLevel;
+  commands: Record<string, string>;
+}
+
+export interface ProfileAdaptivePainConfig {
+  enabled: boolean;
+  spiral_boost: number;
+  min_threshold: number;
+  max_threshold: number;
+  backlog_trigger: number;
+  hard_failure_trigger: number;
+  low_recent_success_boost: number;
+  high_recent_pain_boost: number;
+}
+
+export interface ProfilePainConfig {
+  soft_capture_threshold: number;
+  adaptive: ProfileAdaptivePainConfig;
+}
+
+export interface ProfileLifecycleConfig {
+  enabled: boolean;
+  heartbeat_stale_hours: number;
+}
+
+export interface ProfilePlanApprovalsConfig {
+  enabled: boolean;
+  max_lines_override: number;
+  allowed_patterns: string[];
+  allowed_operations: string[];
+}
+
+export interface ProfileProgressiveGateConfig {
+  enabled: boolean;
+  plan_approvals: ProfilePlanApprovalsConfig;
+}
+
+export interface ProfileEditVerificationConfig {
+  enabled: boolean;
+  max_file_size_bytes: number;
+  fuzzy_match_enabled: boolean;
+  fuzzy_match_threshold: number;
+  skip_large_file_action: 'warn' | 'block';
+}
+
+export interface ProfileThinkingCheckpointConfig {
+  enabled: boolean;
+  window_ms: number;
+  high_risk_tools: string[];
+}
+
+export interface ProfileCustomGuard {
+  pattern: string;
+  message: string;
+  severity: string;
+}
+
+export interface ProfileConfig {
+  audit_level: ProfileAuditLevel;
+  risk_paths: string[];
+  evolution_mode: ProfileEvolutionMode;
+  gate: ProfileGateConfig;
+  tests: ProfileTestsConfig;
+  pain: ProfilePainConfig;
+  lifecycle: ProfileLifecycleConfig;
+  progressive_gate: ProfileProgressiveGateConfig;
+  edit_verification: ProfileEditVerificationConfig;
+  thinking_checkpoint: ProfileThinkingCheckpointConfig;
+  custom_guards: ProfileCustomGuard[];
+}
+
+// ── Context Injection Config (PR-xxx) ─────────────────────────────
+
+export const VALID_PROJECT_FOCUS_MODES = ['full', 'summary', 'off'] as const;
+export type ProjectFocusMode = (typeof VALID_PROJECT_FOCUS_MODES)[number];
+
+export interface EvolutionContextConfig {
+  /** Enable conversation context in evolution task (default: true) */
+  enabled: boolean;
+  /** Max recent messages included in evolution task (default: 4) */
+  maxMessages: number;
+  /** Max chars per message snippet (default: 200) */
+  maxCharsPerMessage: number;
+}
+
+/** Context injection — what runtime content gets injected into the LLM prompt. */
+export interface ContextInjectionConfig {
+  /** Thinking OS (mental models) injection toggle. */
+  thinkingOs: boolean;
+  /** Project context (CURRENT_FOCUS.md) injection mode. */
+  projectFocus: ProjectFocusMode;
+  /** Evolution task context injection settings. */
+  evolutionContext: EvolutionContextConfig;
+}
+
 // ── Top-Level Config ────────────────────────────────────────────────────────
 
 export interface PdConfig {
@@ -141,6 +255,10 @@ export interface PdConfig {
   ui: UiConfig;
   /** Principle generation preferences (PRI-336). */
   principles?: PrinciplesConfig;
+  /** Agent behavioral profile — partial user input; defaults resolved in effective config (PRI-304). */
+  profile?: Partial<ProfileConfig>;
+  /** Context injection configuration — partial user input; defaults resolved in effective config. */
+  contextInjection?: Partial<ContextInjectionConfig>;
 }
 
 // ── Validation Result ───────────────────────────────────────────────────────
@@ -172,6 +290,10 @@ export interface EffectivePdConfig {
   source: 'defaults' | 'user_config';
   warnings: string[];
   featuresChangedFromDefault?: string[];
+  /** Fully resolved behavioural profile — always present after effective config computation (PRI-304). */
+  resolvedProfile: ProfileConfig;
+  /** Fully resolved context injection config — always present after effective config computation. */
+  resolvedContextInjection: ContextInjectionConfig;
 }
 
 // ── Redacted Summary ────────────────────────────────────────────────────────
@@ -205,6 +327,13 @@ export interface RedactedFeatureSummary {
   enabled: boolean;
 }
 
+export interface RedactedProfileSummary {
+  audit_level: ProfileAuditLevel;
+  evolution_mode: ProfileEvolutionMode;
+  risk_path_count: number;
+  custom_guard_count: number;
+}
+
 export interface RedactedPdConfigSummary {
   version: PdConfigVersion;
   source: 'defaults' | 'user_config';
@@ -214,6 +343,8 @@ export interface RedactedPdConfigSummary {
   defaultRuntime: string;
   agents: RedactedAgentSummary[];
   ui: UiConfig;
+  profile?: RedactedProfileSummary;
+  contextInjection?: ContextInjectionConfig;
   warnings: string[];
 }
 
