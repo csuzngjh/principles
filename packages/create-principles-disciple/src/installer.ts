@@ -883,6 +883,11 @@ function openBrowserForOnboarding(url: string): { opened: boolean; reason?: stri
   }
   try {
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    // P2-E: handle async spawn errors (ENOENT, EACCES) — without this,
+    // the process emits an unhandled 'error' event that crashes Node.
+    child.on('error', (err) => {
+      logger.warn(`Browser launch failed asynchronously: ${err.message}`);
+    });
     child.unref();
     return { opened: true };
   } catch (err) {
@@ -902,13 +907,24 @@ function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean>
       res.on('end', () => {
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
-          // P1-5: verify PD-specific fields, not just any 200+JSON response.
-          // Matches console-launcher.ts probeConsoleHealth contract (rc-5-object-hasown-not-in).
-          const isPdConsole = typeof body === 'object' && body !== null
-            && (
-              (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
-              (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true)
-            );
+          // P1-B: verify a PD-specific field inside body.data, not just the generic
+          // { success: true } envelope that ANY service could return. PD Console's
+          // /api/health responds via sendSuccess -> { success: true, data: {...} } where
+          // data.overall is one of 'healthy' | 'degraded' | 'error' (HealthCheckModel).
+          // The previous top-level `body.healthy` branch was dead code (PD Console never
+          // returns it) and `body.success === true` alone matched any generic service.
+          // rc-5-object-hasown-not-in: use Object.hasOwn, not `in`, for untrusted keys.
+          const isPdConsole = (() => {
+            if (typeof body !== 'object' || body === null) return false;
+            if (!Object.hasOwn(body, 'success') || Reflect.get(body, 'success') !== true) return false;
+            if (!Object.hasOwn(body, 'data')) return false;
+            const data = Reflect.get(body, 'data');
+            if (typeof data !== 'object' || data === null) return false;
+            // data.overall is the PD-specific discriminative field.
+            if (!Object.hasOwn(data, 'overall')) return false;
+            const overall = Reflect.get(data, 'overall');
+            return overall === 'healthy' || overall === 'degraded' || overall === 'error';
+          })();
           resolve(isPdConsole);
         } catch { resolve(false); }
       });

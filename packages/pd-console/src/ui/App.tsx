@@ -40,6 +40,9 @@ function AuthRoutes() {
   // feature flags (to gate the redirect). Both are fetched after auth.
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>("default");
   const [featureFlags, setFeatureFlags] = useState<Record<string, { enabled: boolean }> | null>(null);
+  // P2-C: tracks whether workspace fetch succeeded. If it failed, we skip
+  // the onboarding redirect so state isn't saved under a fake "default" key.
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const navigate = useNavigate();
 
   const verifyAuth = useCallback(async () => {
@@ -81,6 +84,8 @@ function AuthRoutes() {
         const firstWorkspace = wsResult.data[0];
         if (firstWorkspace) {
           setCurrentWorkspaceId(firstWorkspace.name);
+          // P2-C: only mark workspaceReady when we have a real workspace name.
+          setWorkspaceReady(true);
         }
       }
       // Then update featureFlags — the redirect effect waits for this.
@@ -115,13 +120,14 @@ function AuthRoutes() {
     if (authed !== true || featureFlags === null || showSplash) return;
 
     const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
-    if (flagEnabled) {
+    // P2-C: if workspace fetch failed, don't force onboarding under "default" key.
+    if (flagEnabled && workspaceReady) {
       const onboardingState = getOnboardingState(currentWorkspaceId);
       navigate(onboardingState.completed ? '/focus' : '/welcome', { replace: true });
     } else {
       navigate('/focus', { replace: true });
     }
-  }, [authed, featureFlags, showSplash, currentWorkspaceId, navigate]);
+  }, [authed, featureFlags, showSplash, currentWorkspaceId, workspaceReady, navigate]);
 
   const handleAuthSuccess = useCallback(() => {
     setAuthed(true);

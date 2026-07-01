@@ -27,11 +27,15 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { sendError, sendJson } from '../utils/response.js';
+
+// ESM-safe require for cross-package require.resolve (pd-cli package lookup).
+const require = createRequire(import.meta.url);
 
 export interface OnboardingRouteContext {
   workspaceDir: string;
@@ -71,14 +75,52 @@ function loadOnboardingFlagEnabled(workspaceDir: string): boolean {
   return flagsResult.flags.new_user_onboarding?.enabled === true;
 }
 
-/** Resolve the pd CLI binary name. Resolved through PATH (no shell). */
-function findPdBin(): string {
-  // The `pd` binary is installed globally (npm i -g @principles/pd-cli) and
-  // resolved through PATH. We spawn WITHOUT shell:true so argv is passed
-  // directly to the OS, eliminating command-injection risk. On Windows the
-  // pd.cmd shim is resolved by Node's CreateProcess; if not found, spawn
-  // emits 'error' which we handle with a clear nextAction.
-  return 'pd';
+/**
+ * Resolve the pd CLI invocation: spawn `process.execPath` (Node itself) with
+ * the absolute path to the pd-cli `dist/index.js` entry, instead of spawning
+ * the bare `pd` binary.
+ *
+ * P1-A (Windows .cmd resolution): `spawn('pd', args, { shell: false })` fails
+ * on Windows with ENOENT because Node's CreateProcess cannot resolve npm's
+ * `.cmd` shims (pd.cmd) without a shell. Spawning `process.execPath` with the
+ * JS entry path sidesteps this entirely — there is no `.cmd` involved. This is
+ * the same pattern used in installer.ts:autoLaunchConsole and
+ * pd-cli's runtime-uat.ts `findPdCliPath`.
+ *
+ * P1-2 (command injection): this approach also keeps `shell: false` — argv is
+ * passed directly to the OS, so no user-controlled value is ever interpreted
+ * by a shell (EP-08 Security Boundary).
+ *
+ * Returns `{ cmd, extraArgs }`:
+ *   - On success: `{ cmd: process.execPath, extraArgs: [pdCliEntryPath] }`
+ *   - On failure (pd-cli not resolvable / entry missing): falls back to
+ *     `{ cmd: 'pd', extraArgs: [] }`. This works on Linux/macOS via PATH; on
+ *     Windows the spawn will emit 'error', which the caller handles with a
+ *     clear nextAction (rc-9-no-silent-fallback).
+ */
+function findPdCli(): { cmd: string; extraArgs: string[] } {
+  try {
+    // Resolve the pd-cli package.json cross-package (npm workspaces hoist this).
+    const pdCliPkg = require.resolve('@principles/pd-cli/package.json');
+    const pdCliDir = path.dirname(pdCliPkg);
+    const pkg = JSON.parse(fs.readFileSync(pdCliPkg, 'utf-8')) as {
+      bin?: Record<string, string>;
+    };
+    // rc-5-object-hasown-not-in: read the bin map via a typed access, not `in`.
+    const binPath = pkg.bin?.pd ?? pkg.bin?.['pd-cli'];
+    if (binPath) {
+      const entryPath = path.resolve(pdCliDir, binPath);
+      if (fs.existsSync(entryPath)) {
+        return { cmd: process.execPath, extraArgs: [entryPath] };
+      }
+    }
+  } catch {
+    // pd-cli not resolvable from console, or package.json unreadable — fall
+    // through to the bare 'pd' fallback (rc-9: caller surfaces a clear error).
+  }
+  // Fallback: bare 'pd' resolved via PATH. Works on Linux/macOS; may fail on
+  // Windows with ENOENT (handled by the caller's 'error' event path).
+  return { cmd: 'pd', extraArgs: [] };
 }
 
 /**
@@ -136,14 +178,15 @@ async function handleRunDemo(
 
   let child: ChildProcess;
   try {
-    const pdBin = findPdBin();
-    // P1-2: no shell:true — pass args as argv array, eliminating command
-    // injection risk from user-controlled paths. The `pd` binary is resolved
-    // via PATH; on Windows, if pd.cmd is not found, the spawn will emit 'error'
-    // which we handle below with a clear nextAction.
+    const { cmd, extraArgs } = findPdCli();
+    // P1-A: spawn process.execPath (Node) with the pd-cli entry JS path to
+    // avoid the Windows .cmd resolution problem. P1-2: no shell:true — argv is
+    // passed directly to the OS, eliminating command-injection risk from
+    // user-controlled paths (the temp workspace path is the only variable
+    // here, and it is a mkdtemp result, not user input).
     child = spawn(
-      pdBin,
-      ['demo', 'story-a', '--workspace', tempWorkspace, '--json'],
+      cmd,
+      [...extraArgs, 'demo', 'story-a', '--workspace', tempWorkspace, '--json'],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         // No shell:true — argv is passed directly to the OS.
@@ -156,10 +199,15 @@ async function handleRunDemo(
       statusCode: 500,
       error: 'demo_spawn_failed',
       reason: `spawn failed: ${message}`,
-      nextAction: 'Check that the pd CLI is installed (npm i -g @principles/pd-cli) and on PATH.',
+      nextAction:
+        'Check that the pd CLI is installed (npm i -g @principles/pd-cli) and that its dist/index.js entry exists, or that pd is on PATH.',
     });
     return;
   }
+
+  // P2-D: declared outside the try so the finally block can clear it. Captures
+  // the 60s timeout handle to prevent the timer from leaking after demo ends.
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
   try {
     // Capture stdout into a buffer. stderr is logged for observability (rc-9).
@@ -193,7 +241,7 @@ async function handleRunDemo(
     });
 
     const timeout = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), DEMO_TIMEOUT_MS);
+      timeoutHandle = setTimeout(() => resolve('timeout'), DEMO_TIMEOUT_MS);
     });
 
     const outcome = await Promise.race([settled, timeout]);
@@ -260,6 +308,10 @@ async function handleRunDemo(
       },
     });
   } finally {
+    // P2-D: clear the 60s timeout timer so it doesn't leak after the demo
+    // completes. The guard handles the case where an error was thrown before
+    // the timeout Promise executor assigned the handle.
+    if (timeoutHandle) clearTimeout(timeoutHandle);
     // P1-1: always clean up the temp workspace, whether the demo succeeded,
     // failed, timed out, or threw. Best-effort — OS will reap temp dirs eventually.
     cleanupTempWorkspace(tempWorkspace);

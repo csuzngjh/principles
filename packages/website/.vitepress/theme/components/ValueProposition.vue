@@ -55,7 +55,7 @@
       <div class="vp-card pd-card">
         <div class="card-decor">03</div>
         <div class="card-icon">🌌</div>
-        <h3>{{ lang === 'zh-CN' ? '动态演进系统' : 'Dynamic Evolution' }}</h3>
+        <h3>{{ lang === 'zh-CN' ? '行为内化系统' : 'Behavior Internalization' }}</h3>
         <p class="card-text">
           {{ lang === 'zh-CN'
             ? '彻底告别静态提示词硬编码。PD 构建起"硬拦截、软推理、重训练"的三层内化引擎，使得原则能够根据痛觉反馈进行分层沉淀与自适应进化。'
@@ -64,7 +64,7 @@
         </p>
         <div class="card-footer">
           <span class="pill">{{ lang === 'zh-CN' ? '三层内化' : '3-Tier Logic' }}</span>
-          <span class="pill">{{ lang === 'zh-CN' ? '持续心智生长' : 'Self-Evolution' }}</span>
+          <span class="pill">{{ lang === 'zh-CN' ? '持续原则沉淀' : 'Ongoing Principle Distillation' }}</span>
         </div>
       </div>
     </div>

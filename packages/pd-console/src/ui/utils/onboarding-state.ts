@@ -48,8 +48,9 @@ export function getOnboardingState(workspaceId: string): OnboardingState {
     const parsed: unknown = JSON.parse(raw);
     if (!isOnboardingState(parsed)) return DEFAULT_STATE;
     return parsed;
-  } catch {
-    // rc-9: no silent fallback — return default but log could be added
+  } catch (err) {
+    // rc-9: surface the failure — don't silently swallow.
+    console.error('[onboarding-state] Failed to read onboarding state:', err);
     return DEFAULT_STATE;
   }
 }
@@ -60,8 +61,9 @@ export function getOnboardingState(workspaceId: string): OnboardingState {
 export function setOnboardingState(workspaceId: string, state: OnboardingState): void {
   try {
     localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
-  } catch {
-    // localStorage might be full or disabled — fail gracefully
+  } catch (err) {
+    // rc-9: surface the failure — don't silently swallow.
+    console.error('[onboarding-state] Failed to save onboarding state:', err);
   }
 }
 

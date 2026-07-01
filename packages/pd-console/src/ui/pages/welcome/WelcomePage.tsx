@@ -142,7 +142,13 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
     const checkForEvidence = async () => {
       try {
         const response = await request('/api/v1/evidence-chain');
-        if (response.success && response.data) {
+        // P2-A: request() returns { success: false, error } on HTTP/network
+        // errors instead of throwing. Convert non-success into a thrown error
+        // so the catch block (error counter + retry UI) actually fires.
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to fetch evidence');
+        }
+        if (response.data) {
           const data = response.data;
           if (typeof data === 'object' && data !== null && Object.hasOwn(data, 'records')) {
             const records = (data as { records: unknown }).records;

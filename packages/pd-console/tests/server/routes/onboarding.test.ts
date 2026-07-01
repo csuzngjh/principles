@@ -179,7 +179,10 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     // EP-06: spawn pd demo story-a --workspace <path> --json (not direct DB write)
     expect(spawn).toHaveBeenCalledTimes(1);
     const [bin, argv, options] = vi.mocked(spawn).mock.calls[0]!;
-    expect(bin).toEqual(expect.stringContaining('pd'));
+    // P1-A: cmd is process.execPath (Node) when pd-cli's dist/index.js is
+    // resolvable, or 'pd' as a PATH-based fallback. Accept either — the
+    // behavioral contract is the argv, not the binary name.
+    expect([process.execPath, 'pd']).toContain(bin);
     expect(argv).toEqual(expect.arrayContaining(['demo', 'story-a', '--json']));
     // P1-1: demo must run in a TEMP workspace, not the user's real workspaceDir,
     // to avoid polluting {workspace}/.pd/state.db with simulated demo data.

@@ -154,10 +154,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
   // New user onboarding wizard — first-visit redirect to /welcome + demo story-a
-  // trigger endpoint. Default-on, user-facing MVP-Core feature. Core flag: can be
-  // emergency-disabled via explicit `enabled: false` in .pd/config.yaml (surfaced
-  // with a warning) or toggled off from the Settings page.
-  { id: 'new_user_onboarding', category: 'core', enabled: true, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Default true to guide new users; can be disabled in .pd/config.yaml or Settings page.' },
+  // trigger endpoint. P1-D: registered as MVP-Quiet with default-off per AGENTS.md
+  // ("Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval").
+  // No approval was obtained for this PR, so the safe default applies. The feature
+  // will not run until a maintainer explicitly enables it via .pd/config.yaml
+  // (new_user_onboarding: { enabled: true }) or approves it as MVP-Core in a
+  // follow-up PR that flips category to 'core'.
+  { id: 'new_user_onboarding', category: 'quiet', enabled: false, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Requires maintainer approval to enable as MVP-Core; default-off (MVP-Quiet) until approved. Enable via .pd/config.yaml: new_user_onboarding: { enabled: true }.' },
 ];
 
 export function computeEffectiveFlags(
