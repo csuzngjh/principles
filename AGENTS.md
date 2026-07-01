@@ -44,18 +44,18 @@ Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
 
 ### Feature Flag Registration
 
-`PRI-239` owns the feature flag registry and production loader contract. Until that issue is merged and its loading path is covered by tests:
+The feature flag registry and production loader contract are in place (`feature-flag-contract.ts`, merged via PRI-239 / PRI-304 / PRI-305; loader covered by `feature-flag-contract.test.ts`). The registry is the single source of truth for which subsystems exist and their default on/off state.
 
 - Do not introduce a new subsystem / hook / writer / reader or expand MVP-Core without explicit maintainer approval.
 - Bug fixes, evidence collection, documentation alignment, synthetic validation, and ADR-0012 legacy retirement/cutover may proceed without inventing an unused flag file.
-- If a proposed new behavior needs runtime disabling before the registry exists, stop and implement the registry first.
+- If a proposed new behavior needs runtime disabling, register the flag instead of ad-hoc gating.
 
-After `PRI-239` merges, every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/config.yaml` (the unified config file; the legacy `.pd/feature-flags.yaml` is no longer read by production runtime — ADR-0016) with:
+Every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/config.yaml` (the unified config file; the legacy `.pd/feature-flags.yaml` is no longer read by production runtime — ADR-0016) with:
 - `category: core | quiet | gone | legacy_retire`
 - `enabled: true | false` (Quiet = false by default)
 - `since: <YYYY-MM-DD>` (when added)
 
-Registration counts only when the production loader and a test exercise the flag. After that point, PRs introducing functional behavior without registration are rejected.
+Registration counts only when the production loader and a test exercise the flag. PRs introducing functional behavior without registration are rejected.
 
 ### Anti-pattern Triggers
 
