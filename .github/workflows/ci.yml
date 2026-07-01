@@ -138,7 +138,7 @@ jobs:
         run: npm run test -- --coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./packages/principles-core/coverage/coverage-final.json
           flags: principles-core
@@ -207,7 +207,7 @@ jobs:
         run: npm run test -- --coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./packages/pd-console/coverage/coverage-final.json
           flags: pd-console
@@ -386,7 +386,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./packages/openclaw-plugin/coverage/coverage-final.json
           flags: openclaw-plugin
