@@ -1,0 +1,235 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { EventEmitter } from 'node:events';
+import * as yaml from 'js-yaml';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+// ── Mock child_process.spawn — we never want to actually run pd in tests ──
+// EP-06 (Source of Truth): the route must spawn `pd demo story-a`, not write
+// SQLite directly. We mock spawn so we can assert argv without touching the DB.
+vi.mock('child_process', () => ({
+  spawn: vi.fn(),
+}));
+
+import { spawn } from 'child_process';
+import {
+  handleOnboardingRoute,
+  disposeOnboardingModels,
+} from '../../../src/server/routes/onboarding.js';
+
+// ── Workspace fixtures ──────────────────────────────────────────────────────
+
+let workspaceDir: string;
+let pdDir: string;
+
+function writeConfig(onboardingEnabled: boolean): void {
+  const config = {
+    version: 1,
+    features: {
+      new_user_onboarding: { category: 'quiet', enabled: onboardingEnabled },
+    },
+    runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+        dreamer: { enabled: true },
+        scribe: { enabled: true },
+      },
+    },
+    ui: { diagnostics: { mode: 'simple' } },
+  };
+  fs.writeFileSync(path.join(pdDir, 'config.yaml'), yaml.dump(config), 'utf8');
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-onboard-route-'));
+  pdDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(pdDir, { recursive: true });
+  writeConfig(true);
+});
+
+afterEach(() => {
+  disposeOnboardingModels();
+  try {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+});
+
+// ── Mock req/res helpers (mirror intent.test.ts pattern) ────────────────────
+
+function makePostReq(url: string): IncomingMessage {
+  const req = new EventEmitter();
+  Object.assign(req, { method: 'POST', url });
+  return req as unknown as IncomingMessage;
+}
+
+function makeGetReq(url: string): IncomingMessage {
+  const req = new EventEmitter();
+  Object.assign(req, { method: 'GET', url });
+  return req as unknown as IncomingMessage;
+}
+
+function makeRes(): ServerResponse {
+  const res = {
+    headersSent: false,
+    statusCode: 200,
+    _body: '',
+    writeHead: vi.fn(function (this: unknown, code: number) {
+      (res as { statusCode: number }).statusCode = code;
+      (res as { headersSent: boolean }).headersSent = true;
+      return this;
+    }),
+    end: vi.fn(function (this: unknown, data?: string) {
+      if (data !== undefined) {
+        (res as { _body: string })._body = data;
+      }
+      return this;
+    }),
+  } as unknown as ServerResponse;
+  return res;
+}
+
+function getBody(res: ServerResponse): string {
+  return (res as unknown as { _body: string })._body;
+}
+
+function getStatus(res: ServerResponse): number {
+  return (res as unknown as { statusCode: number }).statusCode;
+}
+
+function parseBody(res: ServerResponse): { success: boolean; data: Record<string, unknown> } {
+  return JSON.parse(getBody(res)) as { success: boolean; data: Record<string, unknown> };
+}
+
+function parseError(res: ServerResponse): {
+  success: boolean;
+  error: string;
+  message: string;
+  reason?: string;
+  nextAction?: string;
+} {
+  return JSON.parse(getBody(res)) as {
+    success: boolean;
+    error: string;
+    message: string;
+    reason?: string;
+    nextAction?: string;
+  };
+}
+
+/** Build a mock ChildProcess-like object whose stdout/stderr are vi.fn() sinks. */
+function makeMockChild(): {
+  on: ReturnType<typeof vi.fn>;
+  stdout: { on: ReturnType<typeof vi.fn> };
+  stderr: { on: ReturnType<typeof vi.fn> };
+} {
+  return {
+    on: vi.fn(),
+    stdout: { on: vi.fn() },
+    stderr: { on: vi.fn() },
+  };
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe('POST /api/v1/onboarding/run-demo', () => {
+  it('Given flag enabled, When POST run-demo, Then spawns pd demo story-a and returns 202', async () => {
+    const mockChild = makeMockChild();
+    vi.mocked(spawn).mockReturnValue(mockChild as never);
+
+    const res = makeRes();
+    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir,
+      subPath: '/run-demo',
+    });
+
+    // EP-06: spawn pd demo story-a --workspace <path> --json (not direct DB write)
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [bin, argv, options] = vi.mocked(spawn).mock.calls[0]!;
+    expect(bin).toEqual(expect.stringContaining('pd'));
+    expect(argv).toEqual(expect.arrayContaining(['demo', 'story-a', '--json']));
+    expect(argv).toEqual(expect.arrayContaining(['--workspace', workspaceDir]));
+    // EP-08: shell: true on Windows so spawn can resolve the pd shim
+    expect(options).toEqual(expect.objectContaining({ shell: process.platform === 'win32' }));
+
+    // 202 Accepted — demo runs async; response returns immediately.
+    expect(getStatus(res)).toBe(202);
+    const body = parseBody(res);
+    expect(body.success).toBe(true);
+    expect(body.data.simulated).toBe(true);
+    expect(body.data.status).toBe('started');
+  });
+
+  it('Given flag disabled, When POST run-demo, Then returns 403 with reason and nextAction', async () => {
+    writeConfig(false);
+
+    const res = makeRes();
+    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir,
+      subPath: '/run-demo',
+    });
+
+    // EP-03: fail loud, observable degradation — must include reason + nextAction
+    expect(spawn).not.toHaveBeenCalled();
+    expect(getStatus(res)).toBe(403);
+    const body = parseError(res);
+    expect(body.success).toBe(false);
+    expect(body.reason).toContain('disabled');
+    expect(body.nextAction).toBeTruthy();
+  });
+
+  it('Given spawn throws synchronously, When POST run-demo, Then returns 500 with reason and nextAction (EP-03)', async () => {
+    vi.mocked(spawn).mockImplementation(() => {
+      throw new Error('ENOENT: pd binary not found');
+    });
+
+    const res = makeRes();
+    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir,
+      subPath: '/run-demo',
+    });
+
+    expect(getStatus(res)).toBe(500);
+    const body = parseError(res);
+    expect(body.success).toBe(false);
+    expect(body.reason).toContain('spawn');
+    expect(body.nextAction).toBeTruthy();
+  });
+
+  it('Given GET method on /run-demo, When called, Then returns 405 method_not_allowed', async () => {
+    const mockChild = makeMockChild();
+    vi.mocked(spawn).mockReturnValue(mockChild as never);
+
+    const res = makeRes();
+    await handleOnboardingRoute(makeGetReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir,
+      subPath: '/run-demo',
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(getStatus(res)).toBe(405);
+    const body = parseError(res);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('method');
+  });
+
+  it('Given unknown subPath, When POST, Then returns 404 not_found', async () => {
+    const res = makeRes();
+    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/unknown'), res, {
+      workspaceDir,
+      subPath: '/unknown',
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(getStatus(res)).toBe(404);
+    const body = parseError(res);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('not_found');
+  });
+});
