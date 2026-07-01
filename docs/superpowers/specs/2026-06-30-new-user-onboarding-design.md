@@ -55,7 +55,12 @@ PD 即将发布给种子用户。当前新用户从安装到使用存在多处�
    - **手动路径**: `pd pain record` → **PainToPrincipleService** → `SplitDiagnosticianRunner` → candidates → ledger
    - 两条路径都走 SplitDiagnosticianRunner + candidates + ledger，差别在入口编排层（PainSignalBridge vs PainToPrincipleService）
    - **不是所有 tool failure 都成 pain**——有高价值门槛
-4. **LLM 配置前置依赖**: `pd pain record` 调 `PainToPrincipleService.recordPain()` 走诊断流水线，**需要 LLM 配置**（provider / model / apiKeyEnv / baseUrl）。配置源是 `resolveRuntimeConfig(stateDir)`，从 `.state/` 下的 runtime config 读取，**不在 `.pd/config.yaml`**。配置缺失时返回 `failureCategory: 'config_missing'`，命令失败退出。Onboarding 在引导用户产生第一个 pain 之前必须确保 LLM 已配。
+4. **PD 内置 agent 的两种 runtime profile 类型**（`pd-config-types.ts`）:
+   - **`openclaw` 类型**（默认）: PD 内置 agent（diagnostician 等）通过 spawn `openclaw agent` 命令运行——PD 调宿主 OpenClaw 的 CLI，让 OpenClaw 的 agent 执行诊断。**不需要用户配 LLM**——LLM 调用由 OpenClaw 自己处理。需要 `openclaw` 命令可用。
+   - **`pi-ai` 类型**（可选，高级）: PD 内置 agent 通过 PD 自带的 pi-ai runtime 直接调 LLM API。**这才需要用户配 provider/model/apiKeyEnv/baseUrl**。
+   - **关键事实**: installer 默认生成 `openclaw.default` profile，绝大多数用户不需要配 LLM。只有用户主动选 pi-ai 类型才需要配 LLM。
+   - **schema 限制**: 现有 `VALID_PROFILE_TYPES = ['openclaw', 'pi-ai']`，**没有 `codex` 或 `claude-code` 类型**。若用户选 Codex/Claude Code 作为宿主，PD 内置 agent 无法直接通过该宿主运行——需走 pi-ai runtime（用户配 LLM）。这是 §6.2 改动 1 的关键约束（见 §12 假设 9）。
+   - **配置源**: runtime config 从 `.pd/config.yaml` 读取（PRI-393 统一，`resolveRuntimeFromPdConfig`）。`.state/workflows.yaml` 是 legacy，不再用于 runtime 解析。
 5. **品牌宪章**: 官网和 console 新增组件遵循 `docs/brand/PD_BRAND_CONSTITUTION.md`——克制、低饱和、Warm Paper、Governance Blue、细线回路图、无霓虹/渐变/3D 渲染。
 6. **Feature flag**: 不引入新功能子系统，不需要 feature flag 注册（遵守 ADR-0014 + PRI-239 约束）。
 
@@ -181,6 +186,8 @@ export interface HostRuntimeInfo {
   hasRuntime: boolean;
   version?: string;
   downloadUrl: string;
+  /** 该宿主是否被 PD runtime profile schema 直接支持（仅 openclaw）。codex/claude-code 需走 pi-ai runtime。 */
+  supportsPdProfileType: boolean;
 }
 
 export interface EnvCheckResult {
@@ -213,27 +220,21 @@ installer 启动时调 `checkEnvironment()`，若检测到多个宿主，调交�
 - 否则默认按优先级：openclaw > codex > claude-code
 - 记录到 `InstallResult.runtime`
 
-**宿主选择写入 config.yaml 的位置**:
+**宿主选择与 runtime profile 的映射（关键约束）**:
 
-选中宿主后，installer 修改 `.pd/config.yaml` 的两个现有字段（不引入新字段，对齐现有 schema）:
-- `runtimeProfiles`: 新增/更新 `<host>.default` 条目（如 `claude-code.default`），`type` 字段为对应宿主类型
-- `internalAgents.defaultRuntime`: 改为 `<host>.default`（如 `claude-code.default`），让内部 agent（diagnostician 等）用选中的宿主运行时
+PD runtime profile schema 只支持 `openclaw` 和 `pi-ai` 两种 `type`（`VALID_PROFILE_TYPES = ['openclaw', 'pi-ai']`）。宿主选择写入 config.yaml 时按以下规则映射:
 
-示例（选 Claude Code 时）:
-```yaml
-runtimeProfiles:
-  openclaw.default:
-    type: openclaw
-    source: default
-  claude-code.default:           # 新增
-    type: claude-code
-    source: user-selected
-internalAgents:
-  defaultRuntime: claude-code.default   # 从 openclaw.default 改为
-  agents: { ... }
-```
+| 用户选的宿主 | 写入的 runtimeProfile type | 说明 |
+|---|---|---|
+| OpenClaw | `openclaw` | PD 内置 agent 通过 `openclaw agent` CLI 运行，不需要用户配 LLM |
+| Codex | `pi-ai` | PD 内置 agent 无法直接调 Codex CLI，需走 pi-ai runtime（用户要配 LLM provider/model/apiKeyEnv） |
+| Claude Code | `pi-ai` | 同上，需走 pi-ai runtime |
 
-注意: 这只控制 PD 内部 agent 的 runtime profile 选择，**不等于 LLM provider/model 配置**——后者是独立问题，见 §6.3 onboarding 改动 0。
+具体写入逻辑:
+- 选 OpenClaw → `runtimeProfiles.openclaw.default` 保持 `{ type: 'openclaw', source: 'default' }`，`internalAgents.defaultRuntime` 保持 `openclaw.default`（即 installer 现有默认，不改）
+- 选 Codex / Claude Code → `runtimeProfiles.pi-ai.default` 新增 `{ type: 'pi-ai', provider: <待配>, model: <待配>, apiKeyEnv: <待配> }`，`internalAgents.defaultRuntime` 改为 `pi-ai.default`。此时 onboarding 步骤 4 必须引导用户配 LLM（见 §6.3 改动 0）
+
+注意: 选 Codex/Claude Code 的用户在 onboarding 步骤 4 会遇到 LLM 配置需求——这是 PD 架构的当前限制，不是 onboarding 能解决的。onboarding 的职责是把这个限制讲清楚并引导配置，不是假装它不存在。未来 PD 若新增 `codex` / `claude-code` profile type，可消除此限制（超出本次范围）。
 
 **改动 2: 自动启动 console + 开浏览器**
 
@@ -289,22 +290,29 @@ fallback: 快捷方式创建失败不阻塞安装，输出"桌面快捷方式创
 
 **架构约束**: pain signal 的创建和触发必须发生在宿主 agent 里，通过 `pd-pain-signal` 技能由 agent 调用 `pd pain record` 完成。Console 是治理/观察层，只能读取和展示已产生的 pain，**不能**直接创建 pain。
 
-**改动 0（前置）: LLM 配置检查与引导**
+**改动 0（条件性）: LLM 配置检查与引导（仅 pi-ai runtime 用户需要）**
 
-这是针对架构约束 §4.4 的必要前置。`pd pain record` 需要 LLM 配置（provider/model/apiKeyEnv/baseUrl），配置源是 `resolveRuntimeConfig(stateDir)` 从 `.state/` 下读取，**不在 `.pd/config.yaml`**。新用户装完 PD 通常没配 LLM，若直接引导产生 pain 会因 `config_missing` 失败。
+这是针对架构约束 §4.4 的条件性前置。关键事实:
+- 若用户选 OpenClaw 作为宿主（默认）→ runtime profile type = `openclaw` → PD 内置 agent 通过 `openclaw agent` CLI 运行 → **不需要用户配 LLM**
+- 若用户选 Codex / Claude Code 作为宿主 → runtime profile type = `pi-ai` → PD 内置 agent 通过 pi-ai runtime 直接调 LLM API → **需要用户配 provider/model/apiKeyEnv/baseUrl**
 
-onboarding 步骤 4（产生第一个 pain）之前，必须先检查 LLM 配置是否可用。检查方式：调 console 后端的 `/api/v1/runtime-config` 端点（若不存在，本次新增——只读端点，返回 `resolveRuntimeConfig(stateDir)` 的 redacted 摘要）。
+onboarding 步骤 4（LLM 配置检查）的行为取决于 installer 写入的 runtime profile type:
+- 读取 `.pd/config.yaml` 的 `internalAgents.defaultRuntime`
+- 若指向 `openclaw.*` profile → 步骤 4 自动跳过（显示"PD 内置 agent 通过 OpenClaw 运行，无需额外配置 LLM"）
+- 若指向 `pi-ai.*` profile → 步骤 4 检查 provider/model/apiKeyEnv 是否已配:
+  - 已配 → 跳过
+  - 未配 → 引导用户配置
 
-若检查结果是配置缺失或无效:
-- onboarding 插入一个"配置 LLM"中间步骤（步骤 3.5，在 principle 概念之后、产生 pain 之前）
-- 引导用户填写 provider（如 `openai` / `anthropic` / `openrouter`）、model（如 `gpt-4o` / `claude-sonnet-4-5`）、apiKeyEnv（环境变量名，如 `OPENAI_API_KEY`）
-- 写入 `.state/` 下对应的 runtime config 文件（具体路径和格式在实施前需进一步核实 `resolveRuntimeConfig` 的读取逻辑）
+配置方式（仅 pi-ai 用户）:
+- console 提供 3-4 个预设组合让用户选（如 "OpenAI GPT-4o" / "Anthropic Claude Sonnet" / "OpenRouter" / "自定义"）
+- 选中预设后自动填 provider/model，用户只需填 API Key（直接填值，console 写入 `.pd/config.yaml` 的 `runtimeProfiles.pi-ai.default.apiKeyEnv` 指定的环境变量名对应的值——但为安全考虑，API key 本身不写入 config.yaml，只写 `apiKeyEnv` 字段名，用户需自己设环境变量）
 - 提供 `pd runtime probe --runtime pi-ai --provider ... --model ... --apiKeyEnv ... --workspace <path>` 命令作为验证手段
 
 **关键约束**:
 - API key 本身不写入配置文件——只写 `apiKeyEnv` 字段（环境变量名），用户需自己设环境变量
-- onboarding 不强制配 LLM——用户可跳过此步骤，但步骤 4 会明确提示"未配 LLM，产生 pain 可能失败，是否先配置？"
-- 这是 onboarding 唯一涉及"写宿主侧配置"的步骤，但仍通过 console 后端 API 完成，不违反"console 不写 pain"约束（写的是 runtime config，不是 pain）
+- 这是 PD 架构的安全设计，onboarding 不能违反
+- 对非技术用户，引导文案要明确："把你的 OpenAI API Key 设为环境变量 OPENAI_API_KEY"，并给出操作系统对应的设置方法（Windows 系统属性 / macOS terminal / Linux export）
+- 这是 onboarding 最容易卡住非技术用户的步骤——若用户无法完成环境变量设置，建议 fallback 到"使用 OpenClaw 作为宿主（无需配 LLM）"
 
 **改动 1: 新增 /welcome 路由 + WelcomePage 组件**
 
@@ -333,10 +341,10 @@ useEffect(() => {
 | 1 · 欢迎与回路 | PD 是什么 | 核心回路图（Evidence→Principle→Owner Gate→Behavior Change），一句话定义 | [开始] / [跳过] |
 | 2 · 什么是 pain | pain 不是报错 | pain 是"值得治理的行为证据"的技术名（PRODUCT_IDENTITY.md: "Pain is PD's current technical name for incoming behavior evidence. It does not mean every tool failure deserves a principle."）。举例："Agent 多次在未确认范围的情况下大面积修改"。展示一条示例 pain 卡片 | [下一步] |
 | 3 · 什么是 principle | 原则不是 prompt | principle 是"可审查的行为政策"。展示一条示例原则卡片 + Owner Gate（批准/修改/拒绝/暂存） | [下一步] |
-| 4 · 配置诊断 LLM（可跳过） | 让 PD 能诊断 pain | 检查 `.state/` runtime config 是否有有效 LLM 配置。若有 → 跳过此步。若无 → 引导填 provider/model/apiKeyEnv（见改动 0） | [配置] / [跳过，稍后配] |
-| 5 · 产生你的第一个 pain | 让用户行动 | 进入"产生第一个 pain"流程（见改动 3）。若步骤 4 跳过，明确提示"未配 LLM，真实 pain 可能失败，建议先配" | [去 Agent 产生] |
+| 4 · 配置诊断 LLM（条件性，仅 pi-ai runtime 用户） | 让 PD 能诊断 pain | 读取 `.pd/config.yaml` 的 `internalAgents.defaultRuntime`。若指向 `openclaw.*` → 显示"PD 内置 agent 通过 OpenClaw 运行，无需配 LLM"并自动跳过。若指向 `pi-ai.*` → 检查 provider/model/apiKeyEnv，未配则引导配置（见改动 0） | [配置] / [跳过，稍后配] / 自动跳过 |
+| 5 · 产生你的第一个 pain | 让用户行动 | 进入"产生第一个 pain"流程（见改动 3）。若 openclaw runtime → 可直接产生 pain。若 pi-ai runtime 且 LLM 未配 → 提示"未配 LLM，真实 pain 会失败，建议回步骤 4 配置或改用 OpenClaw"，或跳路径 3 演示 | [去 Agent 产生] |
 
-步骤 5 是 onboarding 终点 C 的核心——产生第一个 pain。步骤 4（LLM 配置）是步骤 5 的前置依赖。
+步骤 5 是 onboarding 终点 C 的核心——产生第一个 pain。步骤 4（LLM 配置）是步骤 5 的条件性前置——仅 pi-ai runtime 用户需要。
 
 视觉约束（品牌宪章）:
 - 留白充足，每步只讲一个概念
@@ -381,7 +389,9 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 
 核心约束: console 只观察不创建 pain。pain 的实际创建由 agent 在宿主里完成（自动捕获 via `after_tool_call` hook，或 agent 主动调 `pd pain record` via pd-pain-signal 技能）。console 轮询 `fetchEvidenceChain()` 检测新 pain 出现。
 
-**前置依赖（重要）**: 路径 1 和路径 2 都依赖 LLM 配置已就绪（见改动 0）。若用户跳过 LLM 配置，路径 1/2 会因 `config_missing` 失败——此时 onboarding 直接跳路径 3 兜底，并提示"未配 LLM，无法真实产生 pain，以下为演示"。
+**前置依赖（重要）**: 路径 1 和路径 2 的前置依赖取决于 runtime profile type:
+- 若 `openclaw` runtime（用户选 OpenClaw 作为宿主）→ `pd pain record` 通过 `openclaw agent` CLI 运行诊断，**不需要 LLM 配置**，路径 1/2 可直接执行
+- 若 `pi-ai` runtime（用户选 Codex/Claude Code）→ `pd pain record` 需要 LLM 配置（provider/model/apiKeyEnv）。若步骤 4 LLM 未配，路径 1/2 会因 `config_missing` 失败——此时 onboarding 直接跳路径 3 兜底，并提示"未配 LLM，无法真实产生 pain，以下为演示。建议回步骤 4 配置，或改用 OpenClaw 作为宿主"
 
 路径 1 · 引导用户回宿主 agent（默认路径，含回忆真实场景）:
 1. console 显示引导文案 + 示例 prompt："告诉你的 Agent：'刚才 Agent 在 [场景] 犛错了，请用 pd-pain-signal 技能记录一个 pain，reason 是 [你的描述]'"
@@ -426,7 +436,7 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 └─────────────────────────────────────────────────────┘
 ```
 
-文案要点: 步骤 5 的引导文案要明确告诉用户"去你的 Agent 平台操作"，避免用户以为在 console 里能直接记录 pain。若步骤 4 LLM 未配，此步骤顶部加提示"⚠ 未配诊断 LLM，真实 pain 可能失败。建议先回步骤 4 配置。"
+文案要点: 步骤 5 的引导文案要明确告诉用户"去你的 Agent 平台操作"，避免用户以为在 console 里能直接记录 pain。若 pi-ai runtime 且步骤 4 LLM 未配，此步骤顶部加提示"⚠ 未配诊断 LLM，真实 pain 会失败。建议回步骤 4 配置，或改用 OpenClaw 作为宿主（无需配 LLM）。" 若 openclaw runtime，不显示此警告。
 
 **文件改动清单**:
 
@@ -595,11 +605,13 @@ Installer → Console 的数据传递:
 - console 启动时读 `.pd/config.yaml`，/welcome 步骤 5 的引导文案根据 `internalAgents.defaultRuntime` 显示对应的宿主名和操作指引
 - 不通过 URL query 传参（installer 开的是 `http://127.0.0.1:3100/welcome`，不带 query）
 
-LLM 配置的数据流（独立于宿主选择）:
-- onboarding 步骤 4 检查 `.state/` 下的 runtime config（provider/model/apiKeyEnv/baseUrl）
-- 若缺失，console 后端 POST /api/v1/runtime-config 写入 `.state/` 下对应文件
-- `pd pain record` 运行时从同一位置读取
-- 注意: LLM 配置和宿主选择是**两个独立维度**——宿主选择控制 PD 内部 agent 用哪个 runtime profile，LLM 配置控制诊断流水线调哪个 LLM provider
+LLM 配置的数据流（仅 pi-ai runtime 用户涉及）:
+- installer 选宿主时写入 `.pd/config.yaml` 的 runtimeProfile type（openclaw 或 pi-ai）
+- onboarding 步骤 4 读取 `.pd/config.yaml` 判断 runtime profile type
+- 若 pi-ai → 检查 provider/model/apiKeyEnv 是否已配
+- console 后端 POST /api/v1/runtime-config 写入 `.pd/config.yaml` 的 `runtimeProfiles.pi-ai.default` 字段（API key 不写入，只写 apiKeyEnv 字段名）
+- `pd pain record` 运行时从 `.pd/config.yaml` 读取（PRI-393 统一入口 `resolveRuntimeFromPdConfig`）
+- 注意: 宿主选择和 LLM 配置是**关联的**——选 OpenClaw 不需要 LLM，选 Codex/Claude Code 需要走 pi-ai runtime 配 LLM
 
 Console → 宿主 agent 的数据流:
 - **没有直接通信**——console 和 agent 不互通
@@ -798,26 +810,33 @@ Console → 宿主 agent 的数据流:
 
 1. **demo story-a 不产生演示 pain**: §6.3 路径 3 原假设 `pd demo story-a` 产生演示 pain——已核实不成立。demo story-a 跑的是端到端激活流水线（artifact → dispatch → 审批 → 激活），不写 pain_events。路径 3 已改为 console 内置静态演示 pain JSON。
 
-2. **`.pd/config.yaml` schema**: 已核实路径是 `.pd/config.yaml`（不是 `.principles/config.yaml`），有 `runtimeProfiles` 和 `internalAgents.defaultRuntime` 字段。installer 写入选中宿主到这两个字段，不引入新字段。
+2. **`.pd/config.yaml` schema**: 已核实路径是 `.pd/config.yaml`（不是 `.principles/config.yaml`），有 `runtimeProfiles` 和 `internalAgents.defaultRuntime` 字段。installer 写入选中宿主到这两个字段。
 
 3. **console health 端点**: 已核实 `/api/health` 端点存在（`server/index.ts` line 416）。
 
-4. **fetchEvidenceChain 返回结构**: 已核实返回 pain_events + tasks + candidates + ledger 的整个证据链（不是只返回最新一条 pain）。前端需记录 onboarding 开始时的 pain_events ID 集合，对比判断新增。
+4. **fetchEvidenceChain 返回结构**: 已核实返回 pain_events + tasks + candidates + ledger 的整个证据链。前端需记录 onboarding 开始时的 pain_events ID 集合，对比判断新增。
 
-5. **pd pain record 行为**: 已核实 `pd pain record` 走 `PainToPrincipleService.recordPain()` 完整诊断流水线，需要 LLM 配置（provider/model/apiKeyEnv/baseUrl），配置缺失时返回 `config_missing` 失败。是异步的（feature flag `diagnostician_async_cli` 控制）。
+5. **pd pain record 行为**: 已核实 `pd pain record` 走 `PainToPrincipleService.recordPain()` 完整诊断流水线。是异步的（feature flag `diagnostician_async_cli` 控制）。
+
+6. **runtime config 来源（PRI-393）**: 已核实 runtime config 从 `.pd/config.yaml` 读取（`resolveRuntimeFromPdConfig`），不是 `.state/` 下的独立文件。`.state/workflows.yaml` 是 legacy，不再用于 runtime 解析。
+
+7. **PD 内置 agent 的两种 runtime profile**: 已核实 `VALID_PROFILE_TYPES = ['openclaw', 'pi-ai']`。openclaw 类型通过 spawn `openclaw agent` CLI 运行（不需用户配 LLM）；pi-ai 类型通过 PD 自带 pi-ai runtime 直接调 LLM API（需用户配 provider/model/apiKeyEnv）。
+
+8. **installer 默认生成 openclaw profile**: 已核实 installer 默认生成 `openclaw.default` profile，`internalAgents.defaultRuntime` 默认指向 `openclaw.default`。选 OpenClaw 的用户不需要配 LLM。
 
 **仍需实施时验证**:
 
-6. **`.state/` runtime config 的具体路径和格式**: §6.3 改动 0 假设 `resolveRuntimeConfig(stateDir)` 从 `.state/` 下某文件读取 LLM 配置。需核实:
-   - 具体文件路径和格式（JSON / YAML / 其他）
-   - 写入是否需要特殊权限或原子性保证
-   - 是否有现成的 CLI 命令可以写入（避免 console 后端重新实现写入逻辑）
+9. **codex/claude-code profile type 缺失的影响**: §6.2 改动 1 假设选 Codex/Claude Code 时映射到 pi-ai runtime profile。需验证:
+   - 是否有现成的 CLI 命令写入 pi-ai profile 到 `.pd/config.yaml`？若无，installer 需自己实现写入逻辑。
+   - pi-ai runtime profile 的 `provider/model/apiKeyEnv` 字段在 installer 阶段留空，由 onboarding 步骤 4 引导填写。这个"两阶段配置"流程是否可行？
+   - 是否有更优雅的方案（如 PD 新增 codex/claude-code profile type）？这超出本次 onboarding 范围，但需评估是否应作为 follow-up issue。
 
-7. **runtime-config 写入端点的安全性**: §6.3 改动 0 新增 POST /api/v1/runtime-config。需确认:
-   - 是否需要认证（console 当前 `--no-auth` 模式下可能无认证）
-   - API key 不应通过 console 传输——只写 `apiKeyEnv` 字段（环境变量名），用户自己设环境变量。这点已在 spec 写明，但实施时要确保 UI 文案明确。
+10. **runtime-config 写入端点的安全性**: §6.3 改动 0 新增 POST /api/v1/runtime-config。需确认:
+    - 是否需要认证（console 当前 `--no-auth` 模式下可能无认证）
+    - API key 不应通过 console 传输——只写 `apiKeyEnv` 字段（环境变量名），用户自己设环境变量。这点已在 spec 写明，但实施时要确保 UI 文案明确。
 
-8. **onboarding 步骤 4 的 UX 决策**: LLM 配置步骤是否会让非技术用户卡住？provider/model/apiKeyEnv 这些字段对非技术用户可能太技术化。实施时可能需要:
-   - 预设几个常见组合（如 "OpenAI GPT-4o" / "Anthropic Claude Sonnet" / "OpenRouter"）
-   - 让用户选预设而非填原始字段
-   - 但这超出当前 spec 范围，作为实施时的 UX 细化项。
+11. **onboarding 步骤 4 的 UX 决策（pi-ai 用户）**: LLM 配置步骤是否会让非技术用户卡住？provider/model/apiKeyEnv 这些字段对非技术用户可能太技术化。实施时可能需要:
+    - 预设几个常见组合（如 "OpenAI GPT-4o" / "Anthropic Claude Sonnet" / "OpenRouter"）
+    - 让用户选预设而非填原始字段
+    - 但这超出当前 spec 范围，作为实施时的 UX 细化项。
+    - **更根本的问题**: 选 Codex/Claude Code 的非技术用户会被"配 LLM + 设环境变量"卡住。考虑是否应在 installer 选宿主阶段就提示"Codex/Claude Code 用户需要额外配 LLM，OpenClaw 用户不需要"。
