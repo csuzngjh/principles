@@ -31,6 +31,10 @@ export interface InstallSuccessOutput {
   enabledChannels: MvpChannel[];
   verification: VerificationResult;
   nextAction: string;
+  /** Task 8: when the installer auto-launches the console via `pd console open`,
+   * this holds the URL the browser was opened to (ends with /welcome). Undefined
+   * when auto-launch was not performed or failed. */
+  consoleUrl?: string;
 }
 
 export interface InstallFailureOutput {
@@ -134,10 +138,14 @@ export interface BuildOutputOptions {
   components: ComponentStatus;
   channels: MvpChannel[];
   verification: VerificationResult;
+  /** Task 8: URL the browser was opened to when the installer auto-launched the
+   * console. When provided and the install is complete, the success output's
+   * nextAction references this URL instead of the manual "pd console" instruction. */
+  consoleUrl?: string;
 }
 
 export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
-  const { workspace, components, channels, verification } = opts;
+  const { workspace, components, channels, verification, consoleUrl } = opts;
   const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
   const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
   const nextActions: string[] = [];
@@ -148,7 +156,15 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
     nextActions.push(`Run ${quotedPath} runtime canary --workspace <path> --json for diagnostics (global pd not on PATH)`);
   }
   if (components.console === 'configured') {
-    nextActions.push('Start console: pd console --workspace <path> --no-auth (listens on 127.0.0.1 only)');
+    // Task 8: when the installer auto-launched the console (consoleUrl set),
+    // point the user at the live URL instead of the manual start instruction.
+    // EP-03: when consoleUrl is absent, keep the manual instruction so the
+    // user is never left without a way to reach the console.
+    if (consoleUrl) {
+      nextActions.push(`Console ready at ${consoleUrl} (browser opened automatically)`);
+    } else {
+      nextActions.push('Start console: pd console --workspace <path> --no-auth (listens on 127.0.0.1 only)');
+    }
   }
 
   if (isComplete) {
@@ -159,6 +175,7 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
       enabledChannels: channels,
       verification,
       nextAction: nextActions.join(' | '),
+      consoleUrl,
     };
   }
 

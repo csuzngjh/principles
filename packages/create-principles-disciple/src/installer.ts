@@ -88,6 +88,12 @@ const CONSOLE_WARMUP_TIME_MS = 6_000;
 const CONSOLE_PORT_RANGE_MIN = 3100;
 const CONSOLE_PORT_RANGE_MAX = 3199;
 
+// Task 8: auto-launch console via `pd console open` after successful install
+const CONSOLE_AUTOLAUNCH_BASE_PORT = 3100;
+const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // 3100..3119 (matches pd console open PORT_FALLBACK_LIMIT)
+const CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS = 12_000;
+const CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS = 500;
+
 // 允许的原生模块白名单
 const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 
@@ -853,6 +859,130 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
   return { ok: false, url: '', process: null, reason: `All ${CONSOLE_PORT_MAX_RETRIES} port attempts failed. Last: ${lastReason}` };
 }
 
+// ─── Task 8: auto-launch console at end of successful install ────────────────
+
+/**
+ * Task 8: Open the system browser to a URL. Minimal platform dispatch — NOT a
+ * launcher subsystem. The console launcher (port detection, reuse, health) is
+ * `pd console open` (handleConsoleOpen), reused via spawn in autoLaunchConsole.
+ *
+ * Best-effort: failures are reported but do not crash the installer.
+ */
+function openBrowserForOnboarding(url: string): { opened: boolean; reason?: string } {
+  let cmd: string;
+  let args: string[];
+  if (process.platform === 'win32') {
+    cmd = process.env.ComSpec || 'cmd.exe';
+    args = ['/c', 'start', '""', url];
+  } else if (process.platform === 'darwin') {
+    cmd = 'open';
+    args = [url];
+  } else {
+    cmd = 'xdg-open';
+    args = [url];
+  }
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    // P2-E: handle async spawn errors (ENOENT, EACCES) — without this,
+    // the process emits an unhandled 'error' event that crashes Node.
+    child.on('error', (err) => {
+      logger.warn(`Browser launch failed asynchronously: ${err.message}`);
+    });
+    child.unref();
+    return { opened: true };
+  } catch (err) {
+    return { opened: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Probe /api/health on a single port. Reuses the http module already imported.
+ */
+function probeAutolaunchHealth(port: number, timeoutMs = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/api/health`, (res) => {
+      if (res.statusCode !== 200) { resolve(false); return; }
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
+          // P1-B: verify a PD-specific field inside body.data, not just the generic
+          // { success: true } envelope that ANY service could return. PD Console's
+          // /api/health responds via sendSuccess -> { success: true, data: {...} } where
+          // data.overall is one of 'healthy' | 'degraded' | 'error' (HealthCheckModel).
+          // The previous top-level `body.healthy` branch was dead code (PD Console never
+          // returns it) and `body.success === true` alone matched any generic service.
+          // rc-5-object-hasown-not-in: use Object.hasOwn, not `in`, for untrusted keys.
+          const isPdConsole = (() => {
+            if (typeof body !== 'object' || body === null) return false;
+            if (!Object.hasOwn(body, 'success') || Reflect.get(body, 'success') !== true) return false;
+            if (!Object.hasOwn(body, 'data')) return false;
+            const data = Reflect.get(body, 'data');
+            if (typeof data !== 'object' || data === null) return false;
+            // data.overall is the PD-specific discriminative field.
+            if (!Object.hasOwn(data, 'overall')) return false;
+            const overall = Reflect.get(data, 'overall');
+            return overall === 'healthy' || overall === 'degraded' || overall === 'error';
+          })();
+          resolve(isPdConsole);
+        } catch { resolve(false); }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(timeoutMs, () => { req.destroy(); resolve(false); });
+  });
+}
+
+/**
+ * Task 8: Auto-launch the PD Console at the end of a successful install by
+ * reusing `pd console open` (handleConsoleOpen). Spawns it detached so the
+ * console survives installer exit, then opens the browser to /welcome.
+ *
+ * EP-03: on failure, returns consoleUrl=undefined + fallbackAction so the user
+ *        is never left without a way to reach the console.
+ * EP-04: detached + unref keeps the console running after the installer exits.
+ * EP-06: reuses pd-cli's handleConsoleOpen via the CLI entry — no new launcher.
+ */
+async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: string; fallbackAction?: string }> {
+  const pdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+  if (!existsSync(pdCliEntry)) {
+    return { fallbackAction: `pd console open --workspace "${workspaceDir}" --no-auth (auto-launch skipped: pd CLI entry not found)` };
+  }
+
+  // Spawn `pd console open` detached — reuses handleConsoleOpen (port detection,
+  // reuse, health). --no-browser because we open /welcome ourselves.
+  const child = spawn(
+    process.execPath,
+    [pdCliEntry, 'console', 'open', '--workspace', workspaceDir, '--no-auth', '--no-browser'],
+    { detached: true, stdio: 'ignore', shell: false },
+  );
+  child.unref();
+
+  // Wait for the console to become ready (bounded poll on 3100..3105).
+  const deadline = Date.now() + CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    for (let i = 0; i < CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT; i++) {
+      const port = CONSOLE_AUTOLAUNCH_BASE_PORT + i;
+       
+      if (await probeAutolaunchHealth(port)) {
+        const consoleUrl = `http://127.0.0.1:${port}/welcome`;
+        const browserResult = openBrowserForOnboarding(consoleUrl);
+        if (!browserResult.opened) {
+          // EP-03: browser failed but console is up — surface the URL + reason.
+          return { consoleUrl, fallbackAction: `Console ready at ${consoleUrl} (browser auto-open failed: ${browserResult.reason ?? 'unknown'} — open the URL manually)` };
+        }
+        return { consoleUrl };
+      }
+    }
+     
+    await new Promise((r) => setTimeout(r, CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS));
+  }
+
+  // EP-03: console did not become ready — provide manual launch instruction.
+  return { fallbackAction: `pd console open --workspace "${workspaceDir}" --no-auth (auto-launch did not become ready in time; run manually)` };
+}
+
 interface CopyOptions {
   pluginDir: string;
   language: string;
@@ -999,6 +1129,9 @@ export interface InstallResult {
   nextAction: string;
   reason?: string;
   error?: string;
+  /** Task 8: URL the browser was opened to when the installer auto-launched the
+   * console via `pd console open`. Undefined when auto-launch was skipped or failed. */
+  consoleUrl?: string;
 }
 
 export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
@@ -1164,6 +1297,11 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
 
     killConsoleChild();
 
+    // Task 8: auto-launch console via `pd console open` (reuses PRI-300
+    // handleConsoleOpen — no new launcher subsystem). Opens the browser to
+    // /welcome for onboarding. Detached so the console survives installer exit.
+    const launchResult = await autoLaunchConsole(options.workspaceDir);
+
     const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
@@ -1174,7 +1312,16 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
     }
     if (components.console === 'configured') {
-      nextActions.push(`pd console --workspace "${options.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
+      if (launchResult.consoleUrl) {
+        // Console auto-launched — point user at the live URL.
+        nextActions.push(`Console ready at ${launchResult.consoleUrl} (browser opened automatically)`);
+      } else {
+        // EP-03: auto-launch did not succeed — keep manual start instruction.
+        nextActions.push(`pd console --workspace "${options.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
+      }
+    }
+    if (launchResult.fallbackAction) {
+      nextActions.push(launchResult.fallbackAction);
     }
 
     return {
@@ -1186,6 +1333,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       verification,
       enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
       nextAction: nextActions.join(' | '),
+      consoleUrl: launchResult.consoleUrl,
     };
   } catch (error) {
     if (spinner) spinner.fail('Install failed');

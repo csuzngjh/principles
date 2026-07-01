@@ -78,8 +78,8 @@ const steps = [
   {
     zhTitle: '真实反馈回流',
     enTitle: 'Feedback Loop',
-    zhDesc: '真实结果转化为算料流回沙盒，动态微调演化出更优心智模型，实现自我进化。',
-    enDesc: 'Feed back execution values into the sandbox, fine-tuning internal weights to auto-evolve rules.'
+    zhDesc: '真实结果转化为算料流回沙盒，沉淀为 Owner 审核通过的原则，应用到后续行为。',
+    enDesc: 'Feed back execution values into the sandbox, distilling them into owner-approved principles applied to future behavior.'
   }
 ]
 </script>

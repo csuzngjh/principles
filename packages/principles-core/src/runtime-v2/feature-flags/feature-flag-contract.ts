@@ -153,6 +153,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
+  // New user onboarding wizard — first-visit redirect to /welcome + demo story-a
+  // trigger endpoint. Maintainer-approved MVP-Core (2026-07-01): promoted from
+  // MVP-Quiet (default-off) to MVP-Core (default-on) after explicit maintainer
+  // approval. As a core flag it defaults ON and cannot be disabled by omission;
+  // explicit emergency disable via `enabled: false` is honored with a warning
+  // (see computeEffectiveFlags core-flag branch, mirrors PRI-435 code_rule_capability).
+  { id: 'new_user_onboarding', category: 'core', enabled: true, since: '2026-07-01', description: 'New user onboarding wizard — first-visit redirect to /welcome + demo story-a trigger endpoint. Maintainer-approved MVP-Core (2026-07-01): default-on; emergency disable via .pd/config.yaml: new_user_onboarding: { enabled: false }.' },
 ];
 
 export function computeEffectiveFlags(

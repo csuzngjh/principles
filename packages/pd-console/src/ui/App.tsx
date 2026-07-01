@@ -7,7 +7,8 @@ import { AppSidebar } from "./components/layout/app-sidebar.js";
 import { SplashScreen } from "./components/auth/splash-screen.js";
 import { LoginForm } from "./components/auth/login-form.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
-import { checkAuth, getToken } from "./api.js";
+import { checkAuth, getToken, fetchConfigSummary, fetchWorkspaces } from "./api.js";
+import type { ConfigSummaryData } from "./api.js";
 import { NotificationProvider } from "./components/notifications/NotificationProvider.js";
 import { Toaster } from "./components/ui/sonner.js";
 
@@ -25,6 +26,8 @@ import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
+import { WelcomePage } from "./pages/welcome/WelcomePage.js";
+import { getOnboardingState } from "./utils/onboarding-state.js";
 
 // Vite replaces import.meta.env.DEV with a boolean literal at build time.
 // The cast avoids TS2339 without needing a generated .d.ts file.
@@ -33,6 +36,13 @@ const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
 function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [showSplash, setShowSplash] = useState(true);
+  // Onboarding redirect needs workspaceId (for onboarding-state lookup) and
+  // feature flags (to gate the redirect). Both are fetched after auth.
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>("default");
+  const [featureFlags, setFeatureFlags] = useState<Record<string, { enabled: boolean }> | null>(null);
+  // P2-C: tracks whether workspace fetch succeeded. If it failed, we skip
+  // the onboarding redirect so state isn't saved under a fake "default" key.
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const navigate = useNavigate();
 
   const verifyAuth = useCallback(async () => {
@@ -52,29 +62,83 @@ function AuthRoutes() {
     // This effect only handles the case where auth resolves after splash is done
   }, [authed, showSplash, navigate]);
 
+  // Fetch workspace list + feature flags after auth for onboarding redirect.
+  // P2-5: use Promise.all so both states update together — prevents the
+  // redirect effect from firing with the wrong workspaceId (race condition).
+  // rc-9: on fetch failure, set featureFlags to {} so the redirect effect
+  // fires (defaults to /focus — safe, no onboarding forced).
   useEffect(() => {
-    if (authed === true) {
-      const currentPath = window.location.hash;
-      if (currentPath === "#/login" || currentPath === "#/splash" || currentPath === "#/") {
-        navigate("/focus", { replace: true });
+    if (authed !== true) return;
+
+    Promise.all([
+      fetchWorkspaces().catch(() => null),
+      fetchConfigSummary().catch(() => null),
+    ]).then(([wsResult, cfgResult]) => {
+      // Update workspaceId first (if we have a real workspace)
+      if (
+        wsResult &&
+        wsResult.success &&
+        Array.isArray(wsResult.data) &&
+        wsResult.data.length > 0
+      ) {
+        const firstWorkspace = wsResult.data[0];
+        if (firstWorkspace) {
+          setCurrentWorkspaceId(firstWorkspace.name);
+          // P2-C: only mark workspaceReady when we have a real workspace name.
+          setWorkspaceReady(true);
+        }
       }
+      // Then update featureFlags — the redirect effect waits for this.
+      // rc-9: on any failure, default to {} so redirect fires to /focus.
+      const flags: Record<string, { enabled: boolean }> = {};
+      if (
+        cfgResult &&
+        cfgResult.success &&
+        cfgResult.data
+      ) {
+        const summary: ConfigSummaryData = cfgResult.data;
+        for (const f of summary.features) {
+          flags[f.id] = { enabled: f.enabled };
+        }
+      }
+      setFeatureFlags(flags);
+    });
+  }, [authed]);
+
+  // P1-4: After splash finishes, if user is not authenticated, go to login.
+  // (The authed === true case is handled by the redirect effect below.)
+  useEffect(() => {
+    if (showSplash || authed !== false) return;
+    navigate('/login', { replace: true });
+  }, [showSplash, authed, navigate]);
+
+  // First-visit redirect: check new_user_onboarding flag + onboarding state.
+  // P1-4: Only redirect AFTER splash is done AND featureFlags are loaded.
+  // This prevents the race where splash navigates to /focus before flags
+  // load, which would bypass the onboarding redirect entirely.
+  useEffect(() => {
+    if (authed !== true || featureFlags === null || showSplash) return;
+
+    const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
+    // P2-C: if workspace fetch failed, don't force onboarding under "default" key.
+    if (flagEnabled && workspaceReady) {
+      const onboardingState = getOnboardingState(currentWorkspaceId);
+      navigate(onboardingState.completed ? '/focus' : '/welcome', { replace: true });
+    } else {
+      navigate('/focus', { replace: true });
     }
-  }, [authed, navigate]);
+  }, [authed, featureFlags, showSplash, currentWorkspaceId, workspaceReady, navigate]);
 
   const handleAuthSuccess = useCallback(() => {
     setAuthed(true);
-    navigate("/focus", { replace: true });
-  }, [navigate]);
+    // Post-auth redirect is handled by the authed + featureFlags effect above,
+    // which fires once feature flags have loaded.
+  }, []);
 
   return (
     <Routes>
       <Route path="/splash" element={<SplashScreen onComplete={() => {
         setShowSplash(false);
-        if (authed) {
-          navigate("/focus", { replace: true });
-        } else {
-          navigate("/login", { replace: true });
-        }
       }} />} />
       <Route path="/login" element={<LoginForm onAuthSuccess={handleAuthSuccess} />} />
       <Route
@@ -98,6 +162,7 @@ function AuthRoutes() {
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Navigate to="/focus" replace />} />
+                    <Route path="/welcome" element={<WelcomePage workspaceId={currentWorkspaceId} />} />
                     <Route path="/focus" element={<FocusPage />} />
                     <Route path="/pain" element={<PainPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
