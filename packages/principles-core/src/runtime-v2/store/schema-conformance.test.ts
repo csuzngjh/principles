@@ -888,7 +888,7 @@ describe('SchemaMigration', () => {
     const store = new SqliteCandidateStore(connection);
 
     // wrong expected status → returns false (guard生效), row unchanged
-    const okWrong = await store.transitionCandidateStatus('c-f13b', 'archived', 'consumed');
+    const okWrong = await store.transitionCandidateStatus('c-f13b', 'expired', 'consumed');
     expect(okWrong).toBe(false);
     const rowBefore = db.prepare('SELECT status, consumed_at FROM principle_candidates WHERE candidate_id = ?').get('c-f13b') as { status: string; consumed_at: string | null };
     expect(rowBefore.status).toBe('pending');
