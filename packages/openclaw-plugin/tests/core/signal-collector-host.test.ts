@@ -29,6 +29,7 @@ const testStore: UnifiedKeywordStore = {
   terms: {
     '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
     '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   },
 };
 
@@ -190,7 +191,7 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     expect(trackFriction).not.toHaveBeenCalled();
   });
 
-  it('LLM unavailable (degraded) → drops ambiguous candidate, no STRONG trigger', async () => {
+  it('LLM unavailable (degraded) → drops correction ambiguous candidate, no STRONG trigger', async () => {
     const wctx = makeMockWctx();
     // llmClassifier = null → 降级纯关键词
     const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
@@ -198,6 +199,28 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     await flushAsync();
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
     expect(trackFriction).not.toHaveBeenCalled();
+  });
+
+  it('LLM unavailable (degraded) → empathy ambiguous routed as WEAK (GFI accumulation preserved)', async () => {
+    // 回归测试: 旧版 prompt.ts 的 empathy keyword matcher 在关键词命中时直接
+    // trackFriction 累积 GFI,不依赖 LLM。SignalCollectorHost 重构后,当 LLM
+    // 不可用(默认配置)时,empathy ambiguous 候选必须降级为 WEAK 信号路由,
+    // 保留 GFI 累积行为,避免 empathy 检测完全失效。
+    const wctx = makeMockWctx();
+    // llmClassifier = null → 降级纯关键词
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('你搞什么啊', 'sess-empathy-degrade', 'user');
+    await flushAsync();
+    expect(trackFriction).toHaveBeenCalledTimes(1);
+    expect(trackFriction).toHaveBeenCalledWith(
+      'sess-empathy-degrade',
+      20,
+      expect.any(String),
+      '/tmp/test-ws',
+      { source: 'user_empathy' },
+    );
+    // STRONG 不触发(降级不触发诊断,仅累积 GFI)
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 
   it('LLM classifier throws exception → gracefully degraded to none', async () => {
