@@ -17,6 +17,7 @@ PD 即将发布给种子用户。当前新用户从安装到使用存在多处�
 4. **Installer 跑完无引导**——末尾只输出一行"Start console: pd console ..."文字，用户得自己复制命令到终端跑、再自己打开浏览器。
 5. **Console 打开后是空白 Focus 页**——没有欢迎引导，新用户不知道下一步做什么、PD 是什么、怎么产生第一个 pain。
 6. **官网视觉与品牌宪章偏离**——现有 landing 用赛博朋克风（深黑 + 霓虹渐变），品牌宪章要求治理工作台风（Warm Paper + Governance Blue + 克制）。
+7. **LLM 配置前置依赖断层**——`pd pain record` 走 Runtime V2 诊断流水线，需要 LLM provider/model/apiKeyEnv 配置（从 `.state/` 下的 runtime config 读取，不在 `.pd/config.yaml`）。installer 不引导配 LLM，新用户装完直接产生 pain 会因 `config_missing` 失败。
 
 ## 2. 用户画像
 
@@ -49,9 +50,14 @@ PD 即将发布给种子用户。当前新用户从安装到使用存在多处�
 
 1. **Pain 创建位置**: pain signal 的创建和触发必须发生在宿主 agent（OpenClaw / Codex / Claude Code）里，通过 `pd-pain-signal` 技能由 agent 调用 `pd pain record` 完成。**Console 永远不能创建 pain**——只能读取和展示。
 2. **Core/Plugin 边界**: `packages/principles-core/` 纯逻辑，`packages/openclaw-plugin/` I/O 边界。本次改动不触及 core，新增 I/O 逻辑在 installer 和 console 包内。
-3. **Runtime V2 流水线**: pain → split-diagnostician → candidates → ledger。Onboarding 产生的 pain 走完整流水线，不用合成数据。
-4. **品牌宪章**: 官网和 console 新增组件遵循 `docs/brand/PD_BRAND_CONSTITUTION.md`——克制、低饱和、Warm Paper、Governance Blue、细线回路图、无霓虹/渐变/3D 渲染。
-5. **Feature flag**: 不引入新功能子系统，不需要 feature flag 注册（遵守 ADR-0014 + PRI-239 约束）。
+3. **Runtime V2 流水线（完整路径）**:
+   - **自动路径**: tool failures → 累积 GFI/friction → **高价值事件**（高 GFI / 重复同型失败 / 严重语义 pain / LLM 瘫痪 / 显式手动 pain）才进入 Runtime V2 → **PainSignalBridge** → `SplitDiagnosticianRunner` → candidates → ledger
+   - **手动路径**: `pd pain record` → **PainToPrincipleService** → `SplitDiagnosticianRunner` → candidates → ledger
+   - 两条路径都走 SplitDiagnosticianRunner + candidates + ledger，差别在入口编排层（PainSignalBridge vs PainToPrincipleService）
+   - **不是所有 tool failure 都成 pain**——有高价值门槛
+4. **LLM 配置前置依赖**: `pd pain record` 调 `PainToPrincipleService.recordPain()` 走诊断流水线，**需要 LLM 配置**（provider / model / apiKeyEnv / baseUrl）。配置源是 `resolveRuntimeConfig(stateDir)`，从 `.state/` 下的 runtime config 读取，**不在 `.pd/config.yaml`**。配置缺失时返回 `failureCategory: 'config_missing'`，命令失败退出。Onboarding 在引导用户产生第一个 pain 之前必须确保 LLM 已配。
+5. **品牌宪章**: 官网和 console 新增组件遵循 `docs/brand/PD_BRAND_CONSTITUTION.md`——克制、低饱和、Warm Paper、Governance Blue、细线回路图、无霓虹/渐变/3D 渲染。
+6. **Feature flag**: 不引入新功能子系统，不需要 feature flag 注册（遵守 ADR-0014 + PRI-239 约束）。
 
 ## 5. 整体架构
 
@@ -108,12 +114,14 @@ PD 即将发布给种子用户。当前新用户从安装到使用存在多处�
 
 主 CTA 只有一个，符合品牌宪章"一个主要动作"。
 
-**改动 2: HeroSection 文案微调对齐品牌**
+**改动 2: HeroSection 文案微调对齐品牌与产品身份**
+
+对齐 PRODUCT_IDENTITY.md 的准确定义："PD is an owner-governed behavior internalization system for AI agents. It turns repeated, owner-relevant behavioral evidence into reviewed, reversible principles that can change future behavior."
 
 - H1: "Principles Disciple"
-- highlight: "把反复纠正 Agent 的经验，沉淀为可治理的原则。"
-- desc: "PD 帮助 Owner 从真实行为证据中审查、部署并回滚原则，让原则进入 Agent 的后续行为。"
-- 英文对应："Turn repeated corrections into governed, reviewable, rollbackable principles that shape future agent behavior."
+- highlight: "Owner 治理下的 Agent 行为内化系统。"
+- desc: "PD 把 Owner 反复纠正 Agent 的行为证据，沉淀为可审查、可回滚的原则，让原则进入 Agent 的后续行为。Pain 是 PD 对'行为证据'的技术名——不是每个 tool failure 都值得成为 pain。"
+- 英文对应："An owner-governed behavior internalization system. Turns repeated, owner-relevant behavioral evidence into reviewed, reversible principles that shape future agent behavior. Pain is PD's technical name for incoming behavior evidence — not every tool failure deserves a principle."
 
 **改动 3: landing 内嵌"快速安装卡片"**
 
@@ -205,6 +213,28 @@ installer 启动时调 `checkEnvironment()`，若检测到多个宿主，调交�
 - 否则默认按优先级：openclaw > codex > claude-code
 - 记录到 `InstallResult.runtime`
 
+**宿主选择写入 config.yaml 的位置**:
+
+选中宿主后，installer 修改 `.pd/config.yaml` 的两个现有字段（不引入新字段，对齐现有 schema）:
+- `runtimeProfiles`: 新增/更新 `<host>.default` 条目（如 `claude-code.default`），`type` 字段为对应宿主类型
+- `internalAgents.defaultRuntime`: 改为 `<host>.default`（如 `claude-code.default`），让内部 agent（diagnostician 等）用选中的宿主运行时
+
+示例（选 Claude Code 时）:
+```yaml
+runtimeProfiles:
+  openclaw.default:
+    type: openclaw
+    source: default
+  claude-code.default:           # 新增
+    type: claude-code
+    source: user-selected
+internalAgents:
+  defaultRuntime: claude-code.default   # 从 openclaw.default 改为
+  agents: { ... }
+```
+
+注意: 这只控制 PD 内部 agent 的 runtime profile 选择，**不等于 LLM provider/model 配置**——后者是独立问题，见 §6.3 onboarding 改动 0。
+
 **改动 2: 自动启动 console + 开浏览器**
 
 新增 `src/console-launcher.ts`（纯逻辑 + I/O 分离）。installer 末尾（所有组件 verified 之后）:
@@ -259,6 +289,23 @@ fallback: 快捷方式创建失败不阻塞安装，输出"桌面快捷方式创
 
 **架构约束**: pain signal 的创建和触发必须发生在宿主 agent 里，通过 `pd-pain-signal` 技能由 agent 调用 `pd pain record` 完成。Console 是治理/观察层，只能读取和展示已产生的 pain，**不能**直接创建 pain。
 
+**改动 0（前置）: LLM 配置检查与引导**
+
+这是针对架构约束 §4.4 的必要前置。`pd pain record` 需要 LLM 配置（provider/model/apiKeyEnv/baseUrl），配置源是 `resolveRuntimeConfig(stateDir)` 从 `.state/` 下读取，**不在 `.pd/config.yaml`**。新用户装完 PD 通常没配 LLM，若直接引导产生 pain 会因 `config_missing` 失败。
+
+onboarding 步骤 4（产生第一个 pain）之前，必须先检查 LLM 配置是否可用。检查方式：调 console 后端的 `/api/v1/runtime-config` 端点（若不存在，本次新增——只读端点，返回 `resolveRuntimeConfig(stateDir)` 的 redacted 摘要）。
+
+若检查结果是配置缺失或无效:
+- onboarding 插入一个"配置 LLM"中间步骤（步骤 3.5，在 principle 概念之后、产生 pain 之前）
+- 引导用户填写 provider（如 `openai` / `anthropic` / `openrouter`）、model（如 `gpt-4o` / `claude-sonnet-4-5`）、apiKeyEnv（环境变量名，如 `OPENAI_API_KEY`）
+- 写入 `.state/` 下对应的 runtime config 文件（具体路径和格式在实施前需进一步核实 `resolveRuntimeConfig` 的读取逻辑）
+- 提供 `pd runtime probe --runtime pi-ai --provider ... --model ... --apiKeyEnv ... --workspace <path>` 命令作为验证手段
+
+**关键约束**:
+- API key 本身不写入配置文件——只写 `apiKeyEnv` 字段（环境变量名），用户需自己设环境变量
+- onboarding 不强制配 LLM——用户可跳过此步骤，但步骤 4 会明确提示"未配 LLM，产生 pain 可能失败，是否先配置？"
+- 这是 onboarding 唯一涉及"写宿主侧配置"的步骤，但仍通过 console 后端 API 完成，不违反"console 不写 pain"约束（写的是 runtime config，不是 pain）
+
 **改动 1: 新增 /welcome 路由 + WelcomePage 组件**
 
 在 `AuthRoutes` 里加:
@@ -279,25 +326,26 @@ useEffect(() => {
 
 **WelcomePage 组件（`src/ui/pages/welcome/WelcomePage.tsx`）**
 
-遵循品牌宪章 §3.3"每个界面只服务一个高质量决策"。4 步向导结构:
+遵循品牌宪章 §3.3"每个界面只服务一个高质量决策"。5 步向导结构（原 4 步 + LLM 配置步骤）:
 
 | 步骤 | 服务什么判断 | 核心内容 | 交互 |
 |---|---|---|---|
 | 1 · 欢迎与回路 | PD 是什么 | 核心回路图（Evidence→Principle→Owner Gate→Behavior Change），一句话定义 | [开始] / [跳过] |
-| 2 · 什么是 pain | pain 不是报错 | pain 是"值得治理的行为证据"。举例："Agent 多次在未确认范围的情况下大面积修改"。展示一条示例 pain 卡片 | [下一步] |
+| 2 · 什么是 pain | pain 不是报错 | pain 是"值得治理的行为证据"的技术名（PRODUCT_IDENTITY.md: "Pain is PD's current technical name for incoming behavior evidence. It does not mean every tool failure deserves a principle."）。举例："Agent 多次在未确认范围的情况下大面积修改"。展示一条示例 pain 卡片 | [下一步] |
 | 3 · 什么是 principle | 原则不是 prompt | principle 是"可审查的行为政策"。展示一条示例原则卡片 + Owner Gate（批准/修改/拒绝/暂存） | [下一步] |
-| 4 · 产生你的第一个 pain | 让用户行动 | 进入"产生第一个 pain"流程（见改动 3） | [记录 pain] |
+| 4 · 配置诊断 LLM（可跳过） | 让 PD 能诊断 pain | 检查 `.state/` runtime config 是否有有效 LLM 配置。若有 → 跳过此步。若无 → 引导填 provider/model/apiKeyEnv（见改动 0） | [配置] / [跳过，稍后配] |
+| 5 · 产生你的第一个 pain | 让用户行动 | 进入"产生第一个 pain"流程（见改动 3）。若步骤 4 跳过，明确提示"未配 LLM，真实 pain 可能失败，建议先配" | [去 Agent 产生] |
 
-步骤 4 是 onboarding 终点 C 的核心——产生第一个 pain。
+步骤 5 是 onboarding 终点 C 的核心——产生第一个 pain。步骤 4（LLM 配置）是步骤 5 的前置依赖。
 
 视觉约束（品牌宪章）:
 - 留白充足，每步只讲一个概念
 - 细线回路图，节点≤6，Owner Gate 轻微 Governance Blue 强调
 - 无动画装饰、无渐变、无 emoji（除回路图节点外）
 - 按钮：主 CTA Governance Blue，次 CTA 透明边框
-- 进度指示：4 个小圆点（已完成实心、当前带细线环、未来空心）
+- 进度指示：5 个小圆点（已完成实心、当前带细线环、未来空心）
 
-完成标记: 步骤 4 产生 pain 后（或用户点"跳过"），`localStorage.setItem('pd_onboarding_completed', 'true')`，然后 `navigate('/focus')`。
+完成标记: 步骤 5 产生 pain 后（或用户点"跳过"），`localStorage.setItem('pd_onboarding_completed', 'true')`，然后 `navigate('/focus')`。
 
 **改动 2: onboarding state 持久化**
 
@@ -329,27 +377,36 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 
 **改动 3: 产生第一个 pain 的三层流程（步骤 4）**
 
-这是 Q5 决策 D 的实现：路径 1（引导用户回宿主，含回忆真实场景）→ 路径 2（当场小任务）→ 路径 3（demo story-a 演示兜底）。
+这是 Q5 决策 D 的实现：路径 1（引导用户回宿主，含回忆真实场景）→ 路径 2（当场小任务）→ 路径 3（内置静态演示 pain 兜底）。
 
 核心约束: console 只观察不创建 pain。pain 的实际创建由 agent 在宿主里完成（自动捕获 via `after_tool_call` hook，或 agent 主动调 `pd pain record` via pd-pain-signal 技能）。console 轮询 `fetchEvidenceChain()` 检测新 pain 出现。
 
+**前置依赖（重要）**: 路径 1 和路径 2 都依赖 LLM 配置已就绪（见改动 0）。若用户跳过 LLM 配置，路径 1/2 会因 `config_missing` 失败——此时 onboarding 直接跳路径 3 兜底，并提示"未配 LLM，无法真实产生 pain，以下为演示"。
+
 路径 1 · 引导用户回宿主 agent（默认路径，含回忆真实场景）:
-1. console 显示引导文案 + 示例 prompt："告诉你的 Agent：'刚才 Agent 在 [场景] 犯错了，请用 pd-pain-signal 技能记录一个 pain，reason 是 [你的描述]'"
+1. console 显示引导文案 + 示例 prompt："告诉你的 Agent：'刚才 Agent 在 [场景] 犛错了，请用 pd-pain-signal 技能记录一个 pain，reason 是 [你的描述]'"
 2. 用户切到宿主 agent，按引导操作
-3. agent 调 `pd pain record --reason "..." --workspace <path>` → 写入工作区 SQLite
-4. console 轮询 `fetchEvidenceChain()` → 检测到新 pain → 展示 pain 卡片 → onboarding 完成
+3. agent 调 `pd pain record --reason "..." --workspace <path>` → 走 `PainToPrincipleService.recordPain()` → 诊断流水线（SplitDiagnosticianRunner → candidates → ledger）→ 写入工作区 SQLite
+4. console 轮询 `fetchEvidenceChain()`（返回 pain_events + tasks + candidates + ledger 的整个证据链）→ 前端记录 onboarding 开始时的 pain_events ID 集合，对比新查询结果判断"有新 pain"→ 展示 pain 卡片 → onboarding 完成
+
+注意（基于 pain-record.ts 实际行为）:
+- `pd pain record` 是异步的（feature flag `diagnostician_async_cli` 控制），可能返回 `status: 'submitted'` 而非立即 `succeeded`
+- onboarding 轮询要容忍异步：返回 submitted 时继续等，直到 evidence-chain 出现新 pain_events 记录或超时
+- 流水线可能失败（config_missing / provider 调用失败 / 超时），onboarding 要展示失败状态并引导到路径 3
 
 路径 2 · 当场小任务（路径 1 的具体化）:
 路径 1 的引导里附带任务建议："如果想不到场景，试试让 Agent 帮你写一封邮件/整理一个文件夹，看它会不会犯错。" 仍是用户回宿主操作，console 只观察。
 
-路径 3 · 兜底演示 pain（不创建真实 pain）:
-复用 `pd demo story-a` 已有的演示数据。console 展示一条标注"演示数据"的 pain 卡片。onboarding 标记完成（但 painId 是 demo 的，非真实）。
+路径 3 · 兜底演示 pain（不创建真实 pain，不依赖 demo story-a）:
+**不使用 `pd demo story-a`**——demo story-a 跑的是端到端激活流水线（artifact → dispatch → 审批 → 激活），不产生 pain_events 记录，不能作为演示 pain 来源。
 
-步骤 4 的 UI:
+改为：console 内置一条**静态演示 pain JSON**（硬编码在 WelcomePage 组件里），标注"演示数据"。内容包括示例 reason、score、painId（假）、证据链摘要。这是纯展示，不写工作区 SQLite。onboarding 标记完成，跳 /focus。
+
+步骤 5 的 UI:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ●  ●  ●  ●   步骤 4 / 4 · 产生你的第一个 pain       │
+│  ●  ●  ●  ●  ●   步骤 5 / 5 · 产生你的第一个 pain   │
 │                                                      │
 │  现在去你的 Agent 平台（OpenClaw / Codex / Claude    │
 │  Code），让 Agent 做一件小事。                       │
@@ -369,26 +426,32 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 └─────────────────────────────────────────────────────┘
 ```
 
-文案要点: 步骤 4 的引导文案要明确告诉用户"去你的 Agent 平台操作"，避免用户以为在 console 里能直接记录 pain。
+文案要点: 步骤 5 的引导文案要明确告诉用户"去你的 Agent 平台操作"，避免用户以为在 console 里能直接记录 pain。若步骤 4 LLM 未配，此步骤顶部加提示"⚠ 未配诊断 LLM，真实 pain 可能失败。建议先回步骤 4 配置。"
 
 **文件改动清单**:
 
 新增:
-- `src/ui/pages/welcome/WelcomePage.tsx`（向导主体，4 步）
+- `src/ui/pages/welcome/WelcomePage.tsx`（向导主体，5 步）
 - `src/ui/pages/welcome/onboarding-circuit-diagram.tsx`（细线回路图）
+- `src/ui/pages/welcome/LLMConfigStep.tsx`（步骤 4 的 LLM 配置表单）
+- `src/ui/pages/welcome/static-demo-pain.ts`（路径 3 的静态演示 pain JSON）
 - `src/ui/utils/onboarding-state.ts`（localStorage 工具）
+- `src/server/routes/runtime-config.ts`（GET /api/v1/runtime-config 只读端点 + POST /api/v1/runtime-config 写入端点）
+- `src/ui/api.ts` 新增 `fetchRuntimeConfig()` + `saveRuntimeConfig()` 函数
 
 修改:
 - `src/ui/App.tsx`（加 /welcome 路由 + 首次跳转逻辑）
 - `src/ui/components/layout/app-sidebar.tsx`（加"新手引导"链接）
 - `src/ui/pages/settings/SettingsPage.tsx`（加"重置 onboarding"按钮）
-- `src/ui/i18n/en.json` + `zh-CN.json`（新增 onboarding 文案）
+- `src/ui/i18n/en.json` + `zh-CN.json`（新增 onboarding 文案，含 LLM 配置步骤文案）
+- `src/server/index.ts`（注册 /api/v1/runtime-config 路由）
 
 不修改（重要）:
 - ❌ 不改 PainPage（保持只读）
-- ❌ 不改 `src/ui/api.ts`（不加 recordPain 函数）
-- ❌ 不新增后端 pain-record 路由
 - ❌ 不改 openclaw-plugin 的 pain 创建路径（那是宿主侧，本次不改）
+- ❌ 不改 principles-core（core 不动）
+
+注意: `src/ui/api.ts` 本次会新增 `fetchRuntimeConfig()` 和 `saveRuntimeConfig()` 函数（用于 LLM 配置步骤），但**不加** `recordPain()` 函数（console 不创建 pain）。
 
 **不做（YAGNI）**:
 - 不做 onboarding 步骤进度后端持久化（localStorage 够）
@@ -406,15 +469,24 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 │ 官网 landing │     │  /install 页     │     │   installer      │     │  console /welcome│     │  宿主 agent      │
 │             │     │                  │     │                  │     │                  │     │                 │
 │ [快速开始]──┼────▶│ 选 OS + 平台     │     │ 检测多宿主       │     │ 步骤 1-3 概念    │     │ 用户操作 agent  │
-│             │     │ 生成命令         │     │ 选宿主           │     │ 步骤 4 引导     │────▶│ pd pain record  │
-│ QuickCard   │     │      │           │     │ 安装组件         │     │      │           │     │ 或自动捕获      │
-│             │     │      ▼           │     │ 自动启动 console │     │      ▼           │     │       │         │
-│             │     │ npx create-...   │────▶│ + 开浏览器       │────▶│ 轮询 evidence    │◀────│       │         │
-│             │     │                  │     │ + 桌面快捷方式   │     │      │           │     │       ▼         │
+│             │     │ 生成命令         │     │ 选宿主           │     │ 步骤 4 配 LLM   │     │       │         │
+│ QuickCard   │     │      │           │     │ 写 .pd/config.   │     │      │           │     │       │         │
+│             │     │      ▼           │     │  yaml runtimePro │     │      ▼           │     │       │         │
+│             │     │ npx create-...   │────▶│ file + 自动启动  │────▶│ 步骤 5 引导     │────▶│ pd pain record  │
+│             │     │                  │     │ console + 快捷键 │     │      │           │     │ PainToPrinciple │
+│             │     │                  │     │                  │     │      ▼           │     │ Service         │
+│             │     │                  │     │                  │     │ 轮询 evidence    │◀────│       │         │
+│             │     │                  │     │                  │     │      │           │     │       ▼         │
 │             │     │                  │     │                  │     │      ▼           │     │ 工作区 SQLite   │
 │             │     │                  │     │                  │     │ 标记完成→/focus │     │                 │
 └─────────────┘     └──────────────────┘     └──────────────────┘     └──────────────────┘     └─────────────────┘
+                                                  installer 写
+                                                  .state/ runtime       步骤 4 写
+                                                  config（若实施       .state/ runtime
+                                                  时决定纳入范围）     config（LLM 配置）
 ```
+
+注意: installer 侧是否要主动写 `.state/` runtime config（LLM 配置）是一个待定项（见 §12 假设 2）。当前设计把 LLM 配置放在 console onboarding 步骤 4，installer 不做 LLM 配置。
 
 #### 6.4.2 Onboarding State 状态机（console 侧）
 
@@ -444,7 +516,14 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
                                 │ [下一步]
                                 ▼
                     ┌───────────────────────────┐
-                    │  STEP_4_AWAIT_PAIN        │
+                    │  STEP_4_LLM_CONFIG        │
+                    │  (检查/配置 LLM)          │
+                    │  已配 → 跳过              │
+                    └───────────┬───────────────┘
+                                │ [配置] / [跳过，稍后配]
+                                ▼
+                    ┌───────────────────────────┐
+                    │  STEP_5_AWAIT_PAIN        │
                     │  (引导回宿主 + 轮询)      │◀───┐
                     └───────────┬───────────────┘    │
                                 │ 检测到新 pain / [跳过] / [演示]
@@ -459,7 +538,7 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 
 状态持久化策略:
 - 只持久化一个布尔值 `pd_onboarding_completed`（localStorage）
-- 不持久化"当前在哪一步"——用户中途刷新就从 STEP_1 重新开始（简单可接受，4 步不长）
+- 不持久化"当前在哪一步"——用户中途刷新就从 STEP_1 重新开始（简单可接受，5 步不长）
 - 用户点"跳过"也算 COMPLETED（避免 onboarding 变成阻塞墙）
 
 #### 6.4.3 Installer State 状态机
@@ -512,19 +591,26 @@ Settings 页加"重置 onboarding": 设置页加一个"重置新手引导"按钮
 #### 6.4.4 跨组件数据契约
 
 Installer → Console 的数据传递:
-- installer 把选中的宿主写到工作区配置 `{workspace}/.principles/config.yaml` 的 `runtime: openclaw|codex|claude-code`
-- console 启动时读这个配置，/welcome 步骤 4 的引导文案根据 `runtime` 显示对应的宿主名和操作指引
+- installer 把选中的宿主写到 `.pd/config.yaml` 的 `runtimeProfiles` 和 `internalAgents.defaultRuntime` 字段（见 §6.2 改动 1 的"宿主选择写入 config.yaml 的位置"）
+- console 启动时读 `.pd/config.yaml`，/welcome 步骤 5 的引导文案根据 `internalAgents.defaultRuntime` 显示对应的宿主名和操作指引
 - 不通过 URL query 传参（installer 开的是 `http://127.0.0.1:3100/welcome`，不带 query）
+
+LLM 配置的数据流（独立于宿主选择）:
+- onboarding 步骤 4 检查 `.state/` 下的 runtime config（provider/model/apiKeyEnv/baseUrl）
+- 若缺失，console 后端 POST /api/v1/runtime-config 写入 `.state/` 下对应文件
+- `pd pain record` 运行时从同一位置读取
+- 注意: LLM 配置和宿主选择是**两个独立维度**——宿主选择控制 PD 内部 agent 用哪个 runtime profile，LLM 配置控制诊断流水线调哪个 LLM provider
 
 Console → 宿主 agent 的数据流:
 - **没有直接通信**——console 和 agent 不互通
 - 数据通过工作区 SQLite 中转：agent 写 pain → console 读 pain
-- console 轮询 `fetchEvidenceChain()` 读工作区 SQLite
+- console 轮询 `fetchEvidenceChain()`（返回 pain_events + tasks + candidates + ledger 的整个证据链）
 
 关键边界（重要）:
 - console 后端只读工作区 SQLite（展示 pain/principle/candidate）
 - agent 通过 hooks 和 skills 写工作区 SQLite（创建 pain/记录诊断）
 - **console 永远不写 pain**（这是 §6.3 的核心约束）
+- console 可以写 `.state/` runtime config（LLM 配置），但这不是 pain，不违反边界
 
 #### 6.4.5 错误处理
 
@@ -534,9 +620,11 @@ Console → 宿主 agent 的数据流:
 | installer 所有宿主缺失 | 终止 + 三个下载链接 | "需要至少一个 agent 平台" |
 | installer 自动启动 console 失败 | fallback 文字指引 | "请手动运行：pd console --workspace ... --no-auth" |
 | 桌面快捷方式创建失败 | 不阻塞，记录日志 | 无感知（fallback 靠下次手动启动） |
-| /welcome 轮询 10 分钟无 pain | 提示演示或跳过 | "还没捕获到？看看演示 pain / 跳过" |
-| /welcome 轮询 API 401 | 跳 /login 重新登录 | 跳登录页 |
-| /welcome 步骤间刷新 | 从 STEP_1 重新开始 | "从头开始"（4 步不长） |
+| onboarding 步骤 4 检测到 LLM 未配 | 引导配置或允许跳过 | "未配诊断 LLM，真实 pain 会失败。配置 / 稍后配 / 跳过看演示" |
+| 步骤 5 轮询时 `pd pain record` 返回 config_missing | 提示回步骤 4 配 LLM，或看演示 | "Agent 报告配置缺失。回步骤 4 配 LLM / 看演示" |
+| 步骤 5 轮询 10 分钟无 pain | 提示演示或跳过 | "还没捕获到？看看演示 pain / 跳过" |
+| 步骤 5 轮询 API 401 | 跳 /login 重新登录 | 跳登录页 |
+| 步骤间刷新 | 从 STEP_1 重新开始 | "从头开始"（5 步不长） |
 
 ### 6.5 测试策略
 
@@ -578,11 +666,19 @@ Console → 宿主 agent 的数据流:
   - `pd_onboarding_completed` 未设 → 跳 /welcome
   - 已设为 'true' → 跳 /focus
   - localStorage 抛错 → 默认跳 /welcome（安全侧）
-- WelcomePage 步骤切换：4 步前进/后退
-- 步骤 4 轮询:
-  - `fetchEvidenceChain` 返回新 painId → 标记完成 + 跳 /focus
+- WelcomePage 步骤切换：5 步前进/后退
+- 步骤 4 LLM 配置:
+  - 已配 → 自动跳过到步骤 5
+  - 未配 → 显示配置表单，POST 后写入 `.state/`
+  - 跳过 → 允许继续到步骤 5，但步骤 5 顶部显示警告
+- 步骤 5 轮询:
+  - `fetchEvidenceChain` 返回新 pain_events（对比 onboarding 开始时的 ID 集合）→ 标记完成 + 跳 /focus
   - 10 分钟无新 pain → 显示 fallback 按钮
   - 轮询期间组件卸载 → 清除定时器（避免 memory leak）
+  - 容忍 `pd pain record` 异步：返回 submitted 时继续等
+- 路径 3 静态演示 pain:
+  - 硬编码 JSON 结构正确，能渲染成 pain 卡片
+  - 标注"演示数据"，不写工作区 SQLite
 
 §5 状态机:
 - installer 状态转换：ENV_CHECK → HOST_SELECT → INSTALL_PIPELINE → ...
@@ -660,18 +756,22 @@ Console → 宿主 agent 的数据流:
 ### §6.3 Console
 - 新增 `packages/pd-console/src/ui/pages/welcome/WelcomePage.tsx`
 - 新增 `packages/pd-console/src/ui/pages/welcome/onboarding-circuit-diagram.tsx`
+- 新增 `packages/pd-console/src/ui/pages/welcome/LLMConfigStep.tsx`
+- 新增 `packages/pd-console/src/ui/pages/welcome/static-demo-pain.ts`
 - 新增 `packages/pd-console/src/ui/utils/onboarding-state.ts`
+- 新增 `packages/pd-console/src/server/routes/runtime-config.ts`（GET + POST /api/v1/runtime-config）
 - 改 `packages/pd-console/src/ui/App.tsx`（/welcome 路由 + 首次跳转）
+- 改 `packages/pd-console/src/ui/api.ts`（加 fetchRuntimeConfig + saveRuntimeConfig，不加 recordPain）
 - 改 `packages/pd-console/src/ui/components/layout/app-sidebar.tsx`（新手引导链接）
 - 改 `packages/pd-console/src/ui/pages/settings/SettingsPage.tsx`（重置按钮）
 - 改 `packages/pd-console/src/ui/i18n/en.json` + `zh-CN.json`
+- 改 `packages/pd-console/src/server/index.ts`（注册 /api/v1/runtime-config 路由）
 
 ### 不修改（架构约束）
 - ❌ `packages/openclaw-plugin/src/commands/pain.ts`（宿主侧 pain 创建，本次不改）
 - ❌ `packages/principles-core/src/runtime-v2/*`（core 不动）
 - ❌ `packages/pd-console/src/ui/pages/pain/PainPage.tsx`（保持只读）
-- ❌ `packages/pd-console/src/ui/api.ts`（不加 recordPain）
-- ❌ `packages/pd-console/src/server/routes/*`（不新增 pain-record 路由）
+- ❌ `packages/pd-console/src/server/routes/*`（不新增 pain-record 路由；只新增 runtime-config 路由，写的是 runtime config 不是 pain）
 
 ---
 
@@ -679,31 +779,45 @@ Console → 宿主 agent 的数据流:
 
 1. **官网 landing**: HeroSection 有"快速开始"按钮 → 跳 /install；landing 有 QuickInstallCard 显示安装命令 + 复制按钮。
 2. **/install 页**: 选 OS + 平台 → 命令动态生成；有"没装？下载链接"提示。
-3. **Installer 多宿主检测**: 装 OpenClaw + Claude Code 的机器跑 installer，能列出两个让用户选；都没装的机器终止并给三个下载链接。
+3. **Installer 多宿主检测**: 装 OpenClaw + Claude Code 的机器跑 installer，能列出两个让用户选；都没装的机器终止并给三个下载链接。选中后写入 `.pd/config.yaml` 的 `runtimeProfiles` 和 `internalAgents.defaultRuntime`。
 4. **Installer 自动启动**: installer 跑完后浏览器自动打开 `http://127.0.0.1:3100/welcome`；桌面有 `PD Console` 快捷方式。
-5. **Console /welcome**: 首次打开 console 自动跳 /welcome；4 步向导可走完；步骤 4 引导用户回宿主 agent；检测到新 pain 后标记完成跳 /focus。
-6. **Onboarding state**: `pd_onboarding_completed=true` 后再开 console 跳 /focus；Settings 页"重置"后重新跳 /welcome。
-7. **架构边界**: console 后端无写 pain 导入；core 无 I/O 依赖新增；architecture-regression.test.ts 通过。
-8. **测试**: §6.5.2 所有用例通过。
+5. **Console /welcome**: 首次打开 console 自动跳 /welcome；5 步向导可走完。
+6. **LLM 配置步骤**: 步骤 4 检测 `.state/` runtime config；未配时引导填 provider/model/apiKeyEnv 并写入；已配时自动跳过。
+7. **第一个 pain 产生**: 步骤 5 引导用户回宿主 agent 调 `pd pain record`；console 轮询 `fetchEvidenceChain()` 检测新 pain_events；检测到后标记完成跳 /focus。
+8. **Onboarding state**: `pd_onboarding_completed=true` 后再开 console 跳 /focus；Settings 页"重置"后重新跳 /welcome。
+9. **架构边界**: console 后端无写 pain 导入；core 无 I/O 依赖新增；architecture-regression.test.ts 通过。
+10. **测试**: §6.5.2 所有用例通过。
 
 ---
 
 ## 12. 实施前需验证的假设
 
-以下假设在 spec 阶段未完全验证，实施第一步必须确认：
+以下假设在 spec 阶段已部分核实，但实施第一步仍需最终确认：
 
-1. **demo story-a 演示数据假设**: §6.3 路径 3 假设 `pd demo story-a` 会产生可展示的演示 pain 数据。需验证：
-   - `pd demo story-a` 是否真的写入演示 pain 到工作区 SQLite？
-   - 演示 pain 的 painId 是否可被 console `fetchEvidenceChain()` 读取？
-   - 若不满足，路径 3 需改为"console 内置一条静态演示 pain JSON"（不依赖 demo 命令）。
+**已核实（spec 修订时已查证）**:
 
-2. **工作区 config.yaml runtime 字段假设**: §6.4.4 假设 `{workspace}/.principles/config.yaml` 有 `runtime` 字段且 console 可读。需验证：
-   - 现有 config.yaml 结构是否有 runtime 字段？若无，installer 写入时需新增字段（注意不破坏现有 schema）。
-   - console 是否已有读 config.yaml 的能力？若无，需新增读取逻辑。
+1. **demo story-a 不产生演示 pain**: §6.3 路径 3 原假设 `pd demo story-a` 产生演示 pain——已核实不成立。demo story-a 跑的是端到端激活流水线（artifact → dispatch → 审批 → 激活），不写 pain_events。路径 3 已改为 console 内置静态演示 pain JSON。
 
-3. **console health 端点假设**: §6.2 改动 2 假设 console 有 `/api/health` 端点。需验证：
-   - 现有 console server 是否有 health check 路由？若无，需新增（轻量，返回 `{status: "ok"}`）。
+2. **`.pd/config.yaml` schema**: 已核实路径是 `.pd/config.yaml`（不是 `.principles/config.yaml`），有 `runtimeProfiles` 和 `internalAgents.defaultRuntime` 字段。installer 写入选中宿主到这两个字段，不引入新字段。
 
-4. **fetchEvidenceChain 轮询新 pain 的能力假设**: §6.3 改动 3 假设 console 前端可通过 `fetchEvidenceChain()` 检测"新出现的 pain"。需验证：
-   - 现有 `fetchEvidenceChain()` 返回的数据结构是否包含时间戳或 painId 列表，能让前端判断"有新 pain"？
-   - 若只返回最新一条，前端需记录"onboarding 开始时已有的 painId 集合"，对比新查询结果判断新增。
+3. **console health 端点**: 已核实 `/api/health` 端点存在（`server/index.ts` line 416）。
+
+4. **fetchEvidenceChain 返回结构**: 已核实返回 pain_events + tasks + candidates + ledger 的整个证据链（不是只返回最新一条 pain）。前端需记录 onboarding 开始时的 pain_events ID 集合，对比判断新增。
+
+5. **pd pain record 行为**: 已核实 `pd pain record` 走 `PainToPrincipleService.recordPain()` 完整诊断流水线，需要 LLM 配置（provider/model/apiKeyEnv/baseUrl），配置缺失时返回 `config_missing` 失败。是异步的（feature flag `diagnostician_async_cli` 控制）。
+
+**仍需实施时验证**:
+
+6. **`.state/` runtime config 的具体路径和格式**: §6.3 改动 0 假设 `resolveRuntimeConfig(stateDir)` 从 `.state/` 下某文件读取 LLM 配置。需核实:
+   - 具体文件路径和格式（JSON / YAML / 其他）
+   - 写入是否需要特殊权限或原子性保证
+   - 是否有现成的 CLI 命令可以写入（避免 console 后端重新实现写入逻辑）
+
+7. **runtime-config 写入端点的安全性**: §6.3 改动 0 新增 POST /api/v1/runtime-config。需确认:
+   - 是否需要认证（console 当前 `--no-auth` 模式下可能无认证）
+   - API key 不应通过 console 传输——只写 `apiKeyEnv` 字段（环境变量名），用户自己设环境变量。这点已在 spec 写明，但实施时要确保 UI 文案明确。
+
+8. **onboarding 步骤 4 的 UX 决策**: LLM 配置步骤是否会让非技术用户卡住？provider/model/apiKeyEnv 这些字段对非技术用户可能太技术化。实施时可能需要:
+   - 预设几个常见组合（如 "OpenAI GPT-4o" / "Anthropic Claude Sonnet" / "OpenRouter"）
+   - 让用户选预设而非填原始字段
+   - 但这超出当前 spec 范围，作为实施时的 UX 细化项。
