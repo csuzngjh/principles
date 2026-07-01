@@ -45,7 +45,7 @@ function saveConfig(workspaceDir: string, config: ContextInjectionConfig): boole
         rawConfig.contextInjection = config;
         
         // Write back as YAML
-        const yamlStr = yaml.dump(rawConfig, { indent: 2, lineWidth: 120, noRefs: true, quotingType: '"', forceQuotes: false });
+        const yamlStr = yaml.dump(rawConfig, { indent: 2, lineWidth: 120, noRefs: true, forceQuotes: false });
         atomicWriteFileSync(configPath, yamlStr);
         return true;
     } catch (e) {
