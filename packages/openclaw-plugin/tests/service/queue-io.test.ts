@@ -66,7 +66,7 @@ describe('loadEvolutionQueue', () => {
         const v2File = path.join(tmpDir, 'v2-queue.json');
         const v2Item = {
             id: 'item-2',
-            taskKind: 'principle_generation',
+            taskKind: 'model_eval',
             priority: 'high',
             source: 'correction_keyword',
             traceId: 'abc123',
@@ -86,7 +86,7 @@ describe('loadEvolutionQueue', () => {
         fs.writeFileSync(v2File, JSON.stringify([v2Item]));
         const result = loadEvolutionQueue(v2File);
         expect(result).toHaveLength(1);
-        expect(result[0]).toMatchObject({ id: 'item-2', taskKind: 'principle_generation', priority: 'high' });
+        expect(result[0]).toMatchObject({ id: 'item-2', taskKind: 'model_eval', priority: 'high' });
     });
 
     it('recovers with empty array when file contains corrupted JSON', () => {

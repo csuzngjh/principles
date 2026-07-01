@@ -171,7 +171,7 @@ export function handleAfterToolCall(
     effectiveWorkspaceDir = resolveWorkspaceDirForRuntimeV2(ctx, api, 'after_tool_call');
   } catch (error) {
     SystemLogger.log(
-      (ctx as any).workspaceDir ?? 'unknown',
+      ctx.workspaceDir ?? 'unknown',
       'WORKSPACE_RESOLUTION_FAILED',
       JSON.stringify({
         hook: 'after_tool_call',

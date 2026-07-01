@@ -144,6 +144,76 @@ export const LedgerPrincipleEntrySchema = Type.Object({
 
 export type LedgerPrincipleEntry = Static<typeof LedgerPrincipleEntrySchema>;
 
+// ── Recommendation (parsed from untrusted artifact/candidate JSON) ─────────
+
+/**
+ * Reduced recommendation shape consumed by CandidateIntakeService.
+ *
+ * This is the simplified form extracted from `candidate.sourceRecommendationJson`
+ * (canonical) or `artifact.contentJson` (legacy fallback). All fields are
+ * optional because the intake service applies its own fallbacks (e.g. `text`
+ * falls back to `candidate.description`). Do NOT confuse with the richer
+ * `DiagnosticianRecommendation` in diagnostician-output.ts (different contract).
+ *
+ * rc-1/rc-2 (ERR-001/ERR-005): values parsed from DB/LLM JSON are untrusted and
+ * MUST pass `validateRecommendation()` before use. Never cast directly.
+ */
+export interface Recommendation {
+  title?: string;
+  text?: string;
+  triggerPattern?: string;
+  action?: string;
+  abstractedPrinciple?: string;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const RECOMMENDATION_STRING_FIELDS = [
+  'title',
+  'text',
+  'triggerPattern',
+  'action',
+  'abstractedPrinciple',
+] as const;
+
+/**
+ * Validate an untrusted parsed value as a {@link Recommendation}.
+ *
+ * Mirrors the `validateReplayReport` pattern (ConsoleLifecycleDatasource.ts):
+ * returns the narrowed value, or `null` when the shape is wrong. Callers decide
+ * the failure policy (the intake service falls back / throws INPUT_INVALID).
+ *
+ * Rules:
+ *  - root must be a plain object (rejects arrays, null, primitives)
+ *  - every recognized field, when present, must be a string
+ *
+ * This is intentionally lenient about *which* fields are present — the intake
+ * service treats all of them as optional and applies its own fallbacks. It is
+ * strict only about *types*: a number where a string is expected is rejected.
+ *
+ * rc-1 (treat parsed JSON as unknown) / rc-2 (no `as` bypass) — ERR-001/ERR-005.
+ */
+export function validateRecommendation(raw: unknown): Recommendation | null {
+  if (!isRecord(raw)) return null;
+  let hasKnownField = false;
+  for (const key of RECOMMENDATION_STRING_FIELDS) {
+    const v = raw[key];
+    if (v !== undefined) {
+      if (typeof v !== 'string') return null;
+      hasKnownField = true;
+    }
+  }
+  // Reject empty/foreign objects (e.g. `{x:1}`) that carry no recognized field.
+  // Without this, any well-formed JSON object would pass and silently produce
+  // an empty ledger entry (the rc-2 bypass this guard exists to close).
+  if (!hasKnownField) return null;
+  // Safe cast: we verified the root is a record, at least one recognized field
+  // is present, and every recognized field is either absent or a string.
+  return raw;
+}
+
 // ── Errors ───────────────────────────────────────────────────────────────
 
 /**

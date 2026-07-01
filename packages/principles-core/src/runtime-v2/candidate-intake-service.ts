@@ -19,21 +19,68 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { LedgerAdapter, LedgerPrincipleEntry } from './candidate-intake.js';
-import { CandidateIntakeError, INTAKE_ERROR_CODES } from './candidate-intake.js';
+import type { LedgerAdapter, LedgerPrincipleEntry, Recommendation } from './candidate-intake.js';
+import { CandidateIntakeError, INTAKE_ERROR_CODES, isRecord, validateRecommendation } from './candidate-intake.js';
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
-
-interface Recommendation {
-  title?: string;
-  text?: string;
-  triggerPattern?: string;
-  action?: string;
-  abstractedPrinciple?: string;
-}
 
 export interface CandidateIntakeServiceOptions {
   stateManager: RuntimeStateManager;
   ledgerAdapter: LedgerAdapter;
+}
+
+/**
+ * Normalize a DiagnosticianRecommendation-shaped object to the Recommendation
+ * contract by mapping `description` → `text`. The diagnostician-committer stores
+ * `JSON.stringify(rec)` where rec has `description`, but the intake service's
+ * Recommendation contract uses `text`. Without this, the canonical
+ * sourceRecommendationJson path would reject every real diagnostician candidate.
+ *
+ * Returns the normalized object, or `null` if the input is not a record carrying
+ * a string `description`. The result MUST still pass `validateRecommendation`.
+ */
+function normalizeDiagnosticianRecommendation(raw: unknown): { text: string } | null {
+  if (!isRecord(raw)) return null;
+  const desc = raw.description;
+  if (typeof desc !== 'string') return null;
+  return { text: desc };
+}
+
+/**
+ * Extract a validated Recommendation from the three historical contentJson shapes:
+ *   1. { recommendation: {...} }  — manual E2E wrapper
+ *   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+ *   3. bare Recommendation-like object
+ *
+ * rc-1/rc-2: the value is untrusted — every branch validates before returning.
+ * Returns the validated Recommendation, or null if none of the shapes match.
+ */
+function extractRecommendationFromContentJson(parsed: unknown): Recommendation | null {
+  if (!isRecord(parsed)) return null;
+  // Shape 1: { recommendation: {...} } wrapper.
+  if (Object.hasOwn(parsed, 'recommendation')) {
+    const inner = parsed.recommendation;
+    const rec = validateRecommendation(inner);
+    if (rec) return rec;
+    const norm = normalizeDiagnosticianRecommendation(inner);
+    if (norm) return validateRecommendation(norm);
+  }
+  // Shape 2: DiagnosticianOutputV1 with recommendations[].
+  if (Object.hasOwn(parsed, 'recommendations')) {
+    const arr = parsed.recommendations;
+    if (Array.isArray(arr) && arr.length > 0) {
+      const [first] = arr;
+      const rec = validateRecommendation(first);
+      if (rec) return rec;
+      const norm = normalizeDiagnosticianRecommendation(first);
+      if (norm) return validateRecommendation(norm);
+    }
+  }
+  // Shape 3: bare Recommendation-like object.
+  const bare = validateRecommendation(parsed);
+  if (bare) return bare;
+  const norm = normalizeDiagnosticianRecommendation(parsed);
+  if (norm) return validateRecommendation(norm);
+  return null;
 }
 
 export class CandidateIntakeService {
@@ -100,9 +147,23 @@ export class CandidateIntakeService {
     const sourceRecJson = candidate.sourceRecommendationJson;
     try {
       if (sourceRecJson && sourceRecJson.trim() !== '') {
-        const fromCandidate = JSON.parse(sourceRecJson) as Recommendation;
-        if (fromCandidate && typeof fromCandidate === 'object') {
+        // rc-1/rc-2 (ERR-001/ERR-005): candidate JSON is untrusted — validate shape,
+        // never cast directly. validateRecommendation returns null on bad shape;
+        // a null result falls through to the contentJson branch below.
+        const parsed = JSON.parse(sourceRecJson) as unknown;
+        const fromCandidate = validateRecommendation(parsed);
+        if (fromCandidate) {
           recommendation = fromCandidate;
+        } else {
+          // diagnostician-committer stores a DiagnosticianRecommendation, whose
+          // body field is `description` (not `text`). Normalize that shape to the
+          // Recommendation contract so the canonical source path is preferred over
+          // the contentJson fallback. rc-4: validate the normalized value too.
+          const normalized = normalizeDiagnosticianRecommendation(parsed);
+          const fromNorm = normalized ? validateRecommendation(normalized) : null;
+          if (fromNorm) {
+            recommendation = fromNorm;
+          }
         }
       }
     } catch (err: unknown) {
@@ -114,11 +175,23 @@ export class CandidateIntakeService {
     // 4c. Fall back to artifact.contentJson if no valid sourceRecommendationJson
     if (!recommendation) {
       try {
-        const parsed = JSON.parse(artifact.contentJson) as { recommendation?: Recommendation };
-        // DiagnosticianRunner stores raw DiagnosticianOutputV1 (no wrapper)
-        // Manual E2E tests store { recommendation: {...} } wrapper
-        recommendation = parsed.recommendation ?? parsed as unknown as Recommendation;
+        const parsed = JSON.parse(artifact.contentJson) as unknown;
+        // Three historical shapes can land in contentJson:
+        //   1. { recommendation: {...} }  — manual E2E wrapper
+        //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+        //   3. bare Recommendation-like object
+        // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
+        const rec = extractRecommendationFromContentJson(parsed);
+        if (!rec) {
+          throw new CandidateIntakeError(
+            INTAKE_ERROR_CODES.INPUT_INVALID,
+            `Failed to parse artifact content for candidate ${candidateId}: contentJson is not a valid recommendation object`,
+            { candidateId },
+          );
+        }
+        recommendation = rec;
       } catch (err: unknown) {
+        if (err instanceof CandidateIntakeError) throw err;
         throw new CandidateIntakeError(
           INTAKE_ERROR_CODES.INPUT_INVALID,
           `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,

@@ -12,6 +12,9 @@ import {
     DEFAULT_TASK_KIND,
     DEFAULT_PRIORITY,
     DEFAULT_MAX_RETRIES,
+    validateQueueItem,
+    isValidQueueItem,
+    VALID_TASK_KINDS,
 } from '../../src/service/queue-migration.js';
 
 describe('isLegacyQueueItem', () => {
@@ -143,5 +146,71 @@ describe('migrateQueueToV2', () => {
 
     it('returns empty array for empty input', () => {
         expect(migrateQueueToV2([])).toHaveLength(0);
+    });
+});
+
+// ── validateQueueItem / isValidQueueItem (rc-1, rc-4: ERR-007) ──────────────
+
+describe('validateQueueItem', () => {
+    const validItem = {
+        id: 'item-1',
+        taskKind: 'model_eval',
+        source: 'test',
+        score: 50,
+        reason: 'r',
+        timestamp: '2026-01-01T00:00:00Z',
+        status: 'pending',
+        retryCount: 0,
+        maxRetries: 3,
+    };
+
+    it('accepts a well-formed item (no errors)', () => {
+        expect(validateQueueItem(validItem)).toEqual([]);
+        expect(isValidQueueItem(validItem)).toBe(true);
+    });
+
+    it('accepts all four canonical taskKind values (regression: was hard-coded to [model_eval])', () => {
+        for (const kind of ['pain_diagnosis', 'sleep_reflection', 'model_eval', 'keyword_optimization']) {
+            const item = { ...validItem, taskKind: kind };
+            expect(validateQueueItem(item)).toEqual([]);
+        }
+    });
+
+    it('rejects an invalid taskKind value', () => {
+        const errors = validateQueueItem({ ...validItem, taskKind: 'principle_generation' });
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors.some((e) => e.includes('invalid taskKind'))).toBe(true);
+        expect(isValidQueueItem({ ...validItem, taskKind: 'principle_generation' })).toBe(false);
+    });
+
+    it('rejects null / non-object / array', () => {
+        expect(validateQueueItem(null).length).toBeGreaterThan(0);
+        expect(validateQueueItem('string').length).toBeGreaterThan(0);
+        expect(validateQueueItem(42).length).toBeGreaterThan(0);
+        expect(validateQueueItem([validItem]).length).toBeGreaterThan(0);
+    });
+
+    it('rejects items missing each required field', () => {
+        const fieldToDelete: Array<keyof typeof validItem> = ['id', 'source', 'score', 'status', 'taskKind', 'retryCount', 'maxRetries'];
+        for (const field of fieldToDelete) {
+            const partial: Record<string, unknown> = { ...validItem };
+            delete partial[field];
+            const errors = validateQueueItem(partial);
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors.some((e) => e.includes(field))).toBe(true);
+        }
+    });
+
+    it('rejects wrong-typed fields (string where number expected, etc.)', () => {
+        expect(validateQueueItem({ ...validItem, score: 'fifty' }).length).toBeGreaterThan(0);
+        expect(validateQueueItem({ ...validItem, retryCount: 'zero' }).length).toBeGreaterThan(0);
+        expect(validateQueueItem({ ...validItem, id: 123 }).length).toBeGreaterThan(0);
+    });
+
+    it('VALID_TASK_KINDS matches the canonical TaskKind set', () => {
+        // Guards against the list drifting from trajectory-types.ts TaskKind.
+        expect([...VALID_TASK_KINDS].sort()).toEqual(
+            ['keyword_optimization', 'model_eval', 'pain_diagnosis', 'sleep_reflection'],
+        );
     });
 });
