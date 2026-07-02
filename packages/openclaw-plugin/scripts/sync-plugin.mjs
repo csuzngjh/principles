@@ -377,6 +377,11 @@ function buildPlugin() {
             cwd: SOURCE_DIR,
             stdio: 'inherit'
         });
+        console.log('📝 Generating TypeScript declaration files...');
+        execSync('npx tsc --emitDeclarationOnly', {
+            cwd: SOURCE_DIR,
+            stdio: 'inherit'
+        });
     } catch (error) {
         console.error('\n❌ Build failed');
         console.error(`   ${error.message}`);
