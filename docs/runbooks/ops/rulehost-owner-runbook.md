@@ -1,9 +1,9 @@
 # RuleHost Owner Runbook
 
 > **状态**: Active
-> **最后更新**: 2026-07-01
+> **最后更新**: 2026-07-02
 > **关联代码**: `packages/openclaw-plugin/src/core/rule-host.ts`
-> **关联文档**: `docs/architecture/ACTIVATION_CHANNELS.md`
+> **关联文档**: `docs/architecture/ACTIVATION_CHANNELS.md`、`docs/runbooks/ops/rulehost-seed-mvp-playbook.md`（种子用户 release smoke + rollback）
 > **适用角色**: RuleHost owner / oncall
 > **编号说明**: R2-RH-001 = 本 runbook；R2-RH-002 = armed-but-empty warn（代码侧已落地）；R2-RH-004 = principleId lineage（代码侧已落地）
 
@@ -21,6 +21,8 @@ RuleHost 是 PD（Principles Disciple）`code_tool_hook` 激活通道的运行�
 - **Shadow mode 与人审流程**：shadow → live 的转换路径
 
 **不在本 runbook 范围**：`prompt` / `defer_archive` 通道的内部实现（低风险自动通道，无需 owner 介入）、`skill` / `model_training` 通道（MVP 未落地）。
+
+**种子用户 release smoke / 首次开启 `rulecode_context_v2` / BehaviorExamplePack 准备 / seed-MVP verification matrix**：见 [`rulehost-seed-mvp-playbook.md`](./rulehost-seed-mvp-playbook.md)。本 runbook 是日常运维参考；playbook 是 release 前一次性 smoke gate。
 
 ---
 
@@ -90,8 +92,10 @@ RuleHost 已武装（被 gate.ts 调用）但加载到 0 条 active `code_tool_h
 ### 4.3 警告消息
 
 ```
-[RuleHost] armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval). nextAction=If this is unexpected, run `pd runtime activation list --channel code_tool_hook` to inspect activations, or `pd runtime activation promote` to enable a live rule
+[RuleHost] armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval). nextAction=If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations, or `pd activation promote --activation-id <id> --confirm` to enable a live rule
 ```
+
+> 命令均为 promoted 顶层命令（PRI-455）。`pd runtime activation list/promote` 仍作为 hidden alias 可用，但 `--help` 不展示，新文档统一使用 promoted 形式。
 
 ### 4.4 去重机制
 
