@@ -1,0 +1,29 @@
+{
+  "duration": 36,
+  "locales": {
+    "zh": {
+      "voice": "zh-CN-YunyangNeural",
+      "label": "中文",
+      "scenes": [
+        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "同样的行为，又要纠正一次。" },
+        { "id": "scene-2", "start": 4, "end": 10, "rate": "+0%", "pitch": "-5Hz", "text": "三次相似纠正，被收束为一个可追溯的行为模式。" },
+        { "id": "scene-3", "start": 10, "end": 17, "rate": "+8%", "pitch": "-4Hz", "text": "系统提出原则：扩大任务范围前，先说明影响、风险和验证方式。" },
+        { "id": "scene-4", "start": 17, "end": 24, "rate": "+5%", "pitch": "-5Hz", "text": "但建议不会自动生效。修改、批准或暂存，始终由 Owner 决定。" },
+        { "id": "scene-5", "start": 24, "end": 31, "rate": "+8%", "pitch": "-4Hz", "text": "下一次相似任务，Agent 先说明范围、风险和验证计划，再等待确认。" },
+        { "id": "scene-6", "start": 31, "end": 36, "rate": "+22%", "pitch": "-5Hz", "text": "让纠正变成 Agent 的下一次行为。燃烧痛苦，协同进化。" }
+      ]
+    },
+    "en": {
+      "voice": "en-US-AndrewNeural",
+      "label": "English",
+      "scenes": [
+        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "The same behavior. Another correction." },
+        { "id": "scene-2", "start": 4, "end": 10, "rate": "+0%", "pitch": "-5Hz", "text": "Three related corrections converge into one traceable behavior pattern." },
+        { "id": "scene-3", "start": 10, "end": 17, "rate": "+8%", "pitch": "-4Hz", "text": "The system proposes a principle: explain impact, risks, and verification before expanding scope." },
+        { "id": "scene-4", "start": 17, "end": 24, "rate": "+0%", "pitch": "-5Hz", "text": "But nothing activates on its own. The Owner edits, approves, or defers." },
+        { "id": "scene-5", "start": 24, "end": 31, "rate": "+8%", "pitch": "-4Hz", "text": "Next time, the Agent presents scope, risks, and a verification plan, then waits." },
+        { "id": "scene-6", "start": 31, "end": 36, "rate": "+8%", "pitch": "-5Hz", "text": "Turn corrections into the Agent's next behavior. Burn pain. Co-evolve." }
+      ]
+    }
+  }
+}

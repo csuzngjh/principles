@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Principles Disciple in 2 minutes and let your AI agent learn from its mistakes.
+description: Install Principles Disciple and turn repeated corrections into Owner-approved behavior principles.
 ---
 
 # Getting Started
@@ -15,7 +15,7 @@ Agent repeats a mistake → PD spots the pattern → You review → Agent improv
 
 You're always in control. Nothing activates without your approval.
 
-## 2 Minutes: Install & Go
+## Installation
 
 **Prerequisites**: Node.js ≥ 18 | OpenClaw CLI installed
 

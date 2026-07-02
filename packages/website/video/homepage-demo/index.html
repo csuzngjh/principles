@@ -1,0 +1,214 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"locale","type":"enum","label":"Locale","default":"en","options":[{"value":"zh","label":"Chinese"},{"value":"en","label":"English"}]},
+    {"id":"s1Title","type":"string","label":"Scene 1 title","default":"The same behavior. Another correction."},
+    {"id":"s1Sub","type":"string","label":"Scene 1 subtitle","default":"By the third time, it should not start from zero."},
+    {"id":"settling","type":"string","label":"Settling line","default":"Corrections do not evaporate. They settle."},
+    {"id":"evidenceLabel","type":"string","label":"Evidence label","default":"RELATED CORRECTIONS"},
+    {"id":"evidenceItems","type":"string","label":"Evidence items","default":"Expanded scope without explaining impact|Acted before naming the risks|Started without confirmation"},
+    {"id":"patternTitle","type":"string","label":"Pattern title","default":"This is not an isolated mistake"},
+    {"id":"patternBody","type":"string","label":"Pattern body","default":"The system found 3 pieces of related behavior evidence"},
+    {"id":"proposalLabel","type":"string","label":"Proposal label","default":"PRINCIPLE PROPOSAL · REVIEW REQUIRED"},
+    {"id":"proposalText","type":"string","label":"Proposal text","default":"Before expanding task scope, explain the impact, risks, and verification plan."},
+    {"id":"ownerTitle","type":"string","label":"Owner title","default":"The system can propose. The Owner decides."},
+    {"id":"modify","type":"string","label":"Modify action","default":"Modify"},
+    {"id":"approve","type":"string","label":"Approve action","default":"Approve"},
+    {"id":"defer","type":"string","label":"Defer action","default":"Defer"},
+    {"id":"locked","type":"string","label":"Locked state","default":"Nothing changes without approval"},
+    {"id":"laterTitle","type":"string","label":"Later title","default":"The next similar task"},
+    {"id":"laterItems","type":"string","label":"Later items","default":"Explains the scope|Names the main risks|Presents a verification plan"},
+    {"id":"observed","type":"string","label":"Observed state","default":"Behavior change observed"},
+    {"id":"rollback","type":"string","label":"Rollback state","default":"Rollback remains available"},
+    {"id":"closing","type":"string","label":"Closing line","default":"Turn corrections into how the Agent acts next."},
+    {"id":"trust","type":"string","label":"Trust line","default":"Owner-governed · Observable · Reversible"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Inter"; src: url("capture/assets/fonts/Inter-400.woff2") format("woff2"); font-weight: 400; }
+      @font-face { font-family: "Inter"; src: url("capture/assets/fonts/Inter-700.woff2") format("woff2"); font-weight: 700; }
+      @font-face { font-family: "Noto Sans SC"; src: url("capture/assets/fonts/NotoSansSC-subset.woff2") format("woff2"); font-weight: 100 900; }
+      @font-face { font-family: "JetBrains Mono"; src: url("capture/assets/fonts/CascadiaMono.ttf") format("truetype"); font-weight: 400 700; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #111827; }
+      body { font-family: "Inter", "Noto Sans SC", sans-serif; color: #FAFAF7; }
+      .mono { font-family: "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #111827; }
+      .scene { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111827; }
+      .scene::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(126,184,218,.07) 2px, rgba(126,184,218,0) 2px), linear-gradient(90deg, rgba(126,184,218,.07) 2px, rgba(126,184,218,0) 2px); background-size: 64px 64px; opacity: .35; }
+      .scene-content { position: relative; z-index: 2; width: 100%; height: 100%; padding: 110px 140px; display: flex; flex-direction: column; justify-content: center; gap: 34px; }
+      .orb { position: absolute; z-index: 1; width: 620px; height: 620px; border-radius: 50%; background: radial-gradient(circle, rgba(126,184,218,.2) 0%, rgba(126,184,218,0) 70%); }
+      .rule { height: 3px; width: 170px; background: #7EB8DA; transform-origin: left center; }
+      .eyebrow { color: #7EB8DA; font-size: 24px; font-weight: 500; }
+      h1, h2, p { margin: 0; }
+      h1 { max-width: 1260px; font-size: 92px; line-height: 1.08; letter-spacing: -.045em; font-weight: 700; }
+      h2 { font-size: 66px; line-height: 1.14; letter-spacing: -.035em; font-weight: 700; }
+      .sub { max-width: 1050px; color: #CBD5E1; font-size: 34px; line-height: 1.45; font-weight: 400; }
+      .meta { color: #94A3B8; font-size: 21px; }
+      .panel { background: #1F2937; border: 2px solid rgba(126,184,218,.34); border-radius: 18px; }
+      .status { display: inline-flex; align-items: center; gap: 14px; color: #CBD5E1; font-size: 24px; }
+      .status-dot { width: 14px; height: 14px; border-radius: 50%; background: #7EB8DA; }
+
+      #scene-1 .scene-content { align-items: flex-start; padding-right: 680px; }
+      #scene-1 .orb { right: 80px; top: 120px; }
+      .settling-ripples { position: absolute; right: 120px; top: 150px; z-index: 3; width: 620px; height: 620px; display: grid; place-items: center; }
+      .settling-ring { position: absolute; border: 2px solid rgba(126,184,218,.22); border-radius: 50%; }
+      .settling-ring:nth-child(1) { width: 210px; height: 210px; }
+      .settling-ring:nth-child(2) { width: 390px; height: 390px; }
+      .settling-ring:nth-child(3) { width: 570px; height: 570px; }
+      .settling-center { position: relative; width: 300px; color: #FAFAF7; text-align: center; font-size: 29px; line-height: 1.55; letter-spacing: .02em; }
+      .settling-center::before { content: "03 · PRINCIPLE"; display: block; margin-bottom: 18px; color: #7EB8DA; font: 18px/1.2 "JetBrains Mono", monospace; letter-spacing: .12em; }
+
+      #scene-2 .orb { left: 640px; top: 180px; }
+      .split { display: grid; grid-template-columns: 1.15fr .85fr; gap: 90px; align-items: center; }
+      .evidence-list { display: flex; flex-direction: column; gap: 22px; }
+      .evidence-card { min-height: 128px; padding: 26px 34px; display: flex; align-items: center; gap: 24px; color: #CBD5E1; font-size: 28px; }
+      .evidence-card .index { flex: 0 0 auto; color: #7EB8DA; font-size: 21px; }
+      .pattern-panel { min-height: 430px; padding: 58px; display: flex; flex-direction: column; justify-content: center; gap: 28px; border-color: #7EB8DA; }
+      .pattern-count { color: #7EB8DA; font-size: 82px; font-weight: 700; }
+
+      #scene-3 .orb { right: 180px; bottom: -80px; }
+      .proposal-wrap { display: grid; grid-template-columns: 330px 1fr; gap: 70px; align-items: stretch; }
+      .proposal-source { padding: 42px; display: flex; flex-direction: column; justify-content: space-between; }
+      .proposal-source .big { color: #7EB8DA; font-size: 88px; font-weight: 700; }
+      .proposal-card { padding: 54px 62px; min-height: 470px; display: flex; flex-direction: column; justify-content: center; gap: 40px; border-color: #7EB8DA; }
+      .proposal-text { max-width: 1080px; font-size: 53px; line-height: 1.35; letter-spacing: -.025em; }
+
+      #scene-4 .orb { left: 80px; bottom: -100px; }
+      .owner-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 78px; align-items: center; }
+      .owner-proposal { padding: 46px; min-height: 410px; display: flex; flex-direction: column; justify-content: center; gap: 30px; }
+      .owner-proposal p { font-size: 38px; line-height: 1.45; }
+      .decision-panel { min-height: 410px; padding: 46px; display: flex; flex-direction: column; justify-content: center; gap: 34px; border-color: #7EB8DA; }
+      .actions { display: flex; gap: 20px; }
+      .action { flex: 1; padding: 22px 24px; border: 2px solid rgba(148,163,184,.45); border-radius: 12px; color: #CBD5E1; font-size: 27px; text-align: center; }
+      .action.approve { color: #FAFAF7; background: #2F855A; border-color: #2F855A; }
+      .locked { padding-top: 28px; border-top: 2px solid rgba(148,163,184,.22); color: #CBD5E1; font-size: 25px; }
+
+      #scene-5 .orb { right: 260px; top: 40px; }
+      .later-panel { width: 100%; padding: 50px 58px; display: grid; grid-template-columns: .75fr 1.25fr; gap: 70px; align-items: center; }
+      .later-context { display: flex; flex-direction: column; gap: 24px; }
+      .later-checks { display: flex; flex-direction: column; gap: 20px; }
+      .check-row { padding: 24px 30px; display: flex; align-items: center; gap: 24px; background: rgba(47,133,90,.16); border: 2px solid rgba(47,133,90,.7); border-radius: 12px; color: #FAFAF7; font-size: 30px; }
+      .check { color: #2F855A; font-size: 34px; font-weight: 700; }
+      .later-states { display: flex; gap: 28px; }
+
+      #scene-6 .scene-content { align-items: flex-start; padding-right: 300px; }
+      #scene-6 .orb { right: 80px; top: 220px; }
+      .closing { font-size: 86px; max-width: 1450px; }
+      .trust { color: #7EB8DA; font-size: 27px; }
+      .brand-mark { position: absolute; right: 190px; bottom: 150px; z-index: 3; width: 180px; height: 180px; border: 3px solid rgba(126,184,218,.65); border-radius: 50%; display: grid; place-items: center; color: #7EB8DA; font-family: "JetBrains Mono", monospace; font-size: 34px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="36" data-width="1920" data-height="1080">
+      <section id="scene-1" class="clip scene" data-start="0" data-duration="4" data-track-index="1" style="z-index:1">
+        <div class="orb"></div><div class="scene-content"><div class="rule"></div><div class="eyebrow mono" data-copy="repeatedCorrection"></div><h1 id="s1-title"></h1><p id="s1-sub" class="sub"></p></div>
+        <div class="settling-ripples"><div class="settling-ring"></div><div class="settling-ring"></div><div class="settling-ring"></div><div id="settling" class="settling-center"></div></div>
+      </section>
+      <section id="scene-2" class="clip scene" data-start="3.4" data-duration="6.6" data-track-index="2" data-layout-allow-overlap style="z-index:2">
+        <div class="orb"></div><div class="scene-content"><div id="evidence-label" class="eyebrow mono"></div><div class="split"><div id="evidence-list" class="evidence-list"></div><div class="pattern-panel panel"><div class="pattern-count">3×</div><h2 id="pattern-title"></h2><p id="pattern-body" class="sub"></p></div></div></div>
+      </section>
+      <section id="scene-3" class="clip scene" data-start="9.4" data-duration="7.6" data-track-index="3" data-layout-allow-overlap style="z-index:3">
+        <div class="orb" data-layout-allow-overflow></div><div class="scene-content"><div id="proposal-label" class="eyebrow mono"></div><div class="proposal-wrap"><div class="proposal-source panel"><div><div class="meta mono" data-copy="evidence"></div><div class="big">3×</div></div><div class="status"><span class="status-dot"></span><span data-copy="traceableSource"></span></div></div><div class="proposal-card panel"><div class="meta mono" data-copy="suggestedPrinciple"></div><p id="proposal-text" class="proposal-text"></p><div class="status"><span class="status-dot"></span><span data-copy="ownerReviewRequired"></span></div></div></div></div>
+      </section>
+      <section id="scene-4" class="clip scene" data-start="16.4" data-duration="7.6" data-track-index="4" style="z-index:4">
+        <div class="orb" data-layout-allow-overflow></div><div class="scene-content"><div class="eyebrow mono" data-copy="ownerGate"></div><h2 id="owner-title"></h2><div class="owner-grid"><div class="owner-proposal panel"><div class="meta mono" data-copy="principleProposal"></div><p id="owner-proposal-text"></p><div class="status"><span class="status-dot"></span><span data-copy="activationLocked"></span></div></div><div class="decision-panel panel"><div class="actions"><div id="action-modify" class="action"></div><div id="action-approve" class="action approve"></div><div id="action-defer" class="action"></div></div><div id="locked" class="locked"></div><div class="meta mono" data-copy="rollbackAvailable"></div></div></div></div>
+      </section>
+      <section id="scene-5" class="clip scene" data-start="23.4" data-duration="7.6" data-track-index="5" style="z-index:5">
+        <div class="orb"></div><div class="scene-content"><div class="eyebrow mono" data-copy="observableChange"></div><div class="later-panel panel"><div class="later-context"><div class="meta mono" data-copy="laterSituation"></div><h2 id="later-title"></h2><div class="later-states"><div class="status"><span class="status-dot" style="background:#2F855A"></span><span id="observed"></span></div><div class="status"><span class="status-dot"></span><span id="rollback"></span></div></div></div><div id="later-checks" class="later-checks"></div></div></div>
+      </section>
+      <section id="scene-6" class="clip scene" data-start="30.4" data-duration="5.6" data-track-index="6" style="z-index:6">
+        <div class="orb"></div><div class="scene-content"><div class="rule"></div><div class="eyebrow mono">Principles Disciple</div><h1 id="closing" class="closing"></h1><p id="trust" class="trust mono"></p></div><div class="brand-mark">PD</div>
+      </section>
+    </div>
+    <script>
+      const vars = window.__hyperframes.getVariables();
+      document.documentElement.lang = vars.locale === "zh" ? "zh-CN" : "en";
+      const copy = vars.locale === "zh" ? {
+        repeatedCorrection: "重复纠正", recurrence: "再次发生", evidence: "行为证据", traceableSource: "来源可追溯",
+        suggestedPrinciple: "原则建议", ownerReviewRequired: "等待 Owner 审查", ownerGate: "Owner 决策点",
+        principleProposal: "原则提案", activationLocked: "证据已附 · 激活仍锁定", rollbackAvailable: "回滚路径始终保留",
+        observableChange: "可观察的变化", laterSituation: "下一次相似任务"
+      } : {
+        repeatedCorrection: "Repeated correction", recurrence: "recurrence", evidence: "Evidence", traceableSource: "Traceable source",
+        suggestedPrinciple: "Suggested principle", ownerReviewRequired: "Owner review required", ownerGate: "Owner gate",
+        principleProposal: "Principle proposal", activationLocked: "Evidence attached · Activation locked", rollbackAvailable: "Rollback path remains available",
+        observableChange: "Observable change", laterSituation: "Comparable later situation"
+      };
+      document.querySelectorAll("[data-copy]").forEach((element) => { element.textContent = copy[element.dataset.copy]; });
+      const put = (id, value) => { document.getElementById(id).textContent = value; };
+      put("s1-title", vars.s1Title); put("s1-sub", vars.s1Sub); put("settling", vars.settling); put("evidence-label", vars.evidenceLabel);
+      put("pattern-title", vars.patternTitle); put("pattern-body", vars.patternBody); put("proposal-label", vars.proposalLabel);
+      put("proposal-text", vars.proposalText); put("owner-title", vars.ownerTitle); put("owner-proposal-text", vars.proposalText);
+      put("action-modify", vars.modify); put("action-approve", vars.approve); put("action-defer", vars.defer); put("locked", vars.locked);
+      put("later-title", vars.laterTitle); put("observed", vars.observed); put("rollback", vars.rollback); put("closing", vars.closing); put("trust", vars.trust);
+      vars.evidenceItems.split("|").forEach((item, index) => {
+        const row = document.createElement("div"); row.className = "evidence-card panel";
+        const label = document.createElement("span"); label.className = "index mono"; label.textContent = `0${index + 1}`;
+        const text = document.createElement("span"); text.textContent = item; row.append(label, text); document.getElementById("evidence-list").append(row);
+      });
+      vars.laterItems.split("|").forEach((item) => {
+        const row = document.createElement("div"); row.className = "check-row";
+        const mark = document.createElement("span"); mark.className = "check"; mark.textContent = "✓";
+        const text = document.createElement("span"); text.textContent = item; row.append(mark, text); document.getElementById("later-checks").append(row);
+      });
+
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const enterScene = (scene, start) => tl.fromTo(scene, { opacity: 0, filter: "blur(20px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, start);
+      enterScene("#scene-1", .1);
+      tl.fromTo("#scene-1 .rule", { scaleX: 0 }, { scaleX: 1, duration: .7, ease: "power2.out" }, .25)
+        .fromTo("#scene-1 .eyebrow", { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: .5, ease: "expo.out" }, .45)
+        .fromTo("#s1-title", { opacity: 0, y: 50 }, { opacity: 1, y: 0, duration: .75, ease: "power3.out" }, .6)
+        .fromTo("#s1-sub", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: .55, ease: "power2.out" }, .95)
+        .fromTo("#scene-1 .settling-ring", { opacity: 0, scale: .55 }, { opacity: 1, scale: 1, duration: 1.1, stagger: .18, ease: "sine.out" }, .55)
+        .fromTo("#scene-1 .settling-center", { opacity: 0, scale: .96 }, { opacity: 1, scale: 1, duration: .7, ease: "sine.out" }, 1.05)
+        .to("#scene-1 .orb", { scale: 1.08, yoyo: true, repeat: 2, duration: 1.2, ease: "sine.inOut" }, .3);
+
+      enterScene("#scene-2", 3.4);
+      tl.fromTo("#scene-2 .eyebrow", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .5, ease: "power2.out" }, 3.75)
+        .fromTo("#scene-2 .evidence-card", { opacity: 0, x: -54 }, { opacity: 1, x: 0, duration: .55, stagger: .28, ease: "power3.out" }, 4.05)
+        .fromTo("#scene-2 .pattern-panel", { opacity: 0, x: 64, scale: .98 }, { opacity: 1, x: 0, scale: 1, duration: .75, ease: "expo.out" }, 5.05)
+        .fromTo("#scene-2 .pattern-count", { opacity: 0, scale: .72 }, { opacity: 1, scale: 1, duration: .5, ease: "back.out(1.4)" }, 5.45)
+        .to("#scene-2 .orb", { x: 90, yoyo: true, repeat: 2, duration: 1.6, ease: "sine.inOut" }, 3.7);
+
+      enterScene("#scene-3", 9.4);
+      tl.fromTo("#scene-3 .eyebrow", { opacity: 0, x: -34 }, { opacity: 1, x: 0, duration: .5, ease: "power2.out" }, 9.8)
+        .fromTo("#scene-3 .proposal-source", { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: .65, ease: "power3.out" }, 10.1)
+        .fromTo("#scene-3 .proposal-card", { opacity: 0, x: 80 }, { opacity: 1, x: 0, duration: .8, ease: "expo.out" }, 10.25)
+        .fromTo("#scene-3 .proposal-text", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: .6, ease: "back.out(1.15)" }, 10.9)
+        .to("#scene-3 .orb", { scale: 1.12, yoyo: true, repeat: 3, duration: 1.25, ease: "sine.inOut" }, 9.7);
+
+      enterScene("#scene-4", 16.4);
+      tl.fromTo("#scene-4 .eyebrow", { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: .45, ease: "power2.out" }, 16.75)
+        .fromTo("#owner-title", { opacity: 0, x: -44 }, { opacity: 1, x: 0, duration: .7, ease: "expo.out" }, 17.0)
+        .fromTo("#scene-4 .owner-proposal", { opacity: 0, x: -72 }, { opacity: 1, x: 0, duration: .75, ease: "power3.out" }, 17.45)
+        .fromTo("#scene-4 .decision-panel", { opacity: 0, x: 72 }, { opacity: 1, x: 0, duration: .75, ease: "power3.out" }, 17.45)
+        .fromTo("#scene-4 .action", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .45, stagger: .25, ease: "back.out(1.25)" }, 18.2)
+        .fromTo("#scene-4 .locked", { opacity: 0 }, { opacity: 1, duration: .55, ease: "sine.out" }, 19.1)
+        .to("#scene-4 .orb", { x: 100, yoyo: true, repeat: 2, duration: 1.5, ease: "sine.inOut" }, 16.7);
+
+      enterScene("#scene-5", 23.4);
+      tl.fromTo("#scene-5 .eyebrow", { opacity: 0, x: -28 }, { opacity: 1, x: 0, duration: .45, ease: "power2.out" }, 23.75)
+        .fromTo("#scene-5 .later-panel", { opacity: 0, y: 54 }, { opacity: 1, y: 0, duration: .7, ease: "power3.out" }, 24.0)
+        .fromTo("#scene-5 .later-context", { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: .6, ease: "expo.out" }, 24.45)
+        .fromTo("#scene-5 .check-row", { opacity: 0, x: 52 }, { opacity: 1, x: 0, duration: .5, stagger: .42, ease: "back.out(1.2)" }, 24.8)
+        .to("#scene-5 .orb", { scale: 1.1, yoyo: true, repeat: 3, duration: 1.15, ease: "sine.inOut" }, 23.7);
+
+      enterScene("#scene-6", 30.4);
+      tl.fromTo("#scene-6 .rule", { scaleX: 0 }, { scaleX: 1, duration: .7, ease: "power2.out" }, 30.8)
+        .fromTo("#scene-6 .eyebrow", { opacity: 0, x: -28 }, { opacity: 1, x: 0, duration: .5, ease: "expo.out" }, 31.0)
+        .fromTo("#closing", { opacity: 0, y: 54 }, { opacity: 1, y: 0, duration: .8, ease: "power3.out" }, 31.2)
+        .fromTo("#trust", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .55, ease: "back.out(1.15)" }, 31.85)
+        .fromTo("#scene-6 .brand-mark", { opacity: 0, scale: .72 }, { opacity: 1, scale: 1, duration: .65, ease: "power2.out" }, 32.05)
+        .to("#scene-6 .orb", { scale: 1.1, yoyo: true, repeat: 2, duration: 1.15, ease: "sine.inOut" }, 30.8)
+        .to("#scene-6", { opacity: 0, duration: .45, ease: "sine.in" }, 35.5);
+      window.__timelines.main = tl;
+    </script>
+  </body>
+</html>

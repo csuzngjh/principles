@@ -1,238 +1,62 @@
 <template>
-  <section class="hero-section">
-    <div class="hero-container">
-      <!-- Left Column: Copy & Actions -->
-      <div class="hero-content">
-        <div class="hero-badge">
-          <span class="friction-node"></span>
-          <span class="badge-text">{{ lang === 'zh-CN' ? '思考型智能体框架' : 'Cognitive Agent Framework' }}</span>
-        </div>
-        <h1 class="hero-title">
-          Principles Disciple
-          <span class="hero-highlight">{{ lang === 'zh-CN' ? '把你对 Agent 的反复纠正，沉淀为可审查、可撤回的行为原则' : 'Turn your repeated corrections into reviewed, reversible principles' }}</span>
-        </h1>
-        <p class="hero-desc">
-          {{ lang === 'zh-CN' 
-            ? 'Owner 治理下的 Agent 行为内化系统。把行为证据沉淀为可审查、可回滚的原则，让原则进入 Agent 的后续行为。' 
-            : 'An owner-governed behavior internalization system. Turns repeated, owner-relevant behavioral evidence into reviewed, reversible principles that shape future agent behavior.' 
-          }}
-        </p>
-        <div class="hero-actions">
-          <a :href="lang === 'zh-CN' ? '/zh/install' : '/install'" class="pd-btn pd-btn-brand">
-            {{ lang === 'zh-CN' ? '快速开始' : 'Quick Start' }}
-          </a>
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/01-the-helmsman-crisis' : '/abyss/01-the-helmsman-crisis'" class="pd-btn pd-btn-alt">
-            {{ lang === 'zh-CN' ? '阅读思维深渊' : 'Enter the Abyss' }}
-          </a>
-          <a href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener" class="pd-btn pd-btn-alt">
-            {{ lang === 'zh-CN' ? 'GitHub 开源' : 'GitHub Repository' }}
-          </a>
-        </div>
+  <section class="pd-section hero-section" aria-labelledby="home-title">
+    <div class="hero-copy">
+      <p class="pd-eyebrow">{{ isZh ? '可审查 · 可撤回 · 可观察' : 'Reviewable · Reversible · Observable' }}</p>
+      <h1 id="home-title" :aria-label="isZh ? '别再反复纠正同一个 Agent。' : 'Stop correcting the same Agent behavior.'">
+        <template v-if="isZh"><span>别再反复纠正</span><span>同一个 Agent。</span></template>
+        <template v-else><span>Stop correcting the</span><span>same Agent behavior.</span></template>
+      </h1>
+      <p class="hero-lead">
+        {{ isZh
+          ? 'PD 把你的纠正沉淀为可审查、可撤回的行为原则，让 Agent 在下一次相似任务中按你的方式行动。'
+          : 'PD turns repeated corrections into reviewable, reversible behavior principles, so the Agent handles the next similar task your way.' }}
+      </p>
+      <p class="hero-proof">
+        {{ isZh ? '每条原则先由你批准，效果可观察，随时可回滚。' : 'You approve every principle first. Its effect stays observable and can be rolled back.' }}
+      </p>
+      <div class="hero-actions">
+        <a class="pd-btn pd-btn-brand" href="#example">{{ isZh ? '看一个真实变化示例' : 'See a behavior change' }}</a>
+        <a class="pd-btn pd-btn-alt" :href="isZh ? '/zh/install' : '/install'">{{ isZh ? '开始使用' : 'Get started' }}</a>
       </div>
+    </div>
 
-      <!-- Right Column: Bilingual Contextual Visual -->
-      <div class="hero-visual-wrapper">
-        <div v-if="lang === 'zh-CN'" class="hero-visual hero-video-container">
-          <video 
-            src="/promo.mp4" 
-            poster="/images/promo-poster-zh.webp"
-            controls 
-            preload="metadata" 
-            class="hero-video-player"
-            @fullscreenchange="onFullscreenChange"
-            @webkitfullscreenchange="onFullscreenChange"
-          >
-            <track kind="subtitles" src="/promo.vtt" srclang="zh" label="中文" default />
-          </video>
-        </div>
-        <div v-else class="hero-visual hero-video-container">
-          <video 
-            src="/promo-en.mp4" 
-            poster="/images/promo-poster-en.webp"
-            controls 
-            preload="metadata" 
-            class="hero-video-player"
-            @fullscreenchange="onFullscreenChange"
-            @webkitfullscreenchange="onFullscreenChange"
-          >
-            <track kind="subtitles" src="/promo-en.vtt" srclang="en" label="English" default />
-          </video>
-        </div>
-      </div>
+    <div class="hero-visual-wrapper">
+      <video
+        class="hero-video"
+        :src="isZh ? '/homepage-demo-zh.mp4' : '/homepage-demo-en.mp4'"
+        :poster="isZh ? '/images/homepage-demo-poster-zh.webp' : '/images/homepage-demo-poster-en.webp'"
+        controls
+        preload="metadata"
+        playsinline
+        :aria-label="isZh ? 'PD Owner 治理行为变化演示视频' : 'PD Owner-governed behavior change demo'"
+      >
+        <track
+          kind="subtitles"
+          :src="isZh ? '/homepage-demo-zh.vtt' : '/homepage-demo-en.vtt'"
+          :srclang="isZh ? 'zh' : 'en'"
+          :label="isZh ? '中文' : 'English'"
+          default
+        />
+      </video>
     </div>
   </section>
 </template>
 
 <script setup>
-import { useData } from 'vitepress'
-import { onMounted } from 'vue'
+import { useIsZh } from '../composables/useIsZh'
 
-const { lang } = useData()
-
-const onFullscreenChange = (e) => {
-  const video = e.target
-  const isFullscreen = document.fullscreenElement === video || 
-                       document.webkitFullscreenElement === video ||
-                       video.webkitDisplayingFullscreen
-  
-  if (video.textTracks && video.textTracks.length > 0) {
-    for (let i = 0; i < video.textTracks.length; i++) {
-      video.textTracks[i].mode = isFullscreen ? 'showing' : 'hidden'
-    }
-  }
-}
-
-onMounted(() => {
-  const videos = document.querySelectorAll('.hero-video-player')
-  videos.forEach(video => {
-    const hideTracks = () => {
-      const isFullscreen = document.fullscreenElement === video || 
-                           document.webkitFullscreenElement === video ||
-                           video.webkitDisplayingFullscreen
-      if (!isFullscreen && video.textTracks) {
-        for (let i = 0; i < video.textTracks.length; i++) {
-          video.textTracks[i].mode = 'hidden'
-        }
-      }
-    }
-    
-    // Initial check
-    hideTracks()
-    
-    // Bind listeners
-    video.addEventListener('loadedmetadata', hideTracks)
-    video.addEventListener('play', hideTracks)
-  })
-})
+const isZh = useIsZh()
 </script>
 
 <style scoped>
-.hero-section {
-  padding: 6rem 1.5rem;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.hero-container {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 3.5rem;
-  align-items: center;
-}
-
-@media (min-width: 960px) {
-  .hero-container {
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 4rem;
-    padding: 2rem 0;
-  }
-}
-
-.hero-content {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  z-index: 5;
-}
-
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.35rem 0.9rem;
-  background: var(--accent-dim);
-  border: 1px solid var(--accent-border);
-  border-radius: 99px;
-  margin-bottom: 1.75rem;
-}
-
-.badge-text {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  text-transform: uppercase;
-}
-
-.hero-title {
-  font-size: clamp(34px, 5.5vw, 56px) !important;
-  line-height: 1.12 !important;
-  letter-spacing: -0.025em !important;
-  font-weight: 400;
-  color: var(--text-main);
-  margin-bottom: 1.5rem;
-}
-
-.hero-highlight {
-  display: block;
-  font-size: clamp(22px, 3.5vw, 34px) !important;
-  font-weight: 400;
-  color: var(--accent);
-  margin-top: 0.5rem;
-}
-
-.hero-desc {
-  font-size: clamp(15px, 1.6vw, 17px) !important;
-  line-height: 1.8 !important;
-  color: var(--text-secondary);
-  max-width: 580px;
-  margin-bottom: 2.5rem;
-}
-
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.hero-visual-wrapper {
-  position: relative;
-  width: 100%;
-  z-index: 2;
-}
-
-.hero-video-container {
-  aspect-ratio: 16 / 9 !important;
-  transition: all 0.3s ease;
-}
-
-.hero-video-container:hover {
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 25px var(--accent-dim);
-}
-
-.hero-video-player {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-/* Custom subtitles styling for fullscreen */
-.hero-video-player::cue {
-  font-family: var(--vp-font-family-sans);
-  background: rgba(17, 24, 39, 0.85) !important;
-  color: #FAFAF7 !important;
-}
-
-/* Hide subtitles visual display when inline (not fullscreen) */
-.hero-video-player:not(:fullscreen)::cue {
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-
-.hero-video-player:not(:-webkit-full-screen)::cue {
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-
-@media (max-width: 959px) {
-  .hero-visual {
-    aspect-ratio: 16 / 7;
-  }
-  .hero-video-container {
-    aspect-ratio: 16 / 9 !important;
-  }
-}
+.hero-section { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: center; gap: 72px; padding-top: 104px; }
+.hero-copy h1 { max-width: 700px; margin: 18px 0 22px; }
+.hero-copy h1 span { display: block; }
+.hero-lead { max-width: 670px; font-size: clamp(18px, 2vw, 22px) !important; line-height: 1.65 !important; color: var(--text-main) !important; }
+.hero-proof { margin-top: 18px; max-width: 620px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.hero-visual-wrapper { aspect-ratio: 16 / 9; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; background: #111827; box-shadow: 0 22px 60px rgba(17, 24, 39, .08); }
+.hero-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 900px) { .hero-section { grid-template-columns: 1fr; gap: 44px; padding-top: 72px; } .hero-visual-wrapper { max-width: 720px; } }
+@media (max-width: 520px) { .hero-section { padding-top: 56px; } .hero-actions { display: grid; grid-template-columns: 1fr; } .pd-btn { width: 100%; } }
 </style>
