@@ -29,7 +29,8 @@
 param(
   [switch]$SkipInstall,
   [switch]$SkipBuild,
-  [switch]$SkipPrivateDocs
+  [switch]$SkipPrivateDocs,
+  [switch]$FromHook  # Set when invoked by post-checkout hook (PATH already set)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,7 +100,9 @@ Write-Host ""
 Write-Host "Step 1: Restore system PATH (Trae IDE bug workaround)"
 
 $pathNeedsFix = -not (Test-Command 'git') -or -not (Test-Command 'node') -or -not (Test-Command 'npm')
-if ($pathNeedsFix) {
+if ($FromHook) {
+  Write-Step 'skip' "PATH fix (running from hook, PATH already set)"
+} elseif ($pathNeedsFix) {
   $pathOk = Invoke-Step -Name "Restore PATH" -Action {
     $machinePath = [Environment]::GetEnvironmentVariable('PATH', 'Machine')
     $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')

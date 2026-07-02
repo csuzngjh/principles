@@ -26,3 +26,33 @@ jobs:
           stale-pr-label: 'stale'
           exempt-issue-labels: 'pinned,security,in-progress'
           exempt-pr-labels: 'pinned,security,in-progress'
+
+  stale-branches:
+    name: Delete stale merged branches
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Delete stale merged branches
+        run: |
+          # Delete remote branches that:
+          # 1. Are merged into main
+          # 2. Have no commits in the last 30 days
+          # Exemptions: main, release/*, protected branches
+          git fetch origin --prune
+          for branch in $(git branch -r --merged origin/main | grep -v 'main\|HEAD'); do
+            last_commit=$(git log -1 --format="%ct" "$branch" 2>/dev/null || echo 0)
+            cutoff=$(date -d "30 days ago" +%s)
+            if [ "$last_commit" -lt "$cutoff" ]; then
+              name=$(echo "$branch" | sed 's|origin/||')
+              # Skip release and protected branches
+              case "$name" in
+                release/*|main|develop) continue ;;
+              esac
+              echo "Deleting stale merged branch: $name (last activity: $(git log -1 --format='%ci' "$branch"))"
+              git push origin --delete "$name" || echo "[warn] Failed to delete $name (may be protected)"
+            fi
+          done

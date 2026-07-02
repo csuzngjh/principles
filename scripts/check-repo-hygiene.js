@@ -58,6 +58,22 @@ export const ALLOWLIST = new Set([
   'packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json',
 ]);
 
+// Large file detection — files exceeding this size (in bytes) are rejected
+// unless they match LFS tracking patterns (see LFS_PATTERNS below).
+// Rationale: prevent accidental commits of build artifacts, binaries, media.
+export const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024; // 5 MB
+
+// File patterns managed by Git LFS — exempt from large file rejection.
+// Keep in sync with .gitattributes LFS filter lines.
+export const LFS_PATTERNS = [
+  /\.mp4$/i,
+  /\.webm$/i,
+  /\.webp$/i,
+  /\.png$/i,  // website assets, may be large
+  /\.mp3$/i,
+  /\.wav$/i,
+];
+
 function gitLines(args) {
   try {
     const output = execFileSync('git', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).trim();
@@ -115,6 +131,61 @@ export function checkFile(filePath) {
 }
 
 /**
+ * Check if a file path matches Git LFS tracking patterns.
+ * LFS-tracked files are exempt from the large file size check.
+ */
+function isLfsTracked(filePath) {
+  const normalized = normalizePath(filePath);
+  return LFS_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Get the size (in bytes) of a staged file's blob in the index.
+ * Uses `git cat-file -s :0:<file>` to read the staged blob size.
+ * Returns 0 if the file is not in the index or size cannot be determined.
+ */
+function getStagedFileSize(filePath) {
+  try {
+    const output = execFileSync('git', ['cat-file', '-s', `:0:${filePath}`], {
+      encoding: 'utf8',
+      maxBuffer: 1024,
+    }).trim();
+    return parseInt(output, 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Check staged files for large non-LFS files.
+ * Returns an array of violations: { file, sizeMB, reason }.
+ *
+ * ERR-002: Fail loud with reason and nextAction.
+ */
+export function checkLargeFiles(stagedFiles) {
+  const violations = [];
+
+  for (const file of stagedFiles) {
+    // Skip LFS-tracked files (they are stored as pointers, not full blobs)
+    if (isLfsTracked(file)) {
+      continue;
+    }
+
+    const sizeBytes = getStagedFileSize(file);
+    if (sizeBytes > LARGE_FILE_THRESHOLD) {
+      const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
+      violations.push({
+        file,
+        sizeMB,
+        reason: `File is ${sizeMB} MB (exceeds ${LARGE_FILE_THRESHOLD / (1024 * 1024)} MB limit). Use Git LFS or remove from commit.`,
+      });
+    }
+  }
+
+  return violations;
+}
+
+/**
  * Main entry point.
  */
 function main() {
@@ -123,11 +194,18 @@ function main() {
 
   const violations = [];
 
+  // 1. Denylist check (temp files, runtime DBs, etc.)
   for (const file of files) {
     const reason = checkFile(file);
     if (reason) {
       violations.push({ file, reason });
     }
+  }
+
+  // 2. Large file check (only for staged files — "all" mode is informational)
+  if (mode === 'staged' && files.length > 0) {
+    const largeViolations = checkLargeFiles(files);
+    violations.push(...largeViolations);
   }
 
   if (violations.length > 0) {

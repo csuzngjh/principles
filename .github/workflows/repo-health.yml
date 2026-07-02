@@ -1,0 +1,51 @@
+name: Repo Health Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  size-guard:
+    name: Repository Size & Large File Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check .git size (warning, non-blocking)
+        run: |
+          # Threshold: 200MB (post-rewrite baseline + 20% buffer)
+          # Non-blocking: warning only, to track growth trend
+          SIZE=$(du -sb .git | cut -f1)
+          THRESHOLD=$((200 * 1024 * 1024))
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          THRESHOLD_MB=$((THRESHOLD / 1024 / 1024))
+          echo "Current .git size: ${SIZE_MB} MB (threshold: ${THRESHOLD_MB} MB)"
+          if [ $SIZE -gt $THRESHOLD ]; then
+            echo "::warning::Repository .git size ${SIZE_MB} MB exceeds threshold ${THRESHOLD_MB} MB. Consider running git gc or history cleanup."
+          fi
+
+      - name: Block large non-LFS files in diff
+        run: |
+          # Blocking: reject PRs that introduce >10MB non-LFS files
+          # LFS-tracked files (.mp4, .webm, .webp) are exempt
+          VIOLATIONS=0
+          while IFS= read -r f; do
+            if [ -f "$f" ]; then
+              SIZE=$(stat -c%s "$f" 2>/dev/null || echo 0)
+              if [ $SIZE -gt $((10 * 1024 * 1024)) ]; then
+                # Check if LFS-tracked
+                case "$f" in
+                  *.mp4|*.webm|*.webp|*.mp3|*.wav)
+                    echo "[skip] LFS-tracked: $f ($((SIZE / 1024 / 1024)) MB)"
+                    ;;
+                  *)
+                    echo "::error::File $f is $((SIZE / 1024 / 1024)) MB (>10MB limit). Use Git LFS or external storage."
+                    VIOLATIONS=$((VIOLATIONS + 1))
+                    ;;
+                esac
+              fi
+            fi
+          done < <(git diff --name-only origin/main...HEAD)
+          exit $VIOLATIONS
