@@ -22,9 +22,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 // Two pillars here: compounding (沉淀感) + clarity (清醒感)
 const points = computed(() => isZh.value ? [
   { head: '沉淀而非遗忘', body: '纠正被沉淀为可追溯的原则，而不是在下一轮对话里重新来过。' },

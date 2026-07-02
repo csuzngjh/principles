@@ -17,9 +17,8 @@
 </template>
 <script setup>
 import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const items = computed(() => isZh.value ? [
   { title: '确认习惯', drift: '在不可逆操作（发布、删除、对外动作）前直接执行，不先确认。', principle: '不可逆操作前，先说明影响并等待确认。' },
   { title: '重构分寸', drift: '重构时倾向大改而非最小改动，引入额外风险。', principle: '大范围修改前，说明范围、风险与验证计划。' },

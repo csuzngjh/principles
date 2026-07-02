@@ -14,9 +14,8 @@
 </template>
 <script setup>
 import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const steps = computed(() => isZh.value
   ? ['行为证据', '原则提案', 'Owner 审查', '可逆激活', '后续行为观察']
   : ['Behavior evidence', 'Principle proposal', 'Owner review', 'Reversible activation', 'Later behavior observation'])

@@ -12,10 +12,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 </script>
 
 <style scoped>

@@ -21,9 +21,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const caseItems = computed(() => isZh.value ? [
   { label: '此前', value: 'Agent 多次在扩大任务范围前没有说明影响。' },
   { label: '发现', value: '系统识别到同类纠正已出现 3 次。' },

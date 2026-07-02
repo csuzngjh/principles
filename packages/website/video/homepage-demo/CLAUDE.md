@@ -20,7 +20,7 @@
 The domain skills (`/hyperframes-core`, `/hyperframes-animation`, `/hyperframes-creative`, `/hyperframes-cli`, `/hyperframes-media`, `/hyperframes-registry`) and the full capability map live inside `/hyperframes` — it is the single source of truth for which skill handles which intent.
 
 > **Tailwind v4 projects** (`hyperframes init --tailwind`): see `/hyperframes-core` → `references/tailwind.md`.
-
+>
 > **Skills not available or need updating?** Run `npx skills add heygen-com/hyperframes`
 > and restart the agent session so the new skills load.
 
@@ -52,7 +52,7 @@ Topics: `data-attributes`, `gsap`, `compositions`, `rendering`, `examples`, `tro
 
 **For full documentation**, discover pages via the machine-readable index — do NOT guess URLs:
 
-```
+```text
 https://hyperframes.heygen.com/llms.txt
 ```
 

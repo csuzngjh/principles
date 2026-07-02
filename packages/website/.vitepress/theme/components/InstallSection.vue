@@ -15,9 +15,8 @@
 </template>
 <script setup>
 import { computed, ref } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const command = 'npx create-principles-disciple --yes'
 const copyStatus = ref('idle')
 const copyState = computed(() => copyStatus.value === 'success' ? (isZh.value ? '已复制' : 'Copied') : copyStatus.value === 'error' ? (isZh.value ? '复制失败' : 'Copy failed') : (isZh.value ? '复制' : 'Copy'))

@@ -9,7 +9,7 @@ description: 参与 Principles Disciple 贡献 — 架构、编码规范与工�
 
 ## 项目结构
 
-```
+```text
 principles/
 ├── packages/
 │   ├── principles-core/     # 纯领域逻辑、状态机
@@ -19,9 +19,9 @@ principles/
 │   └── website/             # 文档站点(VitePress)
 ├── docs/
 │   ├── architecture/        # 架构决策记录与模型
-│   └── adr/                 # 架构决策记录(ADR)
-│   ├── product/
-│   │   └── PRODUCT_IDENTITY.md # 产品边界权威定义
+│   ├── adr/                 # 架构决策记录(ADR)
+│   └── product/
+│       └── PRODUCT_IDENTITY.md # 产品边界权威定义
 └── CONTRIBUTING.md          # 贡献指南
 ```
 
@@ -68,7 +68,7 @@ PD 遵循严格的三层分层架构:
 
 PD 的知识通过固定的三层结构演进:
 
-```
+```text
 Principle  →  Rule  →  Implementation
 (为什么/是什么)  (何时/何地/如何)  (具体可执行物)
 ```
@@ -124,7 +124,7 @@ MVP 当前激活三个通道:
 
 遵循 [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 <type>(<scope>): <description>
 ```
 

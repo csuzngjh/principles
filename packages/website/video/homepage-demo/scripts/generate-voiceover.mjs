@@ -13,23 +13,35 @@ const rendersRoot = path.join(projectRoot, 'renders')
 function run(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false })
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error(`${command} timed out`))
+    }, 120000)
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk) => { stdout += chunk })
     child.stderr.on('data', (chunk) => { stderr += chunk })
-    child.on('error', reject)
-    child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(`${command} exited ${code}: ${stderr}`)))
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      code === 0 ? resolve(stdout) : reject(new Error(`${command} exited ${code}: ${stderr}`))
+    })
   })
 }
 
 async function publishFile(temporary, output) {
-  await rm(output, { force: true })
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     try {
       await rename(temporary, output)
       return
     } catch (error) {
-      if (error?.code !== 'EBUSY' || attempt === 10) throw error
+      if (error?.code === 'EBUSY' || error?.code === 'EEXIST' || error?.code === 'EPERM') {
+        await rm(output, { force: true }).catch(() => {})
+      }
+      if (attempt === 10) throw error
       await new Promise((resolve) => setTimeout(resolve, attempt * 100))
     }
   }

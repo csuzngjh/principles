@@ -25,7 +25,7 @@
 
     <section class="guide-step">
       <h2 class="step-title">{{ isZh ? '步骤 2 · 运行安装命令' : 'Step 2 · Run install command' }}</h2>
-      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" @click="copyCommand">{{ copyState }}</button></div>
+      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" aria-live="polite" @click="copyCommand">{{ copyState }}</button></div>
       <p class="step-desc">
         {{ isZh
           ? '在终端中运行此命令。--yes 跳过 npx 安装确认提示；Installer 会自动检测 Node 和 OpenClaw，缺失时给出官方下载链接。'
@@ -39,7 +39,7 @@
       <div class="command-row"><code>openclaw gateway --force</code></div>
       <p class="step-desc">
         {{ isZh
-          ? '安装完成后,在 OpenClaw 中注册 PD 网关。--force 用于首次注册或覆盖旧版本。注册成功后 PD 钩子即生效。'
+          ? '安装完成后，在 OpenClaw 中注册 PD 网关。--force 用于首次注册或覆盖旧版本。注册成功后 PD 钩子即生效。'
           : 'After install, register the PD gateway in OpenClaw. Use --force for first-time registration or to overwrite a previous version. PD hooks become active once registered.'
         }}
       </p>
@@ -66,17 +66,21 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const command = 'npx create-principles-disciple --yes'
 const copyStatus = ref<'idle' | 'success' | 'error'>('idle')
 const copyState = computed(() => copyStatus.value === 'success' ? (isZh.value ? '已复制' : 'Copied') : copyStatus.value === 'error' ? (isZh.value ? '复制失败' : 'Copy failed') : (isZh.value ? '复制' : 'Copy'))
 const copyLabel = computed(() => isZh.value ? '复制安装命令' : 'Copy install command')
+let copyTimer: number | null = null
 async function copyCommand() {
   try { await navigator.clipboard.writeText(command); copyStatus.value = 'success' }
   catch { copyStatus.value = 'error' }
-  window.setTimeout(() => { copyStatus.value = 'idle' }, 2000)
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = window.setTimeout(() => {
+    copyStatus.value = 'idle'
+    copyTimer = null
+  }, 2000)
 }
 </script>
 
@@ -155,6 +159,7 @@ async function copyCommand() {
   color: #f8fafc;
   white-space: nowrap;
   overflow-x: auto;
+  display: block;
 }
 
 .command-row button {

@@ -8,7 +8,7 @@
 
     <div class="boundary-table">
       <div class="row pd-cares">
-        <span class="badge" aria-hidden="true">{{ isZh ? 'PD 治理' : 'PD governs' }}</span>
+        <span class="badge">{{ isZh ? 'PD 治理' : 'PD governs' }}</span>
         <div class="content">
           <strong>{{ isZh ? '行为模式级 · 跨会话的人机行为偏差' : 'Behavior-pattern · cross-session human–Agent gaps' }}</strong>
           <ul>
@@ -17,7 +17,7 @@
         </div>
       </div>
       <div class="row pd-skips">
-        <span class="badge dim" aria-hidden="true">{{ isZh ? '不由 PD' : 'Not PD' }}</span>
+        <span class="badge dim">{{ isZh ? '不由 PD' : 'Not PD' }}</span>
         <div class="content">
           <strong>{{ isZh ? '工具级 / 任务级 · 由宿主与会话记忆处理' : 'Tool / task level · handled by host & session memory' }}</strong>
           <ul>
@@ -31,9 +31,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useData } from 'vitepress'
-const { lang } = useData()
-const isZh = computed(() => lang.value === 'zh-CN')
+import { useIsZh } from '../composables/useIsZh'
+const isZh = useIsZh()
 const caresItems = computed(() => isZh.value ? [
   '在不可逆操作前缺乏确认习惯。',
   '重构时偏激进而非保守。',
