@@ -26,6 +26,11 @@ function copyRecursive(src, dest) {
 async function bundlePlugin() {
   try {
     // 1. Build the main bundle for OpenClaw
+    // Banner injects `require` via createRequire so that bundled CJS deps
+    // (e.g. yaml, which calls require('process')) work under ESM import.
+    // Without this, pd-cli's `import { ... } from 'principles-disciple'`
+    // throws "Dynamic require of 'process' is not supported".
+    // OpenClaw loads via setupEntry (dynamic import), so the banner is safe.
     await build({
       entryPoints: ['src/index.ts'],
       outfile: 'dist/bundle.js',
@@ -33,6 +38,9 @@ async function bundlePlugin() {
       platform: 'node',
       target: 'node20',
       format: 'esm',
+      banner: {
+        js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      },
       external: [
         'openclaw',
         '@openclaw/sdk',

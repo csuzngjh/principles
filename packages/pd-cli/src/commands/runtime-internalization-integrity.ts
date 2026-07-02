@@ -98,8 +98,10 @@ export async function handleRuntimeInternalizationIntegrity(opts: Internalizatio
   }
 
   if (result.overallStatus !== 'ok') {
-    console.error('');
-    console.error(`FAIL: overallStatus=${result.overallStatus}`);
+    if (!opts.json) {
+      console.error('');
+      console.error(`FAIL: overallStatus=${result.overallStatus}`);
+    }
     process.exitCode = 1;
   }
 }

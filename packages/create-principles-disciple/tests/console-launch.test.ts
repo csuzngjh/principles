@@ -26,17 +26,20 @@ describe('Console auto-launch output (Task 8)', () => {
   const channels: MvpChannel[] = ['prompt', 'defer_archive'];
 
   it('Given successful install with consoleUrl, When buildSuccessOutput runs, Then output includes consoleUrl and nextAction references it', () => {
+    // HashRouter: real URL is /#/welcome (client-side route under hash),
+    // not /welcome (which the server would treat as an API path → 404).
+    const consoleUrl = 'http://127.0.0.1:3100/#/welcome';
     const result = buildSuccessOutput({
       workspace: '/test/ws',
       components: completeComponents,
       channels,
       verification: passedVerification,
-      consoleUrl: 'http://127.0.0.1:3100/welcome',
+      consoleUrl,
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.consoleUrl).toBe('http://127.0.0.1:3100/welcome');
-      expect(result.nextAction).toContain('http://127.0.0.1:3100/welcome');
+      expect(result.consoleUrl).toBe(consoleUrl);
+      expect(result.nextAction).toContain(consoleUrl);
     }
   });
 
@@ -61,7 +64,7 @@ describe('Console auto-launch output (Task 8)', () => {
       components: { plugin: 'failed', cli: 'skipped', console: 'skipped' },
       channels,
       verification: { features: 'skipped', storyA: 'skipped' },
-      consoleUrl: 'http://127.0.0.1:3100/welcome',
+      consoleUrl: 'http://127.0.0.1:3100/#/welcome',
     });
     // 安装失败时不应该宣称 console 已就绪 (EP-03: fail loud, 不伪装成功)
     expect(result.success).toBe(false);

@@ -8,6 +8,26 @@ export interface DemoStage {
   evidenceRef?: string;
 }
 
+/**
+ * Map backend demo stage identifiers (snake_case English, stable contract
+ * from demo-story-a-runner.ts) to localized labels. Falls back to the raw
+ * name if no mapping exists, so new stages still render (rc-9: no silent
+ * failure) but future stages should be added here.
+ */
+const STAGE_LABEL_KEYS: Record<string, string> = {
+  evidence_seed: 'pages.welcome.step2.stages.evidenceSeed',
+  principle_proposal: 'pages.welcome.step2.stages.principleProposal',
+  owner_review: 'pages.welcome.step2.stages.ownerReview',
+  activation: 'pages.welcome.step2.stages.activation',
+  follow_up_observation: 'pages.welcome.step2.stages.followUpObservation',
+  rollback_proof: 'pages.welcome.step2.stages.rollbackProof',
+};
+
+function localizeStageName(rawName: string, t: (key: string) => string): string {
+  const key = STAGE_LABEL_KEYS[rawName];
+  return key ? t(key) : rawName;
+}
+
 export interface DemoResultData {
   status: string;
   generatedAt?: string;
@@ -59,7 +79,7 @@ export function DemoResultView({ result, loading, error }: DemoResultViewProps) 
         <ol className="demo-stages">
           {result.stages.map((stage, idx) => (
             <li key={idx} className={`demo-stage demo-stage-${stage.status}`}>
-              <span className="demo-stage-name">{stage.name}</span>
+              <span className="demo-stage-name">{localizeStageName(stage.name, t)}</span>
               {stage.reason && <span className="demo-stage-detail">{stage.reason}</span>}
             </li>
           ))}
