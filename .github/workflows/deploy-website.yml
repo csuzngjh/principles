@@ -11,8 +11,22 @@ jobs:
     name: Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (with Git LFS)
         uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Verify LFS assets pulled
+        run: |
+          # Fail fast if mp4/webp are still LFS pointers (130 bytes) instead of real content
+          for f in packages/website/public/promo.mp4 packages/website/public/promo-en.mp4; do
+            size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -lt 1024 ]; then
+              echo "::error::$f is $size bytes — Git LFS pull failed (expected real video content >1KB)"
+              exit 1
+            fi
+            echo "[ok] $f: $size bytes"
+          done
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
