@@ -1,0 +1,23 @@
+{
+  "locale": "en",
+  "s1Title": "The same behavior. Another correction.",
+  "s1Sub": "By the third time, it should not start from zero.",
+  "settling": "Corrections do not evaporate. They settle.",
+  "evidenceLabel": "RELATED CORRECTIONS",
+  "evidenceItems": "Expanded scope without explaining impact|Acted before naming the risks|Started without confirmation",
+  "patternTitle": "This is not an isolated mistake",
+  "patternBody": "The system found 3 pieces of related behavior evidence",
+  "proposalLabel": "PRINCIPLE PROPOSAL · REVIEW REQUIRED",
+  "proposalText": "Before expanding task scope, explain the impact, risks, and verification plan.",
+  "ownerTitle": "The system can propose. The Owner decides.",
+  "modify": "Modify",
+  "approve": "Approve",
+  "defer": "Defer",
+  "locked": "Nothing changes without approval",
+  "laterTitle": "The next similar task",
+  "laterItems": "Explains the scope|Names the main risks|Presents a verification plan",
+  "observed": "Behavior change observed",
+  "rollback": "Rollback remains available",
+  "closing": "Turn corrections into the agent's next behavior.",
+  "trust": "Owner-governed · Observable · Reversible"
+}

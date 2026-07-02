@@ -29,7 +29,15 @@
         preload="metadata"
         playsinline
         :aria-label="isZh ? 'PD Owner 治理行为变化演示视频' : 'PD Owner-governed behavior change demo'"
-      />
+      >
+        <track
+          kind="subtitles"
+          :src="isZh ? '/homepage-demo-zh.vtt' : '/homepage-demo-en.vtt'"
+          :srclang="isZh ? 'zh' : 'en'"
+          :label="isZh ? '中文' : 'English'"
+          default
+        />
+      </video>
     </div>
   </section>
 </template>

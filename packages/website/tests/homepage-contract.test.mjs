@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
@@ -8,9 +9,21 @@ import sharp from 'sharp'
 const websiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distRoot = path.join(websiteRoot, '.vitepress', 'dist')
 const publicRoot = path.join(websiteRoot, 'public')
+const voiceoverManifestPath = path.join(websiteRoot, 'video', 'homepage-demo', 'voiceover', 'scenes.json')
 
 async function page(relativePath) {
   return readFile(path.join(distRoot, relativePath), 'utf8')
+}
+
+function probeMedia(filePath) {
+  const result = spawnSync('ffprobe', [
+    '-v', 'error',
+    '-show_entries', 'format=duration:stream=codec_name,codec_type,width,height,r_frame_rate',
+    '-of', 'json',
+    filePath,
+  ], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  return JSON.parse(result.stdout)
 }
 
 test('Chinese homepage ships the Owner-governed story and working paths', async () => {
@@ -67,7 +80,10 @@ test('videos, posters, and Open Graph image are publishable assets', async () =>
 })
 
 test('homepage videos remain user-controlled and accessible', async () => {
-  for (const relativePath of ['index.html', path.join('zh', 'index.html')]) {
+  for (const [relativePath, locale, suffix] of [
+    ['index.html', 'en', 'en'],
+    [path.join('zh', 'index.html'), 'zh', 'zh'],
+  ]) {
     const html = await page(relativePath)
     const videos = html.match(/<video[\s\S]*?<\/video>/g) ?? []
     assert.equal(videos.length, 1)
@@ -76,5 +92,36 @@ test('homepage videos remain user-controlled and accessible', async () => {
     assert.match(videos[0], /playsinline/)
     assert.match(videos[0], /aria-label=/)
     assert.doesNotMatch(videos[0], /autoplay/)
+    assert.match(videos[0], new RegExp(`<track[^>]+src="/homepage-demo-${suffix}\\.vtt"`))
+    assert.match(videos[0], new RegExp(`srclang="${locale}"`))
+    assert.match(videos[0], /kind="subtitles"/)
+    assert.match(videos[0], /\sdefault(?:="")?/)
+  }
+})
+
+test('published videos contain synchronized narration and six-scene captions', async () => {
+  const voiceoverManifest = JSON.parse(await readFile(voiceoverManifestPath, 'utf8'))
+
+  for (const locale of ['zh', 'en']) {
+    const media = probeMedia(path.join(publicRoot, `homepage-demo-${locale}.mp4`))
+    assert.equal(Number(media.format.duration), 36)
+    assert.deepEqual(media.streams.map((stream) => [stream.codec_type, stream.codec_name]), [
+      ['video', 'h264'],
+      ['audio', 'aac'],
+    ])
+    assert.deepEqual(
+      [media.streams[0].width, media.streams[0].height, media.streams[0].r_frame_rate],
+      [1920, 1080, '30/1'],
+    )
+
+    const captions = await readFile(path.join(publicRoot, `homepage-demo-${locale}.vtt`), 'utf8')
+    assert.match(captions, /^WEBVTT/)
+    assert.deepEqual(
+      [...captions.matchAll(/^(\d{2}:\d{2}:\d{2}\.\d{3}) -->/gm)].map((match) => match[1]),
+      ['00:00:00.000', '00:00:04.000', '00:00:10.000', '00:00:17.000', '00:00:24.000', '00:00:31.000'],
+    )
+    for (const scene of voiceoverManifest.locales[locale].scenes) {
+      assert.match(captions, new RegExp(scene.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    }
   }
 })

@@ -1,0 +1,23 @@
+{
+  "locale": "zh",
+  "s1Title": "同样的行为，又要纠正一次。",
+  "s1Sub": "第三次，不该再从头解释。",
+  "settling": "纠正不会蒸发。它会沉淀。",
+  "evidenceLabel": "相似纠正",
+  "evidenceItems": "扩大范围前未说明影响|没有先列出风险|未确认就开始执行",
+  "patternTitle": "这不是孤立问题",
+  "patternBody": "系统识别到 3 次相关行为证据",
+  "proposalLabel": "原则提案 · 等待审查",
+  "proposalText": "扩大任务范围前，先说明影响、风险和验证方式。",
+  "ownerTitle": "系统可以建议，Owner 决定。",
+  "modify": "修改",
+  "approve": "批准",
+  "defer": "暂存",
+  "locked": "未经批准，不会生效",
+  "laterTitle": "下一次相似任务",
+  "laterItems": "说明修改范围|列出主要风险|给出验证计划",
+  "observed": "已观察到行为变化",
+  "rollback": "随时可以回滚",
+  "closing": "让纠正变成 Agent 的下一次行为。",
+  "trust": "Owner 治理 · 效果可观察 · 原则可回滚"
+}
