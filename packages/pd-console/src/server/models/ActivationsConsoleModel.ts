@@ -28,7 +28,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * even when the rulecode_context_v2 flag is off.
  */
 export interface ActivationRecord {
-  id: string;
+  activationId: string;
   artifactId: string;
   principleId: string;
   channel: string;
@@ -67,9 +67,12 @@ export interface ActivationRecord {
 
 export interface ActivationsResponse {
   activations: ActivationRecord[];
-  generatedAt: string;
-  /** Present when data is degraded/missing rather than genuinely empty */
-  note?: string;
+  /** 'ok' on success, 'degraded' when data is incomplete/missing. */
+  status: 'ok' | 'degraded';
+  /** Present when status is 'degraded' — explains why. */
+  reason?: string;
+  /** Present when status is 'degraded' — next operator action. */
+  nextAction?: string;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -108,7 +111,7 @@ export class ActivationsConsoleModel {
   async getActivations(): Promise<ActivationsResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { activations: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
+      return { activations: [], status: 'degraded', reason: 'state.db not found — workspace may not be initialized', nextAction: 'Run pd runtime diagnostics to check workspace state' };
     }
 
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
@@ -121,7 +124,7 @@ export class ActivationsConsoleModel {
         allActivations = await activationStore.listAllActivations();
       } catch (err) {
         if (isMissingTableError(err)) {
-          return { activations: [], generatedAt: new Date().toISOString(), note: 'activation table not found — workspace may not be initialized' };
+          return { activations: [], status: 'degraded', reason: 'activation table not found — workspace may not be initialized', nextAction: 'Run pd runtime internalization integrity to check schema' };
         }
         throw err;
       }
@@ -222,7 +225,7 @@ export class ActivationsConsoleModel {
         }
 
         const enriched: ActivationRecord = {
-          id: record.activationId,
+          activationId: record.activationId,
           artifactId: record.artifactId,
           principleId: artifactPrincipleMap.get(record.artifactId) ?? 'unlinked',
           channel: record.channel,
@@ -248,14 +251,15 @@ export class ActivationsConsoleModel {
       if (danglingArtifactIds.size > 0) {
         return {
           activations: facts,
-          generatedAt: new Date().toISOString(),
-          note: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
+          status: 'degraded',
+          reason: `${danglingArtifactIds.size} activation(s) reference non-existent artifact_id(s): ${Array.from(danglingArtifactIds).join(', ')}`,
+          nextAction: 'Run pd runtime internalization integrity to check for orphaned activations',
         };
       }
 
       return {
         activations: facts,
-        generatedAt: new Date().toISOString(),
+        status: 'ok',
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }

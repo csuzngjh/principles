@@ -155,12 +155,13 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     const mean = timings.reduce((s, t) => s + t, 0) / timings.length;
     console.log(`[PRI-486 perf] production hook (100 iterations):
   min=${formatMs(timings[0])} p50=${formatMs(p50)} p95=${formatMs(p95)} p99=${formatMs(p99)} mean=${formatMs(mean)} max=${formatMs(timings[timings.length - 1])}`);
-    // Spec §10.3: baseline first, budget later. Use sanity upper bounds (matching
-    // the pattern of other tests in this file) instead of strict budgets so the
-    // test is reliable on Windows where SQLite FS overhead is higher and the
-    // full-suite parallel load can push p95 well past 50ms.
-    expect(p95).toBeLessThan(500); // 500ms sanity upper bound
-    expect(p99).toBeLessThan(1000); // 1000ms sanity upper bound
+    // Spec §10.3 aspirational target: p95 < 50ms, p99 < 200ms (NOT enforced).
+    // Contract threshold (PRI-496): see playbook §10.3. This test measures the
+    // production hook (SQLite load + VM compile + gate) and uses 500ms/1000ms
+    // sanity bounds — broader than the gate perf test's 200ms/500ms because
+    // this test includes the full SQLite FS overhead on Windows.
+    expect(p95).toBeLessThan(500); // 500ms sanity upper bound (see playbook §10.3)
+    expect(p99).toBeLessThan(1000); // 1000ms sanity upper bound (see playbook §10.3)
   }, 30000); // perf test: 100 iterations under full-suite load can exceed the 5s default
 
   it('context query p50/p95 over 100 iterations with 100 history rows', () => {

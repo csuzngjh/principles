@@ -64,9 +64,9 @@ describe('ActivationsConsoleModel — missing database handling', () => {
     const result = await model.getActivations();
 
     expect(result.activations).toEqual([]);
-    expect(result.generatedAt).toBeDefined();
-    expect(result.note).toBeDefined();
-    expect(result.note).toContain('state.db not found');
+    expect(result.status).toBe('degraded');
+    expect(result.reason).toBeDefined();
+    expect(result.reason).toContain('state.db not found');
   });
 
   it('returns degraded response with note when activation table missing', async () => {
@@ -81,8 +81,8 @@ describe('ActivationsConsoleModel — missing database handling', () => {
     const result = await model.getActivations();
 
     expect(result.activations).toEqual([]);
-    expect(result.note).toBeDefined();
-    expect(result.note).toContain('activation table not found');
+    expect(result.reason).toBeDefined();
+    expect(result.reason).toContain('activation table not found');
   });
 });
 
@@ -96,7 +96,7 @@ describe('ActivationsConsoleModel — data computation', () => {
 
     const result = await model.getActivations();
     expect(result.activations).toEqual([]);
-    expect(result.note).toBeUndefined();
+    expect(result.reason).toBeUndefined();
   });
 
   it('maps activation records to principleId via artifact lookup', async () => {
@@ -128,7 +128,7 @@ describe('ActivationsConsoleModel — data computation', () => {
     expect(result.activations).toHaveLength(2);
     
     // Active activation
-    const active = result.activations.find(a => a.id === 'act-001');
+    const active = result.activations.find(a => a.activationId === 'act-001');
     expect(active).toBeDefined();
     expect(active?.status).toBe('active');
     expect(active?.principleId).toBe('principle-001');
@@ -136,7 +136,7 @@ describe('ActivationsConsoleModel — data computation', () => {
     expect(active?.action).toBe('inject');
     
     // Inactive activation (deactivatedAt set → status 'deactivated' under PRI-491)
-    const inactive = result.activations.find(a => a.id === 'act-002');
+    const inactive = result.activations.find(a => a.activationId === 'act-002');
     expect(inactive).toBeDefined();
     expect(inactive?.status).toBe('deactivated');
     expect(inactive?.principleId).toBe('principle-002');
@@ -272,7 +272,7 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
     
     // Verify the activation is now inactive
     const verifyResult = await model.getActivations();
-    const deactivated = verifyResult.activations.find(a => a.id === 'act-active');
+    const deactivated = verifyResult.activations.find(a => a.activationId === 'act-active');
     expect(deactivated?.status).toBe('deactivated');
     expect(deactivated?.activatedAt).not.toBeNull();
   });
@@ -576,9 +576,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     const rec = result.activations[0]!;
     expect(rec.warning).toContain('artifact_id "art-missing" does not exist');
     expect(rec.warning).toContain('orphaned');
-    // rc-9: the response note must also surface the dangling reference.
-    expect(result.note).toContain('1 activation(s) reference non-existent artifact_id');
-    expect(result.note).toContain('art-missing');
+    // rc-9: the response reason must also surface the dangling reference.
+    expect(result.reason).toContain('1 activation(s) reference non-existent artifact_id');
+    expect(result.reason).toContain('art-missing');
   });
 
   it('unrecognized action yields undefined mode and undefined nextAction (no false mode label)', async () => {

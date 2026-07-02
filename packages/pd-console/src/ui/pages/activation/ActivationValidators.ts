@@ -32,7 +32,7 @@ const VALID_ACTIVATION_STATUSES = new Set(["active", "inactive", "deactivated", 
 export function validateActivationRecord(raw: unknown): ActivationRecord | null {
   if (!isRecord(raw)) return null;
   if (
-    !Object.hasOwn(raw, "id") ||
+    !Object.hasOwn(raw, "activationId") ||
     !Object.hasOwn(raw, "artifactId") ||
     !Object.hasOwn(raw, "principleId") ||
     !Object.hasOwn(raw, "channel") ||
@@ -43,10 +43,10 @@ export function validateActivationRecord(raw: unknown): ActivationRecord | null 
   ) {
     return null;
   }
-  const { id, artifactId, principleId, channel, action, targetRef, activatedAt, status } = raw;
+  const { activationId, artifactId, principleId, channel, action, targetRef, activatedAt, status } = raw;
   if (
-    typeof id !== "string" ||
-    id.length === 0 ||
+    typeof activationId !== "string" ||
+    activationId.length === 0 ||
     typeof artifactId !== "string" ||
     typeof principleId !== "string" ||
     typeof channel !== "string" ||
@@ -61,7 +61,7 @@ export function validateActivationRecord(raw: unknown): ActivationRecord | null 
   // Narrow status from string to union type via const assertion
   const narrowStatus = status as "active" | "inactive" | "deactivated" | "suspended_by_flag";
   return {
-    id: id,
+    activationId: activationId,
     artifactId: artifactId,
     principleId: principleId,
     channel: channel,
@@ -74,11 +74,11 @@ export function validateActivationRecord(raw: unknown): ActivationRecord | null 
 
 export function validateActivationsData(raw: unknown): ActivationsData | null {
   if (!isRecord(raw)) return null;
-  if (!Object.hasOwn(raw, "activations") || !Object.hasOwn(raw, "generatedAt")) {
+  if (!Object.hasOwn(raw, "activations") || !Object.hasOwn(raw, "status")) {
     return null;
   }
-  const { activations, generatedAt } = raw;
-  if (!Array.isArray(activations) || typeof generatedAt !== "string") {
+  const { activations, status } = raw;
+  if (!Array.isArray(activations) || typeof status !== "string") {
     return null;
   }
   // Fail loud: any invalid record rejects the entire payload (ERR-009)
@@ -88,11 +88,10 @@ export function validateActivationsData(raw: unknown): ActivationsData | null {
     if (validated === null) return null;
     validatedRecords.push(validated);
   }
-  return {
-    activations: validatedRecords,
-    generatedAt,
-    note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined,
-  };
+  const result: ActivationsData = { activations: validatedRecords, status };
+  if (Object.hasOwn(raw, "reason") && typeof raw.reason === "string") result.reason = raw.reason;
+  if (Object.hasOwn(raw, "nextAction") && typeof raw.nextAction === "string") result.nextAction = raw.nextAction;
+  return result;
 }
 
 // ── Lifecycle validators ─────────────────────────────────────────────────────

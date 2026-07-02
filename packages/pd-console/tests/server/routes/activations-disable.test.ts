@@ -213,7 +213,7 @@ describe('Activation disable route', () => {
       await handleActivationsRoute(req, res, tempDir, '/');
 
       expect(res.statusCode).toBe(200);
-      const body = parseResponseBody<{ success: true; data: { activations: unknown[]; generatedAt: string } }>(res);
+      const body = parseResponseBody<{ success: true; data: { activations: unknown[]; status: string } }>(res);
       expect(body.success).toBe(true);
       expect(body.data.activations).toEqual([]);
     });
