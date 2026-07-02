@@ -3,7 +3,7 @@
     <h2 id="footer-label" class="sr-only">Footer</h2>
     <div class="footer-inner">
       <div class="footer-brand">
-        <span class="brand-name">Principles Disciple</span>
+        <a class="brand-name" :href="isZh ? '/zh/' : '/'">Principles Disciple</a>
         <span class="brand-meta">{{ isZh ? 'MIT 许可证 · Copyright © 2026 Principles Disciple Contributors' : 'MIT License · Copyright © 2026 Principles Disciple Contributors' }}</span>
       </div>
       <nav class="footer-nav" :aria-label="isZh ? '页脚导航' : 'Footer'">
@@ -47,7 +47,9 @@ const isZh = computed(() => lang.value === 'zh-CN')
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-main);
+  text-decoration: none;
 }
+.brand-name:hover { color: var(--accent); }
 .brand-meta { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 .footer-nav { display: flex; flex-wrap: wrap; gap: 24px; }
 .footer-nav a {

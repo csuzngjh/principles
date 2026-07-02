@@ -15,7 +15,7 @@ Agent repeats a mistake → PD spots the pattern → You review → Agent improv
 
 You're always in control. Nothing activates without your approval.
 
-## 2 Minutes: Install & Go
+## Installation
 
 **Prerequisites**: Node.js ≥ 18 | OpenClaw CLI installed
 

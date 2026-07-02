@@ -4,8 +4,12 @@ layout: page
 
 # 思维深渊 (Abyss of Thought)
 
-> “当你凝视深渊，深渊也凝视你。”
-> 在这里，我们记录 Principles Disciple (PD) 项目在进化过程中的每一次灵魂撞击。这里没有现成的代码，只有对认知的极限挑战。
+<div class="abyss-intro">
+  <blockquote>
+    “当你凝视深渊，深渊也凝视你。”
+  </blockquote>
+  <p>在这里，我们记录 Principles Disciple (PD) 项目在进化过程中的每一次灵魂撞击。这里没有现成的代码，只有对认知的极限挑战。</p>
+</div>
 
 <div class="abyss-list">
 
@@ -48,34 +52,54 @@ layout: page
 </div>
 
 <style scoped>
+.abyss-intro {
+  margin: 2rem 0 4rem 0;
+  padding: 2rem;
+  background: var(--vp-c-bg-soft);
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+}
+.abyss-intro blockquote {
+  font-size: 1.4rem;
+  font-weight: 600;
+  border: none;
+  padding: 0;
+  margin-bottom: 1rem;
+  color: var(--vp-c-text-1);
+}
 .abyss-list {
   margin-top: 3rem;
 }
 .abyss-item {
-  margin-bottom: 3rem;
-  padding-bottom: 2rem;
+  margin-bottom: 3.5rem;
+  padding-bottom: 2.5rem;
   border-bottom: 1px solid var(--vp-c-divider);
 }
 .abyss-meta {
   font-family: var(--vp-font-family-mono);
   font-size: 0.85rem;
   color: var(--vp-c-brand-1);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: 0.1em;
 }
 .abyss-title {
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.75rem;
+  font-weight: 700;
   color: var(--vp-c-text-1);
   text-decoration: none;
-  transition: color 0.2s;
+  transition: all 0.3s;
+  display: block;
+  line-height: 1.3;
 }
 .abyss-title:hover {
   color: var(--vp-c-brand-1);
+  transform: translateX(10px);
 }
 .abyss-desc {
-  margin-top: 0.8rem;
-  font-size: 1rem;
+  margin-top: 1.2rem;
+  font-size: 1.05rem;
   color: var(--vp-c-text-2);
-  line-height: 1.6;
+  line-height: 1.8;
+  max-width: 800px;
 }
 </style>

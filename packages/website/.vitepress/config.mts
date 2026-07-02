@@ -5,7 +5,7 @@ export default defineConfig({
   description: "Turn repeated AI Agent corrections into reviewable, reversible behavior principles governed by the Owner.",
   lastUpdated: true,
   cleanUrls: true,
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
 
   head: [
     ['link', { rel: 'icon', href: '/images/favicon.svg' }],
@@ -16,7 +16,7 @@ export default defineConfig({
       href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap',
       rel: 'stylesheet'
     }],
-    // Open Graph
+    // Open Graph — canonical production URL; update if primary domain changes
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'Principles Disciple' }],
     ['meta', { property: 'og:description', content: 'Turn repeated corrections into Owner-approved, observable, reversible Agent behavior principles.' }],
@@ -86,6 +86,7 @@ export default defineConfig({
               items: [
                 { text: '快速开始 (Getting Started)', link: '/zh/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
+                { text: '开发指南 (Development Guide)', link: '/zh/docs/development' },
               ]
             }
           ],
