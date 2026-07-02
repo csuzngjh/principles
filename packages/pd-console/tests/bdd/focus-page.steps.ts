@@ -139,7 +139,7 @@ registry.then('ActivationPage 出现新的激活项', async (ctx, page, api) => 
   expect(body.success).toBe(true);
   const activationId = ctx.state.activationId;
   expect(typeof activationId).toBe('string');
-  const activation = body.data.activations.find((a) => a.id === activationId);
+  const activation = body.data.activations.find((a) => a.activationId === activationId);
   expect(activation, `activation ${String(activationId)} not found`).toBeDefined();
   expect(activation?.status).toBe('active');
 });

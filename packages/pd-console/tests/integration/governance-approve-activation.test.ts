@@ -358,7 +358,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         (a) => isRecord(a) && getStringField(a, 'artifactId') === artifactId,
       );
       if (isRecord(found)) {
-        activationId = getStringField(found, 'id');
+        activationId = getStringField(found, 'activationId');
       }
     }
     expect(activationId).withContext('Must find activation ID to disable').toBeDefined();

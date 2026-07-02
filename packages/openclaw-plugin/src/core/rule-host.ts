@@ -59,11 +59,14 @@ export interface RuleHostObservedDecision extends RuleHostResult {
 /**
  * PRI-491 — A structured record of an activation that was skipped at load
  * time (flag-off v2, unsupported action, unsupported context version,
- * missing target_ref, content_json not an object, no implementationCode).
+ * missing target_ref, content_json not an object, no implementationCode,
+ * or duplicate active activation for target_ref).
  *
  * Unlike compile/load failures (which emit rulehost_unhealthy), skipped
  * activations have a configuration/flag reason — the RuleCode itself may be
- * valid, but the runtime chose not to execute it.
+ * valid, but the runtime chose not to execute it. Duplicate activations are
+ * a special case: they ALSO emit rulehost_unhealthy (for telemetry), but are
+ * surfaced in skippedActivations so the owner can observe and act (rc-9).
  *
  * ERR-002 (rc-9): every skip carries a reason + nextAction, never silent.
  */
@@ -352,7 +355,13 @@ export class RuleHost {
       }
 
       // Emit structured unhealthy evidence for duplicate groups; collect valid (non-duplicate) rows.
+      // PRI-497: duplicate activations are ALSO pushed to the `skipped` array
+      // so callers (gate.ts, CLI, Console) can observe them via
+      // skippedActivations — not just via rulehost_unhealthy event log.
+      // Both paths are populated (rc-9-no-silent-fallback): event log for
+      // telemetry, skipped array for structured caller-facing observability.
       const validRows: Record<string, unknown>[] = [];
+      const skipped: SkippedActivation[] = [];
       for (const [targetRef, group] of rowsByTargetRef) {
         if (group.length > 1) {
           const activationIds: string[] = [];
@@ -380,6 +389,14 @@ export class RuleHost {
                 `duplicate active activation for target_ref ${targetRef}`,
                 'Deactivate all but one activation for this target_ref',
               );
+              // PRI-497: also surface in skippedActivations for caller observability
+              skipped.push({
+                activationId,
+                ruleId: targetRef,
+                mode: 'live',
+                reason: 'duplicate_active_activation',
+                nextAction: 'Deactivate all but one activation for this target_ref',
+              });
             }
           }
         } else {
@@ -389,7 +406,6 @@ export class RuleHost {
       }
 
       const loaded: LoadedRuleActivation[] = [];
-      const skipped: SkippedActivation[] = [];
 
       for (const r of validRows) {
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';

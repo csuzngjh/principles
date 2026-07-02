@@ -673,7 +673,7 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
 }
 
 export interface ActivationRecordData {
-  id: string;
+  activationId: string;
   artifactId: string;
   principleId: string;
   channel: string;
@@ -685,7 +685,7 @@ export interface ActivationRecordData {
 
 function validateActivationRecord(v: unknown): ActivationRecordData | null {
   if (!isObject(v)) return null;
-  if (!Object.hasOwn(v, 'id') || !isString(v.id)) return null;
+  if (!Object.hasOwn(v, 'activationId') || !isString(v.activationId)) return null;
   if (!Object.hasOwn(v, 'artifactId') || !isString(v.artifactId)) return null;
   if (!Object.hasOwn(v, 'principleId') || !isString(v.principleId)) return null;
   if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
@@ -695,7 +695,7 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
   if (!activatedAt.valid) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   return {
-    id: v.id, artifactId: v.artifactId, principleId: v.principleId,
+    activationId: v.activationId, artifactId: v.artifactId, principleId: v.principleId,
     channel: v.channel, action: v.action, targetRef: v.targetRef,
     activatedAt: activatedAt.value,
     status: v.status,
@@ -704,18 +704,20 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
 
 export interface ActivationsData {
   activations: ActivationRecordData[];
-  generatedAt: string;
-  note?: string;
+  status: string;
+  reason?: string;
+  nextAction?: string;
 }
 
 export function validateActivations(v: unknown): ActivationsData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'activations') || !Array.isArray(v.activations)) return null;
-  if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
+  if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
   const activations = validateArray(v.activations, validateActivationRecord);
   if (activations === null) return null;
-  const result: ActivationsData = { activations, generatedAt: v.generatedAt };
-  if (Object.hasOwn(v, 'note') && isString(v.note)) result.note = v.note;
+  const result: ActivationsData = { activations, status: v.status };
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   return result;
 }
 

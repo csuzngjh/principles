@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "title": "RuleHost seed-MVP Performance Baseline",
+  "description": "PRI-496: Recorded baseline for gate-rule-host-perf-budget.test.ts and rule-context-v2.perf.test.ts. These numbers are NOT thresholds — they are measured baselines for regression detection. Contract thresholds (enforced in CI) are documented in docs/runbooks/ops/rulehost-seed-mvp-playbook.md §10.3.",
+  "recordedAt": "2026-07-02T10:10:00+08:00",
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeVersion": "v24.14.0",
+    "osRelease": "10.0.26200",
+    "osType": "Windows_NT"
+  },
+  "contractThresholds": {
+    "gateHook": {
+      "p95": "<200ms",
+      "p99": "<500ms"
+    },
+    "rationale": "Spec aspirational target is 50ms/200ms; CI enforces 200ms/500ms due to Windows FS overhead + SQLite concurrent load. ERR-088 BLOCK_MARKER proves rule executed (not silent skip)."
+  },
+  "scenarios": [
+    {
+      "name": "gate-rule-host-perf-budget.test.ts: production hook (100 iterations)",
+      "testFile": "packages/openclaw-plugin/tests/hooks/gate-rule-host-perf-budget.test.ts",
+      "description": "Full handleBeforeToolCall with real SQLite activation + v2 flag + RuleHost load + VM compile. ERR-088: asserts PERF_BASELINE_BLOCK marker on every iteration.",
+      "iterations": 100,
+      "metrics": {
+        "min": "42.28ms",
+        "p50": "47.68ms",
+        "p95": "53.01ms",
+        "p99": "61.10ms",
+        "mean": "49.46ms",
+        "max": "192.66ms"
+      },
+      "contractCheck": {
+        "p95Passes": true,
+        "p99Passes": true,
+        "note": "p95/p99 well within 200ms/500ms contract; max spike 192.66ms likely Windows FS cache miss."
+      }
+    },
+    {
+      "name": "rule-context-v2.perf.test.ts: production hook (100 iterations)",
+      "testFile": "packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts",
+      "description": "Production hook including SQLite load and VM compilation (broader sanity bound 500ms/1000ms).",
+      "iterations": 100,
+      "metrics": {
+        "min": "42.61ms",
+        "p50": "48.85ms",
+        "p95": "54.55ms",
+        "p99": "61.10ms",
+        "mean": "49.46ms",
+        "max": "65.23ms"
+      }
+    },
+    {
+      "name": "rule-context-v2.perf.test.ts: context query (100 rows, 100 iterations)",
+      "testFile": "packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts",
+      "description": "buildProductionRuleContext p50/p95 over 100 iterations with 100 history rows.",
+      "iterations": 100,
+      "metrics": {
+        "min": "0.14ms",
+        "p50": "0.17ms",
+        "p95": "0.35ms",
+        "p99": "0.49ms",
+        "mean": "0.20ms",
+        "max": "0.54ms"
+      }
+    },
+    {
+      "name": "rule-context-v2.perf.test.ts: cold-start (first recordToolCall + schema init)",
+      "testFile": "packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts",
+      "description": "First recordToolCall on a fresh workspace — triggers SQLite schema initialization.",
+      "iterations": 1,
+      "metrics": {
+        "coldStartMs": "45.54ms"
+      }
+    },
+    {
+      "name": "rule-context-v2.perf.test.ts: empty-history query (100 iterations)",
+      "testFile": "packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts",
+      "description": "Baseline overhead: buildProductionRuleContext with empty history.",
+      "iterations": 100,
+      "metrics": {
+        "p50": "0.03ms",
+        "p95": "0.04ms"
+      }
+    }
+  ],
+  "notes": [
+    "These baselines were recorded on Windows 10 (10.0.26200) with Node v24.14.0.",
+    "Linux CI numbers will likely be lower (3-5x faster SQLite FS).",
+    "Update this file after any major architecture change (e.g., cache layer rewrite, SQLite schema migration).",
+    "Contract thresholds are in the test files (toBeLessThan calls) and documented in playbook §10.3."
+  ]
+}

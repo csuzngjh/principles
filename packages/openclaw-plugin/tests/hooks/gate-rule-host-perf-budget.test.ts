@@ -241,20 +241,20 @@ describe('PRI-494 — Full-hook perf budget with ERR-088 execution proof', () =>
     above are the authoritative baseline — include in PR body.`);
 
     // Spec budgets (PRI-494 acceptance criteria):
-    //   p95 < 50ms, p99 < 200ms (Linux CI target)
+    //   p95 < 50ms, p99 < 200ms (aspirational target, NOT enforced in CI)
     //
-    // Windows-safe sanity bounds: the existing perf test
-    // (rule-context-v2.perf.test.ts) uses 500ms/1000ms sanity bounds with
-    // the note "SQLite FS overhead is higher and the full-suite parallel
-    // load can push p95 well past 50ms" on Windows. We use tighter bounds
-    // (200ms/500ms) that are still achievable on Windows while catching
-    // real regressions (e.g., cache miss on every call would push p95
-    // well past 200ms due to SQLite query + VM compile per iteration).
+    // Contract threshold (PRI-496, enforced in CI):
+    //   p95 < 200ms, p99 < 500ms
+    // See docs/runbooks/ops/rulehost-seed-mvp-playbook.md §10.3 for rationale
+    // (Windows FS overhead + SQLite concurrent load + ERR-088 BLOCK_MARKER
+    // proves rule executed, not just timing). The spec's 50ms/200ms is the
+    // aspirational target; CI enforces 200ms/500ms as the contract. Baseline
+    // numbers: docs/runbooks/ops/perf-baselines/2026-07-02-rulehost-seed-mvp-baseline.json
     //
     // The cold-load path (first call) is allowed to exceed these because
     // it includes SQLite query + VM compile; that cost is paid once per
     // fingerprint change, not per gate call.
-    expect(p95).toBeLessThan(200); // 200ms Windows-safe sanity bound (spec: 50ms)
-    expect(p99).toBeLessThan(500); // 500ms Windows-safe sanity bound (spec: 200ms)
+    expect(p95).toBeLessThan(200); // 200ms contract threshold (see playbook §10.3)
+    expect(p99).toBeLessThan(500); // 500ms contract threshold (see playbook §10.3)
   }, 30000); // 30s timeout: 100 iterations + setup on Windows can exceed 5s default
 });
