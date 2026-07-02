@@ -19,6 +19,10 @@ jobs:
           persist-credentials: false
           # Full history so check-runtime-contract can resolve origin/main...HEAD.
           fetch-depth: 0
+          # verify:merge runs test:website, whose homepage-contract test reads
+          # the real .mp4/.webp LFS assets. Without LFS, they are 132-byte
+          # pointer files and the size assertion fails.
+          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

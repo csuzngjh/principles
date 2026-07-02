@@ -43,6 +43,20 @@
   overflow-x: hidden;
 }
 
+.pd-section {
+  width: min(1152px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 88px 0;
+}
+
+.pd-eyebrow {
+  margin: 0;
+  color: var(--accent) !important;
+  font: 600 12px/1.4 var(--vp-font-family-mono) !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .pd-home-wrapper h1 {
   font-size: clamp(36px, 5.5vw, 64px);
   line-height: 1.12;
@@ -157,6 +171,14 @@
   border-color: var(--accent-border);
 }
 
+.pd-btn:focus-visible,
+.pd-home-wrapper a:focus-visible,
+.pd-home-wrapper button:focus-visible,
+.pd-home-wrapper video:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
 /* VitePress Overrides */
 .VPHome { padding-bottom: 0 !important; background: transparent !important; }
 .VPSidebarItem .text:has(+ .coming-soon), a[href*="coming-soon"] { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
@@ -205,4 +227,22 @@
   transform: translateX(-50%);
   font-size: 8px;
   color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .pd-section {
+    width: min(100% - 32px, 1152px);
+    padding: 56px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pd-home-wrapper *,
+  .pd-home-wrapper *::before,
+  .pd-home-wrapper *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

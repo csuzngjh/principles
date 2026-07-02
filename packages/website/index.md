@@ -1,14 +1,18 @@
 ---
 layout: home
-title: Principles Disciple | A Thinking OS for Silicon Lifeforms
-description: Empowering AI with principles, reflection, and constructive friction to pause, question, and align before execution.
+title: Principles Disciple | Turn corrections into the Agent's next behavior
+titleTemplate: false
+description: Turn repeated AI Agent corrections into reviewable, reversible behavior principles. Every principle is Owner-approved and its effect stays observable.
 ---
 
 <div class="pd-home-wrapper">
   <HeroSection />
-  <QuickInstallCard />
-  <MottoSection />
-  <ValueProposition />
-  <AgentContrast />
+  <BehaviorExampleSection />
+  <GovernanceLoopSection />
+  <BoundarySection />
+  <UseCasesSection />
+  <CompoundingSection />
+  <InstallSection />
   <ThinkingLogCard />
+  <ClosingSection />
 </div>

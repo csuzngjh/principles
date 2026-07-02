@@ -3,22 +3,22 @@
     <div class="section-header">
       <div class="section-tag">
         <span class="friction-node"></span>
-        <span class="tag-text">{{ lang === 'zh-CN' ? '演化日志' : 'Thinking Log' }}</span>
+        <span class="tag-text">{{ lang === 'zh-CN' ? '观点与研究' : 'Ideas & Research' }}</span>
       </div>
       <h2 class="section-title">
-        {{ lang === 'zh-CN' ? '思想演进日志' : 'System Thinking Logs' }}
+        {{ lang === 'zh-CN' ? '理解 Owner 不可外包的判断' : 'Explore the judgment an Owner cannot outsource' }}
       </h2>
       <p class="section-desc">
         {{ lang === 'zh-CN' 
-          ? 'PD 并非一款平庸的功能展示型工具，而是一个在不断拷问中持续自我演化的认知外脑。' 
-          : 'PD is not an ordinary utility, but a cognitive engine evolving through persistent questioning.' 
+          ? '阅读 PD 对 Owner、Agent 行为边界和可治理协作方式的持续研究。'
+          : 'Read PD\'s ongoing research into Owners, Agent behavior boundaries, and governable collaboration.'
         }}
       </p>
     </div>
 
     <div class="journal-card pd-card">
       <div class="journal-thumb">
-        <img src="/images/abyss/06/abyss-06-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
+        <img src="/images/abyss/06/abyss-06-cover.png" :alt="lang === 'zh-CN' ? '关于 Owner 与 Agent 边界的文章封面' : 'Article cover about Owner and Agent boundaries'" />
         <div class="thumb-overlay"></div>
       </div>
       
@@ -48,7 +48,7 @@
 
         <div class="journal-action">
           <a :href="lang === 'zh-CN' ? '/zh/abyss/06-expanding-boundary' : '/abyss/06-expanding-boundary'" class="read-link">
-            <span>{{ lang === 'zh-CN' ? '凝视深渊' : 'Gaze into the Abyss' }}</span>
+            <span>{{ lang === 'zh-CN' ? '阅读文章' : 'Read the article' }}</span>
             <span class="arrow">&rarr;</span>
           </a>
         </div>
@@ -63,7 +63,7 @@ const { lang } = useData()
 </script>
 
 <style scoped>
-.log-section { padding: 5rem 1.5rem 8rem 1.5rem; max-width: 1000px; margin: 0 auto; }
+.log-section { width: min(1152px, calc(100% - 48px)); padding: 88px 0 112px; max-width: none; margin: 0 auto; border-top: 1px solid var(--border); }
 .section-header { text-align: center; max-width: 780px; margin: 0 auto 3.5rem auto; }
 .section-tag { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.8rem; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 99px; margin-bottom: 1.25rem; }
 .tag-text { font-family: var(--vp-font-family-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.06em; color: var(--text-secondary); text-transform: uppercase; }
@@ -92,4 +92,5 @@ const { lang } = useData()
 .journal-action { margin-top: auto; }
 .read-link { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 400; color: var(--accent); text-decoration: none !important; transition: gap 0.25s ease, opacity 0.25s ease; }
 .read-link:hover { gap: 0.8rem; opacity: 0.8; }
+@media (max-width: 640px) { .log-section { width: min(100% - 32px, 1152px); padding: 56px 0 72px; } .journal-body { padding: 1.5rem; } }
 </style>

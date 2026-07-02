@@ -27,6 +27,19 @@ Agent behaves better next time (Observation)
 
 You are always in control. No principle becomes active without your review.
 
+## What PD Is Not
+
+To set expectations clearly:
+
+- PD is **not** a task execution engine
+- PD is **not** a general memory system or external brain
+- PD is **not** a generic tool-call or output-format repair product
+- PD is **not** a LangChain-style app builder
+- PD is **not** a SaaS product or chatbot
+- PD is **not** a magic self-improvement button
+
+PD is an **owner-governed behavior internalization layer** for OpenClaw coding agents. It helps your agent learn from pain — with you in the loop.
+
 ## Core Concepts
 
 ### Pain Signal
@@ -303,16 +316,3 @@ Default location: `~/.openclaw/workspace/memory/.state/logs/`
 | `events.jsonl` | Structured event log (tool calls, pain signals, gate blocks, evolution tasks) |
 | `plugin.log` | Runtime plugin logs |
 | `daily-stats.json` | Daily statistics summary |
-
-## What PD Is Not
-
-To set expectations clearly:
-
-- PD is **not** a task execution engine
-- PD is **not** a general memory system or external brain
-- PD is **not** a generic tool-call or output-format repair product
-- PD is **not** a LangChain-style app builder
-- PD is **not** a SaaS product or chatbot
-- PD is **not** a magic self-improvement button
-
-PD is an **owner-governed behavior internalization layer** for OpenClaw coding agents. It helps your agent learn from pain — with you in the loop.
