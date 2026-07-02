@@ -557,6 +557,39 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.baseUrl).toBeUndefined();
   });
 
+  it('TC4: pi-ai profile with systemPrompt passes it to adapter config', () => {
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+        systemPrompt: 'You are a diagnostician.',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('pi-ai');
+    if (result.runtimeKind !== 'pi-ai') return;
+    expect(result.systemPrompt).toBe('You are a diagnostician.');
+  });
+
+  it('TC5: pi-ai profile without systemPrompt omits it from adapter config', () => {
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('pi-ai');
+    if (result.runtimeKind !== 'pi-ai') return;
+    expect(result.systemPrompt).toBeUndefined();
+  });
+
   // ── Additional edge cases for adapter config creation ───────────────────────
 
   it('pi-ai profile without timeoutMs still produces valid config', () => {

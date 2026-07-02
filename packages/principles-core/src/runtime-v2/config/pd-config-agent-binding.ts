@@ -60,6 +60,8 @@ export interface PiAiAdapterConfigResult {
   baseUrl?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  /** Optional system prompt (from profile, flows to PiAiRuntimeAdapter). */
+  systemPrompt?: string;
   workspace: string;
 }
 
@@ -268,6 +270,9 @@ export function createAdapterConfigFromProfile(
     }
     if (profile.maxRetries !== undefined) {
       result.maxRetries = profile.maxRetries;
+    }
+    if (profile.systemPrompt) {
+      result.systemPrompt = profile.systemPrompt;
     }
     return result;
   }
