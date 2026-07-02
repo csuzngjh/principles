@@ -15,7 +15,7 @@
 
 把 RuleContext v2 / RuleHost 从"功能已实现但生产体验不稳"收敛到"可安全给种子用户体验"的 MVP 状态。本 playbook 是 **release 前一次性 smoke gate**，验证种子 workspace 在真实生产入口下端到端跑通：
 
-```
+```text
 pain + Owner example IDs
   → BehaviorExamplePack
   → Artificer ↔ Evaluator 对抗循环
@@ -382,7 +382,7 @@ pd activation list --channel code_tool_hook --json
 | P2 | `run-rulehost --dry-run` capability ON | dry-run 输出 | `code_rule_capability: ON` |
 | P3 | `run-rulehost --confirm` 生成 v2 artifact | `pd trace show --pain-id <id>` | artifact `validationStatus = validated`，含 `requiresContextVersion: 2` + `evidenceRefs` |
 | P4 | approve 后写 shadow activation | `pd activation list --channel code_tool_hook --json` | `action = code_tool_hook_shadow_activate`，`mode = shadow` |
-| P5 | shadow 期间 evaluate 执行 | eventLog | `rulehost_evaluated` 记录，`applicationMode = shadow` |
+| P5 | shadow 期间 evaluate 执行 | eventLog | `rulehost_evaluated` 记录，`activationMode = shadow` |
 | P6 | shadow 不阻断 tool call | agent 实际行为 | 负样本 tool call 仍执行（不 block） |
 | P7 | promote 后变 live | `pd activation list --json` | `action = code_tool_hook_live_activate`，`mode = live` |
 | P8 | live 阻断负样本 tool call | agent 实际行为 | 负样本 tool call 被 block，agent 收到反馈 |
