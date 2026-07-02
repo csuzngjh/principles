@@ -66,8 +66,9 @@ PD 即将发布给种子用户。当前新用户从安装到使用存在多处�
    - **不是所有 tool failure 都成 pain**——有高价值门槛
 
 5. **PD 内置诊断代理 runtime profile**（权威版本，单一数据源）:
-   - **首版默认 `openclaw` runtime**: PD 内置诊断代理通过 spawn `openclaw agent` CLI 运行——LLM 调用由 OpenClaw 自己处理，**不需要用户配 LLM API Key**。这是 MVP onboarding 的默认路径，避免非技术用户被 API Key 配置卡住。
-   - **`pi-ai` 类型是后续扩展**: pi-ai runtime 让 PD 内置代理直接调 LLM API（需 provider/model/apiKeyEnv），但需设计 secret contract（ADR-0016 禁止明文 secret 写入 `.pd/config.yaml`，只允许 `apiKeyEnv` 环境变量名引用）。**不在 MVP onboarding 范围**。
+   - **默认 `pi-ai` runtime（M9 决策，2026-07 修订）**: PD 内置代理默认通过 `PiAiRuntimeAdapter` 直接调用 LLM provider——绕过 OpenClaw main agent，避免诊断协议被 main agent 的"有用助手"system prompt 干扰（详见 PRI-501 Bug 根因）。默认 profile id 为 `pd.default`，provider/model/apiKeyEnv 为空占位符，静态 readiness 为 `needs_setup`。用户必须通过 web console（Control Center → Runtime Profiles）或手编 `.pd/config.yaml` 填入真实值。
+   - **`openclaw` runtime 作为 fallback**: 保留 `openclaw.default` profile（type=openclaw, source=default）作为一键切回的 fallback。当用户暂无 LLM API Key 时，可切回 openclaw runtime，让 main agent 执行诊断任务（注意：此路径有已知 Bug PRI-501，main agent 可能不理解诊断协议）。
+   - **Web console Profile CRUD**: 用户可在 Control Center → Runtime Profiles 创建/编辑/删除 runtime profile（POST/PATCH/DELETE `/api/v1/config/profiles`）。onboarding 不强制配置 LLM provider，用户可在 onboarding demo 后自行配置。
    - **schema 限制**: 现有 `VALID_PROFILE_TYPES = ['openclaw', 'pi-ai']`。`pd-config-validate.ts` 明确禁止 `apiKey`、`api_key`、`token` 等 secret 字段（ADR-0016 §2.2）——违反者报错 "PD does not store provider credentials"。
    - **配置源**: runtime config 从 `.pd/config.yaml` 读取（PRI-393 统一，`resolveRuntimeFromPdConfig`）。**`.state/workflows.yaml` 是 legacy，不再用于 runtime 解析——本 spec 全文不再引用 `.state/` runtime config**。
 

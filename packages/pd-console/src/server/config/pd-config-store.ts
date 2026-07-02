@@ -25,6 +25,7 @@ import {
   checkAgentRuntimeReadiness,
   resolveAgentRuntimeBinding,
   INTERNAL_AGENT_NAMES,
+  VALID_PROFILE_TYPES,
 } from '@principles/core/runtime-v2';
 import type {
   EffectivePdConfig,
@@ -1032,6 +1033,435 @@ export function updateFeatureFlag(
     ok: true,
     feature: featureName,
     enabled: confirmedEnabled,
+  };
+}
+
+// ── Runtime Profile CRUD ─────────────────────────────────────────────────────
+
+export interface RuntimeProfileCrudResultOk {
+  ok: true;
+  profileId: string;
+  profile: RuntimeProfile;
+}
+
+export interface RuntimeProfileCrudResultErr {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+  nextAction?: string;
+}
+
+export type RuntimeProfileCrudResult = RuntimeProfileCrudResultOk | RuntimeProfileCrudResultErr;
+
+/**
+ * Validate the basic structure of a runtime profile payload (type field).
+ * Full field validation is delegated to validatePdConfig after merge.
+ * Uses Object.hasOwn() for untrusted key checks (ERR-013).
+ */
+function validateProfileStructure(
+  payload: unknown,
+): { ok: true; type: string } | { ok: false; error: string; message: string } {
+  if (!isRecord(payload)) {
+    return { ok: false, error: 'bad_request', message: 'Profile must be a JSON object with a type field' };
+  }
+  const typeRaw = Object.hasOwn(payload, 'type') ? payload.type : undefined;
+  if (typeRaw === undefined) {
+    return { ok: false, error: 'bad_request', message: `Profile missing required field: type (must be one of: ${VALID_PROFILE_TYPES.join(', ')})` };
+  }
+  if (typeof typeRaw !== 'string' || !(VALID_PROFILE_TYPES as readonly string[]).includes(typeRaw)) {
+    return { ok: false, error: 'bad_request', message: `Profile type must be one of: ${VALID_PROFILE_TYPES.join(', ')}. Got: ${String(typeRaw)}` };
+  }
+  return { ok: true, type: typeRaw };
+}
+
+/**
+ * Extract only known, correctly-typed fields from a profile payload.
+ * Prevents unknown fields from being persisted to .pd/config.yaml.
+ * Uses Object.hasOwn() for untrusted key checks (ERR-013).
+ */
+function extractProfileFields(
+  payload: Record<string, unknown>,
+  type: string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { type };
+  if (Object.hasOwn(payload, 'provider') && typeof payload.provider === 'string') {
+    result.provider = payload.provider;
+  }
+  if (Object.hasOwn(payload, 'model') && typeof payload.model === 'string') {
+    result.model = payload.model;
+  }
+  if (type === 'openclaw') {
+    if (Object.hasOwn(payload, 'source') && typeof payload.source === 'string') {
+      result.source = payload.source;
+    }
+  } else {
+    // pi-ai
+    if (Object.hasOwn(payload, 'apiKeyEnv') && typeof payload.apiKeyEnv === 'string') {
+      result.apiKeyEnv = payload.apiKeyEnv;
+    }
+    if (Object.hasOwn(payload, 'baseUrl') && typeof payload.baseUrl === 'string') {
+      result.baseUrl = payload.baseUrl;
+    }
+    if (Object.hasOwn(payload, 'timeoutMs') && typeof payload.timeoutMs === 'number') {
+      result.timeoutMs = payload.timeoutMs;
+    }
+    if (Object.hasOwn(payload, 'maxRetries') && typeof payload.maxRetries === 'number') {
+      result.maxRetries = payload.maxRetries;
+    }
+  }
+  return result;
+}
+
+/**
+ * Read raw config file preserving unknown root sections.
+ * Returns an empty record if the file does not exist.
+ * Treats parsed YAML as unknown (ERR-001).
+ */
+function readRawConfig(configPath: string): Record<string, unknown> {
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+  const rawContent = fs.readFileSync(configPath, 'utf8');
+  const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+  if (isRecord(rawParsed)) {
+    return { ...rawParsed };
+  }
+  return {};
+}
+
+/**
+ * Create a new runtime profile in .pd/config.yaml.
+ *
+ * - Rejects duplicate profile IDs (400 bad_request)
+ * - Validates profile structure (type + required fields via validatePdConfig)
+ * - Persists atomically, preserving unknown config sections
+ *
+ * ERR entries:
+ * - ERR-001/ERR-005: No `as` bypasses; payload validated as unknown
+ * - ERR-002: Graceful degradation includes reason + nextAction
+ * - ERR-009/ERR-010: Required fields fail loud
+ * - ERR-013: Object.hasOwn() for untrusted keys
+ */
+export function createRuntimeProfile(
+  workspaceDir: string,
+  profileId: string,
+  payload: unknown,
+): RuntimeProfileCrudResult {
+  // 1. Validate profileId
+  if (typeof profileId !== 'string' || profileId.length === 0) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'profileId must be a non-empty string' };
+  }
+
+  // 2. Validate profile structure (type field)
+  const structResult = validateProfileStructure(payload);
+  if (!structResult.ok) {
+    return { ok: false, statusCode: 400, error: structResult.error, message: structResult.message };
+  }
+
+  // 3. Load existing config — refuse to write on malformed (rc-9)
+  const loadResult = loadPdConfig(workspaceDir);
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot create runtime profile: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 4. Reject duplicate profile ID
+  if (Object.hasOwn(effective.config.runtimeProfiles, profileId)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Runtime profile '${profileId}' already exists. Use PATCH to update it.`,
+      nextAction: `Use PATCH /api/v1/config/profiles/${encodeURIComponent(profileId)} to update the existing profile`,
+    };
+  }
+
+  // 5. Extract only known fields from payload (prevents unknown field persistence)
+  const profileRecord = extractProfileFields(payload as Record<string, unknown>, structResult.type);
+
+  // 6. Read raw config to preserve unknown sections, add new profile
+  const configPath = getPdConfigPath(workspaceDir);
+  const rawConfig = readRawConfig(configPath);
+  const profilesMap = isRecord(rawConfig.runtimeProfiles)
+    ? { ...rawConfig.runtimeProfiles }
+    : { ...effective.config.runtimeProfiles };
+  profilesMap[profileId] = profileRecord;
+  rawConfig.runtimeProfiles = profilesMap;
+
+  // 7. Validate the full updated config (catches missing required fields etc.)
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Profile validation failed: ${validation.errors.map(e => e.reason).join('; ')}`,
+      nextAction: 'Fix profile fields and retry',
+    };
+  }
+
+  // 8. Atomic write
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  // 9. Return the validated profile from the config
+  // Defensive guard: Object.hasOwn() doesn't narrow TS type, so extract and verify.
+  const createdProfile = validation.value.runtimeProfiles[profileId];
+  if (!createdProfile) {
+    return { ok: false, statusCode: 500, error: 'internal_error',
+      message: `Profile '${profileId}' was written but could not be read back from config.`,
+      nextAction: 'This is a bug in PD config persistence. Please report it.' };
+  }
+  return {
+    ok: true,
+    profileId,
+    profile: createdProfile,
+  };
+}
+
+/**
+ * Update an existing runtime profile in .pd/config.yaml.
+ *
+ * - Rejects non-existent profile (404 not_found)
+ * - Rejects type changes (400 bad_request — type change = delete + create)
+ * - Merges patch into existing profile, only known fields are persisted
+ * - Persists atomically, preserving unknown config sections
+ *
+ * ERR entries: same as createRuntimeProfile.
+ */
+export function updateRuntimeProfile(
+  workspaceDir: string,
+  profileId: string,
+  patch: unknown,
+): RuntimeProfileCrudResult {
+  // 1. Validate profileId
+  if (typeof profileId !== 'string' || profileId.length === 0) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'profileId must be a non-empty string' };
+  }
+
+  // 2. Validate patch is a record
+  if (!isRecord(patch)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Patch payload must be a JSON object' };
+  }
+
+  // 3. Load existing config — refuse to write on malformed (rc-9)
+  const loadResult = loadPdConfig(workspaceDir);
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update runtime profile: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 4. Reject if profile doesn't exist (404)
+  if (!Object.hasOwn(effective.config.runtimeProfiles, profileId)) {
+    return {
+      ok: false,
+      statusCode: 404,
+      error: 'not_found',
+      message: `Runtime profile '${profileId}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
+      nextAction: 'Use POST /api/v1/config/profiles to create a new profile',
+    };
+  }
+
+  const existingProfile = effective.config.runtimeProfiles[profileId];
+  // Defensive guard: Object.hasOwn() above doesn't narrow TS type.
+  if (!existingProfile) {
+    return { ok: false, statusCode: 500, error: 'internal_error',
+      message: `Profile '${profileId}' existence check passed but value is undefined.`,
+      nextAction: 'This is a bug in PD config resolution. Please report it.' };
+  }
+
+  // 5. Reject type change (type change = delete + create)
+  if (Object.hasOwn(patch, 'type')) {
+    const patchType = patch.type;
+    if (typeof patchType !== 'string' || patchType !== existingProfile.type) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: 'bad_request',
+        message: `Cannot change profile type (existing: '${existingProfile.type}', requested: '${String(patchType)}'). Type change equals delete + create. Delete this profile and create a new one instead.`,
+        nextAction: `DELETE /api/v1/config/profiles/${encodeURIComponent(profileId)} then POST /api/v1/config/profiles with the new type`,
+      };
+    }
+  }
+
+  // 6. Merge patch into existing profile, then extract only known fields
+  const mergedSource: Record<string, unknown> = { ...existingProfile, ...patch };
+  const mergedRecord = extractProfileFields(mergedSource, existingProfile.type);
+
+  // 7. Read raw config to preserve unknown sections, update the profile
+  const configPath = getPdConfigPath(workspaceDir);
+  const rawConfig = readRawConfig(configPath);
+  const profilesMap = isRecord(rawConfig.runtimeProfiles)
+    ? { ...rawConfig.runtimeProfiles }
+    : { ...effective.config.runtimeProfiles };
+  profilesMap[profileId] = mergedRecord;
+  rawConfig.runtimeProfiles = profilesMap;
+
+  // 8. Validate the full updated config
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Profile validation failed: ${validation.errors.map(e => e.reason).join('; ')}`,
+      nextAction: 'Fix profile fields and retry',
+    };
+  }
+
+  // 9. Atomic write
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  // 10. Return the validated updated profile
+  // Defensive guard: Object.hasOwn() doesn't narrow TS type.
+  const updatedProfile = validation.value.runtimeProfiles[profileId];
+  if (!updatedProfile) {
+    return { ok: false, statusCode: 500, error: 'internal_error',
+      message: `Profile '${profileId}' was updated but could not be read back from config.`,
+      nextAction: 'This is a bug in PD config persistence. Please report it.' };
+  }
+  return {
+    ok: true,
+    profileId,
+    profile: updatedProfile,
+  };
+}
+
+/**
+ * Delete a runtime profile from .pd/config.yaml.
+ *
+ * - Rejects non-existent profile (404 not_found)
+ * - Rejects if profile is the defaultRuntime (400 bad_request)
+ * - Rejects if any agent binding references the profile (400 bad_request, lists agents)
+ * - Persists atomically, preserving unknown config sections
+ *
+ * ERR entries: same as createRuntimeProfile.
+ */
+export function deleteRuntimeProfile(
+  workspaceDir: string,
+  profileId: string,
+): RuntimeProfileCrudResult {
+  // 1. Validate profileId
+  if (typeof profileId !== 'string' || profileId.length === 0) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'profileId must be a non-empty string' };
+  }
+
+  // 2. Load existing config — refuse to write on malformed (rc-9)
+  const loadResult = loadPdConfig(workspaceDir);
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot delete runtime profile: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 3. Reject if profile doesn't exist (404)
+  if (!Object.hasOwn(effective.config.runtimeProfiles, profileId)) {
+    return {
+      ok: false,
+      statusCode: 404,
+      error: 'not_found',
+      message: `Runtime profile '${profileId}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
+    };
+  }
+
+  // Capture the profile snapshot BEFORE deletion (for return value).
+  // Defensive guard: Object.hasOwn() doesn't narrow TS type.
+  const deletedProfile = effective.config.runtimeProfiles[profileId];
+  if (!deletedProfile) {
+    return { ok: false, statusCode: 500, error: 'internal_error',
+      message: `Profile '${profileId}' existence check passed but value is undefined.`,
+      nextAction: 'This is a bug in PD config resolution. Please report it.' };
+  }
+
+  // 4. Reject if profile is the defaultRuntime
+  if (effective.config.internalAgents.defaultRuntime === profileId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Cannot delete runtime profile '${profileId}' because it is the default runtime. Change the default runtime first.`,
+      nextAction: 'Use PATCH /api/v1/config/default-runtime to change the default to another profile before deleting',
+    };
+  }
+
+  // 5. Reject if any agent binding references this profile (list the agents)
+  const referencingAgents: string[] = [];
+  for (const agentName of INTERNAL_AGENT_NAMES) {
+    const binding = effective.config.internalAgents.agents[agentName];
+    if (binding && binding.runtimeProfile === profileId) {
+      referencingAgents.push(agentName);
+    }
+  }
+  if (referencingAgents.length > 0) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Cannot delete runtime profile '${profileId}' because it is referenced by agents: ${referencingAgents.join(', ')}. Update their bindings first.`,
+      nextAction: `Use PATCH /api/v1/config/agents/:agentName/binding to reassign: ${referencingAgents.join(', ')}`,
+    };
+  }
+
+  // 6. Read raw config to preserve unknown sections, remove the profile
+  const configPath = getPdConfigPath(workspaceDir);
+  const rawConfig = readRawConfig(configPath);
+  const profilesMap = isRecord(rawConfig.runtimeProfiles)
+    ? { ...rawConfig.runtimeProfiles }
+    : {};
+  delete profilesMap[profileId];
+  rawConfig.runtimeProfiles = profilesMap;
+
+  // 7. Validate the updated config
+  const validation = validatePdConfig(rawConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Updated config would be invalid after deletion: ${validation.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  // 8. Atomic write
+  try {
+    writeConfigAtomic(configPath, rawConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
+  }
+
+  // 9. Return the deleted profile snapshot for client confirmation
+  return {
+    ok: true,
+    profileId,
+    profile: deletedProfile,
   };
 }
 

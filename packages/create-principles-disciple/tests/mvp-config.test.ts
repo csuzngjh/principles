@@ -1683,12 +1683,34 @@ describe('Malformed config.yaml fails loud with rollback', () => {
 });
 
 describe('config.yaml does not contain OpenClaw secrets', () => {
-  it('generated config has no apiKey, token, or secret fields', () => {
+  // ADR-0016: PD does not store provider secrets. `apiKeyEnv` is allowed
+  // because it stores an *env var name* (e.g. "ANTHROPIC_API_KEY"), not the
+  // secret value itself. This test forbids literal secret-value fields like
+  // `apiKey`, `api_key`, `token`, `secret`, `password` at any depth.
+  function findSecretKeys(obj: unknown, prefix = ''): string[] {
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+    const forbidden = new Set(['apikey', 'api_key', 'token', 'secret', 'password']);
+    const hits: string[] = [];
+    for (const key of Object.keys(obj)) {
+      const fullPath = prefix ? `${prefix}.${key}` : key;
+      if (forbidden.has(key.toLowerCase())) {
+        hits.push(fullPath);
+      }
+      const val = (obj as Record<string, unknown>)[key];
+      if (typeof val === 'object' && val !== null) {
+        hits.push(...findSecretKeys(val, fullPath));
+      }
+    }
+    return hits;
+  }
+
+  it('generated config has no literal secret-value fields (apiKey/api_key/token/secret/password)', () => {
     const content = generateConfigYamlContent();
-    expect(content).not.toContain('apiKey');
-    expect(content).not.toContain('token');
-    expect(content).not.toContain('secret');
-    expect(content).not.toContain('password');
+    const parsed = yaml.load(content) as unknown;
+    const hits = findSecretKeys(parsed);
+    expect(hits, `Forbidden secret-value keys found: ${hits.join(', ')}`).toEqual([]);
+    // Sanity: apiKeyEnv IS allowed (env var name reference, not a secret).
+    expect(content).toContain('apiKeyEnv');
   });
 });
 

@@ -371,6 +371,32 @@ describe('PiAiRuntimeAdapter', () => {
         expect(context.messages[0].content).toBe('{"pain":"signal","severity":0.8}');
       }
     });
+
+    // ── systemPrompt support (PRI-501 follow-up) ──
+
+    it('TC1: passes config.systemPrompt to Context.systemPrompt when set', async () => {
+      const adapter = makeAdapter({ systemPrompt: 'You are a diagnostician.' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBe('You are a diagnostician.');
+    });
+
+    it('TC2: omits Context.systemPrompt when config.systemPrompt is unset (backward compat)', async () => {
+      const adapter = makeAdapter();
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBeUndefined();
+    });
+
+    it('TC3: omits Context.systemPrompt when config.systemPrompt is empty string', async () => {
+      const adapter = makeAdapter({ systemPrompt: '' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBeUndefined();
+    });
   });
 
   // ── JSON extraction (balanced parsing) ──

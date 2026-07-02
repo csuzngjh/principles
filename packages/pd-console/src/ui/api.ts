@@ -23,6 +23,8 @@ import {
   validateConfigCatalog,
   validateAgentBindingUpdate,
   validateDefaultRuntimeUpdate,
+  validateRuntimeProfileMutation,
+  validateReadinessCheck,
   validateFeatureFlagUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
@@ -60,6 +62,8 @@ import type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  RuntimeProfileMutationData,
+  ReadinessCheckData,
   FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
@@ -359,6 +363,93 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
   );
 }
 
+// ── Runtime Profile CRUD (POST/PATCH/DELETE /api/v1/config/profiles) ──────────
+
+/**
+ * Create a new runtime profile.
+ *
+ * Body shape: `{ id: string, profile: { type, provider?, model?, ... } }`.
+ * Server validates per-type requirements (pi-ai needs provider/model/apiKeyEnv)
+ * and returns 400 with a message on validation failure. The server response is
+ * `{ profileId, profile }`; we validate the contract fields and rely on the
+ * caller to re-fetch the catalog for display.
+ *
+ * rc-9: server-side validation errors surface as `result.error` (no silent
+ * fallback) — the request() helper extracts the message from the error envelope.
+ */
+async function createRuntimeProfile(
+  id: string,
+  profile: Record<string, unknown>,
+): Promise<ApiResponse<RuntimeProfileMutationData>> {
+  return request<RuntimeProfileMutationData>(
+    '/api/v1/config/profiles',
+    {
+      method: 'POST',
+      body: JSON.stringify({ id, profile }),
+    },
+    validateRuntimeProfileMutation,
+  );
+}
+
+/**
+ * Update an existing runtime profile (partial patch).
+ *
+ * Body shape: a partial profile object (e.g. `{ model: 'new-model' }`).
+ * The server rejects type changes with 400; other fields are merged.
+ */
+async function updateRuntimeProfile(
+  profileId: string,
+  patch: Record<string, unknown>,
+): Promise<ApiResponse<RuntimeProfileMutationData>> {
+  return request<RuntimeProfileMutationData>(
+    `/api/v1/config/profiles/${encodeURIComponent(profileId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    },
+    validateRuntimeProfileMutation,
+  );
+}
+
+/**
+ * Delete a runtime profile.
+ *
+ * The server rejects deletion with 400 when the profile is the defaultRuntime
+ * or is referenced by any agent (error message lists the agent names). The
+ * caller must surface this error to the user (rc-9: no silent fallback).
+ */
+async function deleteRuntimeProfile(
+  profileId: string,
+): Promise<ApiResponse<RuntimeProfileMutationData>> {
+  return request<RuntimeProfileMutationData>(
+    `/api/v1/config/profiles/${encodeURIComponent(profileId)}`,
+    { method: 'DELETE' },
+    validateRuntimeProfileMutation,
+  );
+}
+
+/**
+ * Fetch dynamic readiness for a single agent (GET /api/v1/config/readiness/:name).
+ *
+ * The summary/catalog endpoints return a static, pessimistic readiness that
+ * doesn't probe the actual provider. This endpoint performs a live check
+ * (e.g. testing whether the API key env var is set and the provider responds).
+ *
+ * Used by AgentCard when L2 is expanded and the static readiness is 'unknown'
+ * — the pessimistic value is replaced with the live result. On failure the
+ * caller falls back to the static value (rc-9: the error is surfaced via the
+ * ApiResponse error envelope, not silently swallowed).
+ */
+async function fetchAgentReadiness(
+  agentName: string,
+): Promise<ApiResponse<ReadinessCheckData>> {
+  return request<ReadinessCheckData>(
+    `/api/v1/config/readiness/${encodeURIComponent(agentName)}`,
+    undefined,
+    validateReadinessCheck,
+  );
+}
+
 // ── Feature Flag Toggle (spec 2026-06-27 §13.5) ─────────────────────────────
 
 async function patchFeatureFlag(
@@ -634,6 +725,10 @@ export {
   fetchConfigCatalog,
   updateAgentBinding,
   updateDefaultRuntime,
+  createRuntimeProfile,
+  updateRuntimeProfile,
+  deleteRuntimeProfile,
+  fetchAgentReadiness,
   patchFeatureFlag,
   fetchOutputLanguage,
   updateOutputLanguage,
@@ -679,6 +774,8 @@ export type {
   ConfigCatalogData,
   AgentBindingUpdateData,
   DefaultRuntimeUpdateData,
+  RuntimeProfileMutationData,
+  ReadinessCheckData,
   FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,

@@ -109,10 +109,14 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     expect(nn(effective.config.features.idle_trigger).category).toBe('gone');
   });
 
-  it('defaults include openclaw.default runtime profile', () => {
+  it('defaults include pd.default (pi-ai) and openclaw.default (openclaw) runtime profiles', () => {
     const effective = computeEffectivePdConfig(null);
+    // pd.default is the primary default profile (pi-ai type)
     expect(Object.hasOwn(effective.config.runtimeProfiles, DEFAULT_RUNTIME_PROFILE_ID)).toBe(true);
-    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('openclaw');
+    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('pi-ai');
+    // openclaw.default is retained as a fallback (openclaw type)
+    expect(Object.hasOwn(effective.config.runtimeProfiles, 'openclaw.default')).toBe(true);
+    expect(nn(effective.config.runtimeProfiles['openclaw.default']).type).toBe('openclaw');
   });
 
   it('defaults include all internal agents', () => {
@@ -746,15 +750,15 @@ describe('Edge cases', () => {
     expect(nn(philosopher).readiness).toBe('disabled');
   });
 
-  it('pi-ai profile with all required fields has readiness=not_ready (runtime unknown)', () => {
+  it('pi-ai profile with all required fields has readiness=unknown (runtime unavailable to static redaction)', () => {
     const raw = makeValidConfig();
     const result = validatePdConfig(raw);
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const summary = redactPdConfig(effective);
     const pdProfile = summary.runtimeProfiles.find(p => p.id === 'pd.anthropic-sonnet');
-    // pi-ai profile is "not_ready" because runtime availability is unknown
-    expect(nn(pdProfile).readiness).toBe('not_ready');
+    // pi-ai profile is "unknown" because static redaction cannot access env vars
+    expect(nn(pdProfile).readiness).toBe('unknown');
   });
 
   it('openclaw profile without provider/model has readiness=needs_setup', () => {

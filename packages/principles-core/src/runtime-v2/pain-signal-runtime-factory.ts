@@ -95,6 +95,8 @@ export interface RuntimeConfig {
   maxRetries?: number;
   /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
   baseUrl?: string;
+  /** Optional system prompt (flows from profile to PiAiRuntimeAdapter). */
+  systemPrompt?: string;
 }
 
 export interface RuntimeConfigError {
@@ -350,6 +352,7 @@ export function resolveRuntimeConfigFromPdConfig(
       timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxRetries: adapterConfig.maxRetries,
       agentId: 'main',
+      ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
     };
   }
 
@@ -468,6 +471,7 @@ export async function createPainSignalBridge(
         timeoutMs: runtimeConfig.timeoutMs,
         baseUrl: runtimeConfig.baseUrl,
         workspace: opts.workspaceDir,
+        ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
       })
     : new OpenClawCliRuntimeAdapter({
         runtimeMode: runtimeConfig.openclawMode ?? 'default',

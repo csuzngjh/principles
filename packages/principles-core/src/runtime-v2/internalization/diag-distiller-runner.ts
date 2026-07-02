@@ -85,10 +85,10 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     super(deps, options, {
       runnerName: 'diag_distiller',
       expectedTaskKind: 'diag_distiller',
-      // PRI-442 Bug-B-005: Use 'diagnostician' (the registered OpenClaw agent)
-      // as the agentId. 'diag_distiller' is an internal stage name, not an
-      // OpenClaw-registered agent. See diag-rootcause-runner.ts for details.
-      defaultAgentId: 'diagnostician',
+      // Use 'main' (the default OpenClaw agent) for CLI invocation.
+      // 'diagnostician' is a PD-internal constant (AGENT_IDS.DIAGNOSTICIAN),
+      // not an OpenClaw-registered agent. See diag-rootcause-runner.ts for details.
+      defaultAgentId: 'main',
       resultRefPrefix: 'diag-distiller',
     });
     this.validator = deps.validator;

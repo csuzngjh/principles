@@ -31,6 +31,7 @@ import { EmpathyObserverCostHint } from "./EmpathyObserverCostHint.js";
 import { WorkflowDiagram } from "./WorkflowDiagram.js";
 import { AgentGroup } from "./AgentGroup.js";
 import { AgentCard, type AgentLocale } from "./AgentCard.js";
+import { RuntimeProfileManager } from "./RuntimeProfileManager.js";
 import {
   AGENT_GROUPS,
   AGENT_METADATA,
@@ -953,6 +954,18 @@ export function ControlCenterPage() {
           profiles={availableProfiles}
           onDefaultChange={handleDefaultRuntimeChange}
           saving={savingDefault}
+        />
+      </section>
+
+      {/* Section 3b: Runtime Profile Management — CRUD UI */}
+      <section className="mt-8" aria-labelledby="section-runtime-profiles">
+        <SectionTitle id="section-runtime-profiles">
+          {t("pages.controlCenter.profiles.sectionTitle")}
+        </SectionTitle>
+        <RuntimeProfileManager
+          profiles={availableProfiles}
+          defaultRuntimeId={configData.defaultRuntime}
+          onMutated={loadData}
         />
       </section>
 

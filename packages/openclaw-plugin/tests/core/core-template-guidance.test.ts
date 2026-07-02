@@ -14,7 +14,7 @@ describe('core template guidance', () => {
 
     expect(enAgents).toContain('sessions_spawn');
     expect(enTools).toContain('sessions_spawn');
-    expect(enAgents).toContain('pd-diagnostician');
+    expect(enAgents).toContain('pd-explorer');
     expect(enAgents).toContain('Tool Routing Addendum');
     expect(enTools).toContain('Agent Routing Clarification');
   });

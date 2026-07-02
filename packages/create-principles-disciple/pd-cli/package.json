@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@principles/core": "file:../core",
+    "principles-disciple": "file:../plugin",
     "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.1"
@@ -21,7 +22,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.2",
+    "@types/node": "^26.0.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"

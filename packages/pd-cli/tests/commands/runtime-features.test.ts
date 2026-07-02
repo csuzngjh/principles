@@ -44,6 +44,8 @@ function makeValidConfigYaml(): string {
       empathy_observer: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
+      // Include pd.default (the M9 default) to avoid "profile not found" warnings
+      'pd.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-3-5-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
       'openclaw.default': { type: 'openclaw', source: 'default' },
     },
     internalAgents: {

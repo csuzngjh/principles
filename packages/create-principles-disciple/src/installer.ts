@@ -966,7 +966,11 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
       const port = CONSOLE_AUTOLAUNCH_BASE_PORT + i;
        
       if (await probeAutolaunchHealth(port)) {
-        const consoleUrl = `http://127.0.0.1:${port}/welcome`;
+        // HashRouter: client-side routes live under /#/ — server only serves /,
+        // anything else (incl. /welcome) is treated as an API path and returns
+        // 404 not_found. Must open /#/welcome so the browser loads index.html
+        // first, then React Router handles the hash segment client-side.
+        const consoleUrl = `http://127.0.0.1:${port}/#/welcome`;
         const browserResult = openBrowserForOnboarding(consoleUrl);
         if (!browserResult.opened) {
           // EP-03: browser failed but console is up — surface the URL + reason.

@@ -286,6 +286,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       timeoutMs: adapterTimeoutMs,
       baseUrl,
       workspace: opts.workspaceDir,
+      ...(configFields.systemPrompt ? { systemPrompt: configFields.systemPrompt } : {}),
     });
   }
 
