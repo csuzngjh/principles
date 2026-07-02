@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: "Principles Disciple",
-  description: "A Thinking OS and Evolution Sandbox for AI Agents",
+  description: "Turn repeated AI Agent corrections into reviewable, reversible behavior principles governed by the Owner.",
   lastUpdated: true,
   cleanUrls: true,
   ignoreDeadLinks: true,
@@ -19,17 +19,17 @@ export default defineConfig({
     // Open Graph
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'Principles Disciple' }],
-    ['meta', { property: 'og:description', content: '硅基生命的思维操作系统与进化沙盒 | A Thinking OS for Silicon Lifeforms' }],
-    ['meta', { property: 'og:image', content: 'https://principles-disciple.vercel.app/images/og-image.png' }],
+    ['meta', { property: 'og:description', content: 'Turn repeated corrections into Owner-approved, observable, reversible Agent behavior principles.' }],
+    ['meta', { property: 'og:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:image', content: 'https://principles-disciple.vercel.app/images/og-image.png' }],
+    ['meta', { name: 'twitter:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
   ],
 
   locales: {
     root: {
       label: 'English',
       lang: 'en',
-      description: 'A Thinking OS and Evolution Sandbox for AI Agents',
+      description: 'Owner-governed, observable, reversible behavior principles for AI Agents.',
       themeConfig: {
         nav: [
           { text: 'Home', link: '/' },
@@ -70,7 +70,7 @@ export default defineConfig({
       label: '简体中文',
       lang: 'zh-CN',
       link: '/zh/',
-      description: '硅基生命的思维操作系统与进化沙盒',
+      description: '把反复纠正沉淀为由 Owner 审批、效果可观察、随时可回滚的 Agent 行为原则。',
       themeConfig: {
         nav: [
           { text: '首页', link: '/zh/' },

@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Principles Disciple in 2 minutes and let your AI agent learn from its mistakes.
+description: Install Principles Disciple and turn repeated corrections into Owner-approved behavior principles.
 ---
 
 # Getting Started
@@ -22,7 +22,7 @@ You're always in control. Nothing activates without your approval.
 ### 1. Install
 
 ```bash
-npx create-principles-disciple --yes
+npx create-principles-disciple
 openclaw gateway --force
 ```
 

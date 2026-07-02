@@ -1,6 +1,6 @@
 ---
 title: 快速开始
-description: 用 2 分钟安装 Principles Disciple，让你的 AI 助手从重复错误中学习。
+description: 安装 Principles Disciple，把反复纠正沉淀为由 Owner 审批的行为原则。
 ---
 
 # 快速开始
@@ -15,14 +15,14 @@ AI 助手反复出错 → PD 识别模式 → 你审核 → AI 助手改进
 
 你始终拥有控制权。没有你的审核，原则不会自动变成约束。
 
-## 2 分钟安装
+## 安装
 
 **前置条件**：Node.js 18 或更高版本，并已安装 OpenClaw CLI。
 
 ### 1. 安装
 
 ```bash
-npx create-principles-disciple --yes
+npx create-principles-disciple
 openclaw gateway --force
 ```
 
