@@ -244,7 +244,7 @@ export class RuleHost {
       if (loaded.length === 0) {
         this._emitEmptyLoadWarn(
           'armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval)',
-          'If this is unexpected, run `pd runtime activation list --channel code_tool_hook` to inspect activations, or `pd runtime activation promote` to enable a live rule',
+          'If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations, or `pd activation promote --activation-id <id> --confirm` to enable a live rule',
         );
       }
       return { loaded, skipped };
