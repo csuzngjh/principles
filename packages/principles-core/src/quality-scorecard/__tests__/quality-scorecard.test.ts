@@ -11,12 +11,18 @@ import {
   meetsMvpThreshold,
   escapeHtml,
   escapeMarkdownTable,
+  isValidRubricScore,
+  parseRubricScore,
+  validateDimensionScores,
   validateLlmScoreResponse,
   validateAdjudicationResponse,
   validatePainRow,
   validateGateRow,
   validateCliOptions,
   validateEvolutionRow,
+  validatePrincipleEventRow,
+  extractJsonFromLlmResponse,
+  truncate,
   needsAdjudication,
   determineFinalLabel,
   sanitize,
@@ -640,5 +646,298 @@ describe('determineFinalLabel — additional boundary conditions', () => {
     const local = makeLocalEval({ totalScore: 10, mvpMet: false });
     const label = determineFinalLabel(local, { adjudicationStatus: 'skipped' });
     expect(label).toBe('needs-review');
+  });
+});
+
+// ── isValidRubricScore ──────────────────────────────────────────
+
+describe('isValidRubricScore', () => {
+  it('returns true for 0', () => {
+    expect(isValidRubricScore(0)).toBe(true);
+  });
+
+  it('returns true for 1', () => {
+    expect(isValidRubricScore(1)).toBe(true);
+  });
+
+  it('returns true for 2', () => {
+    expect(isValidRubricScore(2)).toBe(true);
+  });
+
+  it('returns false for -1', () => {
+    expect(isValidRubricScore(-1)).toBe(false);
+  });
+
+  it('returns false for 3', () => {
+    expect(isValidRubricScore(3)).toBe(false);
+  });
+
+  it('returns false for 1.5', () => {
+    expect(isValidRubricScore(1.5)).toBe(false);
+  });
+
+  it('returns false for string "2"', () => {
+    expect(isValidRubricScore('2' as unknown as number)).toBe(false);
+  });
+
+  it('returns false for null', () => {
+    expect(isValidRubricScore(null as unknown as number)).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(isValidRubricScore(undefined as unknown as number)).toBe(false);
+  });
+
+  it('returns false for NaN', () => {
+    expect(isValidRubricScore(NaN)).toBe(false);
+  });
+});
+
+// ── parseRubricScore ────────────────────────────────────────────
+
+describe('parseRubricScore', () => {
+  it('returns 0 for valid 0', () => {
+    expect(parseRubricScore(0)).toBe(0);
+  });
+
+  it('returns 1 for valid 1', () => {
+    expect(parseRubricScore(1)).toBe(1);
+  });
+
+  it('returns 2 for valid 2', () => {
+    expect(parseRubricScore(2)).toBe(2);
+  });
+
+  it('defaults to 0 for invalid value 3', () => {
+    expect(parseRubricScore(3)).toBe(0);
+  });
+
+  it('defaults to 0 for invalid value -1', () => {
+    expect(parseRubricScore(-1)).toBe(0);
+  });
+
+  it('defaults to 0 for null', () => {
+    expect(parseRubricScore(null as unknown as number)).toBe(0);
+  });
+
+  it('defaults to 0 for undefined', () => {
+    expect(parseRubricScore(undefined as unknown as number)).toBe(0);
+  });
+
+  it('defaults to 0 for string', () => {
+    expect(parseRubricScore('2' as unknown as number)).toBe(0);
+  });
+});
+
+// ── validateDimensionScores ─────────────────────────────────────
+
+describe('validateDimensionScores', () => {
+  it('returns all dimensions with correct scores', () => {
+    const raw: Record<string, unknown> = {
+      G1: 2, G2: 1, G3: 0, G4: 2, G5: 1, G6: 0, G7: 2,
+    };
+    const result = validateDimensionScores(raw);
+    expect(result.G1).toBe(2);
+    expect(result.G2).toBe(1);
+    expect(result.G3).toBe(0);
+    expect(result.G4).toBe(2);
+    expect(result.G5).toBe(1);
+    expect(result.G6).toBe(0);
+    expect(result.G7).toBe(2);
+  });
+
+  it('defaults missing dimensions to 0', () => {
+    const raw: Record<string, unknown> = { G1: 2 };
+    const result = validateDimensionScores(raw);
+    expect(result.G1).toBe(2);
+    expect(result.G2).toBe(0);
+    expect(result.G3).toBe(0);
+    expect(result.G4).toBe(0);
+    expect(result.G5).toBe(0);
+    expect(result.G6).toBe(0);
+    expect(result.G7).toBe(0);
+  });
+
+  it('clamps invalid dimension values to 0', () => {
+    const raw: Record<string, unknown> = {
+      G1: 5, G2: -1, G3: 'bad', G4: null,
+    };
+    const result = validateDimensionScores(raw);
+    expect(result.G1).toBe(0);
+    expect(result.G2).toBe(0);
+    expect(result.G3).toBe(0);
+    expect(result.G4).toBe(0);
+  });
+
+  it('handles empty object (all zeros)', () => {
+    const result = validateDimensionScores({});
+    for (const dim of RUBRIC_DIMENSIONS) {
+      expect(result[dim]).toBe(0);
+    }
+  });
+
+  it('ignores extra unknown dimensions', () => {
+    const raw: Record<string, unknown> = {
+      G1: 2, G8: 1, extra: 'value',
+    };
+    const result = validateDimensionScores(raw);
+    expect(result.G1).toBe(2);
+    expect(Object.keys(result)).toHaveLength(7);
+    for (const dim of RUBRIC_DIMENSIONS) {
+      expect(Object.keys(result)).toContain(dim);
+    }
+  });
+});
+
+// ── validatePrincipleEventRow ───────────────────────────────────
+
+describe('validatePrincipleEventRow', () => {
+  it('parses valid row with principle_id', () => {
+    const row = {
+      principle_id: 'P_12345',
+      event_type: 'principle_created',
+      created_at: '2026-04-26T10:00:00.000Z',
+    };
+    const result = validatePrincipleEventRow(row);
+    expect(result).not.toBeNull();
+    expect(result?.principle_id).toBe('P_12345');
+    expect(result?.event_type).toBe('principle_created');
+    expect(result?.created_at).toBe('2026-04-26T10:00:00.000Z');
+  });
+
+  it('parses valid row with null principle_id', () => {
+    const row = {
+      principle_id: null,
+      event_type: 'system_started',
+      created_at: '2026-04-26T10:00:00.000Z',
+    };
+    const result = validatePrincipleEventRow(row);
+    expect(result).not.toBeNull();
+    expect(result?.principle_id).toBeNull();
+    expect(result?.event_type).toBe('system_started');
+  });
+
+  it('returns null for null input', () => {
+    expect(validatePrincipleEventRow(null)).toBeNull();
+  });
+
+  it('returns null for non-object input', () => {
+    expect(validatePrincipleEventRow('string')).toBeNull();
+    expect(validatePrincipleEventRow(42)).toBeNull();
+    expect(validatePrincipleEventRow([])).toBeNull();
+  });
+
+  it('returns null for missing event_type', () => {
+    expect(validatePrincipleEventRow({ principle_id: 'P_1' })).toBeNull();
+  });
+
+  it('returns null for empty event_type', () => {
+    expect(validatePrincipleEventRow({ event_type: '' })).toBeNull();
+  });
+
+  it('defaults created_at when missing', () => {
+    const result = validatePrincipleEventRow({ event_type: 'test_event' });
+    expect(result).not.toBeNull();
+    expect(result?.event_type).toBe('test_event');
+    expect(typeof result?.created_at).toBe('string');
+    expect(result?.created_at.length).toBeGreaterThan(0);
+  });
+
+  it('defaults principle_id to null when wrong type', () => {
+    const result = validatePrincipleEventRow({ event_type: 'test', principle_id: 123 });
+    expect(result).not.toBeNull();
+    expect(result?.principle_id).toBeNull();
+  });
+});
+
+// ── extractJsonFromLlmResponse ──────────────────────────────────
+
+describe('extractJsonFromLlmResponse', () => {
+  it('extracts JSON object from plain JSON string', () => {
+    const text = '{"score": 2, "rationale": "good"}';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toEqual({ score: 2, rationale: 'good' });
+  });
+
+  it('extracts JSON from text with surrounding prose', () => {
+    const text = 'Here is my analysis:\n\n{"score": 1, "rationale": "partial"}\n\nLet me know if you need more.';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toEqual({ score: 1, rationale: 'partial' });
+  });
+
+  it('extracts nested JSON objects', () => {
+    const text = '{"scores": {"G1": 2, "G2": 1}, "flags": ["flag1"]}';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toEqual({ scores: { G1: 2, G2: 1 }, flags: ['flag1'] });
+  });
+
+  it('returns null for text without JSON', () => {
+    const text = 'Just some plain text with no JSON here.';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(extractJsonFromLlmResponse('')).toBeNull();
+  });
+
+  it('returns null for malformed JSON', () => {
+    const text = '{"broken": json}';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for JSON array only (not object)', () => {
+    const text = '[1, 2, 3]';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toBeNull();
+  });
+
+  it('extracts JSON with markdown code fences', () => {
+    const text = '```json\n{"key": "value"}\n```';
+    const result = extractJsonFromLlmResponse(text);
+    expect(result).toEqual({ key: 'value' });
+  });
+});
+
+// ── truncate ────────────────────────────────────────────────────
+
+describe('truncate', () => {
+  it('returns unchanged text when shorter than maxLen', () => {
+    expect(truncate('short', 100)).toBe('short');
+  });
+
+  it('returns unchanged text when exactly maxLen', () => {
+    expect(truncate('exact', 5)).toBe('exact');
+  });
+
+  it('truncates text longer than maxLen and appends "..."', () => {
+    const result = truncate('this is a long string', 10);
+    expect(result).toHaveLength(13);
+    expect(result.startsWith('this is a ')).toBe(true);
+    expect(result.endsWith('...')).toBe(true);
+  });
+
+  it('uses default maxLen of 200', () => {
+    const longText = 'a'.repeat(300);
+    const result = truncate(longText);
+    expect(result).toHaveLength(203);
+    expect(result.endsWith('...')).toBe(true);
+  });
+
+  it('handles empty string', () => {
+    expect(truncate('', 50)).toBe('');
+  });
+
+  it('handles maxLen of 0', () => {
+    const result = truncate('hello', 0);
+    expect(result).toBe('...');
+  });
+
+  it('handles unicode characters', () => {
+    const text = '测试 日本語 🎉 emoji';
+    const result = truncate(text, 5);
+    expect(result.length).toBeLessThan(text.length);
+    expect(result.endsWith('...')).toBe(true);
   });
 });
