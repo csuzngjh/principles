@@ -200,6 +200,6 @@ When completing any coding task (via AI coding assistant or direct):
 Use this to avoid confusing peer agents with Principles internal workers:
 
 - **Peer agents / peer sessions**: `agents_list`, `sessions_list`, `sessions_send`, `sessions_spawn`
-- **Internal workers** (for example `diagnostician`, `explorer`): use `sessions_spawn with pd-diagnostician/pd-explorer skills`
+- **Internal workers** (for example `explorer`): use `sessions_spawn with pd-explorer skill`
 - **Inspect internal workers**: use `subagents`
-- **Do not** treat `diagnostician` or `explorer` as peer session targets
+- **Do not** treat `explorer` as a peer session target

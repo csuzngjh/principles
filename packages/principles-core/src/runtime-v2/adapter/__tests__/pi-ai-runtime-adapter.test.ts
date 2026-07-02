@@ -124,7 +124,7 @@ function findTelemetryEvent(eventType: string): Record<string, unknown> | undefi
   // Runtime Contract Rule 2 (no `as` bypass): validate the mock-call shape
   // before treating it as a telemetry payload.
   const call = mockEmitTelemetry.mock.calls.find((c: unknown[]) => {
-    const payload = c[0];
+    const [payload] = c;
     return (
       typeof payload === 'object' &&
       payload !== null &&
@@ -133,7 +133,7 @@ function findTelemetryEvent(eventType: string): Record<string, unknown> | undefi
     );
   });
   if (!call) return undefined;
-  const payload = call[0];
+  const [payload] = call;
   return typeof payload === 'object' && payload !== null
     ? (payload as Record<string, unknown>)
     : undefined;
@@ -145,11 +145,11 @@ function findTelemetryEvent(eventType: string): Record<string, unknown> | undefi
  */
 function isToolContext(
   value: unknown,
-): value is { tools: Array<{ name: string; parameters: unknown }> } {
+): value is { tools: { name: string; parameters: unknown }[] } {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'tools')) {
     return false;
   }
-  const tools = (value as { tools: unknown }).tools;
+  const {tools} = (value as { tools: unknown });
   if (!Array.isArray(tools)) return false;
   return tools.every((tool) => {
     if (typeof tool !== 'object' || tool === null) return false;
@@ -370,6 +370,32 @@ describe('PiAiRuntimeAdapter', () => {
       if (context.messages[0]) {
         expect(context.messages[0].content).toBe('{"pain":"signal","severity":0.8}');
       }
+    });
+
+    // ── systemPrompt support (PRI-501 follow-up) ──
+
+    it('TC1: passes config.systemPrompt to Context.systemPrompt when set', async () => {
+      const adapter = makeAdapter({ systemPrompt: 'You are a diagnostician.' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBe('You are a diagnostician.');
+    });
+
+    it('TC2: omits Context.systemPrompt when config.systemPrompt is unset (backward compat)', async () => {
+      const adapter = makeAdapter();
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBeUndefined();
+    });
+
+    it('TC3: omits Context.systemPrompt when config.systemPrompt is empty string', async () => {
+      const adapter = makeAdapter({ systemPrompt: '' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
+      expect(context.systemPrompt).toBeUndefined();
     });
   });
 
@@ -2045,7 +2071,7 @@ describe('PiAiRuntimeAdapter', () => {
       // Verify fallback telemetry was emitted for tool_call path.
       // Runtime Contract Rule 2: validate shape before reading eventType.
       const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
-        const payload = c[0];
+        const [payload] = c;
         return (
           typeof payload === 'object' &&
           payload !== null &&
@@ -2085,7 +2111,7 @@ describe('PiAiRuntimeAdapter', () => {
       expect(isToolContext(rawContext)).toBe(true);
       if (!isToolContext(rawContext)) throw new Error('invalid tool context');
       expect(rawContext.tools.length).toBe(1);
-      const tool = rawContext.tools[0];
+      const [tool] = rawContext.tools;
       if (!tool) throw new Error('expected exactly one tool');
       // Name derived from schemaRef 'diagnostician-output-v1'
       expect(tool.name).toBe('record_diagnostician_output_v1');
@@ -2149,7 +2175,7 @@ describe('PiAiRuntimeAdapter', () => {
       // Verify fallback telemetry.
       // Runtime Contract Rule 2: validate shape before reading eventType.
       const fallbackEvents = mockEmitTelemetry.mock.calls.filter((c: unknown[]) => {
-        const payload = c[0];
+        const [payload] = c;
         return (
           typeof payload === 'object' &&
           payload !== null &&

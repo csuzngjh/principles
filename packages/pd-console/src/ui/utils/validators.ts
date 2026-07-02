@@ -502,6 +502,42 @@ export function validateDefaultRuntimeUpdate(v: unknown): DefaultRuntimeUpdateDa
   return { defaultRuntime: v.defaultRuntime };
 }
 
+// ── Runtime Profile mutation (POST/PATCH/DELETE /api/v1/config/profiles) ──────
+
+/**
+ * Response shape for create/update/delete runtime profile endpoints.
+ *
+ * Server returns `{ profileId: string, profile: { type, provider?, model?, ... } }`.
+ * We validate the contract fields (profileId + profile.type) loudly and accept
+ * the rest of the profile object as a string-indexed record, since the patch
+ * surface is open (timeoutMs, maxRetries, baseUrl, source, etc.). The page only
+ * needs profileId to confirm the target; it re-fetches the catalog for display.
+ *
+ * rc-1: input treated as unknown.
+ * rc-2: no `as` bypass — uses Object.hasOwn + typeof guards.
+ * rc-3: profileId + profile.type are required and fail loud.
+ * rc-5: Object.hasOwn for untrusted keys.
+ */
+export interface RuntimeProfileMutationData {
+  profileId: string;
+  profile: {
+    type: string;
+    [key: string]: unknown;
+  };
+}
+
+export function validateRuntimeProfileMutation(v: unknown): RuntimeProfileMutationData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'profileId') || !isString(v.profileId)) return null;
+  if (!Object.hasOwn(v, 'profile') || !isObject(v.profile)) return null;
+  const {profile} = v;
+  if (!Object.hasOwn(profile, 'type') || !isString(profile.type)) return null;
+  // Bind narrowed string to a local so the return literal keeps `type: string`
+  // (spreading a Record<string, unknown> alone would widen `type` back to unknown).
+  const profileType: string = profile.type;
+  return { profileId: v.profileId, profile: { ...profile, type: profileType } };
+}
+
 // ── Health check validator ────────────────────────────────────────────────────
 
 interface HealthCheckItemData {

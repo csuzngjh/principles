@@ -95,13 +95,13 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     super(deps, options, {
       runnerName: 'diag_rootcause',
       expectedTaskKind: 'diag_rootcause',
-      // PRI-442 Bug-B-005: Use 'diagnostician' (the registered OpenClaw agent)
-      // as the agentId for CLI invocation. 'diag_rootcause' is an internal PD
-      // stage name (DiagnosticianStageKind), not an OpenClaw-registered agent.
-      // The OpenClaw CLI rejects unknown agent IDs with "Unknown agent id".
+      // Use 'main' (the default OpenClaw agent) for CLI invocation.
+      // 'diagnostician' is a PD-internal constant (AGENT_IDS.DIAGNOSTICIAN),
+      // not an OpenClaw-registered agent. The OpenClaw CLI rejects unknown
+      // agent IDs with "Unknown agent id".
       // runnerName/expectedTaskKind still distinguish the stage internally;
       // outputSchemaRef still selects the correct output schema.
-      defaultAgentId: 'diagnostician',
+      defaultAgentId: 'main',
       resultRefPrefix: 'diag-rootcause',
     });
     this.validator = deps.validator;

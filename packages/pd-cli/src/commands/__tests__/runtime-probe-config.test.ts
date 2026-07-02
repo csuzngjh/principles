@@ -420,9 +420,9 @@ describe('PRI-402: resolveRuntimeWithOverrides returns profile info', () => {
       const { resolveRuntimeWithOverrides } = await import('../../services/resolve-runtime-from-pd-config.js');
       const result = resolveRuntimeWithOverrides(workspace, {});
 
-      // Missing config → defaults, which use openclaw.default as defaultRuntime
+      // Missing config → defaults, which use pd.default (pi-ai placeholder) as defaultRuntime
       expect(result.configSource).toBe('.pd/config.yaml');
-      expect(result.runtimeProfileId).toBe('openclaw.default');
+      expect(result.runtimeProfileId).toBe('pd.default');
       expect(typeof result.runtimeProfileLabel).toBe('string');
     } finally {
       cleanupWorkspace(workspace);

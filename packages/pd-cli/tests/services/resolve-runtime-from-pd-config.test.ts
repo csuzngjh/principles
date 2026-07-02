@@ -266,9 +266,11 @@ describe('resolveRuntimeFromPdConfig', () => {
     const tmp = mkTmpDir();
     try {
       const result = resolveRuntimeFromPdConfig(tmp);
-      expect(isRuntimeConfigError(result.result)).toBe(false);
+      // Default profile is pd.default (pi-ai with empty placeholder fields) →
+      // resolveRuntimeConfigFromPdConfig returns a needs_setup error.
+      expect(isRuntimeConfigError(result.result)).toBe(true);
       expect(result.configSource).toBe('.pd/config.yaml');
-      expect(result.runtimeProfileId).toBe('openclaw.default');
+      expect(result.runtimeProfileId).toBe('pd.default');
       expect(typeof result.runtimeProfileLabel).toBe('string');
     } finally { rmTmpDir(tmp); }
   });

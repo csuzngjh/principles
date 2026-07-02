@@ -96,8 +96,10 @@ export async function handleRuntimeHealthSnapshot(opts: HealthSnapshotOptions): 
     }
 
     if (snapshot.overallStatus !== 'healthy') {
-      console.error('');
-      console.error(`FAIL: overallStatus=${snapshot.overallStatus}`);
+      if (!opts.json) {
+        console.error('');
+        console.error(`FAIL: overallStatus=${snapshot.overallStatus}`);
+      }
       process.exitCode = 1;
     }
   } finally {

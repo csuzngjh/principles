@@ -56,6 +56,12 @@ export interface PdLocalRuntimeProfile {
   timeoutMs?: number;
   /** Optional maximum number of retries */
   maxRetries?: number;
+  /**
+   * Optional system prompt passed to pi-ai Context.systemPrompt.
+   * Enables Anthropic system-prompt caching and OpenAI developer-role priority.
+   * Design intent: "system prompt is agent profile's responsibility" (DPB-07).
+   */
+  systemPrompt?: string;
 }
 
 export type RuntimeProfile = OpenClawRuntimeProfile | PdLocalRuntimeProfile;

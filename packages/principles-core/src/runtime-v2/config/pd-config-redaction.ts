@@ -80,10 +80,13 @@ function assessProfileReadiness(profile: RuntimeProfile): RedactedRuntimeProfile
     if (oc.provider && oc.model) return 'ready';
     return 'needs_setup';
   }
-  // pi-ai: needs apiKeyEnv set
+  // pi-ai: static redaction cannot access env vars, so we cannot confirm
+  // runtime availability. Return 'unknown' (rather than the previous
+  // pessimistic 'not_ready') so the UI prompts the user to run a dynamic
+  // readiness check instead of falsely showing a broken state.
   const pd = profile;
   if (!pd.provider || !pd.model || !pd.apiKeyEnv) return 'needs_setup';
-  return 'not_ready'; // has config but runtime availability unknown
+  return 'unknown'; // config complete but runtime availability unknown (env var not checked)
 }
 
 // ── Agent Readiness ─────────────────────────────────────────────────────────

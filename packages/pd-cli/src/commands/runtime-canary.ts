@@ -362,8 +362,10 @@ export async function handleRuntimeCanary(opts: CanaryOptions): Promise<void> {
   }
 
   if (output.overallStatus !== 'healthy') {
-    console.error('');
-    console.error(`FAIL: overallStatus=${output.overallStatus}`);
+    if (!opts.json) {
+      console.error('');
+      console.error(`FAIL: overallStatus=${output.overallStatus}`);
+    }
     process.exitCode = 1;
   }
 }

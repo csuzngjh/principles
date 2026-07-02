@@ -271,23 +271,35 @@ export function generateConfigYamlContent(): string {
       idle_trigger:       { category: 'gone',  enabled: false },
     },
     runtimeProfiles: {
+      // M9 default: pi-ai profile. Placeholder fields — user must fill in
+      // provider/model/apiKeyEnv via web console (Profile CRUD API) or by
+      // editing this file. Static readiness is `needs_setup` until filled.
+      'pd.default': {
+        type: 'pi-ai',
+        provider: '',
+        model: '',
+        apiKeyEnv: '',
+      },
+      // Fallback: openclaw.default delegates LLM calls to the OpenClaw main
+      // agent. Users can switch back via web console if pi-ai is unavailable.
       'openclaw.default': {
         type: 'openclaw',
         source: 'default',
       },
     },
     internalAgents: {
-      defaultRuntime: 'openclaw.default',
+      defaultRuntime: 'pd.default',
       agents: {
-        diagnostician:     { enabled: true,  runtimeProfile: 'openclaw.default' },
-        dreamer:           { enabled: true,  runtimeProfile: 'openclaw.default' },
-        philosopher:       { enabled: false, runtimeProfile: 'openclaw.default' },
-        scribe:            { enabled: true,  runtimeProfile: 'openclaw.default' },
-        artificer:         { enabled: true,  runtimeProfile: 'openclaw.default' },
-        evaluator:         { enabled: false, runtimeProfile: 'openclaw.default' },
-        rolloutReviewer:   { enabled: false, runtimeProfile: 'openclaw.default' },
-        correctionObserver:{ enabled: false, runtimeProfile: 'openclaw.default' },
-        empathyObserver:   { enabled: false, runtimeProfile: 'openclaw.default' },
+        diagnostician:     { enabled: true,  runtimeProfile: 'pd.default' },
+        dreamer:           { enabled: true,  runtimeProfile: 'pd.default' },
+        philosopher:       { enabled: false, runtimeProfile: 'pd.default' },
+        scribe:            { enabled: true,  runtimeProfile: 'pd.default' },
+        artificer:         { enabled: true,  runtimeProfile: 'pd.default' },
+        evaluator:         { enabled: false, runtimeProfile: 'pd.default' },
+        rolloutReviewer:   { enabled: false, runtimeProfile: 'pd.default' },
+        correctionObserver:{ enabled: false, runtimeProfile: 'pd.default' },
+        empathyObserver:   { enabled: false, runtimeProfile: 'pd.default' },
+        signalCollector:   { enabled: false, runtimeProfile: 'pd.default' },
       },
     },
     ui: {
