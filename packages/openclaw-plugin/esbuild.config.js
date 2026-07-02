@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync, rmSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const isProduction = process.argv.includes('--production');
@@ -26,6 +26,11 @@ function copyRecursive(src, dest) {
 async function bundlePlugin() {
   try {
     // 1. Build the main bundle for OpenClaw
+    // Banner injects `require` via createRequire so that bundled CJS deps
+    // (e.g. yaml, which calls require('process')) work under ESM import.
+    // Without this, pd-cli's `import { ... } from 'principles-disciple'`
+    // throws "Dynamic require of 'process' is not supported".
+    // OpenClaw loads via setupEntry (dynamic import), so the banner is safe.
     await build({
       entryPoints: ['src/index.ts'],
       outfile: 'dist/bundle.js',
@@ -33,6 +38,9 @@ async function bundlePlugin() {
       platform: 'node',
       target: 'node20',
       format: 'esm',
+      banner: {
+        js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      },
       external: [
         'openclaw',
         '@openclaw/sdk',
@@ -46,6 +54,12 @@ async function bundlePlugin() {
     });
 
     console.log('Main bundle created: dist/bundle.js');
+
+    // Generate dist/index.js as a re-export of bundle.js so that package.json
+    // main/exports (./dist/index.js) resolves correctly after esbuild clean.
+    // tsc build also generates dist/index.js (from src/index.ts) for dev/test.
+    writeFileSync('dist/index.js', "export * from './bundle.js';\n");
+    console.log('Re-export shim created: dist/index.js -> dist/bundle.js');
 
     // 2. Build core tools for CLI usage (bootstrap-rules, etc)
     // We keep these separate and un-minified for easier debugging and CLI importing

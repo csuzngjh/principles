@@ -183,8 +183,10 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
     }
 
     if (result.status !== 'passed') {
-      console.error('');
-      console.error(`FAIL: status=${result.status}`);
+      if (!opts.json) {
+        console.error('');
+        console.error(`FAIL: status=${result.status}`);
+      }
       process.exitCode = 1;
     }
   } finally {

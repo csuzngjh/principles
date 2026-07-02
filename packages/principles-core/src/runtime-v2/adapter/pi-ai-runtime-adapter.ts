@@ -96,6 +96,14 @@ export interface PiAiRuntimeAdapterConfig {
    * Default: 4096. Set to 0 or undefined to omit (use model default).
    */
   maxTokens?: number;
+  /**
+   * Optional system prompt passed to pi-ai Context.systemPrompt.
+   * When set, the LLM receives it as a dedicated system-role message,
+   * enabling Anthropic system-prompt caching and OpenAI developer-role priority.
+   * When unset, behavior is unchanged (no systemPrompt field in Context).
+   * Design intent: "system prompt is agent profile's responsibility" (DPB-07).
+   */
+  systemPrompt?: string;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
   _testBackoffDelayMs?: number;
 }
@@ -512,7 +520,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       content: messageContent,
       timestamp: Date.now(),
     };
-    const context: Context = { messages: [userMessage] };
+    const context: Context = {
+      messages: [userMessage],
+      ...(this.config.systemPrompt ? { systemPrompt: this.config.systemPrompt } : {}),
+    };
 
     // Get model
     const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);

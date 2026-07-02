@@ -170,25 +170,30 @@ function validatePdLocalProfile(
 ): { ok: true; value: PdLocalRuntimeProfile } | { ok: false; errors: PdConfigValidationError[] } {
   const errors: PdConfigValidationError[] = [];
 
+  // Presence + type required; empty string is ALLOWED as a "needs_setup"
+  // placeholder (e.g. the default `pd.default` profile ships with empty
+  // provider/model/apiKeyEnv that the user fills in via web console).
+  // Semantic completeness (non-empty values) is enforced by
+  // assessProfileReadiness → 'needs_setup', not by the structural validator.
   const provider = readOwn(raw, 'provider');
   if (provider === undefined) {
     errors.push(err(`${path}.provider`, `profile '${profileId}' missing required field 'provider'`, `Add 'provider' to profile '${profileId}' (e.g. "anthropic", "openai")`));
-  } else if (!isString(provider) || provider.length === 0) {
-    errors.push(err(`${path}.provider`, `profile '${profileId}' provider must be a non-empty string, got ${safePreview(provider)}`, `Fix provider in profile '${profileId}'`));
+  } else if (!isString(provider)) {
+    errors.push(err(`${path}.provider`, `profile '${profileId}' provider must be a string, got ${safePreview(provider)}`, `Fix provider in profile '${profileId}'`));
   }
 
   const model = readOwn(raw, 'model');
   if (model === undefined) {
     errors.push(err(`${path}.model`, `profile '${profileId}' missing required field 'model'`, `Add 'model' to profile '${profileId}' (e.g. "claude-3-5-sonnet")`));
-  } else if (!isString(model) || model.length === 0) {
-    errors.push(err(`${path}.model`, `profile '${profileId}' model must be a non-empty string, got ${safePreview(model)}`, `Fix model in profile '${profileId}'`));
+  } else if (!isString(model)) {
+    errors.push(err(`${path}.model`, `profile '${profileId}' model must be a string, got ${safePreview(model)}`, `Fix model in profile '${profileId}'`));
   }
 
   const apiKeyEnv = readOwn(raw, 'apiKeyEnv');
   if (apiKeyEnv === undefined) {
     errors.push(err(`${path}.apiKeyEnv`, `profile '${profileId}' missing required field 'apiKeyEnv'`, `Add 'apiKeyEnv' to profile '${profileId}' (e.g. "ANTHROPIC_API_KEY")`));
-  } else if (!isString(apiKeyEnv) || apiKeyEnv.length === 0) {
-    errors.push(err(`${path}.apiKeyEnv`, `profile '${profileId}' apiKeyEnv must be a non-empty string (env var name), got ${safePreview(apiKeyEnv)}`, `Fix apiKeyEnv in profile '${profileId}' to be an environment variable name`));
+  } else if (!isString(apiKeyEnv)) {
+    errors.push(err(`${path}.apiKeyEnv`, `profile '${profileId}' apiKeyEnv must be a string (env var name), got ${safePreview(apiKeyEnv)}`, `Fix apiKeyEnv in profile '${profileId}' to be an environment variable name`));
   }
 
   const baseUrl = readOwn(raw, 'baseUrl');

@@ -101,8 +101,10 @@ export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCli
     }
 
     if (summary.status !== 'passed') {
-      console.error('');
-      console.error(`FAIL: status=${summary.status}`);
+      if (!opts.json) {
+        console.error('');
+        console.error(`FAIL: status=${summary.status}`);
+      }
       process.exitCode = 1;
     }
   } finally {

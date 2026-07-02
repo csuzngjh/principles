@@ -52,7 +52,13 @@ function makeValidConfig(): PdConfig {
 // ── Empty String Validation ────────────────────────────────────────────────
 
 describe('Empty string validation in pi-ai profiles', () => {
-  it('rejects empty provider string', () => {
+  // Design contract (M9 + Plan C): empty strings are structurally VALID
+  // placeholder values. The default `pd.default` profile ships with empty
+  // provider/model/apiKeyEnv that users fill in via web console. Semantic
+  // completeness is enforced by assessProfileReadiness → 'needs_setup',
+  // NOT by the structural validator. Missing keys (undefined) still error.
+
+  it('accepts empty provider string as placeholder (needs_setup)', () => {
     const raw = makeValidConfig();
     raw.runtimeProfiles['pd.empty-provider'] = {
       type: 'pi-ai',
@@ -61,15 +67,10 @@ describe('Empty string validation in pi-ai profiles', () => {
       apiKeyEnv: 'TEST_KEY',
     };
     const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('provider') &&
-      e.reason.includes('non-empty string')
-    )).toBe(true);
+    expect(result.ok).toBe(true);
   });
 
-  it('rejects empty model string', () => {
+  it('accepts empty model string as placeholder (needs_setup)', () => {
     const raw = makeValidConfig();
     raw.runtimeProfiles['pd.empty-model'] = {
       type: 'pi-ai',
@@ -78,15 +79,10 @@ describe('Empty string validation in pi-ai profiles', () => {
       apiKeyEnv: 'TEST_KEY',
     };
     const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('model') &&
-      e.reason.includes('non-empty string')
-    )).toBe(true);
+    expect(result.ok).toBe(true);
   });
 
-  it('rejects empty apiKeyEnv string', () => {
+  it('accepts empty apiKeyEnv string as placeholder (needs_setup)', () => {
     const raw = makeValidConfig();
     raw.runtimeProfiles['pd.empty-key'] = {
       type: 'pi-ai',
@@ -95,15 +91,10 @@ describe('Empty string validation in pi-ai profiles', () => {
       apiKeyEnv: '',
     };
     const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('apiKeyEnv') &&
-      e.reason.includes('non-empty string')
-    )).toBe(true);
+    expect(result.ok).toBe(true);
   });
 
-  it('accepts whitespace-only provider (current behavior - no trim)', () => {
+  it('accepts whitespace-only provider (no trim)', () => {
     const raw = makeValidConfig();
     raw.runtimeProfiles['pd.whitespace-provider'] = {
       type: 'pi-ai',
@@ -112,9 +103,40 @@ describe('Empty string validation in pi-ai profiles', () => {
       apiKeyEnv: 'TEST_KEY',
     };
     const result = validatePdConfig(raw);
-    // Current validation only checks non-empty string, does not trim
-    // Whitespace-only strings are technically non-empty
     expect(result.ok).toBe(true);
+  });
+
+  it('still rejects missing provider key (presence required)', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.missing-provider'] = {
+      type: 'pi-ai',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+    } as unknown as typeof raw.runtimeProfiles[string];
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('provider') &&
+      e.reason.includes('missing required field')
+    )).toBe(true);
+  });
+
+  it('still rejects non-string provider (type required)', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.numeric-provider'] = {
+      type: 'pi-ai',
+      provider: 123,
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+    } as unknown as typeof raw.runtimeProfiles[string];
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('provider') &&
+      e.reason.includes('must be a string')
+    )).toBe(true);
   });
 });
 
@@ -176,26 +198,26 @@ describe('Special characters in profile IDs', () => {
 describe('Multiple concurrent errors collection', () => {
   it('collects all errors when multiple fields are invalid', () => {
     const raw = makeValidConfig();
-    // Add multiple invalid profiles
+    // Add multiple invalid profiles (wrong types, not empty strings)
     raw.runtimeProfiles['pd.error1'] = {
       type: 'pi-ai',
-      provider: '',
-      model: '',
-      apiKeyEnv: '',
-    };
+      provider: 123,
+      model: 'test',
+      apiKeyEnv: 'TEST_KEY',
+    } as unknown as typeof raw.runtimeProfiles[string];
     raw.runtimeProfiles['pd.error2'] = {
       type: 'pi-ai',
       provider: 'valid',
-      model: '',
-      apiKeyEnv: '',
-    };
+      model: 456,
+      apiKeyEnv: 'TEST_KEY',
+    } as unknown as typeof raw.runtimeProfiles[string];
 
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
 
     // Should have multiple errors, not just the first one
-    expect(result.errors.length).toBeGreaterThan(3);
+    expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.some(e => e.path.includes('error1'))).toBe(true);
     expect(result.errors.some(e => e.path.includes('error2'))).toBe(true);
   });
@@ -209,9 +231,9 @@ describe('Multiple concurrent errors collection', () => {
       runtimeProfiles: {
         'pd.error': {
           type: 'pi-ai',
-          provider: '',
-          model: '',
-          apiKeyEnv: '',
+          provider: 123,
+          model: 'test',
+          apiKeyEnv: 'TEST_KEY',
         },
       },
       internalAgents: {
@@ -234,13 +256,13 @@ describe('Multiple concurrent errors collection', () => {
     const raw = makeValidConfig();
     // First error: invalid feature
     raw.features.prompt = { category: 'core', enabled: 'invalid' as unknown as boolean };
-    // Second error: invalid profile
+    // Second error: invalid profile (wrong type, not empty string)
     raw.runtimeProfiles['pd.error'] = {
       type: 'pi-ai',
-      provider: '',
+      provider: 123,
       model: 'test',
       apiKeyEnv: 'TEST_KEY',
-    };
+    } as unknown as typeof raw.runtimeProfiles[string];
     // Third error: invalid internalAgents.defaultRuntime (empty string)
     raw.internalAgents.defaultRuntime = '';
 

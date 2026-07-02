@@ -10,6 +10,6 @@
 ## 4. Agent Routing Clarification
 
 - `agents_list`, `sessions_list`, `sessions_send`, and `sessions_spawn` are for peer agents and peer sessions
-- Use `sessions_spawn` with `pd-diagnostician` or `pd-explorer` skills to start Principles internal workers
+- Use `sessions_spawn` with `pd-explorer` skill to start Principles internal workers (e.g., explorer)
 - `subagents` inspects already-started internal workers and their outputs
 - Do not use peer-session tools to pretend an internal worker is a peer agent
