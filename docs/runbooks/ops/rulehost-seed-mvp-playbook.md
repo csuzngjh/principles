@@ -166,8 +166,8 @@ pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v
 
 ### 4.3 准备流程
 
-1. **找到一次失败/偏离的 tool call**：通过 `pd trace show --pain-id <id>` 或 eventLog 找到触发 pain 的 tool call，记下其 `toolCallId`（负样本）。
-2. **找 1~3 次正面对照**：在同一 workspace 或相邻 session 中，找到 owner 认为行为正确的同类 tool call（正样本）。正样本数量 ≤ 3，且必须与负样本同 `toolName`。
+1. **找到一次失败/偏离的 tool call**：通过 `pd pain evidence --json`（近期 pain 决策）或 `pd trace show --pain-id <id>`（pain → artifact → ledger 链）定位 pain 记录；pain 记录中含触发该 pain 的 `toolCallId`（负样本）。也可直接查 SQLite `pain_signals` 表。
+2. **找 1~3 次正面对照**：在同一 workspace 或相邻 session 中，找到 owner 认为行为正确的同类 tool call（正样本）。正样本数量 ≤ 3，且必须与负样本同 `toolName`。可从 trajectory DB（`trajectory.db`）查询历史 tool call。
 3. **写 `ownerDesiredOutcome`**：一句话描述 owner 期望，如"修改文件前必须先读取目标文件确认路径"。
 4. **保存为 JSON 文件**：例如 `./behavior-examples.json`。
 
@@ -265,12 +265,28 @@ pd activation list --channel code_tool_hook --json
 shadow 模式下 RuleHost 会加载并执行 evaluate，但 **不阻断** tool call。验证：
 
 ```bash
-# eventLog 应有 rulehost_evaluated 记录，applicationMode = "shadow"
-pd trace show --pain-id <id>
-# 或直接查 SQLite event_log 表
+# 方式 A: agent 行为观察
+# 触发应被 block 的 tool call — agent 应继续执行（不被 block），证明 shadow 不阻断
+
+# 方式 B: eventLog 查询（JSONL 文件，路径 <workspace>/.principles/logs/events_<YYYY-MM-DD>.jsonl）
+# gate.ts 在 shadow 期间会调用 eventLog.recordRuleHostEvaluated({
+#   toolName, filePath, matched, decision, ruleId, activationId, activationMode: 'shadow'
+# })
+# 每条记录是一行 JSON。可用 PowerShell 或 jq 过滤：
+
+# PowerShell（Windows 默认终端）：
+Get-Content "<workspace>\.principles\logs\events_$(Get-Date -Format 'yyyy-MM-dd').jsonl" |
+  Where-Object { $_ -match '"rulehost_evaluated"' -and $_ -match '"shadow"' } |
+  Select-Object -Last 10
+
+# 或 jq（跨平台）：
+jq -c 'select(.eventType == "rulehost_evaluated" and .data.activationMode == "shadow")' \
+  "<workspace>/.principles/logs/events_$(date +%Y-%m-%d).jsonl" | tail -n 10
 ```
 
 如果 shadow 期间 evaluate 从未 match（`matched: false`），说明规则条件不匹配——promote 后也不会阻断。**先**回到 §5 检查 BehaviorExamplePack 是否正确，再 promote。
+
+> ⚠️ `pd trace show --pain-id <id>` 显示的是 pain → artifact → activation → ledger 链，**不**显示 eventLog 中的 `rulehost_evaluated` 记录。shadow 观察必须查 JSONL 日志文件或观察 agent 实际行为。
 
 ### 7.3 验证 would-block 信号
 
