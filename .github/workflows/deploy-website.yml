@@ -19,7 +19,7 @@ jobs:
       - name: Verify LFS assets pulled
         run: |
           # Fail fast if mp4/webp are still LFS pointers (130 bytes) instead of real content
-          for f in packages/website/public/promo.mp4 packages/website/public/promo-en.mp4; do
+          for f in packages/website/public/homepage-demo-zh.mp4 packages/website/public/homepage-demo-en.mp4; do
             size=$(stat -c%s "$f" 2>/dev/null || echo 0)
             if [ "$size" -lt 1024 ]; then
               echo "::error::$f is $size bytes — Git LFS pull failed (expected real video content >1KB)"
