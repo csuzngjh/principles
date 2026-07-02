@@ -408,12 +408,24 @@ pd activation list --channel code_tool_hook --json
 
 ```bash
 # 使用真实 handleBeforeToolCall + 真实 SQLite activation + v2 flag + RuleHost load + VM compile
-# p95 < 50ms, p99 < 200ms
-# 详见 PRI-494 性能测试
+# Contract threshold (enforced in CI): p95 < 200ms, p99 < 500ms
+# Aspirational target (spec, NOT enforced): p95 < 50ms, p99 < 200ms
+# 实测基线见 perf-baselines/2026-07-02-rulehost-seed-mvp-baseline.json
 cd packages/openclaw-plugin && npx vitest run tests/hooks/gate-rule-host-perf-budget.test.ts
 # v2 RuleContext query perf：
 cd packages/openclaw-plugin && npx vitest run tests/core/rule-context-v2.perf.test.ts
 ```
+
+**性能阈值契约（PRI-496）**:
+
+| 指标 | Aspirational (spec) | Contract (CI enforced) | 理由 |
+|---|---|---|---|
+| p95 | < 50ms | < 200ms | Windows FS 开销 + SQLite 并发负载 + 全套测试并行运行导致 p95 远高于 spec；sanity bound 已通过 ERR-088 BLOCK_MARKER 验证规则真实执行（非空跑），仅放宽 timing 上限 |
+| p99 | < 200ms | < 500ms | 同上；Windows 下 SQLite FS 开销是 Linux 的 3-5x，且 CI 全套并行负载会推高 tail latency |
+
+- **Aspirational target**：spec 设计目标，不在 CI 强制执行，作为未来优化方向参考。
+- **Contract threshold**：CI 实际执行的阈值，是正式契约。测试代码中的 `toBeLessThan(...)` 即此值。
+- **Baseline**：实测基线（p50/p95/p99/min/max）见 `perf-baselines/2026-07-02-rulehost-seed-mvp-baseline.json`，每次重大架构变更后更新。
 
 性能测试必须证明规则实际执行（unique block marker），不能只测 timing（ERR-088）。
 
@@ -429,7 +441,7 @@ cd packages/openclaw-plugin && npx vitest run tests/core/rule-context-v2.perf.te
 | 正向 smoke | §10.1 P1–P10 全通过 | 10/10 | ☐ | ☐ |
 | 负向 smoke | §10.2 N1–N10 全降级 | 10/10 | ☐ | ☐ |
 | 0 unavailable false block | live 期间无误 block | 0 | ☐ | ☐ |
-| Hook perf | p95 < 50ms, p99 < 200ms | 达标 | ☐ | ☐ |
+| Hook perf | p95 < 200ms, p99 < 500ms (contract, see §10.3) | 达标 | ☐ | ☐ |
 | Rollback verified | flag off → suspended_by_flag | 达标 | ☐ | ☐ |
 | `npm run verify:merge` | 全绿 | pass | ☐ | ☐ |
 

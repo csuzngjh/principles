@@ -1273,4 +1273,69 @@ describe('PRI-491: RuleHost.evaluateDetailed returns skippedActivations', () => 
     const ids = report.skippedActivations.map(s => s.activationId).sort();
     expect(ids).toEqual(['act-bad-1', 'act-bad-2']);
   });
+
+  // PRI-497: duplicate active activations for the same target_ref must appear
+  // in skippedActivations (not just rulehost_unhealthy event log). Previously
+  // duplicate groups were only routed to _recordUnhealthy, leaving the
+  // caller-facing skippedActivations array empty — violating rc-9
+  // (no-silent-fallback). Both paths are now populated: event log for
+  // telemetry, skipped array for structured caller observability.
+  it('reports duplicate-target_ref activations in skippedActivations (PRI-497)', async () => {
+    // Two live activations with the SAME target_ref (impl://R_DUP) —
+    // duplicate group guard runs before per-row skip loop.
+    insertRuleArtifact({
+      artifactId: 'art-dup-1',
+      ruleId: 'R_DUP',
+      contentJson: JSON.stringify({
+        principleId: 'P_DUP',
+        ruleId: 'R_DUP',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-dup-1',
+      artifactId: 'art-dup-1',
+      ruleId: 'R_DUP',
+      action: 'code_tool_hook_live_activate',
+    });
+
+    insertRuleArtifact({
+      artifactId: 'art-dup-2',
+      ruleId: 'R_DUP',
+      sourceTaskId: 'task-dup-2',
+      contentJson: JSON.stringify({
+        principleId: 'P_DUP',
+        ruleId: 'R_DUP',
+        implementationCode: BLOCKING_CODE,
+        goldenTrace: { traceId: 't', cases: [], createdAt: new Date().toISOString(), version: 1 },
+      }),
+    });
+    await insertCodeToolHookActivation({
+      activationId: 'act-dup-2',
+      artifactId: 'art-dup-2',
+      ruleId: 'R_DUP',
+      action: 'code_tool_hook_live_activate',
+    });
+
+    const ruleHost = makeRuleHost();
+    const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+
+    // Both duplicate activations must appear in skippedActivations.
+    expect(report.skippedActivations).toHaveLength(2);
+    const ids = report.skippedActivations.map(s => s.activationId).sort();
+    expect(ids).toEqual(['act-dup-1', 'act-dup-2']);
+
+    // Each skipped entry must carry structured reason + nextAction (rc-9).
+    for (const skip of report.skippedActivations) {
+      expect(skip.reason).toBe('duplicate_active_activation');
+      expect(skip.nextAction).toContain('Deactivate all but one activation');
+      expect(skip.mode).toBe('live');
+      expect(skip.ruleId).toBe('impl://R_DUP');
+    }
+
+    // Duplicate group must NOT produce any live or shadow decisions.
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.shadowDecisions).toHaveLength(0);
+  });
 });

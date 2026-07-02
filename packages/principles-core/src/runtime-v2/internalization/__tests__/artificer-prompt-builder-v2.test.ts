@@ -73,6 +73,13 @@ describe('ArtificerPromptBuilder V2 contract', () => {
     expect(result.promptInput.artificerInstruction).toContain('block');
     expect(result.promptInput.artificerInstruction).toContain('propose_correction');
     expect(result.promptInput.artificerInstruction).toMatch(/do not.*propose_correction/i);
+    // PRI-498: prompt must explicitly forbid all unsupported action types
+    // (not just propose_correction — requireApproval and auto_correct are also
+    // rejected by the schema validator, but the LLM needs explicit guidance)
+    expect(result.promptInput.artificerInstruction).toContain('requireApproval');
+    expect(result.promptInput.artificerInstruction).toContain('auto_correct');
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*requireApproval/i);
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*auto_correct/i);
     // PRI-490: prompt must mention evidenceRefs copy requirement
     expect(result.promptInput.artificerInstruction).toContain('evidenceRefs');
     expect(result.promptInput.artificerInstruction).toMatch(/copy.*evidenceRefs/i);

@@ -92,7 +92,7 @@ export function handleBeforeToolCall(
 
     const report = typeof ruleHost.evaluateDetailed === 'function'
       ? ruleHost.evaluateDetailed(hostInput)
-      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [] };
+      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [], skippedActivations: [] };
     const hostResult = report.liveDecision;
 
     for (const shadowDecision of report.shadowDecisions) {

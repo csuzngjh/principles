@@ -14,6 +14,7 @@ import {
   ApprovalCompletionService,
   isArtifactRevisionOf,
   extractEvidenceRefs,
+  extractPrincipleId,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -478,7 +479,7 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
     // PRI-491: Map artifactId to { contextVersion, evidenceRefs } extracted
     // from contentJson. rc-1/rc-2: contentJson is parsed as unknown and
     // type-narrowed; never `as`-cast without prior typeof check.
-    const artifactMetadata = new Map<string, { contextVersion: 'v1' | 'v2'; evidenceRefs: string[] | null }>();
+    const artifactMetadata = new Map<string, { contextVersion: 'v1' | 'v2'; evidenceRefs: string[] | null; principleId: string | null }>();
     for (const artifactId of uniqueArtifactIds) {
       try {
         const artifact = await piArtifactStore.getArtifactById(artifactId);
@@ -502,7 +503,11 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
           && parsedContent.requiresContextVersion === 2;
         const contextVersion: 'v1' | 'v2' = requiresCtxV2 ? 'v2' : 'v1';
         const evidenceRefs = parsedContent !== null ? extractEvidenceRefs(parsedContent) : null;
-        artifactMetadata.set(artifactId, { contextVersion, evidenceRefs });
+        // PRI-500: extract principleId to match Console's ActivationRecord field.
+        // Uses extractPrincipleId (4-step fallback) so dreamer artifacts whose
+        // sourcePrincipleId was stripped still resolve via contentJson.
+        const principleId = extractPrincipleId(toSnapshot(artifact));
+        artifactMetadata.set(artifactId, { contextVersion, evidenceRefs, principleId });
       } catch {
         // Treat lookup failure as dangling - fail loud rather than silent (rc-9).
         danglingArtifactIds.add(artifactId);
@@ -520,6 +525,7 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
     // mode/status/contextVersion/evidenceRefs/nextAction let the owner
     // understand rule state without reading SQLite or logs.
     interface AnnotatedActivation extends ActivationStatusRecord {
+      principleId?: string;
       mode?: 'shadow' | 'live';
       status: 'active' | 'deactivated' | 'suspended_by_flag';
       contextVersion?: 'v1' | 'v2';
@@ -566,6 +572,7 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
 
       const record: AnnotatedActivation = {
         ...r,
+        principleId: meta?.principleId ?? 'unlinked',
         mode,
         status,
         contextVersion,
@@ -607,6 +614,7 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
               : `[ACTIVE]`;
           const modeLabel = r.mode ? ` (${r.mode})` : '';
           console.log(`${statusLabel}${modeLabel} ${r.activationId}`);
+          console.log(`  principleId: ${r.principleId ?? 'unlinked'}`);
           console.log(`  artifactId: ${r.artifactId}`);
           console.log(`  channel: ${r.channel}`);
           console.log(`  action: ${r.action}`);

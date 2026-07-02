@@ -66,7 +66,7 @@ function ActivationFactCard({
       className={`relative pl-[22px] py-[18px] pr-[18px] bg-panel border rounded-[6px] transition-colors hover:border-line-2 ${
         neverActivated ? "border-amber/30 border-l-[3px] border-l-amber" : "border-line"
       }`}
-      data-testid={`activation-card-${record.id}`}
+      data-testid={`activation-card-${record.activationId}`}
     >
       {/* Tags row */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -200,7 +200,7 @@ function ActivationFactCard({
               onClick={() => setShowConfirm(true)}
               disabled={disabling}
               className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-              data-testid={`disable-btn-${record.id}`}
+              data-testid={`disable-btn-${record.activationId}`}
             >
               {t("pages.activation.disableAction")}
             </button>
@@ -208,7 +208,7 @@ function ActivationFactCard({
             <div
               className="flex items-center gap-3 px-[14px] py-[10px] bg-surface border border-amber/25 rounded-[4px]"
               role="alert"
-              data-testid={`confirm-bar-${record.id}`}
+              data-testid={`confirm-bar-${record.activationId}`}
             >
               <span className="text-ink-2 text-[13px] flex-1">
                 {t("pages.activation.confirmDisable")}
@@ -220,7 +220,7 @@ function ActivationFactCard({
                 }}
                 disabled={disabling}
                 className="inline-flex items-center border border-danger/40 text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-                data-testid={`confirm-disable-${record.id}`}
+                data-testid={`confirm-disable-${record.activationId}`}
               >
                 {disabling ? t("pages.activation.disabling") : t("common.confirm")}
               </button>
@@ -272,8 +272,8 @@ export function ActivationPage() {
     }
 
     setActivationsData(validated);
-    if (validated.note) {
-      setDegradedNote(validated.note);
+    if (validated.reason) {
+      setDegradedNote(validated.reason);
     }
 
     // Pre-fetch lifecycle metrics for active principles with rules
@@ -311,9 +311,9 @@ export function ActivationPage() {
   }, [loadData]);
 
   const handleDisable = useCallback(async (record: ActivationRecord) => {
-    setDisablingIds((prev) => new Set(prev).add(record.id));
+    setDisablingIds((prev) => new Set(prev).add(record.activationId));
 
-    const result = await disableActivation(record.id);
+    const result = await disableActivation(record.activationId);
 
     if (result.success) {
       toast.success(t("pages.activation.disableSuccess"), {
@@ -327,7 +327,7 @@ export function ActivationPage() {
         return {
           ...prev,
           activations: prev.activations.map((a) =>
-            a.id === record.id ? { ...a, status: "inactive" as const } : a
+            a.activationId === record.activationId ? { ...a, status: "inactive" as const } : a
           ),
         };
       });
@@ -344,7 +344,7 @@ export function ActivationPage() {
 
     setDisablingIds((prev) => {
       const next = new Set(prev);
-      next.delete(record.id);
+      next.delete(record.activationId);
       return next;
     });
   }, [t]);
@@ -444,11 +444,11 @@ export function ActivationPage() {
           <div className="space-y-[14px]">
             {activeActivations.map((record) => (
               <ActivationFactCard
-                key={record.id}
+                key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
                 onDisable={handleDisable}
-                disabling={disablingIds.has(record.id)}
+                disabling={disablingIds.has(record.activationId)}
               />
             ))}
           </div>
@@ -468,11 +468,11 @@ export function ActivationPage() {
           <div className="space-y-[14px]">
             {inactiveActivations.map((record) => (
               <ActivationFactCard
-                key={record.id}
+                key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
                 onDisable={handleDisable}
-                disabling={disablingIds.has(record.id)}
+                disabling={disablingIds.has(record.activationId)}
               />
             ))}
           </div>
@@ -490,7 +490,7 @@ export function ActivationPage() {
               .filter((a) => a.activatedAt === null)
               .map((record) => (
                 <article
-                  key={record.id}
+                  key={record.activationId}
                   className="relative pl-[22px] py-[14px] pr-[18px] bg-panel border border-amber/20 border-l-[3px] border-l-amber rounded-[6px]"
                 >
                   <div className="text-ink-2 text-sm leading-relaxed">

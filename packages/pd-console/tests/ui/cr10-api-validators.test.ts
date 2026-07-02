@@ -463,11 +463,11 @@ describe('validateGovernanceQueue', () => {
 describe('validateActivations', () => {
   const validActivations = {
     activations: [{
-      id: 'a1', artifactId: 'art1', principleId: 'p1',
+      activationId: 'a1', artifactId: 'art1', principleId: 'p1',
       channel: 'prompt', action: 'inject', targetRef: 'target',
       activatedAt: '2026-06-01', status: 'active',
     }],
-    generatedAt: '2026-06-01T00:00:00Z',
+    status: 'ok',
   };
 
   it('accepts valid activations', () => {
@@ -481,11 +481,11 @@ describe('validateActivations', () => {
   });
 
   it('rejects missing required fields in activation record', () => {
-    expect(validateActivations({ activations: [{ id: 'a1' }], generatedAt: '2026' })).toBeNull();
+    expect(validateActivations({ activations: [{ activationId: 'a1' }], status: 'ok' })).toBeNull();
   });
 
   it('rejects wrong field types', () => {
-    expect(validateActivations({ ...validActivations, generatedAt: 123 })).toBeNull();
+    expect(validateActivations({ ...validActivations, status: 123 })).toBeNull();
   });
 });
 

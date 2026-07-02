@@ -167,11 +167,11 @@ function DebtCard({
               {item.activeActivationRecords && item.activeActivationRecords.length > 0 ? (
                 item.activeActivationRecords.map((ar) => (
                   <button
-                    key={ar.id}
-                    onClick={() => handleDeactivateClick(ar.id)}
+                    key={ar.activationId}
+                    onClick={() => handleDeactivateClick(ar.activationId)}
                     disabled={isProcessing}
                     className="w-full inline-flex items-center justify-center gap-1.5 border border-danger/20 bg-surface text-danger hover:bg-danger/5 transition-colors rounded-[3px] px-[14px] py-[6px] text-[12.5px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-                    data-testid={`deactivate-btn-${ar.id}`}
+                    data-testid={`deactivate-btn-${ar.activationId}`}
                   >
                     <Trash2 className="w-4 h-4 text-danger/80" aria-hidden="true" />
                     {t("pages.debt.actionDeactivate")} ({ar.channel})
@@ -380,7 +380,7 @@ export function DebtPage() {
           .map((item) => {
             if (item.id !== principleId) return item;
             const updatedActivations = item.activeActivationRecords?.filter(
-              (ar) => ar.id !== activationId
+              (ar) => ar.activationId !== activationId
             );
             return {
               ...item,

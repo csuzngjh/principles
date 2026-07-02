@@ -82,7 +82,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
             return { decision: 'activated', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
           }
           if (args.channel === 'code_tool_hook') {
-            return { decision: 'refused', activationId: 'act-001', action: 'none', targetRef: 'P_001', reason: 'activation_state_read_failed', riskLevel: 'high', channel: 'code_tool_hook' };
+            return { decision: 'refused', activationId: 'act-001', action: 'none', targetRef: 'P_001', reason: 'activation_state_read_failed', riskLevel: 'high', channel: 'code_tool_hook', nextAction: 'Check activation_state table integrity and retry' };
           }
           return { decision: 'would_activate', activationId: 'act-001', action: 'prompt', targetRef: 'P_001' };
         }),
@@ -102,7 +102,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
   };
 });
 
-import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleActivationApprove, handleRuntimeActivationPromote } from '../../src/commands/runtime-activation.js';
+import { handleRuntimeActivationDispatch, handleRuntimeActivationDeactivate, handleRuntimeActivationList, handleRuntimeActivationEdit, handleActivationApprove, handleRuntimeActivationPromote, registerRuntimeActivationDispatchCommand, registerRuntimeActivationDeactivateCommand, registerRuntimeActivationPromoteCommand, registerRuntimeActivationListCommand } from '../../src/commands/runtime-activation.js';
 
 const WS = '/fake/workspace';
 
@@ -459,6 +459,8 @@ describe('handleRuntimeActivationList', () => {
     expect(output.activations.length).toBe(2);
     expect(output.activations[0]).toHaveProperty('activationId');
     expect(output.activations[0]).toHaveProperty('channel');
+    // PRI-500: CLI list output must include principleId (matching Console field).
+    expect(output.activations[0]).toHaveProperty('principleId');
     expect(output.status).toBe('ok');
   });
 
@@ -1572,5 +1574,265 @@ describe('handleActivationApprove', () => {
     expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe?.('rulecode_context_v2')).toBe(true);
     // Unknown flags must not be reported as enabled (rc-2-no-as-bypass).
     expect(mockRuleHostWriterConfigs[0]?.featureFlagProbe?.('nonexistent_flag')).toBe(false);
+  });
+});
+
+// ── PRI-499: CLI parser wiring (cli-7) and exit-stops (cli-2) ─────────────
+//
+// cli-7-test-wiring: every activation subcommand must exercise the real
+// Commander flag registration path. Without this, a future refactor could
+// silently break flag parsing and only surface at runtime. The existing
+// `approve` parser test (AP-07 above) is the template; these tests extend
+// coverage to dispatch, deactivate, promote, and list.
+//
+// cli-2-exit-stops: failure paths that call process.exit must not trigger
+// downstream side effects (DB writes, ledger updates, artifact creation).
+// Stubs process.exit to throw, then asserts no store was constructed.
+
+describe('PRI-499: CLI parser wiring (cli-7) for activation subcommands', () => {
+  it('dispatch: --artifact-id, --channel, --dry-run, --confirm, --json parse correctly', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationDispatchCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'dispatch',
+      '--artifact-id', 'art-parse-001',
+      '--channel', 'prompt',
+      '--dry-run',
+      '--json',
+    ]);
+
+    expect(captured.artifactId).toBe('art-parse-001');
+    expect(captured.channel).toBe('prompt');
+    expect(captured.dryRun).toBe(true);
+    expect(captured.confirm).toBeUndefined();
+    expect(captured.json).toBe(true);
+  });
+
+  it('dispatch: --confirm flag parses and is mutually exclusive with --dry-run at handler level', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationDispatchCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'dispatch',
+      '--artifact-id', 'art-confirm',
+      '--confirm',
+      '--json',
+    ]);
+
+    expect(captured.confirm).toBe(true);
+    expect(captured.dryRun).toBeUndefined();
+  });
+
+  it('deactivate: --activation-id (required) parses correctly', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationDeactivateCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'deactivate',
+      '--activation-id', 'act-parse-deact',
+      '--json',
+    ]);
+
+    expect(captured.activationId).toBe('act-parse-deact');
+    expect(captured.json).toBe(true);
+  });
+
+  it('deactivate: missing --activation-id fails at parser level (required option)', async () => {
+    const { Command } = await import('commander');
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationDeactivateCommand(activationCmd)
+      .action(async () => { /* no-op */ });
+
+    await expect(
+      program.parseAsync(['node', 'pd', 'activation', 'deactivate', '--json']),
+    ).rejects.toThrow(/required option.*--activation-id.*not specified/);
+  });
+
+  it('promote: --activation-id (required), --dry-run, --confirm parse correctly', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationPromoteCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'promote',
+      '--activation-id', 'act-parse-promote',
+      '--dry-run',
+      '--json',
+    ]);
+
+    expect(captured.activationId).toBe('act-parse-promote');
+    expect(captured.dryRun).toBe(true);
+    expect(captured.confirm).toBeUndefined();
+  });
+
+  it('promote: --confirm flag parses (not --dry-run)', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationPromoteCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'promote',
+      '--activation-id', 'act-promote-confirm',
+      '--confirm',
+      '--json',
+    ]);
+
+    expect(captured.confirm).toBe(true);
+    expect(captured.dryRun).toBeUndefined();
+  });
+
+  it('list: --channel filter and --json parse correctly', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationListCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'list',
+      '--channel', 'code_tool_hook',
+      '--json',
+    ]);
+
+    expect(captured.channel).toBe('code_tool_hook');
+    expect(captured.json).toBe(true);
+    expect(captured.includeDeactivated).toBeUndefined();
+  });
+
+  it('list: --include-deactivated flag parses as boolean true', async () => {
+    const { Command } = await import('commander');
+    const captured: Record<string, unknown> = {};
+    const program = new Command();
+    program.exitOverride();
+    const activationCmd = program.command('activation');
+    registerRuntimeActivationListCommand(activationCmd)
+      .action(async (opts) => { Object.assign(captured, opts); });
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'list',
+      '--include-deactivated',
+      '--json',
+    ]);
+
+    expect(captured.includeDeactivated).toBe(true);
+  });
+});
+
+// PRI-499 cli-2-exit-stops: Verify failure paths do NOT trigger DB/ledger/
+// artifact side effects. Production code uses `process.exitCode = 1` (not
+// `process.exit(1)`) and returns early — these tests assert both the exit
+// code AND that no store was constructed, covering the high-risk channel
+// refusal path that was not covered by the existing tests at lines 266-303.
+// If a future change replaces `process.exitCode` with `process.exit()` but
+// forgets to add a `return`, these tests will fail because the store mock
+// would be called before the exit.
+describe('PRI-499: cli-2-exit-stops — failure paths set exitCode and do not construct stores', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRuleHostWriterConfigs.length = 0;
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockGetArtifactById.mockResolvedValue(makeArtifact());
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('high-risk channel refusal: sets exitCode=1 and returns structured refusal (cli-2)', async () => {
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    // cli-2: exit-stops — refused path must set exitCode and return a
+    // structured refusal. Stores ARE constructed (artifact exists, so
+    // RuntimeStateManager/SqliteActivationStateStore/ActivationDispatcher
+    // are built before dispatch() returns 'refused'). The cli-2 guarantee
+    // for this path = exitCode set + structured output, NOT "no store
+    // construction" (rc-9 + cli-6).
+    expect(process.exitCode).toBe(1);
+
+    // Verify the JSON output is a structured refusal (rc-9 + cli-6).
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('refused');
+    expect(output.reason).toBeDefined();
+    expect(output.nextAction).toBeDefined();
+  });
+
+  it('missing artifact: sets exitCode=1 and does not construct SqliteActivationStateStore or ActivationDispatcher (cli-2)', async () => {
+    mockGetArtifactById.mockResolvedValue(null);
+    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime-v2');
+    vi.mocked(SqliteActivationStateStore).mockClear();
+    vi.mocked(ActivationDispatcher).mockClear();
+
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'nonexistent-cli-2',
+      channel: 'prompt',
+      json: true,
+    });
+
+    // cli-2: RuntimeStateManager IS constructed at line 143 (needed to check
+    // artifact existence via getArtifactById). But SqliteActivationStateStore
+    // and ActivationDispatcher are NOT constructed — the handler returns at
+    // line 156 before reaching lines 170/175. This is the no-DB-side-effects
+    // guarantee for the missing-artifact failure path.
+    expect(process.exitCode).toBe(1);
+    expect(SqliteActivationStateStore).not.toHaveBeenCalled();
+    expect(ActivationDispatcher).not.toHaveBeenCalled();
+  });
+
+  it('mutex failure (--dry-run + --confirm): sets exitCode=1 and does not construct RuntimeStateManager', async () => {
+    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    vi.mocked(RuntimeStateManager).mockClear();
+
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'prompt',
+      dryRun: true,
+      confirm: true,
+      json: true,
+    });
+
+    // cli-2: mutex failure must set exitCode and NOT construct state manager.
+    expect(process.exitCode).toBe(1);
+    expect(RuntimeStateManager).not.toHaveBeenCalled();
   });
 });

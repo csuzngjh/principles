@@ -28,7 +28,7 @@ import zhJson from "../../src/ui/i18n/zh-CN.json" with { type: "json" };
 
 function makeActivationRecord(overrides?: Record<string, unknown>) {
   return {
-    id: "act-001",
+    activationId: "act-001",
     artifactId: "artifact-001",
     principleId: "principle-001",
     channel: "prompt",
@@ -43,7 +43,7 @@ function makeActivationRecord(overrides?: Record<string, unknown>) {
 function makeActivationsData(overrides?: Record<string, unknown>) {
   return {
     activations: [makeActivationRecord()],
-    generatedAt: "2026-06-05T12:00:00.000Z",
+    status: "ok",
     ...overrides,
   };
 }
@@ -95,7 +95,7 @@ describe("validateActivationRecord", () => {
   it("validates a well-formed activation record", () => {
     const result = validateActivationRecord(makeActivationRecord());
     expect(result).not.toBeNull();
-    expect(result?.id).toBe("act-001");
+    expect(result?.activationId).toBe("act-001");
     expect(result?.channel).toBe("prompt");
     expect(result?.status).toBe("active");
   });
@@ -125,13 +125,13 @@ describe("validateActivationRecord", () => {
     expect(validateActivationRecord([1, 2, 3])).toBeNull();
   });
 
-  it("rejects record with missing id", () => {
-    const { id, ...rest } = makeActivationRecord();
+  it("rejects record with missing activationId", () => {
+    const { activationId, ...rest } = makeActivationRecord();
     expect(validateActivationRecord(rest)).toBeNull();
   });
 
-  it("rejects record with empty id", () => {
-    expect(validateActivationRecord(makeActivationRecord({ id: "" }))).toBeNull();
+  it("rejects record with empty activationId", () => {
+    expect(validateActivationRecord(makeActivationRecord({ activationId: "" }))).toBeNull();
   });
 
   it("rejects record with invalid status", () => {
@@ -158,13 +158,13 @@ describe("validateActivationsData", () => {
     const result = validateActivationsData(makeActivationsData());
     expect(result).not.toBeNull();
     expect(result?.activations).toHaveLength(1);
-    expect(result?.generatedAt).toBe("2026-06-05T12:00:00.000Z");
+    expect(result?.status).toBe("ok");
   });
 
-  it("validates data with optional note", () => {
-    const result = validateActivationsData(makeActivationsData({ note: "degraded" }));
+  it("validates data with optional reason", () => {
+    const result = validateActivationsData(makeActivationsData({ reason: "degraded" }));
     expect(result).not.toBeNull();
-    expect(result?.note).toBe("degraded");
+    expect(result?.reason).toBe("degraded");
   });
 
   it("validates data with empty activations array", () => {
@@ -182,8 +182,8 @@ describe("validateActivationsData", () => {
     expect(validateActivationsData(rest)).toBeNull();
   });
 
-  it("rejects missing generatedAt field", () => {
-    const { generatedAt, ...rest } = makeActivationsData();
+  it("rejects missing status field", () => {
+    const { status, ...rest } = makeActivationsData();
     expect(validateActivationsData(rest)).toBeNull();
   });
 
@@ -191,24 +191,24 @@ describe("validateActivationsData", () => {
     expect(validateActivationsData(makeActivationsData({ activations: "not-array" }))).toBeNull();
   });
 
-  it("rejects non-string generatedAt", () => {
-    expect(validateActivationsData(makeActivationsData({ generatedAt: 123 }))).toBeNull();
+  it("rejects non-string status", () => {
+    expect(validateActivationsData(makeActivationsData({ status: 123 }))).toBeNull();
   });
 
   it("rejects data with any invalid activation record (fail loud, ERR-009)", () => {
     const data = makeActivationsData({
       activations: [
         makeActivationRecord(),
-        { id: 123 }, // invalid record
+        { activationId: 123 }, // invalid record
       ],
     });
     expect(validateActivationsData(data)).toBeNull();
   });
 
-  it("ignores non-string note field", () => {
-    const result = validateActivationsData(makeActivationsData({ note: 42 }));
+  it("ignores non-string reason field", () => {
+    const result = validateActivationsData(makeActivationsData({ reason: 42 }));
     expect(result).not.toBeNull();
-    expect(result?.note).toBeUndefined();
+    expect(result?.reason).toBeUndefined();
   });
 });
 
