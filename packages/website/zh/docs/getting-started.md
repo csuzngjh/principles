@@ -22,7 +22,7 @@ AI 助手反复出错 → PD 识别模式 → 你审核 → AI 助手改进
 ### 1. 安装
 
 ```bash
-npx create-principles-disciple
+npx create-principles-disciple --yes
 openclaw gateway --force
 ```
 

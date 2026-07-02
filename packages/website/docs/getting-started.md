@@ -22,7 +22,7 @@ You're always in control. Nothing activates without your approval.
 ### 1. Install
 
 ```bash
-npx create-principles-disciple
+npx create-principles-disciple --yes
 openclaw gateway --force
 ```
 

@@ -35,6 +35,6 @@ const trustItems = computed(() => isZh.value ? [
 .loop span { color: var(--accent); font: 12px/1 var(--vp-font-family-mono); }
 .trust-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; list-style: none; padding: 0; margin: 32px 0 0; }
 .trust-grid li { padding: 18px 20px 18px 44px; border-left: 2px solid var(--accent); background: var(--accent-dim); color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
-@media (max-width: 960px) { .loop { grid-template-columns: repeat(2, 1fr); gap: 16px; } .loop li { min-height: 0; } .loop li:not(:last-child)::after { content: '↓'; right: 50%; top: auto; bottom: -14px; transform: translateX(50%); } }
+@media (max-width: 960px) { .loop { grid-template-columns: repeat(2, 1fr); gap: 16px; } .loop li { min-height: 0; } .loop li:not(:last-child)::after { content: none; } }
 @media (max-width: 600px) { .loop { grid-template-columns: 1fr; } .trust-grid { grid-template-columns: 1fr; } }
 </style>
