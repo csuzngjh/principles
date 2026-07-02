@@ -517,12 +517,19 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   }
 
   // 5) Compute overall status
+  // Classification → status mapping:
+  // - config_missing (profile exists but fields empty/placeholder) → degraded
+  //   This is the expected initial state for the default `pd.default` profile
+  //   that ships with empty provider/model/apiKeyEnv. Users fill via console.
+  // - auth_missing (apiKeyEnv set but env var not in environment) → failed
+  //   User configured the profile but the secret is missing at runtime.
+  // - needs_probe / rate_limit / unavailable → degraded
   let status: DoctorStatus = 'ok';
   const classifications = providerHealth.map((p) => p.classification);
-  if (classifications.includes('rate_limit') || classifications.includes('unavailable') || classifications.includes('needs_probe')) {
+  if (classifications.includes('rate_limit') || classifications.includes('unavailable') || classifications.includes('needs_probe') || classifications.includes('config_missing')) {
     status = 'degraded';
   }
-  if (classifications.includes('auth_missing') || classifications.includes('config_missing')) {
+  if (classifications.includes('auth_missing')) {
     status = 'failed';
   }
   if (!loadResult.ok) {

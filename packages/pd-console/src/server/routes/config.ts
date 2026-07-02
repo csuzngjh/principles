@@ -22,7 +22,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed, sendBadRequest, sendJson } from '../utils/response.js';
 import {
   getConfigSummary,
   getConfigCatalog,
@@ -32,6 +32,9 @@ import {
   getPrinciplesOutputLanguage,
   updatePrinciplesOutputLanguage,
   updateFeatureFlag,
+  createRuntimeProfile,
+  updateRuntimeProfile,
+  deleteRuntimeProfile,
 } from '../config/pd-config-store.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -286,6 +289,98 @@ export async function handleConfigRoute(
       sendSuccess(res, { outputLanguage: confirmResult.outputLanguage, source: confirmResult.source });
       return;
     }
+    sendMethodNotAllowed(res);
+    return;
+  }
+
+  // POST /profiles — create a new runtime profile
+  if (subPath === '/profiles') {
+    if (method !== 'POST') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch {
+      sendBadRequest(res, 'Request body exceeds maximum allowed size');
+      return;
+    }
+    const body = safeParseBody(bodyText);
+    if (body === null) {
+      sendBadRequest(res, 'Invalid JSON body');
+      return;
+    }
+    // Validate body shape: { id: string, profile: object } (ERR-001: no `as` bypass)
+    if (!isObject(body)) {
+      sendBadRequest(res, 'Body must be a JSON object with id and profile fields');
+      return;
+    }
+    if (!Object.hasOwn(body, 'id')) {
+      sendBadRequest(res, 'Missing required field: id');
+      return;
+    }
+    if (typeof body.id !== 'string' || body.id.length === 0) {
+      sendBadRequest(res, 'id must be a non-empty string');
+      return;
+    }
+    if (!Object.hasOwn(body, 'profile')) {
+      sendBadRequest(res, 'Missing required field: profile');
+      return;
+    }
+    const result = createRuntimeProfile(workspaceDir, body.id, body.profile);
+    if (!result.ok) {
+      sendError(res, result.statusCode, result.error, result.message);
+      return;
+    }
+    // 201 Created for new resource
+    sendJson(res, 201, { success: true, data: { profileId: result.profileId, profile: result.profile } });
+    return;
+  }
+
+  // PATCH/DELETE /profiles/:profileId — update or delete a runtime profile
+  const profileMatch = /^\/profiles\/([^/]+)$/.exec(subPath);
+  if (profileMatch) {
+    let profileId: string;
+    try {
+      profileId = decodeURIComponent(profileMatch[1] ?? '');
+    } catch {
+      sendBadRequest(res, 'Invalid profile ID encoding');
+      return;
+    }
+
+    if (method === 'PATCH') {
+      let bodyText: string;
+      try {
+        bodyText = await readBody(req);
+      } catch {
+        sendBadRequest(res, 'Request body exceeds maximum allowed size');
+        return;
+      }
+      const body = safeParseBody(bodyText);
+      if (body === null) {
+        sendBadRequest(res, 'Invalid JSON body');
+        return;
+      }
+      const result = updateRuntimeProfile(workspaceDir, profileId, body);
+      if (!result.ok) {
+        sendError(res, result.statusCode, result.error, result.message);
+        return;
+      }
+      sendSuccess(res, { profileId: result.profileId, profile: result.profile });
+      return;
+    }
+
+    if (method === 'DELETE') {
+      const result = deleteRuntimeProfile(workspaceDir, profileId);
+      if (!result.ok) {
+        sendError(res, result.statusCode, result.error, result.message);
+        return;
+      }
+      sendSuccess(res, { profileId: result.profileId, profile: result.profile });
+      return;
+    }
+
     sendMethodNotAllowed(res);
     return;
   }

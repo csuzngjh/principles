@@ -205,7 +205,8 @@ describe('GET /api/v1/config/summary', () => {
       agents: { name: string; runtimeProfileId: string; runtimeProfileLabel: string }[];
     }>(res);
     expect(data.source).toBe('user_config');
-    expect(data.runtimeProfiles).toHaveLength(3);
+    // 3 user profiles + 1 default `pd.default` merged by computeEffectivePdConfig
+    expect(data.runtimeProfiles).toHaveLength(4);
     expect(data.agents).toHaveLength(10); // all internal agents (incl. signalCollector)
   });
 
@@ -706,8 +707,9 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     expect(res.statusCode).toBe(200);
     const data = okEnvelope<{ agent: string; readiness: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    // Default profile is openclaw.default with source=default → ready
-    expect(data.readiness).toBe('ready');
+    // Default profile is pd.default (pi-ai placeholder) → needs_setup until
+    // user fills in provider/model/apiKeyEnv via web console (M9 + Plan C)
+    expect(data.readiness).toBe('needs_setup');
   });
 
   it('returns unknown readiness when config is malformed', async () => {
@@ -1612,5 +1614,433 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       existsSpy.mockRestore();
       readSpy.mockRestore();
     }
+  });
+});
+
+// ===========================================================================
+// POST /api/v1/config/profiles — create runtime profile
+// ===========================================================================
+
+describe('POST /api/v1/config/profiles', () => {
+  it('creates a new openclaw profile and persists to config.yaml', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'new-openclaw',
+        profile: { type: 'openclaw', provider: 'ollama', model: 'llama3' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(201);
+    const data = okEnvelope<{ profileId: string; profile: { type: string; provider?: string } }>(res);
+    expect(data.profileId).toBe('new-openclaw');
+    expect(data.profile.type).toBe('openclaw');
+    expect(data.profile.provider).toBe('ollama');
+
+    // Verify persisted to disk
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(Object.hasOwn(profiles, 'new-openclaw')).toBe(true);
+    expect(profiles['new-openclaw'].provider).toBe('ollama');
+  });
+
+  it('creates a new pi-ai profile', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'openai-cloud',
+        profile: {
+          type: 'pi-ai',
+          provider: 'openai',
+          model: 'gpt-4',
+          apiKeyEnv: 'OPENAI_API_KEY',
+        },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(201);
+    const data = okEnvelope<{ profileId: string; profile: { type: string; apiKeyEnv: string } }>(res);
+    expect(data.profileId).toBe('openai-cloud');
+    expect(data.profile.apiKeyEnv).toBe('OPENAI_API_KEY');
+  });
+
+  it('rejects duplicate profile ID with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'lmstudio-local',
+        profile: { type: 'openclaw', provider: 'lmstudio', model: 'qwen3' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('already exists');
+  });
+
+  it('rejects profile with missing type field', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'no-type',
+        profile: { provider: 'lmstudio' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('type');
+  });
+
+  it('rejects profile with invalid type value', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'bad-type',
+        profile: { type: 'invalid-type' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects pi-ai profile missing required fields (provider/model/apiKeyEnv)', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'incomplete-pi-ai',
+        profile: { type: 'pi-ai' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('validation');
+  });
+
+  it('rejects body missing id field', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: { profile: { type: 'openclaw' } },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('id');
+  });
+
+  it('rejects body missing profile field', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: { id: 'new-profile' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('profile');
+  });
+
+  it('preserves unknown config sections when creating profile', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      customSection: { note: 'preserve-me' },
+    });
+    const req = createMockRequest('POST', {
+      url: '/api/v1/config/profiles',
+      body: {
+        id: 'new-profile',
+        profile: { type: 'openclaw', source: 'default' },
+      },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+
+    expect(res.statusCode).toBe(201);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'customSection')).toBe(true);
+  });
+
+  it('returns 405 for non-POST methods on /profiles', async () => {
+    const req = createMockRequest('GET', { url: '/api/v1/config/profiles' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
+    expect(res.statusCode).toBe(405);
+  });
+});
+
+// ===========================================================================
+// PATCH /api/v1/config/profiles/:profileId — update runtime profile
+// ===========================================================================
+
+describe('PATCH /api/v1/config/profiles/:profileId', () => {
+  it('updates an existing openclaw profile', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+      body: { model: 'qwen3-new-model' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profileId: string; profile: { model: string } }>(res);
+    expect(data.profileId).toBe('lmstudio-local');
+    expect(data.profile.model).toBe('qwen3-new-model');
+
+    // Verify persisted
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(profiles['lmstudio-local'].model).toBe('qwen3-new-model');
+    // provider should be preserved
+    expect(profiles['lmstudio-local'].provider).toBe('lmstudio');
+  });
+
+  it('updates a pi-ai profile adding optional fields', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { timeoutMs: 30000, maxRetries: 3 },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profile: { timeoutMs: number; maxRetries: number } }>(res);
+    expect(data.profile.timeoutMs).toBe(30000);
+    expect(data.profile.maxRetries).toBe(3);
+  });
+
+  it('rejects update of non-existent profile with 404', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/nonexistent',
+      body: { model: 'newmodel' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/nonexistent' });
+
+    expect(res.statusCode).toBe(404);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('not_found');
+  });
+
+  it('rejects type change with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+      body: { type: 'pi-ai' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('Cannot change profile type');
+  });
+
+  it('allows patch with same type (no-op type field)', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+      body: { type: 'openclaw', model: 'updated-model' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profile: { model: string } }>(res);
+    expect(data.profile.model).toBe('updated-model');
+  });
+
+  it('rejects invalid JSON body', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+      rawBody: '{invalid json',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('preserves unknown config sections when updating', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      customSection: { note: 'preserve-me' },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+      body: { model: 'newmodel' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(200);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'customSection')).toBe(true);
+  });
+
+  it('returns 405 for non-PATCH methods on /profiles/:id', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('GET', { url: '/api/v1/config/profiles/lmstudio-local' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    expect(res.statusCode).toBe(405);
+  });
+});
+
+// ===========================================================================
+// DELETE /api/v1/config/profiles/:profileId — delete runtime profile
+// ===========================================================================
+
+describe('DELETE /api/v1/config/profiles/:profileId', () => {
+  it('deletes an unreferenced profile and persists to config.yaml', async () => {
+    writeConfig(VALID_CONFIG);
+    // anthropic-cloud is not the default and not referenced by any agent
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profileId: string; profile: { type: string } }>(res);
+    expect(data.profileId).toBe('anthropic-cloud');
+    expect(data.profile.type).toBe('pi-ai');
+
+    // Verify deleted from disk
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const profiles = parsed.runtimeProfiles as Record<string, unknown>;
+    expect(Object.hasOwn(profiles, 'anthropic-cloud')).toBe(false);
+    // Other profiles still exist
+    expect(Object.hasOwn(profiles, 'openclaw.default')).toBe(true);
+  });
+
+  it('rejects deletion of non-existent profile with 404', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/nonexistent',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/nonexistent' });
+
+    expect(res.statusCode).toBe(404);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('not_found');
+  });
+
+  it('rejects deletion of defaultRuntime profile with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // openclaw.default is the defaultRuntime
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/openclaw.default',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/openclaw.default' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('default runtime');
+  });
+
+  it('rejects deletion of profile referenced by an agent with 400', async () => {
+    writeConfig(VALID_CONFIG);
+    // lmstudio-local is referenced by diagnostician
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('referenced by agents');
+    expect(err.message).toContain('diagnostician');
+  });
+
+  it('allows deletion after agent binding is changed', async () => {
+    // Write a config where lmstudio-local is NOT referenced by any agent
+    // (diagnostician uses anthropic-cloud instead)
+    writeConfig({
+      ...VALID_CONFIG,
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'anthropic-cloud' },
+          dreamer: { enabled: true },
+          scribe: { enabled: true },
+        },
+      },
+    });
+
+    // lmstudio-local is now unreferenced — delete should succeed
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/lmstudio-local',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('preserves unknown config sections when deleting', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      customSection: { note: 'preserve-me' },
+    });
+    const req = createMockRequest('DELETE', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(200);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'customSection')).toBe(true);
+  });
+
+  it('returns 405 for non-DELETE methods on /profiles/:id', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('POST', { url: '/api/v1/config/profiles/anthropic-cloud' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+    expect(res.statusCode).toBe(405);
   });
 });

@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "../../../lib/utils.js";
 import type { AgentMeta } from "../../utils/agent-metadata.js";
+import { fetchAgentReadiness } from "../../api.js";
 import type {
   RedactedAgentSummary,
   RedactedRuntimeProfileSummary,
+  ReadinessStatus,
 } from "../../api.js";
 
 /**
@@ -43,13 +45,17 @@ interface AgentCardProps {
   locale: AgentLocale;
 }
 
-/** 状态点样式：ready / notready / off */
-function statusDotClasses(agent: RedactedAgentSummary): string {
+/** 状态点样式：ready / notready / off
+ *
+ * 接受 readiness + enabled 而非整个 agent 对象，以便 L1 状态点可以使用
+ * 动态获取的 readiness（fetchAgentReadiness）替换静态悲观值。
+ */
+function statusDotClasses(readiness: ReadinessStatus, enabled: boolean): string {
   const base = "w-2 h-2 rounded-full border-2 shrink-0";
-  if (!agent.enabled) {
+  if (!enabled) {
     return cn(base, "border-ink-4 bg-surface opacity-50");
   }
-  switch (agent.readiness) {
+  switch (readiness) {
     case "ready":
       return cn(base, "border-green bg-green");
     case "not_ready":
@@ -131,6 +137,46 @@ export function AgentCard({
   const [isOpen, setIsOpen] = useState(false);
   const [showTechDetail, setShowTechDetail] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  // 动态 readiness：L2 展开时，若静态 readiness 为 'unknown'（悲观值），
+  // 调用 /api/v1/config/readiness/:agentName 获取实时探测结果替换静态值。
+  // 仅在 agent.enabled && agent.readiness === 'unknown' 时发起请求。
+  const [dynamicReadiness, setDynamicReadiness] = useState<ReadinessStatus | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessFetched, setReadinessFetched] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (readinessFetched) return;
+    if (!agent.enabled) return;
+    if (agent.readiness !== "unknown") return;
+
+    let cancelled = false;
+    setReadinessFetched(true);
+    setReadinessLoading(true);
+
+    fetchAgentReadiness(agent.name).then((result) => {
+      if (cancelled) return;
+      setReadinessLoading(false);
+      if (result.success && result.data) {
+        setDynamicReadiness(result.data.readiness);
+      }
+      // rc-9: 调用失败时不静默吞错——result.error 已由 request() 提取；
+      // 此处 fallback 到静态 agent.readiness（'unknown'），状态点保持 amber。
+      // loading 指示器消失即告知用户探测已结束但未获得确定结果。
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, readinessFetched, agent.enabled, agent.readiness, agent.name]);
+
+  // 有效 readiness：静态值为 'unknown' 且已获取动态值时使用动态值；
+  // 否则使用静态值（父组件 re-fetch 后若不再是 'unknown' 则自动优先）。
+  const effectiveReadiness: ReadinessStatus =
+    agent.readiness === "unknown" && dynamicReadiness !== null
+      ? dynamicReadiness
+      : agent.readiness;
 
   // locale 决定取 Zh 还是 En 字段
   const isZh = locale === "zh-CN";
@@ -225,8 +271,8 @@ export function AgentCard({
           }
         }}
       >
-        {/* 状态点 */}
-        <div className={statusDotClasses(agent)} aria-hidden="true" />
+        {/* 状态点 — 使用 effectiveReadiness（动态获取后替换静态悲观值）*/}
+        <div className={statusDotClasses(effectiveReadiness, agent.enabled)} aria-hidden="true" />
 
         {/* 名称 + 角色 */}
         <div className="flex-1 min-w-0">
@@ -383,7 +429,7 @@ export function AgentCard({
           )}
 
           {/* profile-row */}
-          <div className="mt-[12px] pt-[12px] border-t border-line-2 flex items-center gap-[10px] text-[12px]">
+          <div className="mt-[12px] pt-[12px] border-t border-line-2 flex items-center gap-[10px] text-[12px] flex-wrap">
             <span className="text-ink-4 font-mono text-[10.5px] uppercase tracking-[0.04em]">
               {t("pages.controlCenter.profileLabelShort")}
             </span>
@@ -400,6 +446,28 @@ export function AgentCard({
                 </option>
               ))}
             </select>
+            {/* 动态 readiness loading 指示器（仅探测中显示）*/}
+            {readinessLoading && (
+              <span className="text-[10.5px] text-ink-4 font-mono animate-pulse">
+                {t("pages.controlCenter.readinessChecking")}
+              </span>
+            )}
+            {/* "管理 Profiles" 按钮 — 滚动到页面级 RuntimeProfileManager 区段 */}
+            <button
+              type="button"
+              data-manage-profiles
+              onClick={(e) => {
+                e.stopPropagation();
+                const el = document.getElementById("runtime-profile-manager");
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+              }}
+              className="ml-auto text-[11px] text-ink-4 hover:text-ink-2 transition-colors px-[8px] py-[3px] border border-line-2 rounded-[3px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              aria-label={t("pages.controlCenter.manageProfiles")}
+            >
+              {t("pages.controlCenter.manageProfiles")}
+            </button>
           </div>
 
           {/* 内联确认条（仅核心代理 confirming=true 时） */}

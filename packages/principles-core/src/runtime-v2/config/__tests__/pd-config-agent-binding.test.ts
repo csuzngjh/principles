@@ -102,7 +102,7 @@ describe('resolveAgentRuntimeBinding', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profileId).toBe(DEFAULT_RUNTIME_PROFILE_ID);
-    expect(result.profile.type).toBe('openclaw');
+    expect(result.profile.type).toBe('pi-ai');
     expect(result.source).toBe('default_runtime');
   });
 
