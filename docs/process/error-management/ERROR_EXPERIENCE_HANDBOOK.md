@@ -179,6 +179,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-083 | Changing a shared contract (store guard, type union, service method, default config value) without auditing all cross-package consumers (callers, validators, tests, mocks) — downstream packages break | PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162 |
 | ERR-084 | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA | PR #1068 |
 | ERR-090 | Package.json entry point (main/exports) changed without verifying the referenced file exists in ALL build paths (tsc vs esbuild) — CI fails on paths that don't generate the new entry | PRI-501 / PR #1162 |
+| ERR-091 | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files | PR #1159 |
 
 ---
 
@@ -1403,5 +1404,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `packages/openclaw-plugin/esbuild.config.js` now generates `dist/index.js` as a re-export shim of `dist/bundle.js` after esbuild build, so `package.json` `main: ./dist/index.js` resolves correctly under both tsc-only and esbuild build paths. CI runs `tsc` build then tests import via `./dist/index.js`.
 - **Related ERRs**: ERR-040 (published artifact missing components — same EP-06 family), ERR-050 (modified bundled copy instead of source — same EP-06 family), ERR-068 (wrong package manager lockfile — same EP-06 family), EP-06
 - **Source**: PRI-501 / PR #1162
+- **Date**: 2026-07-02
+- **Recurrence**: None
+
+---
+
+**[ERR-091]** | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files
+
+- **What happened**: PR #1159 added homepage-demo-{zh,en}.mp4 and homepage-demo-poster-{zh,en}.webp as Git LFS-tracked binary assets under `packages/website/public/`. The `verify-merge` CI job's `actions/checkout` step used the default `lfs: false`, so the LFS-tracked assets were checked out as 132-byte pointer files instead of real binary content. The `homepage-contract.test.mjs` test asserts `asset.size > 100_000` (`must contain a rendered video`); with 132-byte pointers, the assertion failed: `homepage-demo-zh.mp4 must contain a rendered video`. The "Verify Merge Gate" CI check failed, blocking merge.
+- **Why it's wrong**: When tests in CI read the content of LFS-tracked binary assets, the checkout step MUST enable `lfs: true`; otherwise `actions/checkout` writes pointer files (132 bytes) instead of the actual binary content. Size/content assertions that pass locally (where LFS smudges the real file) fail in CI with no obvious connection to the checkout configuration. The test itself was correct — it caught the missing wiring — but the CI workflow was misconfigured.
+- **Generalized failure mode**: When adding LFS-tracked binary assets that any CI test reads (size, content, format, dimension), assistants must ensure every `actions/checkout` step in every CI job that runs those tests has `lfs: true`. Additionally, any pre-deploy LFS-pointer guard must be extended to cover the new asset paths.
+- **Correct approach**: (1) Add `lfs: true` to the `actions/checkout` step in `.github/workflows/ci.yml` for the `verify-merge` job (and any other job whose tests read LFS assets). (2) Extend pre-deploy LFS-pointer guards (e.g., in `deploy-website.yml`) to cover new LFS-tracked asset paths. (3) The size/content assertion in the contract test is the correct regression guard — keep it.
+- **How to prevent**: When adding LFS-tracked binary assets that tests read in CI: (1) `grep "actions/checkout" .github/workflows/*.yml` and ensure every job running those tests has `lfs: true`. (2) Extend any LFS-pointer guard loop to include the new file glob. (3) Run `npm run verify:merge` locally before pushing — but note that local LFS smudge hides the CI-only pointer-file failure, so CI is the real guard.
+- **Regression guard**: `packages/website/tests/homepage-contract.test.mjs` asserts `asset.size > 100_000` for each LFS-tracked video asset — this test catches the missing `lfs: true` wiring (it fails in CI when pointers are checked out instead of real content).
+- **Related ERRs**: ERR-068 (wrong package manager in CI — same "CI consumes different artifact than local" pattern), ERR-084 (GitHub Actions workflow wiring — same EP-06 category), ERR-040 (published artifact missing components — same "test environment differs from CI/production" class)
+- **Source**: PR #1159
 - **Date**: 2026-07-02
 - **Recurrence**: None
