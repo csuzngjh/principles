@@ -498,7 +498,11 @@ async function processEvolutionQueueWithResult(
             return { queue: queueResult, errors };
         }
 
-        const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+        // rc-1/rc-2/rc-4 (ERR-001/ERR-005/ERR-007): use the canonical loader
+        // instead of raw JSON.parse + cast. loadEvolutionQueue handles parse,
+        // migrate, and element-wise validation; malformed items are dropped
+        // with a console.warn (rc-9: no silent fallback).
+        const queue: EvolutionQueueItem[] = loadEvolutionQueue(queuePath);
 
         // Purge stale failed tasks before processing (keeps queue lean)
         const purgeResult = purgeStaleFailedTasks(queue, logger);
