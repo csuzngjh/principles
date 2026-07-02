@@ -5,7 +5,7 @@
  * Extracted from evolution-worker.ts.
  */
 
-import type { EvolutionQueueItem } from './evolution-queue-migration.js';
+import type { EvolutionQueueItem } from '../core/evolution-types.js';
 
 /**
  * Dedup window for pain queue tasks (30 minutes).

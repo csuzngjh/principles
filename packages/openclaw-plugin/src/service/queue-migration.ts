@@ -6,34 +6,11 @@
  */
 
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+import type { QueueStatus, TaskResolution, EvolutionQueueItem } from '../core/evolution-types.js';
 
-// V2 types (not exported from evolution-types.ts — defined here for self-containment)
-export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
-export type TaskResolution = 'success' | 'failure' | 'skipped';
-export interface EvolutionQueueItem {
-    id: string;
-    taskKind: TaskKind;
-    priority: TaskPriority;
-    source: string;
-    traceId?: string;
-    task?: string;
-    score: number;
-    reason: string;
-    timestamp: string;
-    enqueued_at?: string;
-    started_at?: string;
-    completed_at?: string;
-    assigned_session_key?: string;
-    trigger_text_preview?: string;
-    status: QueueStatus;
-    resolution?: TaskResolution;
-    session_id?: string;
-    agent_id?: string;
-    retryCount: number;
-    maxRetries: number;
-    lastError?: string;
-    resultRef?: string;
-}
+// V2 types — canonical definitions live in evolution-types.ts (single source of truth).
+// Re-exported here for backward compatibility with existing importers.
+export type { QueueStatus, TaskResolution, EvolutionQueueItem } from '../core/evolution-types.js';
 
 /**
  * Legacy queue item shape (pre-V2) for migration compatibility.
