@@ -9,8 +9,10 @@ description: 把对 AI Agent 的反复纠正沉淀为可审查、可回滚的行
   <HeroSection />
   <BehaviorExampleSection />
   <GovernanceLoopSection />
-  <MottoSection />
+  <BoundarySection />
   <UseCasesSection />
+  <CompoundingSection />
   <InstallSection />
   <ThinkingLogCard />
+  <ClosingSection />
 </div>

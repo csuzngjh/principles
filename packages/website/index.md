@@ -9,8 +9,10 @@ description: Turn repeated AI Agent corrections into reviewable, reversible beha
   <HeroSection />
   <BehaviorExampleSection />
   <GovernanceLoopSection />
-  <MottoSection />
+  <BoundarySection />
   <UseCasesSection />
+  <CompoundingSection />
   <InstallSection />
   <ThinkingLogCard />
+  <ClosingSection />
 </div>
