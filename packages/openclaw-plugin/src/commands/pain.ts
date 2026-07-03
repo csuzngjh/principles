@@ -211,7 +211,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             text += `当前是全新工作区，还没有痛觉信号 —— 这是正常的。\n\n`;
             text += `**下一步**:\n`;
             text += `1. 让 Agent 工作，当它犯错时运行 \`/pd-pain <描述问题>\`\n`;
-            text += `2. 或运行演示: \`pd demo story-a\`\n`;
+            text += `2. 或运行演示: \`pd demo first-principle\`\n`;
             text += `3. 配置 LLM runtime profile: \`pd console open --workspace "<path>"\`\n\n`;
             text += `审批通过的原则会出现在这里。`;
         } else {
@@ -239,7 +239,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             text += `This is a fresh workspace with no pain signals yet — that's expected.\n\n`;
             text += `**Next steps**:\n`;
             text += `1. Let your agent work and run \`/pd-pain <description>\` when it makes a mistake\n`;
-            text += `2. Or run the demo: \`pd demo story-a\`\n`;
+            text += `2. Or run the demo: \`pd demo first-principle\`\n`;
             text += `3. Configure LLM runtime profile: \`pd console open --workspace "<path>"\`\n\n`;
             text += `Approved principles will appear here once activated.`;
         } else {

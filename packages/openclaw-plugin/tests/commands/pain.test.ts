@@ -131,7 +131,7 @@ describe('Pain Command', () => {
 
         expect(result.text).toContain('Welcome to Principles Disciple');
         expect(result.text).toContain('fresh workspace');
-        expect(result.text).toContain('pd demo story-a');
+        expect(result.text).toContain('pd demo first-principle');
         expect(result.text).toContain('pd console open');
         expect(result.text).not.toContain('Hint: Use `/pd-status empathy`');
     });
@@ -147,7 +147,7 @@ describe('Pain Command', () => {
 
         expect(result.text).toContain('欢迎使用 Principles Disciple');
         expect(result.text).toContain('全新工作区');
-        expect(result.text).toContain('pd demo story-a');
+        expect(result.text).toContain('pd demo first-principle');
         expect(result.text).toContain('pd console open');
         expect(result.text).not.toContain('提示: 使用 `/pd-status empathy`');
     });
