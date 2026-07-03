@@ -246,6 +246,7 @@ function phase3(trap, runId, timeoutSec, ws, model) {
     env: {
       OPENCLAW_WORKSPACE: ws,
       PD_WORKSPACE_DIR: ws,
+      PD_E2E_MODE: '1',
     },
   });
   const raw = (proc.stdout ?? '').trim();
@@ -319,6 +320,7 @@ function phase3b(trap, runId, ws, model, sessionKey) {
       env: {
         OPENCLAW_WORKSPACE: ws,
         PD_WORKSPACE_DIR: ws,
+        PD_E2E_MODE: '1',
       },
     });
 
