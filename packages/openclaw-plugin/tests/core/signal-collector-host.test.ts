@@ -369,4 +369,129 @@ describe('SignalCollectorHost edge cases and error handling', () => {
       host.detectSync('这是错的', 'sess-no-trajectory', 'user');
     }).not.toThrow();
   });
+
+  it('empty keyword store → no signal detected', () => {
+    const emptyStore: UnifiedKeywordStore = {
+      version: 1,
+      terms: {},
+    };
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: emptyStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-empty-store', 'user');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('keyword store with only empathy terms → empathy ambiguous routed as WEAK when LLM unavailable', async () => {
+    const empathyOnlyStore: UnifiedKeywordStore = {
+      version: 1,
+      terms: {
+        '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '气死我了': { term: '气死我了', category: 'empathy', weight: 0.7, precision: 'high', source: 'seed' },
+      },
+    };
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: empathyOnlyStore, config: testConfig });
+    host.detectSync('你搞什么啊', 'sess-empathy-only', 'user');
+    await flushAsync();
+    expect(trackFriction).toHaveBeenCalledTimes(1);
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('keyword store with only correction terms → correction ambiguous dropped when LLM unavailable', async () => {
+    const correctionOnlyStore: UnifiedKeywordStore = {
+      version: 1,
+      terms: {
+        '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
+      },
+    };
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: correctionOnlyStore, config: testConfig });
+    host.detectSync('这个不对', 'sess-correction-only', 'user');
+    await flushAsync();
+    expect(trackFriction).not.toHaveBeenCalled();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('very long user message → handled without crash', () => {
+    const longMessage = '这是错的'.repeat(1000);
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync(longMessage, 'sess-long', 'user');
+    }).not.toThrow();
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('message with special characters → handled without crash', () => {
+    const specialMessage = '这是错的!@#$%^&*()_+-=[]{}|;:,.<>?~`';
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync(specialMessage, 'sess-special', 'user');
+    }).not.toThrow();
+  });
+
+  it('message with emoji → handled without crash', () => {
+    const emojiMessage = '这是错的 😡🔥';
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync(emojiMessage, 'sess-emoji', 'user');
+    }).not.toThrow();
+  });
+
+  it('rate limit of 0 → all STRONG signals suppressed', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, strongRateLimitPerHour: 0 },
+    });
+    host.detectSync('这是错的', 'sess-zero-rate', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('rate limit of 1000 → no suppression for normal usage', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, strongRateLimitPerHour: 1000 },
+    });
+    for (let i = 0; i < 10; i++) {
+      host.detectSync('这是错的', 'sess-high-rate', 'user');
+    }
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(10);
+  });
+
+  it('empty sessionId → handled without crash', () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync('这是错的', '', 'user');
+    }).not.toThrow();
+  });
+
+  it('sessionId with special characters → handled without crash', () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    expect(() => {
+      host.detectSync('这是错的', 'sess@#$%^&*()', 'user');
+    }).not.toThrow();
+  });
+
+  it('mixed empathy and correction keywords in same message → correct routing', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: 'mixed message',
+      }),
+    });
+    host.detectSync('你搞什么啊，这是错的', 'sess-mixed', 'user');
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalled();
+  });
 });

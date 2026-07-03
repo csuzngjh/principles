@@ -249,6 +249,13 @@ export interface ContextInjectionConfig {
   evolutionContext: EvolutionContextConfig;
 }
 
+/** Partial context injection config — for user input, defaults resolved in effective config. */
+export type PartialContextInjectionConfig = {
+  thinkingOs?: boolean;
+  projectFocus?: ProjectFocusMode;
+  evolutionContext?: Partial<EvolutionContextConfig>;
+};
+
 // ── Top-Level Config ────────────────────────────────────────────────────────
 
 export interface PdConfig {
@@ -264,7 +271,7 @@ export interface PdConfig {
   /** Agent behavioral profile — partial user input; defaults resolved in effective config (PRI-304). */
   profile?: Partial<ProfileConfig>;
   /** Context injection configuration — partial user input; defaults resolved in effective config. */
-  contextInjection?: Partial<ContextInjectionConfig>;
+  contextInjection?: PartialContextInjectionConfig;
 }
 
 // ── Validation Result ───────────────────────────────────────────────────────
