@@ -124,18 +124,19 @@ Every significant agent decision — approvals, blocks, corrections, pain events
 
 ### 4. Principle internalization
 
-Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, evaluate, promote, disable, archive, or roll back these implementations with commands such as:
+Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, promote, disable, archive, or roll back these implementations with commands such as:
 
 ```text
 /pd-evolution-status
 /pd-promote-impl list
-/pd-promote-impl eval <id>
 /pd-promote-impl show <id>
 /pd-promote-impl <id>
 /pd-disable-impl <id>
 /pd-rollback-impl <id>
 /pd-archive-impl <id>
 ```
+
+> ⚠️ Note: The legacy replay generation path (`/pd-promote-impl eval`) was retired in PRI-230. Promotion only works for implementations that already have a pre-existing passing replay report.
 
 A principle should not become active just because it sounds good.
 
