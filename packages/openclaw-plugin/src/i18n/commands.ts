@@ -69,6 +69,30 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '查看或审核纠错样本 [review approve|reject <sample-id> [note]]',
     en: 'List or review correction samples [review approve|reject <sample-id> [note]]'
   },
+  'pd-pain': {
+    zh: '从 OpenClaw 会话报告 pain（context-bound provenance）',
+    en: 'Report pain from OpenClaw session (context-bound provenance)'
+  },
+  'pd-workflow-debug': {
+    zh: '调试 workflow 状态与事件 [workflowId]',
+    en: 'Debug workflow state and events [workflowId]'
+  },
+  'pd-promote-impl': {
+    zh: '提升候选实现到 active [list|show <id>|<id>]（半废弃）',
+    en: 'Promote candidate implementation to active [list|show <id>|<id>] (semi-deprecated)'
+  },
+  'pd-disable-impl': {
+    zh: '禁用 active 实现 [list|<id> --reason "..."]（半废弃）',
+    en: 'Disable active implementation [list|<id> --reason "..."] (semi-deprecated)'
+  },
+  'pd-archive-impl': {
+    zh: '永久归档实现 [list|<id>]（半废弃）',
+    en: 'Archive implementation permanently [list|<id>] (semi-deprecated)'
+  },
+  'pd-rollback-impl': {
+    zh: '回滚到上一个 active 实现 [list|<id> --reason "..."]（半废弃）',
+    en: 'Rollback to previous active implementation [list|<id> --reason "..."] (semi-deprecated)'
+  },
 };
 
 /**

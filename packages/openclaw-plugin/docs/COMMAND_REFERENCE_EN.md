@@ -11,8 +11,6 @@
 | `/pd-evolution-status` | View EP tier, GFI, pain flag, and gate events |
 | `/pd-status empathy` | Inspect empathy/frustration event statistics |
 | `/pd-rollback last` | Roll back the latest empathy penalty |
-| `/pd-evolve` | Run an evolution task |
-| `/pd-evolution-points` | View current EP balance and tier |
 
 ---
 

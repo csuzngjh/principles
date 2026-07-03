@@ -19,6 +19,7 @@ const CORE_DEST = join(__dirname, '..', 'core');
 
 const PLUGIN_REQUIRED = [
   'dist',
+  'dist/bundle.js',
   'templates',
   'openclaw.plugin.json',
   'package.json',

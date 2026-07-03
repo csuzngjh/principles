@@ -495,6 +495,12 @@ function main() {
   if (!args.skipDeps) installRootDeps();
 
   if (!args.skipBuild) {
+    console.log('\n📝 Generating openclaw-plugin declaration files...');
+    try {
+      execSync('npx tsc --emitDeclarationOnly', { cwd: PLUGIN_SOURCE_DIR, stdio: 'inherit' });
+    } catch (e) {
+      console.warn('  ⚠️  Failed to generate declarations (non-blocking, will try full build):', e.message);
+    }
     buildCoreAndCli();
     buildPdConsole();
   } else {
