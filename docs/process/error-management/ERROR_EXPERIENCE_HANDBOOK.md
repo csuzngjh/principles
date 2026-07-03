@@ -180,6 +180,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-084 | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA | PR #1068 |
 | ERR-090 | Package.json entry point (main/exports) changed without verifying the referenced file exists in ALL build paths (tsc vs esbuild) — CI fails on paths that don't generate the new entry | PRI-501 / PR #1162 |
 | ERR-091 | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files | PR #1159 |
+| ERR-092 | Module-level cache leaks across workspace instances when not keyed by workspaceDir | PRI-504 / PR #1164 review |
 
 ---
 
@@ -797,8 +798,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 90 |
-| Last updated | 2026-07-02 |
+| Total lessons | 91 |
+| Last updated | 2026-07-03 |
 | Top category | Schema & Type |
 | Recurring errors | 43 |
 
@@ -812,7 +813,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout.
+- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`.
 
 ---
 
@@ -1391,6 +1392,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-29
 - **Recurrence**: Yes — same "incomplete coverage" root cause, call-site flavor (not failure branches):
   - 2026-06-30 PR #1132: When merging two scattered detectSync call sites (correction segment + empathy segment) into a unified SignalCollectorHost, the empathy-segment call was left in place. Both fired for the same `trigger==='user'` message → double `user_turns` write + double STRONG rate-limit consumption. Fix: removed the redundant call; added `toHaveBeenCalledTimes(1)` regression test. Lesson: when consolidating N call sites into 1, grep for ALL old call sites and remove every one — the new unified call doesn't "replace" them implicitly.
+  - 2026-07-03 PRI-503 / PR #1164 review: PR #1134 fixed Bug-H (admission gate bypass) by adding `checkAdmissionGate` to 3 call sites in `candidate.ts`, but missed 2 sibling commands (`pain-retry.ts:469` and `diagnose.ts:471`) that also call `intakeService.intake()` without the gate. Fix: extracted `checkAdmissionGate` to a shared helper `admission-gate.ts` and applied it to both sibling commands. Lesson: when fixing a gate/check validation in one CLI command, grep ALL commands that call the same downstream API (`intakeService.intake`) and apply the gate to every call site.
 
 ---
 
@@ -1420,4 +1422,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-068 (wrong package manager in CI — same "CI consumes different artifact than local" pattern), ERR-084 (GitHub Actions workflow wiring — same EP-06 category), ERR-040 (published artifact missing components — same "test environment differs from CI/production" class)
 - **Source**: PR #1159
 - **Date**: 2026-07-02
+- **Recurrence**: None
+
+---
+
+**[ERR-092]** | Module-level cache leaks across workspace instances when not keyed by workspaceDir
+
+- **What happened**: `SystemLogger` in `packages/openclaw-plugin/src/core/system-logger.ts` used three module-level `let` variables (`cachedLogFile`, `cachedLogDate`, `lastCleanupDate`) to cache the current log file path. These variables were NOT keyed by `workspaceDir` — they were single-valued. When multiple workspaces were used in the same Node.js process (e.g., PRI-442 E2E isolation tests), the first workspace to call `log()` set `cachedLogFile` to its own log path. All subsequent calls from other workspaces used the same cached path, writing their logs to the FIRST workspace's log file. The cache only invalidated on date change (midnight), not on workspace change.
+- **Why it's wrong**: Module-level mutable state that caches per-input-derived values (file paths, DB connections, service instances) MUST be keyed by the input that determines the value. A single-valued cache silently leaks state across callers with different inputs. This is especially dangerous in multi-workspace processes (E2E tests, long-running services handling multiple workspaces) where the leak corrupts observability data — logs from workspace B end up in workspace A's log file, making audit trails and E2E acceptance evidence unreliable.
+- **Generalized failure mode**: When a module caches a value derived from an input parameter (workspaceDir, stateDir, sessionId, userId), the cache MUST be keyed by that input (typically a `Map<string, T>`). A single-valued `let` cache that only tracks "last seen" input (via `if (lastX !== currentX)`) is the broken anti-pattern — it works for single-caller processes but leaks under multi-caller use.
+- **Correct approach**: Replace single-valued `let` caches with `Map<string, T>` keyed by `path.resolve(workspaceDir)` (path normalization defends against `./a/b` vs `/abs/a/b` key mismatches). Add `disposeX(workspaceDir)` and `disposeAllX()` exports for test isolation. The codebase already has this pattern in `evolution-engine.ts:551-577` (Pattern B with `path.resolve()` keying) and `evolution-logger.ts:319-357` (Pattern A with Map + get/dispose/disposeAll).
+- **How to prevent**: When reviewing a module that has `let cachedX` or `let lastX` at module scope: (1) check if the cached value is derived from a function parameter; (2) if yes, the cache MUST be a `Map<param, value>` not a single slot; (3) key by `path.resolve()` if the parameter is a filesystem path; (4) add dispose functions for test cleanup. Anti-pattern to reject: `let config = null; let lastStateDir = null; if (lastStateDir !== stateDir) { config = new...; lastStateDir = stateDir; }` — this only works for single-caller processes.
+- **Regression guard**: `packages/openclaw-plugin/tests/core/system-logger.test.ts` — writes from two distinct temp workspaces, asserts each workspace's logs land in its own `SYSTEM_YYYY-MM-DD.log` file (no cross-contamination).
+- **Related ERRs**: EP-07 (Runtime State Source Alignment — output points to wrong state source, related but different: EP-07 is about reading stale state, this is about writing to wrong state). Also related to the "anti-pattern D" documented in `src/core/AGENTS.md` — `config-service.ts`, `dictionary-service.ts`, `detection-service.ts` all use the same broken `let lastStateDir` single-slot pattern and may need the same fix.
+- **Source**: PRI-504 / PR #1164 review
+- **Date**: 2026-07-03
 - **Recurrence**: None
