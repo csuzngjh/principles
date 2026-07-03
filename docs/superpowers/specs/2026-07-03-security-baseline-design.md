@@ -161,9 +161,9 @@ PD 已有完整的 [SECURITY_ARCHITECTURE.md](../../architecture/SECURITY_ARCHIT
 
 ### 8.2 `architecture-regression.test.ts` 新增 describe 块
 
-在现有 [architecture-regression.test.ts](../../../packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts) 尾部追加 5 个 describe 块(遵循现有 PRI-* 命名风格,改用 SEC-BASE-* 前缀):
+在现有 [architecture-regression.test.ts](../../../packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts) 尾部追加 5 个 describe 块(遵循现有 `PRI-*` 命名风格,改用 `SEC-BASE-*` 前缀):
 
-```
+```text
 describe('SEC-BASE-1: supply chain provenance guards', () => { ... })  // 校验 publish workflow 字段
 describe('SEC-BASE-2: sandbox escape regression', () => { ... })        // forbidden patterns + 子进程边界
 describe('SEC-BASE-3: PII redaction guards', () => { ... })             // email/phone/card/ip 正则

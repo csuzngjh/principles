@@ -31,18 +31,18 @@ PD 安全基线按四层纵深防御组织，每层均有 CI 守护测试与/或
 |-------|------|---------|
 | SECURITY.md | 仓库根存在漏洞披露政策 | `check-security-baseline.js` |
 | CodeQL | 启用 `javascript-typescript` + `security-extended` 周扫描 | `.github/workflows/codeql.yml` |
-| npm provenance | `package.json` 含 `"provenance": true` 发布配置 | `check-security-baseline.js` |
-| ignore-scripts | `package.json` 含 `"ignore-scripts": true` 安装时禁用生命周期脚本 | `check-security-baseline.js` |
+| npm provenance | `.github/workflows/publish-npm.yml` 含 `npm publish --provenance` | `check-security-baseline.js` |
+| ignore-scripts | `.github/workflows/publish-npm.yml` 含 `npm ci --ignore-scripts` | `check-security-baseline.js` |
 | lockfile | 仓库存在 `package-lock.json` | `check-security-baseline.js` |
 | Dependabot | `.github/dependabot.yml` 配置 npm 周更新 | `check-security-baseline.js` |
-| lefthook gitleaks | pre-push 钩子扫描暂存区密钥 | `lefthook.yml` + `.gitleaks.toml` |
+| lefthook gitleaks | pre-push 钩子扫描 git 历史密钥 | `lefthook.yml` + `.gitleaks.toml` |
 | npm audit | PR 检查运行 `npm audit --audit-level=high`（非阻塞） | `.github/workflows/pr-checks.yml` |
 
 ### 2.2 用户操作指引
 
 - **安装前**：用户可运行 `npm audit --audit-level=high` 自行验证依赖安全
-- **安装时**：PD 的 `ignore-scripts: true` 确保依赖包不会在安装时执行脚本
-- **发布溯源**：未来 PD 发布到 npm 时将使用 `npm publish --provenance`（Sigstore + SLSA Build L3），用户可用 `npm audit signatures` 验证
+- **安装时**：CI 的 `npm ci --ignore-scripts` 确保依赖包不会在安装时执行脚本；用户本地安装也可加 `--ignore-scripts` 标志
+- **发布溯源**：PD 发布到 npm 时使用 `npm publish --provenance`（Sigstore + SLSA Build L3），用户可用 `npm audit signatures` 验证
 
 ### 2.3 残余风险
 

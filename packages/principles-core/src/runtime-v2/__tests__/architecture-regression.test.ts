@@ -4238,7 +4238,13 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
       const content = fsSync.readFileSync(pathSync.join(consoleDir, f), 'utf8');
       const lines = content.split('\n');
       lines.forEach((line, idx) => {
-        if (/host\s*[:=]\s*['"]0\.0\.0\.0['"]/.test(line) && !/comment/.test(line)) {
+        // rc-9-no-silent-fallback: previously used `!/comment/.test(line)` which
+        // matched any line containing the substring "comment" (e.g. a variable
+        // named `commentField`), silently skipping real 0.0.0.0 defaults.
+        // Only skip genuine comment lines.
+        const trimmed = line.trim();
+        const isCommentLine = trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
+        if (/host\s*[:=]\s*['"]0\.0\.0\.0['"]/.test(line) && !isCommentLine) {
           violations.push(`${f}:${idx + 1}: ${line.trim()}`);
         }
       });

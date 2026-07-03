@@ -20,4 +20,6 @@ pre-push:
       # Canonical merge gate. Keep this in sync with the required CI check.
       run: npm run verify:merge
     gitleaks:
-      run: gitleaks protect --staged --redact --verbose
+      # `protect --staged` is deprecated in gitleaks v8.18+; `detect` scans
+      # the full git history so outgoing commits are covered at pre-push.
+      run: gitleaks detect --source . --redact --verbose
