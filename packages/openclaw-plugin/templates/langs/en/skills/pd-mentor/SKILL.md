@@ -29,7 +29,6 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 | `/pd-bootstrap` | Environment tool scan and upgrade | Tool upgrade |
 | `/pd-research` | Initiate tool upgrade research | Deep research |
 | `/pd-thinking` | Manage mental models and candidates | Metacognition |
-| `/pd-evolve` | Execute full evolution loop | Bug fix |
 | `/pd-evolution-status` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
 | `/pd-help` | Get interactive command guidance | This skill |
@@ -57,7 +56,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 **Recommended Flow**:
 1. `/pd-status` - Check system status (GFI and Pain Dictionary)
-2. `/pd-evolve` - Start full evolution loop
+2. `/pd-evolution-status` - View EP tier and evolution status
 
 **Script**: "Problems are the fuel of evolution. Let me help you diagnose and fix systematically."
 
@@ -170,7 +169,7 @@ For complex scenarios, combine multiple skills:
 
 | Scenario | Combined Flow |
 |----------|---------------|
-| Major refactor | `/pd-evolve` → `deductive-audit` → execute |
+| Major refactor | `/pd-evolution-status` → `deductive-audit` → execute |
 | System optimization | `/pd-status` → `root-cause` → optimize |
 | Project review | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
 

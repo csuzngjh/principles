@@ -119,37 +119,28 @@ Edit your workspace's `docs/PROFILE.json`:
 
 ## Slash Commands
 
-PD integrates with OpenClaw through slash commands. Here are the MVP commands:
+PD integrates with OpenClaw through slash commands. All commands start with `/pd-` (with short aliases like `/pdi`, `/pdb`, etc.) and never conflict with OpenClaw's built-in commands.
 
-### Setup
+Here's a quick overview of the most-used commands:
 
-| Command | Short | Description |
-|---------|-------|-------------|
+| Command | Short | Purpose |
+|---------|-------|---------|
 | `/pd-init` | `/pdi` | Initialize workspace |
-| `/pd-bootstrap` | `/pdb` | Scan environment tools |
-| `/pd-research` | `/pdr` | Research tools and capabilities |
-| `/pd-help` | `/pdh` | Show command reference |
+| `/pd-status` | — | View GFI friction index and system health |
+| `/pd-pain` | — | Report a pain signal from the current session |
+| `/pd-evolution-status` | — | View principle evolution state |
+| `/pd-rollback` | — | Rollback a misjudged empathy event penalty |
+| `/pd-principle-rollback` | — | Rollback a principle and blacklist it |
+| `/pd-context` | — | Control context injection (Thinking OS / project focus) |
+| `/pd-help` | `/pdh` | Show command reference in-session |
 
-### Pain & Monitoring
+::: tip Full Reference
+For the complete list of commands with detailed parameters, examples, and common workflows, see the [Slash Commands Reference](./slash-commands).
+:::
 
-| Command | Description |
-|---------|-------------|
-| `/pd-pain` | Report a pain signal from the current session |
-| `/pd-status` | View system health, hook status, and error rate |
-| `/pd-evolution-status` | View principle evolution state |
-
-### Principle Management
-
-| Command | Description |
-|---------|-------------|
-| `/pd-promote-impl list` | List all implementation candidates |
-| `/pd-promote-impl eval <id>` | Evaluate a specific candidate |
-| `/pd-promote-impl show <id>` | Show candidate details |
-| `/pd-promote-impl <id>` | Promote a candidate to active |
-| `/pd-disable-impl <id>` | Disable an active implementation |
-| `/pd-rollback-impl <id>` | Roll back to previous state |
-| `/pd-archive-impl <id>` | Archive an implementation |
-| `/pd-principle-rollback` | Roll back a principle to probation |
+::: warning About Implementation Lifecycle Commands
+`/pd-promote-impl`, `/pd-disable-impl`, `/pd-archive-impl`, and `/pd-rollback-impl` have their replay-generation path retired in PRI-230 and are now in a semi-deprecated state. For the new implementation promotion workflow, use the `pd candidate internalize` and `pd runtime activation promote` CLI commands instead.
+:::
 
 ## The PD CLI
 
@@ -218,17 +209,14 @@ The local console is your primary window into PD's activity.
 
 ### Rolling Back
 
-If an activated principle causes problems:
+If an activated principle causes problems, you can rollback empathy event penalties or principles directly:
 
 ```bash
-/pd-rollback-impl <id>
+/pd-rollback last             # Rollback the most recent empathy event penalty
+/pd-principle-rollback P_003  # Rollback a principle and blacklist it
 ```
 
-This restores the previous state. You can also disable without rolling back:
-
-```bash
-/pd-disable-impl <id>
-```
+For implementation lifecycle rollback (`/pd-rollback-impl`), note that the replay-generation path was retired in PRI-230. Use the `pd candidate internalize` CLI workflow for new implementations. See [Slash Commands Reference](./slash-commands) for details.
 
 ### Reporting a Problem
 

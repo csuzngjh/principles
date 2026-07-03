@@ -29,7 +29,6 @@ disable-model-invocation: true
 | `/pd-bootstrap` | 环境工具扫描与升级 | 装备升级 |
 | `/pd-research` | 发起工具升级研究 | 深度调研 |
 | `/pd-thinking` | 管理思维模型与候选方案 | 元认知管理 |
-| `/pd-evolve` | 执行完整进化循环 | 问题修复 |
 | `/pd-evolution-status` | 查看EP等级与安全状态 | 状态查询 |
 | `/pd-status` | 查看系统状态（GFI和痛苦词典） | 健康检查 |
 | `/pd-help` | 获取交互式命令引导 | 本技能 |
@@ -57,7 +56,7 @@ disable-model-invocation: true
 
 **推荐流程**:
 1. `/pd-status` - 检查系统状态（GFI 和痛苦词典）
-2. `/pd-evolve` - 启动完整的进化循环
+2. `/pd-evolution-status` - 查看 EP 等级和进化状态
 
 **话术**: "问题就是进化的燃料。让我帮你系统化地诊断和修复。"
 
@@ -170,7 +169,7 @@ disable-model-invocation: true
 
 | 场景 | 组合流程 |
 |------|----------|
-| 大型重构 | `/pd-evolve` → `deductive-audit` → 执行 |
+| 大型重构 | `/pd-evolution-status` → `deductive-audit` → 执行 |
 | 系统优化 | `/pd-status` → `root-cause` → 优化实施 |
 | 项目复盘 | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
 
