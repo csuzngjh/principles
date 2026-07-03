@@ -7,8 +7,8 @@
  * and IntentPage.test.ts.
  *
  * This guards against accidental regressions in:
- *  - 3-step wizard state (1 | 2 | 3)
- *  - integration of CircuitDiagram + DemoResultView + onboarding-state
+ *  - 4-step wizard state (1 | 2 | 3 | 4)
+ *  - integration of CircuitDiagram + DemoResultView + SlashCommandsCard + onboarding-state
  *  - API call wiring (POST /api/v1/onboarding/run-demo)
  *  - i18n key routing (EP-11: every user-facing string via t())
  *  - accessibility roles (role=main, progressbar, aria-labelledby)
@@ -41,16 +41,18 @@ describe('WelcomePage component contract', () => {
     expect(componentSource).toContain('if (!setOnboardingState(workspaceId');
     expect(componentSource).toContain('pages.welcome.stateSaveError');
   });
-  it('Given WelcomePage source, When parsed, Then has 3 steps with step state', () => {
-    expect(componentSource).toContain('useState<1 | 2 | 3>(1)');
+  it('Given WelcomePage source, When parsed, Then has 4 steps with step state', () => {
+    expect(componentSource).toContain('useState<1 | 2 | 3 | 4>(1)');
     expect(componentSource).toContain('step === 1');
     expect(componentSource).toContain('step === 2');
     expect(componentSource).toContain('step === 3');
+    expect(componentSource).toContain('step === 4');
   });
 
-  it('Given WelcomePage, When parsed, Then imports CircuitDiagram and DemoResultView', () => {
+  it('Given WelcomePage, When parsed, Then imports CircuitDiagram, DemoResultView, and SlashCommandsCard', () => {
     expect(componentSource).toContain('CircuitDiagram');
     expect(componentSource).toContain('DemoResultView');
+    expect(componentSource).toContain('SlashCommandsCard');
   });
 
   it('Given WelcomePage, When parsed, Then imports onboarding-state functions', () => {
@@ -76,6 +78,7 @@ describe('WelcomePage component contract', () => {
       'pages.welcome.step1.title',
       'pages.welcome.step2.title',
       'pages.welcome.step3.title',
+      'pages.welcome.step4.title',
     ];
     for (const key of simpleKeys) {
       expect(componentSource).toContain(`t('${key}')`);
@@ -91,6 +94,10 @@ describe('WelcomePage component contract', () => {
     expect(zh.title).toBeDefined();
     expect(getNestedRecord(en, ['step1']).title).toBeDefined();
     expect(getNestedRecord(zh, ['step1']).title).toBeDefined();
+    expect(getNestedRecord(en, ['step3']).title).toBeDefined();
+    expect(getNestedRecord(zh, ['step3']).title).toBeDefined();
+    expect(getNestedRecord(en, ['step4']).title).toBeDefined();
+    expect(getNestedRecord(zh, ['step4']).title).toBeDefined();
   });
 
   it('Given WelcomePage, When parsed, Then has accessibility roles', () => {
@@ -108,7 +115,7 @@ describe('WelcomePage component contract', () => {
   });
 });
 
-describe('WelcomePage step 3 polling (spec 6.5.2)', () => {
+describe('WelcomePage step 4 polling (spec 6.5.2)', () => {
   it('Given WelcomePage, When parsed, Then has polling logic with 2-hour timeout', () => {
     expect(componentSource).toContain('TWO_HOURS_MS');
     expect(componentSource).toContain('2 * 60 * 60 * 1000');

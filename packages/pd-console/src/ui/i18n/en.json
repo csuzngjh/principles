@@ -1093,6 +1093,22 @@
         }
       },
       "step3": {
+        "title": "Essential Slash Commands",
+        "description": "Type these commands in your agent conversation to control PD.",
+        "commandsIntro": "Here are 7 core commands. Type /pd-help for the full list.",
+        "commandDescriptions": {
+          "pdInit": "Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)",
+          "pdStatus": "View system status (GFI, Pain dictionary)",
+          "pdPain": "Report pain from OpenClaw session",
+          "pdHelp": "Show all commands and usage guide",
+          "pdContext": "Control context injection",
+          "pdEvolutionStatus": "Show evolution loop status",
+          "pdFocus": "Manage CURRENT_FOCUS.md"
+        },
+        "nextButton": "Next",
+        "emptyListFallback": "Failed to load command list. Type /pd-help to see all commands."
+      },
+      "step4": {
         "title": "Ready to record real evidence",
         "description": "When your agent makes a mistake or you repeatedly correct it, tell the agent: 'Use pd-pain-signal to record this.'",
         "examplePrompt": "Example prompt to agent:",
@@ -1111,7 +1127,8 @@
       "progress": {
         "step1": "Welcome",
         "step2": "Demo",
-        "step3": "Invite"
+        "step3": "Commands",
+        "step4": "Evidence"
       }
     }
   },
