@@ -244,13 +244,33 @@ export function isWindows(): boolean {
 }
 
 /**
+ * Fix-4 (P0-BUG-4): Optional runtime profile input collected by the installer
+ * prompt flow. When provided, the generated config.yaml's `pd.default` profile
+ * is pre-filled instead of left empty, so LLM-dependent features (diagnose,
+ * candidate intake, internalization) work on first run instead of failing
+ * silently (rc-9: no silent fallback).
+ *
+ * All fields optional — if undefined, the corresponding config field stays
+ * empty (backward compatible with the previous behavior).
+ */
+export interface RuntimeProfileInput {
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
+}
+
+/**
  * PRI-308: Generate .pd/config.yaml content.
  *
  * This replaces the old feature-flags.yaml generation.
  * The config.yaml follows the PdConfig schema from principles-core
  * (pd-config-types.ts), inlined to avoid a runtime dependency.
+ *
+ * Fix-4 (P0-BUG-4): `runtimeProfile` optional parameter — when provided,
+ * the `pd.default` profile is pre-filled with user-supplied values instead
+ * of being left empty. Empty profile causes LLM features to fail silently.
  */
-export function generateConfigYamlContent(): string {
+export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput): string {
   const config: Record<string, unknown> = {
     version: 1,
     features: {
@@ -271,14 +291,15 @@ export function generateConfigYamlContent(): string {
       idle_trigger:       { category: 'gone',  enabled: false },
     },
     runtimeProfiles: {
-      // M9 default: pi-ai profile. Placeholder fields — user must fill in
-      // provider/model/apiKeyEnv via web console (Profile CRUD API) or by
-      // editing this file. Static readiness is `needs_setup` until filled.
+      // M9 default: pi-ai profile. Fix-4: when the installer collected
+      // provider/model/apiKeyEnv from the user, pre-fill them here so
+      // LLM-dependent features work on first run. Otherwise leave empty
+      // (user must configure via web console).
       'pd.default': {
         type: 'pi-ai',
-        provider: '',
-        model: '',
-        apiKeyEnv: '',
+        provider: runtimeProfile?.provider ?? '',
+        model: runtimeProfile?.model ?? '',
+        apiKeyEnv: runtimeProfile?.apiKeyEnv ?? '',
       },
       // Fallback: openclaw.default delegates LLM calls to the OpenClaw main
       // agent. Users can switch back via web console if pi-ai is unavailable.

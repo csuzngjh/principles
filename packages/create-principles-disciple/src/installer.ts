@@ -22,6 +22,7 @@ import {
   validateOpenClawConfig,
   type ComponentStatus,
   type VerificationResult,
+  type RuntimeProfileInput,
 } from './mvp-config.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
@@ -1062,7 +1063,10 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   return count;
 }
 
-async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
+async function generateConfigYamlConfig(
+  workspaceDir: string,
+  runtimeProfile?: RuntimeProfileInput,
+): Promise<string> {
   const configPath = getConfigYamlPath(workspaceDir);
   const configDir = path.dirname(configPath);
 
@@ -1081,7 +1085,10 @@ async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
   }
 
   await fse.ensureDir(configDir);
-  writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
+  // Fix-4 (P0-BUG-4): pass through the runtime profile collected by the
+  // prompt flow so the generated config.yaml's pd.default profile is
+  // pre-filled instead of empty (avoids silent LLM failures on first run).
+  writeFileSync(configPath, generateConfigYamlContent(runtimeProfile), 'utf8');
   return configPath;
 }
 
@@ -1257,7 +1264,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Generating config.yaml...');
-    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir);
+    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir, options.runtimeProfile);
     verification.features = 'passed';
     stepIndex++;
 

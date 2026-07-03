@@ -2,7 +2,7 @@ import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
 import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
-import { MVP_CHANNELS, type MvpChannel } from './mvp-config.js';
+import { MVP_CHANNELS, type MvpChannel, type RuntimeProfileInput } from './mvp-config.js';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
 
 export interface InstallOptions {
@@ -11,6 +11,72 @@ export interface InstallOptions {
   workspaceDir: string;
   channels: MvpChannel[];
   overwriteConfig: boolean;
+  /** Fix-4 (P0-BUG-4): optional LLM runtime profile collected during prompts. */
+  runtimeProfile?: RuntimeProfileInput;
+}
+
+// Fix-4 (P0-BUG-4): Supported pi-ai providers for the interactive prompt.
+// Keep in sync with packages/principles-core pi-ai adapter capabilities.
+const RUNTIME_PROFILE_PROVIDERS = [
+  { name: 'openai', value: 'openai' },
+  { name: 'anthropic', value: 'anthropic' },
+  { name: 'deepseek', value: 'deepseek' },
+  { name: 'skip — configure later in console', value: '__skip__' },
+] as const;
+
+/**
+ * Fix-4 (P0-BUG-4): Interactive prompt for LLM runtime profile.
+ *
+ * Why this exists: without a configured runtimeProfile, `.pd/config.yaml`
+ * leaves `pd.default` provider/model/apiKeyEnv empty, and LLM-dependent
+ * features (diagnose, candidate intake, internalization) fail silently
+ * (rc-9: no silent fallback). This prompt collects the values up front so
+ * first-run experience is not broken.
+ *
+ * Returns `undefined` when the user skips — installer falls back to empty
+ * profile and surfaces a clear next-action pointing to the console settings.
+ */
+async function promptRuntimeProfile(): Promise<RuntimeProfileInput | undefined> {
+  const configure = await confirm({
+    message: 'Configure LLM runtime profile now? (recommended for first-time users — needed for pain diagnosis and principle generation)',
+    default: true,
+  });
+  if (!configure) return undefined;
+
+  const providerChoice = await select({
+    message: 'Select LLM provider:',
+    choices: RUNTIME_PROFILE_PROVIDERS,
+    default: 'openai',
+  });
+  if (providerChoice === '__skip__') return undefined;
+
+  const apiKeyEnv = await input({
+    message: 'Enter API key environment variable name (e.g. OPENAI_API_KEY):',
+    default: providerChoice === 'openai' ? 'OPENAI_API_KEY'
+      : providerChoice === 'anthropic' ? 'ANTHROPIC_API_KEY'
+      : providerChoice === 'deepseek' ? 'DEEPSEEK_API_KEY'
+      : 'LLM_API_KEY',
+    validate: (value) => {
+      if (!value.trim()) return 'Environment variable name cannot be empty (enter "skip" to skip)';
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(value.trim())) {
+        return 'Must be a valid environment variable name (uppercase letters, digits, underscore; cannot start with a digit)';
+      }
+      return true;
+    },
+  });
+
+  // Model is optional — sensible defaults exist per provider, user can override
+  // via console later. We don't prompt for it to keep onboarding short.
+  const modelDefault = providerChoice === 'openai' ? 'gpt-4o-mini'
+    : providerChoice === 'anthropic' ? 'claude-3-5-haiku-latest'
+    : providerChoice === 'deepseek' ? 'deepseek-chat'
+    : '';
+
+  return {
+    provider: providerChoice,
+    model: modelDefault,
+    apiKeyEnv: apiKeyEnv.trim(),
+  };
 }
 
 async function promptLanguage(): Promise<Language> {
@@ -94,6 +160,12 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
   console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
   console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
   console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
+  // Fix-4: surface runtime profile status so user knows whether LLM features will work.
+  if (options.runtimeProfile) {
+    console.log(`  LLM runtime profile: ${options.runtimeProfile.provider} / ${options.runtimeProfile.model} (key: $${options.runtimeProfile.apiKeyEnv})`);
+  } else {
+    console.log(`  LLM runtime profile: not configured (configure later via console)`);
+  }
 
   return await confirm({
     message: t('confirm_install'),
@@ -126,12 +198,20 @@ export async function runPrompts(
 
   showMvpCoreChannels();
 
+  // Fix-4 (P0-BUG-4): collect LLM runtime profile after channels are shown,
+  // before final confirmation. Skipped automatically in non-interactive mode
+  // (caller passes runtimeProfile via cliOptions or leaves it undefined).
+  const runtimeProfile = cliOptions.runtimeProfile !== undefined
+    ? cliOptions.runtimeProfile
+    : await promptRuntimeProfile();
+
   const options: InstallOptions = {
     language,
     mode,
     workspaceDir,
     channels: [...MVP_CHANNELS],
     overwriteConfig: false,
+    runtimeProfile,
   };
 
   const confirmed = await promptConfirm(options);
