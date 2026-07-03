@@ -26,6 +26,7 @@ export const PDErrorCategorySchema = Type.Union([
   Type.Literal('lease_conflict'),
   Type.Literal('lease_expired'),
   Type.Literal('execution_failed'),
+  Type.Literal('rate_limit'),
   Type.Literal('timeout'),
   Type.Literal('cancelled'),
   Type.Literal('output_invalid'),
@@ -49,6 +50,7 @@ export const PD_ERROR_CATEGORIES: readonly PDErrorCategory[] = [
   'lease_conflict',
   'lease_expired',
   'execution_failed',
+  'rate_limit',
   'timeout',
   'cancelled',
   'output_invalid',
@@ -69,7 +71,7 @@ export function isPDErrorCategory(value: string): value is PDErrorCategory {
 }
 
 /**
- * Maps PDErrorCategory (17 internal codes) to 9 user-facing failure categories.
+ * Maps PDErrorCategory (18 internal codes) to 9 user-facing failure categories.
  *
  * Used by pd-cli trace + pain-record commands for consistent classification.
  */
@@ -80,6 +82,7 @@ export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
   lease_conflict: 'runtime_unavailable',
   lease_expired: 'runtime_unavailable',
   execution_failed: 'runtime_unavailable',
+  rate_limit: 'runtime_unavailable',
   timeout: 'runtime_timeout',
   cancelled: 'runtime_timeout',
   output_invalid: 'output_invalid',
