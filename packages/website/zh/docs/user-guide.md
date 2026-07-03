@@ -120,40 +120,39 @@ RuleHost 会对每个变更工具调用进行已激活规则的评估：
 
 ## 斜杠命令
 
-PD 通过斜杠命令与 OpenClaw 集成。以下是 MVP 命令：
+PD 通过斜杠命令与 OpenClaw 集成。所有命令以 `/pd-` 开头(短别名如 `/pdi`、`/pdb` 等),不会与 OpenClaw 内置命令冲突。
 
-### 初始化
+以下是最常用命令的快速概览:
 
-| 命令 | 缩写 | 说明 |
+| 命令 | 缩写 | 用途 |
 |------|------|------|
 | `/pd-init` | `/pdi` | 初始化工作区 |
-| `/pd-bootstrap` | `/pdb` | 扫描环境工具 |
-| `/pd-research` | `/pdr` | 研究工具和能力 |
-| `/pd-help` | `/pdh` | 显示命令参考 |
+| `/pd-status` | — | 查看 GFI 疲劳指数和系统健康度 |
+| `/pd-pain` | — | 从当前会话报告痛觉信号 |
+| `/pd-evolution-status` | — | 查看原则演化状态 |
+| `/pd-rollback` | — | 回滚误判的情绪事件惩罚 |
+| `/pd-principle-rollback` | — | 回滚原则并加黑名单 |
+| `/pd-context` | — | 控制上下文注入(思维模型/项目焦点) |
+| `/pd-help` | `/pdh` | 在会话中查看命令参考 |
 
-### 痛觉与监控
+::: tip 完整参考
+完整的命令列表、详细参数说明、示例和常见工作流,请查看[斜杠命令参考](./slash-commands)。
+:::
+
+::: warning 关于实现生命周期命令
+`/pd-promote-impl`、`/pd-disable-impl`、`/pd-archive-impl`、`/pd-rollback-impl` 这四个命令的 replay 生成路径已在 PRI-230 退役,目前处于半废弃状态。新的实现晋升工作流请使用 `pd candidate internalize` 和 `pd runtime activation promote` CLI 命令。
+:::
+
+### 原则管理 (CLI)
+
+`pd` CLI 提供了现代化的原则生命周期命令:
 
 | 命令 | 说明 |
 |------|------|
-| `/pd-pain` | 从当前会话报告痛觉信号 |
-| `/pd-status` | 查看系统健康状态、钩子状态和错误率 |
-| `/pd-evolution-status` | 查看原则演化状态 |
-
-### 原则管理
-
-> ℹ️ `/pd-promote-impl` 斜杠命令自 PRI-230 起**已退役**(旧版 replay 生成路径已下线)。
-> 请改用下方的 `pd` CLI 命令——它们覆盖同样的生命周期,且使用现代化的内化流水线。
-
-| 命令 | 说明 |
-|------|------|
-| `/pd-disable-impl <id>` | 禁用一个激活的实现 |
-| `/pd-rollback-impl <id>` | 回滚到之前的状态 |
-| `/pd-archive-impl <id>` | 归档一个实现 |
-| `/pd-principle-rollback` | 将原则回滚到试用状态 |
-| `pd candidate list` | 列出原则候选(CLI) |
-| `pd candidate intake --candidate-id <id>` | 接纳一个候选(CLI) |
-| `pd activation approve --approval-id <id>` | 批准候选进入激活状态(CLI) |
-| `pd activation list` | 列出已激活的原则(CLI) |
+| `pd candidate list` | 列出原则候选 |
+| `pd candidate intake --candidate-id <id>` | 接纳一个候选 |
+| `pd activation approve --approval-id <id>` | 批准候选进入激活状态 |
+| `pd activation list` | 列出已激活的原则 |
 
 ## PD 命令行工具
 
@@ -221,17 +220,14 @@ pd console open --workspace "<你的工作区路径>"
 
 ### 回滚
 
-如果激活的原则导致了问题：
+如果激活的原则导致了问题,你可以直接回滚情绪事件惩罚或原则:
 
 ```bash
-/pd-rollback-impl <id>
+/pd-rollback last             # 回滚最近一次情绪事件惩罚
+/pd-principle-rollback P_003  # 回滚原则并加黑名单
 ```
 
-这会恢复到之前的状态。你也可以只禁用而不回滚：
-
-```bash
-/pd-disable-impl <id>
-```
+实现生命周期回滚(`/pd-rollback-impl`)的 replay 生成路径已在 PRI-230 退役。新的实现晋升请使用 `pd candidate internalize` CLI 工作流。详见[斜杠命令参考](./slash-commands)。
 
 ## 配置
 

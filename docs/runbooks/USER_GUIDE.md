@@ -81,21 +81,9 @@ Use these commands when:
 
 This lists candidate implementations and tells you whether each one already has a passing replay report.
 
-### Step 2: Run Replay Evaluation
+> ⚠️ **Note**: The legacy replay generation path was retired in PRI-230. There is currently no CLI entry point to generate new replay reports. Promotion only works for implementations that already have a pre-existing passing replay report. The `eval` subcommand referenced in older documentation no longer exists.
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-This runs replay evaluation for the target implementation and writes a replay report.
-
-Use this before promotion when:
-
-- the candidate is new
-- the previous report is missing
-- the replay dataset changed and you want a fresh report
-
-### Step 3: Inspect The Replay Report
+### Step 2: Inspect The Replay Report
 
 ```text
 /pd-promote-impl show <implId>
@@ -110,7 +98,7 @@ Check:
 - which classifications were exercised
 - whether the report is empty because no replay samples were available
 
-### Step 4: Promote The Candidate
+### Step 3: Promote The Candidate
 
 ```text
 /pd-promote-impl <implId>
@@ -124,7 +112,7 @@ Promotion rules:
 
 This is the normal path from candidate to active.
 
-### Step 5: Disable A Bad Implementation
+### Step 4: Disable A Bad Implementation
 
 ```text
 /pd-disable-impl list
@@ -135,7 +123,7 @@ Use this when an implementation is causing bad runtime behavior and should stop 
 
 Disabling keeps the implementation in the ledger but removes it from active use.
 
-### Step 6: Roll Back To The Previous Active Implementation
+### Step 5: Roll Back To The Previous Active Implementation
 
 ```text
 /pd-rollback-impl list
@@ -146,7 +134,7 @@ Use this when the current active implementation should be reverted and the previ
 
 If there is no previous active implementation, the rule simply falls back to the hard host boundaries such as GFI and Progressive Gate.
 
-### Step 7: Archive An Implementation
+### Step 6: Archive An Implementation
 
 ```text
 /pd-archive-impl list
@@ -163,9 +151,8 @@ When the system has produced a new code candidate, use this order:
 
 1. `/pd-evolution-status`
 2. `/pd-promote-impl list`
-3. `/pd-promote-impl eval <implId>`
-4. `/pd-promote-impl show <implId>`
-5. `/pd-promote-impl <implId>`
+3. `/pd-promote-impl show <implId>`
+4. `/pd-promote-impl <implId>`
 
 If the promoted implementation regresses:
 
@@ -191,19 +178,17 @@ These are recommendations, not automatic actions.
 
 ## Troubleshooting
 
-### “Promotion rejected: no passing replay report”
+### "Promotion rejected: no passing replay report"
 
-Run:
+The legacy replay generation path was retired in PRI-230. There is currently no CLI entry point to generate new replay reports. Promotion only succeeds for implementations that already have a pre-existing passing replay report.
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-Then inspect the report with:
+You can inspect the existing report with:
 
 ```text
 /pd-promote-impl show <implId>
 ```
+
+If no report exists, the implementation cannot be promoted through the CLI until the replay generation path is restored.
 
 ### “Replay report is empty”
 

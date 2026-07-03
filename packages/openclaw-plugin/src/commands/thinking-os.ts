@@ -1,9 +1,21 @@
- 
+
 import * as fs from 'fs';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+
+// rc-1/rc-2: Treat JSON.parse output as unknown and validate before use.
+// Local guard matches the pattern in index.ts and rule-implementation-runtime.ts.
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Safely read a numeric field from an untrusted record (rc-4: validate element types).
+function readNumber(record: Record<string, unknown>, key: string): number {
+    const v = record[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
 
 function getWorkspaceDir(ctx: PluginCommandContext): string {
     return resolvePluginCommandWorkspaceDir(ctx, 'thinking-os');
@@ -40,8 +52,12 @@ function formatUsageReport(wctx: WorkspaceContext): string {
     }
 
     try {
-        const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        const totalTurns = usage._total_turns || 1;
+        // rc-1: JSON.parse output is unknown. rc-2: do not bypass with `as`.
+        const parsed: unknown = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+        if (!isRecord(parsed)) {
+            return '❌ Failed to read usage data: usage log is not a valid JSON object.';
+        }
+        const totalTurns = readNumber(parsed, '_total_turns') || 1;
         const models = getModels(wctx);
 
         let report = `# 🧠 Thinking OS — Usage Report\n\n`;
@@ -49,14 +65,14 @@ function formatUsageReport(wctx: WorkspaceContext): string {
         report += `| Model | Name | Hits | Rate |\n|---|---|---|---|\n`;
 
         for (const [id, name] of Object.entries(models)) {
-            const hits = usage[id] || 0;
+            const hits = readNumber(parsed, id);
             const rate = totalTurns > 0 ? ((hits / totalTurns) * 100).toFixed(1) : '0.0';
             const status = hits === 0 ? '⚠️' : (parseFloat(rate) < 5 ? '🔸' : '✅');
             report += `| ${id} | ${name} | ${hits} | ${status} ${rate}% |\n`;
         }
 
         const dormant = Object.entries(models)
-            .filter(([id]) => (usage[id] || 0) === 0)
+            .filter(([id]) => readNumber(parsed, id) === 0)
             .map(([id, name]) => `- ${id}: ${name}`);
 
         if (dormant.length > 0) {
@@ -125,15 +141,19 @@ function formatAuditReport(wctx: WorkspaceContext): string {
     }
 
     try {
-        const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        const totalTurns = usage._total_turns || 1;
+        // rc-1: JSON.parse output is unknown. rc-2: do not bypass with `as`.
+        const parsed: unknown = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+        if (!isRecord(parsed)) {
+            return `❌ Failed to generate audit report: usage log is not a valid JSON object.`;
+        }
+        const totalTurns = readNumber(parsed, '_total_turns') || 1;
 
         const overused: string[] = [];
         const underused: string[] = [];
         const healthy: string[] = [];
 
         for (const [id, name] of Object.entries(models)) {
-            const hits = usage[id] || 0;
+            const hits = readNumber(parsed, id);
             const rate = (hits / totalTurns) * 100;
 
             if (rate > 50) overused.push(`- ${id} (${name}): ${rate.toFixed(1)}% — possibly too broad a pattern?`);

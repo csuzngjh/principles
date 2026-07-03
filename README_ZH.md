@@ -155,18 +155,19 @@ STATUS: READY
 
 重复失败可以变成原则候选或规则实现候选。
 
-操作者可以通过以下命令查看、评估、晋升、禁用、归档或回滚这些实现：
+操作者可以通过以下命令查看、晋升、禁用、归档或回滚这些实现：
 
 ```text
 /pd-evolution-status
 /pd-promote-impl list
-/pd-promote-impl eval <id>
 /pd-promote-impl show <id>
 /pd-promote-impl <id>
 /pd-disable-impl <id>
 /pd-rollback-impl <id>
 /pd-archive-impl <id>
 ```
+
+> ⚠️ 注意：Legacy replay 生成路径（`/pd-promote-impl eval`）已在 PRI-230 退役。只有已经存在通过 replay 报告的实现才能被 promote。
 
 一个原则不应该因为“听起来正确”就被激活。
 

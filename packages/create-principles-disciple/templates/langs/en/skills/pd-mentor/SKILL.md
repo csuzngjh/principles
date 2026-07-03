@@ -26,15 +26,10 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 | Command | Purpose | Use Case |
 |---------|---------|----------|
 | `/pd-init` | Initialize strategy and OKRs | New project startup |
-| `/pd-okr` | Objectives and Key Results management | Weekly/monthly review |
 | `/pd-bootstrap` | Environment tool scan and upgrade | Tool upgrade |
 | `/pd-research` | Initiate tool upgrade research | Deep research |
 | `/pd-thinking` | Manage mental models and candidates | Metacognition |
-| `/pd-evolve` | Execute full evolution loop | Bug fix |
-| `/pd-daily` | Configure and send evolution daily report | Daily review |
-| `/pd-trust` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
-| `/pd-grooming` | Workspace digital cleanup | Entropy reduction |
 | `/pd-help` | Get interactive command guidance | This skill |
 
 ---
@@ -60,7 +55,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 **Recommended Flow**:
 1. `/pd-status` - Check system status (GFI and Pain Dictionary)
-2. `/pd-evolve` - Start full evolution loop
+2. `/pd-evolution-status` - Start full evolution loop
 
 **Script**: "Problems are the fuel of evolution. Let me help you diagnose and fix systematically."
 
@@ -71,38 +66,26 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: User says "what did I do today", "check progress", "give me a report"
 
 **Recommended Flow**:
-1. `/pd-daily` - Send today's evolution report
-2. `/pd-trust` - View current trust score
-3. `/pd-okr` - Check OKR alignment
+1. `/pd-evolution-status` - Send today's evolution report
+2. `/pd-evolution-status` - View current trust score
 
 **Script**: "Daily report in hand, evolution I command. Let me help you review today's achievements."
 
 ---
 
-### Scenario 4: Messy Workspace
-
-**Trigger**: User says "project is too messy", "too many files", "need to organize"
-
-**Recommended Flow**:
-1. `/pd-grooming` - Start workspace cleanup
-
-**Script**: "Digital cleanliness is a virtue. Let me help you reduce entropy."
-
----
-
-### Scenario 5: Permission or Security Related
+### Scenario 4: Permission or Security Related
 
 **Trigger**: User says "not enough permissions", "blocked", "security level"
 
 **Recommended Flow**:
-1. `/pd-trust` - View trust score and security stage
+1. `/pd-evolution-status` - View trust score and security stage
 2. Explain current stage's capability boundaries
 
 **Script**: "Trust is earned, not given. Let me help you understand your current security level."
 
 ---
 
-### Scenario 6: Tool Upgrade Needs
+### Scenario 5: Tool Upgrade Needs
 
 **Trigger**: User says "want to upgrade tools", "research new version", "tech stack update"
 
@@ -160,7 +143,6 @@ Use `AskUserQuestion` to ask user about current task scenario:
 - 🆕 New project initialization
 - 🐛 Bug fix
 - 📊 Daily review
-- 🧹 Workspace cleanup
 - 🔐 Permission/Security
 - 🔧 Tool upgrade
 - ❓ Other
@@ -185,9 +167,9 @@ For complex scenarios, combine multiple skills:
 
 | Scenario | Combined Flow |
 |----------|---------------|
-| Major refactor | `/pd-evolve` → `deductive-audit` → execute |
+| Major refactor | `/pd-evolution-status` → `deductive-audit` → execute |
 | System optimization | `/pd-status` → `evolve-system` → `root-cause` |
-| Project review | `/pd-daily` → `/pd-okr` → `reflection-log` |
+| Project review | `/pd-evolution-status` → `/pd-okr` → `reflection-log` |
 
 ### Internal Skill Calls
 
