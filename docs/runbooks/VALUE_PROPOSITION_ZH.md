@@ -1,5 +1,9 @@
 # Principles — 价值主张
 
+> ⚠️ **已归档**：本文档描述的是 PD 在 MVP 转型前的早期愿景（思维操作系统、进化沙箱、5 级成长体系）。
+> 当前产品边界定义于 [`docs/product/PRODUCT_IDENTITY.md`](../product/PRODUCT_IDENTITY.md)。
+> 本文档仅作历史参考保留——请勿将其作为当前功能或产品范围的依据。
+
 > *凝练人类智慧，编织智能体认知。*
 
 ---

@@ -229,7 +229,13 @@ That is enough for most day-to-day use.
 If your deployment exposes the plugin UI, open:
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+Or launch it directly with the CLI:
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 Use the console for:

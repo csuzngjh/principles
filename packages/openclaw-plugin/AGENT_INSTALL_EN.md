@@ -52,7 +52,7 @@
 ## Quick Check: First Install vs Update
 
 ```
-Check if ~/clawd/.principles/PRINCIPLES.md exists:
+Check if <workspace>/.principles/THINKING_OS.md exists:
 ├── Does not exist → First Install (skip to [First Install] section)
 └── Exists → Update (skip to [Update] section)
 ```
@@ -64,7 +64,7 @@ Check if ~/clawd/.principles/PRINCIPLES.md exists:
 ### Step 1: Run Installation Command
 
 ```bash
-npx create-principles-disciple --non-interactive --lang en --workspace ~/clawd
+npx create-principles-disciple --non-interactive --lang en --workspace /path/to/your/workspace
 ```
 
 ### Step 2: Restart OpenClaw Gateway
@@ -100,17 +100,17 @@ Run in your project directory:
 ### Step 1: Run Update Command
 
 ```bash
-npx create-principles-disciple --non-interactive --lang en --workspace ~/clawd
+npx create-principles-disciple --non-interactive --lang en --workspace /path/to/your/workspace
 ```
 
 ### Step 2: Check Update Content
 
 ```bash
 # View changelog
-cat ~/clawd/docs/CHANGELOG.md | head -100
+cat /path/to/your/workspace/docs/CHANGELOG.md | head -100
 
 # List all .update files
-find ~/clawd -name "*.update" -type f
+find /path/to/your/workspace -name "*.update" -type f
 ```
 
 ### Step 3: Merge Updates
@@ -161,7 +161,7 @@ cat ~/.openclaw/extensions/principles-disciple/package.json | grep version
 ### Q: How to view all updates?
 
 ```bash
-cat ~/clawd/docs/CHANGELOG.md
+cat /path/to/your/workspace/docs/CHANGELOG.md
 ```
 
 ---

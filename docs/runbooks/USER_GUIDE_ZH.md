@@ -231,7 +231,13 @@ archive 比 disable 更彻底，适合做永久清理。
 如果你的部署暴露了插件 UI，可以打开：
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+或直接通过 CLI 启动：
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 控制台适合做：

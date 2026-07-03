@@ -29,7 +29,7 @@
 - `DEVELOPMENT.md`、`TESTING.md`
 
 ### runbooks/
-用户操作手册:USER_GUIDE(中英)、VALUE_PROPOSITION(中英)
+用户操作手册:USER_GUIDE(中英)、VALUE_PROPOSITION(中英,已归档,见文件顶部 ARCHIVED 标注)
 
 ### archive/
 历史归档:

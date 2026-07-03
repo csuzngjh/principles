@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo-en.mp4">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/homepage-demo-en.mp4">
     <img src="https://img.shields.io/badge/▶_Watch_Demo-FF6B35?style=for-the-badge" alt="Watch Demo Video">
   </a>
 </p>
@@ -152,7 +152,13 @@ Principles Console provides a local web UI for observing agent health and evolut
 After starting OpenClaw Gateway, open:
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+Or launch it directly with the installer/CLI:
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 The console can show:

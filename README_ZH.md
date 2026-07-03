@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo.mp4">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/homepage-demo-zh.mp4">
     <img src="https://img.shields.io/badge/▶_观看演示-FF6B35?style=for-the-badge" alt="Watch Demo Video">
   </a>
 </p>
@@ -73,7 +73,7 @@ openclaw gateway --force
 
 **它安全吗？** 是的。PD 会把规则作为本地沙盒文件写入，并通过 SQLite 追踪一切。所有自主进化都可以被你审查、回滚或禁用。
 
-👉 **详见人类指南:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+👉 **详见人类指南:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
 
 ---
 
@@ -163,7 +163,13 @@ Principles Console 提供一个本地 Web UI，用来观察智能体健康状态
 启动 OpenClaw Gateway 后打开：
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+或直接通过安装器/CLI 启动：
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 控制台可以展示：
