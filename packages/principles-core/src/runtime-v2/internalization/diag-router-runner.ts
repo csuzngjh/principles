@@ -38,6 +38,7 @@ import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-out
 import type { DiagnosticianCommitter, CommitResult } from '../store/commit/diagnostician-committer.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RouterPromptBuilder } from '../diagnostician/router-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
@@ -75,6 +76,13 @@ export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
   readonly committer: DiagnosticianCommitter;
 }
 
+// ── Options ──────────────────────────────────────────────────────────────────
+
+export interface DiagRouterRunnerOptions extends PeerRunnerOptions {
+  /** Effective PD config for feature flag resolution (ADR-0019). */
+  readonly effectiveConfig?: EffectivePdConfig;
+}
+
 // ── DiagRouterRunner ─────────────────────────────────────────────────────────
 
 /**
@@ -91,7 +99,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
   private readonly committer: DiagnosticianCommitter;
   private readonly defaultValidator: DefaultDiagnosticianValidator;
 
-  constructor(deps: DiagRouterRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: DiagRouterRunnerDeps, options: DiagRouterRunnerOptions) {
     super(deps, options, {
       runnerName: 'diag_router',
       expectedTaskKind: 'diag_router',
@@ -100,6 +108,9 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       // not an OpenClaw-registered agent. See diag-rootcause-runner.ts for details.
       defaultAgentId: 'main',
       resultRefPrefix: 'diag-router',
+      // ADR-0019: pass effectiveConfig so BasePeerRunner.isDegradationEnabled()
+      // can read the diagnostician_llm_degradation feature flag.
+      effectiveConfig: options.effectiveConfig,
     });
     this.committer = deps.committer;
     this.defaultValidator = new DefaultDiagnosticianValidator();

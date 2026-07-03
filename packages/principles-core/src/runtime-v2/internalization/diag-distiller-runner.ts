@@ -90,6 +90,9 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
       // not an OpenClaw-registered agent. See diag-rootcause-runner.ts for details.
       defaultAgentId: 'main',
       resultRefPrefix: 'diag-distiller',
+      // ADR-0019: pass effectiveConfig so BasePeerRunner.isDegradationEnabled()
+      // can read the diagnostician_llm_degradation feature flag.
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
     this.effectiveConfig = options.effectiveConfig;

@@ -142,6 +142,7 @@ describe('Real packaged install smoke test', () => {
           // repo state) rather than the npm-published version, which may be
           // incompatible with local core changes (e.g., removed exports).
           PD_SKIP_NPM_UPGRADE: '1',
+          PD_SKIP_GLOBAL_SHIM: '1',
         },
         timeout: 180_000,
       });
@@ -310,6 +311,7 @@ describe('Real packaged install smoke test', () => {
             HOME: backupHomeDir,
             USERPROFILE: backupHomeDir,
             PD_SKIP_NPM_UPGRADE: '1',
+          PD_SKIP_GLOBAL_SHIM: '1',
           },
           timeout: 180_000,
         }).toString();

@@ -97,7 +97,7 @@ registerPainRetryCommand(painCmd);
 
 painCmd
   .command('evidence')
-  .description('Show recent pain admission/trigger decisions (PEAT-B2)')
+  .description('Show recent TRIGGER_DECISION log entries — pain admission gate decisions only (PEAT-B2)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
   .option('--json', 'Output raw JSON')

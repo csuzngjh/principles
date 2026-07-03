@@ -274,7 +274,7 @@ describe('PainToPrincipleService', () => {
   });
 });
 
-// ── Parity: all 17 PDErrorCategory → FAILURE_CATEGORY_MAP ──────────────────
+// ── Parity: all 18 PDErrorCategory → FAILURE_CATEGORY_MAP ──────────────────
 
 describe('PainToPrincipleService error classification parity', () => {
    
@@ -291,7 +291,7 @@ describe('PainToPrincipleService error classification parity', () => {
     service = new PainToPrincipleService(makeOpts());
   });
 
-  it('classifyFromBridge maps all 17 PDErrorCategories correctly', async () => {
+  it('classifyFromBridge maps all 18 PDErrorCategories correctly', async () => {
     for (const cat of PD_ERROR_CATEGORIES) {
       mockBridgeResult = { ...SUCCEEDED, status: 'failed', errorCategory: cat, candidateIds: ['c1'], ledgerEntryIds: ['l1'] };
       const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
