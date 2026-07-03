@@ -56,11 +56,11 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 ### EP-07 Runtime State Source Alignment
 
-- **Use when**: returning config, reading disk state, resolving runtime/provider endpoints, lineage, or artifact source IDs.
-- **Failure mode**: output reports requested inputs instead of actual state, or fields from different sources are mixed into one lineage/config result.
-- **Must check**: returned state is read from the canonical source after writes; lineage and evidence fields come from the same source; config resolver output is consumed by callers.
-- **Representative ERRs**: ERR-004, ERR-008, ERR-031, ERR-034, ERR-036, ERR-042, ERR-049, ERR-059.
-- **Automation target**: mismatch tests where requested state differs from disk/canonical state.
+- **Use when**: returning config, reading disk state, resolving runtime/provider endpoints, lineage, or artifact source IDs; **also when caching per-workspace derived values (file paths, DB connections, service instances) at module scope**.
+- **Failure mode**: output reports requested inputs instead of actual state, or fields from different sources are mixed into one lineage/config result; **OR a module-level cache (`let cachedX` / `let lastX`) stores a value derived from a function parameter (workspaceDir, stateDir) but is NOT keyed by that parameter — the first caller's value leaks to all subsequent callers, writing workspace B's output to workspace A's destination (ERR-092)**.
+- **Must check**: returned state is read from the canonical source after writes; lineage and evidence fields come from the same source; config resolver output is consumed by callers; **module-level caches for per-input-derived values use `Map<string, T>` keyed by `path.resolve(input)`, not single-valued `let` slots that only track "last seen" input**.
+- **Representative ERRs**: ERR-004, ERR-008, ERR-031, ERR-034, ERR-036, ERR-042, ERR-049, ERR-059, ERR-092.
+- **Automation target**: mismatch tests where requested state differs from disk/canonical state; **static scan for `let cached` / `let last` at module scope where the cached value is derived from a function parameter — flag any that are single-valued instead of `Map`-keyed**.
 
 ### EP-08 Security Boundary Placement
 
