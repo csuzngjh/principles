@@ -180,3 +180,50 @@ describe('PRI-484 Artificer prompt context modes', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('RETRY');
   });
 });
+
+describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () => {
+  const builder = new ArtificerPromptBuilder();
+
+  it('shared CONSTRAINTS must not mention propose_correction as an expected negative case', () => {
+    // The shared CONSTRAINTS section (ARTIFICER_PROTOCOL_INSTRUCTION) must NOT
+    // tell the LLM to emit propose_correction — it contradicts the V2 ban and
+    // causes schema validation failures (ERR-009).
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toMatch(/negative block\/propose_correction case/);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toMatch(/propose_correction cases MUST include/);
+  });
+
+  it('shared CONSTRAINTS forbids propose_correction, requireApproval, and auto_correct', () => {
+    // The "only allow/block" constraint must appear in the shared section so
+    // both v1 and v2 prompts are consistent.
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/expectedDecision MUST be only.*allow.*block/i);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/do not.*propose_correction/i);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/do not.*requireApproval/i);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/do not.*auto_correct/i);
+  });
+
+  it('v1 prompt forbids propose_correction (no contradiction with v2)', () => {
+    const result = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'bug3-v1',
+      contextHash: 'ctx-bug3',
+      sourceScribeArtifactId: 'scribe-bug3',
+      scribeArtifact: {},
+    });
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*propose_correction/i);
+    expect(result.promptInput.artificerInstruction).not.toMatch(/negative block\/propose_correction case/);
+  });
+
+  it('v2 prompt still forbids propose_correction (constraint preserved after move)', () => {
+    const result = builder.buildPrompt({
+      contextMode: 'v2',
+      taskId: 'bug3-v2',
+      contextHash: 'ctx-bug3',
+      sourceScribeArtifactId: 'scribe-bug3',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+    });
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*propose_correction/i);
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*requireApproval/i);
+    expect(result.promptInput.artificerInstruction).toMatch(/do not.*auto_correct/i);
+  });
+});

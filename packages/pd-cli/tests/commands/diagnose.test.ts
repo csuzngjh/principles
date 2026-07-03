@@ -66,6 +66,21 @@ const { mockResolveRuntimeFromPdConfig } = vi.hoisted(() => {
   return { mockResolveRuntimeFromPdConfig };
 });
 
+// BUG-1: capture runner constructor args to verify effectiveConfig wiring
+const { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor } = vi.hoisted(() => {
+  const diagRootCauseRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  const diagDistillerRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  const diagRouterRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  return { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor };
+});
+
+// BUG-2: capture buildDreamerSeedFromCandidate sourcePainId arg + mock resolver
+const { buildDreamerSeedCalls, mockResolveSourcePainId } = vi.hoisted(() => {
+  const buildDreamerSeedCalls: Array<{ candidateId: string; sourcePainId?: string }> = [];
+  const mockResolveSourcePainId = vi.fn().mockResolvedValue('pain_test-source-1');
+  return { buildDreamerSeedCalls, mockResolveSourcePainId };
+});
+
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
@@ -83,9 +98,9 @@ vi.mock('@principles/core/runtime-v2', () => {
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagDistillerRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRouterRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRootCauseRunner: diagRootCauseRunnerCtor,
+    DiagDistillerRunner: diagDistillerRunnerCtor,
+    DiagRouterRunner: diagRouterRunnerCtor,
     DefaultDiagRootCauseValidator: vi.fn().mockImplementation(function () { return {}; }),
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -142,15 +157,19 @@ vi.mock('@principles/core/runtime-v2', () => {
     status: vi.fn(),
     PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
     // Defect-004 dreamer seed mocks — minimal stubs that mirror real behavior
-    buildDreamerSeedFromCandidate: vi.fn().mockImplementation((candidate: { candidateId: string }, _opts: { route: string; ready: boolean; sourcePainId?: string }) => ({
-      taskId: `dreamer-${candidate.candidateId}`,
-      taskKind: 'dreamer' as const,
-      channel: 'prompt' as const,
-      diagnosticJson: JSON.stringify({ candidateId: candidate.candidateId }),
-      status: 'pending' as const,
-      attemptCount: 0,
-      maxAttempts: 3,
-    })),
+    // BUG-2: capture sourcePainId arg to verify lineage wiring
+    buildDreamerSeedFromCandidate: vi.fn().mockImplementation((candidate: { candidateId: string }, opts: { route: string; ready: boolean; sourcePainId?: string }) => {
+      buildDreamerSeedCalls.push({ candidateId: candidate.candidateId, sourcePainId: opts?.sourcePainId });
+      return {
+        taskId: `dreamer-${candidate.candidateId}`,
+        taskKind: 'dreamer' as const,
+        channel: 'prompt' as const,
+        diagnosticJson: JSON.stringify({ candidateId: candidate.candidateId }),
+        status: 'pending' as const,
+        attemptCount: 0,
+        maxAttempts: 3,
+      };
+    }),
     CANDIDATE_KIND_TO_ROUTE: {
       principle: 'principle-candidate',
       rule: 'rule-candidate',
@@ -170,12 +189,21 @@ vi.mock('../../src/config-reader.js', () => ({
 }));
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
-  loadPdConfig: vi.fn().mockReturnValue({ ok: true, effective: { config: {}, source: 'defaults', warnings: [] } }),
+  loadPdConfig: vi.fn().mockReturnValue({
+    ok: true,
+    effective: { config: { featureFlags: { diagnostician_llm_degradation: true } }, source: 'file', warnings: [] },
+    defaults: { config: {}, source: 'defaults', warnings: [] },
+  }),
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
+}));
+
+// BUG-2: mock resolveSourcePainIdFromDiagnostician imported by diagnose.ts from candidate.js
+vi.mock('../../src/commands/candidate.js', () => ({
+  resolveSourcePainIdFromDiagnostician: mockResolveSourcePainId,
 }));
 
 import { handleDiagnoseRun, handleDiagnoseStatus, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
@@ -1289,6 +1317,110 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
     const seedResult = parsed.intake.candidates.find((c: { candidateId: string; status: string }) => c.candidateId === 'cand-1' && c.status === 'dreamer_seed_failed');
     expect(seedResult).toBeDefined();
     expect(seedResult.error).toContain('DB write failed');
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// BUG-1 (PRI-442): effectiveConfig must be passed to split-pipeline runners
+// so that ADR-0019 LLM rate-limit degradation (isDegradationEnabled) can fire.
+// Without this wiring, isDegradationEnabled() always returns false because
+// this.config.effectiveConfig is undefined. EP-02: production path wiring.
+describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockIntake.mockReset();
+  });
+
+  it('passes effectiveConfig to DiagRootCauseRunner when split pipeline is enabled', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
+    const optionsArg = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
+    expect(optionsArg?.effectiveConfig).toBeDefined();
+    expect(optionsArg?.effectiveConfig).toEqual(
+      expect.objectContaining({ config: expect.anything(), source: 'file' }),
+    );
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('passes effectiveConfig to DiagDistillerRunner and DiagRouterRunner', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const distillerOptions = diagDistillerRunnerCtor.mock.calls[0]?.[1];
+    expect(distillerOptions?.effectiveConfig).toBeDefined();
+
+    const routerOptions = diagRouterRunnerCtor.mock.calls[0]?.[1];
+    expect(routerOptions?.effectiveConfig).toBeDefined();
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// BUG-2 (PRI-442): sourcePainId must be resolved from the diagnostician task
+// chain and passed to buildDreamerSeedFromCandidate. Without this, the dreamer
+// task's diagnosticJson omits sourcePainId, breaking run-rulehost lineage.
+// rc-6: lineage consistency. ERR-004: never invent lineage.
+describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    buildDreamerSeedCalls.length = 0;
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockCreateTask.mockResolvedValue(undefined);
+    mockGetTask.mockResolvedValue(null);
+    mockIntake.mockReset();
+    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+    mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
+  });
+
+  it('passes resolved sourcePainId to buildDreamerSeedFromCandidate (lineage consistency)', async () => {
+    const candidates = [
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // resolveSourcePainIdFromDiagnostician should have been called
+    expect(mockResolveSourcePainId).toHaveBeenCalled();
+    // buildDreamerSeedFromCandidate should have received the resolved sourcePainId
+    expect(buildDreamerSeedCalls.length).toBeGreaterThan(0);
+    expect(buildDreamerSeedCalls[0].sourcePainId).toBe('pain_test-source-1');
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
