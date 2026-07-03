@@ -333,3 +333,37 @@ describe('PRI-439 Phase 2: template generator canonical form', () => {
     expect(violations).toEqual([]);
   });
 });
+
+// ── SEC-BASE-2: forbidden patterns upgrade (vm escape surface) ─────────────
+// Adds: import.meta, WeakRef, FinalizationRegistry, SharedArrayBuffer, Atomics
+// These are meta-programming & shared-memory primitives that widen the vm
+// escape surface. See docs/architecture/SECURITY_BASELINE.md §4 (sandbox layer).
+
+describe('SEC-BASE-2: forbidden patterns upgrade (vm escape surface)', () => {
+  async function getModule() {
+    return import('../rule-code-validator.js');
+  }
+
+  const NEW_FORBIDDEN = [
+    { label: 'import.meta', code: 'const x = import.meta.url;' },
+    { label: 'WeakRef', code: 'const r = new WeakRef({});' },
+    { label: 'FinalizationRegistry', code: 'const r = new FinalizationRegistry(() => {});' },
+    { label: 'SharedArrayBuffer', code: 'const b = new SharedArrayBuffer(8);' },
+    { label: 'Atomics', code: 'Atomics.load(new Int32Array(1), 0);' },
+  ];
+
+  for (const { label, code } of NEW_FORBIDDEN) {
+    it(`forbids ${label}`, async () => {
+      const { checkForbiddenPatterns } = await getModule();
+      const labels = checkForbiddenPatterns(code);
+      expect(labels).toContain(label);
+    });
+  }
+
+  it('bracket access to new forbidden globals is also blocked', async () => {
+    const { checkForbiddenPatterns } = await getModule();
+    // Bracket access — common vm escape evasion
+    const labels = checkForbiddenPatterns("const x = globalThis['WeakRef'];");
+    expect(labels).toContain('bracket access to forbidden global');
+  });
+});

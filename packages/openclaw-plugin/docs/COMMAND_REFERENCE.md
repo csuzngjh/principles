@@ -12,7 +12,6 @@
 | `/pd-evolution-status` | 查看控制面与进化面的当前状态 | 读取 `RuntimeSummaryService` 的 canonical state |
 | `/pd-status empathy` | 查看情绪/共情事件统计 | 用于观察 `user_empathy` 与 `system_infer` 事件是否稳定落日志 |
 | `/pd-rollback last` | 回滚最近一次情绪惩罚 | 只回滚 `user_empathy` 对应的 GFI slice |
-| `/pd-evolve` | 执行进化任务 | 属于学习面，通过 EP 积累提升权限 |
 | `/pd-help` | 显示帮助 | |
 
 ---

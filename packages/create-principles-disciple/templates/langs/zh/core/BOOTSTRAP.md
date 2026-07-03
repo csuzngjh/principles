@@ -162,20 +162,7 @@ memory/
 
 如果用户同意，**执行以下命令：**
 
-### 1. 熵减巡检（每天凌晨 2 点）
-
-**功能：** 每天清理工作区临时文件，保持项目整洁。
-
-```bash
-openclaw cron add --name "pd-grooming-daily" \
-  --cron "0 2 * * *" --tz "UTC" \
-  --session isolated \
-  --light-context \
-  --no-deliver \
-  --message '执行 pd-grooming 技能：检查工作区根目录，清理临时文件和数字垃圾。严格遵循安全红线，不要删除业务代码。'
-```
-
-### 2. 环境健康检查（每 4 小时）
+### 1. 环境健康检查（每 4 小时）
 
 **功能：** 验证核心工具（rg, node, python）是否可用，异常时告警。
 
@@ -186,7 +173,7 @@ openclaw cron add --name "health-check" \
   --system-event '环境健康检查：验证核心工具（rg, node, python）是否可用，检查工作区状态与实际进度是否一致。'
 ```
 
-### 3. 战略对齐检查（每天上午 9 点）
+### 2. 战略对齐检查（每天上午 9 点）
 
 **功能：** 检查过去 24 小时的操作是否偏离 CURRENT_FOCUS.md 战略目标。
 
@@ -198,7 +185,7 @@ openclaw cron add --name "strategy-alignment" \
   --message '执行战略对齐检查：对比 memory/okr/CURRENT_FOCUS.md，确认过去24小时的操作是否偏离战略重点。如有偏离，提醒用户。'
 ```
 
-### 4. Memory 周度整理（每周一上午 10 点）
+### 3. Memory 周度整理（每周一上午 10 点）
 
 **功能：** 回顾每日记忆文件，提炼重要内容到 MEMORY.md，清理过时信息。
 
@@ -210,7 +197,7 @@ openclaw cron add --name "memory-weekly" \
   --message '执行 Memory 周度整理：翻阅近期的 memory/YYYY-MM-DD.md 文件，提炼重要内容到 MEMORY.md，清理过时信息。'
 ```
 
-### 5. 周治理（每周日 UTC 0 点）
+### 4. 周治理（每周日 UTC 0 点）
 
 更新 WEEK_STATE.json 并验证 CURRENT_FOCUS.md：
 

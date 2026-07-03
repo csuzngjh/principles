@@ -45,6 +45,7 @@ export default defineConfig({
               items: [
                 { text: 'Getting Started', link: '/docs/getting-started' },
                 { text: 'User Guide', link: '/docs/user-guide' },
+                { text: 'Slash Commands', link: '/docs/slash-commands' },
                 { text: 'Development Guide', link: '/docs/development' },
               ]
             }
@@ -86,6 +87,7 @@ export default defineConfig({
               items: [
                 { text: '快速开始 (Getting Started)', link: '/zh/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
+                { text: '斜杠命令参考 (Slash Commands)', link: '/zh/docs/slash-commands' },
                 { text: '开发指南 (Development Guide)', link: '/zh/docs/development' },
               ]
             }

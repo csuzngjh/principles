@@ -23,7 +23,6 @@ An evolutionary agent framework built around pain signals, guarded execution, an
 | Command | Description |
 |---|---|
 | `/pd-evolution-status` | Show the current control-plane and evolution summary |
-| `/pd-evolve` | Run an evolution task |
 | `/pd-rollback` | Roll back the latest or specified empathy penalty |
 | `/pd-help` | Show help |
 
