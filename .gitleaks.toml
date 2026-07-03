@@ -1,0 +1,11 @@
+title = "PD Security Baseline gitleaks config"
+
+[allowlist]
+description = "Allowlist test fixtures and synthetic secrets"
+paths = [
+  '''packages/.*/__tests__/.*\.ts''',
+  '''packages/.*/src/.*/__tests__/.*\.ts''',
+  '''packages/.*/tests/.*\.ts''',
+  '''docs/superpowers/specs/.*\.md''',
+  '''docs/superpowers/plans/.*\.md''',
+]
