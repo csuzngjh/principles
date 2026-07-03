@@ -141,16 +141,19 @@ PD 通过斜杠命令与 OpenClaw 集成。以下是 MVP 命令：
 
 ### 原则管理
 
+> ℹ️ `/pd-promote-impl` 斜杠命令自 PRI-230 起**已退役**(旧版 replay 生成路径已下线)。
+> 请改用下方的 `pd` CLI 命令——它们覆盖同样的生命周期,且使用现代化的内化流水线。
+
 | 命令 | 说明 |
 |------|------|
-| `/pd-promote-impl list` | 列出所有实现候选 |
-| `/pd-promote-impl eval <id>` | 评估指定候选 |
-| `/pd-promote-impl show <id>` | 查看候选详情 |
-| `/pd-promote-impl <id>` | 将候选晋升为激活状态 |
 | `/pd-disable-impl <id>` | 禁用一个激活的实现 |
 | `/pd-rollback-impl <id>` | 回滚到之前的状态 |
 | `/pd-archive-impl <id>` | 归档一个实现 |
 | `/pd-principle-rollback` | 将原则回滚到试用状态 |
+| `pd candidate list` | 列出原则候选(CLI) |
+| `pd candidate intake <id>` | 接纳一个候选(CLI) |
+| `pd activation approve <id>` | 批准候选进入激活状态(CLI) |
+| `pd activation list` | 列出已激活的原则(CLI) |
 
 ## PD 命令行工具
 
@@ -184,10 +187,10 @@ Canary 运行 7 项检查，报告三种状态之一：
 ### 启动控制台
 
 ```bash
-pd console --workspace "<路径>" --no-auth
+pd console open --workspace "<你的工作区路径>"
 ```
 
-在浏览器中打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。
+浏览器会自动打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。
 
 ::: warning
 控制台默认绑定到 `127.0.0.1`（仅本机回环），其他机器无法访问。如果需要网络访问，请使用 `--host <ip>` 配合 `--token <密钥>`。

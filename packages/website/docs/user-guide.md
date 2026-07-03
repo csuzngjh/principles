@@ -140,16 +140,20 @@ PD integrates with OpenClaw through slash commands. Here are the MVP commands:
 
 ### Principle Management
 
+> ℹ️ The `/pd-promote-impl` slash command is **deprecated** since PRI-230 (the
+> legacy replay generation path was retired). Use the `pd` CLI commands below
+> instead — they cover the same lifecycle with the modern internalization pipeline.
+
 | Command | Description |
 |---------|-------------|
-| `/pd-promote-impl list` | List all implementation candidates |
-| `/pd-promote-impl eval <id>` | Evaluate a specific candidate |
-| `/pd-promote-impl show <id>` | Show candidate details |
-| `/pd-promote-impl <id>` | Promote a candidate to active |
 | `/pd-disable-impl <id>` | Disable an active implementation |
 | `/pd-rollback-impl <id>` | Roll back to previous state |
 | `/pd-archive-impl <id>` | Archive an implementation |
 | `/pd-principle-rollback` | Roll back a principle to probation |
+| `pd candidate list` | List principle candidates (CLI) |
+| `pd candidate intake <id>` | Intake a candidate (CLI) |
+| `pd activation approve <id>` | Approve a candidate for activation (CLI) |
+| `pd activation list` | List active principles (CLI) |
 
 ## The PD CLI
 
