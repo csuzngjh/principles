@@ -1078,38 +1078,53 @@ async function generateConfigYamlConfig(
 ): Promise<string> {
   const configPath = getConfigYamlPath(workspaceDir);
   const configDir = path.dirname(configPath);
+  await fse.ensureDir(configDir);
 
-  // PRI-308: preserve existing valid config.yaml
-  if (existsSync(configPath)) {
-    try {
-      validateConfigYamlFull(workspaceDir);
-      // Existing config is structurally valid — preserve it
-      logger.info(`Existing .pd/config.yaml is valid, preserving it`);
-      // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via
-      // --provider/--api-key-env but an existing valid config.yaml was found,
-      // the profile is NOT written. Emit a clear warning so the user knows
-      // their --provider/--api-key-env flags were ignored and how to update
-      // the profile manually.
-      if (runtimeProfile) {
-        logger.warn(
-          `--provider/--api-key-env were provided but an existing valid .pd/config.yaml was found. ` +
-          `The runtime profile was not written. To update it, edit .pd/config.yaml or run: pd console open --workspace "${workspaceDir}"`,
-        );
-      }
-      return configPath;
-    } catch (e) {
-      // Existing config is malformed — fail loud, do not overwrite
-      const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });
-    }
+  // Fix-4 (P0-BUG-4): pass through the runtime profile so the generated
+  // config.yaml's pd.default profile is pre-filled (avoids silent LLM
+  // failures on first run).
+  // CodeQL TOCTOU fix: use 'wx' (exclusive create) instead of existsSync
+  // + default write. The 'wx' flag atomically creates the file and fails
+  // with EEXIST if it already exists — eliminating the race between a
+  // separate check and the write. If the file exists (pre-existing or
+  // created concurrently), EEXIST is caught below and we preserve the
+  // existing config (PRI-308).
+  try {
+    writeFileSync(
+      configPath,
+      generateConfigYamlContent(runtimeProfile),
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    return configPath;
+  } catch (err) {
+    // rc-2: instanceof Error is the runtime guard; the cast extends the type
+    // with the optional `code` property present on Node.js fs errors.
+    if (!(err instanceof Error) || (err as Error & { code?: string }).code !== 'EEXIST') throw err;
   }
 
-  await fse.ensureDir(configDir);
-  // Fix-4 (P0-BUG-4): pass through the runtime profile collected by the
-  // prompt flow so the generated config.yaml's pd.default profile is
-  // pre-filled instead of empty (avoids silent LLM failures on first run).
-  writeFileSync(configPath, generateConfigYamlContent(runtimeProfile), 'utf8');
-  return configPath;
+  // PRI-308: preserve existing valid config.yaml (file exists — either
+  // pre-existing or created concurrently between ensureDir and writeFileSync).
+  try {
+    validateConfigYamlFull(workspaceDir);
+    // Existing config is structurally valid — preserve it
+    logger.info(`Existing .pd/config.yaml is valid, preserving it`);
+    // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via
+    // --provider/--api-key-env but an existing valid config.yaml was found,
+    // the profile is NOT written. Emit a clear warning so the user knows
+    // their --provider/--api-key-env flags were ignored and how to update
+    // the profile manually.
+    if (runtimeProfile) {
+      logger.warn(
+        `--provider/--api-key-env were provided but an existing valid .pd/config.yaml was found. ` +
+        `The runtime profile was not written. To update it, edit .pd/config.yaml or run: pd console open --workspace "${workspaceDir}"`,
+      );
+    }
+    return configPath;
+  } catch (e) {
+    // Existing config is malformed — fail loud, do not overwrite
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });
+  }
 }
 
 async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
