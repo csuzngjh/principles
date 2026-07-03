@@ -26,15 +26,10 @@ disable-model-invocation: true
 | 命令 | 用途 | 适用场景 |
 |------|------|----------|
 | `/pd-init` | 初始化战略与OKR | 新项目启动 |
-| `/pd-okr` | 目标与关键结果管理 | 周/月度复盘 |
 | `/pd-bootstrap` | 环境工具扫描与升级 | 装备升级 |
 | `/pd-research` | 发起工具升级研究 | 深度调研 |
 | `/pd-thinking` | 管理思维模型与候选方案 | 元认知管理 |
-| `/pd-evolve` | 执行完整进化循环 | 问题修复 |
-| `/pd-daily` | 配置并发送进化日报 | 日常查看 |
-| `/pd-trust` | 查看信任积分与安全等级 | 权限查询 |
 | `/pd-status` | 查看系统状态（GFI和痛苦词典） | 健康检查 |
-| `/pd-grooming` | 工作区数字大扫除 | 熵减维护 |
 | `/pd-help` | 获取交互式命令引导 | 本技能 |
 
 ---
@@ -60,7 +55,7 @@ disable-model-invocation: true
 
 **推荐流程**:
 1. `/pd-status` - 检查系统状态（GFI 和痛苦词典）
-2. `/pd-evolve` - 启动完整的进化循环
+2. `/pd-evolution-status` - 启动完整的进化循环
 
 **话术**: "问题就是进化的燃料。让我帮你系统化地诊断和修复。"
 
@@ -71,38 +66,26 @@ disable-model-invocation: true
 **触发条件**: 用户说"今天干了什么"、"看看进度"、"汇报一下"
 
 **推荐流程**:
-1. `/pd-daily` - 发送今日进化日报
-2. `/pd-trust` - 查看当前信任积分
-3. `/pd-okr` - 检查 OKR 对齐情况
+1. `/pd-evolution-status` - 发送今日进化日报
+2. `/pd-evolution-status` - 查看当前信任积分
 
 **话术**: "日报在手，进化我有。让我帮你回顾今天的成果。"
 
 ---
 
-### 场景 4: 工作区太乱
-
-**触发条件**: 用户说"项目太乱了"、"文件一堆"、"需要整理"
-
-**推荐流程**:
-1. `/pd-grooming` - 启动工作区大扫除
-
-**话术**: "数字洁癖是一种美德。让我帮你熵减。"
-
----
-
-### 场景 5: 权限或安全相关
+### 场景 4: 权限或安全相关
 
 **触发条件**: 用户说"权限不够"、"被拦截了"、"安全等级"
 
 **推荐流程**:
-1. `/pd-trust` - 查看信任积分和安全等级
+1. `/pd-evolution-status` - 查看信任积分和安全等级
 2. 解释当前等级的能力边界
 
 **话术**: "信任是挣来的，不是给的。让我帮你了解当前的安全等级。"
 
 ---
 
-### 场景 6: 工具升级需求
+### 场景 5: 工具升级需求
 
 **触发条件**: 用户说"想升级工具"、"研究新版本"、"技术栈更新"
 
@@ -160,7 +143,6 @@ disable-model-invocation: true
 - 🆕 新项目初始化
 - 🐛 问题修复
 - 📊 日常回顾
-- 🧹 工作区清理
 - 🔐 权限/安全
 - 🔧 工具升级
 - ❓ 其他
@@ -185,9 +167,9 @@ disable-model-invocation: true
 
 | 场景 | 组合流程 |
 |------|----------|
-| 大型重构 | `/pd-evolve` → `deductive-audit` → 执行 |
+| 大型重构 | `/pd-evolution-status` → `deductive-audit` → 执行 |
 | 系统优化 | `/pd-status` → `evolve-system` → `root-cause` |
-| 项目复盘 | `/pd-daily` → `/pd-okr` → `reflection-log` |
+| 项目复盘 | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
 
 ### 内部技能调用
 

@@ -85,4 +85,49 @@ describe('Thinking OS Command', () => {
         expect(result.text).toContain('Active models**: 2');
         expect(result.text).toContain('possibly too broad a pattern');
     });
+
+    // rc-1: JSON.parse output that is not a JSON object must fail loud (status path)
+    it('should return error when usage log is a JSON array (not an object) on status', () => {
+        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
+        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
+
+        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+            const pStr = p.toString();
+            return pStr === usageLogPath || pStr === thinkingOsPath;
+        });
+        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+            const pStr = p.toString();
+            if (pStr === usageLogPath) {
+                return '[1, 2, 3]'; // valid JSON but not an object — isRecord returns false
+            }
+            if (pStr === thinkingOsPath) {
+                return '### T-01: Map';
+            }
+            return '';
+        });
+
+        const result = handleThinkingOs({ config: { workspaceDir }, args: 'status' } as any);
+        expect(result.text).toContain('usage log is not a valid JSON object');
+    });
+
+    // rc-1: JSON.parse output that is not a JSON object must fail loud (audit path)
+    it('should return error when usage log is a JSON primitive string (not an object) on audit', () => {
+        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
+        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
+
+        vi.mocked(fs.existsSync).mockImplementation(() => true);
+        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+            const pStr = p.toString();
+            if (pStr === usageLogPath) {
+                return '"just a string"'; // valid JSON but not an object — isRecord returns false
+            }
+            if (pStr === thinkingOsPath) {
+                return '### T-01: Map';
+            }
+            return '';
+        });
+
+        const result = handleThinkingOs({ config: { workspaceDir }, args: 'audit' } as any);
+        expect(result.text).toContain('usage log is not a valid JSON object');
+    });
 });

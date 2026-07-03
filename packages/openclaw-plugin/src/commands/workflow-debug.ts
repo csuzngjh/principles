@@ -1,6 +1,12 @@
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
+
+// rc-1/rc-2: Treat JSON.parse output as unknown and validate before use.
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 function formatTimestamp(ts: number | null | undefined): string {
     if (!ts) return '--';
@@ -21,8 +27,14 @@ function formatState(state: string): string {
     return `${icon} ${state}`;
 }
 
- 
- 
+// rc-5: Use Object.hasOwn for untrusted object keys. Returns string or '--'.
+function readStringField(record: Record<string, unknown>, key: string): string {
+    if (Object.hasOwn(record, key) && typeof record[key] === 'string') {
+        return record[key] as string;
+    }
+    return '--';
+}
+
 function buildOutput(
     workflowId: string,
     summary: ReturnType<InstanceType<typeof WorkflowStore>['getWorkflow']>,
@@ -40,7 +52,18 @@ function buildOutput(
         ].join('\n');
     }
 
-    const metadata = JSON.parse(summary.metadata_json || '{}');
+    // rc-1: JSON.parse output is unknown. rc-2: do not bypass with `as`.
+    const rawMetadata: unknown = JSON.parse(summary.metadata_json || '{}');
+    const metadata: Record<string, unknown> = isRecord(rawMetadata) ? rawMetadata : {};
+    const workspaceField = readStringField(metadata, 'workspaceDir');
+
+    // rc-4: Validate taskInput element type before substring.
+    let taskInputPreview = '--';
+    if (Object.hasOwn(metadata, 'taskInput') && typeof metadata['taskInput'] === 'string') {
+        const ti = metadata['taskInput'] as string;
+        taskInputPreview = ti.substring(0, 100) + (ti.length > 100 ? '...' : '');
+    }
+
     const recentEvents = events.slice(-10);
 
     const lines: string[] = [
@@ -61,8 +84,8 @@ function buildOutput(
         `- Run ID: ${summary.run_id ?? '--'}`,
         '',
         'Metadata',
-        `- Workspace: ${metadata.workspaceDir ?? '--'}`,
-        `- Task Input: ${typeof metadata.taskInput === 'string' ? metadata.taskInput.substring(0, 100) + (metadata.taskInput.length > 100 ? '...' : '') : '--'}`,
+        `- Workspace: ${workspaceField}`,
+        `- Task Input: ${taskInputPreview}`,
         '',
         `Recent Events (${recentEvents.length})`,
     ];
@@ -84,12 +107,12 @@ function buildOutput(
 }
 
 export function handleWorkflowDebugCommand(
-    ctx: PluginCommandContext & { args?: string }
+    ctx: PluginCommandContext
 ): { text: string } {
     const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'workflow-debug');
-    
-    // Parse workflow ID from args
-    const args = (ctx as { args?: string }).args?.trim() || '';
+
+    // rc-2: Do not use `as` to bypass; use normalizeCommandArgs for string|string[] union.
+    const args = normalizeCommandArgs(ctx.args).trim();
     const [workflowId] = args.split(/\s+/);
 
     if (!workflowId) {

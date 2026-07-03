@@ -70,21 +70,9 @@
 
 它会列出当前 candidate implementation，并标记哪些已经有通过的 replay report。
 
-### 第二步：执行 replay 评估
+> ⚠️ **注意**：Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以生成新的 replay 报告。只有已经存在通过 replay 报告的实现才能被 promote。旧文档中提到的 `eval` 子命令已不存在。
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-它会针对目标 implementation 运行 replay evaluation，并写出 replay report。
-
-以下情况建议先跑一次：
-
-- 新 candidate 刚生成
-- 之前没有 replay report
-- replay 数据集已经变化，你想重新评估
-
-### 第三步：查看 replay 报告
+### 第二步：查看 replay 报告
 
 ```text
 /pd-promote-impl show <implId>
@@ -97,7 +85,7 @@
 - 覆盖了哪些 classification
 - 是否因为没有 replay 样本导致报告为空
 
-### 第四步：正式 promote
+### 第三步：正式 promote
 
 ```text
 /pd-promote-impl <implId>
@@ -111,7 +99,7 @@ promote 的前提：
 
 这是 candidate 进入 active 的标准路径。
 
-### 第五步：禁用异常实现
+### 第四步：禁用异常实现
 
 ```text
 /pd-disable-impl list
@@ -122,7 +110,7 @@ promote 的前提：
 
 disable 会保留账本记录，但停止它继续参与运行。
 
-### 第六步：回滚到上一个 active 实现
+### 第五步：回滚到上一个 active 实现
 
 ```text
 /pd-rollback-impl list
@@ -137,7 +125,7 @@ disable 会保留账本记录，但停止它继续参与运行。
 - Progressive Gate
 - 其他已有硬约束
 
-### 第七步：归档实现
+### 第六步：归档实现
 
 ```text
 /pd-archive-impl list
@@ -154,9 +142,8 @@ archive 比 disable 更彻底，适合做永久清理。
 
 1. `/pd-evolution-status`
 2. `/pd-promote-impl list`
-3. `/pd-promote-impl eval <implId>`
-4. `/pd-promote-impl show <implId>`
-5. `/pd-promote-impl <implId>`
+3. `/pd-promote-impl show <implId>`
+4. `/pd-promote-impl <implId>`
 
 如果 promote 后发现它有回归：
 
@@ -182,19 +169,17 @@ archive 比 disable 更彻底，适合做永久清理。
 
 ## 常见问题
 
-### “Promotion rejected: no passing replay report”
+### "Promotion rejected: no passing replay report"
 
-先执行：
+Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以生成新的 replay 报告。只有已经存在通过 replay 报告的实现才能被 promote。
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-再查看：
+可以查看已有报告：
 
 ```text
 /pd-promote-impl show <implId>
 ```
+
+如果没有报告，在 replay 生成路径恢复之前，该实现无法通过 CLI 进行 promote。
 
 ### “Replay report 是空的”
 
