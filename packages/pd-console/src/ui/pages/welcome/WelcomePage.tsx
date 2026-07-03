@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CircuitDiagram } from '../../components/onboarding/CircuitDiagram.js';
 import { DemoResultView, type DemoResultData, type DemoStage } from '../../components/onboarding/DemoResultView.js';
+import { SlashCommandsCard } from '../../components/onboarding/SlashCommandsCard.js';
+import { ONBOARDING_SLASH_COMMANDS } from '../../components/onboarding/slashCommands.js';
 import { getOnboardingState, setOnboardingState, type OnboardingState } from '../../utils/onboarding-state.js';
 import { request } from '../../api.js';
 
-// Polling configuration for step 3 evidence detection (spec 6.5.2).
+// Polling configuration for step 4 evidence detection (spec 6.5.2).
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 30 * 1000;
 
@@ -53,7 +55,7 @@ function parseDemoResponse(value: unknown): DemoResponse | null {
 export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [demoStatus, setDemoStatus] = useState<DemoStatus>('idle');
   const [demoResult, setDemoResult] = useState<DemoResultData | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
@@ -84,7 +86,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
   const completeOnboarding = useCallback((status: OnboardingState['status']) => {
     if (!setOnboardingState(workspaceId, {
       completed: true,
-      step: 3,
+      step: 4,
       status,
       completedAt: new Date().toISOString(),
     })) {
@@ -181,7 +183,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
         // swallowing it. After 3 consecutive errors, stop polling and show the
         // error UI so the user can retry rather than waiting up to 2 hours.
         errorCountRef.current += 1;
-        setPollingError(t('pages.welcome.step3.pollingError'));
+        setPollingError(t('pages.welcome.step4.pollingError'));
         if (errorCountRef.current >= 3) {
           setPollingStatus('error');
           stopPolling();
@@ -207,9 +209,9 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
         <div
           className="welcome-step-indicator"
           role="progressbar"
-          aria-valuetext={t('pages.welcome.stepIndicator', { current: step, total: 3 })}
+          aria-valuetext={t('pages.welcome.stepIndicator', { current: step, total: 4 })}
         >
-          {[1, 2, 3].map((s) => (
+          {[1, 2, 3, 4].map((s) => (
             <span
               key={s}
               className={`step-dot ${s === step ? 'active' : ''} ${s < step ? 'completed' : ''}`}
@@ -258,27 +260,47 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
           </div>
         </section>
       )}
+
       {step === 3 && (
         <section className="welcome-step welcome-step-3" aria-labelledby="step3-title">
           <h2 id="step3-title">{t('pages.welcome.step3.title')}</h2>
           <p>{t('pages.welcome.step3.description')}</p>
+          <p className="slash-commands-intro">{t('pages.welcome.step3.commandsIntro')}</p>
+          <SlashCommandsCard
+            commands={ONBOARDING_SLASH_COMMANDS}
+          />
+          <div className="welcome-actions">
+            <button className="pd-btn pd-btn-brand" onClick={() => setStep(4)}>
+              {t('pages.welcome.step3.nextButton')}
+            </button>
+            <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
+              {t('pages.welcome.step1.skipButton')}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 4 && (
+        <section className="welcome-step welcome-step-4" aria-labelledby="step4-title">
+          <h2 id="step4-title">{t('pages.welcome.step4.title')}</h2>
+          <p>{t('pages.welcome.step4.description')}</p>
           <div className="example-prompt" role="note">
-            <span className="prompt-label">{t('pages.welcome.step3.examplePrompt')}</span>
-            <code className="prompt-text">{t('pages.welcome.step3.examplePromptText')}</code>
+            <span className="prompt-label">{t('pages.welcome.step4.examplePrompt')}</span>
+            <code className="prompt-text">{t('pages.welcome.step4.examplePromptText')}</code>
           </div>
 
           {pollingStatus === 'idle' && (
             <>
-              <p className="window-hint">{t('pages.welcome.step3.windowHint')}</p>
+              <p className="window-hint">{t('pages.welcome.step4.windowHint')}</p>
               <div className="welcome-actions">
                 <button className="pd-btn pd-btn-brand" onClick={() => { startPolling(); }}>
-                  {t('pages.welcome.step3.tryNowButton')}
+                  {t('pages.welcome.step4.tryNowButton')}
                 </button>
                 <button className="pd-btn pd-btn-alt" onClick={() => completeOnboarding('demo')}>
-                  {t('pages.welcome.step3.goToFocusButton')}
+                  {t('pages.welcome.step4.goToFocusButton')}
                 </button>
                 <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
-                  {t('pages.welcome.step3.skipButton')}
+                  {t('pages.welcome.step4.skipButton')}
                 </button>
               </div>
             </>
@@ -286,43 +308,43 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
 
           {pollingStatus === 'polling' && (
             <div className="polling-active" role="status" aria-live="polite">
-              <p>{t('pages.welcome.step3.pollingActive')}</p>
+              <p>{t('pages.welcome.step4.pollingActive')}</p>
               <button className="pd-btn pd-btn-alt" onClick={() => { stopPolling(); completeOnboarding('demo'); }}>
-                {t('pages.welcome.step3.stopPollingButton')}
+                {t('pages.welcome.step4.stopPollingButton')}
               </button>
             </div>
           )}
 
           {pollingStatus === 'evidence-found' && (
             <div className="polling-success" role="status">
-              <p>{t('pages.welcome.step3.evidenceFound')}</p>
+              <p>{t('pages.welcome.step4.evidenceFound')}</p>
               <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('evidence_found')}>
-                {t('pages.welcome.step3.goToFocusButton')}
+                {t('pages.welcome.step4.goToFocusButton')}
               </button>
             </div>
           )}
 
           {pollingStatus === 'timeout' && (
             <div className="polling-timeout" role="status">
-              <p>{t('pages.welcome.step3.timeoutHint')}</p>
+              <p>{t('pages.welcome.step4.timeoutHint')}</p>
               <button className="pd-btn pd-btn-brand" onClick={() => completeOnboarding('demo')}>
-                {t('pages.welcome.step3.goToFocusButton')}
+                {t('pages.welcome.step4.goToFocusButton')}
               </button>
               <button className="pd-btn pd-btn-alt" onClick={skipOnboarding}>
-                {t('pages.welcome.step3.skipButton')}
+                {t('pages.welcome.step4.skipButton')}
               </button>
             </div>
           )}
 
           {pollingStatus === 'error' && (
             <div className="polling-error" role="alert">
-              <p>{pollingError ?? t('pages.welcome.step3.pollingError')}</p>
+              <p>{pollingError ?? t('pages.welcome.step4.pollingError')}</p>
               <div className="welcome-actions">
                 <button className="pd-btn pd-btn-brand" onClick={() => { startPolling(); }}>
-                  {t('pages.welcome.step3.retryButton')}
+                  {t('pages.welcome.step4.retryButton')}
                 </button>
                 <button className="pd-btn pd-btn-alt" onClick={() => completeOnboarding('demo')}>
-                  {t('pages.welcome.step3.goToFocusButton')}
+                  {t('pages.welcome.step4.goToFocusButton')}
                 </button>
               </div>
             </div>

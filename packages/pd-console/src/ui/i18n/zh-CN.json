@@ -1093,6 +1093,22 @@
         }
       },
       "step3": {
+        "title": "常用斜杠命令",
+        "description": "在与智能体对话时输入这些命令来控制 PD。",
+        "commandsIntro": "以下是 7 个核心命令，输入 /pd-help 查看完整列表。",
+        "commandDescriptions": {
+          "pdInit": "初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等）",
+          "pdStatus": "查看系统状态（GFI、Pain 词典）",
+          "pdPain": "从 OpenClaw 会话报告 pain",
+          "pdHelp": "显示所有命令和使用指南",
+          "pdContext": "控制上下文注入",
+          "pdEvolutionStatus": "查看 evolution 闭环状态",
+          "pdFocus": "管理 CURRENT_FOCUS.md"
+        },
+        "nextButton": "下一步",
+        "emptyListFallback": "命令列表加载失败，输入 /pd-help 查看完整命令列表。"
+      },
+      "step4": {
         "title": "准备好记录真实证据",
         "description": "当你下次使用智能体时，如果智能体犯错或你重复纠正了它，告诉智能体：'用 pd-pain-signal 记录一下'。",
         "examplePrompt": "给智能体的示例提示：",
@@ -1111,7 +1127,8 @@
       "progress": {
         "step1": "欢迎",
         "step2": "演示",
-        "step3": "邀请"
+        "step3": "命令",
+        "step4": "邀请"
       }
     }
   },

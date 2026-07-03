@@ -6,7 +6,7 @@
 
 export interface OnboardingState {
   completed: boolean;
-  step: number; // 0=not started, 1=welcome, 2=demo, 3=invite
+  step: number; // 0=not started, 1=welcome, 2=demo, 3=commands, 4=invite
   status: 'pending' | 'demo' | 'skipped' | 'evidence_found';
   completedAt?: string; // ISO timestamp
 }
