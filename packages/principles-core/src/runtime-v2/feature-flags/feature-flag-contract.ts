@@ -126,6 +126,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
+  // ADR-0019: Diagnostician LLM rate-limit graceful degradation. On persistent rate-limit,
+  // mark task failed with `rate_limit` errorCategory + emit `diag_llm_rate_limit_degraded`
+  // telemetry (observable degradation, rc-9). Default off; flag-off = current hard-fail
+  // behavior (rate_limit errors flow through retryOrFail → max_attempts_exceeded).
+  { id: 'diagnostician_llm_degradation', category: 'quiet', enabled: false, since: '2026-07-03', description: 'Diagnostician LLM rate-limit graceful degradation — on persistent rate-limit, emit diag_llm_rate_limit_degraded telemetry + rate_limit errorCategory instead of max_attempts_exceeded (ADR-0019). Default off; flag-off = hard fail (legacy behavior).' },
   // PRI-419: L2 multi-turn agent loop for the dreamer runner. Scoped single-runner exception
   // per ADR-0014 amendment (mirrors the 2026-06-10 diagnostician-split owner exception).
   // Default off; flips dreamer from one-shot completeSimple to a multi-turn agentLoop with

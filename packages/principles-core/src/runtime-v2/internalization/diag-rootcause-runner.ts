@@ -103,6 +103,9 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       // outputSchemaRef still selects the correct output schema.
       defaultAgentId: 'main',
       resultRefPrefix: 'diag-rootcause',
+      // ADR-0019: pass effectiveConfig so BasePeerRunner.isDegradationEnabled()
+      // can read the diagnostician_llm_degradation feature flag.
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
     this.contextAssembler = deps.contextAssembler;

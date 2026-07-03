@@ -1252,9 +1252,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           }
 
           // execution_failed — retryable if attempts remain
+          // ADR-0019: detect rate-limit signatures first and classify as rate_limit
+          // (distinct from execution_failed) so downstream retryOrFail can degrade.
+          const isRateLimit = /rate.?limit|429|quota|too many requests/i.test(rawMessage);
+          const errorCategory = isRateLimit ? 'rate_limit' : 'execution_failed';
           const pdErr = new PDRuntimeError(
-            'execution_failed',
-            `LLM execution failed: ${rawMessage.substring(0, 300)}`,
+            errorCategory,
+            `${isRateLimit ? 'LLM rate limit hit' : 'LLM execution failed'}: ${rawMessage.substring(0, 300)}`,
             {
               retryAttempt: attempt,
               maxRetries,
@@ -1277,7 +1281,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 effectiveTimeoutMs,
               });
             }
-            const delay = getDelay(attempt);
+            // ADR-0019: rate-limit uses 2× backoff since limits need more time to clear
+            const delay = isRateLimit ? getDelay(attempt) * 2 : getDelay(attempt);
             await new Promise(r => setTimeout(r, delay));
             continue;
           }
@@ -1348,6 +1353,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         }
 
         // It is an execution_failed (network, etc.)
+        // ADR-0019: detect rate-limit signatures in thrown errors too (SDK may throw 429)
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isRateLimitCatch = /rate.?limit|429|quota|too many requests/i.test(errMsg);
+        const catchCategory = isRateLimitCatch ? 'rate_limit' : 'execution_failed';
         const errorDetails = {
           retryAttempt: attempt,
           maxRetries,
@@ -1355,8 +1364,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           providerEvidence: safeStringifyPreview(err, 300),
         };
         const pdErr = new PDRuntimeError(
-          'execution_failed',
-          `LLM completion failed: ${err instanceof Error ? err.message : String(err)}`,
+          catchCategory,
+          `${isRateLimitCatch ? 'LLM rate limit hit' : 'LLM completion failed'}: ${errMsg.substring(0, 300)}`,
           errorDetails,
         );
         lastError = pdErr;
@@ -1374,7 +1383,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               effectiveTimeoutMs,
             });
           }
-          const delay = getDelay(attempt);
+          // ADR-0019: rate-limit uses 2× backoff
+          const delay = isRateLimitCatch ? getDelay(attempt) * 2 : getDelay(attempt);
           await new Promise(r => setTimeout(r, delay));
         }
       }

@@ -18,6 +18,7 @@ import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { RunnerKind } from '../internalization/peer-runner-contracts.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,13 @@ export interface PeerRunnerConfig {
   readonly defaultAgentId: string;
   /** ResultRef prefix (e.g. 'dreamer' → 'dreamer://runId'). */
   readonly resultRefPrefix: string;
+  /**
+   * Effective PD config for feature flag resolution (ADR-0019).
+   * When provided, enables rate-limit graceful degradation via
+   * the `diagnostician_llm_degradation` feature flag.
+   * Undefined = no degradation (legacy behavior).
+   */
+  readonly effectiveConfig?: EffectivePdConfig;
 }
 
 // ── Result ───────────────────────────────────────────────────────────────────

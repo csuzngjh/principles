@@ -459,6 +459,14 @@ function getNpmGlobalBinDir(): string | null {
 }
 
 function installGlobalPdShim(): boolean {
+  // Allow skipping global shim installation in smoke tests to avoid
+  // polluting the host's npm global bin dir. The bundled pd-cli is
+  // still installed locally (getInstalledBinDir); only the global
+  // symlink/shim is skipped. Mirrors PD_SKIP_NPM_UPGRADE pattern.
+  if (process.env.PD_SKIP_GLOBAL_SHIM === '1' || process.env.PD_SKIP_GLOBAL_SHIM === 'true') {
+    logger.info('Skipping global pd shim installation (PD_SKIP_GLOBAL_SHIM set).');
+    return false;
+  }
   const globalBin = getNpmGlobalBinDir();
   if (!globalBin) return false;
 
