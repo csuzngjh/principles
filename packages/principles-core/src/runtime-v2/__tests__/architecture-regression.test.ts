@@ -4149,7 +4149,11 @@ describe('SEC-BASE-4: log secret redaction & SQL injection guards', () => {
       const templateSqlRe = /\.(prepare|exec)\s*\(\s*`([\s\S]*?)`/g;
       let m: RegExpExecArray | null;
       while ((m = templateSqlRe.exec(content)) !== null) {
+        // rc-2-no-as-bypass: RegExpExecArray indices are `string | undefined`
+        // under noUncheckedIndexedAccess. Use array destructuring (ESLint
+        // prefer-destructuring) + explicit undefined check (fail-loud).
         const [, , sqlBody] = m;
+        if (sqlBody === undefined) continue;
         if (!DML_RE.test(sqlBody)) continue; // DDL-only is allowed
         // Find line number of the match start.
         const matchOffset = m.index;
@@ -4158,15 +4162,17 @@ describe('SEC-BASE-4: log secret redaction & SQL injection guards', () => {
         const interpRe = /\$\{([^}]+)\}/g;
         let im: RegExpExecArray | null;
         while ((im = interpRe.exec(sqlBody)) !== null) {
-          const expr = im[1].trim();
+          const [, expr] = im;
+          if (expr === undefined) continue;
+          const exprTrimmed = expr.trim();
           // Safe: ends with .join(...) — column-list / placeholder-list pattern.
-          if (/\.join\s*\(/.test(expr)) continue;
+          if (/\.join\s*\(/.test(exprTrimmed)) continue;
           // Safe: known pre-built clause variable.
-          const rootVar = expr.split('.')[0].split('[')[0].split('(')[0].trim();
-          if (SAFE_CLAUSE_VARS.has(rootVar)) continue;
+          const rootVar = exprTrimmed.split('.')[0]?.split('[')[0]?.split('(')[0];
+          if (rootVar !== undefined && SAFE_CLAUSE_VARS.has(rootVar.trim())) continue;
           // Safe: numeric / length / index expressions (not user data).
-          if (/^\d+$/.test(expr) || /\.length$/.test(expr)) continue;
-          suspicious.push(`${f}:${lineNum}: interpolation \${${expr}} in DML template`);
+          if (/^\d+$/.test(exprTrimmed) || /\.length$/.test(exprTrimmed)) continue;
+          suspicious.push(`${f}:${lineNum}: interpolation \${${exprTrimmed}} in DML template`);
         }
       }
       // Also check for string-concatenation pattern: .prepare('...' + var + '...')
@@ -4241,6 +4247,11 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
   });
 
   it('code_tool_hook config defaults to require_approval', () => {
+    // rc-9-no-silent-fallback: this was previously `expect(true).toBe(true)`
+    // (a tautology that always passed, giving false confidence). Now it fails
+    // loud if the require_approval decision is removed from the codebase.
+    // The `requireApproval` decision is enforced in gate.ts and is the
+    // MVP-Core safety boundary for code_tool_hook.
     const pluginDir = pathSync.join(REPO_ROOT, 'packages', 'openclaw-plugin', 'src');
     const files = fsSync.readdirSync(pluginDir, { recursive: true, encoding: 'utf8' })
       .filter((f): f is string => typeof f === 'string' && f.endsWith('.ts') && !f.includes('__tests__'));
@@ -4252,10 +4263,10 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
         break;
       }
     }
-    // Non-blocking: config may live in yaml template, not src
-    if (!foundRequireApproval) {
-      console.warn('SEC-BASE-5: code_tool_hook require_approval default not found in plugin src — verify yaml template manually');
-    }
-    expect(true).toBe(true);
+    expect(
+      foundRequireApproval,
+      'code_tool_hook should reference require_approval decision in openclaw-plugin src ' +
+      '(expected in hooks/gate.ts). If removed, the code_tool_hook safety boundary is broken.',
+    ).toBe(true);
   });
 });
