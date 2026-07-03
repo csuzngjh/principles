@@ -45,7 +45,7 @@ It shows:
 - recent gate blocks and bypasses
 - evolution queue state
 - principle counts
-- internalization route recommendations such as `skill`, `code`, or `defer`
+- internalization route recommendations such as `prompt`, `code_tool_hook` (RuleHost), or `defer_archive`
 
 Read this command first if you are unsure whether the system is blocked by fatigue, pain, or code-implementation policy.
 
@@ -166,15 +166,15 @@ If the promoted implementation regresses:
 
 `/pd-evolution-status` may show route recommendations like:
 
-- `skill`
-- `code`
-- `defer`
+- `prompt`
+- `code_tool_hook` (RuleHost)
+- `defer_archive`
 
 Interpret them like this:
 
-- `skill`: the principle likely needs prompt/SOP shaping first
-- `code`: the principle is deterministic or high-risk enough for a code implementation
-- `defer`: there is not enough evidence yet, or forcing implementation would be premature
+- `prompt`: the principle likely needs prompt/SOP shaping first
+- `code_tool_hook` (RuleHost): the principle is deterministic or high-risk enough for a code implementation
+- `defer_archive`: there is not enough evidence yet, or forcing implementation would be premature
 
 These are recommendations, not automatic actions.
 

@@ -45,7 +45,7 @@
 - 最近 gate block / bypass
 - evolution 队列状态
 - 原则数量统计
-- 当前的内化路线建议，例如 `skill`、`code`、`defer`
+- 当前的内化路线建议，例如 `prompt`、`code_tool_hook` (RuleHost)、`defer_archive`
 
 如果你不确定现在是被疲劳状态卡住、被 pain 卡住，还是被 code implementation 策略卡住，先看这个命令。
 
@@ -168,15 +168,15 @@ archive 比 disable 更彻底，适合做永久清理。
 
 `/pd-evolution-status` 可能会显示：
 
-- `skill`
-- `code`
-- `defer`
+- `prompt`
+- `code_tool_hook` (RuleHost)
+- `defer_archive`
 
 它们的含义是：
 
-- `skill`：这个原则更适合先通过提示词 / SOP / 工作流来内化
-- `code`：这个原则更确定、风险更高，适合变成 code implementation
-- `defer`：当前证据还不够，先不要强行内化
+- `prompt`：这个原则更适合先通过提示词 / SOP / 工作流来内化
+- `code_tool_hook` (RuleHost)：这个原则更确定、风险更高，适合变成 code implementation
+- `defer_archive`：当前证据还不够，先不要强行内化
 
 这些只是建议，不会自动执行。
 
