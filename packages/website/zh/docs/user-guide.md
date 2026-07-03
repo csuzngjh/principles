@@ -143,6 +143,17 @@ PD 通过斜杠命令与 OpenClaw 集成。所有命令以 `/pd-` 开头(短别�
 `/pd-promote-impl`、`/pd-disable-impl`、`/pd-archive-impl`、`/pd-rollback-impl` 这四个命令的 replay 生成路径已在 PRI-230 退役,目前处于半废弃状态。新的实现晋升工作流请使用 `pd candidate internalize` 和 `pd runtime activation promote` CLI 命令。
 :::
 
+### 原则管理 (CLI)
+
+`pd` CLI 提供了现代化的原则生命周期命令:
+
+| 命令 | 说明 |
+|------|------|
+| `pd candidate list` | 列出原则候选 |
+| `pd candidate intake --candidate-id <id>` | 接纳一个候选 |
+| `pd activation approve --approval-id <id>` | 批准候选进入激活状态 |
+| `pd activation list` | 列出已激活的原则 |
+
 ## PD 命令行工具
 
 `pd` 命令行工具提供了 OpenClaw 会话之外的额外功能。
@@ -175,10 +186,10 @@ Canary 运行 7 项检查，报告三种状态之一：
 ### 启动控制台
 
 ```bash
-pd console --workspace "<路径>" --no-auth
+pd console open --workspace "<你的工作区路径>"
 ```
 
-在浏览器中打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。
+浏览器会自动打开本机地址(默认 `127.0.0.1:3100`;如果端口被占用,会自动尝试下一个本地端口)。
 
 ::: warning
 控制台默认绑定到 `127.0.0.1`（仅本机回环），其他机器无法访问。如果需要网络访问，请使用 `--host <ip>` 配合 `--token <密钥>`。

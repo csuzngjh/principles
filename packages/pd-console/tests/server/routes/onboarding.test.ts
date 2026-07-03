@@ -253,6 +253,35 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     expect(body.nextAction).toBeTruthy();
   });
 
+  // CodeRabbit coverage: exercise the non-zero exit-code branch so the
+  // nextAction string ("Run `pd demo first-principle --json` ...") is hit.
+  it('Given demo exits with non-zero code, When POST run-demo, Then returns 500 with demo_exit_nonzero and nextAction', async () => {
+    const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+    const child = {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        if (!handlers[event]) handlers[event] = [];
+        handlers[event].push(cb);
+        return child;
+      }),
+      stdout: { on: vi.fn(() => child) },
+      stderr: { on: vi.fn(() => child) },
+      kill: vi.fn(() => true),
+    };
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const res = makeRes();
+    const promise = handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+      workspaceDir, subPath: '/run-demo',
+    });
+    setTimeout(() => { handlers.close?.forEach(cb => cb(1)); }, 0);
+    await promise;
+
+    expect(getStatus(res)).toBe(500);
+    const body = parseError(res);
+    expect(body.error).toBe('demo_exit_nonzero');
+    expect(body.reason).toContain('exited with code 1');
+    expect(body.nextAction).toContain('pd demo first-principle --json');
+  });
+
   it('Given GET method on /run-demo, When called, Then returns 405 method_not_allowed', async () => {
     const res = makeRes();
     await handleOnboardingRoute(makeGetReq('/api/v1/onboarding/run-demo'), res, {

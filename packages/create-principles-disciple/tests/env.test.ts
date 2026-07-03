@@ -171,7 +171,8 @@ describe('environment detection utilities', () => {
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
         if (p.toString() === defaultWorkspace) return true;
-        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return true;
+        // Fix-8 (P1-BUG-2): installer creates THINKING_OS.md, not PRINCIPLES.md
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'THINKING_OS.md')) return true;
         return false;
       });
 
@@ -186,7 +187,7 @@ describe('environment detection utilities', () => {
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
         if (p.toString() === defaultWorkspace) return true;
-        if (p.toString() === path.join(defaultWorkspace, '.principles', 'PRINCIPLES.md')) return false;
+        if (p.toString() === path.join(defaultWorkspace, '.principles', 'THINKING_OS.md')) return false;
         if (p.toString() === path.join(defaultWorkspace, 'AGENTS.md')) return true;
         return false;
       });

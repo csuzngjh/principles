@@ -104,9 +104,13 @@ export function detectWorkspace(): WorkspaceInfo {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      const principlesPath = path.join(candidate, '.principles', 'PRINCIPLES.md');
+      // Fix-8 (P1-BUG-2): detect via THINKING_OS.md — the file the installer
+      // actually creates under .principles/. The previous check for
+      // PRINCIPLES.md never matched because the installer doesn't create
+      // that file, so hasPrinciples was always false on reinstall.
+      const principlesPath = path.join(candidate, '.principles', 'THINKING_OS.md');
       const hasPrinciples = fs.existsSync(principlesPath);
-      
+
       // 检测已存在的核心文件
       const coreFiles: string[] = [];
       for (const file of CORE_FILES) {
@@ -114,10 +118,10 @@ export function detectWorkspace(): WorkspaceInfo {
           coreFiles.push(file);
         }
       }
-      
-      // 判断是否首次安装：没有 PRINCIPLES.md 且没有核心文件
+
+      // 判断是否首次安装：没有 THINKING_OS.md 且没有核心文件
       const isFirstInstall = !hasPrinciples && coreFiles.length === 0;
-      
+
       return {
         detectedPath: candidate,
         exists: true,

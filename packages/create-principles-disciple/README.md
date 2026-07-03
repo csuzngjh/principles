@@ -52,8 +52,8 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 
 The installer automatically verifies the installation during setup:
 
-1. **Feature flags** — `.pd/config.yaml` is generated and validated (ADR-0016: replaces the legacy `.pd/feature-flags.yaml`)
-2. **Story A demo** — `pd demo story-a` is executed to confirm runtime integration
+1. **Configuration** — `.pd/config.yaml` is generated and validated (ADR-0016: replaces the legacy `.pd/feature-flags.yaml`)
+2. **Demo verification** — `pd demo first-principle` is executed to confirm runtime integration
 3. **Console health** — `/api/health` is checked on the local console instance
 
 After a successful install, you can re-verify at any time:
