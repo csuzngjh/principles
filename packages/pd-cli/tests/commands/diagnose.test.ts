@@ -1379,6 +1379,57 @@ describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', ()
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  // CR-2 (CodeRabbit P2): loadPdConfig mock only covered ok:true. The
+  // ok:false fallback branch (effectiveConfig = defaults) was untested.
+  // This test locks in the fallback behavior + asserts rc-9 observability.
+  it('warns and falls back to defaults when configLoadResult.ok is false', async () => {
+    // Override the module-level mock for this test only
+    const { loadPdConfig } = await import('../../src/services/pd-config-loader.js');
+    vi.mocked(loadPdConfig).mockReturnValueOnce({
+      ok: false,
+      source: 'malformed',
+      configPath: '/tmp/fake-workspace/.pd/config.yaml',
+      errors: [
+        { path: 'featureFlags.diagnostician_llm_degradation', reason: 'expected boolean, got string', nextAction: 'Fix the value to be a boolean' },
+      ],
+      defaults: { config: {}, source: 'defaults', warnings: [] },
+      warnings: [],
+      legacyFilesDetected: [],
+      legacyFileNextActions: [],
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // Assert warning was emitted (rc-9: no silent fallback)
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[pd diagnose]'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('malformed'),
+    );
+
+    // Assert runners still received effectiveConfig (the defaults-based one)
+    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
+    const optionsArg = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
+    expect(optionsArg?.effectiveConfig).toBeDefined();
+    expect(optionsArg?.effectiveConfig).toEqual(
+      expect.objectContaining({ source: 'defaults' }),
+    );
+
+    warnSpy.mockRestore();
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 // BUG-2 (PRI-442): sourcePainId must be resolved from the diagnostician task

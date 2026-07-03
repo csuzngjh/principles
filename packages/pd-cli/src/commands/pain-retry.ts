@@ -385,6 +385,16 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // degradation (isDegradationEnabled in base-peer-runner) can read the
     // diagnostician_llm_degradation feature flag. Without this, the runners
     // receive no effectiveConfig and degradation silently never fires.
+    // CR-1 (CodeRabbit P2, rc-9): warn when config load failed so the
+    // fallback to defaults is observable — no silent degradation.
+    if (!configLoadResult.ok) {
+      const errSummary = configLoadResult.errors
+        .map((e) => `${e.path}: ${e.reason}`)
+        .join('; ');
+      console.warn(
+        `[pd pain retry] .pd/config.yaml at ${configLoadResult.configPath} is malformed — falling back to default feature flags. Errors: ${errSummary}. Next action: ${configLoadResult.errors[0]?.nextAction ?? 'fix config errors and retry'}`,
+      );
+    }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
     let runner: DiagnosticianRunnerLike;
