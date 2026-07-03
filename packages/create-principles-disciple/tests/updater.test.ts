@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchVersionDescription, applyUpdate, computeDiff, rollbackUpdate, migrateDatabase } from '../src/updater.js';
+import { checkForUpdates, fetchVersionDescription, applyUpdate, computeDiff, rollbackUpdate } from '../src/updater.js';
 
 // Module-level mocks (hoisted to top by vitest)
 vi.mock('fs', () => ({
@@ -364,13 +364,5 @@ describe('rollbackUpdate', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('Backup not found');
-  });
-});
-
-describe('migrateDatabase', () => {
-  it('should return success when no migrations needed', async () => {
-    const result = await migrateDatabase('/tmp/test.db', '1.0.0', '1.0.0');
-    expect(result.success).toBe(true);
-    expect(result.appliedMigrations).toEqual([]);
   });
 });

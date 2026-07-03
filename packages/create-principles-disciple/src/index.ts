@@ -267,7 +267,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 }
 
 async function runUninstall(options: Record<string, unknown>): Promise<void> {
-  setLanguage('zh');
+  setLanguage(options.lang === 'en' ? 'en' : 'zh');
   console.log(banner);
   console.log();
 
@@ -275,6 +275,7 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
 
   const result = await uninstall({
     force: options.force === true,
+    lang: typeof options.lang === 'string' ? options.lang : undefined,
   });
 
   if (!result.success) {
@@ -284,8 +285,8 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
   }
 }
 
-async function showStatus(): Promise<void> {
-  setLanguage('zh');
+async function showStatus(options: Record<string, unknown>): Promise<void> {
+  setLanguage(options.lang === 'en' ? 'en' : 'zh');
   console.log(banner);
   console.log();
 
@@ -344,6 +345,7 @@ program
   .alias('rm')
   .description('Uninstall Principles Disciple (preserves user data)')
   .option('-f, --force', 'Force uninstall without confirmation', false)
+  .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
   .action(async (options) => {
     await runUninstall(options);
   });
@@ -351,8 +353,9 @@ program
 program
   .command('status')
   .description('Check install status')
-  .action(async () => {
-    await showStatus();
+  .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
+  .action(async (options) => {
+    await showStatus(options);
   });
 
 process.on('uncaughtException', (error) => {
