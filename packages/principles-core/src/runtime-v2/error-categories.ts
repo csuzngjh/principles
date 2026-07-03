@@ -71,7 +71,7 @@ export function isPDErrorCategory(value: string): value is PDErrorCategory {
 }
 
 /**
- * Maps PDErrorCategory (18 internal codes) to 9 user-facing failure categories.
+ * Maps PDErrorCategory (19 internal codes) to 6 user-facing failure categories.
  *
  * Used by pd-cli trace + pain-record commands for consistent classification.
  */
