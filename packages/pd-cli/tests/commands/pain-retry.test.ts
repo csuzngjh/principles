@@ -120,6 +120,15 @@ vi.mock('@principles/core/runtime-v2', () => {
       }
     },
     CandidateIntakeService: MockCandidateIntakeService,
+    // PRI-503: admission gate mock — admit by default so existing retry/intake
+    // tests keep their original flow. Tests that need to assert refusal behavior
+    // can override this mock per-test.
+    evaluateCandidateAdmissionFromRecord: vi.fn().mockReturnValue({
+      decision: 'admitted',
+      reason: 'mock_admitted',
+      nextAction: 'none',
+      evidenceStatus: 'unknown',
+    }),
     resolveRuntimeConfig: mockResolveRuntimeConfig,
     isRuntimeConfigError: vi.fn().mockReturnValue(false),
     isFeatureEnabled: vi.fn().mockReturnValue(true),

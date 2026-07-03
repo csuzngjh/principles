@@ -12,7 +12,7 @@
 
 | 文件 | 内容 | 风险 |
 |------|------|------|
-| `.principles/PRINCIPLES.md` | 用户积累的原则和教训 | 🔴 **删除 = 丢失所有经验** |
+| `.principles/THINKING_OS.md` | 当前思维操作系统 / 原则状态 | 🔴 **删除 = 丢失当前内化状态** |
 | `.principles/PROFILE.json` | 用户配置和偏好 | 🔴 删除 = 重置所有设置 |
 | `AGENTS.md` | Agent 身份和记忆 | 🔴 删除 = 丢失身份认知 |
 | `SOUL.md` | Agent 核心人格 | 🔴 删除 = 丢失人格设定 |
@@ -52,7 +52,7 @@
 ## 快速判断：首次安装 vs 更新
 
 ```
-检查 ~/clawd/.principles/PRINCIPLES.md 是否存在：
+检查 <workspace>/.principles/THINKING_OS.md 是否存在：
 ├── 不存在 → 首次安装（跳到 [首次安装] 章节）
 └── 存在 → 更新（跳到 [更新] 章节）
 ```
@@ -64,7 +64,7 @@
 ### 步骤 1：运行安装命令
 
 ```bash
-npx create-principles-disciple --non-interactive --lang zh --workspace ~/clawd
+npx create-principles-disciple --non-interactive --lang zh --workspace /path/to/your/workspace
 ```
 
 ### 步骤 2：重启 OpenClaw Gateway
@@ -100,17 +100,17 @@ openclaw plugins list | grep -A 2 "Principles"
 ### 步骤 1：运行更新命令
 
 ```bash
-npx create-principles-disciple --non-interactive --lang zh --workspace ~/clawd
+npx create-principles-disciple --non-interactive --lang zh --workspace /path/to/your/workspace
 ```
 
 ### 步骤 2：查看更新内容
 
 ```bash
 # 查看变更日志
-cat ~/clawd/docs/CHANGELOG.md | head -100
+cat /path/to/your/workspace/docs/CHANGELOG.md | head -100
 
 # 列出所有 .update 文件
-find ~/clawd -name "*.update" -type f
+find /path/to/your/workspace -name "*.update" -type f
 ```
 
 ### 步骤 3：合并更新
@@ -161,7 +161,7 @@ cat ~/.openclaw/extensions/principles-disciple/package.json | grep version
 ### Q: 如何查看所有更新？
 
 ```bash
-cat ~/clawd/docs/CHANGELOG.md
+cat /path/to/your/workspace/docs/CHANGELOG.md
 ```
 
 ---

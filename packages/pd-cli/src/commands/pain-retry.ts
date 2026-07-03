@@ -44,6 +44,7 @@ import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -465,6 +466,23 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     for (const candidate of candidates) {
+      // PRI-503: admission gate check — refuse non-admitted candidates before
+      // intake, mirroring candidate.ts (intake/repair/backfill). Without this,
+      // `pd pain retry` could bypass the gate and intake unreviewed candidates.
+      // cli-5-failure-no-mutation: refusal path does not call intake(), does
+      // not update candidate status, does not write ledger.
+      // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
+      const admissionBlock = checkAdmissionGate(candidate);
+      if (admissionBlock) {
+        intakeFailed = true;
+        intakeResults.push({
+          candidateId: candidate.candidateId,
+          status: 'intake_failed',
+          error: `Admission gate refused: ${admissionBlock.reason}`,
+          nextAction: admissionBlock.nextAction,
+        });
+        continue;
+      }
       try {
         const entry = await intakeService.intake(candidate.candidateId);
         if (candidate.status !== 'consumed') {

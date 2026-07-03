@@ -3,7 +3,7 @@
     <div class="install-copy">
       <p class="pd-eyebrow">{{ isZh ? '安装' : 'Install' }}</p>
       <h2 id="install-title">{{ isZh ? '从下一次纠正开始沉淀。' : 'Start with the next correction.' }}</h2>
-      <p>{{ isZh ? '安装后，你仍然掌握每条原则的审核权。当前需要 Node.js 20+ 和一个可用的 OpenClaw 环境。' : 'After installation, you still control review and activation. You currently need Node.js 20+ and a working OpenClaw environment.' }}</p>
+      <p>{{ isZh ? '安装后，你仍然掌握每条原则的审核权。当前需要 Node.js ≥ 18 和一个可用的 OpenClaw 环境。' : 'After installation, you still control review and activation. You currently need Node.js ≥ 18 and a working OpenClaw environment.' }}</p>
       <div class="compatibility"><span>{{ isZh ? '当前可用' : 'Available now' }}</span><strong>OpenClaw</strong></div>
     </div>
     <div class="command-card">

@@ -126,7 +126,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
     try {
       const result = initTrajectorySchema(resolvedWorkspace);
       if (result.warnings.length > 0) {
-        warnings.push(...result.warnings.map(w => `${DB_NAMES.trajectory}: ${w}`));
+        warnings.push(...result.warnings.map((w: string) => `${DB_NAMES.trajectory}: ${w}`));
       }
       databases.push({
         name: DB_NAMES.trajectory,
@@ -169,7 +169,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
     try {
       const result = initWorkflowSchema(resolvedWorkspace);
       if (result.warnings.length > 0) {
-        warnings.push(...result.warnings.map(w => `${DB_NAMES.workflow}: ${w}`));
+        warnings.push(...result.warnings.map((w: string) => `${DB_NAMES.workflow}: ${w}`));
       }
       databases.push({
         name: DB_NAMES.workflow,

@@ -499,6 +499,9 @@ describe('CLI command wiring (pd console open)', () => {
     // Fake a console install: create dir + dist/server.js with a minimal HTTP server
     const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
     fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
+    // EP-06 regression guard: dist/web/index.html must exist (PR #1169 fix)
+    fs.mkdirSync(path.join(consoleDir, 'dist', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(consoleDir, 'dist', 'web', 'index.html'), '<!DOCTYPE html><html></html>');
     fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), `
       const http = require('http');
       const args = process.argv.slice(2);
@@ -757,6 +760,22 @@ describe('CLI command wiring (pd console open)', () => {
       expect(parsed.status).not.toBe('refused');
       // Host should be normalized to ::1 (without brackets)
       expect(parsed.host).toBe('::1');
+    }, 10_000);
+  });
+
+  describe('EP-06 regression guard: dist/web/index.html check (PR #1169)', () => {
+    it('returns console_web_ui_missing when dist/web/index.html does not exist', () => {
+      // beforeEach creates the fake console dir WITH dist/web/index.html.
+      // Remove it to simulate a corrupted install (the PR #1169 regression).
+      const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
+      const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+      fs.rmSync(webIndex, { force: true });
+
+      const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot, 5_000);
+      const parsed = JSON.parse(out);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.reason).toBe('console_web_ui_missing');
+      expect(parsed.nextAction).toMatch(/create-principles-disciple/);
     }, 10_000);
   });
 });

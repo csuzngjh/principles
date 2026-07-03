@@ -162,20 +162,7 @@ If the user has clear project goals, run `/init-strategy` skill to:
 
 If the user agrees, **execute these commands:**
 
-### 1. Grooming (Daily at 2 AM)
-
-**What it does:** Cleans workspace temp files daily to prevent clutter buildup.
-
-```bash
-openclaw cron add --name "pd-grooming-daily" \
-  --cron "0 2 * * *" --tz "UTC" \
-  --session isolated \
-  --light-context \
-  --no-deliver \
-  --message 'Execute pd-grooming skill: Check workspace root, clean temp files and digital clutter. Follow safety rules strictly. Do not delete business code.'
-```
-
-### 2. Health Check (Every 4 hours)
+### 1. Health Check (Every 4 hours)
 
 **What it does:** Verifies core tools (rg, node, python) are available and alerts on failure.
 
@@ -186,7 +173,7 @@ openclaw cron add --name "health-check" \
   --system-event 'Health check: Verify core tools (rg, node, python) are available. Check if workspace state matches actual progress.'
 ```
 
-### 3. Strategy Alignment (Daily at 9 AM)
+### 2. Strategy Alignment (Daily at 9 AM)
 
 **What it does:** Checks if daily operations have drifted from CURRENT_FOCUS.md strategic goals.
 
@@ -198,7 +185,7 @@ openclaw cron add --name "strategy-alignment" \
   --message 'Execute strategy alignment check: Compare against memory/okr/CURRENT_FOCUS.md. Confirm if past 24 hours of operations have drifted from strategic focus. Alert user if drifted.'
 ```
 
-### 4. Memory Weekly Cleanup (Monday 10 AM)
+### 3. Memory Weekly Cleanup (Monday 10 AM)
 
 **What it does:** Reviews daily memory files, extracts important content to MEMORY.md, cleans outdated info.
 
@@ -210,7 +197,7 @@ openclaw cron add --name "memory-weekly" \
   --message 'Execute weekly memory cleanup: Review recent memory/YYYY-MM-DD.md files, extract important content to MEMORY.md, clean outdated info.'
 ```
 
-### 5. Weekly Governance (Sunday Midnight UTC)
+### 4. Weekly Governance (Sunday Midnight UTC)
 
 Update WEEK_STATE.json and validate CURRENT_FOCUS.md:
 

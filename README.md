@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo-en.mp4">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/homepage-demo-en.mp4">
     <img src="https://img.shields.io/badge/▶_Watch_Demo-FF6B35?style=for-the-badge" alt="Watch Demo Video">
   </a>
 </p>
@@ -77,6 +77,22 @@ Install Principles Disciple if you want to:
 
 ---
 
+## What You'll See
+
+A typical PD moment:
+
+> Your AI agent keeps forgetting to confirm scope before cross-module edits. After the third correction, PD surfaces: "Agent has skipped scope confirmation 3 times. Propose a principle?"
+>
+> You review the evidence, tweak the wording, approve it.
+>
+> Next time the agent faces a similar task, it proactively offers a change scope and verification plan.
+>
+> If the principle later causes side effects, roll it back anytime.
+
+Not AI magic — your judgment respected and enforced. Not a one-off fix — durable behavior change. Not black-box automation — transparent, reviewable governance.
+
+---
+
 ## Runtime Adapters: OpenClaw Now, Codex Next
 
 PD is designed with a runtime adapter layer rather than being tied to a single agent runtime or task domain. The first validated domain is agentic development, where agent behavior is observable through tool calls, file edits, command execution, failures, user corrections, and review events. The adapter layer lets PD observe and govern different agent runtimes through a shared local feedback model: pain-signal capture, decision logs, principle review, and maintainer-approved guardrails.
@@ -124,18 +140,19 @@ Every significant agent decision — approvals, blocks, corrections, pain events
 
 ### 4. Principle internalization
 
-Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, evaluate, promote, disable, archive, or roll back these implementations with commands such as:
+Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, promote, disable, archive, or roll back these implementations with commands such as:
 
 ```text
 /pd-evolution-status
 /pd-promote-impl list
-/pd-promote-impl eval <id>
 /pd-promote-impl show <id>
 /pd-promote-impl <id>
 /pd-disable-impl <id>
 /pd-rollback-impl <id>
 /pd-archive-impl <id>
 ```
+
+> ⚠️ Note: The legacy replay generation path (`/pd-promote-impl eval`) was retired in PRI-230. Promotion only works for implementations that already have a pre-existing passing replay report.
 
 A principle should not become active just because it sounds good.
 
@@ -152,7 +169,13 @@ Principles Console provides a local web UI for observing agent health and evolut
 After starting OpenClaw Gateway, open:
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+Or launch it directly with the installer/CLI:
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 The console can show:
@@ -273,7 +296,7 @@ A: Check `{stateDir}/logs/`:
 
 By transforming owner-relevant behavior evidence into reviewed principles, PD helps agents align with how you want work done.
 
-**[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Join Discord](https://discord.gg/)** | **[Documentation](docs/)**
+**[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Documentation](docs/)**
 
 ---
 

@@ -1,6 +1,5 @@
 import type {
   OpenClawPluginApi,
-  PluginCommandContext,
   PluginHookBeforePromptBuildEvent,
   PluginHookAgentContext,
   PluginHookBeforePromptBuildResult,
@@ -552,57 +551,111 @@ const plugin = {
           return { text: `
 📖 **Principles Disciple 命令大全**
 
-## 快速开始
+## 🚀 快速开始
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-| \`/pdi\` | \`/pd-init\` | 初始化工作区 |
-| \`/pdb\` | \`/pd-bootstrap\` | 环境工具扫描 |
-| \`/pdr\` | \`/pd-research\` | 研究工具方案 |
+| \`/pdi\` | \`/pd-init\` | 初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等） |
+| \`/pdb\` | \`/pd-bootstrap\` | 扫描环境工具并建议升级 |
+| \`/pdr\` | \`/pd-research\` | 研究工具升级方案 |
 
-## 状态查询
+## 📊 状态与监控
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-| \`/pdt\` | \`/pd-thinking\` | 思维模型管理 |
+| \`/pdt\` | \`/pd-thinking\` | 思维模型管理 [status\\|propose\\|audit] |
+|  | \`/pd-status\` | 查看系统状态（GFI、Pain 词典） |
+|  | \`/pd-pain\` | 从 OpenClaw 会话报告 pain |
+|  | \`/pd-evolution-status\` | 查看 evolution 闭环状态（candidate/probation/active） |
+|  | \`/pd-workflow-debug\` | 调试 workflow 状态与事件 [workflowId] |
 
-## 其他命令
+## ⚙️ 配置与上下文
 | 命令 | 用途 |
 |------|------|
-| \`/pd-status\` | 查看系统状态 |
-| \`/pd-context\` | 控制上下文注入 |
-| \`/pd-focus\` | 焦点文件管理 |
-| \`/pd-export\` | 导出数据 |
-| \`/pd-samples\` | 审核纠错样本 |
-| \`/pd-rollback\` | 回滚情绪事件惩罚 |
-| \`/pd-principle-rollback\` | 回滚原则 |
+| \`/pd-context\` | 控制上下文注入 [status\\|thinking\\|reflection\\|focus\\|preset] |
+| \`/pd-focus\` | 管理 CURRENT_FOCUS.md [status\\|history\\|compress\\|rollback] |
+
+## ↩️ 回滚操作
+| 命令 | 用途 |
+|------|------|
+| \`/pd-rollback\` | 回滚情绪事件惩罚 <event-id>\\|last |
+| \`/pd-principle-rollback\` | 回滚原则并加入黑名单 <principle-id> [reason] |
+
+## 📦 数据与导出
+| 命令 | 用途 |
+|------|------|
+| \`/pd-export\` | 导出数据 [analytics\\|corrections --redacted] |
+| \`/pd-samples\` | 查看或审核纠错样本 [review approve\\|reject <sample-id> [note]] |
+
+## 🔧 实现生命周期（半废弃）
+> ⚠️ 以下命令的 replay 生成路径已在 PRI-230 退役，仅查询/状态相关子命令可用。
+
+| 命令 | 用途 |
+|------|------|
+| \`/pd-promote-impl\` | 提升候选实现到 active [list\\|show <id>\\|<id>] |
+| \`/pd-disable-impl\` | 禁用 active 实现 [list\\|<id> --reason "..."] |
+| \`/pd-archive-impl\` | 永久归档实现 [list\\|<id>] |
+| \`/pd-rollback-impl\` | 回滚到上一个 active 实现 [list\\|<id> --reason "..."] |
+
+## ❓ 帮助
+| 命令 | 用途 |
+|------|------|
 | \`/pd-help\` | 显示本帮助 |
+
+💡 完整文档请访问：https://principles-disciple.dev/docs/slash-commands
 `.trim() };
         } else {
           return { text: `
 📖 **Principles Disciple Command Reference**
 
-## Quick Start
+## 🚀 Quick Start
 | Short | Full | Purpose |
 |-------|------|---------|
-| \`/pdi\` | \`/pd-init\` | Initialize workspace |
-| \`/pdb\` | \`/pd-bootstrap\` | Scan environment tools |
-| \`/pdr\` | \`/pd-research\` | Research tool solutions |
+| \`/pdi\` | \`/pd-init\` | Initialize workspace (PRINCIPLES.md, THINKING_OS.md, etc.) |
+| \`/pdb\` | \`/pd-bootstrap\` | Scan environment tools and suggest upgrades |
+| \`/pdr\` | \`/pd-research\` | Research tool upgrade solutions |
 
-## Status
+## 📊 Status & Monitoring
 | Short | Full | Purpose |
 |-------|------|---------|
-| \`/pdt\` | \`/pd-thinking\` | Mental model management |
+| \`/pdt\` | \`/pd-thinking\` | Manage Thinking OS [status\\|propose\\|audit] |
+|  | \`/pd-status\` | View system status (GFI, Pain dictionary) |
+|  | \`/pd-pain\` | Report pain from OpenClaw session |
+|  | \`/pd-evolution-status\` | Show evolution loop status (candidate/probation/active) |
+|  | \`/pd-workflow-debug\` | Debug workflow state and events [workflowId] |
 
-## Other Commands
+## ⚙️ Configuration & Context
 | Command | Purpose |
 |---------|---------|
-| \`/pd-status\` | View system status |
-| \`/pd-context\` | Control context injection |
-| \`/pd-focus\` | Focus file management |
-| \`/pd-export\` | Export data |
-| \`/pd-samples\` | Review correction samples |
-| \`/pd-rollback\` | Rollback empathy penalty |
-| \`/pd-principle-rollback\` | Rollback principle |
+| \`/pd-context\` | Control context injection [status\\|thinking\\|reflection\\|focus\\|preset] |
+| \`/pd-focus\` | Manage CURRENT_FOCUS.md [status\\|history\\|compress\\|rollback] |
+
+## ↩️ Rollback
+| Command | Purpose |
+|---------|---------|
+| \`/pd-rollback\` | Rollback empathy event penalty <event-id>\\|last |
+| \`/pd-principle-rollback\` | Rollback principle and blacklist pattern <principle-id> [reason] |
+
+## 📦 Data & Export
+| Command | Purpose |
+|---------|---------|
+| \`/pd-export\` | Export data [analytics\\|corrections --redacted] |
+| \`/pd-samples\` | List or review correction samples [review approve\\|reject <sample-id> [note]] |
+
+## 🔧 Implementation Lifecycle (Semi-deprecated)
+> ⚠️ Replay generation path for these commands was retired in PRI-230. Only list/show/status subcommands remain useful.
+
+| Command | Purpose |
+|---------|---------|
+| \`/pd-promote-impl\` | Promote candidate implementation to active [list\\|show <id>\\|<id>] |
+| \`/pd-disable-impl\` | Disable active implementation [list\\|<id> --reason "..."] |
+| \`/pd-archive-impl\` | Archive implementation permanently [list\\|<id>] |
+| \`/pd-rollback-impl\` | Rollback to previous active implementation [list\\|<id> --reason "..."] |
+
+## ❓ Help
+| Command | Purpose |
+|---------|---------|
 | \`/pd-help\` | Show this help |
+
+💡 Full documentation: https://principles-disciple.dev/docs/slash-commands
 `.trim() };
         }
     });
@@ -626,9 +679,7 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-pain",
-      description: language === 'zh'
-        ? '从 OpenClaw 会话中报告 pain（context-bound provenance）'
-        : 'Report pain from OpenClaw session (context-bound provenance)',
+      description: getCommandDescription('pd-pain', language),
       acceptsArgs: true,
       handler: async (ctx) => {
         try {
@@ -758,13 +809,13 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-workflow-debug",
-      description: 'Debug helper workflow state and events [workflowId]',
+      description: getCommandDescription('pd-workflow-debug', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {
           const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleWorkflowDebugCommand(ctx as PluginCommandContext & { args?: string });
+          return handleWorkflowDebugCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-workflow-debug failed: ${String(err)}`);
           return { text: `Workflow debug command failed: ${String(err)}` };
@@ -775,7 +826,7 @@ const plugin = {
     // ── Implementation Lifecycle Commands (Phase 13) ──
     api.registerCommand({
       name: "pd-promote-impl",
-      description: 'Promote a candidate implementation to active [list|show <id>|<id>]',
+      description: getCommandDescription('pd-promote-impl', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {
@@ -791,7 +842,7 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-disable-impl",
-      description: 'Disable an active implementation [list|<id> --reason "..."]',
+      description: getCommandDescription('pd-disable-impl', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {
@@ -807,7 +858,7 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-archive-impl",
-      description: 'Archive an implementation permanently [list|<id>]',
+      description: getCommandDescription('pd-archive-impl', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {
@@ -823,7 +874,7 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-rollback-impl",
-      description: 'Rollback current active implementation to previous active [list|<id> --reason "..."]',
+      description: getCommandDescription('pd-rollback-impl', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {

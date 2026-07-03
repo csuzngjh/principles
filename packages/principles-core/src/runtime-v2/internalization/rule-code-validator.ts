@@ -44,7 +44,13 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   // Random / non-deterministic (PRI-439 Phase 2)
   { pattern: /Math\.random/, label: 'Math.random' },
   { pattern: /\bcrypto\b/, label: 'crypto' },
-  { pattern: /\[\s*['"](require|import|fetch|eval|process|globalThis|global|Reflect|Proxy|Buffer|Function|setImmediate|queueMicrotask|XMLHttpRequest|crypto)\s*['"]\s*\]/, label: 'bracket access to forbidden global' },
+  // SEC-BASE-2: vm escape surface — meta-programming & shared-memory primitives
+  { pattern: /\bimport\s*\.\s*meta\b/, label: 'import.meta' },
+  { pattern: /\bWeakRef\b/, label: 'WeakRef' },
+  { pattern: /\bFinalizationRegistry\b/, label: 'FinalizationRegistry' },
+  { pattern: /\bSharedArrayBuffer\b/, label: 'SharedArrayBuffer' },
+  { pattern: /\bAtomics\b/, label: 'Atomics' },
+  { pattern: /\[\s*['"](require|import|import\.meta|fetch|eval|process|globalThis|global|Reflect|Proxy|Buffer|Function|setImmediate|queueMicrotask|XMLHttpRequest|crypto|WeakRef|FinalizationRegistry|SharedArrayBuffer|Atomics)\s*['"]\s*\]/, label: 'bracket access to forbidden global' },
 ];
 
 /**

@@ -24,7 +24,7 @@ const logger = {
 };
 
 const banner = `${pc.blue('╔══════════════════════════════════════════════════════════════╗')}
-${pc.blue('║')}     ${pc.bold(pc.red('🦞 Principles Disciple'))} - OpenClaw Plugin Installer      ${pc.blue('║')}
+${pc.blue('║')}     ${pc.bold(pc.red('🦞 Principles Disciple'))} - Installer                        ${pc.blue('║')}
 ${pc.blue('╚══════════════════════════════════════════════════════════════╝')}`;
 
 export { logger, banner };

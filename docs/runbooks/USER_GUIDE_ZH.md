@@ -11,6 +11,17 @@
 
 你不需要理解全部架构，日常只要掌握下面这些命令。
 
+### 原则生命周期
+
+原则有四种状态：
+
+| 状态 | 含义 |
+|------|------|
+| `candidate` | 新提案，尚未审核 |
+| `probation` | 试用期 / 影子模式——已激活但仍在监控副作用 |
+| `active` | 正式生效 |
+| `archived` | 已归档，不再生效 |
+
 ## 日常命令
 
 ### `/pd-status`
@@ -45,7 +56,7 @@
 - 最近 gate block / bypass
 - evolution 队列状态
 - 原则数量统计
-- 当前的内化路线建议，例如 `skill`、`code`、`defer`
+- 当前的内化路线建议，例如 `prompt`、`code_tool_hook` (RuleHost)、`defer_archive`
 
 如果你不确定现在是被疲劳状态卡住、被 pain 卡住，还是被 code implementation 策略卡住，先看这个命令。
 
@@ -70,21 +81,9 @@
 
 它会列出当前 candidate implementation，并标记哪些已经有通过的 replay report。
 
-### 第二步：执行 replay 评估
+> ⚠️ **注意**：Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以生成新的 replay 报告。只有已经存在通过 replay 报告的实现才能被 promote。旧文档中提到的 `eval` 子命令已不存在。
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-它会针对目标 implementation 运行 replay evaluation，并写出 replay report。
-
-以下情况建议先跑一次：
-
-- 新 candidate 刚生成
-- 之前没有 replay report
-- replay 数据集已经变化，你想重新评估
-
-### 第三步：查看 replay 报告
+### 第二步：查看 replay 报告
 
 ```text
 /pd-promote-impl show <implId>
@@ -97,7 +96,7 @@
 - 覆盖了哪些 classification
 - 是否因为没有 replay 样本导致报告为空
 
-### 第四步：正式 promote
+### 第三步：正式 promote
 
 ```text
 /pd-promote-impl <implId>
@@ -111,7 +110,7 @@ promote 的前提：
 
 这是 candidate 进入 active 的标准路径。
 
-### 第五步：禁用异常实现
+### 第四步：禁用异常实现
 
 ```text
 /pd-disable-impl list
@@ -122,7 +121,7 @@ promote 的前提：
 
 disable 会保留账本记录，但停止它继续参与运行。
 
-### 第六步：回滚到上一个 active 实现
+### 第五步：回滚到上一个 active 实现
 
 ```text
 /pd-rollback-impl list
@@ -137,7 +136,7 @@ disable 会保留账本记录，但停止它继续参与运行。
 - Progressive Gate
 - 其他已有硬约束
 
-### 第七步：归档实现
+### 第六步：归档实现
 
 ```text
 /pd-archive-impl list
@@ -154,9 +153,8 @@ archive 比 disable 更彻底，适合做永久清理。
 
 1. `/pd-evolution-status`
 2. `/pd-promote-impl list`
-3. `/pd-promote-impl eval <implId>`
-4. `/pd-promote-impl show <implId>`
-5. `/pd-promote-impl <implId>`
+3. `/pd-promote-impl show <implId>`
+4. `/pd-promote-impl <implId>`
 
 如果 promote 后发现它有回归：
 
@@ -168,33 +166,31 @@ archive 比 disable 更彻底，适合做永久清理。
 
 `/pd-evolution-status` 可能会显示：
 
-- `skill`
-- `code`
-- `defer`
+- `prompt`
+- `code_tool_hook` (RuleHost)
+- `defer_archive`
 
 它们的含义是：
 
-- `skill`：这个原则更适合先通过提示词 / SOP / 工作流来内化
-- `code`：这个原则更确定、风险更高，适合变成 code implementation
-- `defer`：当前证据还不够，先不要强行内化
+- `prompt`：这个原则更适合先通过提示词 / SOP / 工作流来内化
+- `code_tool_hook` (RuleHost)：这个原则更确定、风险更高，适合变成 code implementation
+- `defer_archive`：当前证据还不够，先不要强行内化
 
 这些只是建议，不会自动执行。
 
 ## 常见问题
 
-### “Promotion rejected: no passing replay report”
+### "Promotion rejected: no passing replay report"
 
-先执行：
+Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以生成新的 replay 报告。只有已经存在通过 replay 报告的实现才能被 promote。
 
-```text
-/pd-promote-impl eval <implId>
-```
-
-再查看：
+可以查看已有报告：
 
 ```text
 /pd-promote-impl show <implId>
 ```
+
+如果没有报告，在 replay 生成路径恢复之前，该实现无法通过 CLI 进行 promote。
 
 ### “Replay report 是空的”
 
@@ -226,12 +222,22 @@ archive 比 disable 更彻底，适合做永久清理。
 
 这对大多数日常使用已经够了。
 
+### "有些功能看起来被禁用了或者缺失"
+
+部分子系统（如 `evolution_worker` 和 `correction_observer`）**默认关闭**，这是 MVP-Quiet 设计（ADR-0014），不是故障。在种子客户证据支持更大范围激活之前，它们会保持关闭。你可以在工作区的 `.pd/config.yaml` 中查看哪些子系统已启用。
+
 ## 可视化控制台
 
 如果你的部署暴露了插件 UI，可以打开：
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+或直接通过 CLI 启动：
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 控制台适合做：
