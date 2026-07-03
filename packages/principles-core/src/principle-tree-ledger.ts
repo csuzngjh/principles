@@ -76,13 +76,23 @@ const RENAME_MAX_RETRIES = 3;
 const RENAME_BASE_DELAY_MS = 50;
 
 function atomicWriteFileSync(filePath: string, data: string): void {
-  const tmpPath = filePath + '.tmp';
-  fs.writeFileSync(tmpPath, data, 'utf8');
+  // CodeQL fix (js/insecure-temporary-file): create a unique temp directory
+  // in the SAME directory as the target (preserving atomic rename — same
+  // filesystem) instead of using a predictable '.tmp' suffix. mkdtempSync
+  // generates a randomized directory name with 0o700 permissions, preventing
+  // symlink-attack and predictable-name vulnerabilities when stateDir is in
+  // a world-writable location such as os.tmpdir() (common in tests).
+  const targetDir = path.dirname(filePath);
+  const tmpDir = fs.mkdtempSync(path.join(targetDir, '.pd-write-'));
+  const tmpPath = path.join(tmpDir, 'tmp');
+  fs.writeFileSync(tmpPath, data, { encoding: 'utf8', mode: 0o600 });
 
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
     try {
       fs.renameSync(tmpPath, filePath);
+      // Success — clean up the temp directory (now empty) and return.
+      try { fs.rmdirSync(tmpDir); } catch { /* best effort */ }
       return;
     } catch (err) {
       lastError = err as Error;
@@ -104,8 +114,9 @@ function atomicWriteFileSync(filePath: string, data: string): void {
     }
   }
 
-  // Clean up temp file on failure
+  // Clean up temp file and directory on failure
   try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+  try { fs.rmdirSync(tmpDir); } catch { /* best effort */ }
   throw lastError ?? new Error('atomicWriteFileSync: rename failed');
 }
 
@@ -201,7 +212,11 @@ function tryAcquireLock(lockPath: string, pid: number): boolean {
       fs.mkdirSync(lockDir, { recursive: true });
     }
     const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL;
-    const fd = fs.openSync(lockPath, flags);
+    // CodeQL fix (js/insecure-temporary-file): restrict lock file permissions
+    // to owner-only (0o600). O_EXCL already prevents pre-existing-file/symlink
+    // attacks on creation; the mode tightens permissions so the lock file is
+    // not world-readable/writable even when stateDir is in os.tmpdir().
+    const fd = fs.openSync(lockPath, flags, 0o600);
     fs.writeSync(fd, String(pid));
     fs.fsyncSync(fd);
     fs.closeSync(fd);
