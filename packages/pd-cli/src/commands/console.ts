@@ -72,6 +72,20 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
     return;
   }
 
+  // EP-06 regression guard (PR #1169): verify web UI bundle exists before launch.
+  // Without dist/web/index.html the server returns 404 "Run npm run build:ui first".
+  const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+  if (!fs.existsSync(webIndex)) {
+    const msg = `Console web UI not found at ${webIndex}. The console bundle is corrupted. Re-run installer.`;
+    if (opts.json) {
+      console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
+    } else {
+      console.error(msg);
+    }
+    process.exit(1);
+    return;
+  }
+
   const port = opts.port || '3100';
   const host = '127.0.0.1';
   const args = [serverEntry, '--workspace', workspaceDir, '--port', port, '--host', host];
@@ -294,6 +308,32 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       browserOpened: false,
       reason: 'console_server_entry_missing',
       nextAction: `Re-run installer: npx create-principles-disciple (expected ${serverEntry})`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  // EP-06 regression guard (PR #1169): verify web UI bundle exists before launch.
+  // Without dist/web/index.html the server returns 404 "Run npm run build:ui first"
+  // — a fatal first-impression bug for new users.
+  const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+  if (!fs.existsSync(webIndex)) {
+    const result: ConsoleLaunchResult = {
+      status: 'failed',
+      url: '',
+      port: 0,
+      host: '127.0.0.1',
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      reason: 'console_web_ui_missing',
+      nextAction: `Re-run installer: npx create-principles-disciple (expected ${webIndex})`,
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

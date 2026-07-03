@@ -22,6 +22,7 @@ import {
   validateOpenClawConfig,
   type ComponentStatus,
   type VerificationResult,
+  type RuntimeProfileInput,
 } from './mvp-config.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
@@ -186,19 +187,19 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Installing bundled @principles/core', weight: 8 },
   { name: 'Installing core dependencies', weight: 10 },
   { name: 'Installing plugin', weight: 10 },
-  { name: 'Pre-filling @principles/core for plugin', weight: 3 },
+  { name: 'Preparing core library for plugin', weight: 3 },
   { name: 'Installing plugin dependencies', weight: 20 },
   { name: 'Installing pd CLI', weight: 8 },
-  { name: 'Pre-filling @principles/core for pd-cli', weight: 3 },
+  { name: 'Preparing core library for pd-cli', weight: 3 },
   { name: 'Verifying pd CLI', weight: 3 },
   { name: 'Installing pd-console', weight: 8 },
-  { name: 'Pre-filling @principles/core for console', weight: 3 },
+  { name: 'Preparing core library for console', weight: 3 },
   { name: 'Installing console dependencies', weight: 10 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
   { name: 'Generating config.yaml', weight: 2 },
   { name: 'Creating config', weight: 2 },
-  { name: 'Verifying pd demo story-a', weight: 5 },
+  { name: 'Verifying demo', weight: 5 },
   { name: 'Updating OpenClaw config', weight: 3 },
 ];
 
@@ -762,6 +763,15 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
+  // EP-06 regression guard (PR #1169): verify the web UI bundle exists BEFORE
+  // spawning the server. Without dist/web/index.html the server returns 404
+  // "Run npm run build:ui first" on every route — a fatal first-impression bug
+  // for new users. npm install --ignore-scripts can remove dist/ in edge cases.
+  const webIndex = path.join(consoleDest, 'dist', 'web', 'index.html');
+  if (!existsSync(webIndex)) {
+    return { ok: false, url: '', process: null, reason: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/. Re-run: npx create-principles-disciple' };
+  }
+
   // Build a shuffled port list to avoid retrying the same port
   const portRange: number[] = [];
   for (let p = CONSOLE_PORT_RANGE_MIN; p <= CONSOLE_PORT_RANGE_MAX; p++) portRange.push(p);
@@ -1062,27 +1072,59 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   return count;
 }
 
-async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
+async function generateConfigYamlConfig(
+  workspaceDir: string,
+  runtimeProfile?: RuntimeProfileInput,
+): Promise<string> {
   const configPath = getConfigYamlPath(workspaceDir);
   const configDir = path.dirname(configPath);
+  await fse.ensureDir(configDir);
 
-  // PRI-308: preserve existing valid config.yaml
-  if (existsSync(configPath)) {
-    try {
-      validateConfigYamlFull(workspaceDir);
-      // Existing config is structurally valid — preserve it
-      logger.info(`Existing .pd/config.yaml is valid, preserving it`);
-      return configPath;
-    } catch (e) {
-      // Existing config is malformed — fail loud, do not overwrite
-      const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });
-    }
+  // Fix-4 (P0-BUG-4): pass through the runtime profile so the generated
+  // config.yaml's pd.default profile is pre-filled (avoids silent LLM
+  // failures on first run).
+  // CodeQL TOCTOU fix: use 'wx' (exclusive create) instead of existsSync
+  // + default write. The 'wx' flag atomically creates the file and fails
+  // with EEXIST if it already exists — eliminating the race between a
+  // separate check and the write. If the file exists (pre-existing or
+  // created concurrently), EEXIST is caught below and we preserve the
+  // existing config (PRI-308).
+  try {
+    writeFileSync(
+      configPath,
+      generateConfigYamlContent(runtimeProfile),
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    return configPath;
+  } catch (err) {
+    // rc-2: instanceof Error is the runtime guard; the cast extends the type
+    // with the optional `code` property present on Node.js fs errors.
+    if (!(err instanceof Error) || (err as Error & { code?: string }).code !== 'EEXIST') throw err;
   }
 
-  await fse.ensureDir(configDir);
-  writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
-  return configPath;
+  // PRI-308: preserve existing valid config.yaml (file exists — either
+  // pre-existing or created concurrently between ensureDir and writeFileSync).
+  try {
+    validateConfigYamlFull(workspaceDir);
+    // Existing config is structurally valid — preserve it
+    logger.info(`Existing .pd/config.yaml is valid, preserving it`);
+    // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via
+    // --provider/--api-key-env but an existing valid config.yaml was found,
+    // the profile is NOT written. Emit a clear warning so the user knows
+    // their --provider/--api-key-env flags were ignored and how to update
+    // the profile manually.
+    if (runtimeProfile) {
+      logger.warn(
+        `--provider/--api-key-env were provided but an existing valid .pd/config.yaml was found. ` +
+        `The runtime profile was not written. To update it, edit .pd/config.yaml or run: pd console open --workspace "${workspaceDir}"`,
+      );
+    }
+    return configPath;
+  } catch (e) {
+    // Existing config is malformed — fail loud, do not overwrite
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });
+  }
 }
 
 async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
@@ -1187,7 +1229,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     await installPluginToStaging(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for plugin...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for plugin...');
     ensureCoreDependency(getPluginExtDir());
     stepIndex++;
 
@@ -1200,7 +1242,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     syncPdCli(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for pd-cli...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for pd-cli...');
     ensureCoreDependency(getInstalledPdCliDir());
     stepIndex++;
 
@@ -1222,7 +1264,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     installConsole(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for console...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for console...');
     ensureCoreDependency(getInstalledConsoleDir());
     stepIndex++;
 
@@ -1257,7 +1299,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Generating config.yaml...');
-    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir);
+    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir, options.runtimeProfile);
     verification.features = 'passed';
     stepIndex++;
 
@@ -1280,7 +1322,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     }
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying demo...');
     try {
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
@@ -1289,7 +1331,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       });
       verification.storyA = 'passed';
     } catch (e) {
-      throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
+      throw new Error(`Demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
     }
     stepIndex++;
 

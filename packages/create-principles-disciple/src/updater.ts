@@ -390,25 +390,3 @@ export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<Ro
     };
   }
 }
-
-export interface MigrationResult {
-  success: boolean;
-  message: string;
-  appliedMigrations?: string[];
-}
-
-export async function migrateDatabase(
-  _dbPath: string,
-  _fromVersion: string,
-  _toVersion: string,
-): Promise<MigrationResult> {
-  // In MVP, we use PRAGMA user_version for schema tracking.
-  // Actual migration SQL would go here per version bump.
-  // For now, this is a placeholder that succeeds — real migrations
-  // will be added when breaking schema changes occur.
-  return {
-    success: true,
-    message: 'No pending migrations',
-    appliedMigrations: [],
-  };
-}

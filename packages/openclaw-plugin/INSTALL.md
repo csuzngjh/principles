@@ -1,5 +1,15 @@
 # Installation Guide
 
+> ⚠️ **DEPRECATED**: This document describes a manual installation flow that has been
+> superseded by the `create-principles-disciple` installer.
+>
+> **New users should use:** `npx create-principles-disciple --yes`
+>
+> This document is kept only for advanced users who need to understand the internal
+> installation structure or troubleshoot edge cases. For the standard installation
+> flow, see the [main README](../../README.md) and the
+> [installation guide](https://principles-website.pages.dev/docs/getting-started).
+
 ## ⚠️ Known Issue: Plugin Dependencies
 
 ### Problem

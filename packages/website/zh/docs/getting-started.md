@@ -53,6 +53,8 @@ PD 会在本机浏览器打开审核控制台。如果 3100 端口被占用，�
 3. 生成候选原则
 4. 等你在控制台审核
 
+> **前提条件**：第 2–3 步需要已配置 LLM runtime profile（provider、API key 环境变量、model）。如果安装时跳过了这步，运行 `pd console open --workspace "<路径>"` 现在配置。没有 runtime profile 时，痛苦信号仍会被捕捉，但诊断不会自动运行。
+
 审核时通常有三种选择：
 
 | 选择 | 作用 | 适用场景 |
@@ -67,6 +69,36 @@ PD 会在本机浏览器打开审核控制台。如果 3100 端口被占用，�
 
 ```bash
 /pd-rollback-impl <id>
+```
+
+### 手动 CLI 流程（进阶）
+
+如果自动流程没有触发（例如 runtime profile 未配置，或你用了 `pd pain record` 的 async 模式），可以手动驱动完整流程：
+
+```bash
+# 1. 记录一条痛苦信号（返回 painId）
+pd pain record --reason "Agent 跨模块修改时未确认范围" --workspace "<路径>"
+
+# 2. 运行诊断（如果第 1 步用了 --wait 且成功，则跳过）
+pd diagnose run --task-id <taskId> --runtime pi-ai --workspace "<路径>"
+
+# 3. 列出诊断产出的候选原则
+pd candidate list --task-id <taskId> --workspace "<路径>"
+
+# 4. 将候选原则纳入激活流水线
+pd candidate intake --candidate-id <id> --workspace "<路径>"
+
+# 5. 批准激活
+pd activation approve --approval-id <id> --workspace "<路径>"
+
+# 6. 查看已激活的原则
+pd activation list --workspace "<路径>"
+```
+
+**一站式替代命令**（code_tool_hook 通道，一次跑完 dreamer→philosopher→scribe→artificer 全循环）：
+
+```bash
+pd runtime internalization run-rulehost --pain-id <id> --confirm --workspace "<路径>"
 ```
 
 ## 反馈问题
