@@ -11,6 +11,17 @@ Principles Disciple now has two main responsibilities:
 
 You do not need to understand the full architecture to use it. Most people only need the commands below.
 
+### Principle Lifecycle
+
+Principles go through four statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `candidate` | Newly proposed, not yet reviewed |
+| `probation` | Under trial / shadow mode — active but monitored for side effects |
+| `active` | Officially in effect |
+| `archived` | Kept for history, not active |
+
 ## Daily Commands
 
 ### `/pd-status`
@@ -45,7 +56,7 @@ It shows:
 - recent gate blocks and bypasses
 - evolution queue state
 - principle counts
-- internalization route recommendations such as `skill`, `code`, or `defer`
+- internalization route recommendations such as `prompt`, `code_tool_hook` (RuleHost), or `defer_archive`
 
 Read this command first if you are unsure whether the system is blocked by fatigue, pain, or code-implementation policy.
 
@@ -153,15 +164,15 @@ If the promoted implementation regresses:
 
 `/pd-evolution-status` may show route recommendations like:
 
-- `skill`
-- `code`
-- `defer`
+- `prompt`
+- `code_tool_hook` (RuleHost)
+- `defer_archive`
 
 Interpret them like this:
 
-- `skill`: the principle likely needs prompt/SOP shaping first
-- `code`: the principle is deterministic or high-risk enough for a code implementation
-- `defer`: there is not enough evidence yet, or forcing implementation would be premature
+- `prompt`: the principle likely needs prompt/SOP shaping first
+- `code_tool_hook` (RuleHost): the principle is deterministic or high-risk enough for a code implementation
+- `defer_archive`: there is not enough evidence yet, or forcing implementation would be premature
 
 These are recommendations, not automatic actions.
 
@@ -209,12 +220,22 @@ Use:
 
 That is enough for most day-to-day use.
 
+### “Some features seem disabled or missing”
+
+Some subsystems (such as `evolution_worker` and `correction_observer`) are **default OFF** by design (MVP-Quiet, ADR-0014). This is intentional — they are not broken. They will be enabled in a future release once seed-customer evidence justifies broader activation. You can verify which subsystems are enabled in your workspace's `.pd/config.yaml`.
+
 ## Console
 
 If your deployment exposes the plugin UI, open:
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+Or launch it directly with the CLI:
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 Use the console for:

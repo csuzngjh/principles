@@ -1,5 +1,9 @@
 # Principles — Value Proposition
 
+> ⚠️ **ARCHIVED**: This document describes PD's pre-MVP-pivot vision (Thinking OS, Evolution Sandbox, 5-stage growth).
+> The current product identity is defined in [`docs/product/PRODUCT_IDENTITY.md`](../product/PRODUCT_IDENTITY.md).
+> This document is kept for historical reference only — do not use it as a source of truth for current features or scope.
+>
 > *Distilling human wisdom, weaving agent cognition.*
 
 ---

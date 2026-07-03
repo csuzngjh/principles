@@ -142,6 +142,17 @@ For the complete list of commands with detailed parameters, examples, and common
 `/pd-promote-impl`, `/pd-disable-impl`, `/pd-archive-impl`, and `/pd-rollback-impl` have their replay-generation path retired in PRI-230 and are now in a semi-deprecated state. For the new implementation promotion workflow, use the `pd candidate internalize` and `pd runtime activation promote` CLI commands instead.
 :::
 
+### Principle Management (CLI)
+
+The `pd` CLI provides the modern principle lifecycle commands:
+
+| Command | Description |
+|---------|-------------|
+| `pd candidate list` | List principle candidates |
+| `pd candidate intake --candidate-id <id>` | Intake a candidate |
+| `pd activation approve --approval-id <id>` | Approve a candidate for activation |
+| `pd activation list` | List active principles |
+
 ## The PD CLI
 
 The `pd` command-line tool provides additional capabilities outside of OpenClaw sessions.

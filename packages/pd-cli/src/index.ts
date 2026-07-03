@@ -454,6 +454,7 @@ const demoCmd = program
 
 demoCmd
   .command('story-a')
+  .alias('first-principle')
   .description('Run Story A\'s proven-channel demo (PRI-246) — full evidence→proposal→approval→activation→observation chain')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')

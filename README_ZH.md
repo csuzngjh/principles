@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo.mp4">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/homepage-demo-zh.mp4">
     <img src="https://img.shields.io/badge/▶_观看演示-FF6B35?style=for-the-badge" alt="Watch Demo Video">
   </a>
 </p>
@@ -73,7 +73,23 @@ openclaw gateway --force
 
 **它安全吗？** 是的。PD 会把规则作为本地沙盒文件写入，并通过 SQLite 追踪一切。所有自主进化都可以被你审查、回滚或禁用。
 
-👉 **详见人类指南:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+👉 **详见人类指南:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
+
+---
+
+## 你会看到什么
+
+一个典型的 PD 时刻：
+
+> 你的 AI agent 总是在跨模块修改时忘记确认范围。第三次纠正后，PD 提示："系统观察到 Agent 在跨模块修改场景中 3 次未确认范围。建议沉淀为原则。"
+>
+> 你审查证据，修改措辞，批准了这条原则。
+>
+> 下一次 Agent 遇到类似任务时，它主动给出了修改范围和验证计划。
+>
+> 如果这条原则后来产生了副作用，随时可以回滚。
+
+不是 AI 魔法——而是你的判断被系统尊重和执行。不是一次性修复——而是长期行为变化。不是黑箱自动化——而是透明可审查的治理。
 
 ---
 
@@ -164,7 +180,13 @@ Principles Console 提供一个本地 Web UI，用来观察智能体健康状态
 启动 OpenClaw Gateway 后打开：
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+或直接通过安装器/CLI 启动：
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 控制台可以展示：

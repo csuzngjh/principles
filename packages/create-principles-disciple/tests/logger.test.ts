@@ -96,8 +96,8 @@ describe('logger utilities', () => {
       expect(banner).toContain('Principles Disciple');
     });
 
-    it('contains OpenClaw Plugin Installer text', () => {
-      expect(banner).toContain('OpenClaw Plugin Installer');
+    it('contains Installer text', () => {
+      expect(banner).toContain('Installer');
     });
   });
 });

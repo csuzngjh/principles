@@ -52,6 +52,8 @@ Use your AI agent as usual. When it makes repeated mistakes, PD will:
 2. **Diagnose** whether it's a one-off or a pattern
 3. **Propose** a principle candidate
 
+> **Prerequisite**: Steps 2–3 require a configured LLM runtime profile (provider, API key env, model). If you skipped this during install, run `pd console open --workspace "<path>"` to configure it now. Without a runtime profile, pain signals are still captured but diagnosis won't run automatically.
+
 You'll see the proposal in the console. Choose one of three actions:
 
 | Action | What Happens | When to Use |
@@ -66,6 +68,36 @@ Changed your mind? Undo anytime:
 
 ```
 /pd-rollback-impl <id>
+```
+
+### Manual CLI Flow (Advanced)
+
+If the automatic flow doesn't trigger (e.g., runtime profile not yet configured, or you used `pd pain record` in async mode), you can drive the full pipeline manually:
+
+```bash
+# 1. Record a pain signal (returns a painId)
+pd pain record --reason "Agent forgot to confirm scope before cross-module edit" --workspace "<path>"
+
+# 2. Run diagnosis (skip if step 1 used --wait and succeeded)
+pd diagnose run --task-id <taskId> --runtime pi-ai --workspace "<path>"
+
+# 3. List candidate principles produced by diagnosis
+pd candidate list --task-id <taskId> --workspace "<path>"
+
+# 4. Intake a candidate into the activation pipeline
+pd candidate intake --candidate-id <id> --workspace "<path>"
+
+# 5. Approve activation
+pd activation approve --approval-id <id> --workspace "<path>"
+
+# 6. Verify activated principles
+pd activation list --workspace "<path>"
+```
+
+**One-shot alternative** (code_tool_hook channel, runs the full dreamer→philosopher→scribe→artificer loop):
+
+```bash
+pd runtime internalization run-rulehost --pain-id <id> --confirm --workspace "<path>"
 ```
 
 ## Report a Problem

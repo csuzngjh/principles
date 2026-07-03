@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo-en.mp4">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/homepage-demo-en.mp4">
     <img src="https://img.shields.io/badge/▶_Watch_Demo-FF6B35?style=for-the-badge" alt="Watch Demo Video">
   </a>
 </p>
@@ -74,6 +74,22 @@ Install Principles Disciple if you want to:
 **Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All owner-approved behavior changes can be inspected, rolled back, or disabled by you.
 
 👉 **See human guide:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
+
+---
+
+## What You'll See
+
+A typical PD moment:
+
+> Your AI agent keeps forgetting to confirm scope before cross-module edits. After the third correction, PD surfaces: "Agent has skipped scope confirmation 3 times. Propose a principle?"
+>
+> You review the evidence, tweak the wording, approve it.
+>
+> Next time the agent faces a similar task, it proactively offers a change scope and verification plan.
+>
+> If the principle later causes side effects, roll it back anytime.
+
+Not AI magic — your judgment respected and enforced. Not a one-off fix — durable behavior change. Not black-box automation — transparent, reviewable governance.
 
 ---
 
@@ -153,7 +169,13 @@ Principles Console provides a local web UI for observing agent health and evolut
 After starting OpenClaw Gateway, open:
 
 ```text
-http://localhost:18789/plugins/principles/
+http://127.0.0.1:3100
+```
+
+Or launch it directly with the installer/CLI:
+
+```bash
+pd console open --workspace "<path>"
 ```
 
 The console can show:
@@ -274,7 +296,7 @@ A: Check `{stateDir}/logs/`:
 
 By transforming owner-relevant behavior evidence into reviewed principles, PD helps agents align with how you want work done.
 
-**[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Join Discord](https://discord.gg/)** | **[Documentation](docs/)**
+**[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Documentation](docs/)**
 
 ---
 

@@ -29,9 +29,8 @@ export interface UninstallResult {
   error?: string;
 }
 
-async function detectAndSetLanguage(): Promise<void> {
-  // Simple implementation - default to Chinese, can be improved later
-  setLanguage('zh');
+async function detectAndSetLanguage(lang?: string): Promise<void> {
+  setLanguage(lang === 'en' ? 'en' : 'zh');
 }
 
 /**
@@ -243,9 +242,10 @@ async function removeWithRetry(targetPath: string, _type: 'dir' | 'file'): Promi
 export async function uninstall(
   options: {
     force?: boolean;
+    lang?: string;
   } = {}
 ): Promise<UninstallResult> {
-  await detectAndSetLanguage();
+  await detectAndSetLanguage(options.lang);
 
   const result: UninstallResult = {
     success: false,
