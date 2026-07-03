@@ -15,6 +15,7 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import * as fs from 'fs';
 import { PDRuntimeError } from '../error-categories.js';
+import { guardWorkspaceLeak } from './workspace-leak-guard.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -49,7 +50,10 @@ export class SqliteConnection {
     const opts = typeof workspaceDirOrOpts === 'string'
       ? { workspaceDir: workspaceDirOrOpts }
       : workspaceDirOrOpts;
-    const pdDir = join(opts.workspaceDir, '.pd');
+    // Guard against mock-leak workspace paths (e.g. '/fake/workspace') that
+    // pollute filesystem root on Windows. See workspace-leak-guard.ts.
+    const workspaceDir = guardWorkspaceLeak(opts.workspaceDir);
+    const pdDir = join(workspaceDir, '.pd');
     this.readonlyMode = opts.readonly ?? false;
     if (!this.readonlyMode && !fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });

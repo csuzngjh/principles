@@ -13,6 +13,8 @@ const RENAME_BASE_DELAY_MS = 50;
 
 export function atomicWriteFileSync(filePath: string, data: string): void {
     const tmpPath = filePath + '.tmp';
+    // codeql[js/insecure-temporary-file] — same-directory temp file, not in shared os.tmpdir()
+    // (the '.tmp' suffix prevents partial-write corruption via atomic rename)
     fs.writeFileSync(tmpPath, data, 'utf8');
 
     let lastError: Error | undefined;

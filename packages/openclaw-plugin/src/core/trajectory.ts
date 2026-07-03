@@ -8,6 +8,7 @@ import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,
@@ -448,7 +449,9 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
  * @returns list of created/verified table names and any warnings
  */
 export function initTrajectorySchema(workspaceDir: string): { tables: string[]; warnings: string[] } {
-  const resolvedDir = path.resolve(workspaceDir);
+  // Guard against mock-leak workspace paths (e.g. '/mock/workspace') that
+  // pollute filesystem root on Windows. See workspace-leak-guard.ts.
+  const resolvedDir = guardWorkspaceLeak(path.resolve(workspaceDir));
   const stateDir = resolvePdPath(resolvedDir, 'STATE_DIR');
   const blobDir = resolvePdPath(resolvedDir, 'TRAJECTORY_BLOBS_DIR');
   const exportDir = resolvePdPath(resolvedDir, 'EXPORTS_DIR');
@@ -517,7 +520,9 @@ export class TrajectoryDatabase {
   private readonly db: Database.Database;
 
   constructor(opts: TrajectoryDatabaseOptions) {
-    this.workspaceDir = path.resolve(opts.workspaceDir);
+    // Guard against mock-leak workspace paths (e.g. '/mock/workspace') that
+    // pollute filesystem root on Windows. See workspace-leak-guard.ts.
+    this.workspaceDir = guardWorkspaceLeak(path.resolve(opts.workspaceDir));
     this.stateDir = resolvePdPath(this.workspaceDir, 'STATE_DIR');
     this.dbPath = resolvePdPath(this.workspaceDir, 'TRAJECTORY_DB');
     this.blobDir = resolvePdPath(this.workspaceDir, 'TRAJECTORY_BLOBS_DIR');
