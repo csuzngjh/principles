@@ -862,7 +862,7 @@ describe('Story A verification uses execFileSync, not shell (P1-1 fix)', () => {
   it('installer.ts does not use shell:cmd for story-a', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const startMarker = "updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...'";
+    const startMarker = "updateProgress(spinner, stepIndex, 'Verifying demo...'";
     const storyASection = content.substring(content.indexOf(startMarker), content.indexOf('verification.storyA'));
     expect(storyASection).not.toContain("shell: 'cmd'");
     expect(storyASection).not.toContain('execSync');

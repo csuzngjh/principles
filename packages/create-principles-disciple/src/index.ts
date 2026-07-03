@@ -215,8 +215,8 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       }
       console.log();
       console.log(t('verification'));
-      console.log(`  Feature flags .................. ${result.verification.features}`);
-      console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
+      console.log(`  Configuration .................. ${result.verification.features}`);
+      console.log(`  Demo verification .............. ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       // Fix-4: surface runtime profile status so the user knows whether LLM
       // features (diagnose, candidate intake, internalization) will work.
       if (installOptions.runtimeProfile) {
@@ -248,8 +248,8 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       }
       console.log();
       console.log(t('verification'));
-      console.log(`  Feature flags .................. ${result.verification.features}`);
-      console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
+      console.log(`  Configuration .................. ${result.verification.features}`);
+      console.log(`  Demo verification .............. ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       console.log();
       console.log(t('not_ready_for_release'));
       console.log(`${t('diagnostics')}: ${diagCmd}`);

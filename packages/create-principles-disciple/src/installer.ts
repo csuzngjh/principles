@@ -187,19 +187,19 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Installing bundled @principles/core', weight: 8 },
   { name: 'Installing core dependencies', weight: 10 },
   { name: 'Installing plugin', weight: 10 },
-  { name: 'Pre-filling @principles/core for plugin', weight: 3 },
+  { name: 'Preparing core library for plugin', weight: 3 },
   { name: 'Installing plugin dependencies', weight: 20 },
   { name: 'Installing pd CLI', weight: 8 },
-  { name: 'Pre-filling @principles/core for pd-cli', weight: 3 },
+  { name: 'Preparing core library for pd-cli', weight: 3 },
   { name: 'Verifying pd CLI', weight: 3 },
   { name: 'Installing pd-console', weight: 8 },
-  { name: 'Pre-filling @principles/core for console', weight: 3 },
+  { name: 'Preparing core library for console', weight: 3 },
   { name: 'Installing console dependencies', weight: 10 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
   { name: 'Generating config.yaml', weight: 2 },
   { name: 'Creating config', weight: 2 },
-  { name: 'Verifying pd demo story-a', weight: 5 },
+  { name: 'Verifying demo', weight: 5 },
   { name: 'Updating OpenClaw config', weight: 3 },
 ];
 
@@ -1194,7 +1194,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     await installPluginToStaging(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for plugin...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for plugin...');
     ensureCoreDependency(getPluginExtDir());
     stepIndex++;
 
@@ -1207,7 +1207,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     syncPdCli(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for pd-cli...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for pd-cli...');
     ensureCoreDependency(getInstalledPdCliDir());
     stepIndex++;
 
@@ -1229,7 +1229,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     installConsole(pluginDir);
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for console...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for console...');
     ensureCoreDependency(getInstalledConsoleDir());
     stepIndex++;
 
@@ -1287,7 +1287,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     }
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying demo...');
     try {
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
@@ -1296,7 +1296,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       });
       verification.storyA = 'passed';
     } catch (e) {
-      throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
+      throw new Error(`Demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
     }
     stepIndex++;
 
