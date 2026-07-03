@@ -712,6 +712,16 @@ describe('Bundle script required vs optional artifacts (Fix A)', () => {
     expect(content).toContain("'package.json'");
   });
 
+  it('plugin REQUIRED items include dist/bundle.js (PRI-505)', () => {
+    // PRI-505: PLUGIN_REQUIRED must explicitly check dist/bundle.js,
+    // aligning with PD_CLI_REQUIRED (dist/index.js) and CORE_REQUIRED
+    // (dist/index.js). If only `tsc` is run without esbuild, dist/ exists
+    // but bundle.js does not — the bundle script must fail rather than
+    // publish a broken plugin. ERR-040: Published artifact missing
+    // components that source-tree tests assume exist.
+    expect(content).toContain("'dist/bundle.js'");
+  });
+
   it('plugin OPTIONAL items include scripts, docs', () => {
     expect(content).toContain('PLUGIN_OPTIONAL');
     expect(content).toContain("'scripts'");
