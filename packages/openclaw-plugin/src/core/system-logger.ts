@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePdPath, PD_FILES } from './paths.js';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 
 /**
  * System Logger for Principles Disciple
@@ -85,8 +86,15 @@ export const SystemLogger = {
     log(workspaceDir: string | undefined, eventType: string, message: string): void {
         if (!workspaceDir) return;
 
+        // Guard against mock-leak workspace paths (e.g. '/fake/workspace') that
+        // pollute filesystem root on Windows. See workspace-leak-guard.ts.
+        const safeWorkspaceDir = guardWorkspaceLeak(workspaceDir);
+
         try {
-            const resolved = path.resolve(workspaceDir);
+            // PRI-504: per-workspace cache key uses path.resolve(safeWorkspaceDir)
+            // so mock-leak paths get distinct cache keys under tmpdir, while
+            // legitimate paths use their real resolved form.
+            const resolved = path.resolve(safeWorkspaceDir);
             const today = getTodayStr();
 
             // Check if date changed for THIS workspace - invalidate its cache and run cleanup
@@ -96,14 +104,14 @@ export const SystemLogger = {
                 // Run cleanup once per day per workspace when date changes
                 if (lastCleanupDates.get(resolved) !== today) {
                     lastCleanupDates.set(resolved, today);
-                    cleanupOldLogs(workspaceDir);
+                    cleanupOldLogs(safeWorkspaceDir);
                 }
             }
 
             // Get or create log file path for this workspace
             let logFile = cachedLogFiles.get(resolved);
             if (!logFile) {
-                logFile = getSystemLogPath(workspaceDir, new Date());
+                logFile = getSystemLogPath(safeWorkspaceDir, new Date());
                 cachedLogFiles.set(resolved, logFile);
                 const logDir = path.dirname(logFile);
                 if (!fs.existsSync(logDir)) {

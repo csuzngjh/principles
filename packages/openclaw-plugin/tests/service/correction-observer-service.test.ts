@@ -126,8 +126,10 @@ const mockDispatch = vi.fn().mockResolvedValue({
 
 const mockRegister = vi.fn();
 
-vi.mock('@principles/core/runtime-v2', () => {
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
   return {
+    ...actual,
     PiAiRuntimeAdapter: class {},
     CorrectionObserver: class {},
     AgentScheduler: class {

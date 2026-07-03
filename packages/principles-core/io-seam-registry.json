@@ -28,6 +28,13 @@
       ]
     },
     {
+      "name": "workspace-leak-guard",
+      "description": "Pure path-redirection helper that detects mock-leak workspace paths (e.g. '/fake/workspace', '/mock/state') used in test code and redirects them to a deterministic subdir under os.tmpdir(). Imports node:path for path joins and node:os for tmpdir(); performs no fs I/O itself. Called at every I/O entry point (SqliteConnection constructor, initTrajectorySchema, TrajectoryDatabase constructor, SystemLogger.log, EventLog constructor) to prevent Windows filesystem-root pollution.",
+      "files": [
+        "runtime-v2/store/workspace-leak-guard.ts"
+      ]
+    },
+    {
       "name": "cli-runtime-adapter",
       "description": "PDRuntimeAdapter implementation that spawns the openclaw CLI process, plus the child_process runner it depends on. Uses node:fs/promises for temp-dir scratch space, node:path for tmpdir joins, and child_process (spawn/execSync) to resolve and launch the CLI binary. Cannot live in plugin because core runners depend on the adapter interface.",
       "files": [

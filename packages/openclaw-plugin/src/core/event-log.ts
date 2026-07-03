@@ -1,6 +1,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 import type {
   EventLogEntry,
   EventType,
@@ -55,7 +56,10 @@ export class EventLog {
   // stats.pain.avgScore counter, which is also removed.
 
   constructor(stateDir: string, logger?: PluginLogger) {
-    this.logsDir = path.join(stateDir, 'logs');
+    // Guard against mock-leak state paths (e.g. '/fake/state') that pollute
+    // filesystem root on Windows. See workspace-leak-guard.ts.
+    const safeStateDir = guardWorkspaceLeak(stateDir);
+    this.logsDir = path.join(safeStateDir, 'logs');
     if (!fs.existsSync(this.logsDir)) {
       fs.mkdirSync(this.logsDir, { recursive: true });
     }
