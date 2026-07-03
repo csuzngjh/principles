@@ -1,0 +1,14 @@
+title = "PD Security Baseline gitleaks config"
+
+# Inherit gitleaks built-in rules. Without this, gitleaks runs with an empty
+# ruleset and the pre-push scan becomes a no-op (rc-9-no-silent-fallback).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist test fixtures and synthetic secrets"
+paths = [
+  '''packages/.*/__tests__/.*\.ts''',
+  '''packages/.*/src/.*/__tests__/.*\.ts''',
+  '''packages/.*/tests/.*\.ts''',
+]
