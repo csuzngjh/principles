@@ -82,8 +82,8 @@ CONSTRAINTS:
 - BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
 - input.action contains toolName, normalizedPath, and paramsSummary
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
-- goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block/propose_correction case
-- propose_correction cases MUST include expectedProposedParams and expectedApplicationMode (shadow or live)
+- goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
+- goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
 - affectedTools MUST contain the non-empty tool names the rule can match
 
 PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
@@ -107,7 +107,6 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
-- SEED RULE CONSTRAINT: goldenTraceCases expectedDecision MUST be only "allow" or "block". Do NOT emit "propose_correction", "requireApproval", or "auto_correct" — seed-user MVP only supports allow/block decisions; all other action types are rejected by the schema validator.
 - You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
 `;
 
