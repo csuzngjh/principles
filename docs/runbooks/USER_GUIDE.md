@@ -11,6 +11,17 @@ Principles Disciple now has two main responsibilities:
 
 You do not need to understand the full architecture to use it. Most people only need the commands below.
 
+### Principle Lifecycle
+
+Principles go through four statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `candidate` | Newly proposed, not yet reviewed |
+| `probation` | Under trial / shadow mode — active but monitored for side effects |
+| `active` | Officially in effect |
+| `archived` | Kept for history, not active |
+
 ## Daily Commands
 
 ### `/pd-status`
@@ -223,6 +234,10 @@ Use:
 ```
 
 That is enough for most day-to-day use.
+
+### “Some features seem disabled or missing”
+
+Some subsystems (such as `evolution_worker` and `correction_observer`) are **default OFF** by design (MVP-Quiet, ADR-0014). This is intentional — they are not broken. They will be enabled in a future release once seed-customer evidence justifies broader activation. You can verify which subsystems are enabled in your workspace's `.pd/config.yaml`.
 
 ## Console
 
