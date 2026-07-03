@@ -203,6 +203,17 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         
         if (suggestionText) {
             text += suggestionText;
+        } else if (stats.totalRules === 0 && stats.totalHits === 0) {
+            // Fix-14 (P1-DESIGN-2): Empty-state onboarding guidance for fresh installs.
+            // Merges Fix-13's welcome message here instead of injecting into the
+            // before_prompt_build hook (avoids MVP-Core behavior change).
+            text += `\n🦞 **欢迎使用 Principles Disciple!**\n\n`;
+            text += `当前是全新工作区，还没有痛觉信号 —— 这是正常的。\n\n`;
+            text += `**下一步**:\n`;
+            text += `1. 让 Agent 工作，当它犯错时运行 \`/pd-pain <描述问题>\`\n`;
+            text += `2. 或运行演示: \`pd demo story-a\`\n`;
+            text += `3. 配置 LLM runtime profile: \`pd console open --workspace "<path>"\`\n\n`;
+            text += `审批通过的原则会出现在这里。`;
         } else {
             text += `*💡 提示: 使用 \`/pd-status empathy\` 查看详细情绪事件统计。*`;
         }
@@ -220,6 +231,17 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         
         if (suggestionText) {
             text += suggestionText;
+        } else if (stats.totalRules === 0 && stats.totalHits === 0) {
+            // Fix-14 (P1-DESIGN-2): Empty-state onboarding guidance for fresh installs.
+            // Merges Fix-13's welcome message here instead of injecting into the
+            // before_prompt_build hook (avoids MVP-Core behavior change).
+            text += `\n🦞 **Welcome to Principles Disciple!**\n\n`;
+            text += `This is a fresh workspace with no pain signals yet — that's expected.\n\n`;
+            text += `**Next steps**:\n`;
+            text += `1. Let your agent work and run \`/pd-pain <description>\` when it makes a mistake\n`;
+            text += `2. Or run the demo: \`pd demo story-a\`\n`;
+            text += `3. Configure LLM runtime profile: \`pd console open --workspace "<path>"\`\n\n`;
+            text += `Approved principles will appear here once activated.`;
         } else {
             text += `*💡 Hint: Use \`/pd-status empathy\` to view detailed empathy event statistics.*`;
         }
