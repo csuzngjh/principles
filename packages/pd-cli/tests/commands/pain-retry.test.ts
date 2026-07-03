@@ -90,6 +90,23 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
+// BUG-1 (PRI-442): capture runner constructor args to verify effectiveConfig wiring
+const { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor } = vi.hoisted(() => {
+  const diagRootCauseRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  const diagDistillerRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  const diagRouterRunnerCtor = vi.fn().mockImplementation(function () { return {}; });
+  return { diagRootCauseRunnerCtor, diagDistillerRunnerCtor, diagRouterRunnerCtor };
+});
+
+vi.mock('../../src/services/pd-config-loader.js', () => ({
+  loadPdConfig: vi.fn().mockReturnValue({
+    ok: true,
+    effective: { config: { featureFlags: { diagnostician_llm_degradation: true } }, source: 'file', warnings: [] },
+    defaults: { config: {}, source: 'defaults', warnings: [] },
+  }),
+  computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
+}));
+
 vi.mock('@principles/core/runtime-v2', () => {
   return {
     RuntimeStateManager: vi.fn().mockImplementation(function () {
@@ -103,9 +120,9 @@ vi.mock('@principles/core/runtime-v2', () => {
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRootCauseRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagDistillerRunner: vi.fn().mockImplementation(function () { return {}; }),
-    DiagRouterRunner: vi.fn().mockImplementation(function () { return {}; }),
+    DiagRootCauseRunner: diagRootCauseRunnerCtor,
+    DiagDistillerRunner: diagDistillerRunnerCtor,
+    DiagRouterRunner: diagRouterRunnerCtor,
     DefaultDiagRootCauseValidator: vi.fn().mockImplementation(function () { return {}; }),
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -964,5 +981,54 @@ describe('Commander wiring for pd pain retry', () => {
     const { program, capturedOpts } = createPainRetryProgram();
     await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway']);
     expect(capturedOpts.openclawGateway).toBe(true);
+  });
+});
+
+// BUG-1 (PRI-442): effectiveConfig must be passed to split-pipeline runners
+// so that ADR-0019 LLM rate-limit degradation (isDegradationEnabled) can fire.
+// EP-02: production path wiring.
+describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeline runners', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockGetRunsByTask.mockResolvedValue([]);
+    mockIntake.mockReset();
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'diagnosis_test-pain-1',
+      runId: 'run-retry-1',
+      contextHash: 'abc123',
+    });
+  });
+
+  it('passes effectiveConfig to all three runners when split pipeline is enabled', async () => {
+    mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'test-pain-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    });
+
+    expect(diagRootCauseRunnerCtor).toHaveBeenCalled();
+    const rootOptions = diagRootCauseRunnerCtor.mock.calls[0]?.[1];
+    expect(rootOptions?.effectiveConfig).toBeDefined();
+    expect(rootOptions?.effectiveConfig).toEqual(
+      expect.objectContaining({ config: expect.anything(), source: 'file' }),
+    );
+
+    const distillerOptions = diagDistillerRunnerCtor.mock.calls[0]?.[1];
+    expect(distillerOptions?.effectiveConfig).toBeDefined();
+
+    const routerOptions = diagRouterRunnerCtor.mock.calls[0]?.[1];
+    expect(routerOptions?.effectiveConfig).toBeDefined();
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });
