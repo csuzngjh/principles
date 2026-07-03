@@ -90,6 +90,7 @@ function tryAcquireLock(lockPath: string, pid: number): boolean {
     
     // 使用底层的 openSync 实现真正的原子操作
     // 如果文件已存在，会抛出 EEXIST 错误
+    // codeql[js/insecure-temporary-file] — O_EXCL + lockPath alongside target, not in shared os.tmpdir()
     const fd = fs.openSync(lockPath, flags);
     
     // 写入 PID
