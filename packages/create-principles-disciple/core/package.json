@@ -1,6 +1,6 @@
 {
   "name": "@principles/core",
-  "version": "1.74.1",
+  "version": "1.75.1",
   "description": "Universal Evolution SDK - framework-agnostic pain signal capture and principle injection",
   "type": "module",
   "main": "./dist/index.js",
