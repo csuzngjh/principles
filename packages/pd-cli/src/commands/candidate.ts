@@ -21,14 +21,13 @@ import {
   decideInternalizationRoute,
   buildDreamerSeedFromCandidate,
   PrincipleTreeLedgerAdapter,
-  evaluateCandidateAdmissionFromRecord,
   type LedgerPrincipleEntry,
-  type AdmissionGateResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
+import { checkAdmissionGate } from './admission-gate.js';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -113,28 +112,6 @@ async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: 
   const now = new Date().toISOString();
   db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, candidateId);
   return now;
-}
-
-/**
- * Check admission gate for a candidate at CLI time. Returns the result if
- * the candidate is NOT admitted (caller should refuse); returns null if
- * the candidate IS admitted (caller may proceed).
- *
- * PRI-442 Stage 4: prevents CLI commands (intake/repair/backfill) from
- * bypassing the admission gate. Uses evaluateCandidateAdmissionFromRecord
- * which checks recommendationKind and confidence from the candidate record.
- *
- * Runtime Contract: rc-9-no-silent-fallback (refusal includes reason + nextAction)
- */
-function checkAdmissionGate(
-  candidate: { recommendationKind: string; confidence: number | null },
-): AdmissionGateResult | null {
-  const admission = evaluateCandidateAdmissionFromRecord({
-    recommendationKind: candidate.recommendationKind as Parameters<typeof evaluateCandidateAdmissionFromRecord>[0]['recommendationKind'],
-    confidence: candidate.confidence,
-  });
-  if (admission.decision === 'admitted') return null;
-  return admission;
 }
 
 interface ResolvedRecommendation {

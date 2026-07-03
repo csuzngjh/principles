@@ -133,3 +133,18 @@ describe('PRI-455: hidden commands still function (de-surface, not delete)', () 
     expect(output).toContain('--apply');
   });
 });
+
+describe('pd demo first-principle alias (Fix-24)', () => {
+  // cli-7-test-wiring: verify the alias resolves to the same command as story-a.
+  it('pd demo first-principle --help works and matches story-a', () => {
+    const aliasOutput = runPdHelp(['demo', 'first-principle', '--help']);
+    const storyAOutput = runPdHelp(['demo', 'story-a', '--help']);
+
+    // Both should show the same options
+    expect(aliasOutput).toContain('--workspace');
+    expect(aliasOutput).toContain('--json');
+    expect(aliasOutput).toContain('--channels');
+    // Alias output should be identical to story-a output
+    expect(aliasOutput).toBe(storyAOutput);
+  });
+});

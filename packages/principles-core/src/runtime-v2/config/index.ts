@@ -40,6 +40,7 @@ export type {
   ProjectFocusMode,
   EvolutionContextConfig,
   ContextInjectionConfig,
+  PartialContextInjectionConfig,
 } from './pd-config-types.js';
 
 export {

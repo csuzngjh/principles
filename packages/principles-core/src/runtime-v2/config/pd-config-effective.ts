@@ -14,6 +14,7 @@ import {
   type InternalAgentsConfig,
   type RuntimeProfile,
   type ContextInjectionConfig,
+  type PartialContextInjectionConfig,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
   DANGEROUS_KEYS,
@@ -30,7 +31,7 @@ import {
 import { resolveProfile } from './pd-profile-constants.js';
 
 function resolveContextInjection(
-  userPartial: Partial<ContextInjectionConfig> | undefined,
+  userPartial: PartialContextInjectionConfig | undefined,
 ): ContextInjectionConfig {
   if (!userPartial) return { ...DEFAULT_CONTEXT_INJECTION };
   return {

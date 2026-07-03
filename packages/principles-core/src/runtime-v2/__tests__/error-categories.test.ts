@@ -27,6 +27,7 @@ describe('PD_ERROR_CATEGORIES', () => {
       'lease_conflict',
       'lease_expired',
       'execution_failed',
+      'rate_limit',
       'timeout',
       'cancelled',
       'output_invalid',

@@ -97,7 +97,7 @@ registerPainRetryCommand(painCmd);
 
 painCmd
   .command('evidence')
-  .description('Show recent pain admission/trigger decisions (PEAT-B2)')
+  .description('Show recent TRIGGER_DECISION log entries — pain admission gate decisions only (PEAT-B2)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
   .option('--json', 'Output raw JSON')
@@ -454,6 +454,7 @@ const demoCmd = program
 
 demoCmd
   .command('story-a')
+  .alias('first-principle')
   .description('Run Story A\'s proven-channel demo (PRI-246) — full evidence→proposal→approval→activation→observation chain')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')

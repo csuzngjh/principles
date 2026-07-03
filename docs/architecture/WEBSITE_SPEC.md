@@ -1,5 +1,7 @@
 # Principles Disciple (PD) - Website & Blog Development Specification
 
+> **⚠️ ARCHIVED**: This spec is outdated and retained for historical reference only. The website implementation has diverged from this document. Do not use it as a build spec. Refer to the actual website source at `packages/website/` and `docs/product/PRODUCT_IDENTITY.md` for current product definitions.
+>
 > **Target Audience**: AI Coding Assistant / Frontend Engineer
 > **Role**: Execute this specification precisely to scaffold and deploy the official PD website using VitePress.
 

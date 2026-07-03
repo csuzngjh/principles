@@ -275,7 +275,7 @@ async function handleRunDemo(
         reason: `demo exited with code ${outcome.code}`,
         nextAction: stderrText.trim()
           ? `pd stderr: ${stderrText.trim()}`
-          : 'Run `pd demo story-a --json` manually for diagnostics.',
+          : 'Run `pd demo first-principle --json` manually for diagnostics.',
       });
       return;
     }
@@ -288,7 +288,7 @@ async function handleRunDemo(
         statusCode: 500,
         error: 'demo_invalid_stdout',
         reason: 'demo stdout did not match the expected JSON schema',
-        nextAction: 'Run `pd demo story-a --json` manually and inspect the output.',
+        nextAction: 'Run `pd demo first-principle --json` manually and inspect the output.',
       });
       return;
     }

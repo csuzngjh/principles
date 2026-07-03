@@ -32,6 +32,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { RunnerPhase } from './runner-phase.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import type {
   PeerRunnerOptions,
   ResolvedPeerRunnerOptions,
@@ -614,6 +615,43 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       };
     }
 
+    // ADR-0019: Rate-limit graceful degradation. When the diagnostician_llm_degradation
+    // feature flag is enabled AND the error is rate_limit, mark the task as failed with
+    // `rate_limit` errorCategory (not max_attempts_exceeded) + emit observable telemetry.
+    // rc-9 (no silent fallback): telemetry event carries nextAction.
+    if (ctx.errorCategory === 'rate_limit' && this.isDegradationEnabled()) {
+      try {
+        await this.stateManager.markTaskFailed(ctx.taskId, 'rate_limit', `LLM rate limit degraded: ${ctx.failureReason}`);
+      } catch (stateErr) {
+        this.emitEvent('mark_failed_error', ctx.taskId, {
+          errorCategory: 'storage_unavailable',
+          attemptCount: ctx.task.attemptCount,
+          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+        });
+        return {
+          status: 'failed',
+          taskId: ctx.taskId,
+          errorCategory: 'storage_unavailable',
+          failureReason: `State manager error: ${ctx.failureReason}`,
+          attemptCount: ctx.task.attemptCount,
+        };
+      }
+      this.emitEvent('diag_llm_rate_limit_degraded', ctx.taskId, {
+        errorCategory: 'rate_limit',
+        attemptCount: ctx.task.attemptCount,
+        failureReason: ctx.failureReason,
+        nextAction: 'Retry diagnosis manually with `pd pain retry` when rate limit clears, or enable fallback provider.',
+      });
+      this.phase = RunnerPhase.Failed;
+      return {
+        status: 'failed',
+        taskId: ctx.taskId,
+        errorCategory: 'rate_limit',
+        failureReason: `LLM rate limit degraded: ${ctx.failureReason}`,
+        attemptCount: ctx.task.attemptCount,
+      };
+    }
+
     // Retry policy check
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
@@ -709,5 +747,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * ADR-0019: Check if diagnostician LLM rate-limit degradation is enabled.
+   * Reads the `diagnostician_llm_degradation` feature flag from effectiveConfig.
+   * Returns false when effectiveConfig is not provided (legacy behavior).
+   */
+  protected isDegradationEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    const flags = computeFeatureFlagsFromConfig(effectiveConfig);
+    return isFeatureEnabled(flags, 'diagnostician_llm_degradation');
   }
 }

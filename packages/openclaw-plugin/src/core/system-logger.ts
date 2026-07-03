@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePdPath, PD_FILES } from './paths.js';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 
 /**
  * System Logger for Principles Disciple
@@ -13,9 +14,13 @@ import { resolvePdPath, PD_FILES } from './paths.js';
  * Old log files are automatically cleaned up based on retention policy.
  */
 
-// Cache for current log file path, invalidated when date changes
-let cachedLogFile: string | undefined;
-let cachedLogDate: string | undefined;
+// PRI-504: per-workspace caches keyed by path.resolve(workspaceDir).
+// Previously these were module-level `let` variables, so the first workspace
+// to call log() would pin the log file path for ALL subsequent workspaces in
+// the same process — causing cross-workspace log leakage (ERR-092).
+// Pattern follows evolution-engine.ts:551-577 (Map + path.resolve + dispose).
+const cachedLogFiles = new Map<string, string>();
+const cachedLogDates = new Map<string, string>();
 
 /**
  * Log retention: delete SYSTEM logs older than this many days.
@@ -72,31 +77,43 @@ function cleanupOldLogs(workspaceDir: string): void {
     }
 }
 
-// Track if cleanup has run today
-let lastCleanupDate: string | undefined;
+// PRI-504: per-workspace cleanup tracker (was module-level `let`).
+// Keyed by path.resolve(workspaceDir) so each workspace runs its own
+// daily cleanup independently.
+const lastCleanupDates = new Map<string, string>();
 
 export const SystemLogger = {
     log(workspaceDir: string | undefined, eventType: string, message: string): void {
         if (!workspaceDir) return;
 
+        // Guard against mock-leak workspace paths (e.g. '/fake/workspace') that
+        // pollute filesystem root on Windows. See workspace-leak-guard.ts.
+        const safeWorkspaceDir = guardWorkspaceLeak(workspaceDir);
+
         try {
+            // PRI-504: per-workspace cache key uses path.resolve(safeWorkspaceDir)
+            // so mock-leak paths get distinct cache keys under tmpdir, while
+            // legitimate paths use their real resolved form.
+            const resolved = path.resolve(safeWorkspaceDir);
             const today = getTodayStr();
 
-            // Check if date changed - invalidate cache and run cleanup
-            if (cachedLogDate !== today) {
-                cachedLogDate = today;
-                cachedLogFile = undefined;
-                // Run cleanup once per day when date changes
-                if (lastCleanupDate !== today) {
-                    lastCleanupDate = today;
-                    cleanupOldLogs(workspaceDir);
+            // Check if date changed for THIS workspace - invalidate its cache and run cleanup
+            if (cachedLogDates.get(resolved) !== today) {
+                cachedLogDates.set(resolved, today);
+                cachedLogFiles.delete(resolved);
+                // Run cleanup once per day per workspace when date changes
+                if (lastCleanupDates.get(resolved) !== today) {
+                    lastCleanupDates.set(resolved, today);
+                    cleanupOldLogs(safeWorkspaceDir);
                 }
             }
 
-            // Get or create log file path
-            if (!cachedLogFile) {
-                cachedLogFile = getSystemLogPath(workspaceDir, new Date());
-                const logDir = path.dirname(cachedLogFile);
+            // Get or create log file path for this workspace
+            let logFile = cachedLogFiles.get(resolved);
+            if (!logFile) {
+                logFile = getSystemLogPath(safeWorkspaceDir, new Date());
+                cachedLogFiles.set(resolved, logFile);
+                const logDir = path.dirname(logFile);
                 if (!fs.existsSync(logDir)) {
                     fs.mkdirSync(logDir, { recursive: true });
                 }
@@ -108,7 +125,7 @@ export const SystemLogger = {
             const logEntry = `[${timestamp}] [${eventType.padEnd(15)}] ${message}\n`;
 
             // Use fire-and-forget async append to prevent blocking
-            fs.appendFile(cachedLogFile, logEntry, 'utf8', (_err) => {
+            fs.appendFile(logFile, logEntry, 'utf8', (_err) => {
                 // Silently drop errors (e.g. disk full) to not crash the gateway
             });
         } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - silently fail if we can't setup the log
@@ -119,9 +136,36 @@ export const SystemLogger = {
     /**
      * Force refresh of the cached log file path.
      * Call this at midnight or when the date changes to ensure proper rotation.
+     *
+     * PRI-504: clears log-file and log-date caches for ALL workspaces (preserves
+     * the original "force refresh" semantics). Does NOT clear lastCleanupDates
+     * to avoid re-triggering cleanup for every workspace on the same day.
      */
     refreshCache(): void {
-        cachedLogDate = undefined;
-        cachedLogFile = undefined;
+        cachedLogFiles.clear();
+        cachedLogDates.clear();
     }
 };
+
+/**
+ * PRI-504: dispose the SystemLogger cache for a single workspace.
+ * Useful for tests and for workspace teardown in multi-workspace processes.
+ * Pattern follows evolution-engine.ts:564-570 (disposeEvolutionEngine).
+ */
+export function disposeSystemLogger(workspaceDir: string): void {
+    const resolved = path.resolve(workspaceDir);
+    cachedLogFiles.delete(resolved);
+    cachedLogDates.delete(resolved);
+    lastCleanupDates.delete(resolved);
+}
+
+/**
+ * PRI-504: dispose ALL SystemLogger caches. Call this in test afterEach
+ * hooks to prevent state leakage between tests. Pattern follows
+ * evolution-engine.ts:572-577 (disposeAllEvolutionEngines).
+ */
+export function disposeAllSystemLoggers(): void {
+    cachedLogFiles.clear();
+    cachedLogDates.clear();
+    lastCleanupDates.clear();
+}
