@@ -253,7 +253,7 @@ describe('ContextInjection config validation', () => {
     const raw = makeValidConfig();
     const ctxInj: Record<string, unknown> = { thinkingOs: true };
     Object.defineProperty(ctxInj, '__proto__', { value: { polluted: true }, enumerable: true });
-    raw.contextInjection = ctxInj as unknown as PdConfig['contextInjection'];
+    raw.contextInjection = ctxInj;
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected error');
