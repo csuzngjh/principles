@@ -40,6 +40,7 @@ import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
+import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
 
 function validateStalledThreshold(val: unknown): number | undefined {
@@ -467,6 +468,23 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
       for (const candidate of candidates) {
+        // PRI-503: admission gate check — refuse non-admitted candidates before
+        // intake, mirroring candidate.ts (intake/repair/backfill). Without this,
+        // `pd diagnose --intake` could bypass the gate and intake unreviewed
+        // candidates. cli-5-failure-no-mutation: refusal path does not call
+        // intake(), does not update candidate status, does not write ledger.
+        // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
+        const admissionBlock = checkAdmissionGate(candidate);
+        if (admissionBlock) {
+          intakeFailed = true;
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'intake_failed',
+            error: `Admission gate refused: ${admissionBlock.reason}`,
+            nextAction: admissionBlock.nextAction,
+          });
+          continue;
+        }
         try {
           const entry = await intakeService.intake(candidate.candidateId);
           if (candidate.status !== 'consumed') {
