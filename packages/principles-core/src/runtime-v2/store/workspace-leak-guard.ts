@@ -98,9 +98,14 @@ export function guardWorkspaceLeak(dir: string): string {
   // Deterministic redirect: same input → same output.
   // Strip drive colons and path separators so the result is a valid
   // single directory name on all platforms.
+  // NOTE: leading/trailing underscore trim is split into two separate
+  // regex calls (not `/^_+|_+$/g`) to avoid CodeQL ReDoS flag on
+  // alternation with `+` quantifier on uncontrolled input. Each call is
+  // linear and non-backtracking.
   const safeName = dir
     .replace(/[:*?"<>|]/g, '_')
     .replace(/[/\\]/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/^_+/, '')
+    .replace(/_+$/, '');
   return path.join(QUARANTINE_ROOT, safeName);
 }
