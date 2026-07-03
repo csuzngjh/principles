@@ -381,21 +381,37 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const featureFlags = computeFlagsFromLoadResult(configLoadResult);
     const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
     const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
+    // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
+    // degradation (isDegradationEnabled in base-peer-runner) can read the
+    // diagnostician_llm_degradation feature flag. Without this, the runners
+    // receive no effectiveConfig and degradation silently never fires.
+    // CR-1 (CodeRabbit P2, rc-9): warn when config load failed so the
+    // fallback to defaults is observable — no silent degradation.
+    if (!configLoadResult.ok) {
+      const errSummary = configLoadResult.errors
+        .map((e) => `${e.path}: ${e.reason}`)
+        .join('; ');
+      console.warn(
+        `[pd pain retry] .pd/config.yaml at ${configLoadResult.configPath} is malformed — falling back to default feature flags. Errors: ${errSummary}. Next action: ${configLoadResult.errors[0]?.nextAction ?? 'fix config errors and retry'}`,
+      );
+    }
+    const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
     let runner: DiagnosticianRunnerLike;
     if (isSplitPipeline) {
       const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
+      const perStageTimeoutMs = pipelineTimeoutMs / 3;
       const rootCauseRunner = new DiagRootCauseRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const distillerRunner = new DiagDistillerRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const routerRunner = new DiagRouterRunner(
         { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage },
+        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
 
       runner = new SplitDiagnosticianRunner({
@@ -404,7 +420,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         routerRunner,
         stateManager,
         committer,
-        perStageTimeoutMs: pipelineTimeoutMs / 3,
+        perStageTimeoutMs,
       });
     } else {
       runner = new DisabledDiagnosticianRunner();
