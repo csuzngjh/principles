@@ -25,8 +25,6 @@ All commands support **short aliases** for easier input:
 | `/pdb` | `/pd-bootstrap` | Scan environment tools |
 | `/pdr` | `/pd-research` | Research tools and capabilities |
 | `/pdt` | `/pd-thinking` | Manage thinking models |
-| `/pdd` | `/pd-daily` | Configure and send daily report |
-| `/pdg` | `/pd-grooming` | Workspace cleanup |
 | `/pdh` | `/pd-help` | Show command reference |
 
 | Command | Description |
