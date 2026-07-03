@@ -763,6 +763,15 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
+  // EP-06 regression guard (PR #1169): verify the web UI bundle exists BEFORE
+  // spawning the server. Without dist/web/index.html the server returns 404
+  // "Run npm run build:ui first" on every route — a fatal first-impression bug
+  // for new users. npm install --ignore-scripts can remove dist/ in edge cases.
+  const webIndex = path.join(consoleDest, 'dist', 'web', 'index.html');
+  if (!existsSync(webIndex)) {
+    return { ok: false, url: '', process: null, reason: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/. Re-run: npx create-principles-disciple' };
+  }
+
   // Build a shuffled port list to avoid retrying the same port
   const portRange: number[] = [];
   for (let p = CONSOLE_PORT_RANGE_MIN; p <= CONSOLE_PORT_RANGE_MAX; p++) portRange.push(p);
