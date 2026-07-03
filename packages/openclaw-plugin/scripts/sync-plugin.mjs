@@ -383,6 +383,18 @@ function buildPlugin() {
         process.exit(1);
     }
 
+    // Generate .d.ts declarations separately so a tsc failure on unrelated
+    // files does not invalidate the esbuild bundle. Matches install.mjs pattern.
+    console.log('📝 Generating TypeScript declaration files...');
+    try {
+        execSync('npx tsc --emitDeclarationOnly', {
+            cwd: SOURCE_DIR,
+            stdio: 'inherit'
+        });
+    } catch (error) {
+        console.warn('  ⚠️  Declaration generation failed (non-blocking):', error.message);
+    }
+
     verifyBundleContents();
 }
 

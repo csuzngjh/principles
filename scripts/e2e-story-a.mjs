@@ -109,7 +109,7 @@ if (OPENCLAW_CMD_PATH) {
  * Run `openclaw agent` via spawnSync, bypassing cmd.exe on Windows.
  * This avoids newline and quoting breakage in --message values.
  */
-function openclawAgent(args, timeoutMs) {
+function openclawAgent(args, timeoutMs, opts = {}) {
   const spawnArgs = process.platform === 'win32' && OPENCLAW_BIN !== 'openclaw'
     ? [OPENCLAW_BIN, 'agent', ...args]
     : ['agent', ...args];
@@ -121,6 +121,8 @@ function openclawAgent(args, timeoutMs) {
     timeout: timeoutMs,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
+    cwd: opts.cwd,
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
   });
 }
 
@@ -171,7 +173,7 @@ function phase0(trap, runId) {
 
   // Copy live workspace config if available
   const liveWs = 'D:\\.openclaw\\workspace';
-  const configFiles = ['.pd/feature-flags.yaml', '.state/workflows.yaml'];
+  const configFiles = ['.pd/feature-flags.yaml', '.pd/config.yaml', '.state/workflows.yaml'];
   for (const f of configFiles) {
     const src = join(liveWs, f);
     const dest = join(ws, f);
@@ -209,7 +211,7 @@ function phase1() {
 // ---------------------------------------------------------------------------
 
 function phase2(ws) {
-  const pdWs = OPENCLAW_WORKSPACE;
+  const pdWs = ws;
   const canary = shJson(pdCmd('runtime canary', pdWs));
   const integrity = shJson(pdCmd('runtime internalization integrity', pdWs));
   const queue = shJson(pdCmd('runtime internalization queue', pdWs));
@@ -236,18 +238,35 @@ function phase3(trap, runId, timeoutSec, ws, model) {
   // Use openclawAgent (spawnSync with args array) to avoid cmd.exe quoting/newline issues.
   // cmd.exe cannot handle newlines inside double-quoted --message values,
   // which causes the command to be truncated and the agent to receive a garbled prompt.
-  const args = ['--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json'];
+  const args = ['--session-key', sessionKey, '--message', prompt, '--timeout', String(timeoutSec), '--json', '--local'];
   if (model) args.push('--model', model);
 
-  const proc = openclawAgent(args, (timeoutSec + 30) * 1000);
+  const proc = openclawAgent(args, (timeoutSec + 30) * 1000, {
+    cwd: ws,
+    env: {
+      OPENCLAW_WORKSPACE: ws,
+      PD_WORKSPACE_DIR: ws,
+      PD_E2E_MODE: '1',
+    },
+  });
   const raw = (proc.stdout ?? '').trim();
+  console.log("DEBUG E2E CLI execution status:", proc.status);
+  console.log("DEBUG E2E CLI execution error:", proc.error);
+  if (proc.stderr) {
+    console.log("DEBUG E2E CLI execution stderr:", proc.stderr.trim());
+  }
 
   let result = null;
   try { result = JSON.parse(raw); } catch { /* non-JSON response */ }
+  console.log("DEBUG E2E CLI output result keys:", Object.keys(result || {}));
+  if (result?.result) {
+    console.log("DEBUG E2E CLI result.result keys:", Object.keys(result.result));
+    console.log("DEBUG E2E CLI result.result.toolSummary:", JSON.stringify(result.result.toolSummary));
+  }
 
-  // OpenClaw returns toolSummary as {calls, tools, failures} at result.meta.toolSummary.
+  // OpenClaw returns toolSummary as {calls, tools, failures} at result.result.meta.toolSummary.
   // Older code expected an array — handle both formats.
-  const rawSummary = result?.toolSummary ?? result?.meta?.toolSummary ?? null;
+  const rawSummary = result?.toolSummary ?? result?.meta?.toolSummary ?? result?.result?.toolSummary ?? result?.result?.meta?.toolSummary ?? null;
   let toolCalls = [];
   let failedTools = [];
 
@@ -293,10 +312,17 @@ function phase3b(trap, runId, ws, model, sessionKey) {
     log('3b', `Sending follow-up ${i + 1}/${trap.followUpMessages.length}: "${msg.slice(0, 60)}..."`);
 
     // Use openclawAgent to avoid cmd.exe quoting/newline issues on Windows
-    const args = ['--session-key', sessionKey, '--message', msg, '--timeout', '120', '--json'];
+    const args = ['--session-key', sessionKey, '--message', msg, '--timeout', '120', '--json', '--local'];
     if (model) args.push('--model', model);
 
-    const proc = openclawAgent(args, 150000);
+    const proc = openclawAgent(args, 150000, {
+      cwd: ws,
+      env: {
+        OPENCLAW_WORKSPACE: ws,
+        PD_WORKSPACE_DIR: ws,
+        PD_E2E_MODE: '1',
+      },
+    });
 
     const raw = (proc.stdout ?? '').trim();
 
@@ -321,7 +347,7 @@ function phase3b(trap, runId, ws, model, sessionKey) {
 // ---------------------------------------------------------------------------
 
 function phase4(ws, sessionKey, sinceTs) {
-  const pdWs = OPENCLAW_WORKSPACE;
+  const pdWs = ws;
   const queue = shJson(pdCmd('runtime internalization queue', pdWs));
 
   const today = new Date().toISOString().slice(0, 10);
@@ -409,7 +435,7 @@ function phase4(ws, sessionKey, sinceTs) {
 // ---------------------------------------------------------------------------
 
 function phase5(ws, sinceTs) {
-  const pdWs = OPENCLAW_WORKSPACE;
+  const pdWs = ws;
   const e2eWs = join(pdWs, 'e2e');
   const results = { tasks: [], candidates: [], integrity: null, canary: null, contentQuality: null };
 
