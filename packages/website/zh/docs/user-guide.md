@@ -151,8 +151,8 @@ PD 通过斜杠命令与 OpenClaw 集成。以下是 MVP 命令：
 | `/pd-archive-impl <id>` | 归档一个实现 |
 | `/pd-principle-rollback` | 将原则回滚到试用状态 |
 | `pd candidate list` | 列出原则候选(CLI) |
-| `pd candidate intake <id>` | 接纳一个候选(CLI) |
-| `pd activation approve <id>` | 批准候选进入激活状态(CLI) |
+| `pd candidate intake --candidate-id <id>` | 接纳一个候选(CLI) |
+| `pd activation approve --approval-id <id>` | 批准候选进入激活状态(CLI) |
 | `pd activation list` | 列出已激活的原则(CLI) |
 
 ## PD 命令行工具
@@ -190,7 +190,7 @@ Canary 运行 7 项检查，报告三种状态之一：
 pd console open --workspace "<你的工作区路径>"
 ```
 
-浏览器会自动打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。
+浏览器会自动打开本机地址(默认 `127.0.0.1:3100`;如果端口被占用,会自动尝试下一个本地端口)。
 
 ::: warning
 控制台默认绑定到 `127.0.0.1`（仅本机回环），其他机器无法访问。如果需要网络访问，请使用 `--host <ip>` 配合 `--token <密钥>`。

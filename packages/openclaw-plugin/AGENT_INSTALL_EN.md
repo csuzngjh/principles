@@ -12,7 +12,7 @@
 
 | File | Content | Risk |
 |------|---------|------|
-| `.principles/PRINCIPLES.md` | User's accumulated principles and lessons | 🔴 **Delete = Lose all experience** |
+| `.principles/THINKING_OS.md` | Current thinking OS / principle state | 🔴 **Delete = Lose current internalized state** |
 | `.principles/PROFILE.json` | User configuration and preferences | 🔴 Delete = Reset all settings |
 | `AGENTS.md` | Agent identity and memory | 🔴 Delete = Lose identity cognition |
 | `SOUL.md` | Agent core personality | 🔴 Delete = Lose personality |

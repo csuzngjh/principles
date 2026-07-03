@@ -51,19 +51,22 @@ async function promptRuntimeProfile(): Promise<RuntimeProfileInput | undefined> 
   if (providerChoice === '__skip__') return undefined;
 
   const apiKeyEnv = await input({
-    message: 'Enter API key environment variable name (e.g. OPENAI_API_KEY):',
+    message: 'Enter API key environment variable name (e.g. OPENAI_API_KEY), or "skip" to skip:',
     default: providerChoice === 'openai' ? 'OPENAI_API_KEY'
       : providerChoice === 'anthropic' ? 'ANTHROPIC_API_KEY'
       : providerChoice === 'deepseek' ? 'DEEPSEEK_API_KEY'
       : 'LLM_API_KEY',
     validate: (value) => {
-      if (!value.trim()) return 'Environment variable name cannot be empty (enter "skip" to skip)';
-      if (!/^[A-Z_][A-Z0-9_]*$/.test(value.trim())) {
-        return 'Must be a valid environment variable name (uppercase letters, digits, underscore; cannot start with a digit)';
+      const trimmed = value.trim();
+      if (!trimmed) return 'Environment variable name cannot be empty (enter "skip" to skip)';
+      if (trimmed.toLowerCase() === 'skip') return true;
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(trimmed)) {
+        return 'Must be a valid environment variable name (uppercase letters, digits, underscore; cannot start with a digit). Enter "skip" to skip.';
       }
       return true;
     },
   });
+  if (apiKeyEnv.trim().toLowerCase() === 'skip') return undefined;
 
   // Model is optional — sensible defaults exist per provider, user can override
   // via console later. We don't prompt for it to keep onboarding short.

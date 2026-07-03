@@ -12,7 +12,7 @@
 
 | 文件 | 内容 | 风险 |
 |------|------|------|
-| `.principles/PRINCIPLES.md` | 用户积累的原则和教训 | 🔴 **删除 = 丢失所有经验** |
+| `.principles/THINKING_OS.md` | 当前思维操作系统 / 原则状态 | 🔴 **删除 = 丢失当前内化状态** |
 | `.principles/PROFILE.json` | 用户配置和偏好 | 🔴 删除 = 重置所有设置 |
 | `AGENTS.md` | Agent 身份和记忆 | 🔴 删除 = 丢失身份认知 |
 | `SOUL.md` | Agent 核心人格 | 🔴 删除 = 丢失人格设定 |

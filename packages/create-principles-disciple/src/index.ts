@@ -22,8 +22,17 @@ const PLUGIN_DIR = path.resolve(__dirname, '..');
 
 // Fix-1 (P0-BUG-1): Read version from package.json instead of hardcoding.
 // EP-06 (Source of Truth): package.json is the canonical version source.
+// rc-2-no-as-bypass: validate the parsed JSON at runtime instead of `as` cast.
 const requireFromMeta = createRequire(import.meta.url);
-const { version: pkgVersion } = requireFromMeta('../package.json') as { version: string };
+const pkgJson: unknown = requireFromMeta('../package.json');
+if (typeof pkgJson !== 'object' || pkgJson === null) {
+  throw new Error('Invalid package.json: expected an object');
+}
+const pkgVersionValue = Object.hasOwn(pkgJson, 'version') ? Reflect.get(pkgJson, 'version') : undefined;
+if (typeof pkgVersionValue !== 'string' || pkgVersionValue.length === 0) {
+  throw new Error('Invalid package.json: "version" must be a non-empty string');
+}
+const pkgVersion = pkgVersionValue;
 
 async function runInstall(options: Record<string, unknown>): Promise<void> {
   const jsonMode = options.json === true;
@@ -125,16 +134,38 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   // CLI flags (--provider/--api-key-env/--model) or env vars
   // (PD_PROVIDER/PD_API_KEY_ENV/PD_MODEL). rc-9: when provider is given
   // without apiKeyEnv, fail loud instead of silently writing an unusable
-  // profile.
+  // profile. rc-3: validate provider allowlist and apiKeyEnv format before
+  // writing, reusing the same patterns as prompts.ts.
   if (nonInteractive) {
     const provider = typeof options.provider === 'string' ? options.provider : process.env.PD_PROVIDER;
     const apiKeyEnv = typeof options.apiKeyEnv === 'string' ? options.apiKeyEnv : process.env.PD_API_KEY_ENV;
     const model = typeof options.model === 'string' ? options.model : process.env.PD_MODEL;
     if (provider) {
+      const allowedProviders: readonly string[] = ['openai', 'anthropic', 'deepseek'];
+      if (!allowedProviders.includes(provider)) {
+        const msg = `--provider "${provider}" is not supported. Valid: openai, anthropic, deepseek.`;
+        if (jsonMode) {
+          console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+        } else {
+          logger.error(msg);
+        }
+        process.exit(1);
+        return;
+      }
       if (!apiKeyEnv) {
         const msg = `--provider "${provider}" given but --api-key-env is missing. Pass --api-key-env OPENAI_API_KEY (or set PD_API_KEY_ENV).`;
         if (jsonMode) {
           console.log(JSON.stringify(buildFailureOutput('runtime_profile_incomplete', msg), null, 2));
+        } else {
+          logger.error(msg);
+        }
+        process.exit(1);
+        return;
+      }
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(apiKeyEnv)) {
+        const msg = `--api-key-env "${apiKeyEnv}" is not a valid environment variable name (uppercase letters, digits, underscore; cannot start with a digit).`;
+        if (jsonMode) {
+          console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
         } else {
           logger.error(msg);
         }
@@ -267,7 +298,15 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 }
 
 async function runUninstall(options: Record<string, unknown>): Promise<void> {
-  setLanguage(options.lang === 'en' ? 'en' : 'zh');
+  // rc-3-fail-loud: validate --lang the same way runInstall does, instead of
+  // silently defaulting any non-'en' value to 'zh'.
+  if (!isLanguage(options.lang)) {
+    logger.error(`--lang must be 'zh' or 'en', got: ${JSON.stringify(options.lang)}`);
+    logger.info(`Next: re-run with --lang zh or --lang en`);
+    process.exit(1);
+    return;
+  }
+  setLanguage(options.lang);
   console.log(banner);
   console.log();
 
@@ -275,7 +314,7 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
 
   const result = await uninstall({
     force: options.force === true,
-    lang: typeof options.lang === 'string' ? options.lang : undefined,
+    lang: options.lang,
   });
 
   if (!result.success) {
@@ -286,7 +325,14 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
 }
 
 async function showStatus(options: Record<string, unknown>): Promise<void> {
-  setLanguage(options.lang === 'en' ? 'en' : 'zh');
+  // rc-3-fail-loud: validate --lang the same way runInstall does.
+  if (!isLanguage(options.lang)) {
+    logger.error(`--lang must be 'zh' or 'en', got: ${JSON.stringify(options.lang)}`);
+    logger.info(`Next: re-run with --lang zh or --lang en`);
+    process.exit(1);
+    return;
+  }
+  setLanguage(options.lang);
   console.log(banner);
   console.log();
 

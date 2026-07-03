@@ -11,7 +11,7 @@
 作为智能体，你不需要交互式问答。使用以下命令直接安装：
 
 ```bash
-# 标准安装（中文，智能合并模式，使用默认 runtime profile —— 由 owner 后续在控制台补全）
+# 标准安装（中文；首装默认 `force` 覆盖，更新时自动 `smart` 合并。runtime profile 先留空，后续在控制台补全）
 npx create-principles-disciple --yes
 
 # 完整参数示例（含 LLM runtime profile，使 diagnose / candidate / internalization 立即可用）

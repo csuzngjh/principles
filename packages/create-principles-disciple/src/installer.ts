@@ -1076,6 +1076,17 @@ async function generateConfigYamlConfig(
       validateConfigYamlFull(workspaceDir);
       // Existing config is structurally valid — preserve it
       logger.info(`Existing .pd/config.yaml is valid, preserving it`);
+      // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via
+      // --provider/--api-key-env but an existing valid config.yaml was found,
+      // the profile is NOT written. Emit a clear warning so the user knows
+      // their --provider/--api-key-env flags were ignored and how to update
+      // the profile manually.
+      if (runtimeProfile) {
+        logger.warn(
+          `--provider/--api-key-env were provided but an existing valid .pd/config.yaml was found. ` +
+          `The runtime profile was not written. To update it, edit .pd/config.yaml or run: pd console open --workspace "${workspaceDir}"`,
+        );
+      }
       return configPath;
     } catch (e) {
       // Existing config is malformed — fail loud, do not overwrite

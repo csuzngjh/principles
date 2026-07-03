@@ -151,8 +151,8 @@ PD integrates with OpenClaw through slash commands. Here are the MVP commands:
 | `/pd-archive-impl <id>` | Archive an implementation |
 | `/pd-principle-rollback` | Roll back a principle to probation |
 | `pd candidate list` | List principle candidates (CLI) |
-| `pd candidate intake <id>` | Intake a candidate (CLI) |
-| `pd activation approve <id>` | Approve a candidate for activation (CLI) |
+| `pd candidate intake --candidate-id <id>` | Intake a candidate (CLI) |
+| `pd activation approve --approval-id <id>` | Approve a candidate for activation (CLI) |
 | `pd activation list` | List active principles (CLI) |
 
 ## The PD CLI
