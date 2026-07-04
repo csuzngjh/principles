@@ -17,6 +17,54 @@ MANIFEST_PATH="$SNAPSHOT_DIR/manifest.json"
 
 mkdir -p "$SNAPSHOT_DIR"
 
+# ── Cross-platform stat / date / find ─────────────────────────────────────────
+# GNU (Linux) and BSD (macOS) have incompatible flags for stat/date/find.
+# Detect once, branch per call.
+case "$(uname -s)" in
+  Darwin*) OS_FLAVOR="bsd" ;;
+  *)        OS_FLAVOR="gnu" ;;
+esac
+
+# get_size <path> → file size in bytes
+get_size() {
+  if [[ "$OS_FLAVOR" == "bsd" ]]; then
+    stat -f %z "$1"
+  else
+    stat -c %s "$1"
+  fi
+}
+
+# get_mtime_epoch <path> → epoch seconds
+get_mtime_epoch() {
+  if [[ "$OS_FLAVOR" == "bsd" ]]; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
+}
+
+# format_mtime_iso <epoch_seconds> → ISO-8601 UTC
+format_mtime_iso() {
+  if [[ "$OS_FLAVOR" == "bsd" ]]; then
+    date -u -r "$1" +"%Y-%m-%dT%H:%M:%SZ"
+  else
+    date -u -d "@$1" +"%Y-%m-%dT%H:%M:%SZ"
+  fi
+}
+
+# list_recent_sessions <dir> <limit> → prints "<path>\n" sorted by mtime desc
+list_recent_sessions() {
+  local dir="$1" limit="$2"
+  if [[ "$OS_FLAVOR" == "bsd" ]]; then
+    # BSD find lacks -printf; use stat -f to get mtime, sort, head, then strip prefix
+    find "$dir" -maxdepth 1 -type f -name '*.json' -exec stat -f '%m %N' {} + \
+      | sort -nr | head -n "$limit" | cut -d' ' -f2-
+  else
+    find "$dir" -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' \
+      | sort -nr | head -n "$limit" | cut -d' ' -f2-
+  fi
+}
+
 MANIFEST_ENTRIES=()
 
 if command -v python3 >/dev/null 2>&1; then
@@ -42,8 +90,8 @@ append_manifest_entry() {
   if [[ -e "$source_path" ]]; then
     local size
     local mtime
-    size="$(stat -c %s "$source_path")"
-    mtime="$(date -u -d "@$(stat -c %Y "$source_path")" +"%Y-%m-%dT%H:%M:%SZ")"
+    size="$(get_size "$source_path")"
+    mtime="$(format_mtime_iso "$(get_mtime_epoch "$source_path")")"
     MANIFEST_ENTRIES+=("{\"relativePath\":$(json_escape "$relative_target"),\"sourcePath\":$(json_escape "$source_path"),\"exists\":true,\"length\":$size,\"lastWriteTime\":$(json_escape "$mtime")}")
   else
     MANIFEST_ENTRIES+=("{\"relativePath\":$(json_escape "$relative_target"),\"sourcePath\":$(json_escape "$source_path"),\"exists\":false,\"length\":null,\"lastWriteTime\":null}")
@@ -75,7 +123,7 @@ SESSIONS_DIR="$STATE_DIR/sessions"
 if [[ -d "$SESSIONS_DIR" ]]; then
   while IFS= read -r session_file; do
     copy_if_exists "$session_file" ".state/sessions/$(basename "$session_file")"
-  done < <(find "$SESSIONS_DIR" -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -nr | head -n "$SESSION_LIMIT" | awk '{ $1=""; sub(/^ /, ""); print }')
+  done < <(list_recent_sessions "$SESSIONS_DIR" "$SESSION_LIMIT")
 fi
 
 cat > "$SNAPSHOT_DIR/review-template.md" <<EOF
