@@ -1,5 +1,5 @@
 {
-  "name": "@csuzngjh/principles-disciple",
+  "name": "principles-disciple",
   "version": "1.74.1",
   "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
   "type": "module",

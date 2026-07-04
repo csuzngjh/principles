@@ -325,7 +325,7 @@ runtimeCmd
   });
 
 // pd runtime init — Initialize all PD SQLite databases for a workspace.
-// Lazy import: avoids loading `@csuzngjh/principles-disciple` at module init time, which
+// Lazy import: avoids loading `principles-disciple` at module init time, which
 // would crash `pd --version` in packaged installs where the plugin's transitive
 // deps are not resolvable from pd-cli's node_modules. The import only executes
 // when `pd runtime init` is actually invoked.

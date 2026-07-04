@@ -35,7 +35,7 @@ const mockState = vi.hoisted(() => {
   };
 });
 
-vi.mock('@csuzngjh/principles-disciple', () => ({
+vi.mock('principles-disciple', () => ({
   initTrajectorySchema: mockState.initTrajectorySchema,
   initWorkflowSchema: mockState.initWorkflowSchema,
 }));
