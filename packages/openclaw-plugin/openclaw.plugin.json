@@ -1,7 +1,7 @@
 {
   "id": "principles-disciple",
   "name": "Principles Disciple",
-  "description": "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
+  "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
   "version": "1.74.1",
   "activation": {
     "onCapabilities": [

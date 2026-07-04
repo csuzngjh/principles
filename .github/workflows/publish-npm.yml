@@ -320,6 +320,8 @@ jobs:
       - name: Publish to npm
         working-directory: packages/${{ matrix.pkg_dir }}
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create Git tag and push
         if: matrix.pkg_dir == 'openclaw-plugin'
