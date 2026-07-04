@@ -805,7 +805,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 91 |
 | Last updated | 2026-07-04 |
 | Top category | Schema & Type |
-| Recurring errors | 43 |
+| Recurring errors | 44 |
 
 ---
 
@@ -1398,6 +1398,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — same "incomplete coverage" root cause, call-site flavor (not failure branches):
   - 2026-06-30 PR #1132: When merging two scattered detectSync call sites (correction segment + empathy segment) into a unified SignalCollectorHost, the empathy-segment call was left in place. Both fired for the same `trigger==='user'` message → double `user_turns` write + double STRONG rate-limit consumption. Fix: removed the redundant call; added `toHaveBeenCalledTimes(1)` regression test. Lesson: when consolidating N call sites into 1, grep for ALL old call sites and remove every one — the new unified call doesn't "replace" them implicitly.
   - 2026-07-03 PRI-503 / PR #1164 review: PR #1134 fixed Bug-H (admission gate bypass) by adding `checkAdmissionGate` to 3 call sites in `candidate.ts`, but missed 2 sibling commands (`pain-retry.ts:469` and `diagnose.ts:471`) that also call `intakeService.intake()` without the gate. Fix: extracted `checkAdmissionGate` to a shared helper `admission-gate.ts` and applied it to both sibling commands. Lesson: when fixing a gate/check validation in one CLI command, grep ALL commands that call the same downstream API (`intakeService.intake`) and apply the gate to every call site.
+  - 2026-07-04 PRI-442 / PR #1180 review: A-09 fix added rc-9 observability to `evaluatePainAdmissionForToolCall`'s early-return branch `if (!allowedTools.includes(toolName) || !outcome.isFailure)`. The implementer only considered the **failure sub-case** (non-write tool fails) and placed a `console.warn` at the top of the branch — but the boolean OR also makes the branch true for the **success sub-case** (any successful tool call, `!outcome.isFailure`). Result: the warn fired on every successful tool call (the happy path), the opposite of intended observability. Code-quality review caught 3 sibling issues: (1) P1 happy-path noise (warn fired on every success), (2) P2 wrong channel (`console.warn` instead of the established `SystemLogger.log` used 70 lines below at TRIGGER_DECISION and throughout `pain.ts`'s PAIN_* family), (3) P2 test only had a positive assertion for the failure case, missing a negative assertion that the success path stays silent. Fix: narrowed the log to `if (outcome.isFailure)`, switched to `SystemLogger.log(workspaceDir, 'PAIN_ADMISSION_SKIPPED', ...)`, added Case B/C negative assertion. Lesson: when adding observability/guard logic inside a boolean-OR early-return, enumerate every sub-case that makes the condition true (`!A || !B` is true when `!A` OR when `!B` OR both) and verify the intended behavior for EACH — a log that's correct for the failure sub-case may be wrong noise for the success sub-case. Also: before choosing an observability channel, grep the surrounding file + sibling files for the established pattern (here: `SystemLogger.log`, not `console.warn`).
 
 ---
 
