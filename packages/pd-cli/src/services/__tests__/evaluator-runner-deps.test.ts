@@ -39,10 +39,9 @@ import type { RuntimeStateManager, TaskRecord } from '@principles/core/runtime-v
 // ─── Test workspace helpers ────────────────────────────────────────────────
 
 function createTempWorkspace(featureFlagEnabled: boolean | null): string {
-  const tmpDir = path.join(
-    os.tmpdir(),
-    `pd-pri-510-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  );
+  // CodeQL: use mkdtempSync for atomic, unpredictable temp dir creation
+  // (avoids path-prediction risk from Date.now() + Math.random()).
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri-510-'));
   const pdDir = path.join(tmpDir, '.pd');
   fs.mkdirSync(pdDir, { recursive: true });
   // When featureFlagEnabled is null, write a config WITHOUT the
@@ -206,10 +205,8 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
   });
 
   it('malformed config → isRepairLoopEnabled() returns false (rc-9: fail safe, not throw)', () => {
-    const tmpDir = path.join(
-      os.tmpdir(),
-      `pd-pri-510-malformed-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    );
+    // CodeQL: use mkdtempSync for atomic, unpredictable temp dir creation.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri-510-malformed-'));
     tmpWorkspaces.push(tmpDir);
     const pdDir = path.join(tmpDir, '.pd');
     fs.mkdirSync(pdDir, { recursive: true });
