@@ -601,15 +601,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         { runId, output, context },
       );
       if (repairOutcome.kind === 'max_iterations_reached') {
-        // Fail loud: mark task needs_human_review + emit observable event.
-        // Skip markTaskSucceeded — the task is NOT succeeded, it needs review.
+        // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
+        // so it does NOT stay in 'leased' state (which would cause the lease
+        // to expire and the evaluator to re-run the same verdict infinitely).
+        //
+        // The runner result remains 'succeeded' — the evaluator produced a
+        // valid verdict; the *task status* reflects that human review is
+        // required, not that the runner failed.
         const resultRef = `${this.config.resultRefPrefix}://${runId}`;
-        this.emitEvent('task_succeeded', taskId, {
+        try {
+          await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+        } catch (stateErr) {
+          // Surface the state-update failure observably (rc-9 — never silent).
+          this.emitEvent('repair_loop_mark_review_failed', taskId, {
+            runId,
+            errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+            nextAction: 'manual_intervention_required',
+          });
+        }
+        this.emitEvent('task_needs_human_review', taskId, {
           attemptCount: task.attemptCount,
           resultRef,
           evaluationDecision: finalOutput.evaluation.decision,
           evaluationScore: finalOutput.evaluation.score,
           ruleArtifactId: null,
+          reason: 'repair_loop_max_iterations_or_seed_failure',
         });
         return {
           status: 'succeeded',
@@ -716,19 +732,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     // ── Slice 5: max iterations (2) reached → fail loud ──
     if (priorRepairIteration >= 2) {
-      try {
-        await this.stateManager.updateTask(evaluatorTaskId, {
-          status: 'needs_human_review',
-        });
-      } catch (updateErr) {
-        // Surface the failure via telemetry — do not silently swallow (rc-9).
-        this.emitEvent('repair_loop_mark_review_failed', evaluatorTaskId, {
-          runId: evaluatorRunId,
-          errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
-          priorRepairIteration,
-        });
-      }
-      // Observable event: structured reason + nextAction (rc-9, EP-03, ERR-002).
+      // Task state update (→ needs_human_review) is handled by the caller
+      // uniformly for all max_iterations_reached paths (rc-9: no silent
+      // fallback; task must not be left in 'leased' state).
       this.emitEvent('repair_loop_max_iterations', evaluatorTaskId, {
         reason: 'max_repair_iterations_exceeded',
         nextAction: 'owner_manual_review_required',

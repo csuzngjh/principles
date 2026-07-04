@@ -229,6 +229,11 @@ function createMockDeps(overrides: {
   evaluatorOutput?: EvaluatorOutputV1;
   isRepairLoopEnabled?: () => boolean;
   seedArtificerRepairTask?: (params: SeedArtificerRepairParams) => Promise<string>;
+  /**
+   * When true AND isRepairLoopEnabled is provided, the deps will NOT inject
+   * seedArtificerRepairTask — used to test the "seeder missing" fail-loud path.
+   */
+  omitSeeder?: boolean;
   artifactStore?: PIArtifactStore;
 }): {
   deps: EvaluatorRunnerDeps;
@@ -309,6 +314,12 @@ function createMockDeps(overrides: {
     ? vi.fn(overrides.seedArtificerRepairTask)
     : defaultSeedArtificerRepairTask;
 
+  // When omitSeeder is true, do NOT inject seedArtificerRepairTask even if
+  // isRepairLoopEnabled is provided — simulates a plugin-layer wiring bug
+  // where the flag is on but the seeder was never injected.
+  const shouldInjectSeeder = overrides.isRepairLoopEnabled !== undefined
+    && overrides.omitSeeder !== true;
+
   const deps: EvaluatorRunnerDeps = {
     stateManager,
     runtimeAdapter,
@@ -318,7 +329,7 @@ function createMockDeps(overrides: {
     ...(overrides.isRepairLoopEnabled !== undefined
       ? { isRepairLoopEnabled: overrides.isRepairLoopEnabled }
       : {}),
-    ...(overrides.isRepairLoopEnabled !== undefined
+    ...(shouldInjectSeeder
       ? { seedArtificerRepairTask: seederMock }
       : {}),
   };
@@ -327,7 +338,7 @@ function createMockDeps(overrides: {
     deps,
     stateManager,
     artifactStore,
-    seedArtificerRepairTask: overrides.isRepairLoopEnabled !== undefined
+    seedArtificerRepairTask: shouldInjectSeeder
       ? seederMock
       : null,
   };
@@ -542,6 +553,120 @@ describe('PRI-509: Evaluator→Artificer Repair Loop (Slice 4 + 5)', () => {
         EVALUATOR_TASK_ID,
         expect.objectContaining({ status: 'needs_human_review' }),
       );
+    });
+  });
+
+  // ── Regression: all max_iterations_reached paths must mark needs_human_review ──
+  //
+  // P1 bug fix: previously only the `priorRepairIteration >= 2` path called
+  // stateManager.updateTask; the other 3 paths (lineage missing, seeder missing,
+  // seeder throws) returned max_iterations_reached WITHOUT updating task state,
+  // leaving the task in 'leased' state → lease expiry → infinite re-evaluation.
+  //
+  // The fix unifies the updateTask call in the caller for ALL max_iterations_reached
+  // returns. These tests verify the 2 reachable degraded paths.
+  //
+  // Note: the lineage-missing path (sourceArtificerArtifactId unresolved) is
+  // defensively unreachable through normal flow — the validator requires
+  // sourceArtificerArtifactId to be a non-empty string, so output rejected by
+  // validation never reaches maybeSeedArtificerRepair. The defensive check
+  // remains in place for defense-in-depth.
+
+  describe('Regression: max_iterations_reached paths mark needs_human_review (P1 fix)', () => {
+    it('seeder not injected despite flag enabled → mark needs_human_review', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        omitSeeder: true, // simulate plugin-layer wiring bug: flag on, seeder missing
+        artificerTask: makeArtificerTask(), // priorRepairIteration = 0 (no payload)
+        evaluatorOutput: makeNeedsRevisionOutput(),
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      // No seeder was injected → no seeding happened
+      expect(seedArtificerRepairTask).toBeNull();
+
+      // P1 fix: task must be marked needs_human_review (not left in 'leased')
+      expect(stateManager.updateTask).toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+
+      // Observable event emitted (rc-9 — no silent fallback)
+      const eventEmitter = deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> };
+      const telemetryCalls = eventEmitter.emitTelemetry.mock.calls;
+      const seederMissingCall = telemetryCalls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_repair_loop_seeder_missing',
+      );
+      expect(seederMissingCall).toBeDefined();
+
+      // task_needs_human_review event also emitted (caller's fail-loud signal)
+      const reviewCall = telemetryCalls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_task_needs_human_review',
+      );
+      expect(reviewCall).toBeDefined();
+    });
+
+    it('seeder throws → mark needs_human_review (no silent swallow)', async () => {
+      const store = new MemoryPIArtifactStore();
+      await seedArtifacts(store);
+      const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+        artifactStore: store,
+        isRepairLoopEnabled: () => true,
+        seedArtificerRepairTask: async () => {
+          throw new Error('plugin-layer seed failed: store unavailable');
+        },
+        artificerTask: makeArtificerTask(), // priorRepairIteration = 0 (no payload)
+        evaluatorOutput: makeNeedsRevisionOutput(),
+      });
+
+      const runner = new EvaluatorRunner(deps, {
+        owner: 'test',
+        runtimeKind: 'evaluator',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      });
+
+      const result = await runner.run(EVALUATOR_TASK_ID);
+      expect(result.status).toBe('succeeded');
+
+      // Seeder was invoked but threw
+      expect(seedArtificerRepairTask).not.toBeNull();
+      expect(seedArtificerRepairTask).toHaveBeenCalledTimes(1);
+
+      // P1 fix: task must be marked needs_human_review (not left in 'leased')
+      expect(stateManager.updateTask).toHaveBeenCalledWith(
+        EVALUATOR_TASK_ID,
+        expect.objectContaining({ status: 'needs_human_review' }),
+      );
+
+      // Observable events emitted: seed failure + needs_human_review
+      const eventEmitter = deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> };
+      const telemetryCalls = eventEmitter.emitTelemetry.mock.calls;
+      const seedFailedCall = telemetryCalls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_repair_task_seed_failed',
+      );
+      expect(seedFailedCall).toBeDefined();
+
+      const reviewCall = telemetryCalls.find(
+        (call: readonly unknown[]) => typeof call[0] === 'object' && call[0] !== null
+          && (call[0] as Record<string, unknown>).eventType === 'evaluator_task_needs_human_review',
+      );
+      expect(reviewCall).toBeDefined();
     });
   });
 });
