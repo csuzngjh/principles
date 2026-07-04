@@ -18,6 +18,11 @@ vi.mock('child_process', () => ({
 const { handleRuntimeUat } = await import('./runtime-uat.js');
 const { guardUatWorkspace } = await import('../utils/production-workspace-guard.js');
 
+// ─── Cross-platform production workspace path ─────────────────────────────────
+// Mirrors the default in production-workspace-guard.ts: ~/.openclaw/workspace.
+// Using this instead of hardcoded "D:\..." paths ensures tests work on Linux/macOS CI.
+const PROD_WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
+
 // ─── Test Setup ─────────────────────────────────────────────────────────────
 const capturedStderr: string[] = [];
 const capturedStdout: string[] = [];
@@ -53,23 +58,16 @@ beforeEach(() => {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 describe('PRI-334: production workspace refusal', () => {
-  it('refuses D: workspace with exit code 1', async () => {
+  it('refuses default production workspace with exit code 1', async () => {
     mockExecFileSync.mockClear();
-    await handleRuntimeUat({ workspace: 'D:\\.openclaw\\workspace', count: 1 });
+    await handleRuntimeUat({ workspace: PROD_WORKSPACE, count: 1 });
     expect(capturedExitCode).toBe(1);
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
-  it('refuses C: workspace with exit code 1', async () => {
+  it('refuses production workspace subdirectory with exit code 1', async () => {
     mockExecFileSync.mockClear();
-    await handleRuntimeUat({ workspace: 'C:\\.openclaw\\workspace', count: 1 });
-    expect(capturedExitCode).toBe(1);
-    expect(mockExecFileSync).not.toHaveBeenCalled();
-  });
-
-  it('refuses production workspace subdirectory', async () => {
-    mockExecFileSync.mockClear();
-    await handleRuntimeUat({ workspace: 'D:\\.openclaw\\workspace\\sub\\path', count: 1 });
+    await handleRuntimeUat({ workspace: path.join(PROD_WORKSPACE, 'sub', 'path'), count: 1 });
     expect(capturedExitCode).toBe(1);
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
@@ -82,11 +80,11 @@ describe('PRI-334: allowed paths (guard level)', () => {
   });
 
   it('allows workspace-test sibling (ERR-030)', () => {
-    expect(guardUatWorkspace('D:\\.openclaw\\workspace-test', 'test').refused).toBe(false);
+    expect(guardUatWorkspace(path.join(os.homedir(), '.openclaw', 'workspace-test'), 'test').refused).toBe(false);
   });
 
   it('allows workspace-backup sibling (ERR-030)', () => {
-    expect(guardUatWorkspace('D:\\.openclaw\\workspace-backup', 'test').refused).toBe(false);
+    expect(guardUatWorkspace(path.join(os.homedir(), '.openclaw', 'workspace-backup'), 'test').refused).toBe(false);
   });
 });
 
@@ -94,7 +92,7 @@ describe('PRI-334: JSON output (EP-04)', () => {
   it('outputs single JSON object with reason and nextAction', async () => {
     mockExecFileSync.mockClear();
     capturedStdout.length = 0;
-    await handleRuntimeUat({ workspace: 'D:\\.openclaw\\workspace', count: 1, json: true });
+    await handleRuntimeUat({ workspace: PROD_WORKSPACE, count: 1, json: true });
     expect(capturedExitCode).toBe(1);
     expect(mockExecFileSync).not.toHaveBeenCalled();
 
@@ -115,7 +113,7 @@ describe('PRI-334: escape hatch', () => {
     capturedStderr.length = 0;
     capturedExitCode = null;
 
-    await handleRuntimeUat({ workspace: 'D:\\.openclaw\\workspace', count: 1, allowProductionWorkspaceForUat: true });
+    await handleRuntimeUat({ workspace: PROD_WORKSPACE, count: 1, allowProductionWorkspaceForUat: true });
     const stderrText = capturedStderr.join('\n');
     expect(stderrText).toContain('WARNING');
     expect(stderrText).toContain('--allow-production-workspace-for-uat');
@@ -125,7 +123,7 @@ describe('PRI-334: escape hatch', () => {
 describe('PRI-334: mutation prevention', () => {
   it('does not call execFileSync after guard refusal', async () => {
     mockExecFileSync.mockClear();
-    await handleRuntimeUat({ workspace: 'D:\\.openclaw\\workspace', count: 1 });
+    await handleRuntimeUat({ workspace: PROD_WORKSPACE, count: 1 });
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 });
