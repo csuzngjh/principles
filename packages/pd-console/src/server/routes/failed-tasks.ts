@@ -209,7 +209,11 @@ export async function handleFailedTasksRoute(
       const tasks = await store.listFailedTasks({ kind, since, limit: limitResult, offset: offsetResult });
       const total = await store.countFailedTasks({ kind, since });
 
-      if (tasks.length === 0) {
+      // Only report "PD pipeline is healthy" when total === 0. When
+      // tasks.length === 0 but total > 0, the caller has paginated past the
+      // last page — returning "healthy" here would mask the failures that
+      // exist on earlier pages.
+      if (total === 0) {
         sendSuccess(res, {
           tasks,
           total,

@@ -219,7 +219,7 @@ export class SqliteTaskStore implements TaskStore {
         (SELECT MAX(r.started_at) FROM runs r WHERE r.task_id = t.task_id) AS last_attempt_at
       FROM tasks t
       WHERE ${conditions.join(' AND ')}
-      ORDER BY last_attempt_at DESC
+      ORDER BY last_attempt_at DESC, t.task_id DESC
     `;
 
     if (filter?.limit !== undefined) {

@@ -23,6 +23,15 @@ import {
 import { decideAutoPromotion } from './approval-queue.js';
 import { extractPrincipleId } from './low-risk-writers.js';
 
+/**
+ * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
+ * Used for JSON.parse output where the shape is genuinely unknown at compile
+ * time. Returns true only for plain objects (not null, not array).
+ */
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 async function checkCanActivate(
   writer: ChannelWriter,
   artifact: PIArtifactSnapshot,
@@ -96,9 +105,9 @@ function buildApprovalContext(
   let principleText = '';
   try {
     const parsed: unknown = JSON.parse(artifact.contentJson);
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const record = parsed as Record<string, unknown>;
-      principleText = String(record.text ?? record.description ?? '');
+    // rc-2: use a type guard predicate instead of `as` to narrow unknown.
+    if (isPlainObjectRecord(parsed)) {
+      principleText = String(parsed.text ?? parsed.description ?? '');
     }
   } catch { /* best-effort */ }
 

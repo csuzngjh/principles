@@ -295,7 +295,24 @@ export async function handleErrorsList(opts: ErrorsListOptions): Promise<void> {
   if (opts.limit !== undefined) {
     if (!Number.isFinite(opts.limit) || opts.limit <= 0) {
       const msg = `Error: --limit must be a positive integer, got ${opts.limit}`;
-      process.stderr.write(msg + '\n');
+      // cli-6-output-next-action: mirror the state.db missing branch — when
+      // opts.json is true, emit a structured { ok:false, reason, nextAction }
+      // envelope to stderr instead of plain text.
+      if (opts.json) {
+        process.stderr.write(
+          JSON.stringify(
+            {
+              ok: false,
+              reason: msg,
+              nextAction: 'Pass --limit as a positive integer (e.g. --limit 50). Maximum is 500.',
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+      } else {
+        process.stderr.write(msg + '\n');
+      }
       process.exitCode = 1;
       return; // cli-2-exit-stops
     }
@@ -307,7 +324,22 @@ export async function handleErrorsList(opts: ErrorsListOptions): Promise<void> {
   if (opts.since !== undefined) {
     if (!Number.isFinite(opts.since) || opts.since < 0) {
       const msg = `Error: --since must be a non-negative number of hours, got ${opts.since}`;
-      process.stderr.write(msg + '\n');
+      // cli-6-output-next-action: same JSON envelope pattern as --limit above.
+      if (opts.json) {
+        process.stderr.write(
+          JSON.stringify(
+            {
+              ok: false,
+              reason: msg,
+              nextAction: 'Pass --since as a non-negative number of hours (e.g. --since 24 for the last 24h).',
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+      } else {
+        process.stderr.write(msg + '\n');
+      }
       process.exitCode = 1;
       return; // cli-2-exit-stops
     }

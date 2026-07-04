@@ -102,13 +102,25 @@ export class HealthCheckModel {
 
   /**
    * P0-2: Read the @principles/core version from its package.json.
-   * Returns 'unknown' on any resolution/parse failure (rc-9: no silent throw).
+   * Returns 'unknown' on any resolution/parse failure (rc-9: log + fallback).
+   *
+   * The `./package.json` subpath is explicitly exported by @principles/core's
+   * package.json (see its `exports` field). Without that export entry, Node.js
+   * would throw ERR_PACKAGE_PATH_NOT_EXPORTED and this method would silently
+   * return 'unknown' for every feedback report — defeating the diagnostic.
    */
   private static readCoreVersion(): string {
     try {
       const pkg = moduleRequire('@principles/core/package.json') as { version?: unknown };
       return typeof pkg.version === 'string' ? pkg.version : 'unknown';
-    } catch {
+    } catch (err) {
+      // rc-9: surface the resolution failure so the operator can observe why
+      // the core version is missing from feedback reports instead of silently
+      // getting 'unknown' forever.
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[HealthCheckModel] readCoreVersion failed: ${msg}\n`,
+      );
       return 'unknown';
     }
   }

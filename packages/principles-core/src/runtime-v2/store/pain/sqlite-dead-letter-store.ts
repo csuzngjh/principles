@@ -111,9 +111,15 @@ export class SqliteDeadLetterStore {
   }
 
   /**
-   * Mark a dead letter as retried.
+   * Mark the most recent dead letter for a painId as retried.
    * - success=true:  retry_count++, retried_at = now
    * - success=false: retry_count++ only (retried_at stays null so it remains retryable)
+   *
+   * Targets only the single latest row (ORDER BY failed_at DESC LIMIT 1) so
+   * historical rows for the same painId keep their original audit state. The
+   * caller (pd pain retry) only replays the latest dead letter via
+   * getByPainId(), so updating older rows would inflate their retry_count
+   * without any corresponding replay.
    */
   markRetried(painId: string, success: boolean): DeadLetterOpResult {
     try {
@@ -122,7 +128,12 @@ export class SqliteDeadLetterStore {
         const retriedAt = new Date().toISOString();
         const result = db
           .prepare(
-            'UPDATE dead_letter_pains SET retry_count = retry_count + 1, retried_at = ? WHERE pain_id = ?',
+            `UPDATE dead_letter_pains
+             SET retry_count = retry_count + 1, retried_at = ?
+             WHERE id = (
+               SELECT id FROM dead_letter_pains WHERE pain_id = ?
+               ORDER BY failed_at DESC LIMIT 1
+             )`,
           )
           .run(retriedAt, painId);
         if (result.changes === 0) {
@@ -130,7 +141,14 @@ export class SqliteDeadLetterStore {
         }
       } else {
         const result = db
-          .prepare('UPDATE dead_letter_pains SET retry_count = retry_count + 1 WHERE pain_id = ?')
+          .prepare(
+            `UPDATE dead_letter_pains
+             SET retry_count = retry_count + 1
+             WHERE id = (
+               SELECT id FROM dead_letter_pains WHERE pain_id = ?
+               ORDER BY failed_at DESC LIMIT 1
+             )`,
+          )
           .run(painId);
         if (result.changes === 0) {
           return { ok: false, error: `No dead letter found for painId: ${painId}` };

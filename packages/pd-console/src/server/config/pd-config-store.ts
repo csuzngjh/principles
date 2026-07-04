@@ -725,8 +725,13 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
 
 // ── Feedback Maintainer Email ───────────────────────────────────────────────
 
-/** Default maintainer email when .pd/config.yaml does not set feedback.maintainer_email. */
-const DEFAULT_FEEDBACK_MAINTAINER_EMAIL = 'csuzngjh@hotmail.com';
+/**
+ * Default maintainer email placeholder when .pd/config.yaml does not set
+ * feedback.maintainer_email. Callers MUST surface a clear warning when this
+ * default is used instead of silently emitting a mailto link — a real-looking
+ * default would leak a placeholder into feedback reports.
+ */
+const DEFAULT_FEEDBACK_MAINTAINER_EMAIL = 'maintainer@example.com';
 
 /**
  * Read `feedback.maintainer_email` from .pd/config.yaml.

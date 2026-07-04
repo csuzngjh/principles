@@ -504,7 +504,7 @@ export interface WorkerStatusReport {
     duration_ms: number;
     pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
     queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
-    errors: Array<string | WorkerStatusErrorEntry>;
+    errors: (string | WorkerStatusErrorEntry)[];
 }
 
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
