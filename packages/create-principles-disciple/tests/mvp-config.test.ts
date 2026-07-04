@@ -1861,13 +1861,13 @@ describe('validateConfigYamlFull catches incomplete config', () => {
   });
 });
 
-// ── PRI-442 P0: principles-disciple dependency rewrite + symlink (Bug-B-001/002/003/004) ──
-// Root cause: bundle-plugin.mjs only rewrote @principles/core, not principles-disciple.
-// installer.ts syncPdCli() only created @principles/core symlink, not principles-disciple.
+// ── PRI-442 P0: @csuzngjh/principles-disciple dependency rewrite + symlink (Bug-B-001/002/003/004) ──
+// Root cause: bundle-plugin.mjs only rewrote @principles/core, not @csuzngjh/principles-disciple.
+// installer.ts syncPdCli() only created @principles/core symlink, not @csuzngjh/principles-disciple.
 // Result: `pd runtime init` crashed with ERR_MODULE_NOT_FOUND because runtime-init.ts
-// statically imports initTrajectorySchema/initWorkflowSchema from principles-disciple.
+// statically imports initTrajectorySchema/initWorkflowSchema from @csuzngjh/principles-disciple.
 
-describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mjs (Bug-B-002)', () => {
+describe('PRI-442 P0: @csuzngjh/principles-disciple dependency rewrite in bundle-plugin.mjs (Bug-B-002)', () => {
   const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
   const content = fs.readFileSync(scriptPath, 'utf-8');
 
@@ -1881,12 +1881,12 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(content).toMatch(/rewriteBundledDependency\(.*depName.*replacement/);
   });
 
-  it('bundle-plugin.mjs rewrites principles-disciple dependency in pd-cli to file:../plugin', () => {
-    // Must rewrite principles-disciple → file:../plugin for pd-cli (the only consumer)
-    expect(content).toContain("'principles-disciple'");
+  it('bundle-plugin.mjs rewrites @csuzngjh/principles-disciple dependency in pd-cli to file:../plugin', () => {
+    // Must rewrite @csuzngjh/principles-disciple → file:../plugin for pd-cli (the only consumer)
+    expect(content).toContain("'@csuzngjh/principles-disciple'");
     expect(content).toContain("'file:../plugin'");
     // The rewrite call must target PD_CLI_DEST
-    const rewriteCallIdx = content.indexOf("'principles-disciple', 'file:../plugin'");
+    const rewriteCallIdx = content.indexOf("'@csuzngjh/principles-disciple', 'file:../plugin'");
     const pdCliDestIdx = content.indexOf('PD_CLI_DEST');
     expect(rewriteCallIdx).toBeGreaterThan(0);
     expect(pdCliDestIdx).toBeGreaterThan(0);
@@ -1899,13 +1899,13 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
   });
 });
 
-describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {
+describe('PRI-442 P0: @csuzngjh/principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {
   const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
   const content = fs.readFileSync(installerPath, 'utf-8');
 
-  it('syncPdCli creates node_modules/principles-disciple symlink', () => {
-    // Must create a principles-disciple symlink in pd-cli's node_modules
-    expect(content).toContain("'principles-disciple'");
+  it('syncPdCli creates node_modules/@csuzngjh/principles-disciple symlink', () => {
+    // Must create a @csuzngjh/principles-disciple symlink in pd-cli's node_modules
+    expect(content).toContain("'@csuzngjh'");
     // The symlink path must be under node_modules
     const pdLinkIdx = content.indexOf("pdLinkPath");
     expect(pdLinkIdx).toBeGreaterThan(0);
@@ -1914,8 +1914,8 @@ describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug
     expect(symlinkSection).toContain('symlinkSync');
   });
 
-  it('principles-disciple symlink target is getPluginExtDir() (the installed plugin root)', () => {
-    // The plugin (principles-disciple package) is installed at <ext-dir>/ root
+  it('@csuzngjh/principles-disciple symlink target is getPluginExtDir() (the installed plugin root)', () => {
+    // The plugin (@csuzngjh/principles-disciple package) is installed at <ext-dir>/ root
     const pdLinkTargetIdx = content.indexOf('pdLinkTarget');
     expect(pdLinkTargetIdx).toBeGreaterThan(0);
     const targetSection = content.substring(pdLinkTargetIdx, pdLinkTargetIdx + 200);
@@ -1933,13 +1933,13 @@ describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug
     expect(pdLinkSection).toContain("'junction'");
   });
 
-  it('syncPdCli creates symlink on Unix using relative path ../../', () => {
-    // Unix must use relative symlink for portability
+  it('syncPdCli creates symlink on Unix using relative path ../../../', () => {
+    // Unix must use relative symlink for portability (3 levels up: @csuzngjh → node_modules → pd-cli → ext)
     const pdLinkStart = content.indexOf('const pdLinkDir');
     const upgradeCallIdx = content.indexOf('tryUpgradePdCliFromNpm(installedPdCliDir)', pdLinkStart);
     expect(upgradeCallIdx).toBeGreaterThan(pdLinkStart);
     const pdLinkSection = content.substring(pdLinkStart, upgradeCallIdx);
-    expect(pdLinkSection).toContain("'../../'");
+    expect(pdLinkSection).toContain("'../../../'");
   });
 
   it('syncPdCli still creates @principles/core symlink (regression guard)', () => {
@@ -1954,15 +1954,15 @@ describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', 
   const rootDir = path.resolve(__dirname, '..', '..', '..');
   const runtimeInitPath = path.join(rootDir, 'packages', 'pd-cli', 'src', 'commands', 'runtime-init.ts');
 
-  it('runtime-init.ts imports from principles-disciple (the plugin package)', () => {
+  it('runtime-init.ts imports from @csuzngjh/principles-disciple (the plugin package)', () => {
     // This import is the crash point — it must resolve via the symlink created by syncPdCli
     const content = fs.readFileSync(runtimeInitPath, 'utf-8');
-    expect(content).toContain("from 'principles-disciple'");
+    expect(content).toContain("from '@csuzngjh/principles-disciple'");
     expect(content).toContain('initTrajectorySchema');
     expect(content).toContain('initWorkflowSchema');
   });
 
-  it('principles-disciple (openclaw-plugin) exports initTrajectorySchema and initWorkflowSchema', () => {
+  it('@csuzngjh/principles-disciple (openclaw-plugin) exports initTrajectorySchema and initWorkflowSchema', () => {
     // The plugin's index.ts must export these functions so the import resolves
     const pluginIndexPath = path.join(rootDir, 'packages', 'openclaw-plugin', 'src', 'index.ts');
     const content = fs.readFileSync(pluginIndexPath, 'utf-8');
