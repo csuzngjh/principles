@@ -26,11 +26,18 @@ export interface ProvenChannelBaselineRunnerOptions {
 
 function isProductionWorkspace(workspaceDir: string): boolean {
   const normalized = path.resolve(workspaceDir).toLowerCase();
-  const productionPrefixes = [
-    path.resolve('D:\\.openclaw\\workspace').toLowerCase(),
-    path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace').toLowerCase(),
+  const productionPrefixes: string[] = [
     path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')).toLowerCase(),
   ];
+  // Allow operator to declare additional production paths (cross-platform).
+  // Use path.delimiter (; on Windows, : on Unix) to separate multiple paths.
+  const extra = process.env.PD_PRODUCTION_WORKSPACE;
+  if (extra) {
+    for (const p of extra.split(path.delimiter)) {
+      const trimmed = p.trim();
+      if (trimmed) productionPrefixes.push(path.resolve(trimmed).toLowerCase());
+    }
+  }
   for (const prefix of productionPrefixes) {
     if (normalized === prefix || normalized.startsWith(prefix + path.sep)) {
       return true;

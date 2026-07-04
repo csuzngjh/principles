@@ -87,4 +87,4 @@ Private docs live in an independent git repo (example path: `D:/Code/principles-
 
 **CRITICAL: Never run `git clean -fdx`, `git stash -a`, or `git checkout -f` in the main worktree** — these will destroy the junction and untrack private docs.
 
-If `docs/.private/` is missing, run `.\scripts\setup-private-docs-symlink.ps1` to recreate.
+If `docs/.private/` is missing, run `node scripts/setup-private-docs-symlink.mjs` to recreate.

@@ -39,9 +39,11 @@ if [ -z "$repo_root" ]; then
     exit 0
 fi
 
-# Check setup script exists
-setup_script="$repo_root/scripts/setup-worktree.ps1"
-if [ ! -f "$setup_script" ]; then
+# Check setup script exists — prefer the cross-platform .mjs version,
+# fall back to the legacy .ps1 wrapper if .mjs is unavailable.
+setup_script_mjs="$repo_root/scripts/setup-worktree.mjs"
+setup_script_ps1="$repo_root/scripts/setup-worktree.ps1"
+if [ ! -f "$setup_script_mjs" ] && [ ! -f "$setup_script_ps1" ]; then
     exit 0
 fi
 
@@ -56,16 +58,22 @@ fi
 [ -f "$git_dir/MERGE_HEAD" ] && exit 0
 [ -f "$git_dir/CHERRY_PICK_HEAD" ] && exit 0
 
-echo "[pd-worktree] Running setup-worktree.ps1..."
-# On Windows: invoke PowerShell to run the setup script
-# -SkipBuild: hook context, build verification deferred to user
-# -FromHook: skip PATH fix (hook inherits git's environment which has PATH)
-if command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -File "$setup_script" -SkipBuild -FromHook || {
+# Order: node (cross-platform) → powershell (legacy wrapper on Windows) → pwsh (PowerShell Core)
+# -SkipBuild/--skip-build: hook context, build verification deferred to user
+# -FromHook/--from-hook: skip PATH fix (hook inherits git's environment which has PATH)
+if command -v node >/dev/null 2>&1 && [ -f "$setup_script_mjs" ]; then
+    echo "[pd-worktree] Running setup-worktree.mjs..."
+    node "$setup_script_mjs" --skip-build --from-hook || {
+        echo "[pd-worktree] setup-worktree.mjs failed. Run manually: node scripts/setup-worktree.mjs"
+    }
+elif command -v powershell >/dev/null 2>&1 && [ -f "$setup_script_ps1" ]; then
+    echo "[pd-worktree] Running setup-worktree.ps1..."
+    powershell -NoProfile -File "$setup_script_ps1" -SkipBuild -FromHook || {
         echo "[pd-worktree] setup-worktree.ps1 failed. Run manually: scripts/setup-worktree.ps1"
     }
-elif command -v pwsh >/dev/null 2>&1; then
-    pwsh -NoProfile -File "$setup_script" -SkipBuild -FromHook || {
+elif command -v pwsh >/dev/null 2>&1 && [ -f "$setup_script_ps1" ]; then
+    echo "[pd-worktree] Running setup-worktree.ps1 (pwsh)..."
+    pwsh -NoProfile -File "$setup_script_ps1" -SkipBuild -FromHook || {
         echo "[pd-worktree] setup-worktree.ps1 failed. Run manually: scripts/setup-worktree.ps1"
     }
 fi

@@ -28,12 +28,16 @@ import * as os from 'os';
 // ── Production workspace detection (PRI-334) ───────────────────────────────────
 
 const PRODUCTION_WORKSPACE_PATHS = [
-  path.resolve('D:\\.openclaw\\workspace'),
-  path.resolve('C:\\.openclaw\\workspace'),
-  path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace'),
-  path.resolve('C:\\Users\\Admin\\.openclaw\\workspace'),
   path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')),
 ];
+// Allow operator to declare additional production paths (cross-platform).
+const _extraProduction = process.env.PD_PRODUCTION_WORKSPACE;
+if (_extraProduction) {
+  for (const p of _extraProduction.split(path.delimiter)) {
+    const trimmed = p.trim();
+    if (trimmed) PRODUCTION_WORKSPACE_PATHS.push(path.resolve(trimmed));
+  }
+}
 
 function isProductionWorkspace(resolvedPath) {
   const normalized = resolvedPath.toLowerCase();
