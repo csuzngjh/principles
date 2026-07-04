@@ -231,6 +231,7 @@ export class SqliteTaskStore implements TaskStore {
       values.push(filter.offset);
     }
 
+    // runtime-contract-exempt: ERR-001 better-sqlite3 .all() returns unknown[]; narrowing to Record<string, unknown>[] is type-only (row fields are validated downstream in rowToFailedTaskSummary via typeof / Object.hasOwn)
     const rows = db.prepare(sql).all(...values) as Record<string, unknown>[];
     return rows.map((row) => SqliteTaskStore.rowToFailedTaskSummary(row));
   }
@@ -286,6 +287,7 @@ export class SqliteTaskStore implements TaskStore {
     }
 
     const sql = `SELECT COUNT(*) as cnt FROM tasks WHERE ${conditions.join(' AND ')}`;
+    // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (cnt field is validated below via typeof row.cnt === 'number')
     const row = db.prepare(sql).get(...values) as Record<string, unknown> | undefined;
     if (!row || typeof row.cnt !== 'number' || !Number.isInteger(row.cnt)) {
       throw new PDRuntimeError(
