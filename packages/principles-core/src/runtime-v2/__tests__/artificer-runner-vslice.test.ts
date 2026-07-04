@@ -759,3 +759,364 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
     expect(storedOutput.sourceTrace.scribeArtifactId).toBe(SCRIBE_ART_ID);
   });
 });
+
+describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scribe.sourceTrace.dreamerArtifactId', () => {
+  // Vertical slice 4: end-to-end — dreamer artifact in store → prompt contains dreamerContext 5维字段
+  const SCRIBE_ART_ID = 'pi-art-scribe-pri508';
+  const DREAMER_ART_ID = 'pi-art-dreamer-pri508';
+  const SCRIBE_TASK_ID_PRI508 = 'scribe-pri508';
+  const ARTIFICER_TASK_ID_PRI508 = 'artificer-pri508';
+
+  function makeScribeArtifactWithDreamer(): PIArtifactRecord {
+    return {
+      artifactId: SCRIBE_ART_ID,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_ID_PRI508,
+      lineageArtifactIds: [DREAMER_ART_ID],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_ID_PRI508,
+        sourcePhilosopherArtifactId: 'pi-art-philosopher-pri508',
+        principleDraft: {
+          title: 'Path Traversal Guard',
+          statement: 'Validate parent path before write_file',
+          rationale: 'Unchecked parent path enables path traversal',
+          applicability: ['write_file'],
+          antiPatterns: ['Trusting raw user input path'],
+          confidence: 0.9,
+        },
+        sourceTrace: {
+          philosopherArtifactId: 'pi-art-philosopher-pri508',
+          dreamerArtifactId: DREAMER_ART_ID,
+        },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeDreamerArtifact(): PIArtifactRecord {
+    return {
+      artifactId: DREAMER_ART_ID,
+      artifactKind: 'principle',
+      sourceTaskId: 'dreamer-task-pri508',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        valid: true,
+        taskId: 'dreamer-task-pri508',
+        candidates: [
+          {
+            candidateIndex: 0,
+            badDecision: 'agent called write_file without resolving parent path',
+            betterDecision: 'agent must resolve and validate parent path before write_file',
+            rationale: 'parent path resolution prevents path traversal exploits',
+            confidence: 0.85,
+            riskLevel: 'medium',
+            strategicPerspective: 'proactive validation beats reactive cleanup',
+          },
+        ],
+        contextRefs: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeScribeTaskPri508(): TaskRecord {
+    return {
+      taskId: SCRIBE_TASK_ID_PRI508,
+      taskKind: 'scribe',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'scribe://run-pri508',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_ID }],
+      }),
+    };
+  }
+
+  function makeArtificerTaskPri508(): TaskRecord {
+    return {
+      taskId: ARTIFICER_TASK_ID_PRI508,
+      taskKind: 'artificer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_ID_PRI508],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_ID }],
+        outputArtifactRefs: [],
+      }),
+    };
+  }
+
+  function makeArtificerOutputPri508(): ArtificerRuleOutput {
+    return {
+      taskId: ARTIFICER_TASK_ID_PRI508,
+      sourceScribeArtifactId: SCRIBE_ART_ID,
+      implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
+      goldenTraceCases: [
+        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/file' }, expectedDecision: 'allow' },
+        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      ],
+      affectedTools: ['write_file'],
+      implementationSummary: 'Validate parent path before write',
+      sourceTrace: {
+        scribeArtifactId: SCRIBE_ART_ID,
+      },
+      risks: [],
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  it('dreamerContext 5维字段透传到 artificer prompt (end-to-end)', async () => {
+    const artifactStore = new MemoryPIArtifactStore();
+    await artifactStore.upsertArtifact(makeScribeArtifactWithDreamer());
+    await artifactStore.upsertArtifact(makeDreamerArtifact());
+
+    const artificerTask = makeArtificerTaskPri508();
+    const scribeTask = makeScribeTaskPri508();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(artificerTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID_PRI508) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-pri508',
+        taskId: ARTIFICER_TASK_ID_PRI508,
+        runtimeKind: 'artificer',
+        startedAt: new Date().toISOString(),
+      }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({
+        runs: [{ runId: 'run-pri508', taskId: ARTIFICER_TASK_ID_PRI508, runtimeKind: 'artificer', startedAt: new Date().toISOString() }],
+        degradedRuns: [],
+      }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    let capturedPrompt: string | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {
+        capturedPrompt = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+        return Promise.resolve({ runId: 'run-pri508', runtimeKind: 'test-double', startedAt: new Date().toISOString() } as RunHandle);
+      }),
+      pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-pri508' }),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeArtificerOutputPri508() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+    const validator = new DefaultArtificerValidator();
+
+    const deps: ArtificerRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter,
+      artifactStore,
+      validator,
+    };
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID_PRI508);
+    expect(result.status).toBe('succeeded');
+
+    // Assert the prompt captured at startRun contains dreamerContext 5维字段
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext).toBeDefined();
+    expect(parsed.dreamerContext.badDecision).toBe('agent called write_file without resolving parent path');
+    expect(parsed.dreamerContext.betterDecision).toBe('agent must resolve and validate parent path before write_file');
+    expect(parsed.dreamerContext.rationale).toBe('parent path resolution prevents path traversal exploits');
+    expect(parsed.dreamerContext.riskLevel).toBe('medium');
+    expect(parsed.dreamerContext.strategicPerspective).toBe('proactive validation beats reactive cleanup');
+  });
+
+  it('dreamerArtifactId 缺失时 dreamerContext undefined (向后兼容)', async () => {
+    // scribe artifact 不带 sourceTrace.dreamerArtifactId → dreamerContext 不出现在 prompt
+    const artifactStore = new MemoryPIArtifactStore();
+    const scribeArtifactNoDreamer: PIArtifactRecord = {
+      artifactId: SCRIBE_ART_ID,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_ID_PRI508,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_ID_PRI508,
+        sourcePhilosopherArtifactId: 'pi-art-philosopher-pri508',
+        principleDraft: {
+          title: 'Path Traversal Guard',
+          statement: 'Validate parent path before write_file',
+          rationale: 'Unchecked parent path enables path traversal',
+          applicability: ['write_file'],
+          antiPatterns: ['Trusting raw user input path'],
+          confidence: 0.9,
+        },
+        sourceTrace: {
+          philosopherArtifactId: 'pi-art-philosopher-pri508',
+          // dreamerArtifactId 刻意缺失
+        },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await artifactStore.upsertArtifact(scribeArtifactNoDreamer);
+
+    const artificerTask = makeArtificerTaskPri508();
+    const scribeTask = makeScribeTaskPri508();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(artificerTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID_PRI508) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-pri508-nodreamer', taskId: ARTIFICER_TASK_ID_PRI508, runtimeKind: 'artificer', startedAt: new Date().toISOString() }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({ runs: [{ runId: 'run-pri508-nodreamer', taskId: ARTIFICER_TASK_ID_PRI508, runtimeKind: 'artificer', startedAt: new Date().toISOString() }], degradedRuns: [] }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    let capturedPrompt: string | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {
+        capturedPrompt = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+        return Promise.resolve({ runId: 'run-pri508-nodreamer', runtimeKind: 'test-double', startedAt: new Date().toISOString() } as RunHandle);
+      }),
+      pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-pri508-nodreamer' }),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeArtificerOutputPri508() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+    const validator = new DefaultArtificerValidator();
+
+    const deps: ArtificerRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter,
+      artifactStore,
+      validator,
+    };
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID_PRI508);
+    expect(result.status).toBe('succeeded');
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext).toBeUndefined();
+  });
+
+  it('dreamerArtifactId 存在但 artifact 查不到时 emit event + dreamerContext undefined (rc-9)', async () => {
+    // scribe 带 dreamerArtifactId 但 store 里没有 dreamer artifact → 不能静默成功，要有可观察事件
+    const artifactStore = new MemoryPIArtifactStore();
+    await artifactStore.upsertArtifact(makeScribeArtifactWithDreamer());
+    // 故意不 upsert dreamer artifact
+
+    const artificerTask = makeArtificerTaskPri508();
+    const scribeTask = makeScribeTaskPri508();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(artificerTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === ARTIFICER_TASK_ID_PRI508) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID_PRI508) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-pri508-missing', taskId: ARTIFICER_TASK_ID_PRI508, runtimeKind: 'artificer', startedAt: new Date().toISOString() }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({ runs: [{ runId: 'run-pri508-missing', taskId: ARTIFICER_TASK_ID_PRI508, runtimeKind: 'artificer', startedAt: new Date().toISOString() }], degradedRuns: [] }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    let capturedPrompt: string | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {
+        capturedPrompt = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+        return Promise.resolve({ runId: 'run-pri508-missing', runtimeKind: 'test-double', startedAt: new Date().toISOString() } as RunHandle);
+      }),
+      pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-pri508-missing' }),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeArtificerOutputPri508() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const emitTelemetry = vi.fn();
+    const eventEmitter = { emitTelemetry } as unknown as StoreEventEmitter;
+    const validator = new DefaultArtificerValidator();
+
+    const deps: ArtificerRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter,
+      artifactStore,
+      validator,
+    };
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID_PRI508);
+    // 仍应成功（dreamerContext 是 best-effort，不阻塞主流程）
+    expect(result.status).toBe('succeeded');
+
+    // rc-9: 不能静默 — 必须有可观察事件
+    // emitTelemetry 接收单个结构化对象 (eventType + traceId + payload + ...)
+    expect(emitTelemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: expect.stringContaining('dreamer'),
+        traceId: ARTIFICER_TASK_ID_PRI508,
+      }),
+    );
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.dreamerContext).toBeUndefined();
+  });
+});
