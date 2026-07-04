@@ -527,6 +527,49 @@ export class SqliteConnection {
     if (!isRecord(countRow) || typeof countRow.cnt !== 'number' || countRow.cnt === 0) {
       db.prepare("INSERT INTO schema_version (version) VALUES ('000')").run();
     }
+
+    // Task 3: dead_letter_pains — durable store for pain signals that failed
+    // to be recorded by PainToPrincipleService (rc-9: no silent failure).
+    // pain.ts catch block writes here so `pd pain retry --pain-id <id>` can replay.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS dead_letter_pains (
+        id TEXT PRIMARY KEY,
+        pain_id TEXT NOT NULL,
+        pain_data TEXT NOT NULL,
+        failed_at TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        retried_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_dead_letter_pains_pain_id ON dead_letter_pains(pain_id);
+      CREATE INDEX IF NOT EXISTS idx_dead_letter_pains_retried_at ON dead_letter_pains(retried_at);
+    `);
+
+    // Task 11: pending_agent_drafts — durable store for agent-generated draft
+    // context attached to a failed task. PendingAgentDraftStore writes here when
+    // a peer runner reaches a permanent-failure terminal state, so the
+    // feedback-report pipeline can later attach the agent's perspective to a
+    // user-submitted feedback report (see Task 12 / Task 13).
+    //
+    // The partial unique index (CREATE UNIQUE INDEX ... WHERE consumed_at IS NULL)
+    // guarantees at most one unconsumed draft per task_id at the DB level —
+    // SQLite does not support WHERE clauses on table-level UNIQUE constraints,
+    // so the partial uniqueness is enforced via a separate UNIQUE INDEX below.
+    // PendingAgentDraftStore.insertPendingDraft honors this with a SELECT-then-
+    // UPDATE/INSERT upsert pattern (idempotent).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_agent_drafts (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        pain_id TEXT,
+        agent_draft TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        consumed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_agent_drafts_task_id ON pending_agent_drafts(task_id);
+      CREATE INDEX IF NOT EXISTS idx_pending_agent_drafts_consumed_at ON pending_agent_drafts(consumed_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_agent_drafts_task_unconsumed
+        ON pending_agent_drafts(task_id) WHERE consumed_at IS NULL;
+    `);
   }
 
   private migrateSchema(): void {

@@ -128,3 +128,36 @@ export function buildEmailText(report: FeedbackReport): string {
   email = redactEnvLikeValues(email);
   return email;
 }
+
+const MAX_MAILTO_BODY_LENGTH = 4000;
+const TRUNCATED_SUFFIX = '\n\n…(truncated — use "Copy Email" in PD Console for the full report)';
+
+/**
+ * Build a `mailto:` URL string for the given report and maintainer email.
+ *
+ * - Returns '' when `maintainerEmail` is empty or not a string.
+ * - Subject: `[PD feedback] [${report.type}] ${report.title}` with absolute
+ *   paths redacted (matches the Subject line produced by buildEmailText).
+ * - Body: buildEmailText(report), truncated to MAX_MAILTO_BODY_LENGTH chars.
+ *   When truncation occurs, TRUNCATED_SUFFIX is appended so the recipient
+ *   can see the body was shortened.
+ * - Subject and body are URL-encoded via encodeURIComponent.
+ *
+ * ERR-014/016: body is bounded before encoding so the decoded body never
+ * exceeds MAX_MAILTO_BODY_LENGTH + TRUNCATED_SUFFIX.length.
+ */
+export function buildMailtoUrl(report: FeedbackReport, maintainerEmail: string): string {
+  if (typeof maintainerEmail !== 'string' || maintainerEmail.length === 0) {
+    return '';
+  }
+
+  const subject = `[PD feedback] [${report.type}] ${redactAbsolutePaths(report.title)}`;
+  const fullBody = buildEmailText(report);
+  const truncatedBody = fullBody.length > MAX_MAILTO_BODY_LENGTH
+    ? fullBody.slice(0, MAX_MAILTO_BODY_LENGTH) + TRUNCATED_SUFFIX
+    : fullBody;
+
+  const encodedSubject = encodeURIComponent(subject);
+  const encodedBody = encodeURIComponent(truncatedBody);
+  return `mailto:${maintainerEmail}?subject=${encodedSubject}&body=${encodedBody}`;
+}

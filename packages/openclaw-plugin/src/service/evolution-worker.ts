@@ -172,6 +172,7 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 export async function processCompilationBackfill(
     wctx: WorkspaceContext,
     logger: PluginLogger,
+    workerStatus?: WorkerStatusReport,
 ): Promise<void> {
     if (!wctx.stateDir) return;
 
@@ -251,7 +252,7 @@ export async function processCompilationBackfill(
         try {
             const result = compiler.compileOne(principleId);
             if (result.success) {
-                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined);
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined, workerStatus);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_SUCCESS',
                     `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
             } else {
@@ -261,11 +262,11 @@ export async function processCompilationBackfill(
                     tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                         evaluability: 'manual_only',
                         compilationRetryCount: undefined,
-                    });
+                    }, workerStatus);
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                         `Principle ${principleId} compilation exhausted after 5 attempts: ${result.reason ?? 'unknown'}`);
                 } else {
-                    tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                    tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount, workerStatus);
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                         `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt ${nextCount}/5)`);
                 }
@@ -277,11 +278,11 @@ export async function processCompilationBackfill(
                 tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                     evaluability: 'manual_only',
                     compilationRetryCount: undefined,
-                });
+                }, workerStatus);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                     `Principle ${principleId} compilation exhausted after 5 attempts: threw ${String(compileErr)}`);
             } else {
-                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount, workerStatus);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                     `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
             }
@@ -291,34 +292,63 @@ export async function processCompilationBackfill(
 
 /**
  * Wrapper for updateRetryCount — logs but does not propagate errors.
- * Errors are silently swallowed: if update fails, the principle stays in its
- * current retry state and will be picked up again on the next heartbeat.
+ * Errors are recorded to worker-status.errors and logged via SystemLogger;
+ * the principle stays in its current retry state and will be picked up
+ * again on the next heartbeat. (rc-9-no-silent-fallback)
  */
-function tryUpdateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number | undefined): void {
+function tryUpdateRetryCount(
+    stateDir: string,
+    workspaceDir: string,
+    principleId: string,
+    count: number | undefined,
+    workerStatus?: WorkerStatusReport,
+): void {
     try {
         updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
     } catch (err) {
-        SystemLogger.log(workspaceDir, 'RETRY_COUNT_UPDATE_FAILED',
-            `Failed to update retry count for ${principleId}: ${String(err)}`);
+        const message = err instanceof Error ? err.message : String(err);
+        SystemLogger.log(workspaceDir, 'WORKER_RETRY_UPDATE_FAILED',
+            `Failed to update retry count for ${principleId}: ${message}`);
+        if (workerStatus) {
+            workerStatus.errors.push({
+                at: new Date().toISOString(),
+                kind: 'retry_count_update_failed',
+                principleId,
+                error: message,
+            });
+            writeWorkerStatus(stateDir, workerStatus);
+        }
     }
 }
 
 /**
  * Wrapper for updatePrinciple with multiple fields — logs but does not propagate errors.
- * Errors are silently swallowed: if update fails, the principle stays in its
- * current state and will be picked up again on the next heartbeat.
+ * Errors are recorded to worker-status.errors and logged via SystemLogger;
+ * the principle stays in its current state and will be picked up again on
+ * the next heartbeat. (rc-9-no-silent-fallback)
  */
 function tryUpdatePrinciple(
     stateDir: string,
     workspaceDir: string,
     principleId: string,
     updates: { evaluability?: PrincipleEvaluability; compilationRetryCount?: number },
+    workerStatus?: WorkerStatusReport,
 ): void {
     try {
         updatePrinciple(stateDir, principleId, updates);
     } catch (err) {
-        SystemLogger.log(workspaceDir, 'RETRY_PRINCIPLE_UPDATE_FAILED',
-            `Failed to update principle ${principleId}: ${String(err)}`);
+        const message = err instanceof Error ? err.message : String(err);
+        SystemLogger.log(workspaceDir, 'WORKER_PRINCIPLE_UPDATE_FAILED',
+            `Failed to update principle ${principleId}: ${message}`);
+        if (workerStatus) {
+            workerStatus.errors.push({
+                at: new Date().toISOString(),
+                kind: 'principle_update_failed',
+                principleId,
+                error: message,
+            });
+            writeWorkerStatus(stateDir, workerStatus);
+        }
     }
 }
 
@@ -461,13 +491,20 @@ export interface ExtendedEvolutionWorkerService {
 }
  
 
-interface WorkerStatusReport {
+export interface WorkerStatusErrorEntry {
+    at: string;
+    kind: 'retry_count_update_failed' | 'principle_update_failed';
+    principleId: string;
+    error: string;
+}
+
+export interface WorkerStatusReport {
     timestamp: string;
     cycle_start_ms: number;
     duration_ms: number;
     pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
     queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
-    errors: string[];
+    errors: Array<string | WorkerStatusErrorEntry>;
 }
 
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
@@ -581,14 +618,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             if (hbSubagent?.run) {
                 logger?.info?.('[PD:DEBUG:SubagentCheck:Heartbeat] run entrypoint is callable');
             }
-            const cycleResult: {
-                timestamp: string;
-                cycle_start_ms: number;
-                duration_ms: number;
-                pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
-                queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
-                errors: string[];
-            } = {
+            const cycleResult: WorkerStatusReport = {
                 timestamp: new Date().toISOString(),
                 cycle_start_ms: cycleStart,
                 duration_ms: 0,
@@ -600,7 +630,8 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             try {
                 // Compilation backfill: runs on every heartbeat to retry failed compilations.
                 // Fire-and-forget — errors are logged within the function.
-                processCompilationBackfill(wctx, logger).catch((err) => {
+                // Pass cycleResult so silent failures in tryUpdate* can be recorded (rc-9).
+                processCompilationBackfill(wctx, logger, cycleResult).catch((err) => {
                     logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
                 });
 

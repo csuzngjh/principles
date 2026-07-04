@@ -42,6 +42,15 @@ import type {
   PeerRunnerValidationResult,
   FailureContext,
 } from './peer-runner-types.js';
+import type {
+  PendingAgentDraftStore,
+  AgentDraftPayload,
+} from '../feedback/pending-agent-draft-store.js';
+import {
+  redactAbsolutePaths,
+  redactTokenLikeValues,
+  redactEnvLikeValues,
+} from '../feedback/redact-sensitive.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -69,6 +78,49 @@ function resolvePeerRunnerOptions(
   };
 }
 
+/**
+ * Type guard: narrow `unknown` to `Record<string, unknown>` for safe property
+ * access on parsed JSON. Mirrors the isRecord / isPlainObject helpers in
+ * pending-agent-draft-store.ts and sqlite-task-store.ts (rc-1, rc-2: no `as`).
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Safely extract `sourcePainId` from a task's `diagnosticJson` column.
+ *
+ * `diagnosticJson` is an optional JSON string that may carry PI metadata
+ * including the originating pain signal ID (for diagnostician tasks). We
+ * parse it defensively (rc-1: treat as unknown): malformed JSON or a
+ * non-string sourcePainId yield null rather than throwing, so a corrupt
+ * payload cannot break the draft-injection path (rc-9: graceful
+ * degradation — painId is optional linkage, not a required field).
+ *
+ * Mirrors the extractPainIdFromDiagnosticJson helper in
+ * sqlite-task-store.ts (Task 8). Inlined here because the original is a
+ * module-private function and core must not introduce a new shared
+ * utility surface for a single-call-site helper (avoid over-engineering).
+ *
+ * ERR-013 / rc-5: Object.hasOwn (not `in`) checks the sourcePainId key.
+ * ERR-001 / rc-2: no `as` casts — uses a type guard (isPlainObject) to
+ * narrow the parsed JSON before property access.
+ */
+function extractPainIdFromDiagnostic(diagnosticJson: unknown): string | null {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(parsed)) return null;
+  if (!Object.hasOwn(parsed, 'sourcePainId')) return null;
+  const { sourcePainId } = parsed;
+  if (typeof sourcePainId !== 'string' || sourcePainId.length === 0) return null;
+  return sourcePainId;
+}
+
 // ── BasePeerRunner ───────────────────────────────────────────────────────────
 
 /**
@@ -85,6 +137,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   protected readonly artifactStore: PIArtifactStore;
   protected readonly resolvedOptions: ResolvedPeerRunnerOptions;
   protected readonly config: PeerRunnerConfig;
+  /**
+   * Optional store for agent-authored draft context (Task 12).
+   * When undefined, permanent failures do not write a draft — backward compatible.
+   */
+  private readonly pendingAgentDraftStore?: PendingAgentDraftStore;
   private phase: RunnerPhase = RunnerPhase.Idle;
 
   constructor(
@@ -96,6 +153,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.artifactStore = deps.artifactStore;
+    this.pendingAgentDraftStore = deps.pendingAgentDraftStore;
     this.config = config;
     this.resolvedOptions = resolvePeerRunnerOptions(options, config.defaultAgentId);
   }
@@ -606,6 +664,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         failureReason: ctx.failureReason,
       });
       this.phase = RunnerPhase.Failed;
+      // Task 12: inject agent-authored draft into pending_agent_drafts so the
+      // feedback-report pipeline (Task 13) can later merge the agent's
+      // perspective into the maintainer-facing report. Best-effort: failures
+      // are observed via telemetry (rc-9) but never propagate, so a draft
+      // write error cannot break the markFailed terminal-state contract.
+      this.injectAgentDraftOnPermanentFailure(ctx);
       return {
         status: 'failed',
         taskId: ctx.taskId,
@@ -759,5 +823,90 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     if (!effectiveConfig) return false;
     const flags = computeFeatureFlagsFromConfig(effectiveConfig);
     return isFeatureEnabled(flags, 'diagnostician_llm_degradation');
+  }
+
+  // ── Agent draft injection (Task 12) ────────────────────────────────────────
+
+  /**
+   * Task 12: Construct an AgentDraftPayload from the permanent-failure
+   * context and write it to pending_agent_drafts via the injected
+   * PendingAgentDraftStore. Best-effort: never throws. All failures are
+   * observed via telemetry (rc-9: no silent fallback) so the maintainer
+   * can diagnose draft-write issues without the markFailed terminal-state
+   * contract being broken.
+   *
+   * No-op when pendingAgentDraftStore is not injected (backward compatible).
+   *
+   * ERR checklist:
+   * - EP-01 / ERR-001, ERR-005, ERR-013: diagnosticJson parsed as unknown,
+   *   narrowed with typeof + Object.hasOwn. No `as` casts on parsed data.
+   * - EP-03 / ERR-002: insertPendingDraft returns { ok: false, error };
+   *   we emit a telemetry event with reason + nextAction (rc-9).
+   * - EP-03 / ERR-074, ERR-089: every branch (store missing, insert
+   *   returns !ok, insert throws) applies the SAME best-effort contract —
+   *   never propagate, always observe.
+   * - EP-08 / ERR-003, ERR-024: redactAbsolutePaths / redactTokenLikeValues
+   *   / redactEnvLikeValues are applied to observedFailure BEFORE persist.
+   */
+  private injectAgentDraftOnPermanentFailure(ctx: FailureContext): void {
+    if (!this.pendingAgentDraftStore) return;
+
+    const { taskKind } = ctx.task;
+    const { errorCategory } = ctx;
+    const observedFailureRaw = ctx.failureReason;
+    // Apply all three redactors in sequence (mirrors redactTelemetryString
+    // composition). Order: paths → tokens → env. Each is a no-op on
+    // non-matching input, so the composition is safe regardless of content.
+    const observedFailure = redactEnvLikeValues(
+      redactAbsolutePaths(redactTokenLikeValues(observedFailureRaw)),
+    );
+
+    const agentDraft: AgentDraftPayload = {
+      summary: `${taskKind} failed with category=${errorCategory} at ${new Date().toISOString()}`,
+      observedFailure,
+      // commandSummary omitted: RunRecord has no toolCalls field (verified
+      // against run-store.ts). Adding it later requires extending RunRecord
+      // + adapter contract — out of scope for Task 12.
+    };
+
+    // rc-7 / ERR-015: read painId fresh from the current task record's
+    // diagnosticJson. ctx.task is the leased task snapshot; diagnosticJson
+    // is the canonical source for sourcePainId linkage.
+    const painId = extractPainIdFromDiagnostic(ctx.task.diagnosticJson);
+
+    try {
+      const result = this.pendingAgentDraftStore.insertPendingDraft({
+        taskId: ctx.taskId,
+        painId: painId ?? undefined,
+        agentDraft,
+      });
+      if (!result.ok) {
+        // rc-9: surface the failure with a reason + nextAction — never silent.
+        this.emitEvent('agent_draft_insert_failed', ctx.taskId, {
+          errorCategory,
+          attemptCount: ctx.task.attemptCount,
+          errorMessage: result.error,
+          nextAction: 'Inspect pending_agent_drafts table integrity; draft will be retried on next permanent failure of the same taskId (idempotent UPDATE).',
+        });
+        return;
+      }
+      this.emitEvent('agent_draft_inserted', ctx.taskId, {
+        errorCategory,
+        attemptCount: ctx.task.attemptCount,
+        draftId: result.id,
+        painIdLinked: painId !== null,
+      });
+    } catch (err) {
+      // Defensive: insertPendingDraft is documented to never throw (it
+      // catches internally and returns { ok: false }), but a misbehaving
+      // store implementation or a synchronous throw before the inner try
+      // must not break the markFailed contract.
+      this.emitEvent('agent_draft_insert_failed', ctx.taskId, {
+        errorCategory,
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'PendingAgentDraftStore.insertPendingDraft threw unexpectedly; inspect the store implementation.',
+      });
+    }
   }
 }

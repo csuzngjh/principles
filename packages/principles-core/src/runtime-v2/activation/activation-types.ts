@@ -54,7 +54,7 @@ export type ActivationDecision =
   | { decision: 'activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
-  | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel }
+  | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel; details?: { originalError: string; errorCategory: string } }
   | { decision: 'invalid_artifact'; reason: string; nextAction?: string };
 
 export interface PIArtifactSnapshot {

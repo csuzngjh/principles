@@ -14,6 +14,8 @@ import {
   AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
   AUTO_PROMOTABLE_CHANNELS,
 } from '../index.js';
+import { StoreEventEmitter } from '../../index.js';
+import type { TelemetryEvent } from '../../index.js';
 import type { PIArtifactSnapshot, DispatchInput, ChannelWriter } from '../index.js';
 
 function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
@@ -350,6 +352,134 @@ describe('ActivationDispatcher', () => {
     expect(result.decision).toBe('refused');
     if (result.decision === 'refused') {
       expect(result.reason).toBe('activation_write_failed');
+    }
+  });
+
+  // rc-9-no-silent-fallback (EP-03 / ERR-002): when ChannelWriter.canActivate
+  // throws, the dispatcher must NOT silently swallow the error. The refused
+  // decision must carry a structured `details` field with the original error
+  // message so the caller can diagnose the writer failure.
+  it('checkCanActivate throwing → refused with details.originalError (rc-9)', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const throwingCanActivateWriter: ChannelWriter = {
+      channel: 'prompt',
+      canActivate: async () => { throw new Error('canActivate crashed'); },
+      activate: async (input) => ({
+        activationId: 'act_prompt_' + input.principleId,
+        action: 'prompt_activate',
+        targetRef: 'ledger://' + input.principleId,
+      }),
+    };
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      new MemoryActivationStateStore(),
+      { writers: [throwingCanActivateWriter] },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('can_activate_check_failed');
+      expect(result.channel).toBe('prompt');
+      expect(result.details).toBeDefined();
+      if (result.details) {
+        expect(typeof result.details.originalError).toBe('string');
+        expect(result.details.originalError.length).toBeGreaterThan(0);
+        expect(result.details.originalError).toBe('canActivate crashed');
+        expect(result.details.errorCategory).toBe('can_activate_check_failed');
+      }
+    }
+  });
+
+  it('checkCanActivate throwing non-Error value → details.originalError is stringified', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    // Throw a non-Error value to exercise the `String(err)` branch.
+    const throwingWriter: ChannelWriter = {
+      channel: 'prompt',
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- test intentionally throws a non-Error to cover the String(err) branch
+      canActivate: async () => { throw 'string error not Error instance'; },
+      activate: async (input) => ({
+        activationId: 'act_prompt_' + input.principleId,
+        action: 'prompt_activate',
+        targetRef: 'ledger://' + input.principleId,
+      }),
+    };
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      new MemoryActivationStateStore(),
+      { writers: [throwingWriter] },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused' && result.details) {
+      expect(typeof result.details.originalError).toBe('string');
+      expect(result.details.originalError.length).toBeGreaterThan(0);
+      expect(result.details.originalError).toBe('string error not Error instance');
+    }
+  });
+
+  it('checkCanActivate throwing → emits degradation_triggered telemetry with artifactId + originalError', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const eventEmitter = new StoreEventEmitter();
+    const receivedEvents: TelemetryEvent[] = [];
+    eventEmitter.onTelemetry((event) => { receivedEvents.push(event); });
+    const throwingWriter: ChannelWriter = {
+      channel: 'prompt',
+      canActivate: async () => { throw new Error('canActivate telemetry test'); },
+      activate: async (input) => ({
+        activationId: 'act_prompt_' + input.principleId,
+        action: 'prompt_activate',
+        targetRef: 'ledger://' + input.principleId,
+      }),
+    };
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      new MemoryActivationStateStore(),
+      { writers: [throwingWriter], eventEmitter },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    // Telemetry event must be emitted with artifactId + originalError in payload
+    expect(receivedEvents.length).toBeGreaterThanOrEqual(1);
+    const [event] = receivedEvents;
+    if (event) {
+      expect(event.eventType).toBe('degradation_triggered');
+      expect(event.traceId).toBe('art-001');
+      // payload is Record<string, unknown> per TelemetryEventSchema — no cast needed
+      expect(event.payload.component).toBe('ActivationDispatcher');
+      expect(event.payload.event).toBe('ACTIVATION_CAN_ACTIVATE_FAILED');
+      expect(event.payload.artifactId).toBe('art-001');
+      expect(event.payload.originalError).toBe('canActivate telemetry test');
+      expect(event.payload.errorCategory).toBe('can_activate_check_failed');
+      expect(event.payload.channel).toBe('prompt');
+    }
+  });
+
+  it('checkCanActivate throwing without eventEmitter → still returns details (no telemetry required)', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const throwingWriter: ChannelWriter = {
+      channel: 'prompt',
+      canActivate: async () => { throw new Error('no emitter'); },
+      activate: async (input) => ({
+        activationId: 'act_prompt_' + input.principleId,
+        action: 'prompt_activate',
+        targetRef: 'ledger://' + input.principleId,
+      }),
+    };
+    // No eventEmitter in config — existing callers that don't wire telemetry
+    // must continue to work; the `details` field is the authoritative record.
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      new MemoryActivationStateStore(),
+      { writers: [throwingWriter] },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused' && result.details) {
+      expect(result.details.originalError).toBe('no emitter');
     }
   });
   // PRI-145: ApprovalQueue & Auto-Promotion

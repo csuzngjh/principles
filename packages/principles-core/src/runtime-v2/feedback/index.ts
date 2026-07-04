@@ -55,6 +55,7 @@ export {
 export {
   buildPrivacyPreview,
   buildEmailText,
+  buildMailtoUrl,
   DEFAULT_INCLUDED_SECTIONS,
   DEFAULT_EXCLUDED_CATEGORIES,
 } from './privacy-preview.js';
@@ -62,3 +63,15 @@ export {
 export { createFeedbackReport, type CreateReportResult } from './create-report.js';
 
 export { safeStringifyPreview } from './safe-stringify.js';
+
+// Task 11: PendingAgentDraftStore — durable store for agent-generated draft
+// context attached to a failed peer-runner task. Unlike the pure-logic helpers
+// above, this class holds a SqliteConnection reference (it is an I/O store,
+// not a pure function). Re-exported here so callers can import from the
+// feedback barrel; the runtime-v2 top-level barrel also re-exports it.
+export { PendingAgentDraftStore } from './pending-agent-draft-store.js';
+export type {
+  AgentDraftPayload,
+  PendingAgentDraftRow,
+  PendingDraftOpResult,
+} from './pending-agent-draft-store.js';

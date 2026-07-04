@@ -3,11 +3,12 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { loadPdConfig, computeFlagsFromLoadResult } from './config/pd-config-store.js';
+import { loadPdConfig, computeFlagsFromLoadResult, getFeedbackMaintainerEmail } from './config/pd-config-store.js';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
 import { handleFeedbackReportsRoute, disposeFeedbackReportModels } from './routes/feedback-reports.js';
+import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
@@ -234,6 +235,7 @@ interface AppServices {
   configStore: WorkspaceConfigStore;
   workspaceService: WorkspaceService;
   feedbackFlags: Record<string, { enabled: boolean }>;
+  maintainerEmail: string;
 }
 
 async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
@@ -244,12 +246,19 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   const configResult = loadPdConfig(workspaceDir);
   const pdFlags = computeFlagsFromLoadResult(configResult);
   const feedbackChannelEnabled = pdFlags.flags.feedback_channel?.enabled ?? false;
+  const failedTasksObservabilityEnabled = pdFlags.flags.failed_tasks_observability?.enabled ?? true;
   const feedbackFlags: Record<string, { enabled: boolean }> = {
     feedback_channel: { enabled: feedbackChannelEnabled },
+    failed_tasks_observability: { enabled: failedTasksObservabilityEnabled },
   };
   if (!configResult.ok) {
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
   }
+
+  // Read feedback.maintainer_email from .pd/config.yaml (defaults to
+  // csuzngjh@hotmail.com when absent). Used to build mailto: URLs in feedback
+  // reports so the owner can open a pre-filled email directly.
+  const maintainerEmail = getFeedbackMaintainerEmail(workspaceDir);
 
   return {
     workspaceDir,
@@ -257,11 +266,13 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
     configStore,
     workspaceService,
     feedbackFlags,
+    maintainerEmail,
   };
 }
 
 async function closeServices(): Promise<void> {
   disposeFeedbackReportModels();
+  disposeFailedTasksModels();
   disposeApprovalsModels();
   disposeApprovalsGroupedModels();
   disposeHealthModels();
@@ -318,7 +329,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // GET/POST /api/feedback/reports, /api/feedback/reports/:id
       if (urlPath === '/api/feedback/reports' || urlPath.startsWith('/api/feedback/reports/')) {
         const subPath = urlPath.slice('/api/feedback/reports'.length);
-        asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
+        asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags, maintainerEmail: services.maintainerEmail }))(req, res);
+        return;
+      }
+
+      // Task 9: GET /api/v1/failed-tasks, /api/v1/failed-tasks/:id
+      if (urlPath === '/api/v1/failed-tasks' || urlPath.startsWith('/api/v1/failed-tasks/')) {
+        const subPath = urlPath.slice('/api/v1/failed-tasks'.length);
+        asyncHandler(() => handleFailedTasksRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 

@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import {
   OperatorHealthReadModel,
   PainChainReadModel,
@@ -25,7 +26,16 @@ export interface SystemHealthStatus {
   checks: HealthCheckResult[];
   pipeline: PipelineTimestamps;
   generatedAt: string;
+  /** P0-2: PD/core/node versions for feedback report diagnostics. */
+  versions?: { pd: string; core: string; node: string };
+  /** P0-2: OS/arch/nodeVersion for feedback report diagnostics. */
+  platform?: { os: string; arch: string; nodeVersion: string };
 }
+
+// P0-2: createRequire lets us read package.json via Node's module resolution
+// in ESM context. Resolves relative to this module's URL in both tsx (dev)
+// and compiled JS (prod) since both mirror the same directory depth.
+const moduleRequire = createRequire(import.meta.url);
 
 const noop = (): void => { /* intentional no-op for promise catch */ };
 
@@ -59,7 +69,48 @@ export class HealthCheckModel {
       checks,
       pipeline: await this.getPipelineTimestamps(),
       generatedAt: new Date().toISOString(),
+      // P0-2: collect version and platform info for feedback diagnostics.
+      // If a package.json read fails, the helper returns 'unknown' rather
+      // than throwing — the feedback report still gets a structured field.
+      versions: {
+        pd: HealthCheckModel.readPdVersion(),
+        core: HealthCheckModel.readCoreVersion(),
+        node: process.versions.node,
+      },
+      platform: {
+        os: process.platform,
+        arch: process.arch,
+        nodeVersion: process.versions.node,
+      },
     };
+  }
+
+  /**
+   * P0-2: Read the PD (monorepo root) version from package.json.
+   * Returns 'unknown' on any resolution/parse failure (rc-9: no silent throw).
+   */
+  private static readPdVersion(): string {
+    try {
+      // From src/server/models/ (or dist/server/models/), five levels up
+      // reaches the monorepo root package.json.
+      const pkg = moduleRequire('../../../../../package.json') as { version?: unknown };
+      return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * P0-2: Read the @principles/core version from its package.json.
+   * Returns 'unknown' on any resolution/parse failure (rc-9: no silent throw).
+   */
+  private static readCoreVersion(): string {
+    try {
+      const pkg = moduleRequire('@principles/core/package.json') as { version?: unknown };
+      return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   private async checkSqlite(): Promise<HealthCheckResult> {

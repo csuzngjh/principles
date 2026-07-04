@@ -216,6 +216,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-171
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction.
+  - 2026-07-04 (feedback-pipeline-observability spec): 3 处 silent failure 复发并被修复
+    - `ActivationDispatcher.checkCanActivate` catch-and-refused 无 `originalError` — owner 无法知道 activation 为何被拒绝
+    - `EvolutionWorker.tryUpdateRetryCount`/`tryUpdatePrinciple` catch-and-swallow（注释明确写 "Errors are silently swallowed"）— worker-status.json 无 errors 记录
+    - `pain.ts emitPainDetectedEvent` catch-and-swallow — pain 信号完全丢失，无死信表，无日志
+    修复: 全部添加 reason + 日志 + 持久化（`dead_letter_pains` / `pending_agent_drafts` 表）
   - 2026-07-03 PRI-442 (PR #1177): Bug #1 fix extracted `effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults` in `diagnose.ts` and `pain-retry.ts` but added NO observability for the `ok: false` fallback — operators got silent degradation to default feature flags with no warning, violating `rc-9-no-silent-fallback`. The TDD test only mocked `ok: true`, missing the `ok: false` branch. CodeRabbit caught both (rc-9 violation + test gap). Fixed by adding `console.warn` with `configPath` + `errors[]` summary + `nextAction`, plus an `ok: false` regression test. This is the structural sibling of the PRI-483/PR#1098 recurrence below — same `loadPdConfig` `ok: false` path, same missing warn log. Lesson: when fixing a silent-failure bug (Bug #1 was itself a silent-failure variant — rate-limit degradation silently dead), the fix must not introduce a NEW silent fallback on the failure branch; TDD tests must cover BOTH `ok: true` and `ok: false` branches whenever code branches on `ok`.
   - 2026-07-01 PR #1146: onboarding localStorage writes/resets and website clipboard copy swallowed failures while UI reported or implied success. Storage APIs now return explicit success, callers surface localized errors, and copy exposes a visible failed state.
   - 2026-06-29 PR#1122: behavior-examples parse/assemble failure silently degraded to text_principle_only; artificer-runner validateOutput left errorCategory undefined for modeErrors (permanent errors retried) — both fixed with fail-fast structured errors (rc-9-no-silent-fallback)

@@ -283,6 +283,9 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
       // MVP-Quiet (ADR-0014 §2.5)
       correction_observer:{ category: 'quiet', enabled: false },
       feedback_channel:   { category: 'quiet', enabled: true },
+      // Task 17: Failed tasks observability — quiet flag, default-on so operators
+      // can list failed pipeline tasks out of the box. Disable via .pd/config.yaml.
+      failed_tasks_observability: { category: 'quiet', enabled: true },
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },

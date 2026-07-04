@@ -5,6 +5,7 @@ import {
   Moon,
   Focus,
   AlertTriangle,
+  AlertCircle,
   BookOpen,
   Zap,
   Archive,
@@ -49,11 +50,12 @@ const mainNavItems = [
 const toolNavItems = [
   { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings },
   { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare },
+  { id: "failed-tasks", labelKey: "components.sidebar.failedTasks", href: "/failed-tasks", icon: AlertCircle },
   { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings },
   { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { enabled: boolean }> }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
@@ -132,6 +134,13 @@ export function AppSidebar() {
           </div>
           <div className="px-0">
             {toolNavItems.map((item) => {
+              // Feature-flag gate: failed-tasks entry only shows when
+              // failed_tasks_observability is enabled. When featureFlags is
+              // undefined (still loading) or the flag is missing, hide the
+              // entry to avoid surfacing a page the backend will 403.
+              if (item.id === "failed-tasks" && featureFlags?.failed_tasks_observability?.enabled !== true) {
+                return null;
+              }
               const Icon = item.icon;
               const active = isActive(item.href);
               return (

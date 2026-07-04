@@ -723,6 +723,60 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
   return { ok: true, outputLanguage: outputLangRaw, source: 'user_config' };
 }
 
+// ── Feedback Maintainer Email ───────────────────────────────────────────────
+
+/** Default maintainer email when .pd/config.yaml does not set feedback.maintainer_email. */
+const DEFAULT_FEEDBACK_MAINTAINER_EMAIL = 'csuzngjh@hotmail.com';
+
+/**
+ * Read `feedback.maintainer_email` from .pd/config.yaml.
+ * Returns the default when the field is absent, empty, or the config is
+ * missing/malformed. Treats parsed YAML as unknown (ERR-001/005): no `as`
+ * bypasses; uses Object.hasOwn for untrusted key checks (ERR-013).
+ */
+export function getFeedbackMaintainerEmail(workspaceDir: string): string {
+  const configPath = getPdConfigPath(workspaceDir);
+
+  if (!fs.existsSync(configPath)) {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  if (!isRecord(parsed)) {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  // Extract feedback section — unknown-first, no `as` bypass (ERR-001)
+  const feedbackRaw = Object.hasOwn(parsed, 'feedback') ? parsed.feedback : undefined;
+  if (feedbackRaw === undefined) {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  if (!isRecord(feedbackRaw)) {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  const emailRaw = Object.hasOwn(feedbackRaw, 'maintainer_email') ? feedbackRaw.maintainer_email : undefined;
+  if (typeof emailRaw !== 'string' || emailRaw.length === 0) {
+    return DEFAULT_FEEDBACK_MAINTAINER_EMAIL;
+  }
+
+  return emailRaw;
+}
+
 /**
  * Update principles.outputLanguage in config.yaml.
  * Safe partial write: preserves unknown sections, validates before write.

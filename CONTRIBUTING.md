@@ -85,6 +85,27 @@ gh pr create --title "feat: your feature" --body "Description"
 
 ## 问题反馈
 
+### PD Console 反馈通道（推荐）
+
+除了在 GitHub 提交 issue 外，你也可以：
+
+1. **PD Console → Report Problem 页面**：打开 PD Console，点击侧边栏的 "Report Problem" 工具，填写问题描述、复现步骤、期望/实际行为。Console 会自动收集 PD 版本、平台信息、feature flags、最近事件等诊断数据，生成结构化的反馈草稿。
+   - 草稿生成后，你可以选择：
+     - **Open Email**：通过 `mailto:` 链接直接发送到维护者邮箱（`csuzngjh@hotmail.com`）
+     - **Open GitHub Issue**：通过预填的 GitHub issue URL 在仓库创建 issue
+     - **Copy Markdown**：复制 markdown 报告内容，自行粘贴到任意渠道
+
+2. **Failed Tasks 页面 → 一键创建反馈**：当 PD 管道中有失败任务时（diagnostician / internalizer 等 peer runner 永久失败），Failed Tasks 页面会列出所有失败任务。每行都有 "Create Feedback Draft" 按钮，点击后会自动跳转到 Report Problem 页面，并预填 taskId 和 painId。提交后，系统会自动合并 peer runner 捕获的失败上下文（agent draft）到反馈报告中，包括：
+   - 失败摘要（error category + 时间戳）
+   - 观察到的错误（已脱敏的 error message + stack 头部）
+   - 命令摘要（最后一次 run 的 tool calls 摘要）
+
+3. **CLI 命令**：使用 `pd errors list` 命令可以在终端查看所有失败任务和 worker errors，便于快速排查。
+   - `pd errors list` — 列出所有失败任务和 worker 错误
+   - `pd errors list --json` — JSON 输出（可被 jq 处理）
+   - `pd errors list --kind diagnostician` — 按类型过滤
+   - `pd errors list --since 24` — 只看最近 24 小时
+
 ### 报告 Bug
 
 请通过 GitHub Issues 反馈问题，包含以下信息：

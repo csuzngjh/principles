@@ -1479,7 +1479,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
-  it('only MVP core channels, code_rule_capability, and feedback_channel are enabled by default', () => {
+  it('only MVP core channels, code_rule_capability, feedback_channel, and failed_tasks_observability are enabled by default', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     const enabledFlags: string[] = [];
@@ -1489,7 +1489,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'prompt']);
   });
 
   it('written to temp workspace is loadable', () => {

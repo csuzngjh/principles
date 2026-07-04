@@ -33,7 +33,7 @@ function makeReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
       excludedByDefault: ['rawPrompt', 'rawChat', 'fileContents', 'envVars', 'tokens', 'fullPaths', 'stackTraces'],
       redactionNotes: [],
     },
-    outputs: { markdown: '', emailText: '', githubIssueUrl: '' },
+    outputs: { markdown: '', emailText: '', githubIssueUrl: '', mailtoUrl: '' },
     ...overrides,
   };
 }

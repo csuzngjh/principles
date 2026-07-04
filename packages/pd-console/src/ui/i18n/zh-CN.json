@@ -566,6 +566,7 @@
         "copyMarkdown": "复制 Markdown",
         "copyEmail": "复制邮件文本",
         "openGithub": "打开 GitHub issue 链接",
+        "openEmail": "打开邮件",
         "delete": "删除草稿"
       },
       "saved": {
@@ -1130,6 +1131,22 @@
         "step3": "命令",
         "step4": "证据"
       }
+    },
+    "failedTasks": {
+      "title": "失败任务",
+      "subtitle": "管道中失败或需要人工审查的任务",
+      "empty": "没有失败任务。PD 管道运行正常。",
+      "error": "加载失败任务失败",
+      "disabled": "失败任务可观测性已禁用。请在 .pd/config.yaml 中启用 'failed_tasks_observability' 以查看。",
+      "createDraft": "创建反馈草稿",
+      "taskId": "任务 ID",
+      "painId": "Pain ID",
+      "kind": "类型",
+      "status": "状态",
+      "lastError": "最近错误",
+      "attempts": "尝试次数",
+      "lastAttempt": "最近尝试",
+      "noPainId": "—"
     }
   },
   "components": {
@@ -1186,6 +1203,7 @@
       "debt": "原则债务",
       "controlCenter": "控制中心",
       "reportProblem": "产品反馈",
+      "failedTasks": "失败任务",
       "settings": "设置",
       "update": "更新",
       "pendingApprovalsAria": "{{count}} 条待审批原则",
