@@ -180,7 +180,7 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
         expect.any(String),
       );
       const payload = JSON.parse(
-        (SystemLogger.log as ReturnType<typeof vi.fn>).mock.calls[0][2] as string,
+        vi.mocked(SystemLogger.log).mock.calls[0][2],
       ) as Record<string, unknown>;
 
       // rc-9 required fields: reason + nextAction (plus structured context).
@@ -223,7 +223,7 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
       );
 
       // The skipped event must NOT fire for a successful tool call.
-      const skippedCalls = (SystemLogger.log as ReturnType<typeof vi.fn>).mock.calls.filter(
+      const skippedCalls = vi.mocked(SystemLogger.log).mock.calls.filter(
         (c) => c[1] === 'PAIN_ADMISSION_SKIPPED',
       );
       expect(skippedCalls).toHaveLength(0);
