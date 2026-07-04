@@ -178,6 +178,37 @@ export class SqliteTaskStore implements TaskStore {
   // ── Failed-task observability methods (Task 8) ────────────────────────────
 
   /**
+   * Shared helper for listFailedTasks / countFailedTasks: build the
+   * kind/since WHERE conditions and parameter values, scoped to the given
+   * table alias. Keeping this in one place ensures the list query and the
+   * count query stay consistent when since semantics or task_kind filtering
+   * change — divergence would cause list/total mismatch in the Failed
+   * Tasks UI pagination.
+   */
+  private static buildFailedTaskConditions(
+    filter: Pick<FailedTaskFilter, 'kind' | 'since'> | undefined,
+    tableAlias: string,
+  ): { conditions: string[]; values: unknown[] } {
+    const conditions: string[] = [`${tableAlias}status IN ('failed', 'needs_human_review')`];
+    const values: unknown[] = [];
+
+    if (filter?.kind !== undefined) {
+      conditions.push(`${tableAlias}task_kind = ?`);
+      values.push(filter.kind);
+    }
+
+    if (filter?.since !== undefined) {
+      const sinceIso = new Date(filter.since).toISOString();
+      conditions.push(
+        `(SELECT MAX(r.started_at) FROM runs r WHERE r.task_id = ${tableAlias}task_id) >= ?`,
+      );
+      values.push(sinceIso);
+    }
+
+    return { conditions, values };
+  }
+
+  /**
    * List tasks in 'failed' or 'needs_human_review' status, sorted by last
    * attempt time descending (most recent failures first).
    *
@@ -191,21 +222,7 @@ export class SqliteTaskStore implements TaskStore {
    */
   async listFailedTasks(filter?: FailedTaskFilter): Promise<FailedTaskSummary[]> {
     const db = this.connection.getDb();
-    const conditions: string[] = ["t.status IN ('failed', 'needs_human_review')"];
-    const values: unknown[] = [];
-
-    if (filter?.kind !== undefined) {
-      conditions.push('t.task_kind = ?');
-      values.push(filter.kind);
-    }
-
-    if (filter?.since !== undefined) {
-      const sinceIso = new Date(filter.since).toISOString();
-      conditions.push(
-        '(SELECT MAX(r.started_at) FROM runs r WHERE r.task_id = t.task_id) >= ?',
-      );
-      values.push(sinceIso);
-    }
+    const { conditions, values } = SqliteTaskStore.buildFailedTaskConditions(filter, 't.');
 
     let sql = `
       SELECT
@@ -268,23 +285,14 @@ export class SqliteTaskStore implements TaskStore {
    * Count tasks in 'failed' or 'needs_human_review' status, with the same
    * kind/since filtering as listFailedTasks. Used for pagination totals.
    */
-  async countFailedTasks(filter?: { kind?: string; since?: number }): Promise<number> {
+  async countFailedTasks(filter?: Pick<FailedTaskFilter, 'kind' | 'since'>): Promise<number> {
     const db = this.connection.getDb();
-    const conditions: string[] = ["status IN ('failed', 'needs_human_review')"];
-    const values: unknown[] = [];
-
-    if (filter?.kind !== undefined) {
-      conditions.push('task_kind = ?');
-      values.push(filter.kind);
-    }
-
-    if (filter?.since !== undefined) {
-      const sinceIso = new Date(filter.since).toISOString();
-      conditions.push(
-        '(SELECT MAX(r.started_at) FROM runs r WHERE r.task_id = tasks.task_id) >= ?',
-      );
-      values.push(sinceIso);
-    }
+    // tableAlias must be 'tasks.' (not '') so the correlated subquery
+    // `r.task_id = tasks.task_id` resolves to the OUTER tasks table. With an
+    // empty alias, `r.task_id = task_id` would resolve to the inner runs
+    // table, making the subquery return MAX(runs.started_at) across ALL runs
+    // and breaking the since filter (false-healthy count).
+    const { conditions, values } = SqliteTaskStore.buildFailedTaskConditions(filter, 'tasks.');
 
     const sql = `SELECT COUNT(*) as cnt FROM tasks WHERE ${conditions.join(' AND ')}`;
     // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (cnt field is validated below via typeof row.cnt === 'number')

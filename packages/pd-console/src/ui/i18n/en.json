@@ -1146,7 +1146,8 @@
       "lastError": "Last Error",
       "attempts": "Attempts",
       "lastAttempt": "Last Attempt",
-      "noPainId": "—"
+      "noPainId": "—",
+      "partialResults": "Showing first {shown} of {total} records. Narrow filters or use 'pd errors list' with --offset to see more."
     }
   },
   "components": {

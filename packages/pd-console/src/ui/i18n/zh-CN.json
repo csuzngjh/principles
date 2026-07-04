@@ -1146,7 +1146,8 @@
       "lastError": "最近错误",
       "attempts": "尝试次数",
       "lastAttempt": "最近尝试",
-      "noPainId": "—"
+      "noPainId": "—",
+      "partialResults": "仅显示前 {shown} 条，共 {total} 条。请缩小筛选范围或使用 'pd errors list --offset' 查看更多。"
     }
   },
   "components": {

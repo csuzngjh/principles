@@ -361,9 +361,16 @@ function LoadedContent({ data, onCreateDraft, t }: LoadedContentProps) {
         })}
       </div>
 
-      {/* Footer: total count */}
-      <div className="mt-8 font-mono text-[11px] text-ink-4">
-        {t("common.total")}: {data.total}
+      {/* Footer: total count + partial-results hint */}
+      <div className="mt-8 font-mono text-[11px] text-ink-4 space-y-1">
+        <div>{t("common.total")}: {data.total}</div>
+        {data.total > data.tasks.length && (
+          <div className="text-amber/80 leading-relaxed">
+            {t("pages.failedTasks.partialResults")
+              .replace("{shown}", String(data.tasks.length))
+              .replace("{total}", String(data.total))}
+          </div>
+        )}
       </div>
     </>
   );

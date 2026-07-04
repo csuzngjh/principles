@@ -5,7 +5,7 @@
  *
  * ERR checklist:
  * - ERR-001/005: no `as` casts; FeedbackReport constructed explicitly
- * - ERR-014/016: body bounded to MAX_MAILTO_BODY_LENGTH (4000) + suffix
+ * - ERR-014/016: encoded body bounded to MAX_MAILTO_ENCODED_BODY_LENGTH (1800) + suffix
  */
 
 import { describe, it, expect } from 'vitest';
@@ -18,7 +18,9 @@ import {
 import type { FeedbackReport } from '../feedback-types.js';
 
 const MAINTAINER_EMAIL = 'csuzngjh@hotmail.com';
-const MAX_MAILTO_BODY_LENGTH = 4000;
+// Must mirror the constant in privacy-preview.ts. We assert the encoded body
+// (not the raw body) stays within this budget — see ERR-014/016.
+const MAX_MAILTO_ENCODED_BODY_LENGTH = 1800;
 const TRUNCATED_SUFFIX = '\n\n…(truncated — use "Copy Email" in PD Console for the full report)';
 
 function makeReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
@@ -118,9 +120,10 @@ describe('buildMailtoUrl', () => {
     expect(bodyPart).toContain('%26');
   });
 
-  it('truncates body to 4000 chars and appends …(truncated) when exceeded', () => {
-    // Use multiple long fields so the email text definitely exceeds 4000 chars
-    // (buildEmailText bounds each field to 1500 chars, so we need several).
+  it('truncates body so the encoded form stays within budget and appends …(truncated) when exceeded', () => {
+    // Use multiple long fields so the email text definitely exceeds the
+    // encoded-body budget. buildEmailText bounds each field to 1500 chars,
+    // so we need several long fields to push the encoded body past 1800.
     const longText = 'x'.repeat(5000);
     const report = makeReport({
       userText: {
@@ -133,12 +136,14 @@ describe('buildMailtoUrl', () => {
     const url = buildMailtoUrl(report, MAINTAINER_EMAIL);
     const bodyPart = url.split('body=')[1] ?? '';
     const decoded = decodeURIComponent(bodyPart);
+    // Suffix must be present (truncation path was taken)
     expect(decoded.endsWith(TRUNCATED_SUFFIX)).toBe(true);
-    const truncatedPart = decoded.slice(0, -TRUNCATED_SUFFIX.length);
-    expect(truncatedPart.length).toBe(MAX_MAILTO_BODY_LENGTH);
+    // The ENCODED body (with suffix) must respect the budget — this is the
+    // invariant that protects Outlook desktop's ~2000-char mailto: limit.
+    expect(bodyPart.length).toBeLessThanOrEqual(MAX_MAILTO_ENCODED_BODY_LENGTH);
   });
 
-  it('does not truncate body when under 4000 chars', () => {
+  it('does not truncate body when encoded form is within budget', () => {
     const report = makeReport();
     const url = buildMailtoUrl(report, MAINTAINER_EMAIL);
     const bodyPart = url.split('body=')[1] ?? '';
