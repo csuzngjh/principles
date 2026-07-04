@@ -432,6 +432,21 @@ export function evaluatePainAdmissionForToolCall(
     : WRITE_TOOLS;
 
   if (!allowedTools.includes(event.toolName) || !outcome.isFailure) {
+    // PRI-442 A-09: rc-9-no-silent-fallback. Only emit observability when we
+    // are DECLINING an actual failure (Case A). Successful tool calls (happy
+    // path) must stay silent — they are not degradation. evaluatePainAdmission
+    // is called on every after_tool_call event, so logging the success path
+    // would spam SYSTEM_*.log on essentially every successful tool call.
+    if (outcome.isFailure) {
+      SystemLogger.log(workspaceDir, 'PAIN_ADMISSION_SKIPPED', JSON.stringify({
+        hook: 'after_tool_call',
+        reason: 'not_a_write_tool_failure',
+        tool: event.toolName,
+        failureSource: outcome.failureSource,
+        sessionId,
+        nextAction: 'No pain task created; failure is outside write-tool admission scope. Retry or investigate if unexpected.',
+      }));
+    }
     return {
       admitted: false,
       stage: 'not_applicable',

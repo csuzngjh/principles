@@ -17,8 +17,19 @@
  * - ERR-024/025/048: Production-path wiring tests.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Mock SystemLogger so tests can assert on the structured-observability channel
+// without touching the filesystem. Matches the established pattern in
+// trajectory-collector.test.ts (vi.mock at module level, not vi.spyOn).
+vi.mock('../../src/core/system-logger.js', () => ({
+  SystemLogger: {
+    log: vi.fn(),
+  },
+}));
+
 import { evaluatePainAdmissionForToolCall, resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
+import { SystemLogger } from '../../src/core/system-logger.js';
 import type { PluginHookAfterToolCallEvent } from '../../src/openclaw-sdk.js';
 import type { ToolCallObservation, ToolCallOutcome } from '../../src/hooks/after-tool-call-types.js';
 
@@ -73,6 +84,9 @@ function createMockConfig(get: (key: string) => unknown) {
 describe('Single-Gate Pain Admission — PRI-363', () => {
   beforeEach(() => {
     resetTriggerCooldownForTest();
+    // Clear SystemLogger.log call history between tests so each assertion
+    // only sees calls made within its own test.
+    vi.mocked(SystemLogger.log).mockClear();
   });
 
   describe('Non-write-tool failures', () => {
@@ -111,6 +125,108 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
       expect(decision.admitted).toBe(false);
       expect(decision.stage).toBe('not_applicable');
       expect(decision.reason).toBe('not_a_write_tool_failure');
+    });
+  });
+
+  /**
+   * PRI-442 A-09: rc-9-no-silent-fallback compliance.
+   *
+   * When a non-WRITE_TOOL failure is rejected at the tool-name gate, the
+   * rejection must not be silent — it must emit a structured SystemLogger
+   * event (PAIN_ADMISSION_SKIPPED) carrying a `reason` and a `nextAction`
+   * so operators can see why the pain path was declined. The admission
+   * decision itself is unchanged (still not_applicable /
+   * not_a_write_tool_failure); only observability is added.
+   *
+   * Observability fires ONLY for the failure case (Case A). A successful
+   * tool call (Case B/C) is the happy path, not degradation, and must stay
+   * silent — evaluatePainAdmission runs on every after_tool_call event.
+   */
+  describe('A-09 rc-9 observability on non-write-tool rejection', () => {
+    it('Case A: emits PAIN_ADMISSION_SKIPPED with reason + nextAction when rejecting a non-write-tool FAILURE', () => {
+      const toolName = 'read'; // Not a write tool
+      const error = new Error('ENOENT: file not found');
+      const sessionId = 'session-a09';
+      const workspaceDir = '/tmp/workspace';
+
+      const event = createMockEvent(toolName, error, { path: '/tmp/test.md' });
+      const observation = createMockObservation(72, false, 'abc123');
+      const outcome = createMockOutcome(true, 'tool_failure'); // FAILURE
+      const sessionState = { currentGfi: 30, consecutiveErrors: 2 };
+      const config = createMockConfig(() => undefined);
+
+      const decision = evaluatePainAdmissionForToolCall(
+        event,
+        observation,
+        outcome,
+        sessionState,
+        sessionState,
+        sessionId,
+        workspaceDir,
+        config,
+      );
+
+      // Admission decision is unchanged.
+      expect(decision.admitted).toBe(false);
+      expect(decision.stage).toBe('not_applicable');
+      expect(decision.reason).toBe('not_a_write_tool_failure');
+
+      // rc-9: rejection must not be silent. A structured SystemLogger event
+      // must fire on the workspace-scoped channel (SYSTEM_*.log).
+      expect(SystemLogger.log).toHaveBeenCalledTimes(1);
+      expect(SystemLogger.log).toHaveBeenCalledWith(
+        workspaceDir,
+        'PAIN_ADMISSION_SKIPPED',
+        expect.any(String),
+      );
+      const payload = JSON.parse(
+        vi.mocked(SystemLogger.log).mock.calls[0][2],
+      ) as Record<string, unknown>;
+
+      // rc-9 required fields: reason + nextAction (plus structured context).
+      expect(payload['reason']).toBe('not_a_write_tool_failure');
+      expect(typeof payload['nextAction']).toBe('string');
+      expect((payload['nextAction'] as string).length).toBeGreaterThan(0);
+      expect(payload['hook']).toBe('after_tool_call');
+      expect(payload['tool']).toBe('read');
+      expect(payload['failureSource']).toBe('tool_failure');
+      expect(payload['sessionId']).toBe(sessionId);
+    });
+
+    it('Case B/C: does NOT emit PAIN_ADMISSION_SKIPPED for a SUCCESSFUL tool call (happy path)', () => {
+      // A successful write tool (isFailure: false) is the happy path —
+      // it must NOT trigger the skipped-observability event. This also
+      // covers Case C (any successful non-write tool), which hits the same
+      // early-return branch but is not a failure.
+      const toolName = 'write';
+      const sessionId = 'session-a09-happy';
+      const workspaceDir = '/tmp/workspace';
+
+      const event = createMockEvent(toolName, null, {
+        file_path: '/tmp/test.md',
+        content: 'ok',
+      });
+      const observation = createMockObservation(0, false, 'abc123');
+      const outcome = createMockOutcome(false, undefined); // SUCCESS
+      const sessionState = { currentGfi: 30, consecutiveErrors: 0 };
+      const config = createMockConfig(() => undefined);
+
+      evaluatePainAdmissionForToolCall(
+        event,
+        observation,
+        outcome,
+        sessionState,
+        sessionState,
+        sessionId,
+        workspaceDir,
+        config,
+      );
+
+      // The skipped event must NOT fire for a successful tool call.
+      const skippedCalls = vi.mocked(SystemLogger.log).mock.calls.filter(
+        (c) => c[1] === 'PAIN_ADMISSION_SKIPPED',
+      );
+      expect(skippedCalls).toHaveLength(0);
     });
   });
 
