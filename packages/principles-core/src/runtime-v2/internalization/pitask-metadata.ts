@@ -144,7 +144,10 @@ function isValidArtifactRef(value: unknown): value is ArtifactRef {
  *   - requiredChanges: non-empty array of non-empty strings (rc-4)
  *   - concerns: array of non-empty strings (can be empty)
  *   - previousScore: finite number
- *   - repairIteration: positive integer (1 or 2)
+ *   - repairIteration: positive integer, upper bound of 2 (rc-3 fail-closed
+ *     at the trust boundary — the documented contract is "max 2 rounds"; a
+ *     payload with repairIteration: 3 must be rejected here rather than
+ *     relying on the runtime caller's priorRepairIteration >= 2 check)
  *   - sourceArtificerArtifactId: non-empty string
  *   - sourceEvaluatorTaskId: non-empty string
  */
@@ -161,7 +164,13 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     if (typeof c !== 'string' || c.trim() === '') return false;
   }
   if (typeof p.previousScore !== 'number' || !Number.isFinite(p.previousScore)) return false;
-  if (typeof p.repairIteration !== 'number' || !Number.isInteger(p.repairIteration) || p.repairIteration < 1) return false;
+  // rc-3: enforce the documented max-2-rounds contract at the trust boundary.
+  // repairIteration must be a positive integer in [1, 2]; reject 3+ here so
+  // a malformed payload cannot bypass the runtime caller's max-iteration guard.
+  if (typeof p.repairIteration !== 'number'
+    || !Number.isInteger(p.repairIteration)
+    || p.repairIteration < 1
+    || p.repairIteration > 2) return false;
   if (typeof p.sourceArtificerArtifactId !== 'string' || p.sourceArtificerArtifactId.trim() === '') return false;
   if (typeof p.sourceEvaluatorTaskId !== 'string' || p.sourceEvaluatorTaskId.trim() === '') return false;
   return true;

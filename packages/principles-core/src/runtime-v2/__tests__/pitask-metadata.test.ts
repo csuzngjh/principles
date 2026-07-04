@@ -489,6 +489,25 @@ describe('PRI-509: RepairPayload serialization + parsing', () => {
     expect(parsePITaskMetadata(json)).toBeNull();
   });
 
+  it('repairPayload with repairIteration > 2 → fail closed (rc-3, EP-03: max-2-rounds contract)', () => {
+    // CodeRabbit finding (PRI-509): the documented contract is "max 2 repair
+    // rounds"; a payload claiming repairIteration: 3 must be rejected at the
+    // trust boundary rather than relying on the runtime caller's
+    // priorRepairIteration >= 2 check (defense in depth).
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 3 };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with repairIteration = 2 → accepted (boundary)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 2 };
+    const json = serializePITaskMetadata(meta);
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed?.repairPayload?.repairIteration).toBe(2);
+  });
+
   it('repairPayload with empty sourceArtificerArtifactId → fail closed (rc-6, ERR-004)', () => {
     const meta = makeMetadata({ channel: 'prompt' });
     meta.repairPayload = { ...makeValidRepairPayload(), sourceArtificerArtifactId: '  ' };

@@ -10,7 +10,7 @@ import type { ArtificerRuleOutput } from '../internalization/artificer-output.js
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
-import type { PITaskMetadata } from '../internalization/pitask-metadata.js';
+import type { PITaskMetadata, RepairPayload } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
 
@@ -1463,14 +1463,7 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
     };
   }
 
-  function makeArtificerTaskPri509(repairPayload?: {
-    requiredChanges: readonly string[];
-    concerns: readonly string[];
-    previousScore: number;
-    repairIteration: number;
-    sourceArtificerArtifactId: string;
-    sourceEvaluatorTaskId: string;
-  }): TaskRecord {
+  function makeArtificerTaskPri509(repairPayload?: RepairPayload): TaskRecord {
     const meta = makeMetadata({
       dependencyTaskIds: [SCRIBE_TASK_ID_PRI509],
       channel: 'prompt',
