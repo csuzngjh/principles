@@ -25,7 +25,7 @@
 
     <section class="guide-step">
       <h2 class="step-title">{{ isZh ? '步骤 2 · 运行安装命令' : 'Step 2 · Run install command' }}</h2>
-      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" aria-live="polite" @click="copyCommand">{{ copyState }}</button></div>
+      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" aria-live="polite" data-umami-event="copy_install_command" @click="copyCommand">{{ copyState }}</button></div>
       <p class="step-desc">
         {{ isZh
           ? '在终端中运行此命令。--yes 跳过 npx 安装确认提示；Installer 会自动检测 Node 和 OpenClaw，缺失时给出官方下载链接。'
