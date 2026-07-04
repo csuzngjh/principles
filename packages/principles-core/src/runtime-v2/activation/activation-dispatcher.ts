@@ -95,8 +95,11 @@ function buildApprovalContext(
 ): Pick<ApprovalEnqueueInput, 'summary' | 'triggerReason' | 'confidenceExplanation' | 'effectDescription' | 'rejectionEffect'> {
   let principleText = '';
   try {
-    const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
-    principleText = String(parsed.text ?? parsed.description ?? '');
+    const parsed: unknown = JSON.parse(artifact.contentJson);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      principleText = String(record.text ?? record.description ?? '');
+    }
   } catch { /* best-effort */ }
 
   const kindLabel = artifact.artifactKind ?? 'artifact';

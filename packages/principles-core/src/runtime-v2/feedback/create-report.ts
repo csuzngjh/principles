@@ -251,6 +251,7 @@ export function createFeedbackReport(
   // user-injected values must not leak tokens through the field structure).
   const scrubbed = redactSensitiveFields(diagnosticSummary);
   const safeDiagnostic: DiagnosticSummary = scrubbed.ok
+    // runtime-contract-exempt: ERR-001 redactSensitiveFields is a shape-preserving recursive redactor — it only replaces string values and truncates, never changes object structure. The output is guaranteed to match the input's DiagnosticSummary shape by construction.
     ? (scrubbed.value as DiagnosticSummary)
     : diagnosticSummary;
   if (scrubbed.ok) {

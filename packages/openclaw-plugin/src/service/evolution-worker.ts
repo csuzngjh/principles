@@ -50,7 +50,7 @@ function validateQueueEventPayload(payload: string | null | undefined): Record<s
         if (typeof parsed !== 'object' || parsed === null) {
             throw new Error('Queue event payload must be a JSON object');
         }
-        if (!('type' in parsed) || !('workspaceId' in parsed)) {
+        if (!Object.hasOwn(parsed, 'type') || !Object.hasOwn(parsed, 'workspaceId')) {
             throw new Error('Queue event payload missing required fields: type, workspaceId');
         }
         return parsed;

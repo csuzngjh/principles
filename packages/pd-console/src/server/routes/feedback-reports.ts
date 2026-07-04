@@ -208,7 +208,11 @@ export async function handleFeedbackReportsRoute(
         }
         return;
       }
-      sendSuccess<{ report: FeedbackReport }>(res, { report: result.report as FeedbackReport });
+      if (!result.report) {
+        sendError(res, 500, 'feedback_reports_get_empty', 'Report lookup succeeded but no report was returned');
+        return;
+      }
+      sendSuccess<{ report: FeedbackReport }>(res, { report: result.report });
     } catch (err) {
       sendError(res, 500, 'feedback_reports_get_error', errorMessage(err));
     }
