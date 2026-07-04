@@ -23,6 +23,19 @@ export default defineConfig({
     ['meta', { property: 'og:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
+    // Cloudflare Web Analytics beacon — privacy-first, no cookies, gives Core Web Vitals
+    ['script', {
+      defer: true,
+      src: 'https://static.cloudflareinsights.com/beacon.min.js',
+      'data-cf-beacon': '{"token": "17b7954b9e24419198b8837990ddb022"}'
+    }],
+    // Umami Cloud analytics — privacy-first, no cookies, supports custom events
+    // Complements Cloudflare Web Analytics (which lacks event tracking)
+    ['script', {
+      defer: true,
+      src: 'https://cloud.umami.is/script.js',
+      'data-website-id': '0f7e4622-4634-40c1-8c52-8496226e41d0'
+    }],
   ],
 
   locales: {

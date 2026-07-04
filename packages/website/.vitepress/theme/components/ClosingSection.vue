@@ -5,8 +5,8 @@
       <cite class="closing-sub">{{ isZh ? '燃烧痛苦，协同进化' : 'Burn Pain, Co-Evolve' }}</cite>
     </blockquote>
     <div class="closing-actions">
-      <a class="pd-btn pd-btn-brand" :href="isZh ? '/zh/install' : '/install'">{{ isZh ? '开始使用' : 'Get started' }}</a>
-      <a class="pd-btn pd-btn-alt" href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener">{{ isZh ? 'GitHub' : 'GitHub' }}</a>
+      <a class="pd-btn pd-btn-brand" :href="isZh ? '/zh/install' : '/install'" data-umami-event="cta_get_started">{{ isZh ? '开始使用' : 'Get started' }}</a>
+      <a class="pd-btn pd-btn-alt" href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener" data-umami-event="outbound_click" data-umami-event-target="github">{{ isZh ? 'GitHub' : 'GitHub' }}</a>
     </div>
   </section>
 </template>
