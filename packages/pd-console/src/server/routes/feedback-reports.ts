@@ -9,8 +9,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   createFeedbackReport,
+  PendingAgentDraftStore,
   type FeedbackReport,
 } from '@principles/core/runtime-v2/feedback';
+import { SqliteConnection } from '@principles/core/runtime-v2';
 import {
   FeedbackReportConsoleModel,
   type FeedbackReportDraftSummary,
@@ -32,6 +34,29 @@ function getModel(workspaceDir: string): FeedbackReportConsoleModel {
     models.set(workspaceDir, model);
   }
   return model;
+}
+
+// Task 13: Per-workspace PendingAgentDraftStore cache.
+// PendingAgentDraftStore holds a SqliteConnection; sharing one per workspace
+// keeps the connection alive across requests. The connection is writable
+// (readonly: false) because markConsumed updates the pending_agent_drafts
+// table. disposeFeedbackReportModels() closes every connection on shutdown.
+interface DraftStoreEntry {
+  store: PendingAgentDraftStore;
+  connection: SqliteConnection;
+}
+
+const draftStores = new Map<string, DraftStoreEntry>();
+
+function getDraftStore(workspaceDir: string): PendingAgentDraftStore {
+  let entry = draftStores.get(workspaceDir);
+  if (!entry) {
+    const connection = new SqliteConnection({ workspaceDir, readonly: false });
+    const store = new PendingAgentDraftStore(connection);
+    entry = { store, connection };
+    draftStores.set(workspaceDir, entry);
+  }
+  return entry.store;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
@@ -85,6 +110,7 @@ export type FeedbackReportsContext = {
   workspaceDir: string;
   subPath: string;
   featureFlags?: Record<string, { enabled: boolean }>;
+  maintainerEmail?: string;
 };
 
 export async function handleFeedbackReportsRoute(
@@ -141,7 +167,8 @@ export async function handleFeedbackReportsRoute(
       const obj = bodyResult.value as Record<string, unknown>;
       const {input} = obj;
       const diagnostics = obj.diagnostics ?? {};
-      const reportResult = createFeedbackReport(input, diagnostics);
+      const draftStore = getDraftStore(ctx.workspaceDir);
+      const reportResult = createFeedbackReport(input, diagnostics, ctx.maintainerEmail, draftStore);
       if (!reportResult.ok) {
         sendBadRequest(res, reportResult.errors.map((e) => `${e.field}: ${e.reason}`).join('; '));
         return;
@@ -181,7 +208,11 @@ export async function handleFeedbackReportsRoute(
         }
         return;
       }
-      sendSuccess<{ report: FeedbackReport }>(res, { report: result.report as FeedbackReport });
+      if (!result.report) {
+        sendError(res, 500, 'feedback_reports_get_empty', 'Report lookup succeeded but no report was returned');
+        return;
+      }
+      sendSuccess<{ report: FeedbackReport }>(res, { report: result.report });
     } catch (err) {
       sendError(res, 500, 'feedback_reports_get_error', errorMessage(err));
     }
@@ -210,4 +241,13 @@ export function disposeFeedbackReportModels(): void {
     model.dispose();
   }
   models.clear();
+  // Task 13: also close and clear the draft store cache
+  for (const entry of draftStores.values()) {
+    try {
+      entry.connection.close();
+    } catch {
+      // best-effort close on shutdown
+    }
+  }
+  draftStores.clear();
 }

@@ -302,9 +302,15 @@ async function createFeedbackReport(
   input: unknown,
   diagnostics: unknown,
 ): Promise<ApiResponse<FeedbackReportData>> {
+  // Ensure diagnostics is always present in the serialized body — when
+  // undefined, JSON.stringify drops the field entirely, leaving the server
+  // with `{ input }` and no diagnostics. Coerce to `{}` so the server's
+  // `obj.diagnostics ?? {}` fallback still receives an explicit object.
+  // rc-9: the empty object is the explicit "no diagnostics collected" shape;
+  // the server's collectDiagnostics records `unavailableReason` for each field.
   return request<FeedbackReportData>('/api/feedback/reports', {
     method: 'POST',
-    body: JSON.stringify({ input, diagnostics }),
+    body: JSON.stringify({ input, diagnostics: diagnostics ?? {} }),
   }, validateFeedbackReport);
 }
 

@@ -47,6 +47,30 @@ describe('HealthCheckModel', () => {
     }
   });
 
+  it('checkSystemHealth returns versions and platform for feedback diagnostics (P0-2)', async () => {
+    ws = await createTestWorkspace();
+    const model = new HealthCheckModel(ws.workspaceDir);
+
+    try {
+      const health = await model.checkSystemHealth();
+
+      // P0-2: versions and platform are now included for feedback reports
+      expect(health.versions).toBeDefined();
+      expect(typeof health.versions?.pd).toBe('string');
+      expect(typeof health.versions?.core).toBe('string');
+      expect(typeof health.versions?.node).toBe('string');
+      // node version always matches process
+      expect(health.versions?.node).toBe(process.versions.node);
+
+      expect(health.platform).toBeDefined();
+      expect(health.platform?.os).toBe(process.platform);
+      expect(health.platform?.arch).toBe(process.arch);
+      expect(health.platform?.nodeVersion).toBe(process.versions.node);
+    } finally {
+      model.dispose();
+    }
+  });
+
   it('checkSystemHealth returns health checks with expected ids', async () => {
     ws = await createTestWorkspace();
     const model = new HealthCheckModel(ws.workspaceDir);

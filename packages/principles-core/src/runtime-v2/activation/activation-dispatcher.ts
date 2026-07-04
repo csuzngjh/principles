@@ -1,4 +1,5 @@
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
+import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type {
   ActivationArtifactReadModel,
   ActivationDecision,
@@ -22,7 +23,20 @@ import {
 import { decideAutoPromotion } from './approval-queue.js';
 import { extractPrincipleId } from './low-risk-writers.js';
 
-async function checkCanActivate(writer: ChannelWriter, artifact: PIArtifactSnapshot): Promise<{ decision: ActivationDecision | null; result?: CanActivateResult }> {
+/**
+ * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
+ * Used for JSON.parse output where the shape is genuinely unknown at compile
+ * time. Returns true only for plain objects (not null, not array).
+ */
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function checkCanActivate(
+  writer: ChannelWriter,
+  artifact: PIArtifactSnapshot,
+  eventEmitter?: StoreEventEmitter,
+): Promise<{ decision: ActivationDecision | null; result?: CanActivateResult }> {
   try {
     const result = await writer.canActivate(artifact);
     if (!result.ok) {
@@ -36,8 +50,48 @@ async function checkCanActivate(writer: ChannelWriter, artifact: PIArtifactSnaps
       };
     }
     return { decision: null, result };
-  } catch {
-    return { decision: { decision: 'refused', reason: 'can_activate_check_failed', channel: writer.channel } };
+  } catch (err) {
+    // rc-9-no-silent-fallback: capture the original error message and carry it
+    // in the refused decision's `details` field. The primary structured reason
+    // lives on the returned decision; telemetry below is secondary observability
+    // (ERR-002 / EP-03). No exception propagates to the caller.
+    const originalError = err instanceof Error ? err.message : String(err);
+    if (eventEmitter) {
+      // Best-effort telemetry: a telemetry listener failure must not break the
+      // dispatch path. The structured `details` on the returned decision is the
+      // authoritative record; this emit only augments observability.
+      try {
+        eventEmitter.emitTelemetry({
+          eventType: 'degradation_triggered',
+          traceId: artifact.artifactId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'activation-dispatcher',
+          payload: {
+            component: 'ActivationDispatcher',
+            event: 'ACTIVATION_CAN_ACTIVATE_FAILED',
+            trigger: 'can_activate_check_failed',
+            channel: writer.channel,
+            artifactId: artifact.artifactId,
+            originalError,
+            errorCategory: 'can_activate_check_failed',
+            nextAction: 'Investigate the ChannelWriter.canActivate implementation for this channel; it threw during the pre-activation guard check.',
+          },
+        });
+      } catch {
+        /* telemetry failure must not propagate to the dispatch caller */
+      }
+    }
+    return {
+      decision: {
+        decision: 'refused',
+        reason: 'can_activate_check_failed',
+        channel: writer.channel,
+        details: {
+          originalError,
+          errorCategory: 'can_activate_check_failed',
+        },
+      },
+    };
   }
 }
 
@@ -50,8 +104,11 @@ function buildApprovalContext(
 ): Pick<ApprovalEnqueueInput, 'summary' | 'triggerReason' | 'confidenceExplanation' | 'effectDescription' | 'rejectionEffect'> {
   let principleText = '';
   try {
-    const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
-    principleText = String(parsed.text ?? parsed.description ?? '');
+    const parsed: unknown = JSON.parse(artifact.contentJson);
+    // rc-2: use a type guard predicate instead of `as` to narrow unknown.
+    if (isPlainObjectRecord(parsed)) {
+      principleText = String(parsed.text ?? parsed.description ?? '');
+    }
   } catch { /* best-effort */ }
 
   const kindLabel = artifact.artifactKind ?? 'artifact';
@@ -78,11 +135,21 @@ function buildApprovalContext(
 export interface DispatcherConfig {
   writers: Iterable<ChannelWriter>;
   approvalQueueStore?: ApprovalQueueStore;
+  /**
+   * Optional telemetry sink for observable degradation. When provided, the
+   * dispatcher emits a `degradation_triggered` event when
+   * `ChannelWriter.canActivate` throws, carrying the artifactId and original
+   * error message (rc-9-no-silent-fallback; ERR-002). Optional so existing
+   * callers continue to work; the structured `details` field on the returned
+   * refused decision is the authoritative record regardless.
+   */
+  eventEmitter?: StoreEventEmitter;
 }
 
 export class ActivationDispatcher {
   private readonly writers: Map<InternalizationChannel, ChannelWriter>;
   private readonly approvalQueueStore?: ApprovalQueueStore;
+  private readonly eventEmitter?: StoreEventEmitter;
 
   constructor(
     private readonly artifactReadModel: ActivationArtifactReadModel,
@@ -90,6 +157,7 @@ export class ActivationDispatcher {
     config: DispatcherConfig,
   ) {
     this.approvalQueueStore = config.approvalQueueStore;
+    this.eventEmitter = config.eventEmitter;
     this.writers = new Map<InternalizationChannel, ChannelWriter>();
     for (const writer of config.writers) {
       this.writers.set(writer.channel, writer);
@@ -215,7 +283,7 @@ export class ActivationDispatcher {
 
     const writer = this.writers.get(input.channel);
     if (writer) {
-      const canActivateResult = await checkCanActivate(writer, artifact);
+      const canActivateResult = await checkCanActivate(writer, artifact, this.eventEmitter);
       if (canActivateResult.decision) return canActivateResult.decision;
     }
 
@@ -281,7 +349,7 @@ export class ActivationDispatcher {
       return { decision: 'refused', reason: 'no_writer_for_channel_' + input.channel, channel: input.channel };
     }
 
-    const canActivateResult = await checkCanActivate(writer, artifact);
+    const canActivateResult = await checkCanActivate(writer, artifact, this.eventEmitter);
     if (canActivateResult.decision) return canActivateResult.decision;
 
     const writerInput: WriterInput = {

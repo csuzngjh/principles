@@ -150,6 +150,7 @@ export type { CandidateIntakeServiceOptions } from './candidate-intake-service.j
 
 // Store
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
+export type { FailedTaskSummary, FailedTaskDetail, FailedTaskFilter } from './store/task/task-types.js';
 export { SqliteRunStore, MalformedRunError } from './store/run/sqlite-run-store.js';
 export { MemoryTaskStore } from './store/task/memory-task-store.js';
 export { MemoryRunStore } from './store/run/memory-run-store.js';
@@ -1784,6 +1785,23 @@ export type {
 
 // PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
 export { SqliteIntentDecisionStore, SqliteIntentDocVersionStore } from './store/intent/index.js';
+
+// Task 3: Dead letter store for pain signals that failed to be recorded.
+export { SqliteDeadLetterStore } from './store/pain/sqlite-dead-letter-store.js';
+export type { DeadLetterRow, DeadLetterOpResult } from './store/pain/sqlite-dead-letter-store.js';
+
+// Task 11: PendingAgentDraftStore — durable store for agent-generated draft
+// context attached to a failed peer-runner task. The feedback-report pipeline
+// (Task 13) reads the unconsumed draft for a given taskId and merges it into
+// the user-facing FeedbackReport so the maintainer sees the agent's
+// perspective. See feedback/pending-agent-draft-store.ts for the full
+// idempotency + fail-loud contract.
+export { PendingAgentDraftStore } from './feedback/pending-agent-draft-store.js';
+export type {
+  AgentDraftPayload,
+  PendingAgentDraftRow,
+  PendingDraftOpResult,
+} from './feedback/pending-agent-draft-store.js';
 
 // Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
 export type { FileModification } from './risk/index.js';

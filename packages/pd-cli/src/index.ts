@@ -62,6 +62,7 @@ import { handleConfigDoctor } from './commands/config-doctor.js';
 import { registerMvpCommands } from './commands/mvp-smoke.js';
 import { registerRulecodeCommand } from './commands/rulecode.js';
 import { registerIntentCommand } from './commands/intent.js';
+import { registerErrorsListCommand } from './commands/errors-list.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -324,7 +325,7 @@ runtimeCmd
   });
 
 // pd runtime init — Initialize all PD SQLite databases for a workspace.
-// Lazy import: avoids loading `principles-disciple` at module init time, which
+// Lazy import: avoids loading `@csuzngjh/principles-disciple` at module init time, which
 // would crash `pd --version` in packaged installs where the plugin's transitive
 // deps are not resolvable from pd-cli's node_modules. The import only executes
 // when `pd runtime init` is actually invoked.
@@ -954,6 +955,12 @@ registerRulecodeCommand(program);
 // Owner-authored INTENT.md management: init (create), show (read-only summary).
 
 registerIntentCommand(program);
+
+// ─── Errors List (Task 14: Feedback Pipeline Observability) ────────────────
+// Operator diagnostic: aggregates SQLite failed/needs_human_review tasks +
+// worker-status.json errors array. Read-only.
+
+registerErrorsListCommand(program);
 
 const consoleCmd = program
   .command('console')

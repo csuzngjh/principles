@@ -25,7 +25,7 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -137,7 +137,39 @@ export async function emitPainDetectedEvent(
         }));
       }
     } catch (err) {
+      // rc-9: no silent fallback — persist pain data to dead_letter_pains so
+      // `pd pain retry --pain-id <id>` can replay it later. The original
+      // PAIN_SERVICE_ERROR log is kept for backwards-compatible observability.
       SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `recordPain threw: ${String(err)}`);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      let deadLetterInserted = false;
+      try {
+        const dlConnection = new SqliteConnection({ workspaceDir: wctx.workspaceDir });
+        try {
+          const dlStore = new SqliteDeadLetterStore(dlConnection);
+          const insertResult = dlStore.insertDeadLetter({ painId: painData.painId, painData });
+          if (insertResult.ok) {
+            deadLetterInserted = true;
+          } else {
+            // rc-9: record the insert failure reason — no silent degradation.
+            SystemLogger.log(wctx.workspaceDir, 'DEAD_LETTER_PERSIST_FAILED', insertResult.error);
+          }
+        } finally {
+          dlConnection.close();
+        }
+      } catch (dlErr) {
+        // rc-9: record the connection/store failure reason — no silent degradation.
+        SystemLogger.log(wctx.workspaceDir, 'DEAD_LETTER_PERSIST_FAILED', String(dlErr));
+      }
+      SystemLogger.log(wctx.workspaceDir, 'PAIN_DEAD_LETTER', JSON.stringify({
+        painId: painData.painId,
+        painType: painData.painType,
+        source: painData.source,
+        score: painData.score,
+        deadLetterInserted,
+        error: errorMessage,
+        nextAction: `Run 'pd pain retry --pain-id ${painData.painId}' to replay this pain signal`,
+      }));
     }
   }
 }

@@ -155,6 +155,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // builders behind this flag; v1 rule behavior is unchanged while the flag
   // is off. Roll back = leave the flag off (or set enabled: false in config).
   { id: 'rulecode_context_v2', category: 'quiet', enabled: false, since: '2026-06-27', description: 'RuleContext v2 — rule-code context vision (PRI-479). Foundation flag; default off, v1 rule behavior unchanged. See docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md' },
+  // Task 7: Failed tasks observability — list/view failed pipeline tasks.
+  // Unsolicited new code defaults to MVP-Quiet (ADR-0014 §2.5). Default-on so
+  // operators can list failed tasks out of the box; disable via .pd/config.yaml:
+  // failed_tasks_observability: { enabled: false }.
+  { id: 'failed_tasks_observability', category: 'quiet', enabled: true, since: '2026-07-04', description: 'Failed tasks observability — list/view failed pipeline tasks' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
