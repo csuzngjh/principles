@@ -8,8 +8,8 @@
     </div>
     <div class="command-card">
       <div class="command-label">{{ isZh ? '在终端运行' : 'Run in your terminal' }}</div>
-      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" @click="copyCommand">{{ copyState }}</button></div>
-      <a :href="isZh ? '/zh/docs/getting-started' : '/docs/getting-started'">{{ isZh ? '查看完整安装向导' : 'Read the complete installation guide' }} <span aria-hidden="true">→</span></a>
+      <div class="command-row"><code>{{ command }}</code><button type="button" :aria-label="copyLabel" data-umami-event="copy_install_command" @click="copyCommand">{{ copyState }}</button></div>
+      <a :href="isZh ? '/zh/docs/getting-started' : '/docs/getting-started'" data-umami-event="cta_read_install_guide">{{ isZh ? '查看完整安装向导' : 'Read the complete installation guide' }} <span aria-hidden="true">→</span></a>
     </div>
   </section>
 </template>

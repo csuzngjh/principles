@@ -15,8 +15,8 @@
         {{ isZh ? '每条原则先由你批准，效果可观察，随时可回滚。' : 'You approve every principle first. Its effect stays observable and can be rolled back.' }}
       </p>
       <div class="hero-actions">
-        <a class="pd-btn pd-btn-brand" href="#example">{{ isZh ? '看一个真实变化示例' : 'See a behavior change' }}</a>
-        <a class="pd-btn pd-btn-alt" :href="isZh ? '/zh/install' : '/install'">{{ isZh ? '开始使用' : 'Get started' }}</a>
+        <a class="pd-btn pd-btn-brand" href="#example" data-umami-event="cta_see_example">{{ isZh ? '看一个真实变化示例' : 'See a behavior change' }}</a>
+        <a class="pd-btn pd-btn-alt" :href="isZh ? '/zh/install' : '/install'" data-umami-event="cta_get_started">{{ isZh ? '开始使用' : 'Get started' }}</a>
       </div>
     </div>
 
