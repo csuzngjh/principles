@@ -9,19 +9,22 @@ import {
   type GuardRefusal,
 } from './production-workspace-guard.js';
 
+// Use os.homedir()-derived paths so the tests work cross-platform
+// (previously hardcoded Windows paths like D:\.openclaw\workspace which on
+// Linux resolve to <cwd>/D:\.openclaw\workspace — meaningless).
+const HOMEDIR_WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
+
 const PRODUCTION_PATHS = [
-  'D:\\.openclaw\\workspace',
-  'C:\\.openclaw\\workspace',
-  'C:\\Users\\Administrator\\.openclaw\\workspace',
-  path.join(os.homedir(), '.openclaw', 'workspace'),
+  HOMEDIR_WORKSPACE,
 ];
 
 const SAFE_PATHS = [
-  'D:\\.openclaw\\workspace-test',
-  'D:\\.openclaw\\workspace-backup',
+  path.join(os.homedir(), '.openclaw', 'workspace-test'),
+  path.join(os.homedir(), '.openclaw', 'workspace-backup'),
   path.join(os.tmpdir(), 'pd-uat-workspace'),
   path.join(os.tmpdir(), 'pd-test-any'),
-  'C:\\completely-unrelated\\work',
+  // A path that is clearly unrelated on every platform
+  path.join(os.tmpdir(), 'completely-unrelated-work'),
 ];
 
 describe('isProductionWorkspace', () => {
@@ -32,18 +35,15 @@ describe('isProductionWorkspace', () => {
     expect(isProductionWorkspace(path.resolve(safePath))).toBe(false);
   });
   it('detects descendant', () => {
-    // Use a platform-appropriate descendant path so the test works on both
-    // Windows (where D:\... resolves as-is) and Linux CI (where D:\... is
-    // treated as a relative path and resolves under cwd).
-    const prodPath = path.resolve(path.join(os.homedir(), '.openclaw', 'workspace'));
+    const prodPath = path.resolve(HOMEDIR_WORKSPACE);
     const descendantPath = path.join(prodPath, 'sub', 'child');
     expect(isProductionWorkspace(descendantPath)).toBe(true);
   });
   it('rejects sibling workspace-test (ERR-030)', () => {
-    expect(isProductionWorkspace(path.resolve('D:\\.openclaw\\workspace-test'))).toBe(false);
+    expect(isProductionWorkspace(path.resolve(path.join(os.homedir(), '.openclaw', 'workspace-test')))).toBe(false);
   });
   it('rejects sibling workspace-backup (ERR-030)', () => {
-    expect(isProductionWorkspace(path.resolve('D:\\.openclaw\\workspace-backup'))).toBe(false);
+    expect(isProductionWorkspace(path.resolve(path.join(os.homedir(), '.openclaw', 'workspace-backup')))).toBe(false);
   });
 });
 
@@ -58,7 +58,7 @@ describe('guardUatWorkspace', () => {
       }
     });
     it('refuses descendant', () => {
-      const prodPath = path.resolve(path.join(os.homedir(), '.openclaw', 'workspace'));
+      const prodPath = path.resolve(HOMEDIR_WORKSPACE);
       const descendantPath = path.join(prodPath, 'subdir');
       expect(guardUatWorkspace(descendantPath, 'test').refused).toBe(true);
     });
@@ -68,8 +68,10 @@ describe('guardUatWorkspace', () => {
       const r = guardUatWorkspace(safePath, 'test');
       expect(r.refused).toBe(false);
     });
-    it.each(['D:\\.openclaw\\workspace-test', 'D:\\.openclaw\\workspace-backup'])(
-      'allows sibling: %s (ERR-030)', (p) => {
+    it.each([
+      path.join(os.homedir(), '.openclaw', 'workspace-test'),
+      path.join(os.homedir(), '.openclaw', 'workspace-backup'),
+    ])('allows sibling: %s (ERR-030)', (p) => {
         expect(guardUatWorkspace(p, 'test').refused).toBe(false);
       });
   });
@@ -77,7 +79,7 @@ describe('guardUatWorkspace', () => {
 
 describe('JSON output (EP-04)', () => {
   it('outputs single object with reason and nextAction', () => {
-    const r = guardUatWorkspace('D:\\.openclaw\\workspace', 'test');
+    const r = guardUatWorkspace(HOMEDIR_WORKSPACE, 'test');
     const json = formatGuardRefusal(r as GuardRefusal, 'test', true);
     const parsed = JSON.parse(json);
     expect(parsed).toMatchObject({
@@ -87,7 +89,7 @@ describe('JSON output (EP-04)', () => {
     expect(Array.isArray(parsed)).toBe(false);
   });
   it('no console prefixes in JSON', () => {
-    const r = guardUatWorkspace('D:\\.openclaw\\workspace', 'test');
+    const r = guardUatWorkspace(HOMEDIR_WORKSPACE, 'test');
     const json = formatGuardRefusal(r as GuardRefusal, 'test', true);
     expect(json).not.toContain('[pd-cli]');
     expect(json).not.toContain('ERROR:');
@@ -97,7 +99,7 @@ describe('JSON output (EP-04)', () => {
 
 describe('text output (EP-03)', () => {
   it('includes reason and nextAction', () => {
-    const r = guardUatWorkspace('D:\\.openclaw\\workspace', 'test');
+    const r = guardUatWorkspace(HOMEDIR_WORKSPACE, 'test');
     const text = formatGuardRefusal(r as GuardRefusal, 'test', false);
     expect(text).toContain('Reason:');
     expect(text).toContain('Next Action:');

@@ -1,6 +1,6 @@
 #!/bin/bash
 # 备份目录
-BACKUP_DIR="/home/csuzngjh/clawd/.backups"
+BACKUP_DIR="${BACKUP_DIR:-$HOME/clawd/.backups}"
 # 备份文件名模式
 PATTERN="*-openclaw-backup.tar.gz"
 
