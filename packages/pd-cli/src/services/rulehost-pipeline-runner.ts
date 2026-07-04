@@ -45,6 +45,11 @@ import {
   DEFAULT_MAX_ROUNDS,
   SqliteApprovalQueueStore,
   getChannelRiskLevel,
+  // PRI-510: feature-flag resolvers imported from the core barrel (EP-02:
+  // pd-config-loader.ts only re-exports loadPdConfig + computeFlagsFromLoadResult;
+  // computeFeatureFlagsFromConfig / isFeatureEnabled live in core).
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -54,7 +59,15 @@ import type {
   PIArtifactStore,
   ApprovalRecord,
   BehaviorExamplePack,
+  // PRI-510: type-only import for the repair-loop deps contract (EP-02 wiring).
+  // RuntimeStateManager / StoreEventEmitter are already imported as values
+  // above; EvaluatorValidator is type-only.
+  EvaluatorRunnerDeps,
+  SeedArtificerRepairParams,
+  EvaluatorValidator,
 } from '@principles/core/runtime-v2';
+import { randomUUID } from 'node:crypto';
+import { loadPdConfig } from './pd-config-loader.js';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
 
@@ -363,8 +376,19 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       },
       runnerOptsFor(capability.artificerAdapter),
     );
+    // PRI-510 (DEFECT-004): construct EvaluatorRunnerDeps via the centralized
+    // helper so the repair-loop wiring (isRepairLoopEnabled + seeder) is
+    // actually invoked in the production CLI path. EP-02: prior code passed
+    // only the 5 base deps, leaving the repair loop as dead code at runtime.
     const evaluatorRunner = new EvaluatorRunner(
-      { stateManager, runtimeAdapter: agentAdapters.evaluator, eventEmitter, validator: new DefaultEvaluatorValidator(), artifactStore },
+      createEvaluatorRunnerDeps({
+        stateManager,
+        runtimeAdapter: agentAdapters.evaluator,
+        eventEmitter,
+        validator: new DefaultEvaluatorValidator(),
+        artifactStore,
+        workspaceDir: opts.workspaceDir,
+      }),
       { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: createSandboxGateDeps() },
     );
 
@@ -534,6 +558,105 @@ async function createInternalizationTask(
       outputArtifactRefs: [],
     }),
   });
+}
+
+// ── PRI-510 (DEFECT-004): EvaluatorRunner repair-loop CLI wiring ────────────
+//
+// EP-02 (Production Path Wiring): PRI-509 added the `isRepairLoopEnabled` and
+// `seedArtificerRepairTask` deps to `EvaluatorRunnerDeps` (core), but the two
+// CLI production paths (runtime-internalization-run-once.ts and this file)
+// constructed `EvaluatorRunner` with only the base deps — the repair loop was
+// dead code at runtime (evaluator needs_revision seeded nothing).
+//
+// This helper centralizes the construction of the full deps so both CLI sites
+// stay in sync. The flag resolver reads `.pd/config.yaml` (the unified config
+// — ADR-0016); the seeder writes the repair task via `stateManager.createTask`
+// (the only sanctioned task-creation path; core peer runners are forbidden
+// from calling it directly — architecture-regression.test.ts enforces this).
+
+/**
+ * Inputs for {@link createEvaluatorRunnerDeps}. Carries the base `PeerRunnerDeps`
+ * fields plus `workspaceDir` (used to resolve the feature flag from
+ * `.pd/config.yaml`).
+ */
+export interface CreateEvaluatorRunnerDepsInputs {
+  readonly stateManager: RuntimeStateManager;
+  readonly runtimeAdapter: PDRuntimeAdapter;
+  readonly eventEmitter: StoreEventEmitter;
+  readonly validator: EvaluatorValidator;
+  readonly artifactStore: PIArtifactStore;
+  /** Workspace directory containing `.pd/config.yaml` (flag source). */
+  readonly workspaceDir: string;
+}
+
+/**
+ * Build the full `EvaluatorRunnerDeps` for CLI production paths, including the
+ * PRI-509 repair-loop wiring (EP-02: production path must invoke core logic).
+ *
+ * - `isRepairLoopEnabled`: reads `.pd/config.yaml` and resolves the
+ *   `evaluator_artificer_repair_loop` flag. Defaults to false when the config
+ *   is missing or malformed (rc-9: fail safe — legacy path runs, never throws).
+ * - `seedArtificerRepairTask`: creates a new `artificer` task carrying the
+ *   `repairPayload` in `diagnosticJson` (rc-1, rc-6: serialized via the
+ *   validated `createPITaskDiagnosticJson`, no `as` bypass). Reuses the
+ *   artificer runner (PRI-509 D1) rather than introducing a new task kind.
+ *
+ * Returns the newly created repair task's ID (UUIDv4, rc-7: fresh per call).
+ */
+export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInputs): EvaluatorRunnerDeps {
+  const { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, workspaceDir } = inputs;
+  return {
+    stateManager,
+    runtimeAdapter,
+    eventEmitter,
+    validator,
+    artifactStore,
+    isRepairLoopEnabled: (): boolean => {
+      // rc-9: never throw on malformed config — fail safe to false so the
+      // legacy (non-repair) path runs. The malformed config is already
+      // surfaced by `pd config doctor` and CLI start-up warnings.
+      try {
+        const result = loadPdConfig(workspaceDir);
+        const effective = result.ok ? result.effective : result.defaults;
+        const flags = computeFeatureFlagsFromConfig(effective);
+        return isFeatureEnabled(flags, 'evaluator_artificer_repair_loop');
+      } catch {
+        return false;
+      }
+    },
+    seedArtificerRepairTask: async (params: SeedArtificerRepairParams): Promise<string> => {
+      // rc-7: each call gets a fresh task ID — never reuse a cached ID.
+      const repairTaskId = `artificer-repair-${randomUUID()}`;
+      await stateManager.createTask({
+        taskId: repairTaskId,
+        // D1 (PRI-509): task kind is 'artificer' — reuses the artificer
+        // runner, which detects repairPayload in diagnosticJson and
+        // forwards it to the prompt builder as repairFeedback.
+        taskKind: 'artificer',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        // rc-1, rc-6: serialize via the validated helper — repairPayload
+        // is untrusted LLM output but `createPITaskDiagnosticJson` writes
+        // it through `serializePITaskMetadata`, which `parsePITaskMetadata`
+        // re-validates on read (defense in depth).
+        diagnosticJson: createPITaskDiagnosticJson({
+          // PITaskMetadata fields are mutable arrays (the metadata envelope
+          // serializes them as JSON arrays). The SeedArtificerRepairParams
+          // contract carries readonly arrays (rc-1: untrusted input from the
+          // evaluator LLM). Spread to a fresh mutable array — no mutation of
+          // the caller's data.
+          dependencyTaskIds: [...params.inheritedDependencyTaskIds],
+          channel: params.inheritedChannel,
+          timeoutMs: params.inheritedTimeoutMs,
+          inputArtifactRefs: [...params.inheritedInputArtifactRefs],
+          outputArtifactRefs: [],
+          repairPayload: params.repairPayload,
+        }),
+      });
+      return repairTaskId;
+    },
+  };
 }
 
 /**
