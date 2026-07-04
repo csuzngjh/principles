@@ -37,6 +37,34 @@ import { isInternalizationChannel, isRunnerKind } from './peer-runner-contracts.
 export const PI_METADATA_KEY = 'pi_metadata' as const;
 
 /**
+ * Evaluator repair payload (PRI-509).
+ *
+ * Carries the evaluator's structured feedback when decision === 'needs_revision'
+ * so the seeded artificer repair task can address each required change instead
+ * of regenerating blind. The metadata layer treats this as opaque; the
+ * ArtificerRunner.buildContext reads it and constructs a pre-formatted
+ * repairFeedback string for the prompt builder.
+ *
+ * Lineage (rc-6):
+ *   - sourceArtificerArtifactId: the prior artificer artifact that was rejected
+ *   - sourceEvaluatorTaskId: the evaluator task that returned needs_revision
+ *
+ * Loop state freshness (rc-7, EP-05, ERR-015/018/019):
+ *   - repairIteration is written at task creation time, never inferred at read.
+ *   - Round 1 = first repair (after initial evaluator needs_revision).
+ *   - Round 2 = second repair (after first repair's evaluator needs_revision).
+ *   - Max 2 rounds; a 3rd needs_revision fails loud via needs_human_review (EP-03).
+ */
+export interface RepairPayload {
+  readonly requiredChanges: readonly string[];
+  readonly concerns: readonly string[];
+  readonly previousScore: number;
+  readonly repairIteration: number;
+  readonly sourceArtificerArtifactId: string;
+  readonly sourceEvaluatorTaskId: string;
+}
+
+/**
  * PI-specific metadata stored inside TaskRecord.diagnosticJson.
  * All fields must be present except parentTaskId and correlationId (optional).
  */
@@ -56,6 +84,13 @@ export interface PITaskMetadata {
    * metadata layer; the ArtificerRunner forwards it to the prompt builder.
    */
   adversarialFeedback?: string;
+  /**
+   * Evaluator repair payload (PRI-509). Present only on artificer tasks seeded
+   * by evaluator needs_revision. Carries the structured feedback
+   * (requiredChanges/concerns/previousScore/repairIteration) so the artificer
+   * can address each required change. Undefined on Round-1 artificer tasks.
+   */
+  repairPayload?: RepairPayload;
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -76,6 +111,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       correlationId: metadata.correlationId,
       rejectionCount: metadata.rejectionCount,
       adversarialFeedback: metadata.adversarialFeedback,
+      repairPayload: metadata.repairPayload,
     },
   });
 }
@@ -95,6 +131,49 @@ function isValidArtifactRef(value: unknown): value is ArtifactRef {
   const r = value as Record<string, unknown>;
   return typeof r.artifactType === 'string' && r.artifactType.trim() !== '' &&
     typeof r.ref === 'string' && r.ref.trim() !== '';
+}
+
+/**
+ * Validates a value is a valid RepairPayload (PRI-509).
+ *
+ * Trust boundary (rc-1, rc-2): repairPayload originates from evaluator LLM
+ * output persisted into diagnosticJson. Treat as unknown and validate every
+ * field before returning. No `as` casts that bypass validation.
+ *
+ * Validation rules:
+ *   - requiredChanges: non-empty array of non-empty strings (rc-4)
+ *   - concerns: array of non-empty strings (can be empty)
+ *   - previousScore: finite number
+ *   - repairIteration: positive integer, upper bound of 2 (rc-3 fail-closed
+ *     at the trust boundary — the documented contract is "max 2 rounds"; a
+ *     payload with repairIteration: 3 must be rejected here rather than
+ *     relying on the runtime caller's priorRepairIteration >= 2 check)
+ *   - sourceArtificerArtifactId: non-empty string
+ *   - sourceEvaluatorTaskId: non-empty string
+ */
+function isValidRepairPayload(value: unknown): value is RepairPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const p = value as Record<string, unknown>;
+  // rc-4: validate array elements are non-empty strings.
+  if (!Array.isArray(p.requiredChanges) || p.requiredChanges.length === 0) return false;
+  for (const c of p.requiredChanges) {
+    if (typeof c !== 'string' || c.trim() === '') return false;
+  }
+  if (!Array.isArray(p.concerns)) return false;
+  for (const c of p.concerns) {
+    if (typeof c !== 'string' || c.trim() === '') return false;
+  }
+  if (typeof p.previousScore !== 'number' || !Number.isFinite(p.previousScore)) return false;
+  // rc-3: enforce the documented max-2-rounds contract at the trust boundary.
+  // repairIteration must be a positive integer in [1, 2]; reject 3+ here so
+  // a malformed payload cannot bypass the runtime caller's max-iteration guard.
+  if (typeof p.repairIteration !== 'number'
+    || !Number.isInteger(p.repairIteration)
+    || p.repairIteration < 1
+    || p.repairIteration > 2) return false;
+  if (typeof p.sourceArtificerArtifactId !== 'string' || p.sourceArtificerArtifactId.trim() === '') return false;
+  if (typeof p.sourceEvaluatorTaskId !== 'string' || p.sourceEvaluatorTaskId.trim() === '') return false;
+  return true;
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────────────
@@ -169,6 +248,16 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     if (m.adversarialFeedback.trim() === '') return null;
   }
 
+  // repairPayload (PRI-509): optional, must pass full validation if present.
+  // rc-3: if the key is present but the value is malformed, fail loud (return null)
+  // rather than silently dropping the field — the caller will see a null metadata
+  // and treat the task as non-PI, which surfaces the corruption.
+  let repairPayload: RepairPayload | undefined;
+  if (Object.hasOwn(m, 'repairPayload') && m.repairPayload !== undefined) {
+    if (!isValidRepairPayload(m.repairPayload)) return null;
+    ({ repairPayload } = m);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -179,6 +268,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     correlationId: typeof m.correlationId === 'string' ? m.correlationId : undefined,
     rejectionCount,
     adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
+    repairPayload,
   };
 }
 
@@ -226,5 +316,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     correlationId: meta.correlationId,
     rejectionCount: meta.rejectionCount ?? 0,
     adversarialFeedback: meta.adversarialFeedback,
+    repairPayload: meta.repairPayload,
   } as unknown as PITaskRecord;
 }

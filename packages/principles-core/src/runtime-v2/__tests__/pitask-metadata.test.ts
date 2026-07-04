@@ -54,7 +54,7 @@ function makeBaseTaskRecord(overrides: Partial<TaskRecord> & { taskId: string })
 
 import type { PITaskMetadata } from '../internalization/pitask-metadata.js';
 
-function makeMetadata(overrides?: Partial<PITaskMetadata>) {
+function makeMetadata(overrides?: Partial<PITaskMetadata>): PITaskMetadata {
   return {
     dependencyTaskIds: overrides?.dependencyTaskIds ?? [],
     channel: overrides?.channel ?? ('prompt'),
@@ -64,6 +64,8 @@ function makeMetadata(overrides?: Partial<PITaskMetadata>) {
     parentTaskId: overrides?.parentTaskId,
     correlationId: overrides?.correlationId,
     rejectionCount: overrides?.rejectionCount,
+    adversarialFeedback: overrides?.adversarialFeedback,
+    repairPayload: overrides?.repairPayload,
   };
 }
 
@@ -392,5 +394,168 @@ describe('SqliteTaskStore roundtrip', () => {
 
     conn.close();
     cleanupDir(tmpDir);
+  });
+});
+
+// ── PRI-509: RepairPayload validation (rc-1/2/3/4/5/6/7) ─────────────────────
+// RepairPayload originates from evaluator LLM output persisted into
+// diagnosticJson. The parser must treat it as untrusted and validate every
+// field before returning (rc-1, rc-2). Failure modes return null (fail closed,
+// rc-3) — never silently drop the field, which would mask corruption (rc-9).
+
+describe('PRI-509: RepairPayload serialization + parsing', () => {
+  function makeValidRepairPayload() {
+    return {
+      requiredChanges: ['add input validation', 'fix path resolution'],
+      concerns: ['code quality issue', 'missing test coverage'],
+      previousScore: 0.65,
+      repairIteration: 1,
+      sourceArtificerArtifactId: 'pi-art-artificer-001',
+      sourceEvaluatorTaskId: 'evaluator-001',
+    };
+  }
+
+  it('valid repairPayload roundtrips through serialize → parse', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = makeValidRepairPayload();
+    const json = serializePITaskMetadata(meta);
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed).not.toBeNull();
+    if (parsed === null) return;
+    expect(parsed.repairPayload).toBeDefined();
+    expect(parsed.repairPayload?.requiredChanges).toEqual(['add input validation', 'fix path resolution']);
+    expect(parsed.repairPayload?.concerns).toEqual(['code quality issue', 'missing test coverage']);
+    expect(parsed.repairPayload?.previousScore).toBe(0.65);
+    expect(parsed.repairPayload?.repairIteration).toBe(1);
+    expect(parsed.repairPayload?.sourceArtificerArtifactId).toBe('pi-art-artificer-001');
+    expect(parsed.repairPayload?.sourceEvaluatorTaskId).toBe('evaluator-001');
+  });
+
+  it('repairPayload absent → parsed.repairPayload undefined (backward compat)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    const json = serializePITaskMetadata(meta);
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed).not.toBeNull();
+    if (parsed === null) return;
+    expect(parsed.repairPayload).toBeUndefined();
+  });
+
+  it('repairPayload with empty requiredChanges → fail closed (rc-3, ERR-009)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), requiredChanges: [] };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with non-string requiredChanges element → fail closed (rc-4, ERR-005)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), requiredChanges: ['valid', 42 as unknown as string] };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with empty-string requiredChanges element → fail closed (rc-4)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), requiredChanges: ['valid', '   '] };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with non-array concerns → fail closed (rc-4)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), concerns: 'not-an-array' as unknown as string[] };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with non-finite previousScore → fail closed (rc-3)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), previousScore: Number.NaN };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with repairIteration < 1 → fail closed (rc-7, EP-05)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 0 };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with non-integer repairIteration → fail closed (rc-7, EP-05)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 1.5 };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with repairIteration > 2 → fail closed (rc-3, EP-03: max-2-rounds contract)', () => {
+    // CodeRabbit finding (PRI-509): the documented contract is "max 2 repair
+    // rounds"; a payload claiming repairIteration: 3 must be rejected at the
+    // trust boundary rather than relying on the runtime caller's
+    // priorRepairIteration >= 2 check (defense in depth).
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 3 };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with repairIteration = 2 → accepted (boundary)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), repairIteration: 2 };
+    const json = serializePITaskMetadata(meta);
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed?.repairPayload?.repairIteration).toBe(2);
+  });
+
+  it('repairPayload with empty sourceArtificerArtifactId → fail closed (rc-6, ERR-004)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), sourceArtificerArtifactId: '  ' };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload with empty sourceEvaluatorTaskId → fail closed (rc-6, ERR-004)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), sourceEvaluatorTaskId: '' };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
+  });
+
+  it('repairPayload concerns can be empty array (no concerns is valid)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), concerns: [] };
+    const json = serializePITaskMetadata(meta);
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed).not.toBeNull();
+    if (parsed === null) return;
+    expect(parsed.repairPayload?.concerns).toEqual([]);
+  });
+
+  it('hydratePITaskRecord preserves repairPayload (rc-6 lineage, rc-7 freshness)', () => {
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = makeValidRepairPayload();
+    const task = makeBaseTaskRecord({ taskId: 'task-repair-1', taskKind: 'artificer' });
+    (task as Record<string, unknown>).diagnosticJson = createPITaskDiagnosticJson(meta);
+
+    const hydrated = hydratePITaskRecord(task);
+    expect(hydrated).not.toBeNull();
+    if (hydrated === null) return;
+    expect(hydrated.repairPayload).toBeDefined();
+    expect(hydrated.repairPayload?.repairIteration).toBe(1);
+    expect(hydrated.repairPayload?.requiredChanges).toEqual(['add input validation', 'fix path resolution']);
+    expect(hydrated.repairPayload?.sourceArtificerArtifactId).toBe('pi-art-artificer-001');
+    expect(hydrated.repairPayload?.sourceEvaluatorTaskId).toBe('evaluator-001');
+  });
+
+  it('malformed repairPayload fails the entire metadata (rc-3, no silent drop)', () => {
+    // If repairPayload key is present but malformed, the WHOLE metadata should
+    // return null (fail closed) — silently dropping repairPayload would mask
+    // corruption and the artificer would run as if no repair feedback existed,
+    // producing the same flawed output (ERR-002 / rc-9).
+    const meta = makeMetadata({ channel: 'prompt' });
+    meta.repairPayload = { ...makeValidRepairPayload(), requiredChanges: 'not-an-array' as unknown as string[] };
+    const json = serializePITaskMetadata(meta);
+    expect(parsePITaskMetadata(json)).toBeNull();
   });
 });

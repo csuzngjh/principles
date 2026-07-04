@@ -10,6 +10,7 @@ import type { ArtificerRuleOutput } from '../internalization/artificer-output.js
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
+import type { PITaskMetadata, RepairPayload } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
 
@@ -442,6 +443,7 @@ describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRa
       scribeArtifact: null,
       sourceScribeArtifactId: null,
       adversarialFeedback: null,
+      repairFeedback: null,
     };
 
     const result = await runner.validateOutput(output, ARTIFICER_TASK_ID, context);
@@ -1401,5 +1403,281 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     expect(parsed.dreamerContext.rationale).toBe('why');
     expect(parsed.dreamerContext.riskLevel).toBeUndefined();
     expect(parsed.dreamerContext.strategicPerspective).toBeUndefined();
+  });
+});
+
+// ── PRI-509 Slice 3: ArtificerRunner.buildContext reads repairPayload ────────
+// When evaluator returns needs_revision, it seeds an artificer repair task
+// whose diagnosticJson contains a repairPayload. The artificer-runner must
+// detect this payload, format it as a repairFeedback string, and forward it
+// to the prompt builder so the LLM addresses each requiredChange instead of
+// regenerating blind. Trust boundary (rc-1, rc-2): repairPayload originates
+// from evaluator LLM output persisted in diagnosticJson — already validated
+// by isValidRepairPayload in pitask-metadata.ts, but the runner must still
+// treat the hydrated value as opaque text when formatting the prompt.
+
+describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFeedback', () => {
+  const SCRIBE_ART_ID_PRI509 = 'pi-art-scribe-pri509';
+  const SCRIBE_TASK_ID_PRI509 = 'scribe-pri509';
+  const ARTIFICER_TASK_ID_PRI509 = 'artificer-repair-r1';
+
+  function makeScribeArtifactPri509(): PIArtifactRecord {
+    return {
+      artifactId: SCRIBE_ART_ID_PRI509,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_ID_PRI509,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_ID_PRI509,
+        sourcePhilosopherArtifactId: 'pi-art-philosopher-pri509',
+        principleDraft: {
+          title: 'Input Validation Discipline',
+          statement: 'Validate tool inputs before execution',
+          rationale: 'Unvalidated inputs cause downstream failures',
+          applicability: ['all tools'],
+          antiPatterns: ['Trusting raw input'],
+          confidence: 0.85,
+        },
+        sourceTrace: { philosopherArtifactId: 'pi-art-philosopher-pri509' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeMetadata(overrides?: Partial<PITaskMetadata>): PITaskMetadata {
+    return {
+      dependencyTaskIds: overrides?.dependencyTaskIds ?? [],
+      channel: overrides?.channel ?? ('prompt' as const),
+      timeoutMs: overrides?.timeoutMs ?? 300_000,
+      inputArtifactRefs: overrides?.inputArtifactRefs ?? [],
+      outputArtifactRefs: overrides?.outputArtifactRefs ?? [],
+      parentTaskId: overrides?.parentTaskId,
+      correlationId: overrides?.correlationId,
+      rejectionCount: overrides?.rejectionCount,
+      adversarialFeedback: overrides?.adversarialFeedback,
+      repairPayload: overrides?.repairPayload,
+    };
+  }
+
+  function makeArtificerTaskPri509(repairPayload?: RepairPayload): TaskRecord {
+    const meta = makeMetadata({
+      dependencyTaskIds: [SCRIBE_TASK_ID_PRI509],
+      channel: 'prompt',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_ID_PRI509 }],
+      outputArtifactRefs: [],
+    });
+    if (repairPayload) {
+      meta.repairPayload = repairPayload;
+    }
+    return {
+      taskId: ARTIFICER_TASK_ID_PRI509,
+      taskKind: 'artificer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson(meta),
+    };
+  }
+
+  function makeArtificerOutputPri509(): ArtificerRuleOutput {
+    return {
+      taskId: ARTIFICER_TASK_ID_PRI509,
+      sourceScribeArtifactId: SCRIBE_ART_ID_PRI509,
+      implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
+      goldenTraceCases: [
+        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/file' }, expectedDecision: 'allow' },
+        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      ],
+      affectedTools: ['write_file'],
+      implementationSummary: 'Validate parent path before write',
+      sourceTrace: { scribeArtifactId: SCRIBE_ART_ID_PRI509 },
+      risks: [],
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  function makeScribeTaskPri509(): TaskRecord {
+    return {
+      taskId: SCRIBE_TASK_ID_PRI509,
+      taskKind: 'scribe',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'scribe://run-pri509',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_ID_PRI509 }],
+      }),
+    };
+  }
+
+  async function runPri509RepairLoop(artificerTask: TaskRecord): Promise<{ result: { status: string }; capturedPrompt: string | undefined }> {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeScribeArtifactPri509());
+
+    const scribeTask = makeScribeTaskPri509();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(artificerTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === ARTIFICER_TASK_ID_PRI509) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID_PRI509) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{ runId: 'run-pri509', taskId: ARTIFICER_TASK_ID_PRI509, runtimeKind: 'artificer', startedAt: new Date().toISOString() }]),
+      getValidRunsByTaskTolerant: vi.fn().mockResolvedValue({ runs: [{ runId: 'run-pri509', taskId: ARTIFICER_TASK_ID_PRI509, runtimeKind: 'artificer', startedAt: new Date().toISOString() }], degradedRuns: [] }),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    let capturedPrompt: string | undefined;
+    const runtimeAdapter = {
+      startRun: vi.fn().mockImplementation((input: { inputPayload: string }) => {
+        capturedPrompt = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+        return Promise.resolve({ runId: 'run-pri509', runtimeKind: 'test-double', startedAt: new Date().toISOString() } as RunHandle);
+      }),
+      pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-pri509' }),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: makeArtificerOutputPri509() }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+    const validator = new DefaultArtificerValidator();
+
+    const deps: ArtificerRunnerDeps = {
+      stateManager,
+      runtimeAdapter,
+      eventEmitter,
+      artifactStore: store,
+      validator,
+    };
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID_PRI509);
+    return { result, capturedPrompt };
+  }
+
+  it('repairPayload present → repairFeedback serialized into prompt message (with requiredChanges text + previousScore)', async () => {
+    const artificerTask = makeArtificerTaskPri509({
+      requiredChanges: ['add path validation', 'fix case sensitivity'],
+      concerns: ['code quality is poor', 'missing error handling'],
+      previousScore: 0.65,
+      repairIteration: 1,
+      sourceArtificerArtifactId: 'pi-art-artificer-original',
+      sourceEvaluatorTaskId: 'evaluator-r0',
+    });
+
+    const { result, capturedPrompt } = await runPri509RepairLoop(artificerTask);
+    expect(result.status).toBe('succeeded');
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.repairFeedback).toBeDefined();
+    // requiredChanges text must be present so artificer can address each one
+    expect(parsed.repairFeedback).toContain('add path validation');
+    expect(parsed.repairFeedback).toContain('fix case sensitivity');
+    // previousScore must be present so artificer knows the prior score
+    expect(parsed.repairFeedback).toContain('0.65');
+    // concerns text must be present (PoC-validated format)
+    expect(parsed.repairFeedback).toContain('code quality is poor');
+    // Must signal this is a needs_revision retry (not a fresh attempt)
+    expect(parsed.repairFeedback).toMatch(/needs_revision|prior attempt/i);
+  });
+
+  it('repairPayload absent → repairFeedback undefined in prompt (backward compat)', async () => {
+    // Round-1 artificer task without repairPayload — repairFeedback must NOT
+    // appear in the prompt (backward compatible with pre-PRI-509 flows).
+    const artificerTask = makeArtificerTaskPri509(); // no repairPayload
+
+    const { result, capturedPrompt } = await runPri509RepairLoop(artificerTask);
+    expect(result.status).toBe('succeeded');
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.repairFeedback).toBeUndefined();
+  });
+
+  it('repairPayload present → repairFeedback appears in promptInput (typed surface)', async () => {
+    const artificerTask = makeArtificerTaskPri509({
+      requiredChanges: ['add input validation'],
+      concerns: [],
+      previousScore: 0.55,
+      repairIteration: 2,
+      sourceArtificerArtifactId: 'pi-art-artificer-r1',
+      sourceEvaluatorTaskId: 'evaluator-r1',
+    });
+
+    const { result } = await runPri509RepairLoop(artificerTask);
+    expect(result.status).toBe('succeeded');
+    // The typed promptInput surface must also carry repairFeedback ( Slice 2 contract).
+    // We can't directly inspect promptInput here — it's internal to the runner.
+    // The prompt message assertion above already covers the e2e path. This test
+    // exists to assert the runner doesn't throw when repairIteration=2.
+  });
+
+  it('repairPayload + adversarialFeedback both present → both forwarded (orthogonal)', async () => {
+    // PRI-428 (adversarialFeedback) and PRI-509 (repairPayload) are orthogonal
+    // signals — adversarialFeedback comes from RuleHost probe failures, while
+    // repairPayload comes from evaluator needs_revision. Both can be present on
+    // the same task and must both reach the prompt.
+    const meta = makeMetadata({
+      dependencyTaskIds: [SCRIBE_TASK_ID_PRI509],
+      channel: 'prompt',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_ART_ID_PRI509 }],
+      outputArtifactRefs: [],
+    });
+    meta.adversarialFeedback = 'Adversarial probe failed: tool=test_tool, case=neg-1, expected=block, got=allow';
+    meta.repairPayload = {
+      requiredChanges: ['add input validation'],
+      concerns: ['missing error handling'],
+      previousScore: 0.6,
+      repairIteration: 1,
+      sourceArtificerArtifactId: 'pi-art-artificer-original',
+      sourceEvaluatorTaskId: 'evaluator-r0',
+    };
+    const artificerTask: TaskRecord = {
+      taskId: ARTIFICER_TASK_ID_PRI509,
+      taskKind: 'artificer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson(meta),
+    };
+
+    const { result, capturedPrompt } = await runPri509RepairLoop(artificerTask);
+    expect(result.status).toBe('succeeded');
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    // Both signals must be present
+    expect(parsed.adversarialFeedback).toBeDefined();
+    expect(parsed.adversarialFeedback).toContain('Adversarial probe failed');
+    expect(parsed.repairFeedback).toBeDefined();
+    expect(parsed.repairFeedback).toContain('add input validation');
+    expect(parsed.repairFeedback).toContain('0.6');
   });
 });

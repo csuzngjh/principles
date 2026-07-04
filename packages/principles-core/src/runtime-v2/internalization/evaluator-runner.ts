@@ -36,9 +36,9 @@ import type {
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { injectRunnerLineageIfAbsent, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -172,8 +172,54 @@ export function resolveEvaluatorRunnerOptions(options: EvaluatorRunnerOptions): 
 
 // ── Dependencies (backward-compatible; extends PeerRunnerDeps) ────────────────
 
+/**
+ * PRI-509: Parameters for seeding an artificer repair task.
+ *
+ * The evaluator runner constructs the repairPayload (core logic — 6 fields
+ * sourced from the current evaluator output) and resolves inherited lineage
+ * from the dependency artificer task. The actual task record creation is
+ * delegated to the plugin layer via `seedArtificerRepairTask` to preserve
+ * the core/plugin boundary (core peer runners do NOT directly orchestrate
+ * task creation — enforced by architecture-regression.test.ts).
+ */
+export interface SeedArtificerRepairParams {
+  /** The repair payload (6 fields) constructed by the evaluator runner. */
+  readonly repairPayload: RepairPayload;
+  /** Scribe task IDs inherited from the original artificer task. */
+  readonly inheritedDependencyTaskIds: readonly string[];
+  /** Channel inherited from the original artificer task. */
+  readonly inheritedChannel: InternalizationChannel;
+  /** Timeout inherited from the original artificer task. */
+  readonly inheritedTimeoutMs: number;
+  /** Input artifact refs inherited from the original artificer task. */
+  readonly inheritedInputArtifactRefs: readonly ArtifactRef[];
+}
+
 export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
   readonly validator: EvaluatorValidator;
+  /**
+   * PRI-509: feature flag resolver for the evaluator→artificer repair loop.
+   * When omitted or returns false, evaluator needs_revision follows the
+   * legacy path (no repair task seeded). When returns true and the
+   * decision is needs_revision, the evaluator seeds an artificer repair
+   * task (up to 2 rounds) or marks the task needs_human_review on the
+   * 3rd round (fail loud, EP-03).
+   *
+   * Injected by the plugin layer (which reads EffectivePdConfig); core
+   * stays pure logic with no direct config coupling (D5).
+   */
+  readonly isRepairLoopEnabled?: () => boolean;
+  /**
+   * PRI-509: Seeder function for artificer repair tasks.
+   *
+   * The plugin layer implements this by serializing the repairPayload +
+   * inherited metadata into diagnosticJson and calling stateManager
+   * task-creation. Core peer runners must NOT call task-creation directly
+   * (architecture-regression.test.ts enforces this boundary).
+   *
+   * Returns the newly created repair task's ID.
+   */
+  readonly seedArtificerRepairTask?: (params: SeedArtificerRepairParams) => Promise<string>;
 }
 
 // ── EvaluatorRunner ───────────────────────────────────────────────────────────
@@ -186,6 +232,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * replay (backward compatible).
    */
   private readonly gateDeps: RefinerRuleHostGateDeps | null;
+  /**
+   * PRI-509: feature flag resolver for the evaluator→artificer repair loop.
+   * Null when the deps did not inject the resolver (= disabled, legacy path).
+   */
+  private readonly repairLoopEnabledResolver: (() => boolean) | null;
+  /**
+   * PRI-509: seeder function for artificer repair tasks.
+   * Null when the deps did not inject the seeder (= repair seeding unavailable).
+   */
+  private readonly repairTaskSeeder: ((params: SeedArtificerRepairParams) => Promise<string>) | null;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
@@ -196,6 +252,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     });
     this.validator = deps.validator;
     this.gateDeps = options.gateDeps ?? null;
+    this.repairLoopEnabledResolver = deps.isRepairLoopEnabled ?? null;
+    this.repairTaskSeeder = deps.seedArtificerRepairTask ?? null;
+  }
+
+  /**
+   * Returns true iff the evaluator→artificer repair loop feature flag is on.
+   */
+  private isRepairLoopEnabled(): boolean {
+    return this.repairLoopEnabledResolver !== null && this.repairLoopEnabledResolver() === true;
   }
 
   // ── Abstract implementations ────────────────────────────────────────────────
@@ -515,6 +580,67 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // ── PRI-509: Evaluator→Artificer Repair Loop ──
+    // When decision === 'needs_revision' AND the feature flag is enabled:
+    //   1. Resolve priorRepairIteration from the dependency artificer task's
+    //      repairPayload (rc-7: read at task creation, never inferred).
+    //   2. If priorRepairIteration >= 2 (max 2 rounds reached):
+    //      - Mark the evaluator task needs_human_review (fail loud, EP-03/ERR-002).
+    //      - Emit a structured repair_loop_max_iterations event with reason +
+    //        nextAction (rc-9: no silent fallback).
+    //      - Return succeeded (the evaluator produced a valid verdict; the task
+    //        status reflects the need for human review, not a runner failure).
+    //   3. Else (priorRepairIteration < 2):
+    //      - Seed a new artificer repair task carrying a fresh repairPayload
+    //        (repairIteration = priorRepairIteration + 1) so the artificer can
+    //        address the evaluator's structured feedback.
+    //      - Fall through to the normal markTaskSucceeded path.
+    if (output.evaluation.decision === 'needs_revision' && this.isRepairLoopEnabled()) {
+      const repairOutcome = await this.maybeSeedArtificerRepair(
+        taskId,
+        { runId, output, context },
+      );
+      if (repairOutcome.kind === 'max_iterations_reached') {
+        // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
+        // so it does NOT stay in 'leased' state (which would cause the lease
+        // to expire and the evaluator to re-run the same verdict infinitely).
+        //
+        // The runner result remains 'succeeded' — the evaluator produced a
+        // valid verdict; the *task status* reflects that human review is
+        // required, not that the runner failed.
+        const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+        try {
+          await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+        } catch (stateErr) {
+          // Surface the state-update failure observably (rc-9 — never silent).
+          this.emitEvent('repair_loop_mark_review_failed', taskId, {
+            runId,
+            errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+            nextAction: 'manual_intervention_required',
+          });
+        }
+        this.emitEvent('task_needs_human_review', taskId, {
+          attemptCount: task.attemptCount,
+          resultRef,
+          evaluationDecision: finalOutput.evaluation.decision,
+          evaluationScore: finalOutput.evaluation.score,
+          ruleArtifactId: null,
+          reason: 'repair_loop_max_iterations_or_seed_failure',
+        });
+        return {
+          status: 'succeeded',
+          taskId,
+          runId,
+          artifactId,
+          resultRef,
+          contextHash,
+          output: finalOutput,
+          attemptCount: task.attemptCount,
+        };
+      }
+      // repairOutcome.kind === 'repair_seeded' → fall through to markTaskSucceeded.
+    }
+
     // Mark task succeeded
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
     try {
@@ -546,6 +672,165 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       output: finalOutput,
       attemptCount: task.attemptCount,
     };
+  }
+
+  /**
+   * PRI-509: Resolve the prior repair iteration by reading the dependency
+   * artificer task's repairPayload (rc-7: written at task creation, never
+   * inferred at read). Returns 0 when the dependency artificer has no
+   * repairPayload (Round-1 evaluator → first repair).
+   *
+   * Loop state freshness (EP-05, ERR-015/018/019): each evaluator round reads
+   * the CURRENT dependency artificer's repairPayload — never a cached value.
+   */
+  private async resolvePriorRepairIteration(taskId: string): Promise<number> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return 0;
+
+    const piTask = hydratePITaskRecord(task);
+    const deps = piTask?.dependencyTaskIds ?? [];
+
+    for (const depId of deps) {
+      const depTask = await this.stateManager.getTask(depId);
+      if (!depTask) continue;
+      if (depTask.taskKind !== 'artificer') continue;
+
+      const piDepTask = hydratePITaskRecord(depTask);
+      // rc-5: use Object.hasOwn to check repairPayload presence.
+      if (piDepTask?.repairPayload && typeof piDepTask.repairPayload.repairIteration === 'number') {
+        return piDepTask.repairPayload.repairIteration;
+      }
+      // First artificer (no repairPayload) → prior iteration = 0.
+      return 0;
+    }
+    return 0;
+  }
+
+  /**
+   * PRI-509: Seed an artificer repair task or mark the evaluator task
+   * needs_human_review when max iterations (2) are reached.
+   *
+   * Returns:
+   *   - { kind: 'repair_seeded', taskId } — a new artificer repair task was created.
+   *   - { kind: 'max_iterations_reached' } — task marked needs_human_review (fail loud).
+   *
+   * Trust boundary (rc-1, rc-2): evaluator output is already validated by
+   * validateOutput before succeedTask is called. requiredChanges / concerns
+   * are typed as readonly string[] on EvaluatorEvaluation, so element-level
+   * re-validation is not required here (rc-4 N/A — not unknown at this point).
+   */
+  private async maybeSeedArtificerRepair(
+    evaluatorTaskId: string,
+    ctx: {
+      runId: string;
+      output: EvaluatorOutputV1;
+      context: EvaluatorContext;
+    },
+  ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached' }> {
+    const { runId: evaluatorRunId, output, context } = ctx;
+    const priorRepairIteration = await this.resolvePriorRepairIteration(evaluatorTaskId);
+
+    // ── Slice 5: max iterations (2) reached → fail loud ──
+    if (priorRepairIteration >= 2) {
+      // Task state update (→ needs_human_review) is handled by the caller
+      // uniformly for all max_iterations_reached paths (rc-9: no silent
+      // fallback; task must not be left in 'leased' state).
+      this.emitEvent('repair_loop_max_iterations', evaluatorTaskId, {
+        reason: 'max_repair_iterations_exceeded',
+        nextAction: 'owner_manual_review_required',
+        priorRepairIteration,
+      });
+      return { kind: 'max_iterations_reached' };
+    }
+
+    // ── Slice 4: seed artificer repair task ──
+    const sourceArtificerArtifactId = context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId;
+    if (!sourceArtificerArtifactId) {
+      // Lineage missing — cannot construct repairPayload. Fail loud (rc-3).
+      this.emitEvent('repair_loop_lineage_missing', evaluatorTaskId, {
+        runId: evaluatorRunId,
+        reason: 'source_artificer_artifact_id_unresolved',
+      });
+      return { kind: 'max_iterations_reached' };
+    }
+
+    // Construct the new repairPayload (repairIteration = prior + 1).
+    // The 6 fields are sourced from the current evaluator output (rc-7:
+    // fresh per-round data, never cached from a prior evaluator run).
+    const repairPayload: RepairPayload = {
+      requiredChanges: [...output.evaluation.requiredChanges],
+      concerns: [...output.evaluation.concerns],
+      previousScore: output.evaluation.score,
+      repairIteration: priorRepairIteration + 1,
+      sourceArtificerArtifactId,
+      sourceEvaluatorTaskId: evaluatorTaskId,
+    };
+
+    // Resolve the dependency artificer task to inherit dependencyTaskIds
+    // (so the repair task points to the same scribe task, preserving lineage).
+    const evaluatorTask = await this.stateManager.getTask(evaluatorTaskId);
+    const evaluatorPiTask = evaluatorTask ? hydratePITaskRecord(evaluatorTask) : null;
+    const evaluatorDeps = evaluatorPiTask?.dependencyTaskIds ?? [];
+
+    // Inherit scribe-level dependency from the artificer task (the artificer's
+    // own dependencyTaskIds), NOT the evaluator's dependencyTaskIds (which
+    // point to the artificer, not the scribe).
+    let inheritedDeps: string[] = [];
+    let inheritedChannel: InternalizationChannel = 'prompt';
+    let inheritedTimeoutMs = 300_000;
+    let inheritedInputArtifactRefs: ArtifactRef[] = [];
+    for (const depId of evaluatorDeps) {
+      const depTask = await this.stateManager.getTask(depId);
+      if (!depTask) continue;
+      if (depTask.taskKind !== 'artificer') continue;
+      const piArtificer = hydratePITaskRecord(depTask);
+      if (!piArtificer) continue;
+      inheritedDeps = piArtificer.dependencyTaskIds;
+      inheritedChannel = piArtificer.channel;
+      inheritedTimeoutMs = piArtificer.timeoutMs;
+      inheritedInputArtifactRefs = piArtificer.inputArtifactRefs;
+      break;
+    }
+
+    // Delegate to the injected seeder — core peer runners do NOT call
+    // task-creation directly (architecture-regression.test.ts enforces
+    // this boundary; the plugin layer wires the actual store mutation).
+    if (!this.repairTaskSeeder) {
+      // Seeder not injected despite flag enabled — configuration error.
+      // Surface via telemetry (rc-9: no silent fallback) and treat as max
+      // iterations reached so the caller skips markTaskSucceeded.
+      this.emitEvent('repair_loop_seeder_missing', evaluatorTaskId, {
+        runId: evaluatorRunId,
+        reason: 'seed_artificer_repair_task_not_injected',
+      });
+      return { kind: 'max_iterations_reached' };
+    }
+
+    try {
+      const repairTaskId = await this.repairTaskSeeder({
+        repairPayload,
+        inheritedDependencyTaskIds: inheritedDeps,
+        inheritedChannel,
+        inheritedTimeoutMs,
+        inheritedInputArtifactRefs,
+      });
+      this.emitEvent('repair_task_seeded', evaluatorTaskId, {
+        repairTaskId,
+        repairIteration: repairPayload.repairIteration,
+        sourceArtificerArtifactId,
+      });
+      return { kind: 'repair_seeded', taskId: repairTaskId };
+    } catch (seedErr) {
+      // Surface failure — do not silently swallow (rc-9).
+      this.emitEvent('repair_task_seed_failed', evaluatorTaskId, {
+        runId: evaluatorRunId,
+        errorMessage: seedErr instanceof Error ? seedErr.message : String(seedErr),
+      });
+      // Treat as max iterations reached so the caller skips markTaskSucceeded
+      // and returns succeeded — the evaluator verdict stands; only the repair
+      // seeding failed, which is logged.
+      return { kind: 'max_iterations_reached' };
+    }
   }
 
   // ── Optional hooks ──────────────────────────────────────────────────────────
