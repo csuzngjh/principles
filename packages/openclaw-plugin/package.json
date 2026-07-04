@@ -47,6 +47,7 @@
     "build": "tsc",
     "build:bundle": "node esbuild.config.js",
     "build:production": "node esbuild.config.js --production && node scripts/verify-build.mjs",
+    "prepack": "npm run build:production",
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts --exclude tests/commands/evolver.test.ts",
     "test:integration": "vitest run tests/integration/",
