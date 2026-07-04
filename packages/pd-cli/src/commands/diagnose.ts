@@ -529,10 +529,20 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // Without this, the chain stops at 'consumed' and never reaches internalization
     // (11 of 18 consumed candidates hit this in production). Mirrors the pattern
     // in PainSignalBridge.onDiagnosisComplete (pain-signal-bridge.ts L310-338).
-    if (opts.intake !== false && !intakeFailed) {
+    //
+    // DEFECT-005 (PRI-514): the dreamer seed loop is gated ONLY by `opts.intake`,
+    // NOT by a global `intakeFailed` flag. A single defer candidate whose intake
+    // is refused by the admission gate must NOT poison dreamer seed for sibling
+    // candidates that were successfully consumed (EP-03 / ERR-089 sibling-branch
+    // defect). Per-candidate eligibility is checked inside the loop via the
+    // intake result's status. `intakeFailed` is retained solely for the
+    // nextAction/exit-code signaling below (partial failure still exits non-zero).
+    if (opts.intake !== false) {
       for (const candidate of candidates) {
         const kind = candidate.recommendationKind;
         if (kind === 'defer' || kind === 'implementation') continue;
+        const intakeResult = intakeResults.find((r) => r.candidateId === candidate.candidateId);
+        if (!intakeResult || intakeResult.status !== 'consumed') continue;
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[kind ?? ''];
           if (!route) continue;
