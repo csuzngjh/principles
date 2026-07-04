@@ -563,11 +563,12 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
-- **Recurrence**: Yes — guard/validator exists but is wired fail-open (bypass/continue) or trusts the caller's claim instead of independently verifying.
+- **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
+  - 2026-07-04 PRI-510 (PR#1188, fixing PRI-509/PR#1186): `EvaluatorRunnerDeps` added optional `isRepairLoopEnabled` + `seedArtificerRepairTask` with isolated tests in `evaluator-runner.ts`, but 2 CLI construction sites (`rulehost-pipeline-runner.ts:366`, `runtime-internalization-run-once.ts:518`) only passed the 5 base deps — repair loop was dead code at runtime. Fixed by centralizing deps construction in `createEvaluatorRunnerDeps` helper used by both CLI sites.
   - 2026-06-25 PRI-467 (PR#1059): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
   - 2026-06-19 PRI-408 (PR#972): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
   - 2026-05-24 PRI-227 (PR#698): Nocturnal guard `if (isFrozenImport) continue;` was fail-open — removed bypass
-  - Fix: enforcement must verify the protected claim independently, never `continue`/trust the caller.
+  - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
 

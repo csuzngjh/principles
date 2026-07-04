@@ -906,6 +906,10 @@ export type {
   EvaluatorRunnerOptions,
   ResolvedEvaluatorRunnerOptions,
   EvaluatorRunnerDeps,
+  // PRI-510: re-export so the CLI plugin layer can reference the seeder contract
+  // without importing the runner source file directly (EP-02: production path
+  // wiring must use the barrel, not deep imports).
+  SeedArtificerRepairParams,
 } from './internalization/evaluator-runner.js';
 
 export {

@@ -24,6 +24,11 @@ import {
   resolveRuntimeAdapterFromConfig,
   ConfigResolutionError,
 } from '../services/runtime-adapter-resolver.js';
+// PRI-510 (DEFECT-004): centralize EvaluatorRunnerDeps construction so the
+// repair-loop wiring (isRepairLoopEnabled + seeder) is invoked in this CLI
+// path. EP-02: prior code passed only the 5 base deps, leaving the repair
+// loop as dead code at runtime.
+import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -515,8 +520,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'evaluator') {
           const validator = new DefaultEvaluatorValidator();
+          // PRI-510 (DEFECT-004): use createEvaluatorRunnerDeps so the repair
+          // loop is wired in this CLI path (EP-02: production path must
+          // invoke core logic, not just construct the runner).
           const runner = new EvaluatorRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            createEvaluatorRunnerDeps({
+              stateManager,
+              runtimeAdapter,
+              eventEmitter,
+              validator,
+              artifactStore,
+              workspaceDir,
+            }),
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
