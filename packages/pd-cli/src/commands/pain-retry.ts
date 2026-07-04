@@ -36,6 +36,11 @@ import {
   isFeatureEnabled,
   SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
   PrincipleTreeLedgerAdapter,
+  SqliteDeadLetterStore,
+  PainSignalBridge,
+  type PainDetectedData,
+  type PainSignalBridgeResult,
+  type DeadLetterRow,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import type { Command } from 'commander';
@@ -94,6 +99,114 @@ function readNonBlankString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+/**
+ * Validate that an unknown value (read from dead_letter_pains.pain_data) has
+ * the shape of PainDetectedData.
+ *
+ * rc-1: Treat parsed JSON as unknown.
+ * rc-2: No `as` bypass — use typeof checks and literal narrowing.
+ * rc-3: Required fields (painId, painType, source, reason) fail loud.
+ * rc-5: Use Object.hasOwn for field presence checks on untrusted objects.
+ */
+function parsePainDetectedData(value: unknown):
+  | { valid: true; data: PainDetectedData }
+  | { valid: false; error: string } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      valid: false,
+      error: `painData is not an object (got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value})`,
+    };
+  }
+  const obj = value as Record<string, unknown>;
+
+  // Detect dead-letter error envelopes from SqliteDeadLetterStore parse/serialize failures.
+  if (Object.hasOwn(obj, '__deadLetterParseError') || Object.hasOwn(obj, '__deadLetterSerializeError')) {
+    return {
+      valid: false,
+      error: `painData contains dead-letter error envelope: ${JSON.stringify(obj)}`,
+    };
+  }
+
+  // Required string fields
+  if (typeof obj.painId !== 'string' || obj.painId.trim().length === 0) {
+    return { valid: false, error: `painData.painId is not a non-blank string (got ${JSON.stringify(obj.painId)})` };
+  }
+  if (typeof obj.source !== 'string') {
+    return { valid: false, error: `painData.source is not a string (got ${JSON.stringify(obj.source)})` };
+  }
+  if (typeof obj.reason !== 'string') {
+    return { valid: false, error: `painData.reason is not a string (got ${JSON.stringify(obj.reason)})` };
+  }
+
+  // painType: narrow to literal union without `as`.
+  const painTypeRaw = obj.painType;
+  if (painTypeRaw !== 'tool_failure' && painTypeRaw !== 'dispatch_error'
+      && painTypeRaw !== 'subagent_error' && painTypeRaw !== 'user_frustration') {
+    return { valid: false, error: `painData.painType is not a valid pain type (got ${JSON.stringify(painTypeRaw)})` };
+  }
+  // After the narrowing check above, TypeScript infers painTypeRaw as the literal union.
+  const painType: PainDetectedData['painType'] = painTypeRaw === 'dispatch_error' ? 'tool_failure' : painTypeRaw;
+
+  // Build the typed object field-by-field. Optional fields are added only when present and valid.
+  const data: PainDetectedData = {
+    painId: obj.painId,
+    painType,
+    source: obj.source,
+    reason: obj.reason,
+  };
+
+  if (Object.hasOwn(obj, 'score')) {
+    if (typeof obj.score !== 'number' || !Number.isFinite(obj.score)) {
+      return { valid: false, error: `painData.score is not a finite number (got ${JSON.stringify(obj.score)})` };
+    }
+    data.score = obj.score;
+  }
+  if (Object.hasOwn(obj, 'sessionId')) {
+    if (typeof obj.sessionId !== 'string') return { valid: false, error: 'painData.sessionId is not a string' };
+    data.sessionId = obj.sessionId;
+  }
+  if (Object.hasOwn(obj, 'agentId')) {
+    if (typeof obj.agentId !== 'string') return { valid: false, error: 'painData.agentId is not a string' };
+    data.agentId = obj.agentId;
+  }
+  if (Object.hasOwn(obj, 'taskId')) {
+    if (typeof obj.taskId !== 'string') return { valid: false, error: 'painData.taskId is not a string' };
+    data.taskId = obj.taskId;
+  }
+  if (Object.hasOwn(obj, 'traceId')) {
+    if (typeof obj.traceId !== 'string') return { valid: false, error: 'painData.traceId is not a string' };
+    data.traceId = obj.traceId;
+  }
+  if (Object.hasOwn(obj, 'provenance')) {
+    const prov = obj.provenance;
+    if (prov !== 'openclaw_context_bound' && prov !== 'owner_reported_no_host_trace' && prov !== 'automatic_hook') {
+      return { valid: false, error: `painData.provenance is not a known literal (got ${JSON.stringify(prov)})` };
+    }
+    data.provenance = prov;
+  }
+  if (Object.hasOwn(obj, 'evidence')) {
+    if (!Array.isArray(obj.evidence)) {
+      return { valid: false, error: 'painData.evidence is not an array' };
+    }
+    // Validate each entry has the PainEvidenceEntry shape { sourceRef: string, note: string }.
+    const evidence: { sourceRef: string; note: string }[] = [];
+    for (let i = 0; i < obj.evidence.length; i++) {
+      const entry = obj.evidence[i];
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        return { valid: false, error: `painData.evidence[${i}] is not an object` };
+      }
+      const e = entry as Record<string, unknown>;
+      if (typeof e.sourceRef !== 'string' || typeof e.note !== 'string') {
+        return { valid: false, error: `painData.evidence[${i}] missing string fields sourceRef/note` };
+      }
+      evidence.push({ sourceRef: e.sourceRef, note: e.note });
+    }
+    data.evidence = evidence;
+  }
+
+  return { valid: true, data };
+}
+
 /** Output a refused/not_found result, respecting --json mode. Exits with code 1. */
 function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: string; taskId?: string; reason: string; message?: string; nextAction: string }): void {
   if (opts.json) {
@@ -133,18 +246,38 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     await stateManager.initialize();
 
     const task = await stateManager.getTask(taskId);
+
+    // Dead letter replay: when no task exists, check if the pain signal was
+    // persisted to dead_letter_pains (rc-9: no silent failure in pain.ts).
+    // If found, replay it through PainSignalBridge.onPainDetected.
+    let deadLetterReplay: { data: PainDetectedData; row: DeadLetterRow } | null = null;
     if (!task) {
-      return refuseExit(opts, {
-        status: 'not_found',
-        painId: opts.painId,
-        taskId,
-        reason: 'task_not_found',
-        message: `No task found for painId '${opts.painId}' (looked for taskId '${taskId}')`,
-        nextAction: `Verify the painId is correct. Use 'pd task list --kind diagnostician' to see all diagnostician tasks.`,
-      });
+      const dlStore = new SqliteDeadLetterStore(stateManager.connection);
+      const dlRow = dlStore.getByPainId(opts.painId);
+      if (!dlRow) {
+        return refuseExit(opts, {
+          status: 'not_found',
+          painId: opts.painId,
+          taskId,
+          reason: 'task_not_found',
+          message: `No task found for painId '${opts.painId}' (looked for taskId '${taskId}') and no dead letter found`,
+          nextAction: `Verify the painId is correct. Use 'pd task list --kind diagnostician' to see all diagnostician tasks.`,
+        });
+      }
+      const parseResult = parsePainDetectedData(dlRow.painData);
+      if (!parseResult.valid) {
+        return refuseExit(opts, {
+          painId: opts.painId,
+          taskId,
+          reason: 'dead_letter_corrupt',
+          message: `Dead letter for painId '${opts.painId}' has corrupt painData: ${parseResult.error}`,
+          nextAction: `The dead letter row cannot be replayed. Inspect the dead_letter_pains table directly: SELECT * FROM dead_letter_pains WHERE pain_id = '${opts.painId}'`,
+        });
+      }
+      deadLetterReplay = { data: parseResult.data, row: dlRow };
     }
 
-    if (task.taskKind !== 'diagnostician') {
+    if (task && task.taskKind !== 'diagnostician') {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -154,10 +287,12 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       });
     }
 
-    const previousTaskStatus = task.status;
-    const previousLastError = task.lastError ?? null;
+    // For dead letter replay there is no prior task; synthesize a status so the
+    // existing logging/output paths have a non-null value to print.
+    const previousTaskStatus: PDTaskStatus | 'dead_lettered' = task ? task.status : 'dead_lettered';
+    const previousLastError = task ? (task.lastError ?? null) : null;
 
-    if (task.status === 'succeeded' && !opts.force) {
+    if (task && task.status === 'succeeded' && !opts.force) {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -167,7 +302,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       });
     }
 
-    if (!RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
+    if (task && !RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -426,6 +561,114 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       runner = new DisabledDiagnosticianRunner();
     }
 
+    // ── Dead letter replay branch ──────────────────────────────────────────
+    // When task was null but a dead letter was found, replay the pain signal
+    // through PainSignalBridge.onPainDetected instead of calling diagnoseRun.
+    // On success/failure, markRetried updates the dead_letter_pains row.
+    if (deadLetterReplay) {
+      const dlStore = new SqliteDeadLetterStore(stateManager.connection);
+      if (!opts.json) {
+        console.log(`\nReplaying dead letter pain: ${opts.painId}`);
+        console.log(`  Task ID:        ${taskId}`);
+        console.log(`  Dead Letter ID: ${deadLetterReplay.row.id}`);
+        console.log(`  Failed At:      ${deadLetterReplay.row.failedAt}`);
+        console.log(`  Retry Count:    ${deadLetterReplay.row.retryCount}`);
+        console.log(`  Runtime:        ${runtimeKind}`);
+        console.log(`  Workspace:      ${workspaceDir}\n`);
+      }
+
+      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+      const bridge = new PainSignalBridge({
+        stateManager,
+        runner,
+        intakeService,
+        ledgerAdapter,
+        owner: 'pd-cli-pain-retry-dead-letter',
+        workspaceDir,
+      });
+
+      let bridgeResult: PainSignalBridgeResult;
+      try {
+        bridgeResult = await bridge.onPainDetected(deadLetterReplay.data);
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const markFail = dlStore.markRetried(opts.painId, false);
+        if (opts.json) {
+          console.log(JSON.stringify({
+            status: 'failed',
+            painId: opts.painId,
+            taskId,
+            source: 'dead_letter',
+            deadLetterId: deadLetterReplay.row.id,
+            runtimeKind,
+            errorCategory: 'execution_failed',
+            message: errorMessage,
+            markRetriedOk: markFail.ok,
+            nextAction: 'Replay threw; retry_count incremented. Adjust parameters and run pd pain retry --pain-id again.',
+          }, null, 2));
+        } else {
+          console.error(`error: ${errorMessage}`);
+          console.error(`nextAction: Replay threw; retry_count incremented. Adjust parameters and try again.`);
+        }
+        process.exit(1);
+        return;
+      }
+
+      const success = bridgeResult.status === 'succeeded';
+      const markResult = dlStore.markRetried(opts.painId, success);
+
+      if (opts.json) {
+        // cli-1-strict-json: exactly one parseable JSON object on stdout.
+        console.log(JSON.stringify({
+          status: success ? 'succeeded' : 'failed',
+          painId: opts.painId,
+          taskId,
+          source: 'dead_letter',
+          deadLetterId: deadLetterReplay.row.id,
+          runtimeKind,
+          bridgeStatus: bridgeResult.status,
+          candidateIds: bridgeResult.candidateIds,
+          ledgerEntryIds: bridgeResult.ledgerEntryIds,
+          markRetriedOk: markResult.ok,
+          message: bridgeResult.message ?? null,
+          nextAction: success
+            ? (bridgeResult.candidateIds.length > 0
+              ? `Dead letter replayed. Internalize candidates:\n  ${bridgeResult.candidateIds.map((id) => `pd candidate internalize --candidate-id ${id} --workspace "${workspaceDir}"`).join('\n  ')}`
+              : 'Dead letter replayed. No candidates generated.')
+            : `Replay did not succeed (status=${bridgeResult.status}). The dead letter remains available for future retry.`,
+        }, null, 2));
+        if (!success) {
+          process.exit(1);
+        }
+        return;
+      }
+
+      // Text output
+      console.log(`\nReplay ${success ? 'succeeded' : 'failed'}:`);
+      console.log(`  Pain ID:         ${opts.painId}`);
+      console.log(`  Task ID:         ${taskId}`);
+      console.log(`  Dead Letter ID:  ${deadLetterReplay.row.id}`);
+      console.log(`  Bridge Status:   ${bridgeResult.status}`);
+      if (bridgeResult.message) {
+        console.log(`  Message:         ${bridgeResult.message}`);
+      }
+      if (success) {
+        console.log(`  Candidates:      ${bridgeResult.candidateIds.length}`);
+        if (bridgeResult.candidateIds.length > 0) {
+          console.log(`  Ledger Entries:  ${bridgeResult.ledgerEntryIds.length}`);
+        }
+      }
+      console.log(`  Mark Retried:    ${markResult.ok ? 'ok' : `FAILED: ${markResult.error}`}`);
+      if (!success) {
+        console.log(`\n  Next Action:`);
+        console.log(`  Replay did not succeed. The dead letter remains available for future retry.`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // ── Normal retry branch ─────────────────────────────────────────────────
     if (!opts.json) {
       console.log(`\nRetrying diagnosis for pain: ${opts.painId}`);
       console.log(`  Task ID:  ${taskId}`);

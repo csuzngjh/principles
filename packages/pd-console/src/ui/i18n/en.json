@@ -566,6 +566,7 @@
         "copyMarkdown": "Copy Markdown",
         "copyEmail": "Copy email text",
         "openGithub": "Open GitHub issue URL",
+        "openEmail": "Open Email",
         "delete": "Delete draft"
       },
       "saved": {
@@ -1130,6 +1131,23 @@
         "step3": "Commands",
         "step4": "Evidence"
       }
+    },
+    "failedTasks": {
+      "title": "Failed Tasks",
+      "subtitle": "Pipeline tasks that failed or need human review",
+      "empty": "No failed tasks. PD pipeline is healthy.",
+      "error": "Failed to load failed tasks",
+      "disabled": "Failed tasks observability is disabled. Enable 'failed_tasks_observability' in .pd/config.yaml to view.",
+      "createDraft": "Create Feedback Draft",
+      "taskId": "Task ID",
+      "painId": "Pain ID",
+      "kind": "Kind",
+      "status": "Status",
+      "lastError": "Last Error",
+      "attempts": "Attempts",
+      "lastAttempt": "Last Attempt",
+      "noPainId": "—",
+      "partialResults": "Showing first {shown} of {total} records. Narrow filters or use 'pd errors list' with --offset to see more."
     }
   },
   "components": {
@@ -1186,6 +1204,7 @@
       "debt": "Principle Debt",
       "controlCenter": "Control Center",
       "reportProblem": "Feedback",
+      "failedTasks": "Failed Tasks",
       "settings": "Settings",
       "update": "Updates",
       "pendingApprovalsAria": "{{count}} pending approvals",

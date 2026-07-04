@@ -1,0 +1,107 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Principles Disciple
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+
+        **Tip**: You can also generate a structured feedback report from PD Console → Report Problem page, which auto-collects PD version, platform info, and recent events. The report can be attached here as Markdown.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Issue Type
+      options:
+        - bug
+        - confusing
+        - privacy_concern
+        - feature_request
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the issue
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - low
+        - medium
+        - high
+    validations:
+      required: false
+
+  - type: input
+    id: pd-version
+    attributes:
+      label: PD Version
+      description: Run `pd --version` or check PD Console → Settings
+      placeholder: "e.g. 1.74.1"
+    validations:
+      required: true
+
+  - type: input
+    id: context-refs
+    attributes:
+      label: Context References (optional)
+      description: Related painId / principleId / approvalId / activationId / taskId (if applicable)
+      placeholder: "e.g. painId=pain-xxx, taskId=tsk-xxx"
+    validations:
+      required: false
+
+  - type: textarea
+    id: agent-draft
+    attributes:
+      label: Agent Draft (optional)
+      description: If reporting from Failed Tasks page, paste the auto-generated agent draft summary
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic Summary (optional)
+      description: Paste the diagnostic summary from PD Console feedback report (versions, platform, feature flags, recent events)
+      render: json
+    validations:
+      required: false

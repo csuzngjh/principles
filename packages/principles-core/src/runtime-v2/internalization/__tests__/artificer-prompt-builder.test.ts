@@ -181,6 +181,84 @@ describe('PRI-484 Artificer prompt context modes', () => {
   });
 });
 
+describe('PRI-508: Artificer dreamer context passthrough', () => {
+  // Vertical slice 1: dreamerContext 5维字段透传到 prompt message
+  it('includes dreamerContext.badDecision/betterDecision/rationale in prompt message when provided', () => {
+    const builder = new ArtificerPromptBuilder();
+    const { message, promptInput } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-508',
+      contextHash: 'ctx-pri-508',
+      sourceScribeArtifactId: 'scribe-pri-508',
+      scribeArtifact: {},
+      dreamerContext: {
+        badDecision: 'agent called write_file without checking parent path',
+        betterDecision: 'agent should resolve and validate parent path before write',
+        rationale: 'unchecked parent path leads to path traversal risk',
+        riskLevel: 'medium',
+        strategicPerspective: 'proactive validation over reactive cleanup',
+      },
+    });
+    const parsed = JSON.parse(message);
+    expect(parsed.dreamerContext).toBeDefined();
+    expect(parsed.dreamerContext.badDecision).toBe('agent called write_file without checking parent path');
+    expect(parsed.dreamerContext.betterDecision).toBe('agent should resolve and validate parent path before write');
+    expect(parsed.dreamerContext.rationale).toBe('unchecked parent path leads to path traversal risk');
+    expect(parsed.dreamerContext.riskLevel).toBe('medium');
+    expect(parsed.dreamerContext.strategicPerspective).toBe('proactive validation over reactive cleanup');
+    expect(promptInput.dreamerContext).toBeDefined();
+  });
+
+  // Vertical slice 2: RuleHost capability boundary hint in protocol instruction
+  it('instruction includes RuleHost capability boundary (stateless/single-call)', () => {
+    // PRI-508: artificer must know RuleHost evaluate() is a stateless single-call
+    // gate to avoid implementing unenforceable procedural rules (e.g. path whitelists
+    // for "audit before modify" principles). PoC-validated text.
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/stateless|single-call/i);
+  });
+
+  // Vertical slice 3: backward compatibility — dreamerContext absent → not in prompt
+  it('does not include dreamerContext in prompt when not provided (backward compatible)', () => {
+    const builder = new ArtificerPromptBuilder();
+    const { message, promptInput } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-508-no-dreamer',
+      contextHash: 'ctx-pri-508',
+      sourceScribeArtifactId: 'scribe-pri-508',
+      scribeArtifact: {},
+    });
+    const parsed = JSON.parse(message);
+    expect(parsed.dreamerContext).toBeUndefined();
+    expect(promptInput.dreamerContext).toBeUndefined();
+  });
+
+  // Vertical slice 3b: v2 mode also passes dreamerContext through
+  it('v2 mode includes dreamerContext in prompt when provided', () => {
+    const builder = new ArtificerPromptBuilder();
+    const { message } = builder.buildPrompt({
+      contextMode: 'v2',
+      taskId: 'task-pri-508-v2',
+      contextHash: 'ctx-pri-508-v2',
+      sourceScribeArtifactId: 'scribe-pri-508',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+      dreamerContext: {
+        badDecision: 'v2 bad decision text',
+        betterDecision: 'v2 better decision text',
+        rationale: 'v2 rationale text',
+      },
+    });
+    const parsed = JSON.parse(message);
+    expect(parsed.dreamerContext).toBeDefined();
+    expect(parsed.dreamerContext.badDecision).toBe('v2 bad decision text');
+    expect(parsed.dreamerContext.betterDecision).toBe('v2 better decision text');
+    expect(parsed.dreamerContext.rationale).toBe('v2 rationale text');
+    // Optional fields not provided → should be undefined (not serialized as null)
+    expect(parsed.dreamerContext.riskLevel).toBeUndefined();
+    expect(parsed.dreamerContext.strategicPerspective).toBeUndefined();
+  });
+});
+
 describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () => {
   const builder = new ArtificerPromptBuilder();
 

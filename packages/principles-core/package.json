@@ -77,7 +77,8 @@
     "./quality-scorecard": {
       "types": "./dist/quality-scorecard/index.d.ts",
       "default": "./dist/quality-scorecard/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"

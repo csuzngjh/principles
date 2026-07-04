@@ -19,6 +19,7 @@ import type { RunnerKind } from '../internalization/peer-runner-contracts.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import type { PendingAgentDraftStore } from '../feedback/pending-agent-draft-store.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,14 @@ export interface PeerRunnerDeps {
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
   readonly artifactStore: PIArtifactStore;
+  /**
+   * Optional store for agent-authored draft context attached to a permanently
+   * failed task (Task 12). When injected, BasePeerRunner writes an
+   * AgentDraftPayload to pending_agent_drafts whenever a task enters the
+   * `failed` terminal state via a permanent error category. When omitted,
+   * the runner behaves as before (no draft written) — backward compatible.
+   */
+  readonly pendingAgentDraftStore?: PendingAgentDraftStore;
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────

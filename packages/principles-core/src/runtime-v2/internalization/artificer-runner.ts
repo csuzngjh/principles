@@ -38,8 +38,9 @@ import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
-import { ArtificerPromptBuilder } from './artificer-prompt-builder.js';
+import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import type { PIArtifactStore } from './pi-artifact.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -62,6 +63,14 @@ interface ArtificerContext {
    * LLM can make targeted corrections.
    */
   readonly adversarialFeedback: string | null;
+  /**
+   * Dreamer candidate 5-dim context (PRI-508). Undefined when:
+   * - scribe artifact lacks sourceTrace.dreamerArtifactId (pre-PRI-508 flows)
+   * - dreamer artifact cannot be resolved (best-effort, non-blocking)
+   * - dreamer artifact contentJson fails runtime validation
+   * Lineage: scribe.sourceTrace.dreamerArtifactId → dreamer artifact → candidates[0] (rc-6).
+   */
+  readonly dreamerContext?: ArtificerDreamerContext;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -129,6 +138,135 @@ export interface ArtificerRunnerDeps extends PeerRunnerDeps {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// ── PRI-508: Dreamer context extraction ─────────────────────────────────────
+
+/**
+ * Resolve the dreamer candidate 5-dim context from the dreamer artifact
+ * referenced by `scribe.sourceTrace.dreamerArtifactId`.
+ *
+ * Trust boundary (rc-1, rc-2): scribe contentJson and dreamer contentJson are
+ * untrusted. All field access uses Object.hasOwn (rc-5) and typeof / Array.isArray
+ * guards (rc-4) — no `as` casts that bypass validation.
+ *
+ * Lineage consistency (rc-6): dreamerContext comes from the exact artifact
+ * referenced by the scribe's sourceTrace.dreamerArtifactId — never inferred.
+ *
+ * Fail-loud / no silent fallback (rc-3, rc-9): when dreamerArtifactId is present
+ * but the dreamer artifact cannot be resolved or fails validation, emits a
+ * `dreamer_artifact_missing` / `dreamer_context_invalid` event so the gap is
+ * observable. Returns undefined (best-effort, non-blocking) so the artificer
+ * can still proceed with the scribe principle alone.
+ */
+async function resolveDreamerContext(params: {
+  scribeContentJson: string;
+  artifactStore: Pick<PIArtifactStore, 'getArtifactById'>;
+  taskId: string;
+  emitEvent: (eventName: string, taskId: string, payload: Record<string, unknown>) => void;
+}): Promise<ArtificerDreamerContext | undefined> {
+  const { scribeContentJson, taskId, emitEvent } = params;
+
+  // Parse scribe contentJson as unknown — never trust the shape (rc-1).
+  let scribeParsed: unknown;
+  try {
+    scribeParsed = JSON.parse(scribeContentJson);
+  } catch {
+    // Scribe contentJson malformed — cannot resolve dreamer lineage.
+    emitEvent('dreamer_context_skipped', taskId, { reason: 'scribe_contentJson_unparseable' });
+    return undefined;
+  }
+  if (!isRecord(scribeParsed)) return undefined;
+
+  // rc-5: use Object.hasOwn, not `in`.
+  if (!Object.hasOwn(scribeParsed, 'sourceTrace') || !isRecord(scribeParsed.sourceTrace)) {
+    // scribe has no sourceTrace.dreamerArtifactId — pre-PRI-508 flow, backward compatible.
+    return undefined;
+  }
+  const { sourceTrace } = scribeParsed;
+  if (!Object.hasOwn(sourceTrace, 'dreamerArtifactId') || sourceTrace.dreamerArtifactId === undefined) {
+    return undefined;
+  }
+  const { dreamerArtifactId } = sourceTrace;
+  if (typeof dreamerArtifactId !== 'string' || dreamerArtifactId.trim() === '') {
+    emitEvent('dreamer_context_skipped', taskId, { reason: 'dreamerArtifactId_not_string', dreamerArtifactId });
+    return undefined;
+  }
+
+  // Fetch the dreamer artifact via the canonical source (rc-6 lineage).
+  const dreamerArtifact = await params.artifactStore.getArtifactById(dreamerArtifactId);
+  if (!dreamerArtifact) {
+    // rc-9: observable event — do NOT silently swallow.
+    emitEvent('dreamer_artifact_missing', taskId, { dreamerArtifactId });
+    return undefined;
+  }
+
+  let dreamerParsed: unknown;
+  try {
+    dreamerParsed = JSON.parse(dreamerArtifact.contentJson);
+  } catch {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'contentJson_unparseable' });
+    return undefined;
+  }
+  if (!isRecord(dreamerParsed)) {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'content_not_record' });
+    return undefined;
+  }
+
+  // rc-4: validate candidates is a non-empty array, then element[0] shape.
+  // rc-2: avoid `as` cast — let `Array.isArray` type-guard narrow the local var.
+  if (!Object.hasOwn(dreamerParsed, 'candidates')) {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_not_array' });
+    return undefined;
+  }
+  const candidatesField: unknown = dreamerParsed.candidates;
+  if (!Array.isArray(candidatesField)) {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_not_array' });
+    return undefined;
+  }
+  if (candidatesField.length === 0) {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidates_empty' });
+    return undefined;
+  }
+  const [firstCandidate] = candidatesField;
+  if (!isRecord(firstCandidate)) {
+    emitEvent('dreamer_context_invalid', taskId, { dreamerArtifactId, reason: 'candidate0_not_record' });
+    return undefined;
+  }
+
+  // Validate the 5-dim fields. badDecision/betterDecision/rationale are required strings.
+  // riskLevel/strategicPerspective are optional but must be string when present.
+  const requiredString = (key: string): string | undefined => {
+    if (!Object.hasOwn(firstCandidate, key)) return undefined;
+    const value = firstCandidate[key];
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+  };
+
+  const badDecision = requiredString('badDecision');
+  const betterDecision = requiredString('betterDecision');
+  const rationale = requiredString('rationale');
+  if (badDecision === undefined || betterDecision === undefined || rationale === undefined) {
+    emitEvent('dreamer_context_invalid', taskId, {
+      dreamerArtifactId,
+      reason: 'missing_required_5dim_fields',
+      hasBadDecision: badDecision !== undefined,
+      hasBetterDecision: betterDecision !== undefined,
+      hasRationale: rationale !== undefined,
+    });
+    return undefined;
+  }
+
+  const riskLevel = requiredString('riskLevel');
+  const strategicPerspective = requiredString('strategicPerspective');
+
+  const dreamerContext: ArtificerDreamerContext = {
+    badDecision,
+    betterDecision,
+    rationale,
+    ...(riskLevel !== undefined ? { riskLevel } : {}),
+    ...(strategicPerspective !== undefined ? { strategicPerspective } : {}),
+  };
+  return dreamerContext;
 }
 
 function deepJsonEqual(left: unknown, right: unknown): boolean {
@@ -263,11 +401,24 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           depTaskId: depId,
           artifactId: firstArtifact.artifactId,
         });
+
+        // PRI-508: resolve dreamer candidate 5-dim context from the dreamer
+        // artifact referenced by scribe.sourceTrace.dreamerArtifactId.
+        // Best-effort: undefined when absent or invalid (backward compatible).
+        // rc-9: emits observable events on resolution failure — no silent fallback.
+        const dreamerContext = await resolveDreamerContext({
+          scribeContentJson: firstArtifact.contentJson,
+          artifactStore: this.artifactStore,
+          taskId,
+          emitEvent: (eventName, tId, payload) => this.emitEvent(eventName, tId, payload),
+        });
+
         return {
           contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
           adversarialFeedback,
+          ...(dreamerContext !== undefined ? { dreamerContext } : {}),
         };
       }
     }
@@ -297,6 +448,9 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       scribeArtifact: scribeArtifactInput,
       sourceScribeArtifactId: context.sourceScribeArtifactId,
       adversarialFeedback: context.adversarialFeedback ?? undefined,
+      // PRI-508: forward dreamer 5-dim context to artificer prompt so artificer
+      // can produce implementations aligned with dreamer's badDecision/betterDecision intent.
+      dreamerContext: context.dreamerContext,
     });
 
     return this.runtimeAdapter.startRun({

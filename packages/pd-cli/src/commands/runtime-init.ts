@@ -20,7 +20,7 @@
 import * as path from 'path';
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import { SchemaConformanceReadModel } from '@principles/core/runtime-v2';
-import { initTrajectorySchema, initWorkflowSchema } from 'principles-disciple';
+import { initTrajectorySchema, initWorkflowSchema } from '@csuzngjh/principles-disciple';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 

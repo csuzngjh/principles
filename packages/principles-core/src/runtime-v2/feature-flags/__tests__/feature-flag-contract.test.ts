@@ -234,6 +234,8 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'pain_evidence_admission') continue;
       if (flag.id === 'painEvidenceAdmissionDefault') continue;
       if (flag.id === 'pain_evidence_admission_default') continue;
+      // Task 7: failed_tasks_observability defaults on (quiet flag, default-on)
+      if (flag.id === 'failed_tasks_observability') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -466,6 +468,39 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
       expect(l2Flag.enabled).toBe(true);
     }
     expect(result.warnings.some(w => w.includes('l2_dreamer') && w.includes('unknown'))).toBe(false);
+  });
+
+  it('Task 7: failed_tasks_observability is registered as quiet, default-on', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'failed_tasks_observability');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('failed_tasks_observability flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(true);
+    expect(flag.since).toBe('2026-07-04');
+    expect(flag.description).toContain('Failed tasks observability');
+  });
+
+  it('Task 7: failed_tasks_observability can be explicitly disabled via config', () => {
+    const userFlags = {
+      failed_tasks_observability: { enabled: false },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    const flag = result.flags.failed_tasks_observability;
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.enabled).toBe(false);
+    }
+    // quiet flag disable must not emit a core-flag emergency-disable warning
+    expect(result.warnings.some(w => w.includes('failed_tasks_observability') && w.includes('core'))).toBe(false);
+  });
+
+  it('Task 7: failed_tasks_observability is recognized by computeEffectiveFlags (no unknown warning)', () => {
+    const userFlags = {
+      failed_tasks_observability: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    expect(result.flags.failed_tasks_observability).toBeDefined();
+    expect(result.warnings.some(w => w.includes('failed_tasks_observability') && w.includes('unknown'))).toBe(false);
   });
 });
 

@@ -231,7 +231,7 @@ export async function handleBeforePromptBuild(
   // ─────────────────────────────────────────────────3. Empathy Observer Spawn
   // Extract actual user message from prompt (handles boot checks + Feishu wrappers).
   // Also detects empathy observer output (prevent recursion) and agent-to-agent messages.
-  const { message: latestUserMessage, isAgentToAgent } =
+  const { isAgentToAgent } =
     extractUserMessageFromPrompt(event.prompt || '', sessionId);
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;

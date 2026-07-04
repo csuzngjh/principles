@@ -113,6 +113,13 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteDiagnosticianCommitter: vi.fn().mockImplementation(function () { return {}; }),
     SqliteTrajectoryLocator: vi.fn().mockImplementation(function () { return {}; }),
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
+    // Dead-letter store mock: getByPainId returns null so the implementation
+    // produces status='not_found' with reason='task_not_found' for the
+    // "失败命令的 --json 输出含 reason 和 nextAction" scenario.
+    SqliteDeadLetterStore: vi.fn().mockImplementation(function () {
+      return { getByPainId: vi.fn().mockReturnValue(null) };
+    }),
+    PainSignalBridge: vi.fn().mockImplementation(function () { return {}; }),
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),

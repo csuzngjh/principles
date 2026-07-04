@@ -158,6 +158,58 @@ describe('normalizeFeedbackDraftInput', () => {
     expect(result.errors.some((e: ValidationError) => e.field === 'context.source')).toBe(true);
   });
 
+  it('accepts context without source (Task 6: source is optional)', () => {
+    const result = normalizeFeedbackDraftInput({
+      type: 'bug', title: 'x', description: 'y',
+      context: { painId: 'pain-abc', page: 'pain_detail' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.context?.source).toBeUndefined();
+    expect(result.value.context?.painId).toBe('pain-abc');
+    expect(result.value.context?.page).toBe('pain_detail');
+  });
+
+  it('accepts context with taskId (Task 6)', () => {
+    const result = normalizeFeedbackDraftInput({
+      type: 'bug', title: 'x', description: 'y',
+      context: { source: 'console', taskId: 'task-xyz', painId: 'pain-abc' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.context?.taskId).toBe('task-xyz');
+    expect(result.value.context?.painId).toBe('pain-abc');
+  });
+
+  it('accepts context with only taskId (all fields optional)', () => {
+    const result = normalizeFeedbackDraftInput({
+      type: 'bug', title: 'x', description: 'y',
+      context: { taskId: 'task-001' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.context?.taskId).toBe('task-001');
+    expect(result.value.context?.source).toBeUndefined();
+  });
+
+  it('accepts empty context object (all fields optional)', () => {
+    const result = normalizeFeedbackDraftInput({
+      type: 'bug', title: 'x', description: 'y',
+      context: {},
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects non-string context.taskId', () => {
+    const result = normalizeFeedbackDraftInput({
+      type: 'bug', title: 'x', description: 'y',
+      context: { taskId: 42 },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e: ValidationError) => e.field === 'context.taskId')).toBe(true);
+  });
+
   it('rejects non-object input', () => {
     const result = normalizeFeedbackDraftInput('not an object');
     expect(result.ok).toBe(false);

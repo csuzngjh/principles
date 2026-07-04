@@ -2,6 +2,28 @@ import { serializePromptInput } from './prompt-serializer.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 
+/**
+ * Dreamer candidate 5-dim context (PRI-508).
+ *
+ * Carries the dreamer-stage candidate fields that scribe compresses into a
+ * single principleDraft.statement. Forwarding them to the artificer prompt
+ * prevents intent inconsistency (PoC: deepseek-v4-flash 0.7 needs_revision
+ * → 0.85 approved when combined with repair loop).
+ *
+ * All fields are runtime-validated by ArtificerRunner.buildContext via
+ * typeof / Object.hasOwn / Array.isArray guards before being placed here
+ * (rc-1, rc-2). dreamerContext is optional — undefined when the scribe
+ * artifact lacks `sourceTrace.dreamerArtifactId` or the dreamer artifact
+ * cannot be resolved (backward compatible with pre-PRI-508 flows).
+ */
+export interface ArtificerDreamerContext {
+  readonly badDecision: string;
+  readonly betterDecision: string;
+  readonly rationale: string;
+  readonly riskLevel?: string;
+  readonly strategicPerspective?: string;
+}
+
 export interface ArtificerPromptBuilderInput {
   contextMode: 'v1' | 'v2';
   behaviorExamplePack?: BehaviorExamplePack;
@@ -15,6 +37,12 @@ export interface ArtificerPromptBuilderInput {
    * the prompt is the initial generation prompt (backward compatible).
    */
   adversarialFeedback?: string;
+  /**
+   * Dreamer candidate 5-dim context (PRI-508). Optional — when present,
+   * serialized into the prompt so the artificer can align its implementation
+   * with the dreamer's original intent. Undefined for backward compatibility.
+   */
+  dreamerContext?: ArtificerDreamerContext;
 }
 
 export interface ArtificerPromptInput {
@@ -28,6 +56,8 @@ export interface ArtificerPromptInput {
   promptContractVersion: string;
   /** Present only when this is a retry with prior adversarial failures. */
   adversarialFeedback?: string;
+  /** Present only when dreamer candidate context is available (PRI-508). */
+  dreamerContext?: ArtificerDreamerContext;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -90,6 +120,12 @@ PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - This is a RETRY. A prior version of your generated code was reviewed and failed adversarial sandbox replay.
 - The \`adversarialFeedback\` field lists the specific cases that failed, each with the attack type, the expected vs actual decision, and a rationale.
 - You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
+
+RULEHOST CAPABILITY BOUNDARY (PRI-508):
+- RuleHost evaluate(input) is a STATELESS single-call gate. It CANNOT track multi-step workflows (e.g., audit→verify→incremental) across invocations.
+- Translate the principle into a STATEFUL-CHECKABLE constraint that evaluate() CAN enforce per tool call: check whether the current tool call carries evidence of prior analysis (context markers, params encoding prior reads, explicit preconditions in the params).
+- Do NOT implement a path whitelist or a "first call must be X" ordering rule if the principle is about procedural discipline — the runtime cannot observe ordering across calls.
+- If the principle cannot be enforced per-call, encode the closest per-call proxy and document the gap in implementationSummary.
 `;
 
 const V1_CONTEXT_INSTRUCTION = `
@@ -141,6 +177,9 @@ export class ArtificerPromptBuilder {
       ...(typeof input.adversarialFeedback === 'string' && input.adversarialFeedback.trim() !== ''
         ? { adversarialFeedback: input.adversarialFeedback }
         : {}),
+      // PRI-508: only include dreamerContext when present, so pre-PRI-508
+      // prompts stay backward-compatible (test asserts absence when undefined).
+      ...(input.dreamerContext !== undefined ? { dreamerContext: input.dreamerContext } : {}),
     };
 
     const message = serializePromptInput(promptInput);

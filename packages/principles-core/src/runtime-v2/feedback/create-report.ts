@@ -13,6 +13,7 @@ import type {
   ValidationError,
   RecentEvent,
   CanaryStatus,
+  AgentDraft,
 } from './feedback-types.js';
 import {
   isRecord,
@@ -28,7 +29,8 @@ import {
 } from './redact-sensitive.js';
 import { renderReportMarkdown } from './render-markdown.js';
 import { buildGitHubIssueDraftUrl } from './render-github-url.js';
-import { buildPrivacyPreview, buildEmailText } from './privacy-preview.js';
+import { buildPrivacyPreview, buildEmailText, buildMailtoUrl } from './privacy-preview.js';
+import type { PendingAgentDraftStore } from './pending-agent-draft-store.js';
 
 export type CreateReportResult =
   | { ok: true; report: FeedbackReport }
@@ -164,10 +166,18 @@ function collectDiagnostics(diagnostics: unknown): DiagnosticSummary {
 /**
  * Create a FeedbackReport from untrusted input + diagnostics.
  * No `as` casts on untrusted values. Failure paths return structured errors.
+ *
+ * `maintainerEmail` (optional): when provided as a non-empty string, a
+ * `mailto:` URL is built into `report.outputs.mailtoUrl`. When omitted or
+ * empty, `mailtoUrl` is ''. The email value itself is not validated for
+ * shape — callers decide what address to pass.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Task 13: pendingAgentDraftStore added for agent draft merge
 export function createFeedbackReport(
   input: unknown,
   diagnostics: unknown,
+  maintainerEmail?: string,
+  pendingAgentDraftStore?: PendingAgentDraftStore,
 ): CreateReportResult {
   // Step 1: validate and normalize the input
   const norm = normalizeFeedbackDraftInput(input);
@@ -204,11 +214,44 @@ export function createFeedbackReport(
     redactionNotes.push('actualBehavior was redacted');
   }
 
+  // Task 13: If taskId is provided and a pending agent draft exists, merge it.
+  // User-provided agentDraft (from input.agentDraft) takes priority — the
+  // agent draft from the store is a fallback for when the user didn't write one.
+  let mergedAgentDraft: AgentDraft | undefined = draft.agentDraft;
+  let consumedDraftId: string | undefined;
+  if (draft.taskId && pendingAgentDraftStore) {
+    try {
+      const pendingDraft = pendingAgentDraftStore.getUnconsumedByTaskId(draft.taskId);
+      if (pendingDraft) {
+        consumedDraftId = pendingDraft.id;
+        if (!mergedAgentDraft) {
+          // User didn't provide agentDraft — use the store's draft
+          mergedAgentDraft = {
+            summary: pendingDraft.agentDraft.summary,
+          };
+          if (pendingDraft.agentDraft.observedFailure) {
+            mergedAgentDraft.observedFailure = pendingDraft.agentDraft.observedFailure;
+          }
+          if (pendingDraft.agentDraft.commandSummary) {
+            mergedAgentDraft.commandSummary = pendingDraft.agentDraft.commandSummary;
+          }
+        }
+        // If user provided agentDraft, we still mark the store's draft as consumed
+        // (the user's report supersedes the agent's draft — no need to keep it pending)
+      }
+    } catch (err) {
+      // rc-9: don't silently swallow store errors — record to redactionNotes
+      // and continue without the agent draft. The report still gets created.
+      redactionNotes.push(`agent draft lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Step 4: scrub the diagnosticSummary via redactSensitiveFields (defense in
   // depth — versions and platform should already be low-sensitivity, but
   // user-injected values must not leak tokens through the field structure).
   const scrubbed = redactSensitiveFields(diagnosticSummary);
   const safeDiagnostic: DiagnosticSummary = scrubbed.ok
+    // runtime-contract-exempt: ERR-001 redactSensitiveFields is a shape-preserving recursive redactor — it only replaces string values and truncates, never changes object structure. The output is guaranteed to match the input's DiagnosticSummary shape by construction.
     ? (scrubbed.value as DiagnosticSummary)
     : diagnosticSummary;
   if (scrubbed.ok) {
@@ -224,15 +267,18 @@ export function createFeedbackReport(
   // Step 6: build contextRefs from the context object
   const contextRefs: ContextRef[] = [];
   if (draft.context) {
-    pushContextRef(contextRefs, 'source', { id: draft.context.source, label: `source=${draft.context.source}` });
+    const ctxSource = draft.context.source;
+    pushContextRef(contextRefs, 'source', { id: ctxSource, label: ctxSource !== undefined ? `source=${ctxSource}` : undefined });
+    pushContextRef(contextRefs, 'sourceDetail', { id: draft.context.sourceDetail });
     pushContextRef(contextRefs, 'page', { id: draft.context.page });
     pushContextRef(contextRefs, 'painId', { id: draft.context.painId });
     pushContextRef(contextRefs, 'principleId', { id: draft.context.principleId });
     pushContextRef(contextRefs, 'approvalId', { id: draft.context.approvalId });
     pushContextRef(contextRefs, 'activationId', { id: draft.context.activationId });
     pushContextRef(contextRefs, 'updateAttemptId', { id: draft.context.updateAttemptId });
+    pushContextRef(contextRefs, 'taskId', { id: draft.context.taskId });
   }
-  if (draft.agentDraft) {
+  if (mergedAgentDraft) {
     pushContextRef(contextRefs, 'agentDraft', { id: 'present', label: 'agentDraft attached' });
   }
 
@@ -260,13 +306,13 @@ export function createFeedbackReport(
     diagnosticSummary: safeDiagnostic,
     contextRefs,
     privacy,
-    outputs: { markdown: '', emailText: '', githubIssueUrl: '' },
+    outputs: { markdown: '', emailText: '', githubIssueUrl: '', mailtoUrl: '' },
   };
   // Surface the agent-attached evidence in the report so it propagates to
   // markdown, emailText, and any later consumer.
   // Redact sensitive values (paths/tokens/env) from agentDraft string fields.
-  if (draft.agentDraft) {
-    const ad = draft.agentDraft;
+  if (mergedAgentDraft) {
+    const ad = mergedAgentDraft;
     report.agentDraft = {
       summary: redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(ad.summary))),
     };
@@ -286,6 +332,23 @@ export function createFeedbackReport(
   const shortSummary = `type=${draft.type}; ${description.slice(0, 200)}`;
   const urlResult = buildGitHubIssueDraftUrl(redactedTitle, draft.type, shortSummary);
   report.outputs.githubIssueUrl = urlResult.ok ? urlResult.url : '';
+
+  // Step 11: build the mailto: URL when a maintainer email is provided.
+  // buildMailtoUrl returns '' for empty/missing email, so the output is
+  // always a string (callers without an email get an empty mailtoUrl).
+  report.outputs.mailtoUrl = buildMailtoUrl(report, maintainerEmail ?? '');
+
+  // Task 13: Mark the pending agent draft as consumed now that the report
+  // has been successfully built. Idempotent — safe to call even if the
+  // draft was already consumed or never existed.
+  if (consumedDraftId && pendingAgentDraftStore) {
+    try {
+      pendingAgentDraftStore.markConsumed(consumedDraftId);
+    } catch (err) {
+      // rc-9: record the failure but don't fail the report creation
+      report.privacy.redactionNotes.push(`agent draft markConsumed failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   return { ok: true, report };
 }
