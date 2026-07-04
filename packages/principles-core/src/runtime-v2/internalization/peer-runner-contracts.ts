@@ -15,6 +15,7 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
+import type { RepairPayload } from './pitask-metadata.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -139,6 +140,8 @@ export interface PITaskRecord extends TaskRecord {
   rejectionCount: number;
   /** Prior adversarial replay failures (PRI-428); present only on Round-2+ tasks. */
   adversarialFeedback?: string;
+  /** Evaluator repair payload (PRI-509); present only on artificer repair tasks. */
+  repairPayload?: RepairPayload;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

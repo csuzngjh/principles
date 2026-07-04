@@ -43,6 +43,16 @@ export interface ArtificerPromptBuilderInput {
    * with the dreamer's original intent. Undefined for backward compatibility.
    */
   dreamerContext?: ArtificerDreamerContext;
+  /**
+   * Evaluator repair feedback (PRI-509). Present only on Round-2+ artificer
+   * tasks seeded by evaluator needs_revision. Carries the evaluator's
+   * requiredChanges/concerns/previousScore as a single pre-formatted string
+   * (built by ArtificerRunner.buildContext from PITaskMetadata.repairPayload).
+   * Distinct from adversarialFeedback (PRI-428): adversarialFeedback is
+   * adversarial-replay failure text; repairFeedback is evaluator semantic feedback.
+   * Undefined on Round-1 artificer tasks (backward compatible).
+   */
+  repairFeedback?: string;
 }
 
 export interface ArtificerPromptInput {
@@ -58,6 +68,8 @@ export interface ArtificerPromptInput {
   adversarialFeedback?: string;
   /** Present only when dreamer candidate context is available (PRI-508). */
   dreamerContext?: ArtificerDreamerContext;
+  /** Present only on Round-2+ artificer repair tasks (PRI-509). */
+  repairFeedback?: string;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -126,6 +138,12 @@ RULEHOST CAPABILITY BOUNDARY (PRI-508):
 - Translate the principle into a STATEFUL-CHECKABLE constraint that evaluate() CAN enforce per tool call: check whether the current tool call carries evidence of prior analysis (context markers, params encoding prior reads, explicit preconditions in the params).
 - Do NOT implement a path whitelist or a "first call must be X" ordering rule if the principle is about procedural discipline — the runtime cannot observe ordering across calls.
 - If the principle cannot be enforced per-call, encode the closest per-call proxy and document the gap in implementationSummary.
+
+REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
+- This is a REPAIR RETRY. A prior attempt of your generated code was reviewed by the evaluator and returned needs_revision.
+- The \`repairFeedback\` field lists the evaluator's concerns and required changes from the prior attempt.
+- You MUST address each required change specifically — do not regenerate blind. Adjust the matcher/logic so the concerns are resolved while preserving the principle intent.
+- If a required change contradicts the principle intent (from scribeArtifact/dreamerContext), prefer the principle intent and document the conflict in implementationSummary.
 `;
 
 const V1_CONTEXT_INSTRUCTION = `
@@ -180,6 +198,11 @@ export class ArtificerPromptBuilder {
       // PRI-508: only include dreamerContext when present, so pre-PRI-508
       // prompts stay backward-compatible (test asserts absence when undefined).
       ...(input.dreamerContext !== undefined ? { dreamerContext: input.dreamerContext } : {}),
+      // PRI-509: only include repairFeedback when present + non-empty, so
+      // Round-1 prompts stay backward-compatible (test asserts absence).
+      ...(typeof input.repairFeedback === 'string' && input.repairFeedback.trim() !== ''
+        ? { repairFeedback: input.repairFeedback }
+        : {}),
     };
 
     const message = serializePromptInput(promptInput);

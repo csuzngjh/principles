@@ -259,6 +259,71 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
   });
 });
 
+describe('PRI-509: Artificer repair feedback passthrough', () => {
+  const builder = new ArtificerPromptBuilder();
+
+  // Slice 1: repairFeedback serialized into prompt message when present
+  it('includes repairFeedback in prompt message when provided (with requiredChanges text)', () => {
+    const { message, promptInput } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-509',
+      contextHash: 'ctx-pri-509',
+      sourceScribeArtifactId: 'scribe-pri-509',
+      scribeArtifact: {},
+      repairFeedback: 'Previous attempt scored 0.65 (needs_revision). Evaluator concerns:\n1. code quality\nRequired changes:\n1. add input validation\nFix ALL the above.',
+    });
+    const parsed = JSON.parse(message);
+    expect(parsed.repairFeedback).toBeDefined();
+    expect(parsed.repairFeedback).toContain('add input validation');
+    expect(parsed.repairFeedback).toContain('needs_revision');
+    expect(promptInput.repairFeedback).toBeDefined();
+  });
+
+  // Slice 2: backward compatibility — repairFeedback absent → not in prompt
+  it('does not include repairFeedback in prompt when not provided (backward compatible)', () => {
+    const { message, promptInput } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-509-no-repair',
+      contextHash: 'ctx-pri-509',
+      sourceScribeArtifactId: 'scribe-pri-509',
+      scribeArtifact: {},
+    });
+    const parsed = JSON.parse(message);
+    expect(parsed.repairFeedback).toBeUndefined();
+    expect(promptInput.repairFeedback).toBeUndefined();
+  });
+
+  // Slice 3: empty/whitespace repairFeedback treated as absent (backward compatible)
+  it('does not include repairFeedback when empty or whitespace-only', () => {
+    const { message: msgEmpty } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-509-empty',
+      contextHash: 'ctx-pri-509',
+      sourceScribeArtifactId: 'scribe-pri-509',
+      scribeArtifact: {},
+      repairFeedback: '',
+    });
+    expect(JSON.parse(msgEmpty).repairFeedback).toBeUndefined();
+
+    const { message: msgWs } = builder.buildPrompt({
+      contextMode: 'v1',
+      taskId: 'task-pri-509-ws',
+      contextHash: 'ctx-pri-509',
+      sourceScribeArtifactId: 'scribe-pri-509',
+      scribeArtifact: {},
+      repairFeedback: '   \n\t  ',
+    });
+    expect(JSON.parse(msgWs).repairFeedback).toBeUndefined();
+  });
+
+  // Slice 4: protocol instruction advertises repair feedback semantics
+  it('instruction includes REPAIR FEEDBACK section hinting at prior attempt', () => {
+    // PRI-509: artificer must know this is a RETRY round when repairFeedback is present,
+    // so it addresses each requiredChange instead of regenerating blind.
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/REPAIR FEEDBACK|prior attempt/i);
+  });
+});
+
 describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () => {
   const builder = new ArtificerPromptBuilder();
 

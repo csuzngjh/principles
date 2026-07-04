@@ -37,7 +37,7 @@ import type { ArtificerRuleOutput, ArtificerValidator } from './artificer-output
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
@@ -71,6 +71,19 @@ interface ArtificerContext {
    * Lineage: scribe.sourceTrace.dreamerArtifactId → dreamer artifact → candidates[0] (rc-6).
    */
   readonly dreamerContext?: ArtificerDreamerContext;
+  /**
+   * Evaluator repair feedback (PRI-509). Non-null only on artificer repair
+   * tasks seeded by evaluator needs_revision. Constructed by buildContext from
+   * the task's PITaskMetadata.repairPayload (already validated by
+   * isValidRepairPayload in pitask-metadata.ts). Forwarded to the prompt
+   * builder so the LLM addresses each requiredChange instead of regenerating
+   * blind. Null on Round-1 artificer tasks (backward compatible).
+   *
+   * Loop state freshness (rc-7, EP-05): repairPayload.repairIteration is
+   * written at task creation time, never inferred at read. Each repair round
+   * reads the current evaluator's feedback — never a cached value.
+   */
+  readonly repairFeedback: string | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -269,6 +282,47 @@ async function resolveDreamerContext(params: {
   return dreamerContext;
 }
 
+// ── PRI-509: Evaluator repair feedback formatting ───────────────────────────
+
+/**
+ * Format a validated RepairPayload into a repairFeedback string for the
+ * artificer prompt. The format is PoC-validated (Campaign 1 R2):
+ *
+ *   Previous attempt scored <previousScore> (needs_revision).
+ *   Evaluator concerns:
+ *   1. <concern1>
+ *   2. <concern2>
+ *   Required changes:
+ *   1. <change1>
+ *   2. <change2>
+ *   Fix ALL the above.
+ *
+ * Trust boundary (rc-1, rc-2): the RepairPayload was already validated by
+ * isValidRepairPayload in pitask-metadata.ts (called inside hydratePITaskRecord).
+ * By the time we receive it here, requiredChanges is a non-empty readonly
+ * string array and concerns is a readonly string array (possibly empty).
+ * No further `as` casts or shape checks are needed — we treat the validated
+ * payload as typed text input for the prompt.
+ *
+ * Loop state freshness (rc-7, EP-05): the caller passes the CURRENT task's
+ * repairPayload — never a cached or stale value. repairIteration tells the
+ * artificer which round it's in (1 = first repair, 2 = second repair).
+ */
+function formatRepairFeedback(payload: RepairPayload): string {
+  const concernsLines = payload.concerns.length > 0
+    ? payload.concerns.map((c, i) => `${i + 1}. ${c}`).join('\n')
+    : '(none)';
+  const changesLines = payload.requiredChanges.map((c, i) => `${i + 1}. ${c}`).join('\n');
+  return [
+    `Previous attempt scored ${payload.previousScore} (needs_revision).`,
+    `Evaluator concerns:`,
+    concernsLines,
+    `Required changes:`,
+    changesLines,
+    `Fix ALL the above.`,
+  ].join('\n');
+}
+
 function deepJsonEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) || Array.isArray(right)) {
@@ -375,9 +429,21 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       ? piTask.adversarialFeedback
       : null;
 
+    // PRI-509: carry evaluator repair feedback into the prompt when this is
+    // an artificer repair task seeded by evaluator needs_revision. The
+    // repairPayload was already validated by isValidRepairPayload in
+    // pitask-metadata.ts (called inside hydratePITaskRecord); we treat the
+    // hydrated value as typed text input and format it for the prompt.
+    // rc-7 (loop state freshness): repairPayload comes from the CURRENT task's
+    // diagnosticJson — never a cached or inferred value. repairIteration tells
+    // the artificer which round it's in.
+    const repairFeedback = piTask?.repairPayload
+      ? formatRepairFeedback(piTask.repairPayload)
+      : null;
+
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback };
     }
 
     for (const depId of deps) {
@@ -418,13 +484,14 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
           adversarialFeedback,
+          repairFeedback,
           ...(dreamerContext !== undefined ? { dreamerContext } : {}),
         };
       }
     }
 
     this.emitEvent('no_scribe_artifact', taskId, {});
-    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback };
+    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback };
   }
 
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
@@ -451,6 +518,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // PRI-508: forward dreamer 5-dim context to artificer prompt so artificer
       // can produce implementations aligned with dreamer's badDecision/betterDecision intent.
       dreamerContext: context.dreamerContext,
+      // PRI-509: forward evaluator repair feedback so artificer addresses each
+      // requiredChange instead of regenerating blind. Undefined when absent
+      // (prompt builder treats undefined as backward-compatible no-op).
+      repairFeedback: context.repairFeedback ?? undefined,
     });
 
     return this.runtimeAdapter.startRun({

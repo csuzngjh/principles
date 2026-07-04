@@ -502,6 +502,40 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(result.flags.failed_tasks_observability).toBeDefined();
     expect(result.warnings.some(w => w.includes('failed_tasks_observability') && w.includes('unknown'))).toBe(false);
   });
+
+  // ── PRI-509: Evaluator→Artificer repair loop ─────────────────────────────
+  it('PRI-509: evaluator_artificer_repair_loop is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evaluator_artificer_repair_loop');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('evaluator_artificer_repair_loop flag not found');
+    expect(flag.category).toBe('quiet');
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-07-04');
+    expect(flag.description).toContain('PRI-509');
+  });
+
+  it('PRI-509: evaluator_artificer_repair_loop can be explicitly enabled via config', () => {
+    const userFlags = {
+      evaluator_artificer_repair_loop: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    const flag = result.flags.evaluator_artificer_repair_loop;
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.enabled).toBe(true);
+    }
+    // quiet flag enable must not emit a core-flag emergency-disable warning
+    expect(result.warnings.some(w => w.includes('evaluator_artificer_repair_loop') && w.includes('core'))).toBe(false);
+  });
+
+  it('PRI-509: evaluator_artificer_repair_loop is recognized by computeEffectiveFlags (no unknown warning)', () => {
+    const userFlags = {
+      evaluator_artificer_repair_loop: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    expect(result.flags.evaluator_artificer_repair_loop).toBeDefined();
+    expect(result.warnings.some(w => w.includes('evaluator_artificer_repair_loop') && w.includes('unknown'))).toBe(false);
+  });
 });
 
 describe('VALID_CATEGORIES', () => {

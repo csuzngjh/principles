@@ -160,6 +160,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // operators can list failed tasks out of the box; disable via .pd/config.yaml:
   // failed_tasks_observability: { enabled: false }.
   { id: 'failed_tasks_observability', category: 'quiet', enabled: true, since: '2026-07-04', description: 'Failed tasks observability — list/view failed pipeline tasks' },
+  // PRI-509: Evaluator→Artificer repair loop. When evaluator returns needs_revision,
+  // auto-seed an artificer repair task carrying the evaluator's requiredChanges/concerns
+  // as repairPayload. Repair iteration capped at 2 rounds; on the 3rd needs_revision the
+  // task enters needs_human_review (fail loud, EP-03). Default off; flag-off = current
+  // behavior (no repair task seeded, evaluator needs_revision just succeeds the task
+  // with pending validation). Roll back = leave flag off (or set enabled: false in config).
+  { id: 'evaluator_artificer_repair_loop', category: 'quiet', enabled: false, since: '2026-07-04', description: 'PRI-509: Evaluator→Artificer repair loop — auto-seed artificer repair task on needs_revision. Default off; flag-off = current behavior (no repair task seeded).' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
