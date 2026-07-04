@@ -58,7 +58,7 @@
 - 公开 docs:直接通过 `docs/<path>` 访问
 - 私人 docs:通过 `docs/.private/<path>` junction 访问
 - **禁止**在主 worktree 运行 `git clean -fdx`、`git stash -a`、`git checkout -f`(会破坏 junction 和未跟踪私人 docs)
-- 如果 `docs/.private/` 丢失,运行 `.\scripts\setup-private-docs-symlink.ps1` 重建
+- 如果 `docs/.private/` 丢失,运行 `node scripts/setup-private-docs-symlink.mjs` 重建
 
 ## 自动化校验
 

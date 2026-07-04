@@ -21,6 +21,7 @@ import { mkdirSync, cpSync, rmSync, existsSync, readFileSync, writeFileSync, rea
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -88,7 +89,8 @@ const PD_CLI = join(ROOT, 'packages/pd-cli/dist/index.js');
 const FIXTURES_DIR = join(ROOT, 'tests/e2e-fixtures');
 const E2E_WS_BASE = join(ROOT, 'tests/e2e-workspace');
 const EVIDENCE_DIR = join(ROOT, 'evidence');
-const OPENCLAW_WORKSPACE = process.env.OPENCLAW_WORKSPACE_DIR || 'D:\\.openclaw\\workspace';
+const OPENCLAW_WORKSPACE = process.env.OPENCLAW_WORKSPACE_DIR
+  || join(os.homedir(), '.openclaw', 'workspace');
 
 // Resolve the openclaw executable for spawnSync.
 // On Windows, `openclaw` is a .cmd wrapper — spawnSync with shell:false cannot execute it.
@@ -172,7 +174,7 @@ function phase0(trap, runId) {
   cpSync(trapDir, ws, { recursive: true });
 
   // Copy live workspace config if available
-  const liveWs = 'D:\\.openclaw\\workspace';
+  const liveWs = OPENCLAW_WORKSPACE;
   const configFiles = ['.pd/feature-flags.yaml', '.pd/config.yaml', '.state/workflows.yaml'];
   for (const f of configFiles) {
     const src = join(liveWs, f);

@@ -3,10 +3,10 @@
  *
  * Prevents UAT/runtime test commands from writing to production workspaces.
  *
- * Production workspaces are:
- * - D:\.openclaw\workspace
- * - C:\Users\Administrator\.openclaw\workspace
- * - And the default workspace resolved by OpenClaw configuration
+ * Production workspaces:
+ * - Default: ~/.openclaw/workspace (cross-platform)
+ * - Additional paths declared via PD_PRODUCTION_WORKSPACE env var
+ *   (use path.delimiter — `;` on Windows, `:` on Unix — to separate multiple paths)
  *
  * This module follows ERR-030 (path prefix matching must use segment boundaries)
  * and EP-03/EP-04 (fail loud with structured reason and nextAction).
@@ -20,19 +20,22 @@ import { existsSync } from 'fs';
 
 /**
  * List of production workspace paths that should be protected from UAT/test writes.
- * These are the default paths where PD is typically installed and used for real work.
+ * Built from: the universal default (~/.openclaw/workspace) plus any paths
+ * declared via PD_PRODUCTION_WORKSPACE.
  */
-const PRODUCTION_WORKSPACE_PATHS = [
-  // Windows default
-  path.resolve('D:\\.openclaw\\workspace'),
-  path.resolve('C:\\.openclaw\\workspace'),
-  path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace'),
-  path.resolve('C:\\Users\\Admin\\.openclaw\\workspace'),
-  // Unix-like defaults
-  path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')),
-  // macOS-specific
-  path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')),
-];
+function buildProductionWorkspacePaths(): string[] {
+  const paths = [path.resolve(path.join(os.homedir(), '.openclaw', 'workspace'))];
+  const extra = process.env.PD_PRODUCTION_WORKSPACE;
+  if (extra) {
+    for (const p of extra.split(path.delimiter)) {
+      const trimmed = p.trim();
+      if (trimmed) paths.push(path.resolve(trimmed));
+    }
+  }
+  return paths;
+}
+
+const PRODUCTION_WORKSPACE_PATHS = buildProductionWorkspacePaths();
 
 // ── Resolution helpers ───────────────────────────────────────────────────────
 
