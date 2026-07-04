@@ -128,3 +128,64 @@ export function buildEmailText(report: FeedbackReport): string {
   email = redactEnvLikeValues(email);
   return email;
 }
+
+/**
+ * Maximum length of the ENCODED body parameter in the mailto: URL.
+ *
+ * Outlook desktop historically enforces a ~2000-char limit on the entire
+ * mailto: URL. We budget conservatively for the encoded body alone, leaving
+ * room for `mailto:<email>?subject=<encoded-subject>&body=`. The raw
+ * (pre-encoding) body can be up to 3x larger per character after
+ * encodeURIComponent (each char → %XX), so budgeting by raw length is
+ * unsafe — a 4000-char raw body with many special chars can exceed 12000
+ * chars encoded.
+ */
+const MAX_MAILTO_ENCODED_BODY_LENGTH = 1800;
+const TRUNCATED_SUFFIX = '\n\n…(truncated — use "Copy Email" in PD Console for the full report)';
+
+/**
+ * Build a `mailto:` URL string for the given report and maintainer email.
+ *
+ * - Returns '' when `maintainerEmail` is empty or not a string.
+ * - Subject: `[PD feedback] [${report.type}] ${report.title}` with absolute
+ *   paths redacted (matches the Subject line produced by buildEmailText).
+ * - Body: buildEmailText(report), truncated so that the URL-encoded body
+ *   stays within MAX_MAILTO_ENCODED_BODY_LENGTH chars. When truncation
+ *   occurs, TRUNCATED_SUFFIX is appended so the recipient can see the body
+ *   was shortened.
+ * - Subject and body are URL-encoded via encodeURIComponent.
+ *
+ * ERR-014/016: the encoded body is bounded so the final mailto: URL stays
+ * within common email client limits (Outlook desktop ~2000 chars).
+ */
+export function buildMailtoUrl(report: FeedbackReport, maintainerEmail: string): string {
+  if (typeof maintainerEmail !== 'string' || maintainerEmail.length === 0) {
+    return '';
+  }
+
+  const subject = `[PD feedback] [${report.type}] ${redactAbsolutePaths(report.title)}`;
+  const fullBody = buildEmailText(report);
+
+  const encodedSubject = encodeURIComponent(subject);
+  const encodedSuffix = encodeURIComponent(TRUNCATED_SUFFIX);
+
+  // Try the full body first; if the encoded length fits, use it as-is.
+  let bodyToEncode = fullBody;
+  let encodedBody = encodeURIComponent(bodyToEncode);
+
+  if (encodedBody.length + encodedSuffix.length > MAX_MAILTO_ENCODED_BODY_LENGTH) {
+    // Truncate: find the longest raw prefix whose encoded form fits within
+    // (budget - suffix). Linear reduction from the end is bounded because
+    // each iteration removes at least one character; worst case ~fullBody.length
+    // iterations, and fullBody is itself bounded by buildEmailText's field caps.
+    const bodyBudget = MAX_MAILTO_ENCODED_BODY_LENGTH - encodedSuffix.length;
+    let cut = fullBody.length;
+    while (cut > 0 && encodeURIComponent(fullBody.slice(0, cut)).length > bodyBudget) {
+      cut -= Math.max(1, Math.floor(cut / 4)); // geometric step for efficiency
+    }
+    bodyToEncode = fullBody.slice(0, cut) + TRUNCATED_SUFFIX;
+    encodedBody = encodeURIComponent(bodyToEncode);
+  }
+
+  return `mailto:${maintainerEmail}?subject=${encodedSubject}&body=${encodedBody}`;
+}

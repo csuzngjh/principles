@@ -17,13 +17,21 @@ export type UserSeverity = 'low' | 'medium' | 'high';
 export type FeedbackSource = 'console' | 'cli' | 'agent';
 
 export interface FeedbackContext {
-  source: FeedbackSource;
+  source?: FeedbackSource;
+  /**
+   * P1-3 (rc-9): Preserves the original `source` value when it is not a valid
+   * FeedbackSource enum. For example, `source=failed_tasks_page` is mapped to
+   * `source='console'` with `sourceDetail='failed_tasks_page'` so the
+   * maintainer can see the concrete entry point without losing the enum.
+   */
+  sourceDetail?: string;
   page?: string;
   painId?: string;
   principleId?: string;
   approvalId?: string;
   activationId?: string;
   updateAttemptId?: string;
+  taskId?: string;
 }
 
 export interface AgentDraft {
@@ -56,6 +64,12 @@ export interface FeedbackDraftInput {
   userSeverity?: unknown;
   context?: unknown;
   agentDraft?: unknown;
+  /**
+   * Task 13: top-level taskId shortcut, independent from context.taskId.
+   * When provided, createFeedbackReport uses it to look up a pending agent
+   * draft in PendingAgentDraftStore and merge it into the report.
+   */
+  taskId?: unknown;
 }
 
 /**
@@ -68,6 +82,8 @@ export interface NormalizedDraft {
   userText: FeedbackUserText;
   context?: FeedbackContext;
   agentDraft?: AgentDraft;
+  /** Task 13: top-level taskId (validated string), separate from context.taskId. */
+  taskId?: string;
 }
 
 export interface RecentEvent {
@@ -117,6 +133,7 @@ export interface FeedbackReport {
     markdown: string;
     emailText: string;
     githubIssueUrl: string;
+    mailtoUrl: string;
   };
 }
 
@@ -197,25 +214,23 @@ function validateFeedbackContext(value: unknown): ValidationError[] {
     });
     return errors;
   }
-  if (!Object.hasOwn(value, 'source')) {
+  // source is optional (Task 6: context fields are all optional — any subset is valid).
+  // When present, it must be a valid FeedbackSource.
+  if (value.source !== undefined && !isFeedbackSource(value.source)) {
     errors.push({
       field: 'context.source',
-      reason: 'context.source is required when context is provided (ERR-009)',
-      nextAction: 'add context.source with a value of console, cli, or agent',
-    });
-  } else if (!isFeedbackSource(value.source)) {
-    errors.push({
-      field: 'context.source',
-      reason: 'context.source must be one of: console, cli, agent (ERR-010)',
-      nextAction: 'set context.source to a valid FeedbackSource value',
+      reason: 'context.source must be one of: console, cli, agent when provided (ERR-010)',
+      nextAction: 'set context.source to a valid FeedbackSource value or omit it',
     });
   }
+  validateOptionalString(value.sourceDetail, 'context.sourceDetail', errors);
   validateOptionalString(value.page, 'context.page', errors);
   validateOptionalString(value.painId, 'context.painId', errors);
   validateOptionalString(value.principleId, 'context.principleId', errors);
   validateOptionalString(value.approvalId, 'context.approvalId', errors);
   validateOptionalString(value.activationId, 'context.activationId', errors);
   validateOptionalString(value.updateAttemptId, 'context.updateAttemptId', errors);
+  validateOptionalString(value.taskId, 'context.taskId', errors);
   return errors;
 }
 
@@ -327,18 +342,24 @@ export function normalizeFeedbackDraftInput(value: unknown): NormalizeResult {
   if (value.context !== undefined) {
     const ctxErrors = validateFeedbackContext(value.context);
     for (const e of ctxErrors) errors.push(e);
-    if (isRecord(value.context) && isFeedbackSource(value.context.source)) {
+    if (isRecord(value.context)) {
       const c = value.context;
-      const built: FeedbackContext = { source: c.source as FeedbackSource };
+      const built: FeedbackContext = {};
+      if (isFeedbackSource(c.source)) built.source = c.source;
+      if (isString(c.sourceDetail)) built.sourceDetail = c.sourceDetail;
       if (isString(c.page)) built.page = c.page;
       if (isString(c.painId)) built.painId = c.painId;
       if (isString(c.principleId)) built.principleId = c.principleId;
       if (isString(c.approvalId)) built.approvalId = c.approvalId;
       if (isString(c.activationId)) built.activationId = c.activationId;
       if (isString(c.updateAttemptId)) built.updateAttemptId = c.updateAttemptId;
+      if (isString(c.taskId)) built.taskId = c.taskId;
       context = built;
     }
   }
+
+  // Optional: taskId (top-level shortcut, separate from context.taskId)
+  const taskId = validateOptionalString(value.taskId, 'taskId', errors);
 
   // Optional: agentDraft
   let agentDraft: AgentDraft | undefined = undefined;
@@ -369,6 +390,7 @@ export function normalizeFeedbackDraftInput(value: unknown): NormalizeResult {
   const normalized: NormalizedDraft = { type, title, userText };
   if (context) normalized.context = context;
   if (agentDraft) normalized.agentDraft = agentDraft;
+  if (taskId !== undefined) normalized.taskId = taskId;
 
   return { ok: true, value: normalized };
 }

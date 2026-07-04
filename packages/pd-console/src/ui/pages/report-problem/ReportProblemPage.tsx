@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -9,6 +10,8 @@ import {
   listFeedbackReports,
   getFeedbackReport,
   deleteFeedbackReport,
+  fetchConfigSummary,
+  request,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import {
@@ -16,6 +19,8 @@ import {
   parseDraftSummary,
   parseEnvelopeReport,
   getErrorMessage,
+  buildFeedbackContextFromSearchParams,
+  buildFeedbackDiagnostics,
 } from "../ReportProblemValidators.js";
 import type { FeedbackDraftSummary, DraftRecord, FeedbackType, UserSeverity } from "../ReportProblemValidators.js";
 
@@ -180,11 +185,12 @@ function PrivacySection({ draft }: { draft: DraftRecord | null }) {
   );
 }
 
-function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onDelete }: {
+function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onOpenEmail, onDelete }: {
   draft: DraftRecord;
   onCopyMarkdown: () => void;
   onCopyEmail: () => void;
   onOpenGithub: () => void;
+  onOpenEmail: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
@@ -218,6 +224,15 @@ function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onDelete 
             className="border border-line bg-surface text-ink rounded-[3px] px-[12px] py-[5px] text-[12px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {t("pages.reportProblem.draft.openGithub")}
+          </button>
+        )}
+        {draft.outputs.mailtoUrl && (
+          <button
+            type="button"
+            onClick={onOpenEmail}
+            className="border border-line bg-surface text-ink rounded-[3px] px-[12px] py-[5px] text-[12px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          >
+            {t("pages.reportProblem.draft.openEmail")}
           </button>
         )}
         {!confirmDelete ? (
@@ -305,12 +320,21 @@ type LoadingState = "loading" | "loaded" | "error";
 
 export function ReportProblemPage() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [drafts, setDrafts] = useState<FeedbackDraftSummary[]>([]);
   const [currentDraft, setCurrentDraft] = useState<DraftRecord | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+
+  // Task 6: read context identifiers (painId, principleId, approvalId,
+  // activationId, taskId, source, page) from URL query params so the feedback
+  // report can be associated with the originating entity.
+  const contextFromUrl = useMemo(
+    () => buildFeedbackContextFromSearchParams(searchParams),
+    [searchParams],
+  );
 
   // ── Load drafts on mount ─────────────────────────────────────────────────
   const loadDrafts = useCallback(async () => {
@@ -361,9 +385,30 @@ export function ReportProblemPage() {
         expectedBehavior: form.expectedBehavior.trim() || undefined,
         actualBehavior: form.actualBehavior.trim() || undefined,
         severity: form.severity,
+        // P0-1: 传递顶层 taskId 触发 agentDraft 合并（Task 13）
+        // contextFromUrl.taskId 来自 URL query（FailedTasksPage 跳转时传入）
+        // createFeedbackReport 检查 draft.taskId（顶层）决定是否从 pending_agent_drafts 表读取
+        ...(contextFromUrl?.taskId ? { taskId: contextFromUrl.taskId } : {}),
+        ...(contextFromUrl ? { context: contextFromUrl } : {}),
       };
 
-      const result = await createFeedbackReport(input, undefined);
+      // ── Collect diagnostics concurrently (Task 5) ───────────────────────
+      // Fetch three APIs in parallel; Promise.allSettled ensures a single
+      // failure doesn't block the others. buildFeedbackDiagnostics then
+      // assembles a diagnostics object with unavailableReason for each failed
+      // field (rc-9-no-silent-fallback).
+      const [configSettled, lifecycleSettled, healthSettled] = await Promise.allSettled([
+        fetchConfigSummary(),
+        request('/api/v1/lifecycle/state'),
+        request('/api/health'),
+      ]);
+      const diagnostics = buildFeedbackDiagnostics(
+        configSettled,
+        lifecycleSettled,
+        healthSettled,
+      );
+
+      const result = await createFeedbackReport(input, diagnostics);
 
       if (!result.success) {
         toast.error(getErrorMessage(result, t("pages.reportProblem.errors.createFailed")));
@@ -406,7 +451,7 @@ export function ReportProblemPage() {
     } finally {
       setForm((prev) => ({ ...prev, submitting: false }));
     }
-  }, [form, t, loadDrafts]);
+  }, [form, t, loadDrafts, contextFromUrl]);
 
   // ── Draft actions ────────────────────────────────────────────────────────
   const handleLoadDraft = useCallback(async (id: string) => {
@@ -454,6 +499,12 @@ export function ReportProblemPage() {
   const handleOpenGithub = useCallback((draft: DraftRecord) => {
     if (draft.outputs.githubIssueUrl) {
       window.open(draft.outputs.githubIssueUrl, "_blank");
+    }
+  }, []);
+
+  const handleOpenEmail = useCallback((draft: DraftRecord) => {
+    if (draft.outputs.mailtoUrl) {
+      window.open(draft.outputs.mailtoUrl, "_blank");
     }
   }, []);
 
@@ -693,6 +744,7 @@ export function ReportProblemPage() {
             onCopyMarkdown={() => handleCopyMarkdown(currentDraft)}
             onCopyEmail={() => handleCopyEmail(currentDraft)}
             onOpenGithub={() => handleOpenGithub(currentDraft)}
+            onOpenEmail={() => handleOpenEmail(currentDraft)}
             onDelete={() => handleDeleteDraft(currentDraft.id)}
           />
         </section>

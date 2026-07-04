@@ -107,6 +107,18 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   computeFlagsFromLoadResult: vi.fn().mockReturnValue({}),
 }));
 
+// Dead-letter store mock: getByPainId returns null by default so the
+// implementation produces status='not_found' with reason='task_not_found'.
+// Tests that need to exercise the dead-letter replay path override this.
+const { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId } = vi.hoisted(() => {
+  const mockDeadLetterGetByPainId = vi.fn().mockReturnValue(null);
+  class MockSqliteDeadLetterStore {
+    getByPainId = mockDeadLetterGetByPainId;
+    constructor(_connection: unknown) {}
+  }
+  return { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId };
+});
+
 vi.mock('@principles/core/runtime-v2', () => {
   return {
     RuntimeStateManager: vi.fn().mockImplementation(function () {
@@ -117,6 +129,8 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteDiagnosticianCommitter: vi.fn().mockImplementation(function () { return {}; }),
     SqliteTrajectoryLocator: vi.fn().mockImplementation(function () { return {}; }),
     SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
+    SqliteDeadLetterStore: MockSqliteDeadLetterStore,
+    PainSignalBridge: vi.fn().mockImplementation(function () { return {}; }),
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     SplitDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
@@ -259,6 +273,7 @@ describe('pd pain retry — validation and error paths', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
+    mockDeadLetterGetByPainId.mockReturnValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',
@@ -796,6 +811,7 @@ describe('pd pain retry — human-readable output', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([]);
     mockIntake.mockReset();
+    mockDeadLetterGetByPainId.mockReturnValue(null);
     mockRun.mockResolvedValue({
       status: 'succeeded',
       taskId: 'diagnosis_test-pain-1',

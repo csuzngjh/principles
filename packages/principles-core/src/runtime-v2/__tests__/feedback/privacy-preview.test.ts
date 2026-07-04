@@ -33,7 +33,7 @@ function makeReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
       excludedByDefault: [...DEFAULT_EXCLUDED_CATEGORIES],
       redactionNotes: [],
     },
-    outputs: { markdown: '', emailText: '', githubIssueUrl: '' },
+    outputs: { markdown: '', emailText: '', githubIssueUrl: '', mailtoUrl: '' },
     ...overrides,
   };
 }

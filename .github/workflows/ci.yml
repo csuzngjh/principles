@@ -175,7 +175,7 @@ jobs:
         run: npm run build --workspace=@principles/core
 
       - name: Build plugin dependency
-        run: npm run build --workspace=principles-disciple
+        run: npm run build --workspace=@csuzngjh/principles-disciple
 
       - name: Build and test
         working-directory: packages/pd-cli
@@ -243,8 +243,8 @@ jobs:
       - name: Build dependencies
         run: |
           npm run build --workspace=@principles/core
-          npm run build:bundle --workspace=principles-disciple
-          npm run build --workspace=principles-disciple
+          npm run build:bundle --workspace=@csuzngjh/principles-disciple
+          npm run build --workspace=@csuzngjh/principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
 

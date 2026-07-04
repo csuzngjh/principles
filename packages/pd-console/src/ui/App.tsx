@@ -24,6 +24,7 @@ import { SignalKeywordsPage } from "./pages/signal-keywords/SignalKeywordsPage.j
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
 import { ReportProblemPage } from "./pages/report-problem/ReportProblemPage.js";
+import { FailedTasksPage } from "./pages/failed-tasks/FailedTasksPage.js";
 import { IntentPage } from "./pages/intent/IntentPage.js";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 import { WelcomePage } from "./pages/welcome/WelcomePage.js";
@@ -157,7 +158,7 @@ function AuthRoutes() {
               <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-paper focus:text-ink">
                 Skip to main content
               </a>
-              <AppSidebar />
+              <AppSidebar featureFlags={featureFlags ?? undefined} />
               <main id="main-content" className="ml-[256px] min-h-screen overflow-y-auto">
                 <ErrorBoundary>
                   <Routes>
@@ -174,6 +175,7 @@ function AuthRoutes() {
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
+                    <Route path="/failed-tasks" element={<FailedTasksPage />} />
                     <Route path="/intent" element={<IntentPage />} />
                     {IS_DEV && (
                       <Route path="/design-system" element={<DesignSystemPage />} />

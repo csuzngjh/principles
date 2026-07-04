@@ -300,6 +300,16 @@ By transforming owner-relevant behavior evidence into reviewed principles, PD he
 
 ---
 
+## Reporting Problems
+
+遇到 bug 或有问题反馈？请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 中的反馈通道说明。
+
+快速路径：
+- **PD Console**：打开 Report Problem 页面，自动收集诊断数据生成草稿
+- **Failed Tasks 页面**：从失败任务一键创建带 agent 上下文的反馈
+- **GitHub Issue**：直接在 [仓库](https://github.com/csuzngjh/principles/issues/new?template=bug_report.yml) 提交 issue（使用 bug_report 模板）
+- **邮件**：发送到 `csuzngjh@hotmail.com`
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

@@ -183,11 +183,11 @@ jobs:
         run: |
           PKG_DIR="${{ matrix.pkg_dir }}"
           if [ "$PKG_DIR" = "openclaw-plugin" ]; then
-            npm run build --workspace=principles-disciple
+            npm run build --workspace=@csuzngjh/principles-disciple
           elif [ "$PKG_DIR" = "pd-cli" ]; then
             npm run build --workspace=@principles/pd-cli
           elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
-            npm run build --workspace=principles-disciple
+            npm run build --workspace=@csuzngjh/principles-disciple
             npm run build --workspace=@principles/pd-cli
             npm run build --workspace=@principles/pd-console
             cd packages/create-principles-disciple && npm ci && npm run build
