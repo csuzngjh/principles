@@ -461,13 +461,23 @@ describe('CR8 Backend Data Contract Routes', () => {
   // ── 7. Unknown/missing DB data fails loud or degrades with reason ─────────
 
   describe('Missing/unknown data — graceful degradation with reason', () => {
-    it('lifecycle for unknown principleId returns 404 with reason', async () => {
+    it('lifecycle for unknown principleId returns 200 + insufficientData (DEFECT-006 / PRI-515)', async () => {
+      // DEFECT-006 (PRI-515): the route returns 200 + insufficientData rather
+      // than 404 for principles not yet in the lifecycle read model. A 404
+      // causes the browser to log a console error that frontend try/catch
+      // cannot suppress. The 200 response still carries a structured reason
+      // via `note` (EP-03 / ERR-002 — no silent degradation).
       const { status, body } = await fetchJson('/api/v1/lifecycle/principles/nonexistent-principle-xyz');
-      expect(status).toBe(404);
+      expect(status).toBe(200);
       const rec = body as Record<string, unknown>;
-      expect(rec.success).toBe(false);
-      // Must include a reason, not silent
-      expect(getStringField(rec, 'message') ?? getStringField(rec, 'error')).toBeDefined();
+      expect(rec.success).toBe(true);
+      const data = rec.data as Record<string, unknown>;
+      expect(data).toBeDefined();
+      const adherence = data.adherence as Record<string, unknown>;
+      expect(adherence.insufficientData).toBe(true);
+      expect(adherence.rate).toBeNull();
+      // Must include a reason via note, not silent
+      expect(getStringField(adherence, 'note')).toBeDefined();
     });
 
     it('governance queue on fresh workspace returns valid structure with zeros', async () => {

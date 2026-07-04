@@ -44,7 +44,25 @@ export async function handleLifecycleRoute(
     try {
       const result = model.getLifecycleMetrics(principleId);
       if (!result) {
-        sendNotFound(res, `Principle "${principleId}" not found in lifecycle read model`);
+        // DEFECT-006 (PRI-515): A null result means the principle is not in the
+        // lifecycle read model (recently created, no rules/implementations, or
+        // the ledger does not exist yet). The frontend calls this endpoint for
+        // every active principle on the activation page; returning 404 here
+        // causes the browser to log a network console error that frontend
+        // `try/catch` cannot suppress. Return 200 + insufficientData so the
+        // frontend can render the "no lifecycle data yet" state cleanly.
+        // EP-03 / ERR-002: graceful degradation carries a structured reason
+        // via the `note` field — same shape as the model-layer insufficientData
+        // branch, so the frontend needs only one rendering path.
+        sendSuccess(res, {
+          principleId,
+          adherence: {
+            insufficientData: true,
+            rate: null,
+            note: '该原则尚无规则，无法计算依从率',
+          },
+          ruleMetrics: [],
+        });
         return;
       }
       sendSuccess(res, result);
