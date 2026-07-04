@@ -23,6 +23,12 @@ export default defineConfig({
     ['meta', { property: 'og:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
+    // Cloudflare Web Analytics beacon — privacy-first, no cookies
+    ['script', {
+      defer: true,
+      src: 'https://static.cloudflareinsights.com/beacon.min.js',
+      'data-cf-beacon': '{"token": "17b7954b9e24419198b8837990ddb022"}'
+    }],
   ],
 
   locales: {
