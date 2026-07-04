@@ -1,7 +1,7 @@
 {
   "name": "@csuzngjh/principles-disciple",
   "version": "1.74.1",
-  "description": "Native OpenClaw plugin for Principles Disciple",
+  "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
