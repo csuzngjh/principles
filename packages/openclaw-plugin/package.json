@@ -41,7 +41,16 @@
     "setupEntry": "./dist/bundle.js",
     "extensions": [
       "./dist/bundle.js"
-    ]
+    ],
+    "compat": {
+      "pluginApi": "2026.4.4"
+    },
+    "build": {
+      "openclawVersion": "2026.4.4"
+    },
+    "install": {
+      "minHostVersion": "2026.4.4"
+    }
   },
   "scripts": {
     "build": "tsc",
