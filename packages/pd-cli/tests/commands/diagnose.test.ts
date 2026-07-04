@@ -1323,6 +1323,165 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
   });
 });
 
+// DEFECT-005 (PRI-514): A single defer candidate's intake_failed must NOT poison
+// the dreamer seed loop for other successfully-consumed candidates. Previously
+// `intakeFailed` was a global flag gating the ENTIRE dreamer seed loop — one
+// defer candidate (admission gate deferred) set it true, skipping dreamer seed
+// for ALL candidates including ones that succeeded intake (EP-03 / ERR-089
+// sibling-branch defect: one branch's failure punished all sibling branches).
+describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candidates dreamer seed', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { run, evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+    mockUpdateCandidateStatus.mockResolvedValue(undefined);
+    mockCreateTask.mockResolvedValue(undefined);
+    mockGetTask.mockResolvedValue(null);
+    mockIntake.mockReset();
+    mockIntake.mockResolvedValue({ id: 'ledger-1', title: 'P1', status: 'probation' });
+    // Default: admit all candidates. Individual tests override for defer.
+    vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
+      decision: 'admitted',
+      reason: 'mock_admitted',
+      nextAction: 'none',
+      evidenceStatus: 'unknown',
+    });
+  });
+
+  // Restore the factory-default admission decision so later describe blocks
+  // (which do `vi.clearAllMocks()` but do not re-set the implementation) see
+  // `admitted` again. Without this, a `mockReturnValue({deferred})` from
+  // DEFECT-005-B would leak into BUG-2 and refuse all its candidates.
+  afterEach(async () => {
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
+      decision: 'admitted',
+      reason: 'mock_admitted',
+      nextAction: 'none',
+      evidenceStatus: 'unknown',
+    });
+  });
+
+  it('DEFECT-005-A: defer deferred + principle/rule/prompt consumed — principle/rule/prompt still dreamer_seeded', async () => {
+    // Admission gate defers ONLY defer candidates; admits everything else.
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    vi.mocked(evaluateCandidateAdmissionFromRecord).mockImplementation((record) => {
+      if (record.recommendationKind === 'defer') {
+        return {
+          decision: 'deferred',
+          reason: 'recommendation_kind_defer_not_actionable',
+          nextAction: 'review_defer_disposition_manually',
+          evidenceStatus: 'unknown',
+        };
+      }
+      return {
+        decision: 'admitted',
+        reason: 'mock_admitted',
+        nextAction: 'none',
+        evidenceStatus: 'unknown',
+      };
+    });
+
+    const candidates = [
+      { candidateId: 'cand-defer', artifactId: 'art-d', taskId: 'test-task-1', status: 'pending', recommendationKind: 'defer', confidence: 0.9 },
+      { candidateId: 'cand-principle', artifactId: 'art-p', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
+      { candidateId: 'cand-rule', artifactId: 'art-r', taskId: 'test-task-1', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
+      { candidateId: 'cand-prompt', artifactId: 'art-pp', taskId: 'test-task-1', status: 'pending', recommendationKind: 'prompt', confidence: 0.9 },
+      { candidateId: 'cand-impl', artifactId: 'art-i', taskId: 'test-task-1', status: 'pending', recommendationKind: 'implementation', confidence: 0.9 },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.intake && Array.isArray(parsed.intake.candidates);
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    const results = parsed.intake.candidates as Array<{ candidateId: string; status: string }>;
+
+    // defer candidate: intake_failed (admission gate deferred) — correct.
+    // intakeResults may carry multiple entries per candidate (intake + seed),
+    // so we match on BOTH candidateId and status (same pattern as DREAMER-05).
+    const deferFailed = results.find(r => r.candidateId === 'cand-defer' && r.status === 'intake_failed');
+    expect(deferFailed).toBeDefined();
+
+    // principle/rule/prompt: dreamer_seeded — MUST NOT be poisoned by defer's intake_failed
+    const principleSeeded = results.find(r => r.candidateId === 'cand-principle' && r.status === 'dreamer_seeded');
+    expect(principleSeeded).toBeDefined();
+
+    const ruleSeeded = results.find(r => r.candidateId === 'cand-rule' && r.status === 'dreamer_seeded');
+    expect(ruleSeeded).toBeDefined();
+
+    const promptSeeded = results.find(r => r.candidateId === 'cand-prompt' && r.status === 'dreamer_seeded');
+    expect(promptSeeded).toBeDefined();
+
+    // 3 dreamer tasks created (principle + rule + prompt).
+    // defer was refused at the gate (no intake, no seed).
+    // implementation is skipped by the dreamer seed loop (`if kind === 'implementation' continue`).
+    expect(mockCreateTask).toHaveBeenCalledTimes(3);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DEFECT-005-B: all candidates intake_failed — 0 dreamer_seeded (boundary)', async () => {
+    // Refuse everything via admission gate
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
+      decision: 'deferred',
+      reason: 'mock_deferred',
+      nextAction: 'none',
+      evidenceStatus: 'unknown',
+    });
+
+    const candidates = [
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
+      { candidateId: 'cand-2', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // No dreamer tasks should be created when no candidate was consumed
+    expect(mockCreateTask).not.toHaveBeenCalled();
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const parsed = JSON.parse(call[0] as string);
+        return parsed.intake && Array.isArray(parsed.intake.candidates);
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    const results = parsed.intake.candidates as Array<{ candidateId: string; status: string }>;
+    expect(results.every(r => r.status === 'intake_failed')).toBe(true);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
 // BUG-1 (PRI-442): effectiveConfig must be passed to split-pipeline runners
 // so that ADR-0019 LLM rate-limit degradation (isDegradationEnabled) can fire.
 // Without this wiring, isDegradationEnabled() always returns false because
