@@ -23,8 +23,6 @@ import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const isWin = process.platform === 'win32';
-
 /**
  * Resolve the private docs target directory.
  * Priority: PD_PRIVATE_DOCS_DIR env > ~/principles-private/docs

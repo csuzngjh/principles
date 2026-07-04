@@ -107,9 +107,14 @@ function main() {
 
   const fragment = fs.readFileSync(fragmentFile, 'utf-8');
 
+  // Read existing hook content; treat ENOENT as "no existing hook".
+  // Using try/catch instead of existsSync+readFileSync to avoid TOCTOU race
+  // (CodeQL: potential file system race condition).
   let existingContent = '';
-  if (fs.existsSync(hookFile)) {
+  try {
     existingContent = fs.readFileSync(hookFile, 'utf-8');
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') throw err;
   }
 
   const hasOurBlock = existingContent.includes(START_MARKER);
