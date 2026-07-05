@@ -200,12 +200,12 @@ function rewriteBundledDependency(pkgPath, label, depName, replacement) {
 rewriteBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core', 'file:./core');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
-// pd-cli also depends on @csuzngjh/principles-disciple (the plugin package). Rewrite to a local
+// pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
 // file reference so the bundled package is self-contained. The installer's syncPdCli()
-// creates a node_modules/@csuzngjh/principles-disciple symlink to the installed plugin directory.
+// creates a node_modules/principles-disciple symlink to the installed plugin directory.
 // Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
 // because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
-rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@csuzngjh/principles-disciple', 'file:../plugin');
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
 
 console.log('\n🔍 Verifying hook activation contract...');
 

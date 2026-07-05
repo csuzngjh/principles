@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@principles/core": "file:../core",
-    "@csuzngjh/principles-disciple": "file:../plugin",
+    "principles-disciple": "file:../plugin",
     "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.1"
