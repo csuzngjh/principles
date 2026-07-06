@@ -14,7 +14,7 @@
  * - Method guard (only GET allowed)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -71,8 +71,6 @@ function parseBody(res: ServerResponse): { statusCode: number; body: unknown } {
   }
   return { statusCode: mockRes.statusCode, body: parsed };
 }
-
-import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Test suite
