@@ -78,6 +78,10 @@ function listStateDirEntries(stateDir: string): string[] {
   return fs.readdirSync(stateDir);
 }
 
+function listPdWriteLeftovers(stateDir: string): string[] {
+  return listStateDirEntries(stateDir).filter((name) => name.startsWith('.pd-write-'));
+}
+
 /**
  * Read the on-disk ledger as raw JSON. The serialize codec writes
  * `{...trainingStore, [TREE_NAMESPACE]: {...tree, lastUpdated}}` —
@@ -110,9 +114,7 @@ describe('PRI-459 Stage 1.5 — atomic write + lock file hardening', () => {
         tree: { principles: {}, rules: {}, implementations: {}, metrics: {}, lastUpdated: '2026-07-07T00:00:00.000Z' },
       });
 
-      const leftovers = listStateDirEntries(stateDir).filter((name) =>
-        name.startsWith('.pd-write-'),
-      );
+      const leftovers = listPdWriteLeftovers(stateDir);
       expect(leftovers).toEqual([]);
     });
 
@@ -132,9 +134,7 @@ describe('PRI-459 Stage 1.5 — atomic write + lock file hardening', () => {
       for (let i = 0; i < 25; i += 1) {
         addPrincipleToLedger(stateDir, makePrinciple(`p${i}`));
       }
-      const leftovers = listStateDirEntries(stateDir).filter((name) =>
-        name.startsWith('.pd-write-'),
-      );
+      const leftovers = listPdWriteLeftovers(stateDir);
       expect(leftovers).toEqual([]);
     });
 
@@ -186,9 +186,7 @@ describe('PRI-459 Stage 1.5 — atomic write + lock file hardening', () => {
       expect(fs.existsSync(lockPath)).toBe(false);
 
       // No temp directories.
-      const tempDirs = listStateDirEntries(stateDir).filter((name) =>
-        name.startsWith('.pd-write-'),
-      );
+      const tempDirs = listPdWriteLeftovers(stateDir);
       expect(tempDirs).toEqual([]);
     });
 
