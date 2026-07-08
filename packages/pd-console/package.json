@@ -36,7 +36,7 @@
     "lucide-react": "^1.23.0",
     "postcss": "^8.5.14",
     "postcss-cli": "^11.0.1",
-    "react": "^19.2.6",
+    "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-i18next": "^17.0.8",
     "react-router-dom": "^7.15.0",
