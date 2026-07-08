@@ -407,4 +407,30 @@ describe('P0 Race Condition Fixes', () => {
     
     releaseLock(ctx);
   });
+
+  test('should clean up stale lock held by alive process (plugin semantics)', () => {
+    // IMPORTANT SEMANTIC DIFFERENCE: The openclaw-plugin file-lock.ts uses
+    // `isStale || isDead` in cleanupStaleLock, meaning a stale-but-alive
+    // lock WILL be cleaned up. This differs from the core
+    // principle-tree-ledger.ts which uses PID-liveness only.
+    //
+    // This test pins the plugin's stale-but-alive cleanup behavior.
+    const lockPath = getLockPath(filePath);
+
+    // Create a lock held by the CURRENT (alive) process but make it stale
+    fs.writeFileSync(lockPath, String(process.pid), 'utf8');
+    const staleTime = Date.now() - 15000; // 15 seconds ago
+    fs.utimesSync(lockPath, new Date(staleTime), new Date(staleTime));
+
+    // The lock should be acquired because it is stale, even though the
+    // holder (current process) is alive
+    const ctx = acquireLock(filePath, {
+      maxRetries: 3,
+      baseRetryDelayMs: 5,
+      lockStaleMs: 10000,
+    });
+    expect(ctx.pid).toBe(process.pid);
+
+    releaseLock(ctx);
+  });
 });
