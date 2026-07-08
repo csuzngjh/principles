@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "1.74.1",
+  "version": "1.198.0",
   "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,13 +43,13 @@
       "./dist/bundle.js"
     ],
     "compat": {
-      "pluginApi": "2026.4.4"
+      "pluginApi": ">=2026.4.4"
     },
     "build": {
       "openclawVersion": "2026.4.4"
     },
     "install": {
-      "minHostVersion": "2026.4.4"
+      "minHostVersion": ">=2026.4.4"
     }
   },
   "scripts": {
@@ -57,6 +57,7 @@
     "build:bundle": "node esbuild.config.js",
     "build:production": "node esbuild.config.js --production && node scripts/verify-build.mjs",
     "prepack": "npm run build:production",
+    "postinstall": "node scripts/postinstall.cjs",
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts --exclude tests/commands/evolver.test.ts",
     "test:integration": "vitest run tests/integration/",
