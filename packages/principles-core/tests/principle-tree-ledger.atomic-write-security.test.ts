@@ -26,6 +26,7 @@ import {
   addPrincipleToLedger,
   loadLedger,
   getLedgerFilePathPublic,
+  withLock,
 } from '../src/principle-tree-ledger.js';
 import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
 
@@ -168,14 +169,52 @@ describe('PRI-1179 — lock file permission hardening', () => {
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
-  it('creates lock file when acquiring via withLock', () => {
-    // The lock file is created with O_EXCL | O_CREAT and 0o600 mode
-    // (owner-only read/write). Verify the mutation succeeds (which
-    // implicitly requires lock acquisition and release).
-    addPrincipleToLedger(stateDir, makePrinciple('lock-perm-test'));
+  it('creates lock file during withLock and cleans up after', () => {
+    // The lock file should exist while the callback is executing
+    // and be removed after the callback completes.
+    const ledgerPath = getLedgerFilePathPublic(stateDir);
+    const lockPath = ledgerPath + '.lock';
 
-    // Lock should be released now; verify the write succeeded
-    const ledger = loadLedger(stateDir);
-    expect(ledger.tree.principles['lock-perm-test']).toBeDefined();
+    let lockExistedDuringCallback = false;
+
+    withLock(ledgerPath, () => {
+      lockExistedDuringCallback = fs.existsSync(lockPath);
+      return 'test-result';
+    });
+
+    // Lock should have existed during callback execution
+    expect(lockExistedDuringCallback).toBe(true);
+
+    // Lock should be cleaned up after withLock returns
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('lock file contains the current PID', () => {
+    // The lock file should contain the PID of the process holding the lock
+    const ledgerPath = getLedgerFilePathPublic(stateDir);
+    const lockPath = ledgerPath + '.lock';
+
+    let lockPid: string | undefined;
+
+    withLock(ledgerPath, () => {
+      lockPid = fs.readFileSync(lockPath, 'utf8').trim();
+      return 'test-result';
+    });
+
+    expect(lockPid).toBe(String(process.pid));
+  });
+
+  it('lock is cleaned up even when callback throws', () => {
+    const ledgerPath = getLedgerFilePathPublic(stateDir);
+    const lockPath = ledgerPath + '.lock';
+
+    expect(() => {
+      withLock(ledgerPath, () => {
+        throw new Error('test error');
+      });
+    }).toThrow('test error');
+
+    // Lock must be cleaned up even on error
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 });

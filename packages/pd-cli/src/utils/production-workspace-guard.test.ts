@@ -125,8 +125,8 @@ describe('resolveWorkspacePath', () => {
 
   it('resolves a relative path against cwd', () => {
     const result = resolveWorkspacePath('relative/path');
-    expect(path.isAbsolute(result)).toBe(true);
-    expect(result).toContain('relative');
+    const expected = path.resolve(process.cwd(), 'relative/path');
+    expect(result).toBe(expected);
   });
 
   it('defaults to cwd when no input is provided', () => {
@@ -135,41 +135,23 @@ describe('resolveWorkspacePath', () => {
   });
 });
 
-describe('PD_PRODUCTION_WORKSPACE env var', () => {
-  const originalEnv = process.env.PD_PRODUCTION_WORKSPACE;
+describe('PD_PRODUCTION_WORKSPACE env var (module-load-time)', () => {
+  // NOTE: PRODUCTION_WORKSPACE_PATHS is built once at module load time from
+  // process.env.PD_PRODUCTION_WORKSPACE. Setting the env var after the module
+  // is loaded does NOT change behavior. These tests verify that the default
+  // production path (HOMEDIR_WORKSPACE) is correctly protected, which is the
+  // primary regression risk.
 
-  beforeEach(() => {
-    delete process.env.PD_PRODUCTION_WORKSPACE;
-  });
-
-  afterEach(() => {
-    if (originalEnv !== undefined) {
-      process.env.PD_PRODUCTION_WORKSPACE = originalEnv;
-    } else {
-      delete process.env.PD_PRODUCTION_WORKSPACE;
-    }
-  });
-
-  it('treats a path listed in PD_PRODUCTION_WORKSPACE as production', () => {
-    const extraPath = path.join(os.tmpdir(), 'pd-extra-prod-ws');
-    process.env.PD_PRODUCTION_WORKSPACE = extraPath;
-    // Re-import is not possible in ESM, but isProductionWorkspace reads
-    // PRODUCTION_WORKSPACE_PATHS which is built once at module load time.
-    // This test verifies the guard behavior when the env var is set
-    // before the module is loaded. Since we can't re-load, we test the
-    // guardUatWorkspace function with the default production path only.
-    // The env var handling is tested implicitly by the existing tests.
-    // Here we verify the function doesn't crash with env var set.
-    expect(() => guardUatWorkspace('/tmp/some-safe-path', 'test')).not.toThrow();
-  });
-
-  it('guardUatWorkspace refuses a path matching PD_PRODUCTION_WORKSPACE', () => {
-    // The default production workspace should always be refused
+  it('guardUatWorkspace refuses the default production workspace', () => {
     const r = guardUatWorkspace(HOMEDIR_WORKSPACE, 'test');
     expect(r.refused).toBe(true);
     if (r.refused) {
       expect(r.isProduction).toBe(true);
       expect(r.workspace).toBe(path.resolve(HOMEDIR_WORKSPACE));
     }
+  });
+
+  it('isProductionWorkspace returns true for the default production path', () => {
+    expect(isProductionWorkspace(path.resolve(HOMEDIR_WORKSPACE))).toBe(true);
   });
 });
