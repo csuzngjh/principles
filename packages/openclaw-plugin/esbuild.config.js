@@ -62,32 +62,38 @@ async function bundlePlugin() {
     console.log('Re-export shim created: dist/index.js -> dist/bundle.js');
 
     // 2. Build core tools for CLI usage (bootstrap-rules, etc)
-    // We keep these separate and un-minified for easier debugging and CLI importing
-    await build({
-      entryPoints: {
-        'core/bootstrap-rules': 'src/core/bootstrap-rules.ts',
-        'core/principle-tree-ledger': 'src/core/principle-tree-ledger.ts',
-        'core/principle-training-state': 'src/core/principle-training-state.ts',
-        'core/principle-compiler/index': 'src/core/principle-compiler/index.ts',
-        'core/trajectory/index': 'src/core/trajectory.ts',
-      },
-      outdir: 'dist',
-      bundle: true,
-      platform: 'node',
-      target: 'node20',
-      format: 'esm',
-      outbase: 'src',
-      external: [
-        'openclaw',
-        '@openclaw/sdk',
-        '@openclaw/plugin-kit',
-        'better-sqlite3',
-      ],
-      sourcemap: false,
-      minify: false,
-    });
-
-    console.log('Core CLI tools built in dist/core/');
+    // Skipped in production: these are maintainer-only CLI tools, not needed at
+    // runtime (the esbuild bundle above already inlines all core logic). Keeping
+    // them out of production builds keeps the published package under ClawHub's
+    // 18MB upload limit. Dev builds still produce them for `npm run bootstrap-rules`.
+    if (!isProduction) {
+      await build({
+        entryPoints: {
+          'core/bootstrap-rules': 'src/core/bootstrap-rules.ts',
+          'core/principle-tree-ledger': 'src/core/principle-tree-ledger.ts',
+          'core/principle-training-state': 'src/core/principle-training-state.ts',
+          'core/principle-compiler/index': 'src/core/principle-compiler/index.ts',
+          'core/trajectory/index': 'src/core/trajectory.ts',
+        },
+        outdir: 'dist',
+        bundle: true,
+        platform: 'node',
+        target: 'node20',
+        format: 'esm',
+        outbase: 'src',
+        external: [
+          'openclaw',
+          '@openclaw/sdk',
+          '@openclaw/plugin-kit',
+          'better-sqlite3',
+        ],
+        sourcemap: false,
+        minify: false,
+      });
+      console.log('Core CLI tools built in dist/core/');
+    } else {
+      console.log('Production build: skipping core CLI tools (not needed at runtime)');
+    }
 
     const staticFiles = ['templates', 'openclaw.plugin.json'];
     const distDir = 'dist';
