@@ -169,16 +169,12 @@ describe('PRI-1179 — lock file permission hardening', () => {
   });
 
   it('creates lock file when acquiring via withLock', () => {
-    // The lock file should be created with O_EXCL | O_CREAT and 0o600 mode
-    // (owner-only read/write). We can verify existence and basic structure.
-    const ledgerPath = getLedgerFilePathPublic(stateDir);
-    const lockPath = ledgerPath + '.lock';
-
-    // Perform a mutation that acquires the lock
+    // The lock file is created with O_EXCL | O_CREAT and 0o600 mode
+    // (owner-only read/write). Verify the mutation succeeds (which
+    // implicitly requires lock acquisition and release).
     addPrincipleToLedger(stateDir, makePrinciple('lock-perm-test'));
 
-    // Lock should be released now, but let's check it existed at some point
-    // by verifying the write succeeded
+    // Lock should be released now; verify the write succeeded
     const ledger = loadLedger(stateDir);
     expect(ledger.tree.principles['lock-perm-test']).toBeDefined();
   });
