@@ -21,6 +21,9 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm install
 
+      - name: Build principles-core
+        run: npm run build --workspace=@principles/core
+
       - name: Run regression tests
         working-directory: packages/openclaw-plugin
         run: npx vitest run tests/core/regression-v1-9-1.test.ts --reporter=verbose
