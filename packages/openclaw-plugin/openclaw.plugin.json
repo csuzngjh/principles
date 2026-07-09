@@ -1,8 +1,8 @@
 {
   "id": "principles-disciple",
   "name": "Principles Disciple",
-  "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
-  "version": "1.74.1",
+  "description": "Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles. Stop correcting the same AI behavior across sessions.",
+  "version": "1.198.1",
   "activation": {
     "onCapabilities": [
       "hook"
