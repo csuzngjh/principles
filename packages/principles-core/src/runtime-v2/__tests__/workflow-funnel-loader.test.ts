@@ -76,8 +76,8 @@ describe('WorkflowFunnelLoader', () => {
 
       const stages = loader.getStages('test-funnel');
       expect(stages.length).toBe(2);
-      expect(stages[0].name).toBe('stage1');
-      expect(stages[1].name).toBe('stage2');
+      expect(stages[0]!.name).toBe('stage1');
+      expect(stages[1]!.name).toBe('stage2');
     });
 
     it('handles missing workflows.yaml with empty funnels + warning', () => {
@@ -216,11 +216,11 @@ describe('WorkflowFunnelLoader', () => {
       const loader = new WorkflowFunnelLoader(stateDir);
       const funnel1 = loader.getFunnel('clone-test')!;
 
-      funnel1.stages[0].name = 'mutated';
+      funnel1.stages[0]!.name = 'mutated';
       funnel1.policy!.timeoutMs = 99999;
 
       const funnel2 = loader.getFunnel('clone-test')!;
-      expect(funnel2.stages[0].name).toBe('original');
+      expect(funnel2.stages[0]!.name).toBe('original');
       expect(funnel2.policy?.timeoutMs).toBe(1000);
     });
   });
@@ -265,10 +265,10 @@ describe('WorkflowFunnelLoader', () => {
 
       const loader = new WorkflowFunnelLoader(stateDir);
       const all1 = loader.getAllFunnels();
-      all1.get('mutate-test')![0].name = 'mutated';
+      all1.get('mutate-test')![0]!.name = 'mutated';
 
       const all2 = loader.getAllFunnels();
-      expect(all2.get('mutate-test')![0].name).toBe('original');
+      expect(all2.get('mutate-test')![0]!.name).toBe('original');
     });
   });
 
@@ -338,7 +338,7 @@ describe('WorkflowFunnelLoader', () => {
       });
 
       const loader = new WorkflowFunnelLoader(stateDir);
-      expect(loader.getStages('reload-test')[0].name).toBe('v1');
+      expect(loader.getStages('reload-test')[0]!.name).toBe('v1');
 
       writeConfig({
         version: '1.0',
@@ -351,7 +351,7 @@ describe('WorkflowFunnelLoader', () => {
       });
 
       loader.load();
-      expect(loader.getStages('reload-test')[0].name).toBe('v2');
+      expect(loader.getStages('reload-test')[0]!.name).toBe('v2');
     });
 
     it('preserves last known-good config on malformed reload', () => {
@@ -366,12 +366,12 @@ describe('WorkflowFunnelLoader', () => {
       });
 
       const loader = new WorkflowFunnelLoader(stateDir);
-      expect(loader.getStages('stable-funnel')[0].name).toBe('good');
+      expect(loader.getStages('stable-funnel')[0]!.name).toBe('good');
 
       fs.writeFileSync(configPath, '::: invalid yaml :::', 'utf-8');
       loader.load();
 
-      expect(loader.getStages('stable-funnel')[0].name).toBe('good');
+      expect(loader.getStages('stable-funnel')[0]!.name).toBe('good');
       expect(loader.getWarnings().some(w => w.includes('Failed to parse'))).toBe(true);
     });
 
@@ -444,6 +444,7 @@ describe('WorkflowFunnelLoader', () => {
 
       const warnings = loader.getWarnings();
       expect(Array.isArray(warnings)).toBe(true);
+      expect(warnings).toEqual([]);
     });
 
     it('warnings are cleared and refreshed on each load', () => {
@@ -461,7 +462,7 @@ describe('WorkflowFunnelLoader', () => {
       });
       loader.load();
       const secondWarnings = loader.getWarnings();
-      expect(secondWarnings.length).toBeLessThan(firstWarnings.length);
+      expect(secondWarnings).toEqual([]);
     });
   });
 
@@ -501,11 +502,11 @@ describe('WorkflowFunnelLoader', () => {
       const stages = loader.getStages('stage-fields');
 
       expect(stages.length).toBe(1);
-      expect(stages[0].timeoutMs).toBe(5000);
-      expect(stages[0].successCriteria).toBe('count > 0');
-      expect(stages[0].legacyDisabled).toBe(true);
-      expect(stages[0].observability?.enabled).toBe(true);
-      expect(stages[0].observability?.emitEvents).toEqual(['stage_started']);
+      expect(stages[0]!.timeoutMs).toBe(5000);
+      expect(stages[0]!.successCriteria).toBe('count > 0');
+      expect(stages[0]!.legacyDisabled).toBe(true);
+      expect(stages[0]!.observability?.enabled).toBe(true);
+      expect(stages[0]!.observability?.emitEvents).toEqual(['stage_started']);
     });
   });
 });

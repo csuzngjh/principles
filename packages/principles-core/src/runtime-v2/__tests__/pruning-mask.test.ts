@@ -24,7 +24,7 @@
 
 /* eslint-disable @typescript-eslint/max-params */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -50,11 +50,17 @@ function makeReview(
     reviewedAt,
     signalSnapshot: {
       principleId,
-      activationCount30d: 0,
-      lastTriggeredAt: null,
-      painSignalCount: 0,
-      confidenceScore: 0.5,
+      status: 'active',
+      createdAt: reviewedAt,
+      updatedAt: reviewedAt,
+      derivedCandidateIds: [],
+      derivedPainCount: 0,
+      matchedCandidateCount: 0,
+      recentCandidateCount: 0,
+      orphanCandidateCount: 0,
       ageDays: 1,
+      riskLevel: 'watch',
+      reasons: [],
     },
     ...overrides,
   };
@@ -217,6 +223,10 @@ describe('getCachedMaskedPrincipleSet', () => {
     logPath = path.join(stateDir, 'pruning_reviews.jsonl');
   });
 
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   function writeReviews(reviews: PruningReviewRecord[]): void {
     const lines = reviews.map(r => JSON.stringify(r));
     fs.writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
@@ -280,17 +290,21 @@ describe('getCachedMaskedPrincipleSet', () => {
     fs.mkdirSync(otherStateDir, { recursive: true });
     const otherLogPath = path.join(otherStateDir, 'pruning_reviews.jsonl');
 
-    const reviews1 = [makeReview('p1', 'archive-candidate', '2026-07-01T00:00:00.000Z')];
-    writeReviews(reviews1);
+    try {
+      const reviews1 = [makeReview('p1', 'archive-candidate', '2026-07-01T00:00:00.000Z')];
+      writeReviews(reviews1);
 
-    const reviews2 = [makeReview('p1', 'keep', '2026-07-01T00:00:00.000Z')];
-    fs.writeFileSync(otherLogPath, reviews2.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+      const reviews2 = [makeReview('p1', 'keep', '2026-07-01T00:00:00.000Z')];
+      fs.writeFileSync(otherLogPath, reviews2.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
 
-    const result1 = getCachedMaskedPrincipleSet(tmpDir);
-    const result2 = getCachedMaskedPrincipleSet(otherDir);
+      const result1 = getCachedMaskedPrincipleSet(tmpDir);
+      const result2 = getCachedMaskedPrincipleSet(otherDir);
 
-    expect(result1.has('p1')).toBe(true);
-    expect(result2.has('p1')).toBe(false);
+      expect(result1.has('p1')).toBe(true);
+      expect(result2.has('p1')).toBe(false);
+    } finally {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 
   it('returns empty set when no pruning_reviews.jsonl exists', () => {
@@ -313,6 +327,10 @@ describe('clearPruningMaskCache', () => {
     stateDir = path.join(tmpDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
     logPath = path.join(stateDir, 'pruning_reviews.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   function writeReviews(reviews: PruningReviewRecord[]): void {
