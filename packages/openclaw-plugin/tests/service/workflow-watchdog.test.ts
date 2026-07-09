@@ -91,8 +91,8 @@ describe('runWorkflowWatchdog', () => {
                 agent: {
                     session: {
                         resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                        loadSessionStore: vi.fn().mockReturnValue({}),
-                        saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                        getSessionEntry: vi.fn().mockReturnValue(undefined),
+                        patchSessionEntry: vi.fn().mockResolvedValue(null),
                     },
                 },
             },
@@ -193,8 +193,8 @@ describe('runWorkflowWatchdog', () => {
                     agent: {
                         session: {
                             resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                            loadSessionStore: vi.fn().mockReturnValue({ [childSessionKey.toLowerCase()]: { data: true } }),
-                            saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockResolvedValue(null),
                         },
                     },
                 },
@@ -206,7 +206,9 @@ describe('runWorkflowWatchdog', () => {
                 mockLogger,
             );
 
-            expect(apiWithNoSubagentRuntime.runtime!.agent!.session!.saveSessionStore).toHaveBeenCalled();
+            expect(apiWithNoSubagentRuntime.runtime!.agent!.session!.patchSessionEntry).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionKey: childSessionKey, replaceEntry: true, preserveActivity: false }),
+            );
             expect(result.anomalies).toBe(1);
         });
 
@@ -236,8 +238,8 @@ describe('runWorkflowWatchdog', () => {
                     agent: {
                         session: {
                             resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                            loadSessionStore: vi.fn().mockReturnValue({ [childSessionKey.toLowerCase()]: { data: true } }),
-                            saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockResolvedValue(null),
                         },
                     },
                 },
@@ -249,7 +251,9 @@ describe('runWorkflowWatchdog', () => {
                 mockLogger,
             );
 
-            expect(apiWithFailingSubagent.runtime!.agent!.session!.saveSessionStore).toHaveBeenCalled();
+            expect(apiWithFailingSubagent.runtime!.agent!.session!.patchSessionEntry).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionKey: childSessionKey, replaceEntry: true, preserveActivity: false }),
+            );
             expect(result.anomalies).toBe(1);
         });
     });
