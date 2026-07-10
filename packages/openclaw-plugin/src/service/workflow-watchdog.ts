@@ -125,12 +125,18 @@ export async function runWorkflowWatchdog(
             } catch (cleanupErr) {
               const errMsg = String(cleanupErr);
               if (errMsg.includes('gateway request') && agentSession) {
-                await cleanupStaleSessionEntry(
-                  agentSession,
-                  wf.child_session_key,
-                  logger,
-                  'after gateway error',
-                );
+                try {
+                  await cleanupStaleSessionEntry(
+                    agentSession,
+                    wf.child_session_key,
+                    logger,
+                    'after gateway error',
+                  );
+                } catch (fallbackErr) {
+                  logger?.warn?.(
+                    `[PD:Watchdog] Fallback cleanup also failed for ${wf.child_session_key}: ${String(fallbackErr)}`,
+                  );
+                }
               } else {
                 logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
               }

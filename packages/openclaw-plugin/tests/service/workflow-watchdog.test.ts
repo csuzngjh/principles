@@ -347,6 +347,55 @@ describe('runWorkflowWatchdog', () => {
             );
             expect(result.anomalies).toBe(1);
         });
+
+        it('logs warning and continues scan when fallback cleanup also fails after gateway error', async () => {
+            const staleWorkflowId = 'wf-stale-007';
+            const childSessionKey = 'child-session-007';
+            const now = Date.now();
+
+            mockListWorkflows.mockReturnValue([
+                createWorkflow({
+                    workflow_id: staleWorkflowId,
+                    child_session_key: childSessionKey,
+                    state: 'active',
+                    created_at: now - (15 * 60 * 1000),
+                }),
+            ]);
+            mockGetEvents.mockReturnValue([
+                createEvent(staleWorkflowId, 'unexpected_crash'),
+            ]);
+            isExpectedSubagentError.mockReturnValue(false);
+
+            // Main cleanup throws gateway error; fallback also throws (same host issue)
+            const apiWithDoubleFailure = {
+                runtime: {
+                    subagent: {
+                        deleteSession: vi.fn().mockRejectedValue(new Error('gateway request failed')),
+                    },
+                    agent: {
+                        session: {
+                            resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockRejectedValue(new Error('host still down')),
+                        },
+                    },
+                },
+            } as unknown as Parameters<typeof runWorkflowWatchdog>[1];
+
+            const result = await runWorkflowWatchdog(
+                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
+                apiWithDoubleFailure,
+                mockLogger,
+            );
+
+            // Fallback failure should be logged, not abort the scan
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                expect.stringContaining('Fallback cleanup also failed'),
+            );
+            // Scan should still complete with the anomaly recorded (not -1 error state)
+            expect(result.anomalies).toBe(1);
+            expect(result.scanError).toBeUndefined();
+        });
     });
 
     // ── General behavior ───────────────────────────────────────────────────
