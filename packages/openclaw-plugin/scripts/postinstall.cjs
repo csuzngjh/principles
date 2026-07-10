@@ -17,7 +17,7 @@
  */
 'use strict';
 
-const { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, openSync, closeSync, statSync, constants } = require('fs');
+const { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, openSync, closeSync, statSync, writeSync, fsyncSync, constants } = require('fs');
 const { join } = require('path');
 const { homedir } = require('os');
 
@@ -48,8 +48,12 @@ function tryAcquireLock() {
   try {
     const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL;
     const fd = openSync(LOCK_PATH, flags, 0o600);
-    writeFileSync(LOCK_PATH, String(process.pid), { flag: 'w' });
-    closeSync(fd);
+    try {
+      writeSync(fd, String(process.pid));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     return true;
   } catch (err) {
     if (err.code === 'EEXIST') return false;
