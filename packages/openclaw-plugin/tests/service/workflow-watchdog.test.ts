@@ -91,8 +91,8 @@ describe('runWorkflowWatchdog', () => {
                 agent: {
                     session: {
                         resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                        loadSessionStore: vi.fn().mockReturnValue({}),
-                        saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                        getSessionEntry: vi.fn().mockReturnValue(undefined),
+                        patchSessionEntry: vi.fn().mockResolvedValue(null),
                     },
                 },
             },
@@ -193,8 +193,8 @@ describe('runWorkflowWatchdog', () => {
                     agent: {
                         session: {
                             resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                            loadSessionStore: vi.fn().mockReturnValue({ [childSessionKey.toLowerCase()]: { data: true } }),
-                            saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockResolvedValue(null),
                         },
                     },
                 },
@@ -206,7 +206,9 @@ describe('runWorkflowWatchdog', () => {
                 mockLogger,
             );
 
-            expect(apiWithNoSubagentRuntime.runtime!.agent!.session!.saveSessionStore).toHaveBeenCalled();
+            expect(apiWithNoSubagentRuntime.runtime!.agent!.session!.patchSessionEntry).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionKey: childSessionKey, replaceEntry: true, preserveActivity: false }),
+            );
             expect(result.anomalies).toBe(1);
         });
 
@@ -236,8 +238,8 @@ describe('runWorkflowWatchdog', () => {
                     agent: {
                         session: {
                             resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
-                            loadSessionStore: vi.fn().mockReturnValue({ [childSessionKey.toLowerCase()]: { data: true } }),
-                            saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockResolvedValue(null),
                         },
                     },
                 },
@@ -249,8 +251,150 @@ describe('runWorkflowWatchdog', () => {
                 mockLogger,
             );
 
-            expect(apiWithFailingSubagent.runtime!.agent!.session!.saveSessionStore).toHaveBeenCalled();
+            expect(apiWithFailingSubagent.runtime!.agent!.session!.patchSessionEntry).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionKey: childSessionKey, replaceEntry: true, preserveActivity: false }),
+            );
             expect(result.anomalies).toBe(1);
+        });
+
+        it('logs warning and skips cleanup when host does not expose row-scoped session helpers', async () => {
+            const staleWorkflowId = 'wf-stale-005';
+            const childSessionKey = 'child-session-005';
+            const now = Date.now();
+
+            mockListWorkflows.mockReturnValue([
+                createWorkflow({
+                    workflow_id: staleWorkflowId,
+                    child_session_key: childSessionKey,
+                    state: 'active',
+                    created_at: now - (15 * 60 * 1000),
+                }),
+            ]);
+            mockGetEvents.mockReturnValue([
+                createEvent(staleWorkflowId, 'unexpected_crash'),
+            ]);
+            isExpectedSubagentError.mockReturnValue(false);
+
+            // Host exposes only deprecated loadSessionStore/saveSessionStore, not row-scoped helpers
+            const apiWithLegacySession = {
+                runtime: {
+                    subagent: null,
+                    agent: {
+                        session: {
+                            resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
+                            loadSessionStore: vi.fn().mockReturnValue({}),
+                            saveSessionStore: vi.fn().mockResolvedValue(undefined),
+                        },
+                    },
+                },
+            } as unknown as Parameters<typeof runWorkflowWatchdog>[1];
+
+            const result = await runWorkflowWatchdog(
+                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
+                apiWithLegacySession,
+                mockLogger,
+            );
+
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                expect.stringContaining('host does not expose row-scoped session helpers'),
+            );
+            expect(result.anomalies).toBe(1);
+        });
+
+        it('skips patchSessionEntry when session entry is already absent', async () => {
+            const staleWorkflowId = 'wf-stale-006';
+            const childSessionKey = 'child-session-006';
+            const now = Date.now();
+
+            mockListWorkflows.mockReturnValue([
+                createWorkflow({
+                    workflow_id: staleWorkflowId,
+                    child_session_key: childSessionKey,
+                    state: 'active',
+                    created_at: now - (15 * 60 * 1000),
+                }),
+            ]);
+            mockGetEvents.mockReturnValue([
+                createEvent(staleWorkflowId, 'unexpected_crash'),
+            ]);
+            isExpectedSubagentError.mockReturnValue(false);
+
+            const mockGetSessionEntry = vi.fn().mockReturnValue(undefined);
+            const mockPatchSessionEntry = vi.fn().mockResolvedValue(null);
+            const apiWithAbsentSession = {
+                runtime: {
+                    subagent: null,
+                    agent: {
+                        session: {
+                            resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
+                            getSessionEntry: mockGetSessionEntry,
+                            patchSessionEntry: mockPatchSessionEntry,
+                        },
+                    },
+                },
+            } as unknown as Parameters<typeof runWorkflowWatchdog>[1];
+
+            const result = await runWorkflowWatchdog(
+                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
+                apiWithAbsentSession,
+                mockLogger,
+            );
+
+            expect(mockGetSessionEntry).toHaveBeenCalledWith({ sessionKey: childSessionKey });
+            expect(mockPatchSessionEntry).not.toHaveBeenCalled();
+            expect(mockLogger.debug).toHaveBeenCalledWith(
+                expect.stringContaining('already absent'),
+            );
+            expect(result.anomalies).toBe(1);
+        });
+
+        it('logs warning and continues scan when fallback cleanup also fails after gateway error', async () => {
+            const staleWorkflowId = 'wf-stale-007';
+            const childSessionKey = 'child-session-007';
+            const now = Date.now();
+
+            mockListWorkflows.mockReturnValue([
+                createWorkflow({
+                    workflow_id: staleWorkflowId,
+                    child_session_key: childSessionKey,
+                    state: 'active',
+                    created_at: now - (15 * 60 * 1000),
+                }),
+            ]);
+            mockGetEvents.mockReturnValue([
+                createEvent(staleWorkflowId, 'unexpected_crash'),
+            ]);
+            isExpectedSubagentError.mockReturnValue(false);
+
+            // Main cleanup throws gateway error; fallback also throws (same host issue)
+            const apiWithDoubleFailure = {
+                runtime: {
+                    subagent: {
+                        deleteSession: vi.fn().mockRejectedValue(new Error('gateway request failed')),
+                    },
+                    agent: {
+                        session: {
+                            resolveStorePath: vi.fn().mockReturnValue('/tmp/sessions.json'),
+                            getSessionEntry: vi.fn().mockReturnValue({ data: true }),
+                            patchSessionEntry: vi.fn().mockRejectedValue(new Error('host still down')),
+                        },
+                    },
+                },
+            } as unknown as Parameters<typeof runWorkflowWatchdog>[1];
+
+            const result = await runWorkflowWatchdog(
+                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
+                apiWithDoubleFailure,
+                mockLogger,
+            );
+
+            // Fallback failure should be logged, not abort the scan
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                expect.stringContaining('Fallback cleanup also failed'),
+            );
+            // Scan should still complete with the anomaly recorded (not -1 error state)
+            expect(result.anomalies).toBe(1);
+            expect(result.scanError).toBeUndefined();
         });
     });
 

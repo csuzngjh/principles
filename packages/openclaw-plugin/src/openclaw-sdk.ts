@@ -111,7 +111,37 @@ export interface OpenClawPluginApi {
       }) => Promise<unknown>;
       session?: {
         resolveStorePath: () => string;
+        /** Row-scoped read (replaces deprecated loadSessionStore whole-store reads). */
+        getSessionEntry?: (params: {
+          sessionKey: string;
+          agentId?: string;
+          storePath?: string;
+        }) => Record<string, unknown> | undefined;
+        /** Row-scoped write (replaces deprecated saveSessionStore whole-store writes). */
+        patchSessionEntry?: (params: {
+          sessionKey: string;
+          agentId?: string;
+          storePath?: string;
+          replaceEntry?: boolean;
+          preserveActivity?: boolean;
+          update: (
+            entry: Record<string, unknown>,
+            context: { existingEntry?: Record<string, unknown> },
+          ) =>
+            | Promise<Partial<Record<string, unknown>> | null>
+            | Partial<Record<string, unknown>>
+            | null;
+        }) => Promise<Record<string, unknown> | null>;
+        /** Row-scoped upsert (replaces deprecated saveSessionStore whole-store writes). */
+        upsertSessionEntry?: (params: {
+          sessionKey: string;
+          agentId?: string;
+          storePath?: string;
+          entry: Record<string, unknown>;
+        }) => Promise<void>;
+        /** @deprecated Use getSessionEntry for reads. Kept for compat with older OpenClaw hosts. */
         loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
+        /** @deprecated Use patchSessionEntry/upsertSessionEntry for writes. Kept for compat with older OpenClaw hosts. */
         saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
         resolveSessionFilePath: (sessionKey: string) => string;
         config?: unknown;

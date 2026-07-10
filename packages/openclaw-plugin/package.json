@@ -1,7 +1,7 @@
 {
   "name": "principles-disciple",
-  "version": "1.74.1",
-  "description": "Teach your AI once. PD turns your corrections into reviewable behavior principles — so the AI never repeats the same mistake.",
+  "version": "1.198.1",
+  "description": "Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles. Stop correcting the same AI behavior across sessions.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -26,6 +26,7 @@
     "dist",
     "scripts",
     "templates",
+    "assets",
     "openclaw.plugin.json"
   ],
   "publishConfig": {
@@ -43,13 +44,13 @@
       "./dist/bundle.js"
     ],
     "compat": {
-      "pluginApi": "2026.4.4"
+      "pluginApi": ">=2026.4.4"
     },
     "build": {
       "openclawVersion": "2026.4.4"
     },
     "install": {
-      "minHostVersion": "2026.4.4"
+      "minHostVersion": ">=2026.4.4"
     }
   },
   "scripts": {

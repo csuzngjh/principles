@@ -27,6 +27,57 @@ export interface WatchdogResult {
   scanError?: string;
 }
 
+type AgentSessionApi = NonNullable<
+  NonNullable<NonNullable<OpenClawPluginApi['runtime']>['agent']>['session']
+>;
+
+/**
+ * Clean up a stale session entry via the row-scoped session API.
+ *
+ * Uses `patchSessionEntry` with `replaceEntry: true` and `update: () => null`
+ * to delete the row. If the host does not expose the row-scoped helpers
+ * (older OpenClaw builds), logs a warning and lets OpenClaw's session GC
+ * sweep the stale entry instead of falling back to the deprecated
+ * whole-store `loadSessionStore`/`saveSessionStore` helpers (which trigger
+ * ClawHub `sdk-load-session-store` / `sdk-session-store-write` warnings).
+ */
+async function cleanupStaleSessionEntry(
+  session: AgentSessionApi,
+  sessionKey: string,
+  logger?: PluginLogger,
+  phase?: string,
+): Promise<void> {
+  const tag = phase ? ` (${phase})` : '';
+
+  if (
+    typeof session.patchSessionEntry !== 'function' ||
+    typeof session.getSessionEntry !== 'function'
+  ) {
+    logger?.warn?.(
+      `[PD:Watchdog] Cannot clean up session ${sessionKey}${tag}: host does not expose row-scoped session helpers. The stale entry will be swept by OpenClaw's session GC.`,
+    );
+    return;
+  }
+
+  const existing = session.getSessionEntry({ sessionKey });
+  if (!existing) {
+    logger?.debug?.(
+      `[PD:Watchdog] Session ${sessionKey} already absent${tag}; nothing to clean.`,
+    );
+    return;
+  }
+
+  await session.patchSessionEntry({
+    sessionKey,
+    replaceEntry: true,
+    preserveActivity: false,
+    update: () => null,
+  });
+  logger?.info?.(
+    `[PD:Watchdog] Cleaned up stale session via row-scoped API${tag}: ${sessionKey}`,
+  );
+}
+
  
 export async function runWorkflowWatchdog(
   wctx: WorkspaceContext,
@@ -69,25 +120,22 @@ export async function runWorkflowWatchdog(
                 await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
                 logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
               } else if (agentSession) {
-                const storePath = agentSession.resolveStorePath();
-                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-                const normalizedKey = wf.child_session_key.toLowerCase();
-                if (sessionStore[normalizedKey]) {
-                  delete sessionStore[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, sessionStore);
-                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
-                }
+                await cleanupStaleSessionEntry(agentSession, wf.child_session_key, logger);
               }
             } catch (cleanupErr) {
               const errMsg = String(cleanupErr);
               if (errMsg.includes('gateway request') && agentSession) {
-                const storePath = agentSession.resolveStorePath();
-                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-                const normalizedKey = wf.child_session_key.toLowerCase();
-                if (sessionStore[normalizedKey]) {
-                  delete sessionStore[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, sessionStore);
-                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
+                try {
+                  await cleanupStaleSessionEntry(
+                    agentSession,
+                    wf.child_session_key,
+                    logger,
+                    'after gateway error',
+                  );
+                } catch (fallbackErr) {
+                  logger?.warn?.(
+                    `[PD:Watchdog] Fallback cleanup also failed for ${wf.child_session_key}: ${String(fallbackErr)}`,
+                  );
                 }
               } else {
                 logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
