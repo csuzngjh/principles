@@ -15,8 +15,8 @@ import type {
 } from './openclaw-sdk.js';
 import * as path from 'path';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
-import { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
-export { checkConversationAccessConfig, getPluginEntry } from './core/config-health.js';
+import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
+export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
@@ -58,6 +58,15 @@ import { checkSurfaceGuard, guardHook, guardService } from '@principles/core/run
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
+
+// PRI-343: Module-level auto-fix for allowConversationAccess.
+// Runs IMMEDIATELY when this bundle is imported (before register() is called).
+// Uses file locking to prevent race conditions with concurrent writers.
+try {
+  ensureConversationAccessInConfig();
+} catch {
+  // Best-effort — register() will retry with logging.
+}
 
 // ── Conversation Access Health Check (PRI-343) ────────────────────────────
 // Re-exported from core/config-health.ts for backward compatibility.
@@ -180,14 +189,29 @@ const plugin = {
         api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
       }
 
-      // PRI-343: Check allowConversationAccess — warn if llm_output/trajectory hooks blocked
+      // PRI-343: Check allowConversationAccess — auto-fix if missing/false, warn if fix fails.
+      // Uses file locking to prevent race conditions with concurrent writers.
       const accessCheck = checkConversationAccessConfig(getPluginEntry(api.config, api.id));
       if (!accessCheck.authorized) {
-        api.logger.error(
-          `[PD:health] conversation hooks (llm_output / trajectory) will be BLOCKED by OpenClaw.\n` +
-          `  reason: ${accessCheck.reason}\n` +
-          `  nextAction: ${accessCheck.nextAction}`,
-        );
+        let fixed = false;
+        try {
+          fixed = ensureConversationAccessInConfig();
+        } catch (err) {
+          api.logger.warn(
+            `[PD:health] auto-fix for allowConversationAccess failed: ${String(err instanceof Error ? err.message : err)}`,
+          );
+        }
+        if (fixed) {
+          api.logger.info(
+            `[PD:health] allowConversationAccess auto-configured. Restart the gateway to activate conversation hooks.`,
+          );
+        } else {
+          api.logger.error(
+            `[PD:health] conversation hooks (llm_output / trajectory) will be BLOCKED by OpenClaw.\n` +
+            `  reason: ${accessCheck.reason}\n` +
+            `  nextAction: ${accessCheck.nextAction}`,
+          );
+        }
       } else {
         api.logger.info(`[PD:health] conversation hooks (allowConversationAccess) OK`);
       }

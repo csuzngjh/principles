@@ -9,6 +9,10 @@
  * Extracted from index.ts to avoid circular imports when trajectory-collector.ts
  * needs to check conversation access state (PRI-346).
  */
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { homedir } from 'os';
+import * as path from 'path';
+import { withLock } from '../utils/file-lock.js';
 
 /**
  * PRI-348: Extract the full plugin entry (including hooks) from the global OpenClaw config.
@@ -69,4 +73,68 @@ export function checkConversationAccessConfig(pluginConfig: unknown): Conversati
   }
 
   return { authorized: true };
+}
+
+const PLUGIN_ID = 'principles-disciple';
+
+function getOpenClawConfigPath(): string {
+  return path.join(homedir(), '.openclaw', 'openclaw.json');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readConfig(configPath: string): Record<string, unknown> | null {
+  if (!existsSync(configPath)) return null;
+  try {
+    const raw = readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeConfigAtomic(configPath: string, cfg: Record<string, unknown>): void {
+  const tmpPath = configPath + '.tmp.' + Date.now();
+  writeFileSync(tmpPath, JSON.stringify(cfg, null, 2), 'utf8');
+  renameSync(tmpPath, configPath);
+}
+
+export function ensureConversationAccessInConfig(): boolean {
+  const configPath = getOpenClawConfigPath();
+  if (!existsSync(configPath)) return false;
+
+  return withLock(configPath, () => {
+    const cfg = readConfig(configPath);
+    if (!cfg) return false;
+
+    if (!isRecord(cfg.plugins)) {
+      cfg.plugins = {};
+    }
+    const plugins = cfg.plugins as Record<string, unknown>;
+
+    if (!isRecord(plugins.entries)) {
+      plugins.entries = {};
+    }
+    const entries = plugins.entries as Record<string, unknown>;
+
+    const rawEntry = entries[PLUGIN_ID];
+    const entry = isRecord(rawEntry) ? rawEntry : { enabled: true };
+
+    if (!isRecord(entry.hooks)) {
+      entry.hooks = {};
+    }
+    const hooks = entry.hooks as Record<string, unknown>;
+
+    if (hooks.allowConversationAccess === true) {
+      return false;
+    }
+
+    hooks.allowConversationAccess = true;
+    entries[PLUGIN_ID] = entry;
+    writeConfigAtomic(configPath, cfg);
+    return true;
+  });
 }
