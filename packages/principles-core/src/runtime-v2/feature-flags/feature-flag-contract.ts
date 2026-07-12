@@ -95,7 +95,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
   { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
-  { id: 'correction_observer', category: 'quiet', enabled: true, since: '2026-06-02', description: 'Independent correction observer service for keyword self-correction (MVP-Core per ADR-0014 amendment, PRI-293; quiet flag to allow runtime disable)' },
+  { id: 'correction_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Optional LLM optimization service for correction keywords; synchronous correction detection remains active independently' },
   { id: 'signal_collector', category: 'quiet', enabled: false, since: '2026-06-30', description: 'Unified signal collection host (correction + empathy upstream merge). NOTE: keyword detection (high-precision phrases) runs regardless of this flag; this flag only gates the LLM deep-judgment path (ambiguous terms / missed keywords). Quiet flag: dogfood-only until validated.' },
   { id: 'internalization_auto_consumer', category: 'quiet', enabled: true, since: '2026-06-13', description: 'Bounded auto-consumer for dreamer internalization tasks — prevents ready tasks from pending forever (PRI-381; quiet flag, default on, disableable via config)' },
   // PRI-408: Story A approval-completion orchestrator. Replaces the demo direct-writer
