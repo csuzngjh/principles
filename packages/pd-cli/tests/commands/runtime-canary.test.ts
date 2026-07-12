@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const expectedCliVersion: string = ((): string => {
+  const pkg: unknown = require('../../package.json');
+  if (typeof pkg === 'object' && pkg !== null && Object.hasOwn(pkg, 'version')) {
+    const v: unknown = Reflect.get(pkg, 'version');
+    if (typeof v === 'string') return v;
+  }
+  return 'unknown';
+})();
 
 const {
   mockSchemaCheck,
@@ -88,6 +99,7 @@ function healthyHealthSnapshot() {
     gfi: { active: null, staleSessionCount: 0, totalSessionCount: 0, activeSessionCount: 0, generatedAt: new Date().toISOString() },
     overallStatus: 'healthy' as const,
     recommendedActions: [],
+    totalTaskCount: 1,
   };
 }
 
@@ -163,6 +175,44 @@ describe('runCanaryChecks', () => {
     expect(result.overallStatus).toBe('degraded');
     const schemaCheck = result.checks.find(c => c.name === 'schema_conformance');
     expect(schemaCheck?.status).toBe('degraded');
+  });
+
+  it('reports an unexercised runtime as degraded with a next action', async () => {
+    mockHealthSnapshot.mockResolvedValue({
+      ...healthyHealthSnapshot(), totalTaskCount: 0,
+      recommendedActions: ['Runtime V2 pipeline has never been exercised.'],
+    });
+    const result = await runCanaryChecks(WS);
+    const runtimeCheck = result.checks.find(check => check.name === 'runtime_health');
+    expect(result.overallStatus).toBe('degraded');
+    expect(runtimeCheck?.status).toBe('degraded');
+    expect(runtimeCheck?.summary).toContain('not been exercised');
+    expect(result.recommendedNextActions).toContainEqual(expect.stringContaining('pain record'));
+  });
+
+  it('surfaces a real error (e.g. DB missing) as error, not masked by cold-start totalTaskCount=0', async () => {
+    // Simulates DB-missing scenario: overallStatus='error' while totalTaskCount stays 0
+    // (getTotalTaskCount() throws and the snapshot keeps the default 0).
+    mockHealthSnapshot.mockResolvedValue({
+      ...healthyHealthSnapshot(),
+      overallStatus: 'error' as const,
+      totalTaskCount: 0,
+      recommendedActions: ['Re-initialize the runtime database.'],
+    });
+    const result = await runCanaryChecks(WS);
+    const runtimeCheck = result.checks.find(check => check.name === 'runtime_health');
+    expect(runtimeCheck?.status).toBe('error');
+    // Summary must surface the error, NOT the cold-start "not been exercised" message.
+    expect(runtimeCheck?.summary).not.toContain('not been exercised');
+    expect(runtimeCheck?.summary).toContain('error');
+    expect(runtimeCheck?.summary).toContain('Re-initialize the runtime database.');
+    expect(result.overallStatus).toBe('error');
+  });
+
+  it('reports the package version instead of a hard-coded shim version', async () => {
+    const result = await runCanaryChecks(WS);
+    const shimCheck = result.checks.find(check => check.name === 'pd_shim_info');
+    expect(shimCheck?.details).toMatchObject({ version: expectedCliVersion });
   });
 
   it('continues other checks when one throws', async () => {
