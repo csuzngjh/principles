@@ -108,12 +108,12 @@ describe('resolveRuntimeConfigFromPdConfig', () => {
     if (isRuntimeConfigError(diagResult)) return;
     expect(diagResult.runtimeKind).toBe('pi-ai');
 
-    // default (no override) → pd.default (pi-ai placeholder), needs_setup without env var
+    // default (no override) → openclaw.default (MVP default runtime), resolves successfully
     const defaultEffective = computeEffectivePdConfig(null);
     const defaultResult = resolveRuntimeConfigFromPdConfig(defaultEffective, envWithoutKey);
-    expect(isRuntimeConfigError(defaultResult)).toBe(true);
-    if (!isRuntimeConfigError(defaultResult)) return;
-    expect(defaultResult.reason).toBe('needs_setup');
+    expect(isRuntimeConfigError(defaultResult)).toBe(false);
+    if (isRuntimeConfigError(defaultResult)) return;
+    expect(defaultResult.runtimeKind).toBe('openclaw-cli');
   });
 
   it('AC4: missing env var fails loud with reason + nextAction', () => {
@@ -128,13 +128,13 @@ describe('resolveRuntimeConfigFromPdConfig', () => {
     expect(result.nextAction).toBeTruthy();
   });
 
-  it('AC5: null config defaults to pi-ai placeholder, returns needs_setup without env var', () => {
+  it('AC5: null config defaults to openclaw runtime, resolves successfully without env var', () => {
     const effective = computeEffectivePdConfig(null);
     const result = resolveRuntimeConfigFromPdConfig(effective, envWithoutKey);
 
-    expect(isRuntimeConfigError(result)).toBe(true);
-    if (!isRuntimeConfigError(result)) return;
-    expect(result.reason).toBe('needs_setup');
+    expect(isRuntimeConfigError(result)).toBe(false);
+    if (isRuntimeConfigError(result)) return;
+    expect(result.runtimeKind).toBe('openclaw-cli');
   });
 
   it('returns error for disabled agent', () => {

@@ -359,7 +359,7 @@ describe('PRI-294: Feature flag registry matches surface registry', () => {
   it('correction_observer flag exists in DEFAULT_FEATURE_FLAGS', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'correction_observer');
     expect(flag).toBeDefined();
-    expect(flag!.enabled).toBe(true);
+    expect(flag!.enabled).toBe(false); // MVP-Quiet: disabled by default
   });
 
   it('nocturnal and idle_trigger are gone flags', () => {

@@ -3,11 +3,11 @@ import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
 import { DEFAULT_FEATURE_FLAGS, computeEffectiveFlags } from '@principles/core/runtime-v2';
 
 describe('Correction Observer Ownership — Feature Flag & Surface Registry Consistency (PRI-293, ERR-027)', () => {
-  it('correction_observer feature flag is registered as quiet with enabled:true (disableable runtime kill switch)', () => {
+  it('correction_observer feature flag is registered as quiet with enabled:false (MVP-Quiet, disableable runtime kill switch)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'correction_observer');
     expect(flag).toBeDefined();
     expect(flag!.category).toBe('quiet');
-    expect(flag!.enabled).toBe(true);
+    expect(flag!.enabled).toBe(false);
   });
 
   it('correction_observer can be disabled via workspace config (P1 fix — runtime kill switch)', () => {

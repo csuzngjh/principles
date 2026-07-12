@@ -109,14 +109,15 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     expect(nn(effective.config.features.idle_trigger).category).toBe('gone');
   });
 
-  it('defaults include pd.default (pi-ai) and openclaw.default (openclaw) runtime profiles', () => {
+  it('defaults use openclaw.default while retaining pd.default as an explicit pi-ai option', () => {
     const effective = computeEffectivePdConfig(null);
-    // pd.default is the primary default profile (pi-ai type)
+    // The active MVP default works through the host OpenClaw runtime.
     expect(Object.hasOwn(effective.config.runtimeProfiles, DEFAULT_RUNTIME_PROFILE_ID)).toBe(true);
-    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('pi-ai');
-    // openclaw.default is retained as a fallback (openclaw type)
+    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('openclaw');
     expect(Object.hasOwn(effective.config.runtimeProfiles, 'openclaw.default')).toBe(true);
     expect(nn(effective.config.runtimeProfiles['openclaw.default']).type).toBe('openclaw');
+    // Direct pi-ai remains available only after the Owner explicitly configures it.
+    expect(nn(effective.config.runtimeProfiles['pd.default']).type).toBe('pi-ai');
   });
 
   it('defaults include all internal agents', () => {

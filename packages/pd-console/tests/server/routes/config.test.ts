@@ -205,8 +205,9 @@ describe('GET /api/v1/config/summary', () => {
       agents: { name: string; runtimeProfileId: string; runtimeProfileLabel: string }[];
     }>(res);
     expect(data.source).toBe('user_config');
-    // 3 user profiles + 1 default `pd.default` merged by computeEffectivePdConfig
-    expect(data.runtimeProfiles).toHaveLength(4);
+    // 3 user profiles; openclaw.default is already in VALID_CONFIG, so the MVP
+    // default profile is not merged again by computeEffectivePdConfig.
+    expect(data.runtimeProfiles).toHaveLength(3);
     expect(data.agents).toHaveLength(10); // all internal agents (incl. signalCollector)
   });
 
@@ -707,9 +708,9 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     expect(res.statusCode).toBe(200);
     const data = okEnvelope<{ agent: string; readiness: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    // Default profile is pd.default (pi-ai placeholder) → needs_setup until
-    // user fills in provider/model/apiKeyEnv via web console (M9 + Plan C)
-    expect(data.readiness).toBe('needs_setup');
+    // Default profile is openclaw.default (MVP default runtime) → ready
+    // out of the box, no env var or user setup required.
+    expect(data.readiness).toBe('ready');
   });
 
   it('returns unknown readiness when config is malformed', async () => {

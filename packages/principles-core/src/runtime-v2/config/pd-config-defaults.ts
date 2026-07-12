@@ -32,15 +32,9 @@ for (const flag of CONTRACT_DEFAULTS) {
 
 // ── Default Runtime Profile ─────────────────────────────────────────────────
 //
-// M9 decision (2026-04-29, MEMORY.md L88): PiAiRuntimeAdapter is the default
-// Diagnostician Runtime. The default profile is therefore a pi-ai type profile
-// (`pd.default`). The legacy `openclaw.default` profile is retained as a
-// fallback so users can switch back via web console without editing yaml.
-//
-// The `pd.default` profile ships with empty placeholder fields
-// (provider/model/apiKeyEnv). Its static readiness is `needs_setup`. Users
-// must fill in real values via web console (Profile CRUD API) or by editing
-// `.pd/config.yaml`.
+// MVP installs must work with the OpenClaw runtime the plugin is already
+// running inside. The optional pi-ai profile remains available for explicit
+// configuration, but its empty placeholders must never be the active default.
 
 export const PI_AI_DEFAULT_PROFILE_ID = 'pd.default';
 
@@ -58,13 +52,9 @@ export const OPENCLAW_DEFAULT_PROFILE: OpenClawRuntimeProfile = {
   source: 'default',
 };
 
-// Backward-compatible aliases. Existing call sites that reference
-// DEFAULT_RUNTIME_PROFILE_ID / DEFAULT_RUNTIME_PROFILE now resolve to the
-// pi-ai default. Call sites that need the openclaw fallback should reference
-// OPENCLAW_DEFAULT_PROFILE_ID / OPENCLAW_DEFAULT_PROFILE explicitly.
-export const DEFAULT_RUNTIME_PROFILE_ID = PI_AI_DEFAULT_PROFILE_ID;
+export const DEFAULT_RUNTIME_PROFILE_ID = OPENCLAW_DEFAULT_PROFILE_ID;
 
-export const DEFAULT_RUNTIME_PROFILE: PdLocalRuntimeProfile = PI_AI_DEFAULT_PROFILE;
+export const DEFAULT_RUNTIME_PROFILE: OpenClawRuntimeProfile = OPENCLAW_DEFAULT_PROFILE;
 
 // ── Default Internal Agents ─────────────────────────────────────────────────
 
