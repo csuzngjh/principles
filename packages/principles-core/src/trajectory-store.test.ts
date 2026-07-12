@@ -5,7 +5,6 @@ import Database from 'better-sqlite3';
 import {
   listCorrectionSamples,
   reviewCorrectionSample,
-  type CorrectionSampleReviewStatus,
 } from './trajectory-store.js';
 
 describe('trajectory-store', () => {
@@ -20,6 +19,7 @@ describe('trajectory-store', () => {
     try {
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {
+      // Best-effort cleanup; ignore errors on tmp teardown.
     }
   });
 
@@ -127,8 +127,8 @@ describe('trajectory-store', () => {
 
       const result = listCorrectionSamples(tmpDir);
       expect(result).toHaveLength(1);
-      expect(result[0].sampleId).toBe('sample-001');
-      expect(result[0].reviewStatus).toBe('pending');
+      expect(result[0]?.sampleId).toBe('sample-001');
+      expect(result[0]?.reviewStatus).toBe('pending');
     });
 
     it('returns approved samples when filtered', () => {
@@ -138,7 +138,7 @@ describe('trajectory-store', () => {
 
       const result = listCorrectionSamples(tmpDir, 'approved');
       expect(result).toHaveLength(1);
-      expect(result[0].sampleId).toBe('sample-002');
+      expect(result[0]?.sampleId).toBe('sample-002');
     });
 
     it('returns rejected samples when filtered', () => {
@@ -148,7 +148,7 @@ describe('trajectory-store', () => {
 
       const result = listCorrectionSamples(tmpDir, 'rejected');
       expect(result).toHaveLength(1);
-      expect(result[0].sampleId).toBe('sample-003');
+      expect(result[0]?.sampleId).toBe('sample-003');
     });
 
     it('returns samples with all expected fields', () => {
@@ -157,20 +157,20 @@ describe('trajectory-store', () => {
       setupTestDb(dbPath);
 
       const result = listCorrectionSamples(tmpDir);
-      const sample = result[0];
+      const [sample] = result;
 
-      expect(sample.sampleId).toBe('sample-001');
-      expect(sample.sessionId).toBe('session-001');
-      expect(sample.badAssistantTurnId).toBe(1);
-      expect(sample.userCorrectionTurnId).toBe(2);
-      expect(sample.recoveryToolSpanJson).toBe('{"tool":"edit"}');
-      expect(sample.diffExcerpt).toBe('diff content');
-      expect(sample.principleIdsJson).toBe('["P0-001"]');
-      expect(sample.qualityScore).toBe(0.9);
-      expect(sample.reviewStatus).toBe('pending');
-      expect(sample.exportMode).toBe('redacted');
-      expect(typeof sample.createdAt).toBe('string');
-      expect(typeof sample.updatedAt).toBe('string');
+      expect(sample?.sampleId).toBe('sample-001');
+      expect(sample?.sessionId).toBe('session-001');
+      expect(sample?.badAssistantTurnId).toBe(1);
+      expect(sample?.userCorrectionTurnId).toBe(2);
+      expect(sample?.recoveryToolSpanJson).toBe('{"tool":"edit"}');
+      expect(sample?.diffExcerpt).toBe('diff content');
+      expect(sample?.principleIdsJson).toBe('["P0-001"]');
+      expect(sample?.qualityScore).toBe(0.9);
+      expect(sample?.reviewStatus).toBe('pending');
+      expect(sample?.exportMode).toBe('redacted');
+      expect(typeof sample?.createdAt).toBe('string');
+      expect(typeof sample?.updatedAt).toBe('string');
     });
 
     it('returns empty array on database error', () => {
@@ -212,8 +212,8 @@ describe('trajectory-store', () => {
 
       const result = listCorrectionSamples(tmpDir);
       expect(result).toHaveLength(2);
-      expect(result[0].sampleId).toBe('sample-004');
-      expect(result[1].sampleId).toBe('sample-001');
+      expect(result[0]?.sampleId).toBe('sample-004');
+      expect(result[1]?.sampleId).toBe('sample-001');
     });
 
     it('handles NULL optional fields gracefully', () => {
@@ -261,9 +261,9 @@ describe('trajectory-store', () => {
 
       const result = listCorrectionSamples(tmpDir);
       expect(result).toHaveLength(1);
-      expect(result[0].recoveryToolSpanJson).toBe('');
-      expect(result[0].diffExcerpt).toBe('');
-      expect(result[0].principleIdsJson).toBe('[]');
+      expect(result[0]?.recoveryToolSpanJson).toBe('');
+      expect(result[0]?.diffExcerpt).toBe('');
+      expect(result[0]?.principleIdsJson).toBe('[]');
     });
   });
 
@@ -279,10 +279,10 @@ describe('trajectory-store', () => {
       expect(result.reviewStatus).toBe('approved');
 
       const db = new Database(dbPath);
-      const row = db.prepare('SELECT review_status FROM correction_samples WHERE sample_id = ?').get('sample-001');
+      const row = db.prepare('SELECT review_status FROM correction_samples WHERE sample_id = ?').get('sample-001') as { review_status: string } | undefined;
       expect(row?.review_status).toBe('approved');
 
-      const reviewRow = db.prepare('SELECT * FROM sample_reviews WHERE sample_id = ?').get('sample-001');
+      const reviewRow = db.prepare('SELECT * FROM sample_reviews WHERE sample_id = ?').get('sample-001') as { review_status: string; note: string | null } | undefined;
       expect(reviewRow?.review_status).toBe('approved');
       expect(reviewRow?.note).toBe('Looks good');
       db.close();
@@ -299,7 +299,7 @@ describe('trajectory-store', () => {
       expect(result.reviewStatus).toBe('rejected');
 
       const db = new Database(dbPath);
-      const row = db.prepare('SELECT review_status FROM correction_samples WHERE sample_id = ?').get('sample-001');
+      const row = db.prepare('SELECT review_status FROM correction_samples WHERE sample_id = ?').get('sample-001') as { review_status: string } | undefined;
       expect(row?.review_status).toBe('rejected');
       db.close();
     });
@@ -322,13 +322,13 @@ describe('trajectory-store', () => {
       setupTestDb(dbPath);
 
       const db = new Database(dbPath);
-      const before = db.prepare('SELECT updated_at FROM correction_samples WHERE sample_id = ?').get('sample-001');
+      const before = db.prepare('SELECT updated_at FROM correction_samples WHERE sample_id = ?').get('sample-001') as { updated_at: string } | undefined;
       db.close();
 
       const result = reviewCorrectionSample('sample-001', 'approved', '', tmpDir);
 
       const db2 = new Database(dbPath);
-      const after = db2.prepare('SELECT updated_at FROM correction_samples WHERE sample_id = ?').get('sample-001');
+      const after = db2.prepare('SELECT updated_at FROM correction_samples WHERE sample_id = ?').get('sample-001') as { updated_at: string } | undefined;
       db2.close();
 
       expect(result.updatedAt).toBe(after?.updated_at);
@@ -345,7 +345,7 @@ describe('trajectory-store', () => {
       expect(result.reviewStatus).toBe('approved');
 
       const db = new Database(dbPath);
-      const reviewRow = db.prepare('SELECT note FROM sample_reviews WHERE sample_id = ?').get('sample-001');
+      const reviewRow = db.prepare('SELECT note FROM sample_reviews WHERE sample_id = ?').get('sample-001') as { note: string | null } | undefined;
       expect(reviewRow?.note).toBe(null);
       db.close();
     });
@@ -360,7 +360,7 @@ describe('trajectory-store', () => {
       expect(result.reviewStatus).toBe('approved');
 
       const db = new Database(dbPath);
-      const reviewRow = db.prepare('SELECT note FROM sample_reviews WHERE sample_id = ?').get('sample-001');
+      const reviewRow = db.prepare('SELECT note FROM sample_reviews WHERE sample_id = ?').get('sample-001') as { note: string | null } | undefined;
       expect(reviewRow?.note).toBe('');
       db.close();
     });

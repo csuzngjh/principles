@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DefaultPrincipleInjector, InjectionContext } from './principle-injector.js';
+import { DefaultPrincipleInjector, type InjectionContext } from './principle-injector.js';
 
 interface TestPrinciple {
   id: string;
@@ -66,7 +66,7 @@ describe('DefaultPrincipleInjector', () => {
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 100 };
       const result = injector.getRelevantPrinciples([p0], context);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('P0-001');
+      expect(result[0]?.id).toBe('P0-001');
     });
 
     it('P0 principles sorted by createdAt (oldest first)', () => {
@@ -75,8 +75,8 @@ describe('DefaultPrincipleInjector', () => {
       const p0New = makeP('P0-002', 'New', { priority: 'P0', createdAt: '2026-06-01T00:00:00.000Z' });
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 4000 };
       const result = injector.getRelevantPrinciples([p0New, p0Old], context);
-      expect(result[0].id).toBe('P0-001');
-      expect(result[1].id).toBe('P0-002');
+      expect(result[0]?.id).toBe('P0-001');
+      expect(result[1]?.id).toBe('P0-002');
     });
 
     it('P1 principles sorted by priority then createdAt', () => {
@@ -85,8 +85,8 @@ describe('DefaultPrincipleInjector', () => {
       const p1New = makeP('P1-002', 'New', { priority: 'P1', createdAt: '2026-06-01T00:00:00.000Z' });
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 4000 };
       const result = injector.getRelevantPrinciples([p1New, p1Old], context);
-      expect(result[0].id).toBe('P1-001');
-      expect(result[1].id).toBe('P1-002');
+      expect(result[0]?.id).toBe('P1-001');
+      expect(result[1]?.id).toBe('P1-002');
     });
 
     it('maskedPrincipleIds filters out excluded principles', () => {
@@ -101,7 +101,7 @@ describe('DefaultPrincipleInjector', () => {
       };
       const result = injector.getRelevantPrinciples([p0, p1], context);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('P0-001');
+      expect(result[0]?.id).toBe('P0-001');
     });
 
     it('maskedPrincipleIds empty set has no effect', () => {
@@ -140,7 +140,10 @@ describe('DefaultPrincipleInjector', () => {
 
     it('undefined priority defaults to P1', () => {
       const injector = new DefaultPrincipleInjector();
-      const p = makeP('P-001', 'Default', {});
+      // Construct directly without `makeP` so the `priority` field is genuinely
+      // absent. `makeP` applies `opts.priority ?? 'P1'`, which would mask the
+      // undefined-priority branch (priorityValue() falls back to 'P1').
+      const p: TestPrinciple = { id: 'P-001', text: 'Default', createdAt: '2026-01-01T00:00:00.000Z' };
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 4000 };
       const result = injector.getRelevantPrinciples([p], context);
       expect(result).toHaveLength(1);
@@ -152,8 +155,8 @@ describe('DefaultPrincipleInjector', () => {
       const p2 = makeP('P2-001', 'P2', { priority: 'P2' });
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 4000 };
       const result = injector.getRelevantPrinciples([p2, p1], context);
-      expect(result[0].id).toBe('P1-001');
-      expect(result[1].id).toBe('P2-001');
+      expect(result[0]?.id).toBe('P1-001');
+      expect(result[1]?.id).toBe('P2-001');
     });
 
     it('P0 fills budget first, then P1/P2', () => {
@@ -163,7 +166,7 @@ describe('DefaultPrincipleInjector', () => {
       const p1b = makeP('P1-002', 'B'.repeat(100), { priority: 'P1' });
       const context: InjectionContext = { domain: 'test', sessionId: 's1', budgetChars: 300 };
       const result = injector.getRelevantPrinciples([p1a, p0, p1b], context);
-      expect(result[0].id).toBe('P0-001');
+      expect(result[0]?.id).toBe('P0-001');
       expect(result.length).toBeGreaterThanOrEqual(2);
     });
 
