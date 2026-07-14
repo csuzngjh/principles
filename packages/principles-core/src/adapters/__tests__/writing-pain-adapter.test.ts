@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { WritingPainAdapter } from '../writing/writing-pain-adapter.js';
 import { deriveSeverity } from '../../pain-signal.js';
-import type { TextAnalysisResult, WritingIssueType } from '../writing/writing-types.js';
+import type { TextAnalysisResult } from '../writing/writing-types.js';
 
 describe('WritingPainAdapter', () => {
   const adapter = new WritingPainAdapter();
@@ -29,27 +29,27 @@ describe('WritingPainAdapter', () => {
   });
 
   it('returns null for severityScore < 0', () => {
-    const event = { ...baseEvent, severityScore: -1 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: -1 };
     expect(adapter.capture(event)).toBeNull();
   });
 
   it('returns null for severityScore > 100', () => {
-    const event = { ...baseEvent, severityScore: 101 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 101 };
     expect(adapter.capture(event)).toBeNull();
   });
 
   it('returns null for non-number severityScore', () => {
-    const event = { ...baseEvent, severityScore: 'high' as unknown as number } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 'high' as unknown as number };
     expect(adapter.capture(event)).toBeNull();
   });
 
   it('returns null for missing sessionId', () => {
-    const event = { ...baseEvent, sessionId: '' } as TextAnalysisResult;
+    const event = { ...baseEvent, sessionId: '' };
     expect(adapter.capture(event)).toBeNull();
   });
 
   it('returns null for sessionId that is not a string', () => {
-    const event = { ...baseEvent, sessionId: 42 as unknown as string } as TextAnalysisResult;
+    const event = { ...baseEvent, sessionId: 42 as unknown as string };
     expect(adapter.capture(event)).toBeNull();
   });
 
@@ -60,23 +60,25 @@ describe('WritingPainAdapter', () => {
   it('returns correct PainSignal for a valid event', () => {
     const signal = adapter.capture(baseEvent);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('style_inconsistency');
-    expect(signal!.score).toBe(65);
-    expect(signal!.domain).toBe('writing');
-    expect(signal!.sessionId).toBe('sess-123');
-    expect(signal!.agentId).toBe('writing-evaluator');
-    expect(signal!.traceId).toBe('unknown');
-    expect(signal!.reason).toBe('Style inconsistency: Mixed formal and informal tone');
-    expect(signal!.severity).toBe(deriveSeverity(65));
-    expect(signal!.timestamp).toBeTruthy();
-    expect(new Date(signal!.timestamp).toISOString()).toBe(signal!.timestamp);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('style_inconsistency');
+    expect(signal.score).toBe(65);
+    expect(signal.domain).toBe('writing');
+    expect(signal.sessionId).toBe('sess-123');
+    expect(signal.agentId).toBe('writing-evaluator');
+    expect(signal.traceId).toBe('unknown');
+    expect(signal.reason).toBe('Style inconsistency: Mixed formal and informal tone');
+    expect(signal.severity).toBe(deriveSeverity(65));
+    expect(signal.timestamp).toBeTruthy();
+    expect(new Date(signal.timestamp).toISOString()).toBe(signal.timestamp);
   });
 
   it('rounds severityScore to integer', () => {
-    const event = { ...baseEvent, severityScore: 72.7 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 72.7 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.score).toBe(73);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.score).toBe(73);
   });
 
   // ---------------------------------------------------------------------------
@@ -91,8 +93,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('text_coherence_violation');
-    expect(signal!.reason).toBe('Text coherence violation: Paragraphs lack logical flow');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('text_coherence_violation');
+    expect(signal.reason).toBe('Text coherence violation: Paragraphs lack logical flow');
   });
 
   it('handles style_inconsistency issue type', () => {
@@ -103,8 +106,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('style_inconsistency');
-    expect(signal!.reason).toBe('Style inconsistency: Mixed styles detected');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('style_inconsistency');
+    expect(signal.reason).toBe('Style inconsistency: Mixed styles detected');
   });
 
   it('handles narrative_arc_break issue type', () => {
@@ -115,8 +119,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('narrative_arc_break');
-    expect(signal!.reason).toBe('Narrative arc break: Story arc is broken');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('narrative_arc_break');
+    expect(signal.reason).toBe('Narrative arc break: Story arc is broken');
   });
 
   it('handles tone_mismatch issue type', () => {
@@ -127,8 +132,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('tone_mismatch');
-    expect(signal!.reason).toBe('Tone mismatch: Tone shifts unexpectedly');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('tone_mismatch');
+    expect(signal.reason).toBe('Tone mismatch: Tone shifts unexpectedly');
   });
 
   // ---------------------------------------------------------------------------
@@ -143,8 +149,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.triggerTextPreview).toBe(longExcerpt.slice(0, 200));
-    expect(signal!.triggerTextPreview.length).toBe(200);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.triggerTextPreview).toBe(longExcerpt.slice(0, 200));
+    expect(signal.triggerTextPreview.length).toBe(200);
   });
 
   it('preserves triggerTextPreview under 200 chars', () => {
@@ -155,7 +162,8 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.triggerTextPreview).toBe(shortExcerpt);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.triggerTextPreview).toBe(shortExcerpt);
   });
 
   // ---------------------------------------------------------------------------
@@ -163,35 +171,39 @@ describe('WritingPainAdapter', () => {
   // ---------------------------------------------------------------------------
 
   it('derives low severity for score < 40', () => {
-    const event = { ...baseEvent, severityScore: 25 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 25 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.severity).toBe('low');
-    expect(signal!.severity).toBe(deriveSeverity(25));
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.severity).toBe('low');
+    expect(signal.severity).toBe(deriveSeverity(25));
   });
 
   it('derives medium severity for score 40-69', () => {
-    const event = { ...baseEvent, severityScore: 55 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 55 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.severity).toBe('medium');
-    expect(signal!.severity).toBe(deriveSeverity(55));
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.severity).toBe('medium');
+    expect(signal.severity).toBe(deriveSeverity(55));
   });
 
   it('derives high severity for score 70-89', () => {
-    const event = { ...baseEvent, severityScore: 78 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 78 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.severity).toBe('high');
-    expect(signal!.severity).toBe(deriveSeverity(78));
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.severity).toBe('high');
+    expect(signal.severity).toBe(deriveSeverity(78));
   });
 
   it('derives critical severity for score >= 90', () => {
-    const event = { ...baseEvent, severityScore: 95 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 95 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.severity).toBe('critical');
-    expect(signal!.severity).toBe(deriveSeverity(95));
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.severity).toBe('critical');
+    expect(signal.severity).toBe(deriveSeverity(95));
   });
 
   // ---------------------------------------------------------------------------
@@ -205,8 +217,9 @@ describe('WritingPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.context.issueType).toBe('style_inconsistency');
-    expect(signal!.context.excerptLength).toBe(11);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.context.issueType).toBe('style_inconsistency');
+    expect(signal.context.excerptLength).toBe(11);
   });
 
   // ---------------------------------------------------------------------------
@@ -217,7 +230,8 @@ describe('WritingPainAdapter', () => {
     const event: TextAnalysisResult = { ...baseEvent, traceId: 'trace-abc' };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.traceId).toBe('trace-abc');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.traceId).toBe('trace-abc');
   });
 
   // ---------------------------------------------------------------------------
@@ -225,16 +239,18 @@ describe('WritingPainAdapter', () => {
   // ---------------------------------------------------------------------------
 
   it('accepts severityScore of 0', () => {
-    const event = { ...baseEvent, severityScore: 0 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 0 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.score).toBe(0);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.score).toBe(0);
   });
 
   it('accepts severityScore of 100', () => {
-    const event = { ...baseEvent, severityScore: 100 } as TextAnalysisResult;
+    const event = { ...baseEvent, severityScore: 100 };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.score).toBe(100);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.score).toBe(100);
   });
 });

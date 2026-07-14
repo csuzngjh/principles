@@ -106,8 +106,10 @@ describe('evolution-store', () => {
 
       const result = listEvolutionTasks(tmpDir, { status: 'completed' });
       expect(result).toHaveLength(1);
-      expect(result[0]?.taskId).toBe('task-002');
-      expect(result[0]?.status).toBe('completed');
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.taskId).toBe('task-002');
+      expect(task.status).toBe('completed');
     });
 
     it('filters by dateFrom', () => {
@@ -116,7 +118,9 @@ describe('evolution-store', () => {
 
       const result = listEvolutionTasks(tmpDir, { dateFrom: '2026-06-18T00:00:00.000Z' });
       expect(result).toHaveLength(1);
-      expect(result[0]?.taskId).toBe('task-003');
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.taskId).toBe('task-003');
     });
 
     it('filters by dateTo', () => {
@@ -125,7 +129,9 @@ describe('evolution-store', () => {
 
       const result = listEvolutionTasks(tmpDir, { dateTo: '2026-06-12T00:00:00.000Z' });
       expect(result).toHaveLength(1);
-      expect(result[0]?.taskId).toBe('task-001');
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.taskId).toBe('task-001');
     });
 
     it('filters by both dateFrom and dateTo', () => {
@@ -137,7 +143,9 @@ describe('evolution-store', () => {
         dateTo: '2026-06-18T00:00:00.000Z',
       });
       expect(result).toHaveLength(1);
-      expect(result[0]?.taskId).toBe('task-002');
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.taskId).toBe('task-002');
     });
 
     it('applies limit and offset', () => {
@@ -178,7 +186,8 @@ describe('evolution-store', () => {
       const result = listEvolutionTasks(tmpDir, { status: 'failed' });
       expect(result).toHaveLength(1);
 
-      const task = result[0]!;
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
       expect(task.taskId).toBe('task-003');
       expect(task.traceId).toBe('trace-003');
       expect(task.enqueuedAt).toBe('2026-06-20T16:00:00.000Z');
@@ -200,7 +209,8 @@ describe('evolution-store', () => {
       const result = listEvolutionTasks(tmpDir, { status: 'queued' });
       expect(result).toHaveLength(1);
 
-      const task = result[0]!;
+      const [task] = result;
+      if (!task) throw new Error('Expected non-null task');
       expect(task.reason).toBe('low score');
       expect(task.startedAt).toBeNull();
       expect(task.completedAt).toBeNull();
@@ -230,8 +240,9 @@ describe('evolution-store', () => {
 
       const task = getEvolutionTask(tmpDir, 1);
       expect(task).not.toBeNull();
-      expect(task!.id).toBe(1);
-      expect(task!.taskId).toBe('task-001');
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.id).toBe(1);
+      expect(task.taskId).toBe('task-001');
     });
 
     it('returns task by string taskId', () => {
@@ -240,16 +251,19 @@ describe('evolution-store', () => {
 
       const task = getEvolutionTask(tmpDir, 'task-002');
       expect(task).not.toBeNull();
-      expect(task!.taskId).toBe('task-002');
-      expect(task!.status).toBe('completed');
-      expect(task!.resolution).toBe('applied');
+      if (!task) throw new Error('Expected non-null task');
+      expect(task.taskId).toBe('task-002');
+      expect(task.status).toBe('completed');
+      expect(task.resolution).toBe('applied');
     });
 
     it('maps all fields correctly for a completed task', () => {
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
 
-      const task = getEvolutionTask(tmpDir, 'task-002')!;
+      const task = getEvolutionTask(tmpDir, 'task-002');
+      expect(task).not.toBeNull();
+      if (!task) throw new Error('Expected non-null task');
       expect(task.id).toBe(2);
       expect(task.taskId).toBe('task-002');
       expect(task.traceId).toBe('trace-002');

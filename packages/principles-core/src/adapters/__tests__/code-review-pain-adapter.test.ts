@@ -5,15 +5,6 @@ import type { ReviewEvent, ReviewComment, ChangedFile } from '../code-review/rev
 describe('CodeReviewPainAdapter', () => {
   const adapter = new CodeReviewPainAdapter();
 
-  const baseComment: ReviewComment = {
-    id: 'c1',
-    authorId: 'reviewer-1',
-    body: 'LGTM',
-    sentimentScore: 50,
-    createdAt: '2026-01-01T00:00:00Z',
-    resolvedAt: '2026-01-02T00:00:00Z',
-  };
-
   const baseFile: ChangedFile = {
     path: 'src/index.ts',
     linesAdded: 10,
@@ -45,12 +36,12 @@ describe('CodeReviewPainAdapter', () => {
   // ---------------------------------------------------------------------------
 
   it('returns null for missing sessionId', () => {
-    const event = { ...baseEvent, sessionId: '' } as ReviewEvent;
+    const event = { ...baseEvent, sessionId: '' };
     expect(adapter.capture(event)).toBeNull();
   });
 
   it('returns null when sessionId is not a string', () => {
-    const event = { ...baseEvent, sessionId: 42 as unknown as string } as ReviewEvent;
+    const event = { ...baseEvent, sessionId: 42 as unknown as string };
     expect(adapter.capture(event)).toBeNull();
   });
 
@@ -60,7 +51,8 @@ describe('CodeReviewPainAdapter', () => {
   });
 
   it('returns null when filesChanged is undefined and no comments', () => {
-    const event = { ...baseEvent, filesChanged: undefined, comments: [] } as ReviewEvent;
+    const { filesChanged: _filesChanged, ...eventWithoutFiles } = baseEvent;
+    const event = { ...eventWithoutFiles, filesChanged: undefined, comments: [] } as unknown as ReviewEvent;
     expect(adapter.capture(event)).toBeNull();
   });
 
@@ -90,11 +82,12 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
+    if (!signal) throw new Error('Expected non-null signal');
     // No tests + >2 files = +35, breaking change without label = +40 → process >= 40
-    expect(signal!.source).toBe('process_violation');
-    expect(signal!.score).toBeGreaterThan(0);
+    expect(signal.source).toBe('process_violation');
+    expect(signal.score).toBeGreaterThan(0);
     // Severity should be at least medium for process violations
-    expect(['medium', 'high', 'critical']).toContain(signal!.severity);
+    expect(['medium', 'high', 'critical']).toContain(signal.severity);
   });
 
   // ---------------------------------------------------------------------------
@@ -119,9 +112,10 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
+    if (!signal) throw new Error('Expected non-null signal');
     // With negative sentiment comments, source should be negative_sentiment
     // provided process violation score < 40
-    expect(signal!.source).toBe('negative_sentiment');
+    expect(signal.source).toBe('negative_sentiment');
   });
 
   // ---------------------------------------------------------------------------
@@ -156,7 +150,8 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.source).toBe('diff_complexity');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.source).toBe('diff_complexity');
   });
 
   // ---------------------------------------------------------------------------
@@ -181,8 +176,9 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.score).toBeGreaterThanOrEqual(0);
-    expect(signal!.score).toBeLessThanOrEqual(100);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.score).toBeGreaterThanOrEqual(0);
+    expect(signal.score).toBeLessThanOrEqual(100);
   });
 
   // ---------------------------------------------------------------------------
@@ -206,7 +202,8 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.triggerTextPreview.length).toBeLessThanOrEqual(200);
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.triggerTextPreview.length).toBeLessThanOrEqual(200);
   });
 
   // ---------------------------------------------------------------------------
@@ -216,15 +213,16 @@ describe('CodeReviewPainAdapter', () => {
   it('returns PainSignal with correct structure', () => {
     const signal = adapter.capture(baseEvent);
     expect(signal).not.toBeNull();
-    expect(typeof signal!.source).toBe('string');
-    expect(typeof signal!.score).toBe('number');
-    expect(signal!.timestamp).toBeTruthy();
-    expect(typeof signal!.reason).toBe('string');
-    expect(signal!.sessionId).toBe('sess-123');
-    expect(signal!.agentId).toBe('code-review-evaluator');
-    expect(signal!.domain).toBe('code-review');
-    expect(typeof signal!.severity).toBe('string');
-    expect(typeof signal!.context).toBe('object');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(typeof signal.source).toBe('string');
+    expect(typeof signal.score).toBe('number');
+    expect(signal.timestamp).toBeTruthy();
+    expect(typeof signal.reason).toBe('string');
+    expect(signal.sessionId).toBe('sess-123');
+    expect(signal.agentId).toBe('code-review-evaluator');
+    expect(signal.domain).toBe('code-review');
+    expect(typeof signal.severity).toBe('string');
+    expect(typeof signal.context).toBe('object');
   });
 
   // ---------------------------------------------------------------------------
@@ -250,9 +248,10 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
+    if (!signal) throw new Error('Expected non-null signal');
     // process score is 35, which is < 40, so not process_violation
-    expect(signal!.context.processViolationScore).toBe(35);
-    expect(signal!.source).not.toBe('process_violation');
+    expect(signal.context.processViolationScore).toBe(35);
+    expect(signal.source).not.toBe('process_violation');
   });
 
   it('adds 40 for breaking change without label', () => {
@@ -265,8 +264,9 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.context.processViolationScore).toBe(40);
-    expect(signal!.source).toBe('process_violation');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.context.processViolationScore).toBe(40);
+    expect(signal.source).toBe('process_violation');
   });
 
   it('adds 50 for security changes without security review', () => {
@@ -280,8 +280,9 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.context.processViolationScore).toBe(50);
-    expect(signal!.source).toBe('process_violation');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.context.processViolationScore).toBe(50);
+    expect(signal.source).toBe('process_violation');
   });
 
   it('adds 20 for >500 lines changed without tests', () => {
@@ -299,8 +300,9 @@ describe('CodeReviewPainAdapter', () => {
     };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
+    if (!signal) throw new Error('Expected non-null signal');
     // no tests + 1 file (not >2) = 0 for that rule, but >500 lines + no tests = +20
-    expect(signal!.context.processViolationScore).toBe(20);
+    expect(signal.context.processViolationScore).toBe(20);
   });
 
   // ---------------------------------------------------------------------------
@@ -332,10 +334,12 @@ describe('CodeReviewPainAdapter', () => {
     const recentSignal = adapter.capture(recentEvent);
     const oldSignal = adapter.capture(oldEvent);
     expect(recentSignal).not.toBeNull();
+    if (!recentSignal) throw new Error('Expected non-null recentSignal');
     expect(oldSignal).not.toBeNull();
+    if (!oldSignal) throw new Error('Expected non-null oldSignal');
     // Older reviews with unresolved negatives should produce higher sentiment pain
-    expect(oldSignal!.context.sentimentScore as number).toBeGreaterThan(
-      recentSignal!.context.sentimentScore as number,
+    expect(oldSignal.context.sentimentScore as number).toBeGreaterThan(
+      recentSignal.context.sentimentScore as number,
     );
   });
 
@@ -347,13 +351,15 @@ describe('CodeReviewPainAdapter', () => {
     const event = { ...baseEvent, traceId: undefined };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.traceId).toBe('unknown');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.traceId).toBe('unknown');
   });
 
   it('uses provided traceId', () => {
     const event: ReviewEvent = { ...baseEvent, traceId: 'trace-abc' };
     const signal = adapter.capture(event);
     expect(signal).not.toBeNull();
-    expect(signal!.traceId).toBe('trace-abc');
+    if (!signal) throw new Error('Expected non-null signal');
+    expect(signal.traceId).toBe('trace-abc');
   });
 });

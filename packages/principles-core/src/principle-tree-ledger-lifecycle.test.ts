@@ -5,8 +5,6 @@ import type {
   LedgerPrinciple,
   LedgerRule,
   Implementation,
-  ImplementationLifecycleState,
-  HybridLedgerStore,
 } from './principle-tree-ledger.js';
 import {
   isValidLifecycleTransition,
@@ -182,7 +180,9 @@ describe('addPrincipleToLedger', () => {
 
     const ledger = loadLedger(tmpDir);
     expect(ledger.tree.principles['p-1']).toBeDefined();
-    expect(ledger.tree.principles['p-1']!.id).toBe('p-1');
+    const principle = ledger.tree.principles['p-1'];
+    if (!principle) throw new Error('Expected non-null principle');
+    expect(principle.id).toBe('p-1');
   });
 });
 
@@ -225,7 +225,9 @@ describe('createRule', () => {
 
     const ledger = loadLedger(tmpDir);
     expect(ledger.tree.rules['r-1']).toBeDefined();
-    expect(ledger.tree.principles['p-1']!.ruleIds).toContain('r-1');
+    const principle = ledger.tree.principles['p-1'];
+    if (!principle) throw new Error('Expected non-null principle');
+    expect(principle.ruleIds).toContain('r-1');
   });
 
   it('deduplicates implementationIds', () => {
@@ -247,7 +249,9 @@ describe('createImplementation', () => {
 
     const ledger = loadLedger(tmpDir);
     expect(ledger.tree.implementations['impl-1']).toBeDefined();
-    expect(ledger.tree.rules['r-1']!.implementationIds).toContain('impl-1');
+    const rule = ledger.tree.rules['r-1'];
+    if (!rule) throw new Error('Expected non-null rule');
+    expect(rule.implementationIds).toContain('impl-1');
   });
 });
 
@@ -269,8 +273,12 @@ describe('updateRule', () => {
     expect(updated.principleId).toBe('p-2');
 
     const ledger = loadLedger(tmpDir);
-    expect(ledger.tree.principles['p-1']!.ruleIds).not.toContain('r-1');
-    expect(ledger.tree.principles['p-2']!.ruleIds).toContain('r-1');
+    const p1 = ledger.tree.principles['p-1'];
+    if (!p1) throw new Error('Expected non-null principle p-1');
+    expect(p1.ruleIds).not.toContain('r-1');
+    const p2 = ledger.tree.principles['p-2'];
+    if (!p2) throw new Error('Expected non-null principle p-2');
+    expect(p2.ruleIds).toContain('r-1');
   });
 
   it('throws when rule does not exist', () => {
@@ -294,11 +302,14 @@ describe('deleteRule', () => {
     createRule(tmpDir, makeRule());
     const deleted = deleteRule(tmpDir, 'r-1');
     expect(deleted).toBeDefined();
-    expect(deleted!.id).toBe('r-1');
+    if (!deleted) throw new Error('Expected non-null deleted');
+    expect(deleted.id).toBe('r-1');
 
     const ledger = loadLedger(tmpDir);
     expect(ledger.tree.rules['r-1']).toBeUndefined();
-    expect(ledger.tree.principles['p-1']!.ruleIds).not.toContain('r-1');
+    const principle = ledger.tree.principles['p-1'];
+    if (!principle) throw new Error('Expected non-null principle');
+    expect(principle.ruleIds).not.toContain('r-1');
   });
 
   it('cascade deletes implementations', () => {
@@ -340,8 +351,12 @@ describe('updateImplementation', () => {
     expect(updated.ruleId).toBe('r-2');
 
     const ledger = loadLedger(tmpDir);
-    expect(ledger.tree.rules['r-1']!.implementationIds).not.toContain('impl-1');
-    expect(ledger.tree.rules['r-2']!.implementationIds).toContain('impl-1');
+    const r1 = ledger.tree.rules['r-1'];
+    if (!r1) throw new Error('Expected non-null rule r-1');
+    expect(r1.implementationIds).not.toContain('impl-1');
+    const r2 = ledger.tree.rules['r-2'];
+    if (!r2) throw new Error('Expected non-null rule r-2');
+    expect(r2.implementationIds).toContain('impl-1');
   });
 
   it('throws when implementation does not exist', () => {
@@ -368,11 +383,14 @@ describe('deleteImplementation', () => {
 
     const deleted = deleteImplementation(tmpDir, 'impl-1');
     expect(deleted).toBeDefined();
-    expect(deleted!.id).toBe('impl-1');
+    if (!deleted) throw new Error('Expected non-null deleted');
+    expect(deleted.id).toBe('impl-1');
 
     const ledger = loadLedger(tmpDir);
     expect(ledger.tree.implementations['impl-1']).toBeUndefined();
-    expect(ledger.tree.rules['r-1']!.implementationIds).not.toContain('impl-1');
+    const rule = ledger.tree.rules['r-1'];
+    if (!rule) throw new Error('Expected non-null rule');
+    expect(rule.implementationIds).not.toContain('impl-1');
   });
 
   it('returns undefined when implementation does not exist', () => {
@@ -474,12 +492,24 @@ describe('listRuleImplementationsByState', () => {
     createImplementation(tmpDir, makeImplementation({ id: 'impl-b', lifecycleState: 'active' }));
     createImplementation(tmpDir, makeImplementation({ id: 'impl-c', lifecycleState: 'disabled' }));
 
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'candidate')).toHaveLength(1);
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'candidate')[0]!.id).toBe('impl-a');
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'active')).toHaveLength(1);
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'active')[0]!.id).toBe('impl-b');
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'disabled')).toHaveLength(1);
-    expect(listRuleImplementationsByState(tmpDir, 'r-1', 'disabled')[0]!.id).toBe('impl-c');
+    const candidates = listRuleImplementationsByState(tmpDir, 'r-1', 'candidate');
+    expect(candidates).toHaveLength(1);
+    const [candidate] = candidates;
+    if (!candidate) throw new Error('Expected non-null candidate');
+    expect(candidate.id).toBe('impl-a');
+
+    const actives = listRuleImplementationsByState(tmpDir, 'r-1', 'active');
+    expect(actives).toHaveLength(1);
+    const [active] = actives;
+    if (!active) throw new Error('Expected non-null active');
+    expect(active.id).toBe('impl-b');
+
+    const disableds = listRuleImplementationsByState(tmpDir, 'r-1', 'disabled');
+    expect(disableds).toHaveLength(1);
+    const [disabled] = disableds;
+    if (!disabled) throw new Error('Expected non-null disabled');
+    expect(disabled.id).toBe('impl-c');
+
     expect(listRuleImplementationsByState(tmpDir, 'r-1', 'archived')).toHaveLength(0);
   });
 
@@ -490,7 +520,9 @@ describe('listRuleImplementationsByState', () => {
 
     const candidates = listRuleImplementationsByState(tmpDir, 'r-1', 'candidate');
     expect(candidates).toHaveLength(1);
-    expect(candidates[0]!.id).toBe('impl-x');
+    const [candidate] = candidates;
+    if (!candidate) throw new Error('Expected non-null candidate');
+    expect(candidate.id).toBe('impl-x');
   });
 });
 
@@ -503,7 +535,8 @@ describe('findActiveImplementation', () => {
 
     const active = findActiveImplementation(tmpDir, 'r-1');
     expect(active).not.toBeNull();
-    expect(active!.id).toBe('impl-b');
+    if (!active) throw new Error('Expected non-null active');
+    expect(active.id).toBe('impl-b');
   });
 
   it('returns null when no active implementation exists', () => {
@@ -531,11 +564,16 @@ describe('getPrincipleSubtree', () => {
 
     const subtree = getPrincipleSubtree(tmpDir, 'p-1');
     expect(subtree).toBeDefined();
-    expect(subtree!.principle.id).toBe('p-1');
-    expect(subtree!.rules).toHaveLength(1);
-    expect(subtree!.rules[0]!.rule.id).toBe('r-1');
-    expect(subtree!.rules[0]!.implementations).toHaveLength(1);
-    expect(subtree!.rules[0]!.implementations[0]!.id).toBe('impl-1');
+    if (!subtree) throw new Error('Expected non-null subtree');
+    expect(subtree.principle.id).toBe('p-1');
+    expect(subtree.rules).toHaveLength(1);
+    const [ruleEntry] = subtree.rules;
+    if (!ruleEntry) throw new Error('Expected non-null rule entry');
+    expect(ruleEntry.rule.id).toBe('r-1');
+    expect(ruleEntry.implementations).toHaveLength(1);
+    const [implEntry] = ruleEntry.implementations;
+    if (!implEntry) throw new Error('Expected non-null implementation entry');
+    expect(implEntry.id).toBe('impl-1');
   });
 
   it('returns undefined for missing principle', () => {
@@ -546,7 +584,8 @@ describe('getPrincipleSubtree', () => {
     addPrincipleToLedger(tmpDir, makePrinciple({ id: 'p-1' }));
     const subtree = getPrincipleSubtree(tmpDir, 'p-1');
     expect(subtree).toBeDefined();
-    expect(subtree!.rules).toEqual([]);
+    if (!subtree) throw new Error('Expected non-null subtree');
+    expect(subtree.rules).toEqual([]);
   });
 });
 
