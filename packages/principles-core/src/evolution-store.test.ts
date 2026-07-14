@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
 import { mkdirSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import { listEvolutionTasks, getEvolutionTask } from './evolution-store.js';
 
@@ -8,7 +9,7 @@ describe('evolution-store', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = join(process.cwd(), 'tmp-test-evolution-store-' + Date.now());
+    tmpDir = join(tmpdir(), 'principles-core-evolution-store-' + Date.now());
     mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -86,6 +87,11 @@ describe('evolution-store', () => {
     db.close();
   }
 
+  function seedTestDb() {
+    mkdirSync(join(tmpDir, '.state'), { recursive: true });
+    setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+  }
+
   describe('listEvolutionTasks', () => {
     it('returns empty array when DB does not exist', () => {
       const result = listEvolutionTasks(tmpDir);
@@ -93,16 +99,14 @@ describe('evolution-store', () => {
     });
 
     it('returns all tasks when no filters applied', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir);
       expect(result).toHaveLength(3);
     });
 
     it('filters by status', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir, { status: 'completed' });
       expect(result).toHaveLength(1);
@@ -113,8 +117,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by dateFrom', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir, { dateFrom: '2026-06-18T00:00:00.000Z' });
       expect(result).toHaveLength(1);
@@ -124,8 +127,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by dateTo', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir, { dateTo: '2026-06-12T00:00:00.000Z' });
       expect(result).toHaveLength(1);
@@ -135,8 +137,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by both dateFrom and dateTo', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir, {
         dateFrom: '2026-06-12T00:00:00.000Z',
@@ -149,8 +150,7 @@ describe('evolution-store', () => {
     });
 
     it('applies limit and offset', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       // Default limit is 50, so all 3 rows are returned
       const all = listEvolutionTasks(tmpDir);
@@ -170,8 +170,7 @@ describe('evolution-store', () => {
     });
 
     it('orders by created_at DESC', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir);
       expect(result[0]?.taskId).toBe('task-003');
@@ -180,8 +179,7 @@ describe('evolution-store', () => {
     });
 
     it('maps snake_case columns to camelCase fields', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const result = listEvolutionTasks(tmpDir, { status: 'failed' });
       expect(result).toHaveLength(1);
@@ -202,8 +200,7 @@ describe('evolution-store', () => {
     });
 
     it('handles NULL optional fields as null', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       // task-001 has nulls for started_at, completed_at, resolution, last_error, result_ref
       const result = listEvolutionTasks(tmpDir, { status: 'queued' });
@@ -227,16 +224,14 @@ describe('evolution-store', () => {
     });
 
     it('returns null when task not found', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       expect(getEvolutionTask(tmpDir, 999)).toBeNull();
       expect(getEvolutionTask(tmpDir, 'nonexistent-task')).toBeNull();
     });
 
     it('returns task by numeric id', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const task = getEvolutionTask(tmpDir, 1);
       expect(task).not.toBeNull();
@@ -246,8 +241,7 @@ describe('evolution-store', () => {
     });
 
     it('returns task by string taskId', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const task = getEvolutionTask(tmpDir, 'task-002');
       expect(task).not.toBeNull();
@@ -258,8 +252,7 @@ describe('evolution-store', () => {
     });
 
     it('maps all fields correctly for a completed task', () => {
-      mkdirSync(join(tmpDir, '.state'), { recursive: true });
-      setupTestDb(join(tmpDir, '.state', '.trajectory.db'));
+      seedTestDb();
 
       const task = getEvolutionTask(tmpDir, 'task-002');
       expect(task).not.toBeNull();
