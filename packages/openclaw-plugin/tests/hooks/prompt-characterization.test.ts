@@ -178,7 +178,6 @@ function makeMinimalEvent(overrides: {
 
 function makeCtx(overrides: {
   workspaceDir?: string;
-  sessionGfi?: number;
   trigger?: string;
   sessionId?: string;
   sessionKey?: string;
@@ -186,7 +185,6 @@ function makeCtx(overrides: {
 } = {}) {
   const {
     workspaceDir = '/fake/workspace',
-    sessionGfi = 20,
     trigger = 'heartbeat',
     sessionId = 'test-session-123',
     sessionKey = sessionId,
@@ -306,7 +304,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI >= 70 does NOT inject HUMBLE_RECOVERY mode', async () => {
     setSessionGfi(75);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 75 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('HUMBLE_RECOVERY');
@@ -315,7 +313,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI >= 40 does NOT inject CONCILIATORY mode', async () => {
     setSessionGfi(50);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 50 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('CONCILIATORY');
@@ -324,7 +322,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI < 40 does NOT inject EFFICIENT mode', async () => {
     setSessionGfi(10);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 10 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('EFFICIENT');
@@ -333,7 +331,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('no "Spicy Evolver" persona text appears in prompt', async () => {
     setSessionGfi(20);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 20 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('Spicy Evolver');
