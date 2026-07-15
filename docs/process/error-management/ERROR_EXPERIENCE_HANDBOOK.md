@@ -134,7 +134,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
 | ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
 | ERR-033 | Operator failure path returns success exit code and breaks JSON contract | PRI-162 |
-| ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
+| ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162; PRI-516 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
 | ERR-086 | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state | PR #1079 |
@@ -644,6 +644,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
 - **Recurrence**: Same class as ERR-031/ERR-004 — canonical resolver output not consumed, or `??`/compatibility fallback silently overrides user intent.
+  - 2026-07-15 PRI-516: prompt retry deduplication initially keyed only by OpenClaw `runId`, although protocol run IDs may be reused after termination. Fixed by including the stable logical session identity (`sessionKey`, falling back to `sessionId`) and workspace in the bounded cache identity, plus a regression proving the same run ID remains valid in another session.
   - 2026-06-18 PRI-429 (PR#966): run-rulehost ignored effective `code_rule_capability` flag + reused one diagnostician adapter for 4 agents — resolved 5 bindings independently
   - 2026-06-08 PRI-336 (PR#850): `pain-signal-runtime-factory` bypassed `resolvedLang.outputLanguage` (read raw input) — always use resolver output
   - Earlier recurrence (PR#701, 2026-05-24): `resolveRuntimeConfig()` didn't accept `requestedRuntimeKind`; `?? 'local'` overrode gateway intent. See git history.
@@ -809,10 +810,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 91 |
-| Last updated | 2026-07-04 |
+| Total lessons | 92 |
+| Last updated | 2026-07-15 |
 | Top category | Schema & Type |
-| Recurring errors | 44 |
+| Recurring errors | 45 |
 
 ---
 
