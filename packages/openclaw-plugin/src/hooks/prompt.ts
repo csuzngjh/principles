@@ -266,10 +266,10 @@ export async function handleBeforePromptBuild(
   // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
   if (currentUserMessage && sessionId && trigger === 'user' && !isAgentToAgent) {
     if (runId && !claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
-      logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId}`);
+      logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
-        logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId}`);
+        logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
       }
       getSignalCollectorHost(wctx, logger).detectSync(
         currentUserMessage, sessionId, trigger,

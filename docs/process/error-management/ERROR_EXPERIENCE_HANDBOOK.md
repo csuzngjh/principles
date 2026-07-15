@@ -157,6 +157,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-080 | Size bound applied to raw input then content escaped — escaped output exceeds budget due to entity expansion | PRI-467 / PR #1059 |
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
+| ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
 
 ---
 
@@ -810,7 +811,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 92 |
+| Total lessons | 93 |
 | Last updated | 2026-07-15 |
 | Top category | Schema & Type |
 | Recurring errors | 45 |
@@ -1453,4 +1454,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: EP-07 (Runtime State Source Alignment — output points to wrong state source, related but different: EP-07 is about reading stale state, this is about writing to wrong state). Also related to the "anti-pattern D" documented in `src/core/AGENTS.md` — `config-service.ts`, `dictionary-service.ts`, `detection-service.ts` all use the same broken `let lastStateDir` single-slot pattern and may need the same fix.
 - **Source**: PRI-504 / PR #1164 review
 - **Date**: 2026-07-03
+- **Recurrence**: None
+
+---
+
+**[ERR-093]** | New log sink emits full external identifier despite an established minimization convention
+
+- **What happened**: PRI-516 added duplicate-run and missing-runId logs that interpolated the complete OpenClaw `sessionId`, while the same prompt hook already truncated session identifiers to 20 characters before logging.
+- **Why it's wrong**: External session identifiers can encode channel or sender identity. Logging the full value creates unnecessary disclosure and contradicts the module's existing data-minimization boundary.
+- **Generalized failure mode**: When adding a log sink for an external user, channel, session, or request identifier, assistants must apply the surrounding module's established truncation or redaction convention before emission, otherwise operational observability can leak identity-bearing values.
+- **Correct approach**: Preserve the full identifier only for internal correlation and persistence contracts; emit a bounded prefix or redacted form in logs. Here both new messages use `sessionId.substring(0, 20)` without changing the deduplication key.
+- **How to prevent**: For every new interpolated log field, grep the same module for prior logging of that identifier and reuse its minimization helper or bound. Reject a new full-value log when a truncated/redacted precedent exists.
+- **Regression guard**: CodeQL/CodeRabbit sensitive-log analysis plus review grep for ``sessionId=${`` in changed log calls; compare each occurrence with the module's 20-character convention.
+- **Related ERRs**: ERR-055 (sensitive-key recognition), ERR-056 (value redaction omitted on an output path), ERR-058 (inconsistent security lists across paths).
+- **Source**: PRI-516 / PR #1230 (CodeRabbit review)
+- **Date**: 2026-07-15
 - **Recurrence**: None
