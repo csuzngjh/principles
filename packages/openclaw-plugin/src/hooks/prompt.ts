@@ -19,7 +19,6 @@ import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
 import {
   escapeXml,
-  extractMessageContent,
   isMinimalTrigger,
 } from '@principles/core/prompt-builder';
 import {
@@ -44,6 +43,10 @@ const STATIC_FILE_TTL_MS = 60_000; // 1 minute
  * cache pollution. Previously a module-level Map keyed by filePath only.
  */
 const _staticFileCache = new Map<string, Map<string, CachedFile>>();
+// Match OpenClaw's bounded per-run prompt cache. The session identity is part of
+// the key because protocol run IDs may be reused after a run terminates.
+const MAX_PROCESSED_SIGNAL_RUNS_PER_WORKSPACE = 256;
+const _processedSignalRunKeys = new Map<string, Set<string>>();
 
 function getOwnValue(value: object, key: string): unknown {
   if (!Object.hasOwn(value, key)) return undefined;
@@ -63,6 +66,42 @@ function getFileCache(workspaceDir: string): Map<string, CachedFile> {
     _staticFileCache.set(workspaceDir, cache);
   }
   return cache;
+}
+
+function hasMessageRole(message: unknown, role: string): boolean {
+  if (typeof message !== 'object' || message === null || !Object.hasOwn(message, 'role')) {
+    return false;
+  }
+  return Object.getOwnPropertyDescriptor(message, 'role')?.value === role;
+}
+
+function nextUserTurnIndex(wctx: WorkspaceContext, sessionId: string, messages: readonly unknown[]): number {
+  const recordedTurns = wctx.trajectory?.listUserTurnsForSession?.(sessionId) ?? [];
+  if (recordedTurns.length > 0) {
+    return recordedTurns.reduce((max, turn) => Math.max(max, turn.turnIndex), 0) + 1;
+  }
+  return messages.filter((message) => hasMessageRole(message, 'user')).length + 1;
+}
+
+function claimSignalRun(workspaceDir: string, sessionIdentity: string, runId: string): boolean {
+  let runKeys = _processedSignalRunKeys.get(workspaceDir);
+  if (!runKeys) {
+    runKeys = new Set<string>();
+    _processedSignalRunKeys.set(workspaceDir, runKeys);
+  }
+  const runKey = `${sessionIdentity}\u0000${runId}`;
+  if (runKeys.has(runKey)) return false;
+
+  runKeys.add(runKey);
+  if (runKeys.size > MAX_PROCESSED_SIGNAL_RUNS_PER_WORKSPACE) {
+    const oldestRunKey = runKeys.values().next().value;
+    if (typeof oldestRunKey === 'string') runKeys.delete(oldestRunKey);
+  }
+  return true;
+}
+
+function hasClaimedSignalRun(workspaceDir: string, sessionIdentity: string, runId: string): boolean {
+  return _processedSignalRunKeys.get(workspaceDir)?.has(`${sessionIdentity}\u0000${runId}`) ?? false;
 }
 
 /**
@@ -105,9 +144,11 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
 export function resetPromptStateForTest(workspaceDir?: string): void {
   if (workspaceDir) {
     _staticFileCache.delete(workspaceDir);
+    _processedSignalRunKeys.delete(workspaceDir);
     resetIntentDocCacheForTest(workspaceDir);
   } else {
     _staticFileCache.clear();
+    _processedSignalRunKeys.clear();
     resetIntentDocCacheForTest();
   }
   // CodeRabbit #6: 清理 host 缓存,避免 rate-limit/classifier 状态跨测试泄漏
@@ -162,38 +203,19 @@ export async function handleBeforePromptBuild(
   }
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
-  const { trigger, sessionId } = ctx as { trigger: string | undefined; sessionId: string | undefined };
+  const { runId, sessionKey, trigger, sessionId } = ctx;
   const api = ctx.api;
   if (sessionId) {
     wctx.trajectory?.recordSession?.({ sessionId });
   }
 
-  // 提前计算 lineage + userTurnCount(不依赖 isAgentToAgent),供后续 detectSync 使用。
-  // detectSync 调用延后到 isAgentToAgent 解析之后(CodeRabbit #7: 避免 agent-to-agent 误判)。
-  let correctionUserText: string | null = null;
+  // OpenClaw sends the current model-visible user input in event.prompt. event.messages
+  // contains prepared history and must only be used for lineage and turn indexing.
   let correctionReferencesAssistantTurnId: number | null = null;
-  let correctionTurnIndex = 0;
-
-  if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
-    const latestUserIndex = [...event.messages]
-      .map((message, index) => ({ message, index }))
-      .reverse()
-      .find((entry) => (entry.message as { role?: unknown })?.role === 'user');
-
-    if (latestUserIndex) {
-      correctionUserText = extractMessageContent(latestUserIndex.message);
-
-      // lineage: 关联到前置 assistant turn(诊断 evidence JOIN 用)。host 不感知 trajectory 结构,由这里算好传入。
-      const hasPriorAssistant = event.messages
-        .slice(0, latestUserIndex.index)
-        .some((message) => (message as { role?: unknown })?.role === 'assistant');
-      if (hasPriorAssistant) {
-        const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
-        const lastAssistant = turns[turns.length - 1];
-        correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
-      }
-      correctionTurnIndex = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
-    }
+  if (sessionId && trigger === 'user' && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
+    const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+    const lastAssistant = turns[turns.length - 1];
+    correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
   }
 
   // Load context injection configuration
@@ -231,8 +253,8 @@ export async function handleBeforePromptBuild(
   // ─────────────────────────────────────────────────3. Empathy Observer Spawn
   // Extract actual user message from prompt (handles boot checks + Feishu wrappers).
   // Also detects empathy observer output (prevent recursion) and agent-to-agent messages.
-  const { isAgentToAgent } =
-    extractUserMessageFromPrompt(event.prompt || '', sessionId);
+  const { message: currentUserMessage, isAgentToAgent } =
+    extractUserMessageFromPrompt(event.prompt, sessionId);
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
@@ -246,11 +268,22 @@ export async function handleBeforePromptBuild(
 
   // SignalCollectorHost 统一接管 correction + empathy 检测(spec §3.3 决策1)。
   // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
-  if (correctionUserText && sessionId && trigger === 'user' && !isAgentToAgent) {
-    getSignalCollectorHost(wctx, logger).detectSync(
-      correctionUserText, sessionId, trigger,
-      { referencesAssistantTurnId: correctionReferencesAssistantTurnId, turnIndex: correctionTurnIndex },
-    );
+  if (currentUserMessage && sessionId && trigger === 'user' && !isAgentToAgent) {
+    if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+      logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
+    } else {
+      if (!runId) {
+        logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
+      }
+      getSignalCollectorHost(wctx, logger).detectSync(
+        currentUserMessage, sessionId, trigger,
+        {
+          referencesAssistantTurnId: correctionReferencesAssistantTurnId,
+          turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
+        },
+      );
+      if (runId) claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId);
+    }
   }
 
   // 注:SignalCollectorHost.detectSync 已在上文 correction 段(:259)统一调用一次,
@@ -594,4 +627,3 @@ export async function handleBeforePromptBuild(
     appendSystemContext
   };
 }
-
