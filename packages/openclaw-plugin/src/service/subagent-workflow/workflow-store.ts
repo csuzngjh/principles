@@ -107,8 +107,8 @@ export class WorkflowStore {
         this.db.prepare(`
             INSERT INTO subagent_workflows (
                 workflow_id, workflow_type, transport, parent_session_id, child_session_key,
-                run_id, state, cleanup_state, created_at, updated_at, last_observed_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'none', ?, ?, NULL, ?)
+                run_id, state, cleanup_state, created_at, updated_at, last_observed_at, duration_ms, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'none', ?, ?, ?, ?, ?)
         `).run(
             row.workflow_id,
             row.workflow_type,
@@ -119,6 +119,8 @@ export class WorkflowStore {
             row.state,
             row.created_at,
             row.updated_at,
+            row.last_observed_at ?? null,
+            row.duration_ms ?? null,
             row.metadata_json
         );
     }
