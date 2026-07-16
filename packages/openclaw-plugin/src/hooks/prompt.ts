@@ -30,7 +30,7 @@ import {
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
-import { SignalCollectorHost, createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
+import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 
 // ---------------------------------------------------------------------------
@@ -204,6 +204,7 @@ export async function handleBeforePromptBuild(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { runId, sessionKey, trigger, sessionId } = ctx;
+  const isUserInteraction = isUserInteractionTrigger(trigger);
   const api = ctx.api;
   if (sessionId) {
     wctx.trajectory?.recordSession?.({ sessionId });
@@ -212,7 +213,7 @@ export async function handleBeforePromptBuild(
   // OpenClaw sends the current model-visible user input in event.prompt. event.messages
   // contains prepared history and must only be used for lineage and turn indexing.
   let correctionReferencesAssistantTurnId: number | null = null;
-  if (sessionId && trigger === 'user' && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
+  if (sessionId && isUserInteraction && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
     const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
     const lastAssistant = turns[turns.length - 1];
     correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
@@ -256,8 +257,6 @@ export async function handleBeforePromptBuild(
   const { message: currentUserMessage, isAgentToAgent } =
     extractUserMessageFromPrompt(event.prompt, sessionId);
 
-  const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
-
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
   // 注:原 empathy 检测门控(empathyEnabled)已移除,检测职责由 SignalCollectorHost 接管。
   // behavioral 约束注入是独立职责,保留门控。
@@ -268,15 +267,17 @@ export async function handleBeforePromptBuild(
 
   // SignalCollectorHost 统一接管 correction + empathy 检测(spec §3.3 决策1)。
   // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
-  if (currentUserMessage && sessionId && trigger === 'user' && !isAgentToAgent) {
+  if (currentUserMessage && sessionId && isUserInteraction && !isAgentToAgent) {
     if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
       logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
         logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
       }
+      // trigger ?? 'api':detectSync 的 trigger 参数必须为具体值(host 内部用
+      // isUserInteractionTrigger 判定,undefined 会被接受但下游日志/标签需要具体值)。
       getSignalCollectorHost(wctx, logger).detectSync(
-        currentUserMessage, sessionId, trigger,
+        currentUserMessage, sessionId, trigger ?? 'api',
         {
           referencesAssistantTurnId: correctionReferencesAssistantTurnId,
           turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),

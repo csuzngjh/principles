@@ -66,11 +66,23 @@ function flushAsync(ms = 50): Promise<void> {
 describe('SignalCollectorHost.detectSync', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('skips when trigger !== user', () => {
+  it('skips when trigger is a non-user system trigger (heartbeat)', () => {
     const wctx = makeMockWctx();
     const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
     host.detectSync('这是错的', 'sess1', 'heartbeat');
     expect(wctx.trajectory.recordUserTurn).not.toHaveBeenCalled();
+  });
+
+  it('accepts api trigger as user interaction (regression: previously rejected by trigger !== user gate)', () => {
+    // P1 regression: detectSync 内部曾用 `if (trigger !== 'user') return;` 静默丢弃
+    // api/undefined 触发的纠正信号。现在改用 isUserInteractionTrigger,user/api/undefined
+    // 均被视为用户交互。prompt.ts 调用时已将 undefined 转为 'api',所以这里测 'api'。
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-api', 'api');
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+      correctionDetected: true,
+    }));
   });
 
   it('high-precision correction → writes user_turns with correctionDetected=true', () => {

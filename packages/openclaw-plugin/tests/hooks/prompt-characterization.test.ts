@@ -97,6 +97,8 @@ vi.mock('../../src/core/signal-collector-host.js', () => ({
     detectSync = mockDetectSync;
   },
   createSignalLlmClassifierFromConfig: vi.fn().mockReturnValue(null),
+  isUserInteractionTrigger: (trigger: string | undefined) =>
+    trigger === 'user' || trigger === 'api' || trigger === undefined,
 }));
 
 // ─── Mutable session mock ────────────────────────────────────────────────────

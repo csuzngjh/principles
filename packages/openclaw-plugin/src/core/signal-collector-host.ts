@@ -4,7 +4,7 @@
  * 把 core 的纯逻辑 (collectSync / mapLlmResultToOutput) 接进 openclaw 运行时。
  *
  * 同步路径 (prompt.ts before_prompt_build 钩子调用,绝不阻塞):
- *   - trigger 门控 (仅 user)
+ *   - trigger 门控 (user/api/undefined 视为用户交互,其余跳过)
  *   - Stage1 关键词快扫 (零成本)
  *   - 写 user_turns (复用 recordUserTurn)
  *   - 高精度短语命中 (high) → 直接走 STRONG 分流 (同步,纯内存)
@@ -51,6 +51,17 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   strongPainScore: 70,
   strongRateLimitPerHour: 5,
 };
+
+/**
+ * 判定 trigger 是否代表真实用户交互。
+ *
+ * `user` / `api` / `undefined` 均视为用户交互(prompt.ts 与 detectSync 共享同一判定,
+ * 避免两处门控不一致导致 api/undefined 触发的纠正信号丢失)。
+ * `heartbeat` / `cron` / `subagent` 等系统触发不视为用户交互。
+ */
+export function isUserInteractionTrigger(trigger: string | undefined): boolean {
+  return trigger === 'user' || trigger === 'api' || trigger === undefined;
+}
 
 export function buildDefaultKeywordStore(): UnifiedKeywordStore {
   const terms: UnifiedKeywordStore['terms'] = {
@@ -136,8 +147,10 @@ export class SignalCollectorHost {
     trigger: string,
     options?: { referencesAssistantTurnId?: number | null; turnIndex?: number },
   ): void {
-    // 1. trigger 门控 (保留现有 trigger 门控,仅处理真实用户消息)
-    if (trigger !== 'user') {
+    // 1. trigger 门控:仅处理真实用户交互(user/api/undefined)。
+    //    与 prompt.ts 共享 isUserInteractionTrigger,避免两处门控不一致导致
+    //    api/undefined 触发的纠正信号在 detectSync 内部被静默丢弃。
+    if (!isUserInteractionTrigger(trigger)) {
       return;
     }
 
