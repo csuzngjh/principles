@@ -72,6 +72,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-073 | Refactoring characterization tests cover shared logic happy path, not call-site-specific behavior equivalence | PRI-431 |
 | ERR-077 | API migration silently drops input parameters — characterization tests don't verify parameter parity | PRI-454 |
 | ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
+| ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
 
 ---
 
@@ -1469,4 +1470,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-055 (sensitive-key recognition), ERR-056 (value redaction omitted on an output path), ERR-058 (inconsistent security lists across paths).
 - **Source**: PRI-516 / PR #1230 (CodeRabbit review)
 - **Date**: 2026-07-15
+- **Recurrence**: None
+
+---
+
+**[ERR-094]** | Range-bounds assertion uses `||` instead of `&&` — tautology that always passes for any value when `low <= high`
+
+- **What happened**: In PR #1218, `packages/principles-core/src/quality-scorecard/__tests__/quality-scorecard.test.ts` line 797 verified that `row.created_at` falls inside the `[before, after]` timestamp window captured around the call. The assertion was written as `expect(row.created_at >= before || row.created_at <= after).toBe(true)`. Because `before` is captured before `after`, `before <= after` always holds. For any value `A`, either `A >= before` OR `A < before` — and when `A < before <= after`, the second clause `A <= after` is true. So `(A >= before) || (A <= after)` is a tautology true for every string `A`, including epoch zero, far-future dates, empty strings, or unrelated values. The test could never fail, even if `validatePrincipleEventRow` set `created_at` to a constant or garbage.
+- **Why it's wrong**: The test claimed to verify a range invariant (`created_at ∈ [before, after]`) but the `||` operator made the predicate unsatisfiable-false-proof. This is the test-side sibling of ERR-088 (non-unique signal) — here the signal is "always true" rather than "produced by multiple paths", but the effect is identical: the test gives false confidence that behavior is verified when in fact no behavior is constrained. A regression changing `created_at` to any fixed value would still pass.
+- **Generalized failure mode**: When asserting a value falls within a range `[low, high]`, the correct boolean operator is `&&` (both bounds must hold), not `||` (either bound). `(A >= low) || (A <= high)` is a tautology whenever `low <= high` — which is the normal case for range checks. The inverse mistake `(A >= low) && (A <= high)` is the only form that actually constrains `A`. This is a special case of EP-09 (Test Reality Gap): the asserted signal is non-unique because every possible input produces it.
+- **Correct approach**: Use `&&`: `expect(row.created_at >= before && row.created_at <= after).toBe(true)`. Equivalently split into two assertions: `expect(row.created_at >= before).toBe(true)` and `expect(row.created_at <= after).toBe(true)`. For numerical ranges, the same rule applies — `expect(value >= low && value <= high).toBe(true)`.
+- **How to prevent**: For any range/bounds assertion `expect(A >= low OP A <= high).toBe(true)`, verify the operator is `&&` not `||`. Mental check: ask "is there any value of `A` that makes this false?" — if the answer is "no" (given `low <= high`), the assertion is a tautology. Add a negative test seeding an out-of-range value (e.g., `created_at = '1970-01-01T00:00:00Z'`) and confirm the assertion fails on the buggy `||` version. Reviewer trigger: any `expect(... || ...).toBe(true)` or `expect(... || ...).toBeTruthy()` in a test file, especially near comparison operators.
+- **Regression guard**: `packages/principles-core/src/quality-scorecard/__tests__/quality-scorecard.test.ts` line 797 (the fixed `&&` assertion). The test now actually constrains `created_at` to the captured window.
+- **Related ERRs**: ERR-088 (non-unique test signal — same EP-09 group, "always true" flavor), ERR-025 (test proves isolated helper, not production defense — same EP-09 group), ERR-073 (characterization tests don't verify call-site behavior — same EP-09 group).
+- **Source**: PR #1218 (self-review before merge)
+- **Date**: 2026-07-16
 - **Recurrence**: None
