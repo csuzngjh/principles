@@ -240,6 +240,8 @@ Footer text.
 
   it('handles null/undefined like empty string via type coercion', () => {
     expect(parseThinkingOsMd('')).toEqual([]);
+    expect(parseThinkingOsMd(null as unknown as string)).toEqual([]);
+    expect(parseThinkingOsMd(undefined as unknown as string)).toEqual([]);
   });
 });
 
@@ -250,7 +252,7 @@ describe('generateDetectionPatterns', () => {
 
   it('extracts Chinese phrases from trigger text', () => {
     const patterns = generateDetectionPatterns('当用户感到困惑时应该停下来');
-    expect(patterns.length).toBeGreaterThan(0);
+    expect(patterns.map(p => p.source)).toEqual(['当用户感到困惑时', '应该停下来']);
     for (const p of patterns) {
       expect(p).toBeInstanceOf(RegExp);
       expect(p.flags).toContain('i');
@@ -288,11 +290,9 @@ describe('generateDetectionPatterns', () => {
     expect(hasEnglish).toBe(true);
   });
 
-  it('escapes special regex characters in patterns', () => {
+  it('treats regex punctuation as phrase separators', () => {
     const patterns = generateDetectionPatterns('error occurred with file.test.ts');
-    for (const p of patterns) {
-      expect(() => p.test('test')).not.toThrow();
-    }
+    expect(patterns.map(p => p.source)).toEqual(['error occurred with file', 'test']);
   });
 
   it('filters out very short English phrases (< 3 chars)', () => {

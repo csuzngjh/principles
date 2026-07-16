@@ -794,7 +794,7 @@ describe('validatePrincipleEventRow', () => {
     const after = new Date().toISOString();
     expect(row).not.toBeNull();
     if (row) {
-      expect(row.created_at >= before || row.created_at <= after).toBe(true);
+      expect(row.created_at >= before && row.created_at <= after).toBe(true);
     }
   });
 
@@ -1017,8 +1017,10 @@ describe('generateMarkdownReport', () => {
     const report = makeFullReport();
     report.evaluations[0]!.episode.summary = 'Test | pipe | and \n newline';
     const md = generateMarkdownReport(report);
-    const tableLines = md.split('\n').filter(line => line.startsWith('|'));
-    expect(tableLines.length).toBeGreaterThan(0);
+    const summaryLine = md.split('\n').find(line => line.startsWith('- Summary:'));
+    expect(summaryLine).toBeDefined();
+    expect(summaryLine!).toContain('Test \\| pipe \\|');
+    expect(summaryLine!).toContain('newline');
   });
 
   it('handles report with zero episodes', () => {
