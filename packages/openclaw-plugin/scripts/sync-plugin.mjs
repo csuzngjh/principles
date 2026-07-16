@@ -1400,6 +1400,7 @@ function main() {
     if (args.restart) {
         const restarted = restartGateway();
         if (!restarted) {
+            process.exitCode = 1;
             console.warn('\n⚠️  Plugin files installed but gateway restart was not confirmed.');
             console.warn('   The gateway may already be running. Verify with:');
             console.warn('     PowerShell: openclaw gateway status');
@@ -1411,6 +1412,7 @@ function main() {
             console.warn('     Then: openclaw gateway start');
             console.warn('');
             console.warn('   Or simply restart from PowerShell (not affected by the cygpath bug).');
+            console.error('\nINSTALLATION INCOMPLETE: plugin files were copied, but the running product was not verified.');
         }
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
