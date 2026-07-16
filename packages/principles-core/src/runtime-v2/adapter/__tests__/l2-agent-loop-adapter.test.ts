@@ -51,7 +51,7 @@ vi.mock('@earendil-works/pi-agent-core', () => ({
 
 // PRI-420: mock completeSimple for L1 fallback tests. getModel/getProviders are used by resolveL2Model
 // in all tests (via the custom baseUrl path), so provide stubs.
-vi.mock('@earendil-works/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   completeSimple: vi.fn(),
   getModel: vi.fn(() => ({ id: 'test', name: 'test', api: 'openai-completions', provider: 'test-provider' })),
   getProviders: vi.fn(() => []),
@@ -63,7 +63,7 @@ vi.mock('../../store/event-emitter.js', () => ({
 }));
 
 import { storeEmitter } from '../../store/event-emitter.js';
-import { completeSimple } from '@earendil-works/pi-ai';
+import { completeSimple } from '@earendil-works/pi-ai/compat';
 import { L2AgentLoopAdapter } from '../l2-agent-loop-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 import type { PdL2ArtifactReader, PdL2PrincipleReader } from '../../tools/agent-tool-contract.js';
