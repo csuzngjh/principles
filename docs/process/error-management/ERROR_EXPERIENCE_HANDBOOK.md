@@ -134,7 +134,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
 | ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
 | ERR-033 | Operator failure path returns success exit code and breaks JSON contract | PRI-162 |
-| ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
+| ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162; PRI-516 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
 | ERR-086 | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state | PR #1079 |
@@ -157,6 +157,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-080 | Size bound applied to raw input then content escaped — escaped output exceeds budget due to entity expansion | PRI-467 / PR #1059 |
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
+| ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
 
 ---
 
@@ -644,6 +645,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
 - **Recurrence**: Same class as ERR-031/ERR-004 — canonical resolver output not consumed, or `??`/compatibility fallback silently overrides user intent.
+  - 2026-07-15 PRI-516: prompt retry deduplication initially keyed only by OpenClaw `runId`, although protocol run IDs may be reused after termination. Fixed by including the stable logical session identity (`sessionKey`, falling back to `sessionId`) and workspace in the bounded cache identity, plus a regression proving the same run ID remains valid in another session.
   - 2026-06-18 PRI-429 (PR#966): run-rulehost ignored effective `code_rule_capability` flag + reused one diagnostician adapter for 4 agents — resolved 5 bindings independently
   - 2026-06-08 PRI-336 (PR#850): `pain-signal-runtime-factory` bypassed `resolvedLang.outputLanguage` (read raw input) — always use resolver output
   - Earlier recurrence (PR#701, 2026-05-24): `resolveRuntimeConfig()` didn't accept `requestedRuntimeKind`; `?? 'local'` overrode gateway intent. See git history.
@@ -809,10 +811,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 91 |
-| Last updated | 2026-07-04 |
+| Total lessons | 93 |
+| Last updated | 2026-07-15 |
 | Top category | Schema & Type |
-| Recurring errors | 44 |
+| Recurring errors | 45 |
 
 ---
 
@@ -1237,7 +1239,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-069 P2 (degradation path written as afterthought skips the happy-path's rigor — same pattern group applied to concurrency), ERR-001 (`as`-bypass on the lock's caught-unknown error, fixed in the same review), ERR-009 (silent overwrite sibling in the same PR)
 - **Source**: PRI-459 / PR #1045
 - **Date**: 2026-06-25
-- **Recurrence**: None
+- **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
 
 ---
 
@@ -1380,7 +1382,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: 2026-06-30 PR #1131 — BDD tests accepted non-unique signals in three forms: the CLI step searched for one parseable JSON object and only warned when stdout contained extras; the UI step accepted any active activation instead of the activation just returned; and two mutating Playwright journeys consumed the same seed approval. The same PR also duplicated CLI option parsing instead of exercising the production Commander registration (ERR-025 sibling). Fixed by asserting exactly one stdout call/JSON object through the production registration function, carrying the returned activation ID into the read assertion, and assigning isolated seed records to each mutating journey. 2026-07-01 PR #1146: onboarding source-string tests passed while Windows command resolution and rendered state transitions were broken; added behavior-level route/storage tests and cross-platform path assertions that fail on the prior implementation. 2026-07-02 `codex/website-homepage-redesign`: the browser viewport was configured to 1200×630, but the saved OG image was 1184×630 because the scrollbar reduced the captured content width; the existing contract only checked that the file was non-empty. Fixed the asset to 1200×630 and added Sharp metadata assertions for OG and poster dimensions/formats. 2026-07-03 PR #1170: SEC-BASE-5 `code_tool_hook` regression test used `expect(true).toBe(true)` after a `foundRequireApproval` flag check — the assertion was a tautology that always passed whether or not the `require_approval` decision was actually found in the plugin source, so the test gave false confidence that the safety boundary was guarded. Fixed by replacing the tautology with `expect(foundRequireApproval).toBe(true)` carrying a message explaining what a failure means (rc-9-no-silent-fallback). 2026-07-04 PR #1182 — two instances of non-unique test signal from single-state fixtures: (1) `sqlite-dead-letter-store.markRetried` used `UPDATE dead_letter_pains SET retry_count = retry_count + 1 WHERE pain_id = ?` which updates ALL rows for that painId, but the test seeded only one row per painId — "retry_count incremented" is non-unique because it passes whether one row or all rows are updated. Fixed by targeting only the latest row via subquery (`WHERE id = (SELECT id FROM dead_letter_pains WHERE pain_id = ? ORDER BY failed_at DESC LIMIT 1)`) and seeding multiple rows in the test to verify only the latest row is affected. (2) `failed-tasks` route returned `nextAction: 'No failed tasks. PD pipeline is healthy.'` when `tasks.length === 0`, but this signal is also produced when `offset` exceeds `total` (paginated past the last page) while failures exist on earlier pages — the test only seeded zero failures. Fixed by checking `total === 0` instead of `tasks.length === 0`, and the test must cover the "paginated past end" case.
+- **Recurrence**: 2026-06-30 PR #1131 — BDD tests accepted non-unique signals in three forms: the CLI step searched for one parseable JSON object and only warned when stdout contained extras; the UI step accepted any active activation instead of the activation just returned; and two mutating Playwright journeys consumed the same seed approval. The same PR also duplicated CLI option parsing instead of exercising the production Commander registration (ERR-025 sibling). Fixed by asserting exactly one stdout call/JSON object through the production registration function, carrying the returned activation ID into the read assertion, and assigning isolated seed records to each mutating journey. 2026-07-01 PR #1146: onboarding source-string tests passed while Windows command resolution and rendered state transitions were broken; added behavior-level route/storage tests and cross-platform path assertions that fail on the prior implementation. 2026-07-02 `codex/website-homepage-redesign`: the browser viewport was configured to 1200×630, but the saved OG image was 1184×630 because the scrollbar reduced the captured content width; the existing contract only checked that the file was non-empty. Fixed the asset to 1200×630 and added Sharp metadata assertions for OG and poster dimensions/formats. 2026-07-03 PR #1170: SEC-BASE-5 `code_tool_hook` regression test used `expect(true).toBe(true)` after a `foundRequireApproval` flag check — the assertion was a tautology that always passed whether or not the `require_approval` decision was actually found in the plugin source, so the test gave false confidence that the safety boundary was guarded. Fixed by replacing the tautology with `expect(foundRequireApproval).toBe(true)` carrying a message explaining what a failure means (rc-9-no-silent-fallback). 2026-07-04 PR #1182 — two instances of non-unique test signal from single-state fixtures: (1) `sqlite-dead-letter-store.markRetried` used `UPDATE dead_letter_pains SET retry_count = retry_count + 1 WHERE pain_id = ?` which updates ALL rows for that painId, but the test seeded only one row per painId — "retry_count incremented" is non-unique because it passes whether one row or all rows are updated. Fixed by targeting only the latest row via subquery (`WHERE id = (SELECT id FROM dead_letter_pains WHERE pain_id = ? ORDER BY failed_at DESC LIMIT 1)`) and seeding multiple rows in the test to verify only the latest row is affected. (2) `failed-tasks` route returned `nextAction: 'No failed tasks. PD pipeline is healthy.'` when `tasks.length === 0`, but this signal is also produced when `offset` exceeds `total` (paginated past the last page) while failures exist on earlier pages — the test only seeded zero failures. Fixed by checking `total === 0` instead of `tasks.length === 0`, and the test must cover the "paginated past end" case. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; the ignored helper argument made call sites appear to exercise context-driven GFI behavior. Fixed by removing the dead override and using only the explicit mock-state setter, with CodeQL guarding unused test inputs.
 
 ---
 
@@ -1452,4 +1454,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: EP-07 (Runtime State Source Alignment — output points to wrong state source, related but different: EP-07 is about reading stale state, this is about writing to wrong state). Also related to the "anti-pattern D" documented in `src/core/AGENTS.md` — `config-service.ts`, `dictionary-service.ts`, `detection-service.ts` all use the same broken `let lastStateDir` single-slot pattern and may need the same fix.
 - **Source**: PRI-504 / PR #1164 review
 - **Date**: 2026-07-03
+- **Recurrence**: None
+
+---
+
+**[ERR-093]** | New log sink emits full external identifier despite an established minimization convention
+
+- **What happened**: PRI-516 added duplicate-run and missing-runId logs that interpolated the complete OpenClaw `sessionId`, while the same prompt hook already truncated session identifiers to 20 characters before logging.
+- **Why it's wrong**: External session identifiers can encode channel or sender identity. Logging the full value creates unnecessary disclosure and contradicts the module's existing data-minimization boundary.
+- **Generalized failure mode**: When adding a log sink for an external user, channel, session, or request identifier, assistants must apply the surrounding module's established truncation or redaction convention before emission, otherwise operational observability can leak identity-bearing values.
+- **Correct approach**: Preserve the full identifier only for internal correlation and persistence contracts; emit a bounded prefix or redacted form in logs. Here both new messages use `sessionId.substring(0, 20)` without changing the deduplication key.
+- **How to prevent**: For every new interpolated log field, grep the same module for prior logging of that identifier and reuse its minimization helper or bound. Reject a new full-value log when a truncated/redacted precedent exists.
+- **Regression guard**: CodeQL/CodeRabbit sensitive-log analysis plus review grep for ``sessionId=${`` in changed log calls; compare each occurrence with the module's 20-character convention.
+- **Related ERRs**: ERR-055 (sensitive-key recognition), ERR-056 (value redaction omitted on an output path), ERR-058 (inconsistent security lists across paths).
+- **Source**: PRI-516 / PR #1230 (CodeRabbit review)
+- **Date**: 2026-07-15
 - **Recurrence**: None
