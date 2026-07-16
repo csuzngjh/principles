@@ -58,7 +58,11 @@ async function run() {
       console.log(`  Validation: ${valid ? 'PASS' : 'FAIL'}`);
     }
   } catch (err) {
-    console.error(`\nBootstrap failed: ${err.message}`);
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'NO_DETERMINISTIC_PRINCIPLES') {
+      console.log('\nNothing to bootstrap yet; the workspace has no deterministic principles.');
+      return;
+    }
+    console.error(`\nBootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }

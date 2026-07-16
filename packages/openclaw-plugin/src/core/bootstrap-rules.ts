@@ -42,7 +42,9 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
   );
 
   if (deterministicEntries.length === 0) {
-    throw new Error('No deterministic principles found in training store');
+    const err = new Error('No deterministic principles found in training store');
+    (err as Error & { code?: string }).code = 'NO_DETERMINISTIC_PRINCIPLES';
+    throw err;
   }
 
   // Sort by observedViolationCount descending, then by principleId for tiebreaker
