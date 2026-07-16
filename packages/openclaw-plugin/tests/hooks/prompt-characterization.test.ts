@@ -26,6 +26,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { resetPromptStateForTest } from '../../src/hooks/prompt.js';
+
+const {
+  mockDetectSync,
+  mockListAssistantTurns,
+  mockListUserTurnsForSession,
+} = vi.hoisted(() => ({
+  mockDetectSync: vi.fn(),
+  mockListAssistantTurns: vi.fn().mockReturnValue([]),
+  mockListUserTurnsForSession: vi.fn().mockReturnValue([]),
+}));
 
 // ─── Mock dependencies ───────────────────────────────────────────────────────
 
@@ -34,6 +45,7 @@ beforeEach(() => {
   process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = 'true';
   // Reset session GFI to default between tests
   sessionGfiValue = 20;
+  resetPromptStateForTest();
 });
 
 afterEach(() => {
@@ -60,7 +72,12 @@ vi.mock('../../src/core/workspace-context.js', () => {
     workspaceDir: '/fake/workspace',
     stateDir: '/fake/state',
     resolve: (key: string) => `/fake/${key}`,
-    trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+    trajectory: {
+      recordSession: vi.fn(),
+      recordUserTurn: vi.fn(),
+      listAssistantTurns: mockListAssistantTurns,
+      listUserTurnsForSession: mockListUserTurnsForSession,
+    },
     config: { get: vi.fn() },
     evolutionReducer: {
       getActivePrinciples: vi.fn().mockReturnValue([]),
@@ -74,6 +91,13 @@ vi.mock('../../src/core/workspace-context.js', () => {
     },
   };
 });
+
+vi.mock('../../src/core/signal-collector-host.js', () => ({
+  SignalCollectorHost: class {
+    detectSync = mockDetectSync;
+  },
+  createSignalLlmClassifierFromConfig: vi.fn().mockReturnValue(null),
+}));
 
 // ─── Mutable session mock ────────────────────────────────────────────────────
 // getSession must be configurable per-test, so we use module-level refs.
@@ -142,27 +166,34 @@ vi.mock('../../src/core/focus-history.js', () => ({
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeMinimalEvent(overrides: {
-  trigger?: string;
-  sessionId?: string;
+  prompt?: string;
+  messages?: unknown[];
 } = {}) {
-  const { trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
-  return {
-    prompt: 'hello world',
-    messages: [],
-    trigger,
-    sessionId,
-  } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+  const {
+    prompt = 'hello world',
+    messages = [],
+  } = overrides;
+  return { prompt, messages };
 }
 
 function makeCtx(overrides: {
   workspaceDir?: string;
-  sessionGfi?: number;
   trigger?: string;
   sessionId?: string;
+  sessionKey?: string;
+  runId?: string;
 } = {}) {
-  const { workspaceDir = '/fake/workspace', sessionGfi = 20, trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
+  const {
+    workspaceDir = '/fake/workspace',
+    trigger = 'heartbeat',
+    sessionId = 'test-session-123',
+    sessionKey = sessionId,
+    runId = 'test-run-123',
+  } = overrides;
   return {
     workspaceDir,
+    runId,
+    sessionKey,
     trigger,
     sessionId,
     api: {
@@ -172,6 +203,94 @@ function makeCtx(overrides: {
     },
   } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 }
+
+describe('OpenClaw before_prompt_build current-turn contract', () => {
+  it('collects the first user turn from event.prompt when history is empty', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    await handleBeforePromptBuild(
+      makeMinimalEvent({ prompt: '这是错误的：请保留当前排序', messages: [] }),
+      makeCtx({ trigger: 'user', sessionId: 'first-turn', runId: 'run-first' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledWith(
+      '这是错误的：请保留当前排序',
+      'first-turn',
+      'user',
+      { referencesAssistantTurnId: null, turnIndex: 1 },
+    );
+  });
+
+  it('does not replay an older history message as the current correction', async () => {
+    mockListAssistantTurns.mockReturnValueOnce([{ id: 42 }]);
+    mockListUserTurnsForSession.mockReturnValueOnce([{ turnIndex: 1 }]);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    await handleBeforePromptBuild(
+      makeMinimalEvent({
+        prompt: '这是错误的：新的纠正',
+        messages: [
+          { role: 'user', content: '这是错误的：旧的纠正' },
+          { role: 'assistant', content: '旧回复' },
+        ],
+      }),
+      makeCtx({ trigger: 'user', sessionId: 'history-turn', runId: 'run-history' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledWith(
+      '这是错误的：新的纠正',
+      'history-turn',
+      'user',
+      { referencesAssistantTurnId: 42, turnIndex: 2 },
+    );
+  });
+
+  it('deduplicates retries with the same runId but accepts a distinct runId', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = makeMinimalEvent({ prompt: '不对，请重新处理', messages: [] });
+    const firstRun = makeCtx({ trigger: 'user', sessionId: 'retry-turn', runId: 'run-retry-1' });
+
+    await handleBeforePromptBuild(event, firstRun);
+    await handleBeforePromptBuild(event, firstRun);
+    await handleBeforePromptBuild(
+      event,
+      makeCtx({ trigger: 'user', sessionId: 'retry-turn', runId: 'run-retry-2' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not consume a runId when signal collection fails, so the retry can succeed', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = makeMinimalEvent({ prompt: '不对，请重试', messages: [] });
+    const retry = makeCtx({ trigger: 'user', sessionId: 'failed-retry', runId: 'run-failed-once' });
+    mockDetectSync.mockImplementationOnce(() => {
+      throw new Error('transient trajectory failure');
+    });
+
+    await expect(handleBeforePromptBuild(event, retry)).rejects.toThrow('transient trajectory failure');
+    await handleBeforePromptBuild(event, retry);
+    await handleBeforePromptBuild(event, retry);
+
+    expect(mockDetectSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts a reused protocol runId in a different logical session', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = makeMinimalEvent({ prompt: '这次结果不符合要求', messages: [] });
+
+    await handleBeforePromptBuild(
+      event,
+      makeCtx({ trigger: 'user', sessionId: 'session-a', sessionKey: 'agent:main:a', runId: 'reused-run' }),
+    );
+    await handleBeforePromptBuild(
+      event,
+      makeCtx({ trigger: 'user', sessionId: 'session-b', sessionKey: 'agent:main:b', runId: 'reused-run' }),
+    );
+
+    expect(mockDetectSync).toHaveBeenCalledTimes(2);
+  });
+});
 
 // ─── Tests: Attitude Directive removed (PRI-291 MVP diet) ───────────────
 // Attitude/personality prompt text was removed per PRI-291.
@@ -200,7 +319,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI >= 70 does NOT inject HUMBLE_RECOVERY mode', async () => {
     setSessionGfi(75);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 75 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('HUMBLE_RECOVERY');
@@ -209,7 +328,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI >= 40 does NOT inject CONCILIATORY mode', async () => {
     setSessionGfi(50);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 50 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('CONCILIATORY');
@@ -218,7 +337,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('GFI < 40 does NOT inject EFFICIENT mode', async () => {
     setSessionGfi(10);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 10 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('EFFICIENT');
@@ -227,7 +346,7 @@ describe('Attitude/personality directive — removed from prompt (PRI-291)', () 
   it('no "Spicy Evolver" persona text appears in prompt', async () => {
     setSessionGfi(20);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 20 }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
     expect(combined).not.toContain('Spicy Evolver');
