@@ -9,19 +9,33 @@ import {
   RUBRIC_DIMENSIONS,
   RUBRIC_LABELS,
   meetsMvpThreshold,
+  sumScores,
   escapeHtml,
   escapeMarkdownTable,
+  isValidRubricScore,
+  parseRubricScore,
+  validateDimensionScores,
   validateLlmScoreResponse,
   validateAdjudicationResponse,
   validatePainRow,
   validateGateRow,
   validateCliOptions,
   validateEvolutionRow,
+  validatePrincipleEventRow,
+  extractJsonFromLlmResponse,
+  truncate,
   needsAdjudication,
   determineFinalLabel,
   sanitize,
+  generateMarkdownReport,
+  generateHtmlReport,
+  generateJsonReport,
   type RubricDimension,
   type RubricScore,
+  type QualityScorecardReport,
+  type EpisodeEvaluation,
+  type PainEpisode,
+  type LocalEvaluation,
 } from '../index.js';
 
 // ── Rubric Tests ───────────────────────────────────────────────────
@@ -640,5 +654,461 @@ describe('determineFinalLabel — additional boundary conditions', () => {
     const local = makeLocalEval({ totalScore: 10, mvpMet: false });
     const label = determineFinalLabel(local, { adjudicationStatus: 'skipped' });
     expect(label).toBe('needs-review');
+  });
+});
+
+// ── Untested Validation Functions ──────────────────────────────────
+
+describe('isValidRubricScore', () => {
+  it('returns true for 0, 1, 2', () => {
+    expect(isValidRubricScore(0)).toBe(true);
+    expect(isValidRubricScore(1)).toBe(true);
+    expect(isValidRubricScore(2)).toBe(true);
+  });
+
+  it('returns false for other numbers', () => {
+    expect(isValidRubricScore(-1)).toBe(false);
+    expect(isValidRubricScore(3)).toBe(false);
+    expect(isValidRubricScore(1.5)).toBe(false);
+    expect(isValidRubricScore(NaN)).toBe(false);
+  });
+
+  it('returns false for non-numbers', () => {
+    expect(isValidRubricScore('0')).toBe(false);
+    expect(isValidRubricScore(null)).toBe(false);
+    expect(isValidRubricScore(undefined)).toBe(false);
+    expect(isValidRubricScore({})).toBe(false);
+  });
+});
+
+describe('parseRubricScore', () => {
+  it('returns the score for valid values', () => {
+    expect(parseRubricScore(0)).toBe(0);
+    expect(parseRubricScore(1)).toBe(1);
+    expect(parseRubricScore(2)).toBe(2);
+  });
+
+  it('returns 0 for invalid values', () => {
+    expect(parseRubricScore(3)).toBe(0);
+    expect(parseRubricScore(-1)).toBe(0);
+    expect(parseRubricScore('bad')).toBe(0);
+    expect(parseRubricScore(null)).toBe(0);
+    expect(parseRubricScore(undefined)).toBe(0);
+  });
+});
+
+describe('validateDimensionScores', () => {
+  it('fills all dimensions with parsed scores', () => {
+    const result = validateDimensionScores({ G1: 2, G2: 1, G3: 0 });
+    expect(result.G1).toBe(2);
+    expect(result.G2).toBe(1);
+    expect(result.G3).toBe(0);
+    expect(RUBRIC_DIMENSIONS.every(d => d in result)).toBe(true);
+  });
+
+  it('defaults missing dimensions to 0', () => {
+    const result = validateDimensionScores({});
+    for (const dim of RUBRIC_DIMENSIONS) {
+      expect(result[dim]).toBe(0);
+    }
+  });
+
+  it('clamps invalid scores to 0', () => {
+    const result = validateDimensionScores({ G1: 5, G2: -1, G3: 'bad' });
+    expect(result.G1).toBe(0);
+    expect(result.G2).toBe(0);
+    expect(result.G3).toBe(0);
+  });
+
+  it('ignores unknown dimensions', () => {
+    const result = validateDimensionScores({ G8: 2, unknown: 1 } as Record<string, unknown>);
+    expect('G8' in result).toBe(false);
+    expect('unknown' in result).toBe(false);
+  });
+});
+
+describe('sumScores', () => {
+  it('sums all dimension scores', () => {
+    const perfect = Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, 2])) as Record<RubricDimension, RubricScore>;
+    expect(sumScores(perfect)).toBe(14);
+  });
+
+  it('returns 0 for all zeros', () => {
+    const zeros = Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, 0])) as Record<RubricDimension, RubricScore>;
+    expect(sumScores(zeros)).toBe(0);
+  });
+
+  it('handles mixed scores', () => {
+    const mixed: Record<RubricDimension, RubricScore> = {
+      G1: 2, G2: 1, G3: 0, G4: 2, G5: 1, G6: 0, G7: 2,
+    };
+    expect(sumScores(mixed)).toBe(8);
+  });
+});
+
+describe('validatePrincipleEventRow', () => {
+  it('returns null for null input', () => {
+    expect(validatePrincipleEventRow(null)).toBeNull();
+  });
+
+  it('returns null for non-object input', () => {
+    expect(validatePrincipleEventRow('string')).toBeNull();
+    expect(validatePrincipleEventRow(123)).toBeNull();
+    expect(validatePrincipleEventRow([])).toBeNull();
+  });
+
+  it('returns null for missing event_type', () => {
+    expect(validatePrincipleEventRow({ principle_id: 'P-001' })).toBeNull();
+  });
+
+  it('returns null for empty event_type', () => {
+    expect(validatePrincipleEventRow({ event_type: '' })).toBeNull();
+  });
+
+  it('parses valid row with all fields', () => {
+    const row = validatePrincipleEventRow({
+      principle_id: 'P-001',
+      event_type: 'principle_created',
+      created_at: '2026-06-01T00:00:00.000Z',
+    });
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.principle_id).toBe('P-001');
+      expect(row.event_type).toBe('principle_created');
+      expect(row.created_at).toBe('2026-06-01T00:00:00.000Z');
+    }
+  });
+
+  it('handles null principle_id', () => {
+    const row = validatePrincipleEventRow({
+      principle_id: null,
+      event_type: 'system_start',
+    });
+    expect(row).not.toBeNull();
+    expect(row?.principle_id).toBeNull();
+  });
+
+  it('defaults missing created_at to current ISO string', () => {
+    const before = new Date().toISOString();
+    const row = validatePrincipleEventRow({ event_type: 'test' });
+    const after = new Date().toISOString();
+    expect(row).not.toBeNull();
+    if (row) {
+      expect(row.created_at >= before && row.created_at <= after).toBe(true);
+    }
+  });
+
+  it('handles non-string event_type (defaults to empty -> null)', () => {
+    expect(validatePrincipleEventRow({ event_type: 123 })).toBeNull();
+  });
+});
+
+describe('extractJsonFromLlmResponse', () => {
+  it('extracts valid JSON object', () => {
+    const result = extractJsonFromLlmResponse('Here is the result: {"score": 85, "status": "pass"}');
+    expect(result).toEqual({ score: 85, status: 'pass' });
+  });
+
+  it('returns null for text without JSON', () => {
+    const result = extractJsonFromLlmResponse('No JSON here, just plain text');
+    expect(result).toBeNull();
+  });
+
+  it('returns null for malformed JSON', () => {
+    const result = extractJsonFromLlmResponse('Here is {invalid json}');
+    expect(result).toBeNull();
+  });
+
+  it('extracts JSON with nested objects', () => {
+    const result = extractJsonFromLlmResponse('Result: {"outer": {"inner": "value"}, "arr": [1,2,3]}');
+    expect(result).toEqual({ outer: { inner: 'value' }, arr: [1, 2, 3] });
+  });
+
+  it('handles empty string input', () => {
+    expect(extractJsonFromLlmResponse('')).toBeNull();
+  });
+
+  it('extracts JSON even when surrounded by markdown code fences', () => {
+    const result = extractJsonFromLlmResponse('```json\n{"key": "value"}\n```');
+    expect(result).toEqual({ key: 'value' });
+  });
+});
+
+describe('truncate', () => {
+  it('returns original text when shorter than maxLen', () => {
+    expect(truncate('hello', 100)).toBe('hello');
+  });
+
+  it('returns original text when exactly maxLen', () => {
+    expect(truncate('hello', 5)).toBe('hello');
+  });
+
+  it('truncates long text and adds ellipsis', () => {
+    const result = truncate('hello world', 5);
+    expect(result).toHaveLength(8);
+    expect(result.startsWith('hello')).toBe(true);
+    expect(result.endsWith('...')).toBe(true);
+  });
+
+  it('uses default maxLen of 200', () => {
+    const longText = 'a'.repeat(300);
+    const result = truncate(longText);
+    expect(result.length).toBeLessThan(300);
+    expect(result.endsWith('...')).toBe(true);
+  });
+
+  it('handles empty string', () => {
+    expect(truncate('')).toBe('');
+  });
+
+  it('handles maxLen of 0', () => {
+    expect(truncate('hello', 0)).toBe('...');
+  });
+});
+
+// ── Report Generator Tests ────────────────────────────────────────
+
+function makeFullReport(): QualityScorecardReport {
+  const episode: PainEpisode = {
+    episodeId: 'EP-TEST-001',
+    summary: 'Agent made incorrect assumption about API behavior',
+    source: 'manual',
+    score: 75,
+    severity: 'high',
+    createdAt: '2026-06-15T10:00:00.000Z',
+    evolutionTaskResolution: null,
+    linkedPrinciples: ['P-001'],
+    gateBlockCount: 2,
+  };
+
+  const localEval: LocalEvaluation = {
+    model: 'local-model',
+    dimensionScores: Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, 2])) as Record<RubricDimension, RubricScore>,
+    dimensionRationales: Object.fromEntries(RUBRIC_DIMENSIONS.map(d => [d, `Good evidence for ${d}`])) as Record<RubricDimension, string>,
+    totalScore: 14,
+    maxScore: 14,
+    mvpMet: true,
+    flags: [],
+  };
+
+  const evaluation: EpisodeEvaluation = {
+    episode,
+    localEvaluation: localEval,
+    strongModelAdjudication: {
+      model: 'strong-model',
+      adjudicationStatus: 'pass',
+      confirmedScores: { ...localEval.dimensionScores },
+      confirmedMvpMet: true,
+      rationale: 'All dimensions well-supported by evidence.',
+      nextAction: null,
+    },
+    finalLabel: 'pass',
+  };
+
+  return {
+    generatedAt: '2026-06-16T00:00:00.000Z',
+    dataSource: {
+      painEventCount: 100,
+      evolutionTaskCount: 25,
+      principleEventCount: 50,
+      gateBlockCount: 10,
+      dateRange: { from: '2026-06-01', to: '2026-06-15' },
+    },
+    localEvaluatorConfig: {
+      model: 'local-model-v1',
+      baseUrl: 'http://localhost:1234/v1',
+      apiKeyStatus: 'configured',
+    },
+    strongModelConfig: {
+      model: 'strong-model-pro',
+      status: 'configured',
+    },
+    evaluations: [evaluation],
+    summary: {
+      totalEpisodes: 1,
+      localPassCount: 1,
+      localFailCount: 0,
+      strongModelReviewedCount: 1,
+      finalPassCount: 1,
+      finalFailCount: 0,
+      needsReviewCount: 0,
+      localOnlyCount: 0,
+      averageLocalScore: 14,
+      mvpThresholdMetCount: 1,
+    },
+    knownLimitations: [
+      'Sample size limited to recent episodes',
+      'Local model may have higher false-negative rate',
+    ],
+  };
+}
+
+describe('generateJsonReport', () => {
+  it('produces valid JSON that round-trips correctly', () => {
+    const report = makeFullReport();
+    const jsonStr = generateJsonReport(report);
+    const parsed = JSON.parse(jsonStr);
+    expect(parsed.generatedAt).toBe(report.generatedAt);
+    expect(parsed.summary.totalEpisodes).toBe(1);
+    expect(parsed.evaluations).toHaveLength(1);
+  });
+
+  it('includes all top-level fields', () => {
+    const report = makeFullReport();
+    const jsonStr = generateJsonReport(report);
+    const parsed = JSON.parse(jsonStr);
+    expect(parsed).toHaveProperty('generatedAt');
+    expect(parsed).toHaveProperty('dataSource');
+    expect(parsed).toHaveProperty('localEvaluatorConfig');
+    expect(parsed).toHaveProperty('strongModelConfig');
+    expect(parsed).toHaveProperty('evaluations');
+    expect(parsed).toHaveProperty('summary');
+    expect(parsed).toHaveProperty('knownLimitations');
+  });
+});
+
+describe('generateMarkdownReport', () => {
+  it('produces non-empty markdown string', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(typeof md).toBe('string');
+    expect(md.length).toBeGreaterThan(0);
+  });
+
+  it('includes report title', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('# PD Quality Scorecard Report');
+  });
+
+  it('includes data source section', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('## Data Source');
+    expect(md).toContain('Pain Events: 100');
+    expect(md).toContain('Evolution Tasks: 25');
+  });
+
+  it('includes summary section with counts', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('## Summary');
+    expect(md).toContain('Total Episodes: 1');
+    expect(md).toContain('Final Pass: 1');
+    expect(md).toContain('MVP Threshold Met: 1/1');
+  });
+
+  it('includes episode evaluations section', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('## Episode Evaluations');
+    expect(md).toContain('EP-TEST-001');
+    expect(md).toContain('PASS');
+  });
+
+  it('includes known limitations section', () => {
+    const report = makeFullReport();
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('## Known Limitations');
+    expect(md).toContain('Sample size limited');
+  });
+
+  it('escapes markdown table special characters in content', () => {
+    const report = makeFullReport();
+    report.evaluations[0]!.episode.summary = 'Test | pipe | and \n newline';
+    const md = generateMarkdownReport(report);
+    const summaryLine = md.split('\n').find(line => line.startsWith('- Summary:'));
+    expect(summaryLine).toBeDefined();
+    expect(summaryLine!).toContain('Test \\| pipe \\|');
+    expect(summaryLine!).toContain('newline');
+  });
+
+  it('handles report with zero episodes', () => {
+    const report = makeFullReport();
+    report.evaluations = [];
+    report.summary.totalEpisodes = 0;
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('Total Episodes: 0');
+    expect(md).toContain('## Episode Evaluations');
+  });
+
+  it('handles episodes without strong model adjudication', () => {
+    const report = makeFullReport();
+    report.evaluations[0]!.strongModelAdjudication = null;
+    report.evaluations[0]!.finalLabel = 'local-pass';
+    const md = generateMarkdownReport(report);
+    expect(md).toContain('LOCAL-PASS');
+  });
+});
+
+describe('generateHtmlReport', () => {
+  it('produces non-empty HTML string', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(typeof html).toBe('string');
+    expect(html.length).toBeGreaterThan(0);
+  });
+
+  it('includes HTML doctype and structure', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('<html');
+    expect(html).toContain('</html>');
+    expect(html).toContain('<head>');
+    expect(html).toContain('</head>');
+    expect(html).toContain('<body>');
+    expect(html).toContain('</body>');
+  });
+
+  it('includes report title', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('PD Quality Scorecard');
+  });
+
+  it('includes summary statistics', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('Episodes');
+    expect(html).toContain('Local Pass Rate');
+    expect(html).toContain('Avg Score');
+  });
+
+  it('includes episode cards', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('EP-TEST-001');
+    expect(html).toContain('card pass');
+  });
+
+  it('escapes HTML special characters in content', () => {
+    const report = makeFullReport();
+    report.evaluations[0]!.episode.summary = '<script>alert("xss")</script>';
+    const html = generateHtmlReport(report);
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('handles episodes without strong model adjudication', () => {
+    const report = makeFullReport();
+    report.evaluations[0]!.strongModelAdjudication = null;
+    report.evaluations[0]!.finalLabel = 'local-pass';
+    const html = generateHtmlReport(report);
+    expect(html).toContain('local-only assessment');
+  });
+
+  it('includes known limitations list', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('Known Limitations');
+    expect(html).toContain('Sample size limited');
+  });
+
+  it('includes score bar visualizations', () => {
+    const report = makeFullReport();
+    const html = generateHtmlReport(report);
+    expect(html).toContain('score-bars');
+    expect(html).toContain('bar-fill');
   });
 });
