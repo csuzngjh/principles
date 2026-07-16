@@ -49,7 +49,7 @@
     "@types/node": "^26.0.1",
     "@types/semver": "^7.7.0",
     "@types/tar": "^7.0.87",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
   },
