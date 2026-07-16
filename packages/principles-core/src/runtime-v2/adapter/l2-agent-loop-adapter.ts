@@ -34,8 +34,8 @@
  */
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
-import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai';
-import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai';
+import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai/compat';
+import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai/compat';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { PDRuntimeError } from '../error-categories.js';
@@ -101,7 +101,7 @@ export interface L2AgentLoopAdapterConfig {
  */
 export function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
   const knownProviders = getProviders();
-  if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
+  if ((knownProviders as string[]).includes(provider) && !baseUrl) {
     // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
     return getModel(provider as KnownProvider, modelId);
   }
@@ -531,7 +531,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     if (typeof response.content === 'string') {
       text = response.content;
     } else if (Array.isArray(response.content)) {
-      const textPart = response.content.find(
+      const textPart = (response.content as unknown[]).find(
         (c): c is { type: 'text'; text: string } =>
           typeof c === 'object' && c !== null && Object.hasOwn(c, 'type') && Reflect.get(c, 'type') === 'text',
       );
