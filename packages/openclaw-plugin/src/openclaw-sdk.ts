@@ -195,17 +195,16 @@ export interface OpenClawPluginApi {
 }
 
 export interface PluginHookBeforePromptBuildEvent {
-  agentId?: string;
-  sessionId?: string;
   prompt: string;
-  messages?: unknown[];
-  [key: string]: unknown;
+  messages: unknown[];
 }
 
 export interface PluginHookBeforePromptBuildResult {
-  prompt?: string;
-  messages?: unknown[];
-  [key: string]: unknown;
+  systemPrompt?: string;
+  prependContext?: string;
+  appendContext?: string;
+  prependSystemContext?: string;
+  appendSystemContext?: string;
 }
 
 export interface PluginHookBeforeToolCallEvent {
@@ -305,11 +304,28 @@ export interface PluginHookSubagentContext {
 }
 
 export interface PluginHookAgentContext {
+  runId?: string;
+  jobId?: string;
+  trace?: unknown;
   agentId?: string;
+  sessionKey?: string;
   sessionId?: string;
   workspaceDir?: string;
+  modelProviderId?: string;
+  modelId?: string;
+  messageProvider?: string;
+  channel?: string;
+  chatId?: string;
+  senderId?: string;
+  trigger?: string;
+  channelId?: string;
+  contextTokenBudget?: number;
+  contextWindowSource?: 'model' | 'config';
+  contextWindowReferenceTokens?: number;
+  senderExternalId?: string;
+  channelContext?: unknown;
+  // PD's local hook adapter supplies a logger in addition to OpenClaw's host context.
   logger?: Partial<PluginLogger>;
-  [key: string]: unknown;
 }
 
 export interface PluginHookBeforeMessageWriteEvent {
