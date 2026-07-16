@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { createRequire } from 'module';
 import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -18,6 +19,17 @@ export interface CanaryOutput {
   recommendedNextActions: string[];
   generatedAt: string;
   internalizationQueueSummary?: InternalizationQueueSummary;
+}
+
+const require = createRequire(import.meta.url);
+
+function readCliVersion(): string {
+  const packageMetadata: unknown = require('../../package.json');
+  if (typeof packageMetadata === 'object' && packageMetadata !== null && Object.hasOwn(packageMetadata, 'version')) {
+    const version: unknown = Reflect.get(packageMetadata, 'version');
+    if (typeof version === 'string') return version;
+  }
+  return 'unknown';
 }
 
 export interface InternalizationQueueSummary {
@@ -244,11 +256,23 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
         const model = new OperatorHealthReadModel({ workspaceDir });
         try {
           const snapshot: OperatorHealthSnapshot = await model.getSnapshot();
-          const status = snapshot.overallStatus === 'healthy' ? 'healthy' : snapshot.overallStatus === 'degraded' ? 'degraded' : 'error';
+          // Priority: real errors (e.g. DB missing) must surface as 'error' and not be
+          // masked by the cold-start `totalTaskCount === 0` branch, which is only a
+          // 'degraded' signal. Check overallStatus==='error' first, then unexercised,
+          // then healthy/degraded.
+          const status = snapshot.overallStatus === 'error'
+            ? 'error'
+            : snapshot.totalTaskCount === 0
+            ? 'degraded'
+            : snapshot.overallStatus === 'healthy' ? 'healthy' : 'degraded';
           return {
             name: 'runtime_health',
             status,
-            summary: status === 'healthy'
+            summary: snapshot.overallStatus === 'error'
+              ? `Runtime health: ${snapshot.overallStatus}. Actions: ${snapshot.recommendedActions.join('; ')}`
+              : snapshot.totalTaskCount === 0
+              ? 'Runtime pipeline has not been exercised yet.'
+              : status === 'healthy'
               ? 'Runtime health OK.'
               : `Runtime health: ${snapshot.overallStatus}. Actions: ${snapshot.recommendedActions.join('; ')}`,
             details: snapshot,
@@ -272,7 +296,7 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
           summary: status === 'healthy'
             ? `PD CLI accessible at ${cliPath}`
             : 'PD CLI entrypoint not found — verify installation.',
-          details: { cliPath, exists: cliExists, version: '0.1.0' },
+          details: { cliPath, exists: cliExists, version: readCliVersion() },
         };
       } catch (err) {
         return { name: 'pd_shim_info', status: 'error', summary: 'PD shim check failed.', error: String(err) };
