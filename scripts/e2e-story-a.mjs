@@ -22,6 +22,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
+import { computeStoryAVerdict, exitCodeForStoryAVerdict } from './e2e-story-a-verdict.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -532,41 +533,29 @@ function generateEvidence({ runId, trap, phase0R, phase1R, phase2R, phase3R, pha
 
   const filePath = join(evidencePath, `STORY_A_E2E_${runId}.md`);
 
-  // Compute verdict
+  // Compute verdict via the strict, unit-tested computation extracted to
+  // e2e-story-a-verdict.mjs. The previous inline verdict block was removed
+  // because it was unconditionally overwritten by strictResult below.
   let verdict = 'story_a_validated';
   const verdictNotes = [];
 
-  if (!phase0R.ok) { verdict = `failed:phase0:${phase0R.error}`; }
-  else if (!phase1R.ok) { verdict = `failed:phase1:${phase1R.error}`; }
-  else if (!phase3R.agentResponded) { verdict = 'failed:phase3:agent_no_response'; }
-  else if (phase4R.painCount === 0) { verdict = 'failed:phase4:no_pain_emitted'; }
-  else if (!phase4R.painSource || phase4R.painSource === 'unknown') {
-    verdict = `failed:phase4:unknown_pain_source:${phase4R.painSource}`;
-  }
-  else if (phase5R.tasks.length === 0) { verdict = 'failed:phase5:no_tasks_created'; }
-  else if (phase5R.candidates.length === 0) { verdict = 'failed:phase5:no_candidates'; }
-  else {
-    const hasProvenance = phase5R.tasks.some(t => t.provenance === 'openclaw_context_bound');
-    const consumed = phase5R.candidates.filter(c => c.status === 'consumed');
-    const pending = phase5R.candidates.filter(c => c.status === 'pending');
-
-    if (hasProvenance && (consumed.length > 0 || pending.length > 0)) {
-      verdict = 'story_a_validated';
-      verdictNotes.push(`provenance=openclaw_context_bound, ${consumed.length} consumed, ${pending.length} pending candidates`);
-    } else if (hasProvenance) {
-      verdict = 'story_a_validated';
-      verdictNotes.push('provenance=openclaw_context_bound, candidates exist');
-    } else {
-      verdictNotes.push(`provenance=${phase5R.tasks[0]?.provenance ?? 'null'}`);
-    }
-
-    if (phase5R.contentQuality?.hasOnlyPdInternalCandidates) {
-      verdict = 'failed:phase5:pd_internal_principles_only';
-      verdictNotes.push('All candidates describe PD internal mechanisms, not agent behavior — evidence enrichment may not be working');
-    } else if (phase5R.contentQuality?.hasAgentBehaviorCandidate) {
-      verdictNotes.push(`Content quality: ${phase5R.contentQuality.agentBehaviorCandidateCount} agent-behavior candidates (good)`);
-    }
-  }
+  const strictResult = computeStoryAVerdict({
+    phase0Ok: phase0R.ok,
+    phase0Error: phase0R.error,
+    phase1Ok: phase1R.ok,
+    phase1Error: phase1R.error,
+    agentResponded: phase3R.agentResponded,
+    painCount: phase4R.painCount,
+    painSource: phase4R.painSource,
+    hasOwnerMessage: phase4R.hasOwnerMessage || phase5R.tasks.some(task => task.hasOwnerMessage),
+    hasAgentTurn: phase4R.hasAgentTurn || phase5R.tasks.some(task => task.hasAgentTurn),
+    tasks: phase5R.tasks,
+    candidates: phase5R.candidates,
+    integrityStatus: phase5R.integrity?.overallStatus,
+    canaryStatus: phase5R.canary?.overallStatus,
+  });
+  verdict = strictResult.verdict;
+  verdictNotes.splice(0, verdictNotes.length, ...strictResult.notes);
 
   if (phase4R.hasOwnerMessage || phase5R.tasks.some(t => t.hasOwnerMessage)) {
     verdictNotes.push('Evidence contains owner_message (P0 fix verified)');
@@ -735,7 +724,7 @@ Traps:
   if (!phase1R.ok) {
     skip('1', phase1R.error);
     // Environment unavailable — generate skip evidence
-    const { filePath } = generateEvidence({
+    const { filePath, verdict } = generateEvidence({
       runId, trap,
       phase0R, phase1R,
       phase2R: { canary: null, integrity: null, queue: null, candidateCount: 0, ledgerEntryCount: 0 },
@@ -744,7 +733,7 @@ Traps:
       phase5R: { tasks: [], candidates: [], integrity: null, canary: null },
     });
     console.log(`\nSKIP: Environment unavailable. Evidence: ${filePath}`);
-    process.exit(0);
+    process.exit(exitCodeForStoryAVerdict(verdict));
   }
   pass('1', 'Gateway reachable, agent responsive');
 
@@ -834,10 +823,7 @@ Traps:
   console.log(`EVIDENCE: ${filePath}`);
   console.log('═'.repeat(60));
 
-  // Exit code: 0 for validated/gate_quarantined, 1 for failed
-  if (verdict.startsWith('failed')) {
-    process.exit(1);
-  }
+  process.exit(exitCodeForStoryAVerdict(verdict));
 }
 
 main().catch(e => {
