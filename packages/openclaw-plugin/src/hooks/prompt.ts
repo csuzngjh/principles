@@ -100,6 +100,10 @@ function claimSignalRun(workspaceDir: string, sessionIdentity: string, runId: st
   return true;
 }
 
+function hasClaimedSignalRun(workspaceDir: string, sessionIdentity: string, runId: string): boolean {
+  return _processedSignalRunKeys.get(workspaceDir)?.has(`${sessionIdentity}\u0000${runId}`) ?? false;
+}
+
 /**
  * Reads a file with TTL-based caching.
  * Returns cached content if:
@@ -265,7 +269,7 @@ export async function handleBeforePromptBuild(
   // SignalCollectorHost 统一接管 correction + empathy 检测(spec §3.3 决策1)。
   // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
   if (currentUserMessage && sessionId && trigger === 'user' && !isAgentToAgent) {
-    if (runId && !claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+    if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
       logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
@@ -278,6 +282,7 @@ export async function handleBeforePromptBuild(
           turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
         },
       );
+      if (runId) claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId);
     }
   }
 

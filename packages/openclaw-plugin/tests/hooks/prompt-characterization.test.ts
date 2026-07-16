@@ -260,6 +260,21 @@ describe('OpenClaw before_prompt_build current-turn contract', () => {
     expect(mockDetectSync).toHaveBeenCalledTimes(2);
   });
 
+  it('does not consume a runId when signal collection fails, so the retry can succeed', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = makeMinimalEvent({ prompt: '不对，请重试', messages: [] });
+    const retry = makeCtx({ trigger: 'user', sessionId: 'failed-retry', runId: 'run-failed-once' });
+    mockDetectSync.mockImplementationOnce(() => {
+      throw new Error('transient trajectory failure');
+    });
+
+    await expect(handleBeforePromptBuild(event, retry)).rejects.toThrow('transient trajectory failure');
+    await handleBeforePromptBuild(event, retry);
+    await handleBeforePromptBuild(event, retry);
+
+    expect(mockDetectSync).toHaveBeenCalledTimes(2);
+  });
+
   it('accepts a reused protocol runId in a different logical session', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const event = makeMinimalEvent({ prompt: '这次结果不符合要求', messages: [] });

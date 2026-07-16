@@ -1239,7 +1239,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-069 P2 (degradation path written as afterthought skips the happy-path's rigor — same pattern group applied to concurrency), ERR-001 (`as`-bypass on the lock's caught-unknown error, fixed in the same review), ERR-009 (silent overwrite sibling in the same PR)
 - **Source**: PRI-459 / PR #1045
 - **Date**: 2026-06-25
-- **Recurrence**: None
+- **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
 
 ---
 
