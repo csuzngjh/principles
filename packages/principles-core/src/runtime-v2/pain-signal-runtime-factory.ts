@@ -27,6 +27,7 @@ import { PDRuntimeError } from './error-categories.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
+import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
 import { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
 import { SqliteConnection } from './store/sqlite-connection.js';
 import { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
@@ -69,6 +70,7 @@ export interface PainSignalRuntimeFactoryOptions {
    * Core never performs filesystem I/O — it only consumes the port.
    */
   intentDocReader?: IntentDocReader;
+  trajectoryTurnReader?: TrajectoryTurnReader;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -459,7 +461,7 @@ export async function createPainSignalBridge(
     stateManager.taskStore,
     historyQuery,
     stateManager.runStore,
-    { sourceTraceLocator },
+    { sourceTraceLocator, trajectoryTurnReader: opts.trajectoryTurnReader },
   );
 
   const runtimeAdapter: PDRuntimeAdapter = runtimeConfig.runtimeKind === 'pi-ai'

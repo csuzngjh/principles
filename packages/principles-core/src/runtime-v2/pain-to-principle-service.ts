@@ -16,6 +16,7 @@ import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
+import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
 
 export type FailureCategory =
   | 'runtime_unavailable'
@@ -48,6 +49,7 @@ export interface PainToPrincipleServiceOptions {
    * Plugin layer supplies the concrete I/O adapter; core only consumes the port.
    */
   intentDocReader?: IntentDocReader;
+  trajectoryTurnReader?: TrajectoryTurnReader;
 }
 
 export interface PainToPrincipleInput {
@@ -149,6 +151,7 @@ export class PainToPrincipleService {
           effectiveConfig: this.opts.effectiveConfig,
           getEnvVar: this.opts.getEnvVar,
           intentDocReader: this.opts.intentDocReader,
+          trajectoryTurnReader: this.opts.trajectoryTurnReader,
         });
 
         // Create task as pending (does not run diagnosis)
@@ -190,6 +193,7 @@ export class PainToPrincipleService {
         effectiveConfig: this.opts.effectiveConfig,
         getEnvVar: this.opts.getEnvVar,
         intentDocReader: this.opts.intentDocReader,
+        trajectoryTurnReader: this.opts.trajectoryTurnReader,
       });
 
       const bridgeResult = await bridge.onPainDetected(painData);
