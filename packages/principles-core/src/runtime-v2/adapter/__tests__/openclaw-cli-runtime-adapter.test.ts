@@ -76,9 +76,10 @@ describe('OpenClawCliRuntimeAdapter', () => {
       expect(call.command).toBe('openclaw');
       expect(call.args).toContain('--agent');
       expect(call.args).toContain('my-agent');
-      expect(call.args).toContain('--message');
-      const messageIdx = call.args.indexOf('--message');
-      expect(call.args[messageIdx + 1]).toMatch(/^@/);
+      expect(call.args).toContain('--message-file');
+      expect(call.args).not.toContain('--message');
+      const messageFileIdx = call.args.indexOf('--message-file');
+      expect(call.args[messageFileIdx + 1]).toMatch(/[\\/]msg-.*\.json$/);
       expect(call.args).toContain('--json');
       expect(call.args).toContain('--local');
       expect(call.args).toContain('--timeout');
@@ -500,7 +501,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
   // OCRA-06: workspaceDir passed as cwd to runCliProcess
   describe('workspaceDir (OCRA-06, HG-02)', () => {
     it('passes workspaceDir as cwd to runCliProcess when provided', async () => {
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', workspaceDir: 'D:/work/.pd' });
+      const workspaceDir = process.cwd();
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', workspaceDir });
       mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
 
       await adapter.startRun({
@@ -512,7 +514,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
-      expect(firstCall.cwd).toBe('D:/work/.pd');
+      expect(firstCall.cwd).toBe(workspaceDir);
     });
 
     it('passes undefined cwd when workspaceDir is not provided', async () => {
@@ -532,7 +534,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
     });
 
     it('passes workspaceDir as cwd even when runtimeMode is gateway', async () => {
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway', workspaceDir: 'D:/work/.pd' });
+      const workspaceDir = process.cwd();
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway', workspaceDir });
       mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
 
       await adapter.startRun({
@@ -544,7 +547,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string; args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
-      expect(firstCall.cwd).toBe('D:/work/.pd');
+      expect(firstCall.cwd).toBe(workspaceDir);
       expect(firstCall.args).not.toContain('--local');
     });
   });

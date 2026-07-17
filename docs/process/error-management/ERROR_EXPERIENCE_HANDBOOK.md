@@ -580,6 +580,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — tests assert shapes/strings/isolated helper behavior instead of the real production contract, or vacuously pass when data is absent.
   - 2026-06-25 PRI-467 (PR#1059): mock stubbed `readActivations()` but prod calls `readActivatedPrinciples()` — TypeError catch-and-continue masked it
   - 2026-06-25 PRI-459 (PR#1045): ledger no-lost-update test was sequential (passes without lock); fails-LOUD lock contract untested
+  - 2026-07-17 PRI-518: the OpenClaw CLI adapter's mocked test asserted a remembered `--message @file` convention, while the checked OpenClaw source accepts multiline payloads through `--message-file <path>`. The real replay therefore sent the diagnostician a literal path and repeatedly received schema-invalid output. Fixed by emitting the source-backed flag and asserting the exact spawned argument contract.
   - Earlier recurrences (PR#689-#1004): same vacuous-pass pattern across MVP smoke, repair loop, package tests, nav tests, RuleHost fixtures. See git history.
 
 ---
