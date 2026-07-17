@@ -1829,6 +1829,12 @@ export type {
   BuiltinPatternEntry,
 } from './thinking-models/index.js';
 
+export type {
+  TrajectoryTurnReader,
+  TrajectoryUserTurn,
+  TrajectoryAssistantTurn,
+} from './store/context/trajectory-turn-reader.js';
+
 // SignalCollector — 统一信号采集层 (correction + empathy 上游融合)
 export {
   scanKeywords,
