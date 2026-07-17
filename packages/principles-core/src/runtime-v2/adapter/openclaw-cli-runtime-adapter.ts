@@ -78,13 +78,11 @@ interface RunState {
 }
 
 interface MessageFileRef {
-  arg: string;
-  dir: string;
+  filePath: string;
 }
 
 async function writeMessageFile(message: string, workspaceDir?: string): Promise<MessageFileRef> {
-  // Write to workspace/.pd/tmp/ so the agent (which runs with workspace cwd) can find it.
-  // The agent interprets @path as relative to its working directory, not an absolute path.
+  // Keep the payload in the PD workspace so cleanup and workspace ownership remain explicit.
   const baseDir = workspaceDir
     ? join(workspaceDir, '.pd', 'tmp')
     : tmpdir();
@@ -92,17 +90,13 @@ async function writeMessageFile(message: string, workspaceDir?: string): Promise
   const filePath = join(baseDir, `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`);
   await writeFile(filePath, message, 'utf8');
 
-  // OpenClaw supports --message @file. Forward slashes avoid cmd.exe treating
-  // backslashes inside the @file token as escaping/quoting boundaries.
-  return { arg: `@${filePath.replace(/\\/g, '/')}`, dir: baseDir };
+  return { filePath };
 }
 
 async function cleanupMessageFile(ref: MessageFileRef | undefined): Promise<void> {
   if (!ref) return;
-  // Extract the file path from the @arg (e.g. "@D:/workspace/.pd/tmp/msg-123.json" → file path)
-  const filePath = ref.arg.replace(/^@/, '');
   try {
-    await rm(filePath, { force: true });
+    await rm(ref.filePath, { force: true });
   } catch {
     // File may already be gone; ignore cleanup errors
   }
@@ -631,7 +625,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     const args = [
       'agent',
       '--agent', agentId,
-      '--message', messageRef.arg,
+      '--message-file', messageRef.filePath,
       '--session-id', sessionId,
       '--json',
     ];
