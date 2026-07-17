@@ -76,9 +76,10 @@ describe('OpenClawCliRuntimeAdapter', () => {
       expect(call.command).toBe('openclaw');
       expect(call.args).toContain('--agent');
       expect(call.args).toContain('my-agent');
-      expect(call.args).toContain('--message');
-      const messageIdx = call.args.indexOf('--message');
-      expect(call.args[messageIdx + 1]).toMatch(/^@/);
+      expect(call.args).toContain('--message-file');
+      expect(call.args).not.toContain('--message');
+      const messageFileIdx = call.args.indexOf('--message-file');
+      expect(call.args[messageFileIdx + 1]).toMatch(/[\\/]msg-.*\.json$/);
       expect(call.args).toContain('--json');
       expect(call.args).toContain('--local');
       expect(call.args).toContain('--timeout');
@@ -500,7 +501,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
   // OCRA-06: workspaceDir passed as cwd to runCliProcess
   describe('workspaceDir (OCRA-06, HG-02)', () => {
     it('passes workspaceDir as cwd to runCliProcess when provided', async () => {
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', workspaceDir: 'D:/work/.pd' });
+      const workspaceDir = process.cwd();
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', workspaceDir });
       mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
 
       await adapter.startRun({
@@ -512,7 +514,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
-      expect(firstCall.cwd).toBe('D:/work/.pd');
+      expect(firstCall.cwd).toBe(workspaceDir);
     });
 
     it('passes undefined cwd when workspaceDir is not provided', async () => {
@@ -532,7 +534,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
     });
 
     it('passes workspaceDir as cwd even when runtimeMode is gateway', async () => {
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway', workspaceDir: 'D:/work/.pd' });
+      const workspaceDir = process.cwd();
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway', workspaceDir });
       mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
 
       await adapter.startRun({
@@ -544,7 +547,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string; args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
-      expect(firstCall.cwd).toBe('D:/work/.pd');
+      expect(firstCall.cwd).toBe(workspaceDir);
       expect(firstCall.args).not.toContain('--local');
     });
   });
@@ -574,7 +577,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
     // healthCheck calls runCliProcess in this order:
     //   1. probe 1 (openclaw --version)
     //   2. probe 2 (openclaw agents list --json)
-    //   3. probe 3 (openclaw agent --agent ... --message ... --json --local)
+    //   3. probe 3 (openclaw agent --agent ... --message-file ... --json --local)
     // So the mock chain order must match: mock[0] → probe 1, mock[1] → probe 2, mock[2] → probe 3.
 
     it('healthy when stderr envelope payload is {"ok":true}', async () => {
@@ -588,6 +591,15 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const result = await adapter.healthCheck();
       expect(result.healthy).toBe(true);
+
+      // Probe 3 must use --message-file (not the legacy --message @file form).
+      // Guards against MessageFileRef field-rename regressions slipping past tsc.
+      const probe3Call = mockRunCliProcess.mock.calls[2]?.[0] as unknown as { args: string[] } | undefined;
+      if (!probe3Call) throw new Error('expected probe3 call');
+      expect(probe3Call.args).toContain('--message-file');
+      expect(probe3Call.args).not.toContain('--message');
+      const messageFileIdx = probe3Call.args.indexOf('--message-file');
+      expect(probe3Call.args[messageFileIdx + 1]).toMatch(/[\\/]msg-.*\.json$/);
     });
 
     it('healthy when envelope payload text contains prose-wrapped {"ok":true}', async () => {
