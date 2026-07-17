@@ -25,7 +25,7 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData } from '@principles/core/runtime-v2';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData, type TrajectoryTurnReader } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -53,6 +53,10 @@ export { buildTrajectoryEvidence };
 function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
   const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
+  const trajectoryTurnReader: TrajectoryTurnReader = {
+    listUserTurnsForSession: (sessionId) => wctx.trajectory.listUserTurnsForSession(sessionId),
+    listAssistantTurns: (sessionId) => wctx.trajectory.listAssistantTurns(sessionId),
+  };
   return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,
     stateDir: wctx.stateDir,
@@ -65,6 +69,7 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
     // when intent_engineering flag is on. Adapter performs no I/O beyond
     // delegating to safeReadIntentDoc (which owns the flag-first check).
     intentDocReader: createIntentDocReader(wctx.workspaceDir, resolveIntentLang(wctx.workspaceDir)),
+    trajectoryTurnReader,
   });
 }
 

@@ -741,6 +741,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-27
 - **Recurrence**: Same class as ERR-024, ERR-025 — component exists and passes isolated tests, but production code never calls it.
   - 2026-06-19 PRI-408 (PR #972): `ApprovalQueue.enqueue()` never wired into `RuleHostPipelineRunner`; `ApprovalQueue.edit()` unreachable (no CLI/Console route)
+  - 2026-07-17 PRI-518: `SqliteContextAssembler` supported the plugin-owned `TrajectoryTurnReader`, but `PainToPrincipleService` and `PainSignalRuntimeFactory` never received or forwarded it. A real Owner correction reached `trajectory.db`, while the diagnostician received empty placeholder turns. Fixed by explicit core port forwarding plus a cross-SQLite regression test that writes plugin trajectory turns and asserts the Runtime V2 context reads them.
   - PRI-261 PR review: initial implementation missed validation_status guard, action filter, budget limit, used `as` bypass + hand-rolled YAML parser
   - See git history for full incident detail.
 
@@ -808,9 +809,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 93 |
-| Last updated | 2026-07-15 |
+| Last updated | 2026-07-17 |
 | Top category | Schema & Type |
-| Recurring errors | 45 |
+| Recurring errors | 47 |
 
 ---
 
@@ -1131,6 +1132,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-428 / PR #966 (CodeRabbit review)
 - **Date**: 2026-06-18
 - **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount.
+
+  - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
 
 ---
 
