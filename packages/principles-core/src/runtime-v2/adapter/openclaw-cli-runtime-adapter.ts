@@ -470,7 +470,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       const probeArgs = [
         'agent',
         '--agent', this.agentId,
-        '--message', probeMessageRef.arg,
+        '--message-file', probeMessageRef.filePath,
         '--session-id', probeSessionId,
         '--timeout', '240',
         '--json',

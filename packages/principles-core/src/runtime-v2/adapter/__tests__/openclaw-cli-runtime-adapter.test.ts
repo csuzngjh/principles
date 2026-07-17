@@ -577,7 +577,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
     // healthCheck calls runCliProcess in this order:
     //   1. probe 1 (openclaw --version)
     //   2. probe 2 (openclaw agents list --json)
-    //   3. probe 3 (openclaw agent --agent ... --message ... --json --local)
+    //   3. probe 3 (openclaw agent --agent ... --message-file ... --json --local)
     // So the mock chain order must match: mock[0] → probe 1, mock[1] → probe 2, mock[2] → probe 3.
 
     it('healthy when stderr envelope payload is {"ok":true}', async () => {
@@ -591,6 +591,15 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const result = await adapter.healthCheck();
       expect(result.healthy).toBe(true);
+
+      // Probe 3 must use --message-file (not the legacy --message @file form).
+      // Guards against MessageFileRef field-rename regressions slipping past tsc.
+      const probe3Call = mockRunCliProcess.mock.calls[2]?.[0] as unknown as { args: string[] } | undefined;
+      if (!probe3Call) throw new Error('expected probe3 call');
+      expect(probe3Call.args).toContain('--message-file');
+      expect(probe3Call.args).not.toContain('--message');
+      const messageFileIdx = probe3Call.args.indexOf('--message-file');
+      expect(probe3Call.args[messageFileIdx + 1]).toMatch(/[\\/]msg-.*\.json$/);
     });
 
     it('healthy when envelope payload text contains prose-wrapped {"ok":true}', async () => {
