@@ -93,11 +93,18 @@ describe('EvolutionDedup', () => {
 
     it('should truncate long source and preview strings', () => {
       const now = Date.now();
-      const longString = 'a'.repeat(500);
+      // Two strings that share the same first 200 chars (the truncation
+      // threshold MAX_DEDUP_KEY_COMPONENT_LENGTH) but differ afterward.
+      // If truncation works, they normalize to the same dedup key and match.
+      // If truncation did NOT work, they would differ and not match — so this
+      // test actually verifies the truncation logic, not just string equality.
+      const prefix = 'a'.repeat(200);
+      const queueString = prefix + 'QUEUE_TAIL';
+      const lookupString = prefix + 'LOOKUP_TAIL';
       const queue: EvolutionQueueItem[] = [
-        createQueueItem(longString, longString, now - 1000),
+        createQueueItem(queueString, queueString, now - 1000),
       ];
-      const duplicate = findRecentDuplicateTask(queue, longString, longString, now);
+      const duplicate = findRecentDuplicateTask(queue, lookupString, lookupString, now);
       expect(duplicate).toBeDefined();
     });
 

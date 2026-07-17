@@ -10,8 +10,24 @@ import {
 } from '../../src/core/pd-task-reconciler.js';
 import { readTasks, writeTasks } from '../../src/core/pd-task-store.js';
 
+// Hoisted mutable array so individual tests can control BUILTIN_PD_TASKS.
+// Without this, BUILTIN_PD_TASKS defaults to [] and reconcilePDTasks' diff()
+// never sees any declared task — making CREATE/DISABLE/SKIP paths untestable.
+const { builtinTasks } = vi.hoisted(() => ({
+  builtinTasks: [] as PDTaskSpec[],
+}));
+
 vi.mock('fs');
 vi.mock('../../src/core/pd-task-store.js');
+vi.mock('../../src/core/pd-task-types.js', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return { ...actual, BUILTIN_PD_TASKS: builtinTasks };
+});
+// writeCronStore uses withLockAsync which acquires a real fs lock; under the
+// fs mock the lock path hangs. Bypass the lock and just run the callback.
+vi.mock('../../src/utils/file-lock.js', () => ({
+  withLockAsync: vi.fn(async (_filePath: string, fn: () => Promise<unknown>) => fn()),
+}));
 
 describe('PDTaskReconciler', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-task-reconciler-test-${Date.now()}`);
@@ -37,6 +53,7 @@ describe('PDTaskReconciler', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    builtinTasks.length = 0; // reset declared tasks between tests
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       if (p.toString().startsWith(tmpDir)) return true;
       if (p.toString() === cronStorePath) return true;
@@ -52,8 +69,15 @@ describe('PDTaskReconciler', () => {
   });
 
   describe('reconcilePDTasks', () => {
-    it('should create new tasks', async () => {
-      vi.mocked(readTasks).mockReturnValue([]);
+    it('should create new jobs for declared builtin tasks with no existing cron job', async () => {
+      builtinTasks.push(testTask);
+      const result = await reconcilePDTasks(tmpDir, { dryRun: false });
+      expect(result.created).toHaveLength(1);
+      expect(result.created[0]).toBe('PD Test Task');
+    });
+
+    it('should return empty created list when no builtin tasks are declared', async () => {
+      // BUILTIN_PD_TASKS is empty (no declared tasks) → diff() has nothing to process
       const result = await reconcilePDTasks(tmpDir, { dryRun: true });
       expect(result.created).toHaveLength(0);
     });
@@ -108,16 +132,33 @@ describe('PDTaskReconciler', () => {
       expect(result.orphaned).toHaveLength(0);
     });
 
-    it('should skip CREATE for disabled task', async () => {
-      vi.mocked(readTasks).mockReturnValue([disabledTask]);
+    it('should disable existing job when declared task is disabled', async () => {
+      // disabledTask must be a declared builtin AND have an existing cron job
+      // for diff() to reach the DISABLE branch (task.enabled === false, job exists).
+      builtinTasks.push(disabledTask);
+      const existingJob: CronJob = {
+        id: 'pd-disabled-1',
+        name: 'PD Disabled Task',
+        enabled: true,
+        createdAtMs: 123,
+        updatedAtMs: 123,
+        schedule: { kind: 'every', everyMs: 3600000 },
+        sessionTarget: 'isolated',
+        wakeMode: 'now',
+        payload: { kind: 'agentTurn', message: 'A disabled task' },
+        state: { nextRunAtMs: 123456 },
+        metadata: { pdVersion: '1.0.0', pdTaskId: 'disabled-task' },
+      };
       vi.mocked(fs.readFileSync).mockImplementation((p) => {
         if (p.toString() === cronStorePath) {
-          return JSON.stringify({ version: 1, jobs: [] });
+          return JSON.stringify({ version: 1, jobs: [existingJob] });
         }
         return '[]';
       });
-      const result = await reconcilePDTasks(tmpDir, { dryRun: true });
+      const logger = { info: vi.fn(), warn: vi.fn() };
+      const result = await reconcilePDTasks(tmpDir, { dryRun: false, logger });
       expect(result.created).toHaveLength(0);
+      expect(logger.warn).toHaveBeenCalledWith('[PD:Reconciler] Disabled job: PD Disabled Task');
     });
 
     it('should handle malformed cron store gracefully', async () => {
@@ -160,6 +201,15 @@ describe('PDTaskReconciler', () => {
       const result = await trigger('test-task', tmpDir);
       expect(result.ok).toBe(false);
       expect(result.error).toBe('Task is auto-disabled. Use force=true to override.');
+    });
+
+    it('should trigger an existing enabled task successfully', async () => {
+      vi.mocked(readTasks).mockReturnValue([testTask]);
+      const result = await trigger('test-task', tmpDir);
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeUndefined();
+      // A successful trigger persists the updated task meta (lastTriggeredAtMs).
+      expect(writeTasks).toHaveBeenCalledWith(tmpDir, expect.arrayContaining([expect.objectContaining({ id: 'test-task' })]));
     });
   });
 });

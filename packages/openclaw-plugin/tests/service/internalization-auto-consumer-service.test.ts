@@ -5,6 +5,7 @@ import {
 } from '../../src/service/internalization-auto-consumer-service.js';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from '../../src/core/pd-config-loader.js';
 import { SystemLogger } from '../../src/core/system-logger.js';
+import type { OpenClawPluginServiceContext } from '../../src/openclaw-sdk.js';
 
 vi.mock('../../src/core/pd-config-loader.js');
 vi.mock('../../src/core/system-logger.js');
@@ -34,28 +35,28 @@ describe('InternalizationAutoConsumerService', () => {
     });
   });
 
-  describe('InternalizationAutoConsumerService', () => {
+  describe('start / stop', () => {
     it('should log warning when workspaceDir is missing', () => {
-      const ctx = { logger } as any;
+      const ctx = { logger } as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.start(ctx);
       expect(logger.warn).toHaveBeenCalledWith('[PD:AutoConsumer] No workspace directory, not starting.');
     });
 
     it('should skip start when feature flag is disabled', () => {
       vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'default' });
-      const ctx = { workspaceDir, logger } as any;
+      const ctx = { workspaceDir, logger } as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.start(ctx);
       expect(SystemLogger.log).toHaveBeenCalledWith(workspaceDir, 'INTERNALIZATION_CONSUMER_DISABLED', expect.any(String));
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('NOT started for workspace'));
     });
 
     it('should stop gracefully without workspaceDir', () => {
-      const ctx = {} as any;
+      const ctx = {} as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.stop(ctx);
     });
 
     it('should stop gracefully with workspaceDir', () => {
-      const ctx = { workspaceDir, logger } as any;
+      const ctx = { workspaceDir, logger } as OpenClawPluginServiceContext;
       InternalizationAutoConsumerService.stop(ctx);
     });
   });
