@@ -26,6 +26,9 @@ import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import { SystemLogger, disposeAllSystemLoggers } from '../../src/core/system-logger.js';
 import type { EvolutionLoopEvent } from '../../src/core/evolution-types.js';
 import { SqliteConnection, SqliteDeadLetterStore } from '@principles/core/runtime-v2';
+import type { PainToPrincipleServiceOptions } from '@principles/core/runtime-v2';
+
+let lastPainServiceOptions: PainToPrincipleServiceOptions | null = null;
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 // Keep SqliteConnection / SqliteDeadLetterStore / evaluateTriggerController real
@@ -39,7 +42,8 @@ vi.mock('@principles/core/runtime-v2', async () => {
   return {
     ...actual,
     // Use `function` (not arrow) so `new PainToPrincipleService(...)` works.
-    PainToPrincipleService: vi.fn().mockImplementation(function () {
+    PainToPrincipleService: vi.fn().mockImplementation(function (options: PainToPrincipleServiceOptions) {
+      lastPainServiceOptions = options;
       return {
         recordPain: vi
           .fn()
@@ -101,6 +105,10 @@ interface StubWctx {
   workspaceDir: string;
   stateDir: string;
   evolutionReducer: { emitSync: ReturnType<typeof vi.fn> };
+  trajectory: {
+    listUserTurnsForSession: ReturnType<typeof vi.fn>;
+    listAssistantTurns: ReturnType<typeof vi.fn>;
+  };
 }
 
 function makeStubWctx(workspaceDir: string): StubWctx {
@@ -108,6 +116,10 @@ function makeStubWctx(workspaceDir: string): StubWctx {
     workspaceDir,
     stateDir: path.join(workspaceDir, '.state'),
     evolutionReducer: { emitSync: vi.fn() },
+    trajectory: {
+      listUserTurnsForSession: vi.fn().mockReturnValue([]),
+      listAssistantTurns: vi.fn().mockReturnValue([]),
+    },
   };
 }
 
@@ -119,6 +131,7 @@ describe('emitPainDetectedEvent — dead letter on recordPain failure (Task 3, r
 
   beforeEach(() => {
     vi.clearAllMocks();
+    lastPainServiceOptions = null;
     tempWorkspaceDir = makeTempWorkspace();
     primeStateDb(tempWorkspaceDir);
     disposeAllSystemLoggers();
@@ -202,6 +215,23 @@ describe('emitPainDetectedEvent — dead letter on recordPain failure (Task 3, r
     } finally {
       conn.close();
     }
+  });
+
+  it('passes the workspace trajectory reader to PainToPrincipleService', async () => {
+    const wctx = makeStubWctx(tempWorkspaceDir);
+    const userTurns = [{ id: 1, turnIndex: 1, rawExcerpt: 'Owner correction', correctionDetected: true, correctionCue: 'wrong', createdAt: '2026-07-17T00:00:00.000Z' }];
+    const assistantTurns = [{ id: 2, sessionId: 'sess-test-001', runId: 'run-1', provider: 'test', model: 'test', sanitizedText: 'Assistant reply', createdAt: '2026-07-17T00:00:01.000Z' }];
+    wctx.trajectory.listUserTurnsForSession.mockReturnValue(userTurns);
+    wctx.trajectory.listAssistantTurns.mockReturnValue(assistantTurns);
+
+    await emitPainDetectedEvent(wctx as any, makePainEvent());
+
+    const reader = lastPainServiceOptions?.trajectoryTurnReader;
+    expect(reader).toBeDefined();
+    expect(reader?.listUserTurnsForSession('sess-test-001')).toBe(userTurns);
+    expect(reader?.listAssistantTurns('sess-test-001')).toBe(assistantTurns);
+    expect(wctx.trajectory.listUserTurnsForSession).toHaveBeenCalledWith('sess-test-001');
+    expect(wctx.trajectory.listAssistantTurns).toHaveBeenCalledWith('sess-test-001');
   });
 
   it('does not propagate exception to the caller (hook continues, rc-9)', async () => {
