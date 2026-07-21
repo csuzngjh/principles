@@ -41,16 +41,24 @@ describe('prompt.ts helper functions', () => {
         prompt: 'test',
         messages: [],
       };
-      const ctx = {
-        workspaceDir: '/nonexistent/workspace',
-        sessionId: 'test-session',
-        trigger: 'user',
-      };
+      // Use a temp directory instead of nonexistent to avoid async errors
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-'));
+      
+      try {
+        const ctx = {
+          workspaceDir: tempDir,
+          sessionId: 'test-session',
+          trigger: 'user',
+          api: {},
+        };
 
-      // Should not throw on missing workspace
-      expect(() => {
-        handleBeforePromptBuild(event as any, ctx as any, undefined as any);
-      }).not.toThrow();
+        // Should not throw on valid workspace
+        expect(() => {
+          handleBeforePromptBuild(event as any, ctx as any, undefined as any);
+        }).not.toThrow();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 
