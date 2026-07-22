@@ -457,7 +457,14 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       errorCategory: 'storage_unavailable',
     });
     expect(result.failureReason).toContain('failed to persist parent task failure');
+    // ERR-088: assert the injected persistence error is surfaced, not just a
+    // generic banner — a future refactor that drops the persist error message
+    // must fail this test.
+    expect(result.failureReason).toContain('database write failed');
+    // ERR-015/ERR-088: the original stage outcome must be preserved in the
+    // reason so operators can see why the stage failed AND why it stuck.
     expect(result.failureReason).toContain('Root-cause output was invalid');
+    expect(result.failureReason).toContain('Original stage outcome: output_invalid');
   });
 
   it('does not report success when it cannot persist a succeeded parent terminal state', async () => {
@@ -484,5 +491,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
       errorCategory: 'storage_unavailable',
     });
     expect(result.failureReason).toContain('failed to persist parent task success');
+    // ERR-088: assert the injected persistence error is surfaced.
+    expect(result.failureReason).toContain('database write failed');
   });
 });
