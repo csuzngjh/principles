@@ -11,6 +11,7 @@ import type { RecordPainSignalObservabilityOptions, PainSignalObservabilityResul
 import type { PainSignalRuntimeFactoryOptions } from '../pain-signal-runtime-factory.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { resolveProfile } from '../config/pd-profile-constants.js';
+import type { TrajectoryTurnReader } from '../store/context/trajectory-turn-reader.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +261,20 @@ describe('PainToPrincipleService', () => {
     expect(lastFactoryOpts!.effectiveConfig).toBe(effectiveConfig);
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
     expect(lastFactoryOpts!.getEnvVar).toBe(mockGetEnvVar);
+  });
+
+  it('recordPain forwards the plugin-owned trajectory reader to createPainSignalBridge', async () => {
+    const trajectoryTurnReader: TrajectoryTurnReader = {
+      listUserTurnsForSession: () => [],
+      listAssistantTurns: () => [],
+    };
+    const svc = new PainToPrincipleService(makeOpts({ trajectoryTurnReader }));
+
+    await svc.recordPain({ painId: 'p', painType: 'user_frustration', source: 'user_correction', reason: 'owner correction' });
+
+    expect(lastFactoryOpts).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
+    expect(lastFactoryOpts!.trajectoryTurnReader).toBe(trajectoryTurnReader);
   });
 
   // 16. PRI-306: without effectiveConfig, factory opts omit it (legacy path)
