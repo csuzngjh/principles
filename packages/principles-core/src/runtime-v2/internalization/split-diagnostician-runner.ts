@@ -204,7 +204,23 @@ export class SplitDiagnosticianRunner {
     const parentResultRef = resultC.resultRef ?? `split-pipeline://${parentTaskId}`;
     try {
       await this.stateManager.markTaskSucceeded(parentTaskId, parentResultRef);
-    } catch { /* best-effort — return success regardless */ }
+    } catch (error) {
+      // rc-3/rc-9 fail-loud (PRI-520): never report success before the parent
+      // terminal transition is durable. If markTaskSucceeded cannot persist,
+      // the parent task stays leased/running in storage while we would claim
+      // succeeded — the most damaging "it said it finished, but the state says
+      // otherwise" failure (ERR-002/ERR-015/ERR-088). Surface a structured
+      // storage_unavailable result so operators see the persistence failure,
+      // not a false success.
+      const persistErrorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `failed to persist parent task success for ${parentTaskId}. Persistence error: ${persistErrorMessage}`,
+        attemptCount: resultC.attemptCount,
+      };
+    }
 
     const stageA = await this.stateManager.getTask(stageATaskId);
     const stageB = await this.stateManager.getTask(stageBTaskId);
@@ -362,14 +378,31 @@ export class SplitDiagnosticianRunner {
     parentTaskId: string,
     stageResult: PeerRunnerResult<unknown>,
   ): Promise<RunnerResult> {
+    const stageErrorCategory = stageResult.errorCategory;
+    const stageFailureReason = stageResult.failureReason ?? `Stage failed for parent task ${parentTaskId}`;
     try {
-      await this.stateManager.markTaskFailed(parentTaskId, stageResult.errorCategory ?? 'execution_failed');
-    } catch { /* best-effort — return failure regardless */ }
+      await this.stateManager.markTaskFailed(parentTaskId, stageErrorCategory ?? 'execution_failed');
+    } catch (error) {
+      // rc-3/rc-9 fail-loud (PRI-520): if markTaskFailed cannot persist, the
+      // parent task stays leased/running while we report the earlier stage
+      // category. That hides the persistence failure behind the stage failure
+      // (ERR-002/ERR-015/ERR-088). Surface storage_unavailable as the primary
+      // category, but preserve the original stage outcome in failureReason so
+      // operators can see both the why-it-failed and why-it-stuck.
+      const persistErrorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        status: 'failed',
+        taskId: parentTaskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `failed to persist parent task failure for ${parentTaskId}. Persistence error: ${persistErrorMessage}. Original stage outcome: ${stageErrorCategory ?? 'execution_failed'} — ${stageFailureReason}`,
+        attemptCount: stageResult.attemptCount,
+      };
+    }
     return {
       status: stageResult.status === 'retried' ? 'failed' : stageResult.status,
       taskId: parentTaskId,
-      errorCategory: stageResult.errorCategory,
-      failureReason: stageResult.failureReason ?? `Stage failed for parent task ${parentTaskId}`,
+      errorCategory: stageErrorCategory,
+      failureReason: stageFailureReason,
       attemptCount: stageResult.attemptCount,
     };
   }
