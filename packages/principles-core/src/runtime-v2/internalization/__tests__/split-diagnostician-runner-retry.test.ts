@@ -417,3 +417,81 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     expect(stateManager.markTaskFailed).toHaveBeenCalledWith(PARENT_TASK_ID, expect.any(String));
   });
 });
+
+// ── Terminal-state persistence must fail loud ─────────────────────────────
+//
+// ERR entries considered:
+//   - ERR-002: never silently degrade when a required state transition fails
+//   - ERR-015/ERR-018/ERR-019: report the current terminal-state failure, not
+//     the earlier stage result, so callers do not mistake a leased task for a
+//     completed one
+//   - ERR-025: exercise the runner's RuntimeStateManager boundary directly
+//   - ERR-088: assert the specific storage failure rather than only `failed`
+
+describe('SplitDiagnosticianRunner terminal-state persistence', () => {
+  it('reports storage_unavailable when it cannot persist a failed parent terminal state', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.markTaskFailed = vi.fn().mockRejectedValue(new Error('database write failed'));
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    rootCauseRunner.run.mockResolvedValue(
+      makeFailedResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID, 'Root-cause output was invalid'),
+    );
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'storage_unavailable',
+    });
+    expect(result.failureReason).toContain('failed to persist parent task failure');
+    // ERR-088: assert the injected persistence error is surfaced, not just a
+    // generic banner — a future refactor that drops the persist error message
+    // must fail this test.
+    expect(result.failureReason).toContain('database write failed');
+    // ERR-015/ERR-088: the original stage outcome must be preserved in the
+    // reason so operators can see why the stage failed AND why it stuck.
+    expect(result.failureReason).toContain('Root-cause output was invalid');
+    expect(result.failureReason).toContain('Original stage outcome: output_invalid');
+  });
+
+  it('does not report success when it cannot persist a succeeded parent terminal state', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    stateManager.markTaskSucceeded = vi.fn().mockRejectedValue(new Error('database write failed'));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      taskId: PARENT_TASK_ID,
+      errorCategory: 'storage_unavailable',
+    });
+    expect(result.failureReason).toContain('failed to persist parent task success');
+    // ERR-088: assert the injected persistence error is surfaced.
+    expect(result.failureReason).toContain('database write failed');
+  });
+});
