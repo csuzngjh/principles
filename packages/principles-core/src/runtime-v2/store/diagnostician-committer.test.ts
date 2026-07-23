@@ -370,6 +370,22 @@ describe('SqliteDiagnosticianCommitter', () => {
     expect(result.candidateCount).toBe(1);
   });
 
+  it('null/undefined output throws PDRuntimeError(input_invalid), not a native TypeError (rc-1/rc-3)', async () => {
+    await createTaskAndRun('task-null-1', 'run-null-1');
+
+    for (const badOutput of [null, undefined, 'not-an-object'] as unknown as DiagnosticianOutputV1[]) {
+      const input: CommitInput = {
+        runId: 'run-null-1',
+        taskId: 'task-null-1',
+        output: badOutput,
+        idempotencyKey: 'ik-null-1',
+      };
+      // Must throw a categorized PDRuntimeError, not a native TypeError from
+      // dereferencing input.output.recommendations on a non-object.
+      await expect(committer.commit(input)).rejects.toThrow(/non-null object/i);
+    }
+  });
+
   it('candidate title defaults to description', async () => {
     await createTaskAndRun('task-title-1', 'run-title-1');
 

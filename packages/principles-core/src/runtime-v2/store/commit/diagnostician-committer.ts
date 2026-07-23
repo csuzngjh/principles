@@ -59,6 +59,17 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
     const db = this.connection.getDb();
 
     // 1. Validate input.output conforms to DiagnosticianOutputV1
+    // rc-1-treat-as-unknown / rc-3-fail-loud-missing: input.output is untrusted
+    // runtime data. Validate it is a non-null object BEFORE dereferencing
+    // .recommendations, so a null/undefined/malformed output yields a categorized
+    // PDRuntimeError('input_invalid') instead of a native TypeError.
+    if (typeof input.output !== 'object' || input.output === null) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        'DiagnosticianOutputV1 output must be a non-null object',
+        { taskId: input.taskId, runId: input.runId },
+      );
+    }
     // PRI-518 / rc-9-no-silent-fallback: reject empty recommendations explicitly
     // before the generic schema error, with a message that names the silent
     // zero-candidate failure mode. (Schema minItems is the backstop.)
