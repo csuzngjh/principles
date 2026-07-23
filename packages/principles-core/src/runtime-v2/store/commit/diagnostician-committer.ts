@@ -59,6 +59,16 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
     const db = this.connection.getDb();
 
     // 1. Validate input.output conforms to DiagnosticianOutputV1
+    // PRI-518 / rc-9-no-silent-fallback: reject empty recommendations explicitly
+    // before the generic schema error, with a message that names the silent
+    // zero-candidate failure mode. (Schema minItems is the backstop.)
+    if (!Array.isArray(input.output.recommendations) || input.output.recommendations.length === 0) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        'DiagnosticianOutputV1.recommendations must be non-empty; an empty array would commit zero owner-reviewable candidates. Emit a { kind: "defer", ... } recommendation when no action is warranted.',
+        { taskId: input.taskId, runId: input.runId },
+      );
+    }
     if (!Value.Check(DiagnosticianOutputV1Schema, input.output)) {
       throw new PDRuntimeError(
         'input_invalid',

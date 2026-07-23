@@ -150,7 +150,7 @@ vi.mock('@principles/core/runtime-v2', () => {
         rootCause: 'Test: test root cause',
         violatedPrinciples: [],
         evidence: [],
-        recommendations: [],
+        recommendations: [{ kind: 'implementation', description: 'Test recommendation' }],
         confidence: 0.9,
       },
     }),
