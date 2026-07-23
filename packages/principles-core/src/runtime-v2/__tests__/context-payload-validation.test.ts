@@ -308,7 +308,7 @@ describe('DiagnosisTargetSchema', () => {
   });
 
   it('accepts all provenance variants', () => {
-    const provenances: Array<DiagnosisTarget['provenance']> = [
+    const provenances: DiagnosisTarget['provenance'][] = [
       'openclaw_context_bound',
       'owner_reported_no_host_trace',
       'automatic_hook',
@@ -321,7 +321,7 @@ describe('DiagnosisTargetSchema', () => {
   });
 
   it('accepts all traceAvailability variants', () => {
-    const availabilities: Array<DiagnosisTarget['traceAvailability']> = [
+    const availabilities: DiagnosisTarget['traceAvailability'][] = [
       'available',
       'unavailable_with_reason',
       'ambiguous',
