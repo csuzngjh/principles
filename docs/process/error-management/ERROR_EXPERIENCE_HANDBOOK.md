@@ -370,6 +370,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
+  - 2026-07-23 PRI-518: `DiagnosticianOutputV1Schema.recommendations` was `Type.Array(...)` with no `minItems`, and `DefaultDiagnosticianValidator` iterated `for (const rec of output.recommendations)` with no length check, so a structurally valid output with `recommendations: []` committed ZERO owner-reviewable candidates and marked the diagnosis task SUCCEEDED with no structured reason. This was the root cause of the Story A "4 pain records, 8 leased tasks, 0 candidates" symptom. Fixed by adding `minItems: 1` to the schema + an explicit validator length check + a committer guard (defense-in-depth). An intentional "no action" decision MUST be expressed as a `{ kind: 'defer', ... }` recommendation. The convention already existed on sibling schemas (`dreamer-output.candidates`, `artificer-output.affectedTools` both use `minItems: 1`) but was missed on `recommendations`.
   - 2026-06-25 PRI-459 (PR#1045): `createRule`/`createImplementation` silently overwrote existing id (orphaning parent link)
   - 2026-06-23 PR#1026: 4 review `as`-bypass violations (`(err as Error)`, `this.token as string`, etc.)
   - Earlier recurrences (PR#680-#966): same silent-skip pattern across `parseInt` w/o NaN check, `?.trim()||undefined`, `?? 'fallback'` defaulting, `if(output){assert}`. See git history.
@@ -810,7 +811,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 93 |
-| Last updated | 2026-07-22 |
+| Last updated | 2026-07-23 |
 | Top category | Schema & Type |
 | Recurring errors | 47 |
 
