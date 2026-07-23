@@ -434,10 +434,7 @@ describe('computeAdaptiveTimeout() — P95 × safety with insufficient-sample fa
   });
 
   it('adaptive result is always an integer (ms are integers)', () => {
-    // P95 value of [1..10] × 1.5 = 15 — integer.
     // P95 × 1.5 where result is fractional → the Math.round inside clampTimeout handles it.
-    const oddHistory = [1, 1, 1, 1, 1, 1, 1, 1, 1, 2]; // n=10, P95 index 9 = 2, ×1.5=3, clamped to MIN (10_000)
-    // But since MIN is high, let's use numbers that yield mid-range.
     const midHistory = Array.from({ length: 10 }, (_, i) => 20_001 + i);
     // P95 sorted[9] = 20_010 × 1.5 = 30_015
     const r = computeAdaptiveTimeout(midHistory, 60_000);
