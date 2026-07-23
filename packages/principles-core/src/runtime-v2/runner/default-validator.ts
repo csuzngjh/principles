@@ -122,7 +122,10 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
     }
 
     // 2f: Recommendations shape + principle structural fields
-    for (const rec of output.recommendations) {
+    // Guard: only iterate when recommendations is a non-empty array. The 2e-bis
+    // check above already recorded the "empty/missing" error in verbose mode;
+    // without this guard, verbose mode would throw on `for...of undefined`.
+    for (const rec of Array.isArray(output.recommendations) ? output.recommendations : []) {
       if (!Value.Check(RecommendationKindSchema, rec.kind)) {
         const msg = `recommendations[].kind "${rec.kind}" is not a valid RecommendationKind`;
         if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
