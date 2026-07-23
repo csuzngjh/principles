@@ -495,3 +495,119 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     expect(result.failureReason).toContain('database write failed');
   });
 });
+
+// ── Stage C cache fallback on corrupt JSON ────────────────────────────────
+//
+// ERR entries considered:
+//   - ERR-001 / rc-1: no unguarded `JSON.parse` on trusted-boundary-crossing
+//     data (runs.outputPayload is persisted DB content, not TypeScript-guarded)
+//   - ERR-002 / PRI-520: never leave parent task leased because of an
+//     unhandled native SyntaxError
+//   - EP-01 / rc-2: treat persisted content as unknown — defensively parse
+
+describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
+  it('falls through to re-run Stage C when cached outputPayload is corrupt JSON', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+      [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, {
+        taskKind: 'diag_router',
+        status: 'succeeded',
+        attemptCount: 2,
+      }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    // Return a succeeded run whose outputPayload is NOT valid JSON.
+    // Previously this threw SyntaxError uncaught through run() → bridge,
+    // leaving the parent task leased (stuck, consistent with PRI-518/520).
+    // With the fix, cache is declared unusable and Stage C is re-run.
+    stateManager.getRunsByTask = vi.fn().mockResolvedValue([
+      {
+        runId: 'run-sc-corrupt',
+        executionStatus: 'succeeded',
+        outputPayload: '{ this is not: [valid json, }',
+      },
+    ]);
+
+    const validOutput: DiagnosticianOutputV1 = {
+      valid: true,
+      diagnosisId: 'fallback-diag',
+      summary: 'Fallback diagnosis after cache unreadable',
+      rootCause: 'Fallback: corrupt cache',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'rerun', note: 'Rerun produced valid output' }],
+      recommendations: [{ kind: 'defer', description: 'Cache was corrupt; reran Stage C' }],
+      confidence: 0.8,
+    };
+    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+    routerRunner.run.mockResolvedValue({
+      status: 'succeeded',
+      taskId: STAGE_C_TASK_ID,
+      attemptCount: 1,
+      contextHash: 'ctx-rerun',
+      output: validOutput,
+    });
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    // run() must resolve with succeeded — not throw SyntaxError.
+    await expect(runner.run(PARENT_TASK_ID)).resolves.toBeDefined();
+    // Because cache was unusable, routerRunner.run must have been invoked
+    // (Stage C re-run path). Previously the test would throw before reaching
+    // this assertion.
+    expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
+  });
+
+  it('uses cached succeeded output when outputPayload is valid JSON', async () => {
+    // Positive counterpart: valid JSON cache is used and Stage C is NOT rerun.
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+      [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, {
+        taskKind: 'diag_router',
+        status: 'succeeded',
+        attemptCount: 1,
+      }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const cachedOutput: DiagnosticianOutputV1 = {
+      valid: true,
+      diagnosisId: 'cached-001',
+      summary: 'Cached diagnosis',
+      rootCause: 'From previous successful run',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [{ kind: 'defer', description: 'Cached: no action' }],
+      confidence: 0.9,
+    };
+    stateManager.getRunsByTask = vi.fn().mockResolvedValue([
+      {
+        runId: 'run-sc-ok',
+        executionStatus: 'succeeded',
+        outputPayload: JSON.stringify(cachedOutput),
+      },
+    ]);
+
+    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
+      distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    // Stage C was cached — routerRunner.run should NOT be invoked
+    expect(routerRunner.run).not.toHaveBeenCalled();
+  });
+});

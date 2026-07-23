@@ -96,7 +96,18 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
     }
 
     // 2e: Evidence array shape
-    for (const ev of output.evidence) {
+    // Guard: record a structural error when evidence is not an array (e.g. LLM
+    // returned a string "none"), then iterate only over a real array. Without
+    // this guard, malformed output would throw `X is not iterable` at the
+    // for...of below instead of returning a categorized output_invalid result.
+    // (Parity with recommendations: commit 2d866209 fixed the same pattern for
+    // recommendations but missed evidence.)
+    if (!Array.isArray(output.evidence)) {
+      const msg = 'evidence must be an array';
+      if (!isVerbose) return buildResult(false, '1 field invalid: evidence', [msg]);
+      detailErrors.push(msg);
+    }
+    for (const ev of Array.isArray(output.evidence) ? output.evidence : []) {
       if (!ev.sourceRef || ev.sourceRef.trim() === '') {
         const msg = 'evidence[].sourceRef must be a non-empty string';
         if (!isVerbose) return buildResult(false, '1 field invalid: evidence', [msg]);
@@ -167,7 +178,8 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
     // 2g: Evidence sourceRef existence check (verbose mode only)
     if (isVerbose && options?.sourceRefs) {
       const refSet = new Set(options.sourceRefs);
-      for (const ev of output.evidence) {
+      // Guard: iterate only over a real array — same pattern as 2e above.
+      for (const ev of Array.isArray(output.evidence) ? output.evidence : []) {
         if (ev.sourceRef && !refSet.has(ev.sourceRef)) {
           const msg = `evidence[].sourceRef "${ev.sourceRef}" not found in context sourceRefs`;
           detailErrors.push(msg);

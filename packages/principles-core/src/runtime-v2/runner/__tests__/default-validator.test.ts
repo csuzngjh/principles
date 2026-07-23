@@ -207,6 +207,50 @@ describe('evidence array', () => {
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('note'))).toBe(true);
   });
+
+  it('evidence is undefined fails in standard mode without throwing (regression: for...of undefined)', async () => {
+    // Parity with recommendations guard (commit 2d866209): evidence iteration
+    // used to throw `output.evidence is not iterable` when evidence was a
+    // non-array. Must return output_invalid with a structured error instead
+    // of throwing a native TypeError — otherwise base-peer-runner classifies
+    // it as execution_failed (retryable) and wastes quota, rather than
+    // output_invalid (permanent).
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), evidence: undefined } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001');
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
+  });
+
+  it('evidence is a non-array string fails in standard mode without throwing', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), evidence: 'none provided' } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001');
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
+  });
+
+  it('evidence is null fails in verbose mode without throwing (regression: for...of null)', async () => {
+    // verbose mode: guard must be present on BOTH evidence loops (the 2e
+    // shape loop AND the 2g sourceRef existence loop) — otherwise either
+    // `for (const ev of null)` or `for (const ev of undefined)` throws.
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), evidence: null } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001', { verbose: true, sourceRefs: ['task-001'] });
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
+  });
+
+  it('evidence is an object (non-array) fails in verbose mode and 2g loop does not throw', async () => {
+    // 2g verbose sourceRef existence loop also iterates evidence — confirm it
+    // uses the same Array.isArray guard so a non-array evidence value cannot
+    // trigger `for...of` TypeError even when sourceRefs are provided.
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), evidence: { 0: 'fake' } } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001', { verbose: true, sourceRefs: ['ref-a'] });
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
+  });
 });
 
 // ── REQ-2.3e: Recommendations shape ─────────────────────────────────────────
