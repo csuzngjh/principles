@@ -177,14 +177,40 @@ export class SplitDiagnosticianRunner {
       const runs = await this.stateManager.getRunsByTask(stageCTaskId);
       const succeededRun = runs.find((r) => r.executionStatus === 'succeeded');
       const outputPayload = succeededRun?.outputPayload;
-      const output = outputPayload ? JSON.parse(outputPayload) : undefined;
-      resultC = {
-        status: 'succeeded',
-        taskId: stageCTaskId,
-        attemptCount: stageCTask.attemptCount,
-        contextHash: '',
-        output,
-      };
+      // EP-01 / rc-1: JSON.parse of persisted DB content is a trust boundary —
+      // outputPayload may be corrupt/malformed (e.g. partial write, DB
+      // corruption). Without this guard, JSON.parse on corrupt data throws an
+      // unhandled SyntaxError that propagates through run() to the bridge —
+      // the parent task stays leased/running (stuck task, consistent with
+      // PRI-518/PRI-520 observations). Fail safe: if parse fails, treat the
+      // cache as unusable and fall through to re-run Stage C normally so the
+      // standard retry/failure path produces a structured result.
+      let parsedOutput: unknown;
+      let cacheUsable = true;
+      if (outputPayload !== undefined && outputPayload !== null) {
+        try {
+          parsedOutput = JSON.parse(outputPayload);
+        } catch {
+          cacheUsable = false;
+        }
+      } else {
+        parsedOutput = undefined;
+      }
+      if (cacheUsable) {
+        resultC = {
+          status: 'succeeded',
+          taskId: stageCTaskId,
+          attemptCount: stageCTask.attemptCount,
+          contextHash: '',
+          output: parsedOutput as DiagnosticianOutputV1,
+        };
+      } else {
+        resultC = await this.runStageWithRetry({
+          taskId: stageCTaskId,
+          runFn: (id) => this.routerRunner.run(id),
+          stageLabel: 'C (router)',
+        });
+      }
     } else {
       resultC = await this.runStageWithRetry({
         taskId: stageCTaskId,
