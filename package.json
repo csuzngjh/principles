@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "@cucumber/gherkin": "^31.0.0",
+    "@cucumber/gherkin": "^42.0.0",
     "@cucumber/messages": "^27.2.0",
     "@eslint/js": "^10.0.1",
     "@semantic-release/changelog": "^6.0.3",
