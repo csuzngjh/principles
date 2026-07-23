@@ -5,7 +5,7 @@
  * that are not fully covered by existing integration tests.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   DisabledDiagnosticianRunner,
   validateRuntimeConfig,
