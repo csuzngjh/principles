@@ -255,6 +255,35 @@ describe('recommendations shape', () => {
     expect(result.errors.some((e) => e.includes('description'))).toBe(true);
   });
 
+  it('empty recommendations array fails (PRI-518 / rc-9: no silent zero-candidate success)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({ recommendations: [] }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('recommendations must contain at least one entry'))).toBe(true);
+  });
+
+  it('missing recommendations field fails in verbose mode without throwing (regression: for...of undefined)', async () => {
+    // PRI-518 regression guard: in verbose mode the empty/missing check pushes
+    // an error but must NOT fall through to `for (const rec of output.recommendations)`
+    // when recommendations is undefined — that would throw instead of collecting errors.
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), recommendations: undefined } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001', { verbose: true });
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('recommendations must contain at least one entry'))).toBe(true);
+  });
+
+  it('recommendations is a non-array value fails in verbose mode without throwing', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const output = { ...makeValidOutput(), recommendations: 'not-an-array' } as unknown as DiagnosticianOutputV1;
+    const result = await validator.validate(output, 'task-001', { verbose: true });
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('recommendations must contain at least one entry'))).toBe(true);
+  });
+
   it('all valid RecommendationKind values pass', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const kinds = ['implementation', 'prompt', 'defer'] as const;
