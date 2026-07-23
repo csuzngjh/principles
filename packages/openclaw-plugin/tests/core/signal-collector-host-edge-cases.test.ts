@@ -131,6 +131,10 @@ describe('SignalCollectorHost rate limiting', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('enforces rate limit for STRONG signals within the same session', async () => {
+    // ERR-088 fix (CodeRabbit): previously called detectSync 3× with no assertion
+    // — the test passed whether or not rate limiting worked. Now assert the
+    // exact emission count: with strongRateLimitPerHour=2, only the first two
+    // STRONG signals emit pain; the third is suppressed.
     const wctx = makeMockWctx();
     const configWithLowLimit: SignalCollectorConfig = {
       ...testConfig,
@@ -143,29 +147,64 @@ describe('SignalCollectorHost rate limiting', () => {
     await flushAsync();
 
     // Second STRONG signal - should emit
-    vi.clearAllMocks();
     host.detectSync('这是错的', 'sess-rate-limit', 'user');
     await flushAsync();
 
-    // Third STRONG signal - should be rate limited
-    vi.clearAllMocks();
+    // Third STRONG signal - should be rate limited (no new emission)
     host.detectSync('这是错的', 'sess-rate-limit', 'user');
     await flushAsync();
 
-    // The rate limit enforcement should prevent excessive emissions
-    // (exact behavior depends on implementation)
+    // Exactly 2 emissions: the rate limit suppressed the 3rd STRONG signal.
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(2);
+    // recordUserTurn is called for ALL signals (rate limit only gates the
+    // STRONG emit path, not the trajectory write) — verify it still wrote 3.
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledTimes(3);
+    // The suppressed signal must be observable (rc-9-no-silent-fallback):
+    // SystemLogger.log is called with SIGNAL_STRONG_RATE_LIMITED.
+    expect(SystemLogger.log).toHaveBeenCalledWith(
+      expect.any(String),
+      'SIGNAL_STRONG_RATE_LIMITED',
+      expect.any(String),
+    );
   });
 
-  it('resets rate limit after time window', async () => {
-    // This test would require mocking Date.now() to simulate time passing
-    // For now, we verify the rate limiting mechanism exists
-    const wctx = makeMockWctx();
-    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+  it('resets rate limit after the 1-hour window expires', async () => {
+    // ERR-088 fix (CodeRabbit): previously did NOT mock time, so it only
+    // verified a single normal emission — it could not prove the window
+    // resets. Now mock Date.now (not full fake timers, which would freeze
+    // flushAsync's setTimeout) to advance past the window and verify a
+    // suppressed signal becomes eligible again.
+    const realNow = Date.now();
+    const dateSpy = vi.spyOn(Date, 'now');
+    let mockedTime = realNow;
+    dateSpy.mockImplementation(() => mockedTime);
+    try {
+      const wctx = makeMockWctx();
+      const host = makeHost(wctx, {
+        keywordStore: testStore,
+        config: { ...testConfig, strongRateLimitPerHour: 1 },
+      });
 
-    host.detectSync('这是错的', 'sess-reset', 'user');
-    await flushAsync();
+      // First STRONG signal consumes the only slot → emits.
+      host.detectSync('这是错的', 'sess-reset', 'user');
+      await flushAsync();
+      expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
 
-    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+      // Second STRONG signal within the window → suppressed.
+      host.detectSync('这是错的', 'sess-reset', 'user');
+      await flushAsync();
+      expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1); // still 1
+
+      // Advance past the 1-hour window → bucket resets.
+      mockedTime = realNow + 60 * 60 * 1000 + 1000;
+
+      // Third STRONG signal after window reset → emits again.
+      host.detectSync('这是错的', 'sess-reset', 'user');
+      await flushAsync();
+      expect(emitPainDetectedEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      dateSpy.mockRestore();
+    }
   });
 });
 
@@ -239,7 +278,16 @@ describe('SignalCollectorHost ambiguous keyword handling', () => {
 describe('SignalCollectorHost empathy keyword routing', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('processes empathy keywords through the signal pipeline', async () => {
+  it('records empathy keyword in trajectory but does NOT route to STRONG or WEAK when LLM is disabled', async () => {
+    // Verified behavior (probe): with enableLlmStage=false + llmClassifier=null,
+    // an ambiguous empathy keyword ('搞什么') is recorded in user_turns but is
+    // NOT routed to either STRONG (emitPainDetectedEvent) or WEAK
+    // (trackFriction) — the ambiguous candidate is silently dropped because
+    // collectSync sets needsLlmConfirmation=false when no LLM is configured.
+    // This documents a real product gap (empathy signals are inert in the
+    // default no-LLM config), NOT a test bug. Asserting trackFriction here
+    // (as CodeRabbit suggested) would be wrong — it is never called in this
+    // config. Assert the actual observed behavior honestly.
     const wctx = makeMockWctx();
     const host = makeHost(wctx, {
       keywordStore: testStore,
@@ -250,8 +298,15 @@ describe('SignalCollectorHost empathy keyword routing', () => {
     host.detectSync('搞什么', 'sess-empathy', 'user');
     await flushAsync(100);
 
-    // Empathy keyword should be processed
-    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
+    // The turn IS recorded (empathy detection is not entirely dead).
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledTimes(1);
+    // But correctionDetected is false (empathy is not a correction).
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+      correctionDetected: false,
+    }));
+    // And neither downstream routing fires — the ambiguous candidate is dropped.
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+    expect(trackFriction).not.toHaveBeenCalled();
   });
 });
 
@@ -290,6 +345,6 @@ describe('SignalCollectorHost concurrent signal detection', () => {
     await flushAsync(100);
 
     // Both should be processed (different sessions have separate rate limits)
-    expect(emitPainDetectedEvent).toHaveBeenCalled();
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(2);
   });
 });
