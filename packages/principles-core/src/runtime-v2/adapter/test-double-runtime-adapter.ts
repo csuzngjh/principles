@@ -163,7 +163,7 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
         rootCause: 'TestDouble default root cause',
         violatedPrinciples: [],
         evidence: [],
-        recommendations: [],
+        recommendations: [{ kind: 'defer', description: 'TestDouble default: no actionable recommendation' }],
         confidence: 0.9,
       },
     };

@@ -109,6 +109,18 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
       }
     }
 
+    // 2e-bis: Recommendations must be non-empty (PRI-518 / rc-9-no-silent-fallback).
+    // A `valid: true` diagnosis with zero recommendations previously committed
+    // zero owner-reviewable candidates and marked the task succeeded — the
+    // silent zero-candidate root cause. An intentional "no action" decision
+    // MUST be expressed as a `{ kind: 'defer', ... }` recommendation so it is
+    // explicit and reviewable, not silent.
+    if (!Array.isArray(output.recommendations) || output.recommendations.length === 0) {
+      const msg = 'recommendations must contain at least one entry; emit a { kind: "defer", ... } recommendation when no action is warranted';
+      if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+      detailErrors.push(msg);
+    }
+
     // 2f: Recommendations shape + principle structural fields
     for (const rec of output.recommendations) {
       if (!Value.Check(RecommendationKindSchema, rec.kind)) {

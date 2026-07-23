@@ -332,7 +332,7 @@ describe('SqliteDiagnosticianCommitter', () => {
     expect(candidates[2]?.idempotency_key).toBe(`${result.commitId}:2`);
   });
 
-  it('empty recommendations array produces candidateCount=0', async () => {
+  it('empty recommendations array is REJECTED (rc-9: no silent zero-candidate success)', async () => {
     await createTaskAndRun('task-empty-1', 'run-empty-1');
 
     const input: CommitInput = {
@@ -342,8 +342,32 @@ describe('SqliteDiagnosticianCommitter', () => {
       idempotencyKey: 'ik-empty-1',
     };
 
+    // PRI-518 / rc-9-no-silent-fallback: an empty recommendations array must
+    // fail loud instead of committing zero candidates and marking the task
+    // succeeded. Previously this path returned candidateCount=0 silently — the
+    // root cause of the "zero candidates" Story A symptom.
+    await expect(committer.commit(input)).rejects.toThrow(/recommendations must be non-empty/i);
+
+    // No candidate row should have been written.
+    const db = connection.getDb();
+    const rows = db.prepare('SELECT COUNT(*) AS n FROM principle_candidates WHERE task_id = ?').get('task-empty-1') as { n: number };
+    expect(rows.n).toBe(0);
+  });
+
+  it('single defer recommendation commits exactly one candidate (explicit no-action)', async () => {
+    await createTaskAndRun('task-defer-1', 'run-defer-1');
+
+    const input: CommitInput = {
+      runId: 'run-defer-1',
+      taskId: 'task-defer-1',
+      output: makeOutput({
+        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to recommend an action' }],
+      }),
+      idempotencyKey: 'ik-defer-1',
+    };
+
     const result = await committer.commit(input);
-    expect(result.candidateCount).toBe(0);
+    expect(result.candidateCount).toBe(1);
   });
 
   it('candidate title defaults to description', async () => {

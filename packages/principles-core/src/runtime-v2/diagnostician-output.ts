@@ -55,7 +55,13 @@ export const DiagnosticianOutputV1Schema = Type.Object({
   rootCause: Type.String({ minLength: 1, description: 'MUST include category prefix: "Design: ..." or "People: ..." or "Assumption: ..." or "Tooling: ..."' }),
   violatedPrinciples: Type.Array(DiagnosticianViolatedPrincipleSchema),
   evidence: Type.Array(DiagnosticianEvidenceSchema),
-  recommendations: Type.Array(DiagnosticianRecommendationSchema),
+  // PRI-518 / rc-9-no-silent-fallback: a `valid: true` diagnosis MUST carry at
+  // least one recommendation. An empty array previously committed zero
+  // owner-reviewable candidates and marked the task *succeeded* — the silent
+  // zero-candidate root cause. When the diagnostician intentionally has no
+  // actionable principle, it MUST emit a single `{ kind: 'defer', ... }`
+  // recommendation so the decision is explicit and reviewable, not silent.
+  recommendations: Type.Array(DiagnosticianRecommendationSchema, { minItems: 1 }),
   confidence: Type.Number({ minimum: 0, maximum: 1, description: 'A number between 0.0 and 1.0 (NOT a string, NOT a percentage)' }),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
   /**

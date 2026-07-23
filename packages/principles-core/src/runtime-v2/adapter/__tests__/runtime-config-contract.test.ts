@@ -51,7 +51,7 @@ const VALID_DIAGNOSIS = {
   rootCause: 'Test',
   violatedPrinciples: [],
   evidence: [],
-  recommendations: [],
+  recommendations: [{ kind: 'defer', description: 'no actionable recommendation' }],
   confidence: 0.9,
 };
 

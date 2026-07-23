@@ -28,7 +28,7 @@ const VALID_PAYLOAD = {
   rootCause: 'test root cause',
   violatedPrinciples: [],
   evidence: [],
-  recommendations: [],
+  recommendations: [{ kind: 'defer', description: 'no actionable recommendation' }],
   confidence: 0.9,
 };
 
