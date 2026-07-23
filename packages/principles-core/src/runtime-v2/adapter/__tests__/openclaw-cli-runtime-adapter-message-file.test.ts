@@ -85,7 +85,9 @@ describe('OpenClawCliRuntimeAdapter healthCheck message-file lifecycle', () => {
       let capturedContent = '';
       mockRunCliProcess.mockImplementationOnce((opts: { args: string[] }) => {
         const msgIdx = opts.args.indexOf('--message-file');
-        capturedPath = opts.args[msgIdx + 1];
+        const filePath = opts.args[msgIdx + 1];
+        if (typeof filePath !== 'string') throw new Error('--message-file path missing in probe args');
+        capturedPath = filePath;
         capturedContent = fs.readFileSync(capturedPath, 'utf8');
         return Promise.resolve(makeCliOutput({ exitCode: 0, stderr: successEnvelope() }));
       });
