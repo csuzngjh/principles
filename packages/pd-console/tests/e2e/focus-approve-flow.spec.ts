@@ -104,8 +104,16 @@ test.describe('FocusPage 审批闭环流程', () => {
     const queueAfterBody = queueAfterResp.body as { success: boolean; data: { pendingReviewCount?: number } };
     expect(queueAfterBody.data.pendingReviewCount).toBeLessThan(queueBody.data.pendingReviewCount!);
 
-    // ── 步骤 6：验证 activation 出现（如果 approve 成功）─────────────────────
-    if (approveBody.data.success) {
+    // ── 步骤 6：验证 activation 出现（如果 approve 产生了 activation）────────
+    // PRI-517 / EP-09 (test reality gap): previously this block was guarded by
+    // `approveBody.data.success`, but `success` lives at the TOP level
+    // (`approveBody.success`), not under `data`. So `approveBody.data.success`
+    // was always undefined → this activation-verification block NEVER ran. The
+    // test "passed" without ever asserting an activation appeared.
+    // Fix: guard on the presence of the activation object itself, which is the
+    // actual signal that approve produced an activation (prompt/defer_archive
+    // channels do; code_tool_hook may not).
+    if (approveBody.data.activation) {
       const activationsResp = await apiGet('/api/v1/activations');
       expect(activationsResp.status).toBe(200);
       const activationsBody = activationsResp.body as {
