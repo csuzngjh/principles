@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
-import { OUTPUT_SCHEMA_REGISTRY } from './output-schema-registry.js';
+import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
@@ -526,7 +526,22 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     try {
       // PRI-271 B3: Three-path fallback chain for structured output
       const schemaRef = input.outputSchemaRef;
-      const schema = schemaRef ? OUTPUT_SCHEMA_REGISTRY.get(schemaRef) : undefined;
+      const schema = resolveOutputSchema(schemaRef);
+      // rc-3-fail-loud-missing: a non-empty outputSchemaRef that cannot be
+      // resolved is a bug (typo or unregistered schema). Fail loud instead of
+      // silently skipping schema-gated validation paths. Consistent with
+      // OpenClawCliRuntimeAdapter.fetchOutput.
+      if (schemaRef && !schema) {
+        throw new PDRuntimeError(
+          'output_invalid',
+          `Unknown outputSchemaRef: ${schemaRef}`,
+          {
+            parseFailureReason: 'unknown_output_schema_ref',
+            outputSchemaRef: schemaRef,
+            nextAction: `Register the schema in OUTPUT_SCHEMA_REGISTRY or pass a known ref (e.g. 'diag-rootcause-output-v1')`,
+          },
+        );
+      }
       const strategy = this.config.outputPathStrategy ?? 'tool_call_first';
 
       let validatedOutput: unknown = undefined;
