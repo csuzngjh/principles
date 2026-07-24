@@ -233,6 +233,101 @@ describe('OpenClawCliRuntimeAdapter', () => {
     });
   });
 
+  // PRI-518: outputSchemaRef must drive which schema validates the output.
+  // Previously fetchOutput hardcoded DiagnosticianOutputV1Schema, which rejected
+  // every valid Stage A (diag_rootcause) and Stage B (diag_distiller) output in
+  // the split diagnostician pipeline → 0 candidates. These tests guard the fix.
+  describe('fetchOutput() outputSchemaRef resolution (PRI-518)', () => {
+    const ROOT_CAUSE_PAYLOAD = {
+      valid: true,
+      diagnosisId: 'rc-1',
+      taskId: 'diag_rootcause-task-A',
+      summary: 'root cause identified',
+      causalChain: [{ why: 1, statement: 'missing dep declared but not installed', evidenceRefs: ['ev-1'] }],
+      rootCause: 'Tooling: missing peer dependency',
+      rootCauseCategory: 'Tooling',
+      evidence: [{ sourceRef: 'tool_call_failure:t1', note: 'exec failed: module not found' }],
+      confidence: 0.8,
+    };
+
+    const DISTILLER_PAYLOAD = {
+      valid: true,
+      taskId: 'diag_distiller-task-B',
+      sourceRootCauseArtifactId: 'art-rc-1',
+      abstractedPrinciple: 'Verify dependencies resolve before running the suite',
+      rationale: 'A declared-but-missing peer dependency is the root cause',
+      groundedOnCorePrincipleIds: ['T-04'],
+      scope: 'domain',
+      confidence: 0.75,
+    };
+
+    it('outputSchemaRef=diag-rootcause-output-v1 accepts valid Stage A output (regression: was always rejected)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(ROOT_CAUSE_PAYLOAD), exitCode: 0 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_rootcause', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+        outputSchemaRef: 'diag-rootcause-output-v1',
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      // Must NOT throw output_invalid; Stage A shape round-trips.
+      expect(result.payload).toMatchObject({ diagnosisId: 'rc-1', rootCauseCategory: 'Tooling' });
+    });
+
+    it('outputSchemaRef=diag-distiller-output-v1 accepts valid Stage B output', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(DISTILLER_PAYLOAD), exitCode: 0 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_distiller', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+        outputSchemaRef: 'diag-distiller-output-v1',
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ abstractedPrinciple: 'Verify dependencies resolve before running the suite', scope: 'domain' });
+    });
+
+    it('unknown outputSchemaRef fails loud with output_invalid (rc-3, not silent)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+        outputSchemaRef: 'does-not-exist-v9',
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(/Unknown outputSchemaRef: does-not-exist-v9/i);
+    });
+
+    it('outputSchemaRef=diag-rootcause-output-v1 rejects DiagnosticianV1-shaped payload (proves the right schema is applied)', async () => {
+      // VALID_PAYLOAD is a DiagnosticianOutputV1 shape — it lacks causalChain
+      // and rootCauseCategory, so it must fail DiagRootCauseOutputV1Schema even
+      // though it would pass the old hardcoded DiagnosticianOutputV1Schema.
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag_rootcause', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+        outputSchemaRef: 'diag-rootcause-output-v1',
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(/does not match diag-rootcause-output-v1 schema/i);
+    });
+  });
+
   // OCRA-04: CLI failures map to correct PDErrorCategory
   describe('fetchOutput() error mapping', () => {
     it('throws PDRuntimeError("runtime_unavailable") when ENOENT (binary not found)', async () => {

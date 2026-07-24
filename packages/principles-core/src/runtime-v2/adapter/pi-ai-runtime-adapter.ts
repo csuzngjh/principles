@@ -20,17 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
-import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
-import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
-import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-output.js';
-import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
-import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
-import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
-import { ArtificerRuleOutputSchema } from '../internalization/artificer-output.js';
-import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js';
-import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
-import { EmpathyObserverOutputV1Schema } from '../observer/empathy-observer.js';
-import { CorrectionObserverOutputV1Schema } from '../observer/correction-observer.js';
+import { OUTPUT_SCHEMA_REGISTRY } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
@@ -332,20 +322,6 @@ interface RunState {
   reason?: string;
   output?: StructuredRunOutput;
 }
-
-const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
-  ['diagnostician-output-v1', DiagnosticianOutputV1Schema],
-  ['diag-rootcause-output-v1', DiagRootCauseOutputV1Schema],
-  ['diag-distiller-output-v1', DiagDistillerOutputV1Schema],
-  ['dreamer-output-v1', DreamerOutputV1Schema],
-  ['philosopher-output-v1', PhilosopherOutputV1Schema],
-  ['scribe-output-v1', ScribeOutputV1Schema],
-  ['artificer-rule-output-v2', ArtificerRuleOutputSchema],
-  ['evaluator-output-v1', EvaluatorOutputV1Schema],
-  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
-  ['empathy-observer-output-v1', EmpathyObserverOutputV1Schema],
-  ['correction-observer-output-v1', CorrectionObserverOutputV1Schema],
-]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private readonly config: PiAiRuntimeAdapterConfig;

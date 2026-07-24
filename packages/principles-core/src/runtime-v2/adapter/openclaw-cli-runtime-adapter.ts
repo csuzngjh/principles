@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { runCliProcess, type CliOutput } from '../utils/cli-process-runner.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter} from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
@@ -75,6 +76,13 @@ interface RunState {
   startedAt: string;
   cliOutput: CliOutput | null; // null until CLI completes
   completed: boolean;
+  /**
+   * The outputSchemaRef passed by the runner at startRun time (e.g.
+   * 'diag-rootcause-output-v1'). fetchOutput uses this to resolve the correct
+   * TypeBox schema for validation instead of hardcoding DiagnosticianOutputV1.
+   * Absent for legacy callers → falls back to DiagnosticianOutputV1Schema.
+   */
+  outputSchemaRef?: string;
 }
 
 interface MessageFileRef {
@@ -605,8 +613,11 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
 
-    // Initialize state — cliOutput null until CLI completes
-    const state: RunState = { runId, startedAt, cliOutput: null, completed: false };
+    // Initialize state — cliOutput null until CLI completes.
+    // Capture outputSchemaRef so fetchOutput can validate against the runner's
+    // expected schema (e.g. diag-rootcause-output-v1 for Stage A) instead of
+    // hardcoding DiagnosticianOutputV1Schema.
+    const state: RunState = { runId, startedAt, cliOutput: null, completed: false, outputSchemaRef: input.outputSchemaRef };
     this.runStateMap.set(runId, state);
 
     // Build CLI args per D-02
@@ -833,11 +844,41 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       }
     }
 
-    // OCRA-03: Validate DiagnosticianOutputV1Schema
+    // OCRA-03: Validate against the schema named by outputSchemaRef.
+    // The split diagnostician pipeline runs 3 stages with DIFFERENT output
+    // shapes: Stage A (diag_rootcause) → DiagRootCauseOutputV1, Stage B
+    // (diag_distiller) → DiagDistillerOutputV1, Stage C (diag_router) →
+    // DiagnosticianOutputV1. Each runner passes outputSchemaRef to name its
+    // expected shape. Previously this hardcoded DiagnosticianOutputV1Schema,
+    // which rejected every valid Stage A/B output → 0 candidates.
+    // Resolution rules (rc-3-fail-loud-missing):
+    //   - outputSchemaRef present + in registry → validate against that schema
+    //   - outputSchemaRef present + NOT in registry → fail loud (unknown ref)
+    //   - outputSchemaRef absent → fall back to DiagnosticianOutputV1Schema
+    //     (backward compat for legacy callers / monolithic diagnostician path)
+    let schema: Parameters<typeof Value.Check>[0];
+    if (state.outputSchemaRef) {
+      const resolved = resolveOutputSchema(state.outputSchemaRef);
+      if (!resolved) {
+        throw new PDRuntimeError(
+          'output_invalid',
+          `Unknown outputSchemaRef: ${state.outputSchemaRef}`,
+          {
+            parseFailureReason: 'unknown_output_schema_ref',
+            outputSchemaRef: state.outputSchemaRef,
+            nextAction: `Register the schema in OUTPUT_SCHEMA_REGISTRY or pass a known ref (e.g. 'diag-rootcause-output-v1')`,
+          },
+        );
+      }
+      schema = resolved;
+    } else {
+      schema = DiagnosticianOutputV1Schema;
+    }
+
     // OCRA-05: On schema mismatch, include evidence with bounded preview (ERR-014/016/017)
     // ERR-055/056: redact sensitive fields from parsed payload before persisting preview
-    if (!Value.Check(DiagnosticianOutputV1Schema, parsed)) {
-      const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, parsed)]
+    if (!Value.Check(schema, parsed)) {
+      const schemaErrors = [...Value.Errors(schema, parsed)]
         .slice(0, 10)
         .map(e => ({ path: e.path, message: e.message }));
       const redacted = redactSensitiveFields(parsed);
@@ -847,9 +888,10 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
       throw new PDRuntimeError(
         'output_invalid',
-        'CLI output does not match DiagnosticianOutputV1 schema',
+        `CLI output does not match ${state.outputSchemaRef ?? 'diagnostician-output-v1'} schema`,
         {
           parseFailureReason: 'schema_validation_failed',
+          outputSchemaRef: state.outputSchemaRef ?? 'diagnostician-output-v1',
           boundedRawOutputPreview: boundedPreview,
           schemaErrors,
           nextAction: 'Review schema errors; check LLM output format and required fields',
