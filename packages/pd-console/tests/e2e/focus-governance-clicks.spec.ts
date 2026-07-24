@@ -29,10 +29,11 @@ async function resolvePrincipleId(approvalId: string): Promise<string> {
   expect(resp.status).toBe(200);
   const body = resp.body as {
     success: boolean;
-    data: { groups: Array<{ principleId: string; records: Array<{ approvalId: string }> }> };
+    data: { groups: Array<{ principleId: string; records: Array<{ id: string }> }> };
   };
   expect(body.success).toBe(true);
-  const group = body.data.groups.find((g) => g.records.some((r) => r.approvalId === approvalId));
+  // NOTE: grouped endpoint returns record.id (mapped from approvalId), NOT record.approvalId.
+  const group = body.data.groups.find((g) => g.records.some((r) => r.id === approvalId));
   expect(group, `grouped endpoint must contain approval ${approvalId}`).toBeTruthy();
   return group!.principleId;
 }
