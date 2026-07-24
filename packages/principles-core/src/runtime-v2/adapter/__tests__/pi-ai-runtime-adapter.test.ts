@@ -862,16 +862,20 @@ describe('PiAiRuntimeAdapter', () => {
       expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
-    it('skips repair for unknown outputSchemaRef (not in registry)', async () => {
-      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
-
+    it('unknown outputSchemaRef fails loud before repair is attempted (rc-3)', async () => {
+      // CodeRabbit PR #1259: unknown non-empty ref now fails loud at schema
+      // resolution (in startRun), so repair is never attempted.
+      // NOTE: no mockComplete setup — resolution fails BEFORE any LLM call,
+      // so no mock value is queued to leak into subsequent tests.
       const adapter = makeAdapter();
-      const handle = await adapter.startRun(makeStartRunInput({
+      await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'custom-unknown-v1',
-      }));
-      expect(mockComplete).toHaveBeenCalledTimes(1);
-      const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject({ valid: true, missing: 'fields' });
+      }))).rejects.toMatchObject({
+        category: 'output_invalid',
+        message: expect.stringMatching(/Unknown outputSchemaRef: custom-unknown-v1/i),
+      });
+      // LLM was never called because resolution failed first.
+      expect(mockComplete).toHaveBeenCalledTimes(0);
     });
 
     it('skips repair for non-JSON output (no schema errors to report)', async () => {
@@ -1125,17 +1129,20 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({ valid: true, diagnosisId: 'diag-test-1' });
     });
 
-    it('unknown outputSchemaRef skips schema validation and succeeds', async () => {
-      const arbitraryOutput = { foo: 'bar', baz: 42 };
-      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(arbitraryOutput)));
-
+    it('unknown outputSchemaRef fails loud with output_invalid (rc-3, was silent skip)', async () => {
+      // CodeRabbit PR #1259: previously an unknown non-empty outputSchemaRef
+      // resolved to undefined and silently skipped schema-gated validation.
+      // That is an rc-9/rc-3 silent-fallback. Now it fails loud, consistent
+      // with OpenClawCliRuntimeAdapter.fetchOutput.
+      // NOTE: no mockComplete setup — resolution fails BEFORE any LLM call.
       const adapter = makeAdapter();
-      const handle = await adapter.startRun(makeStartRunInput({
+      await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'custom-output-v1',
-      }));
-
-      const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject(arbitraryOutput);
+      }))).rejects.toMatchObject({
+        category: 'output_invalid',
+        message: expect.stringMatching(/Unknown outputSchemaRef: custom-output-v1/i),
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(0);
     });
 
     it('no outputSchemaRef skips schema validation (backward compatible)', async () => {
@@ -1359,19 +1366,21 @@ describe('PiAiRuntimeAdapter', () => {
       expect((payload.rawOutputPreview as string).length).toBeGreaterThan(0);
     });
 
-    it('10. unknown schemaRef keeps existing backward-compatible behavior', async () => {
+    it('10. unknown schemaRef fails loud (rc-3; was backward-compatible silent skip)', async () => {
+      // CodeRabbit PR #1259: previously an unknown non-empty outputSchemaRef
+      // silently skipped schema validation (the "backward-compatible behavior").
+      // That silent skip is an rc-9/rc-3 defect — now it fails loud, matching
+      // OpenClawCliRuntimeAdapter. NOTE: no mockComplete setup because schema
+      // resolution fails before any LLM call.
       resetMock();
-      const arbitraryOutput = { foo: 'bar', baz: 42 };
-      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(arbitraryOutput)));
-
       const adapter = makeAdapter();
-      const handle = await adapter.startRun(makeStartRunInput({
+      await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'custom-unknown-v1',
-      }));
-
-      expect(mockComplete).toHaveBeenCalledTimes(1);
-      const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject(arbitraryOutput);
+      }))).rejects.toMatchObject({
+        category: 'output_invalid',
+        message: expect.stringMatching(/Unknown outputSchemaRef: custom-unknown-v1/i),
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(0);
     });
 
     it('emits output_schema_invalid telemetry before repair attempt', async () => {
