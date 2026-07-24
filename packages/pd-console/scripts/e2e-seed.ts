@@ -183,8 +183,51 @@ stateDb.prepare(`
   now, '回归测试：rule artifact 含非法 expectedDecision=requireApproval', 'Owner 审批：触发 golden_trace_schema_invalid 验证',
 );
 
+// ── PRI-517: dedicated isolated records for real-UI-click e2e ───────────────
+// Each click action gets its own approval + artifact + principle so the
+// focus-governance-clicks.spec.ts tests never mutate records owned by other
+// specs (focus-approve-flow / BDD). All are prompt channel (MVP-reversible)
+// so approve produces a real activation and deactivate is available.
+insertPiArtifact.run(
+  'artifact-click-approve', 'principle', 'task-click-approve', 'p-click-approve',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-click-approve', title: '点击批准测试原则' }), now, now,
+);
+insertPiArtifact.run(
+  'artifact-click-reject', 'principle', 'task-click-reject', 'p-click-reject',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-click-reject', title: '点击拒绝测试原则' }), now, now,
+);
+insertPiArtifact.run(
+  'artifact-click-edit', 'principle', 'task-click-edit', 'p-click-edit',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-click-edit', title: '点击编辑测试原则' }), now, now,
+);
+// Edit replacement artifact (pre-validated, so editApproval can point at it).
+// NOTE: pi_artifacts has a UNIQUE(source_task_id, artifact_kind) constraint, so
+// this artifact needs its own source_task_id distinct from artifact-click-edit.
+insertPiArtifact.run(
+  'artifact-click-edit-new', 'principle', 'task-click-edit-new', 'p-click-edit',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-click-edit', title: '编辑后新原则' }), now, now,
+);
+const insertClickApproval = stateDb.prepare(`
+  INSERT INTO approvals (
+    approval_id, artifact_id, channel, risk_level, status, confidence,
+    requested_at, summary, trigger_reason
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertClickApproval.run(
+  'apr-click-approve', 'artifact-click-approve', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, '点击测试：批准', 'Owner 审批：UI 点击批准',
+);
+insertClickApproval.run(
+  'apr-click-reject', 'artifact-click-reject', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, '点击测试：拒绝', 'Owner 审批：UI 点击拒绝',
+);
+insertClickApproval.run(
+  'apr-click-edit', 'artifact-click-edit', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, '点击测试：编辑', 'Owner 审批：UI 点击编辑',
+);
+
 stateConn.close();
-console.log('[e2e-seed] state.db seeded: 4 approvals (incl. 1 BDD-isolated, 1 bad-trace regression), 4 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
+console.log('[e2e-seed] state.db seeded: 7 approvals (incl. 1 BDD-isolated, 1 bad-trace regression, 3 PRI-517 click-isolated), 8 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
 
 // ── 8. 初始化 trajectory.db + pain_events ───────────────────────────────────
 const trajectoryDir = path.join(workspaceDir, '.state');
