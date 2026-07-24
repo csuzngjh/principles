@@ -199,8 +199,13 @@ function phase1() {
     return { ok: false, error: 'Gateway unreachable. Run: openclaw gateway run --force' };
   }
 
-  // Quick agent probe — use openclawAgent to avoid cmd.exe quoting issues
-  const probeProc = openclawAgent(['--session-key', 'agent:main:main', '--message', 'reply OK', '--timeout', '30', '--json'], 45000);
+  // Quick agent probe — use openclawAgent to avoid cmd.exe quoting issues.
+  // NOTE: the agent --timeout and the spawnSync kill timer must both be
+  // generous. A cold session against a real provider (e.g. SenseNova) can
+  // take ~50s end-to-end (model latency + session bootstrap + JSON payload),
+  // so the previous 30s/45s pair reliably timed out and produced empty
+  // stdout → false "Agent probe failed" SKIP. Bumped to 60s agent / 90s kill.
+  const probeProc = openclawAgent(['--session-key', 'agent:main:main', '--message', 'reply OK', '--timeout', '60', '--json'], 90000);
   const probe = (probeProc.stdout ?? '').trim();
   if (!probe) {
     return { ok: false, error: 'Agent probe failed — no response from openclaw agent' };
