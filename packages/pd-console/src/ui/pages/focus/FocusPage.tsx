@@ -473,6 +473,7 @@ function PendingReviewCard({
           type="button"
           onClick={handleApprove}
           disabled={!isActionable || actionLoading}
+          data-testid={`approve-btn-${group.principleId}`}
           className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {actionLoading ? t("common.loading") + "…" : t("pages.focus.approveAction", { defaultValue: "批准" })}
@@ -481,6 +482,7 @@ function PendingReviewCard({
           type="button"
           onClick={() => { setShowEditInput((v) => !v); setShowRejectInput(false); }}
           disabled={!isActionable || actionLoading}
+          data-testid={`edit-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.editAction", { defaultValue: "编辑" })}
@@ -489,6 +491,7 @@ function PendingReviewCard({
           type="button"
           onClick={() => { setShowRejectInput((v) => !v); setShowEditInput(false); }}
           disabled={!isActionable || actionLoading}
+          data-testid={`reject-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
           {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
@@ -510,6 +513,7 @@ function PendingReviewCard({
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
+            data-testid={`reject-reason-${group.principleId}`}
             placeholder={t("pages.focus.rejectReasonPlaceholder", { defaultValue: "请说明拒绝原因" })}
             className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
           />
@@ -518,6 +522,7 @@ function PendingReviewCard({
               type="button"
               onClick={handleReject}
               disabled={!rejectReason.trim() || actionLoading}
+              data-testid={`confirm-reject-${group.principleId}`}
               className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t("pages.focus.confirmReject", { defaultValue: "确认拒绝" })}
@@ -546,6 +551,7 @@ function PendingReviewCard({
             type="text"
             value={newArtifactId}
             onChange={(e) => setNewArtifactId(e.target.value)}
+            data-testid={`edit-new-artifact-${group.principleId}`}
             placeholder={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
             className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
             aria-label={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
@@ -553,6 +559,7 @@ function PendingReviewCard({
           <textarea
             value={editReason}
             onChange={(e) => setEditReason(e.target.value)}
+            data-testid={`edit-reason-${group.principleId}`}
             placeholder={t("pages.focus.editReasonPlaceholder", { defaultValue: "请说明编辑原因" })}
             className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
           />
@@ -561,6 +568,7 @@ function PendingReviewCard({
               type="button"
               onClick={handleEdit}
               disabled={!editReason.trim() || !newArtifactId.trim() || actionLoading}
+              data-testid={`confirm-edit-${group.principleId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t("pages.focus.confirmEdit", { defaultValue: "确认编辑" })}
