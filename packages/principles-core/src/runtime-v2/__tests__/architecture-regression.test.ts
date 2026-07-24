@@ -2095,10 +2095,12 @@ describe('PRI-111 ArtificerRunner boundary', () => {
     expect(src).toContain('DefaultArtificerValidator');
   });
 
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers unified artificer-rule-output-v2 schema', async () => {
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers unified artificer-rule-output-v2 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    // The registry was extracted to adapter/output-schema-registry.ts (single
+    // source of truth shared by pi-ai and openclaw-cli adapters). Assert there.
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
     expect(src).toContain('artificer-rule-output-v2');
     expect(src).not.toContain('artificer-rule-output-v1');
     expect(src).toContain('ArtificerRuleOutputSchema');
@@ -2179,10 +2181,10 @@ describe('PRI-EVAL EvaluatorRunner boundary', () => {
     expect(src).not.toContain("from './evaluator-prompt-builder.js'");
   });
 
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers evaluator-output-v1 schema', async () => {
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers evaluator-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
     expect(src).toContain('evaluator-output-v1');
     expect(src).toContain('EvaluatorOutputV1Schema');
   });
@@ -2246,10 +2248,10 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     expect(src).not.toContain("from './rollout-reviewer-prompt-builder.js'");
   });
 
-  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers rollout-reviewer-output-v1 schema', async () => {
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers rollout-reviewer-output-v1 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
     expect(src).toContain('rollout-reviewer-output-v1');
     expect(src).toContain('RolloutReviewerOutputV1Schema');
   });
