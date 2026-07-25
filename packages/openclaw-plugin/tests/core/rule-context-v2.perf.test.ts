@@ -158,10 +158,10 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     // Spec §10.3 aspirational target: p95 < 50ms, p99 < 200ms (NOT enforced).
     // Contract threshold (PRI-496): see playbook §10.3. This test measures the
     // production hook (SQLite load + VM compile + gate) and uses 500ms/1000ms
-    // sanity bounds — broader than the gate perf test's 200ms/500ms because
-    // this test includes the full SQLite FS overhead on Windows.
-    expect(p95).toBeLessThan(500); // 500ms sanity upper bound (see playbook §10.3)
-    expect(p99).toBeLessThan(1000); // 1000ms sanity upper bound (see playbook §10.3)
+    // sanity bounds — same as the gate perf test's 500ms/1000ms contract
+    // (both reflect full SQLite FS overhead on Windows / loaded CI runners).
+    expect(p95).toBeLessThan(500); // 500ms contract threshold (see playbook §10.3)
+    expect(p99).toBeLessThan(1000); // 1000ms contract threshold
   }, 30000); // perf test: 100 iterations under full-suite load can exceed the 5s default
 
   it('context query p50/p95 over 100 iterations with 100 history rows', () => {
