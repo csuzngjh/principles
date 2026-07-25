@@ -47,4 +47,47 @@ describe('DiagDistillerOutputV1Schema', () => {
     const result = await validator.validate(withFabricated, 'task-001');
     expect(result.valid).toBe(false);
   });
+
+  // PRI-518: LLM in split-pipeline Stage B (diag_distiller) tends to echo the
+  // parent task ID it saw in the Stage-A context (e.g. "diagnosis_pain_...")
+  // instead of this stage's "diag_distiller-diagnosis_pain_..." id. Stage A's
+  // validator already re-injects (BUG-007c); Stage B must do the same, else
+  // every Stage B output fails taskId lineage → 0 candidates. Found via real
+  // Story A run after the adapter schema-ref fix unblocked Stage A.
+  describe('taskId lineage re-injection (BUG-007c, PRI-518)', () => {
+    it('re-injects the expected stage taskId when LLM outputs the parent (diagnosis_*) id', async () => {
+      const validator = new DefaultDiagDistillerValidator();
+      const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
+      const parentTaskId = 'diagnosis_pain_123_abc';
+      // LLM output carries the PARENT id (what it saw in Stage A context)
+      const llmOutput = { ...validOutput, taskId: parentTaskId };
+
+      const result = await validator.validate(llmOutput, stageTaskId);
+      expect(result.valid).toBe(true);
+      // taskId was corrected in-place to the trusted caller value (ERR-008:
+      // re-injection source is the caller's taskId, never LLM output)
+      expect((llmOutput as { taskId: string }).taskId).toBe(stageTaskId);
+      expect(result.warnings?.some(w => w.includes('re-injected'))).toBe(true);
+    });
+
+    it('still rejects a taskId that is neither the stage id nor the parent id', async () => {
+      const validator = new DefaultDiagDistillerValidator();
+      const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
+      const llmOutput = { ...validOutput, taskId: 'totally-unrelated-task-9' };
+
+      const result = await validator.validate(llmOutput, stageTaskId);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('taskId mismatch'))).toBe(true);
+    });
+
+    it('accepts output that already carries the correct stage taskId (no re-injection)', async () => {
+      const validator = new DefaultDiagDistillerValidator();
+      const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
+      const llmOutput = { ...validOutput, taskId: stageTaskId };
+
+      const result = await validator.validate(llmOutput, stageTaskId);
+      expect(result.valid).toBe(true);
+      expect(result.warnings?.length ?? 0).toBe(0);
+    });
+  });
 });
