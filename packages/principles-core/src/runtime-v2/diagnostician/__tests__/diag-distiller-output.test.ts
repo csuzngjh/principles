@@ -55,25 +55,36 @@ describe('DiagDistillerOutputV1Schema', () => {
   // every Stage B output fails taskId lineage → 0 candidates. Found via real
   // Story A run after the adapter schema-ref fix unblocked Stage A.
   describe('taskId lineage re-injection (BUG-007c, PRI-518)', () => {
-    it('re-injects the expected stage taskId when LLM outputs the parent (diagnosis_*) id', async () => {
+    it('re-injects when LLM outputs the Stage A id (diag_rootcause- prefix, same suffix)', async () => {
+      // Real Story A bug: Stage B LLM echoes the Stage A task id
+      // (diag_rootcause-diagnosis_pain_...) instead of this stage's
+      // diag_distiller-diagnosis_pain_... — same suffix, wrong prefix.
       const validator = new DefaultDiagDistillerValidator();
       const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
-      const parentTaskId = 'diagnosis_pain_123_abc';
-      // LLM output carries the PARENT id (what it saw in Stage A context)
-      const llmOutput = { ...validOutput, taskId: parentTaskId };
+      const echoedStageAId = 'diag_rootcause-diagnosis_pain_123_abc';
+      const llmOutput = { ...validOutput, taskId: echoedStageAId };
 
       const result = await validator.validate(llmOutput, stageTaskId);
       expect(result.valid).toBe(true);
-      // taskId was corrected in-place to the trusted caller value (ERR-008:
-      // re-injection source is the caller's taskId, never LLM output)
       expect((llmOutput as { taskId: string }).taskId).toBe(stageTaskId);
       expect(result.warnings?.some(w => w.includes('re-injected'))).toBe(true);
     });
 
-    it('still rejects a taskId that is neither the stage id nor the parent id', async () => {
+    it('re-injects when LLM outputs the parent (diagnosis_*) id (no diag prefix)', async () => {
       const validator = new DefaultDiagDistillerValidator();
       const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
-      const llmOutput = { ...validOutput, taskId: 'totally-unrelated-task-9' };
+      const parentTaskId = 'diagnosis_pain_123_abc';
+      const llmOutput = { ...validOutput, taskId: parentTaskId };
+
+      const result = await validator.validate(llmOutput, stageTaskId);
+      expect(result.valid).toBe(true);
+      expect((llmOutput as { taskId: string }).taskId).toBe(stageTaskId);
+    });
+
+    it('still rejects a taskId with a different suffix', async () => {
+      const validator = new DefaultDiagDistillerValidator();
+      const stageTaskId = 'diag_distiller-diagnosis_pain_123_abc';
+      const llmOutput = { ...validOutput, taskId: 'diag_rootcause-totally-different-9' };
 
       const result = await validator.validate(llmOutput, stageTaskId);
       expect(result.valid).toBe(false);
