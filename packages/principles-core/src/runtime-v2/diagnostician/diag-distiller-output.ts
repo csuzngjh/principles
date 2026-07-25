@@ -106,8 +106,9 @@ export class DefaultDiagDistillerValidator implements DiagDistillerValidator {
   async validate(
     output: unknown,
     taskId: string,
-  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string }> {
+  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string; warnings?: string[] }> {
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     // ── Step 1: Object guard ────────────────────────────────────────────────
     if (typeof output !== 'object' || output === null) {
@@ -118,8 +119,26 @@ export class DefaultDiagDistillerValidator implements DiagDistillerValidator {
     const record = output as Record<string, unknown>;
 
     // ── Step 2: taskId lineage check (ERR-008) ──────────────────────────────
+    // BUG-007c (mirrored from diag-rootcause-output.ts): if the LLM outputs the
+    // parent task ID (the diagnosis_* id it saw in the Stage-A context) instead
+    // of this stage's diag_distiller-* id, re-inject the expected taskId from
+    // the caller's trusted `taskId` parameter instead of treating it as a hard
+    // error. The re-injection value MUST come from the caller, never from LLM
+    // output (ERR-008). Real Story A run confirmed the LLM echoes the parent id.
     if (typeof record.taskId !== 'string' || record.taskId !== taskId) {
-      errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
+      const DIAG_DISTILLER_PREFIX = 'diag_distiller-';
+      if (
+        typeof record.taskId === 'string'
+        && taskId.startsWith(DIAG_DISTILLER_PREFIX)
+        && record.taskId === taskId.slice(DIAG_DISTILLER_PREFIX.length)
+      ) {
+        // LLM output the parent task ID — re-inject the expected stage taskId
+        const parentTaskId = record.taskId;
+        record.taskId = taskId;
+        warnings.push(`taskId re-injected: LLM output parent ID "${parentTaskId}", corrected to "${taskId}" (ERR-008)`);
+      } else {
+        errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
+      }
     }
 
     // ── Step 3: TypeBox schema validation ───────────────────────────────────
@@ -143,6 +162,6 @@ export class DefaultDiagDistillerValidator implements DiagDistillerValidator {
       return { valid: false, errors, errorCategory: 'output_invalid' };
     }
 
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings };
   }
 }
