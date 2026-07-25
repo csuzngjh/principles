@@ -119,23 +119,29 @@ export class DefaultDiagDistillerValidator implements DiagDistillerValidator {
     const record = output as Record<string, unknown>;
 
     // ── Step 2: taskId lineage check (ERR-008) ──────────────────────────────
-    // BUG-007c (mirrored from diag-rootcause-output.ts): if the LLM outputs the
-    // parent task ID (the diagnosis_* id it saw in the Stage-A context) instead
-    // of this stage's diag_distiller-* id, re-inject the expected taskId from
-    // the caller's trusted `taskId` parameter instead of treating it as a hard
-    // error. The re-injection value MUST come from the caller, never from LLM
-    // output (ERR-008). Real Story A run confirmed the LLM echoes the parent id.
+    // BUG-007c (mirrored from diag-rootcause-output.ts): if the LLM outputs a
+    // taskId with the WRONG diag-stage prefix (or no prefix), re-inject the
+    // expected taskId from the caller's trusted `taskId` parameter instead of
+    // treating it as a hard error. Real Story A run confirmed the Stage B LLM
+    // echoes the Stage A task id (diag_rootcause-diagnosis_pain_...) instead of
+    // this stage's diag_distiller-diagnosis_pain_... — same suffix, wrong
+    // prefix. The re-injection value MUST come from the caller, never from LLM
+    // output (ERR-008).
     if (typeof record.taskId !== 'string' || record.taskId !== taskId) {
-      const DIAG_DISTILLER_PREFIX = 'diag_distiller-';
-      if (
-        typeof record.taskId === 'string'
-        && taskId.startsWith(DIAG_DISTILLER_PREFIX)
-        && record.taskId === taskId.slice(DIAG_DISTILLER_PREFIX.length)
-      ) {
-        // LLM output the parent task ID — re-inject the expected stage taskId
-        const parentTaskId = record.taskId;
+      const DIAG_PREFIXES = ['diag_rootcause-', 'diag_distiller-', 'diag_router-'];
+      const stripDiagPrefix = (id: string): string => {
+        for (const p of DIAG_PREFIXES) {
+          if (id.startsWith(p)) return id.slice(p.length);
+        }
+        return id;
+      };
+      const expectedSuffix = stripDiagPrefix(taskId);
+      const actualSuffix = typeof record.taskId === 'string' ? stripDiagPrefix(record.taskId) : '';
+      if (actualSuffix !== '' && actualSuffix === expectedSuffix) {
+        // LLM output a sibling/parent stage id with the same suffix — re-inject
+        const echoedTaskId = record.taskId as string;
         record.taskId = taskId;
-        warnings.push(`taskId re-injected: LLM output parent ID "${parentTaskId}", corrected to "${taskId}" (ERR-008)`);
+        warnings.push(`taskId re-injected: LLM output "${echoedTaskId}", corrected to "${taskId}" (ERR-008)`);
       } else {
         errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
       }
