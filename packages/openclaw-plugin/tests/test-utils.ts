@@ -39,9 +39,13 @@ export function safeRmDir(dir: string): void {
             fs.rmSync(dir, { recursive: true, force: true });
         }
     } catch (err: any) {
-        // On Windows, ignore EPERM/ENOTEMPTY errors (file handle still held)
-        // The OS will clean up temp directories eventually
-        if (process.platform !== 'win32' || (err?.code !== 'EPERM' && err?.code !== 'ENOTEMPTY')) {
+        // Tolerate EPERM/ENOTEMPTY on ALL platforms (not just Windows). These
+        // races are OS-agnostic: any async file writer (e.g. an event/log
+        // flusher still draining when afterEach runs) can populate a subdir
+        // mid-rmdir, producing ENOTEMPTY on Linux CI too. The OS cleans up
+        // tmp dirs eventually; re-throwing only causes false CI failures.
+        // Previously this guard was Windows-only, which left Linux CI exposed.
+        if (err?.code !== 'EPERM' && err?.code !== 'ENOTEMPTY') {
             throw err;
         }
     }
