@@ -140,6 +140,13 @@ export interface PeerRunnerValidationResult {
   readonly valid: boolean;
   readonly errors: readonly string[];
   readonly errorCategory?: PDErrorCategory;
+  /**
+   * Non-fatal validation warnings (e.g. taskId re-injection notice). Present
+   * when the validator corrected/normalized the output but still accepted it.
+   * Callers may surface these in telemetry; they do not affect the pass/fail
+   * decision (which is driven by `valid`).
+   */
+  readonly warnings?: readonly string[];
 }
 
 // ── Internal context types (used by base class) ──────────────────────────────

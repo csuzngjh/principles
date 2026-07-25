@@ -201,6 +201,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
       valid: result.valid,
       errors: result.errors,
       errorCategory: result.errorCategory as PDErrorCategory | undefined,
+      warnings: result.warnings,
     };
   }
 
