@@ -34,13 +34,13 @@
       "contractCheck": {
         "p95Passes": true,
         "p99Passes": true,
-        "note": "p95/p99 well within 200ms/500ms contract; max spike 192.66ms likely Windows FS cache miss."
+        "note": "p95/p99 well within 500ms/1000ms contract; max spike 192.66ms likely Windows FS cache miss."
       }
     },
     {
       "name": "rule-context-v2.perf.test.ts: production hook (100 iterations)",
       "testFile": "packages/openclaw-plugin/tests/core/rule-context-v2.perf.test.ts",
-      "description": "Production hook including SQLite load and VM compilation (broader sanity bound 500ms/1000ms).",
+      "description": "Production hook including SQLite load and VM compilation (500ms/1000ms contract, same as gate perf test).",
       "iterations": 100,
       "metrics": {
         "min": "42.61ms",

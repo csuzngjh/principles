@@ -85,7 +85,7 @@ export interface DiagDistillerValidator {
   validate(
     output: unknown,
     taskId: string,
-  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string }>;
+  ): Promise<{ valid: boolean; errors: string[]; errorCategory?: string; warnings?: string[] }>;
 }
 
 /**
