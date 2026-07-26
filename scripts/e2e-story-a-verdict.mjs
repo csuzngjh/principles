@@ -8,47 +8,50 @@ export function computeStoryAVerdict(input) {
     return { verdict: `failed:phase4:unknown_pain_source:${input.painSource ?? 'null'}`, notes };
   }
 
-  // Evidence-anchor check is scenario-dependent (PRI-518):
-  //   - user_correction / user_empathy pain → evidence MUST include an
-  //     owner_message:* entry (the owner's correction text is the anchor).
-  //   - tool_failure pain → the legitimate evidence anchor is a
-  //     tool_call_failure:* entry (the agent's failed tool call that
-  //     triggered the pain). Requiring owner_message for a tool-failure
-  //     scenario was a category error — those scenarios have no owner
-  //     correction by design. Both anchor types are real pain sources that
-  //     justify diagnosis; neither is a weakening of the gate.
+  // Evidence anchor + context-bound task check are scenario-dependent AND must
+  // be bound to the SAME task (PRI-518, CodeRabbit review):
+  //   - user_correction / user_empathy → evidence MUST include owner_message;
+  //     provenance must be openclaw_context_bound; agent_turn required.
+  //   - tool_failure → evidence MUST include tool_call_failure; provenance may
+  //     be openclaw_context_bound or automatic_hook; agent_turn optional
+  //     (diagnosis runs synchronously in after_tool_call, before the current
+  //     turn's assistant response is written to trajectory).
+  // The evidence anchor check uses per-task flags (not global) to prevent
+  // splicing evidence from task A with provenance from task B.
   const isToolFailureScenario = input.painSource === 'tool_failure';
-  const hasValidEvidenceAnchor = isToolFailureScenario
-    ? (input.hasToolCallFailure === true)
-    : (input.hasOwnerMessage === true);
-  if (!hasValidEvidenceAnchor) {
-    return {
-      verdict: isToolFailureScenario ? 'failed:phase4:missing_tool_call_failure_evidence' : 'failed:phase4:missing_owner_message',
-      notes,
-    };
-  }
-  // agent_turn evidence is required for user_correction scenarios (the agent's
-  // behavioral response is essential context). For tool_failure scenarios it is
-  // optional: the diagnosis runs synchronously inside after_tool_call, BEFORE
-  // the current turn's assistant response is written to trajectory (that happens
-  // in after_llm_output, which fires later). So tool_call_failure evidence is
-  // the only behavioral anchor available at pain-trigger time — and it is
-  // sufficient (it includes the tool name, error type, and error detail).
-  if (!isToolFailureScenario && !input.hasAgentTurn) {
-    return { verdict: 'failed:phase4:missing_agent_turn', notes };
-  }
-
-  // Context-bound task check is also scenario-dependent: a tool_failure pain
-  // is produced by the after_tool_call hook, so its provenance is
-  // 'automatic_hook' (correctly — it WAS detected automatically). That is a
-  // valid context anchor for tool-failure scenarios. user_correction pain
-  // arrives via an OpenClaw host session, so its provenance is
-  // 'openclaw_context_bound'.
   const validProvenances = isToolFailureScenario
     ? ['openclaw_context_bound', 'automatic_hook']
     : ['openclaw_context_bound'];
-  const contextBoundTasks = input.tasks.filter(task => validProvenances.includes(task.provenance));
-  if (contextBoundTasks.length === 0) return { verdict: 'failed:phase5:no_context_bound_tasks', notes };
+
+  const contextBoundTasks = input.tasks.filter(task => {
+    if (!validProvenances.includes(task.provenance)) return false;
+    // Per-task evidence anchor: the SAME task must have both the valid
+    // provenance AND the scenario-appropriate evidence.
+    if (isToolFailureScenario) {
+      return task.hasToolCallFailure === true;
+    }
+    return task.hasOwnerMessage === true && task.hasAgentTurn === true;
+  });
+  if (contextBoundTasks.length === 0) {
+    // Distinguish "no context-bound tasks at all" from "tasks exist but none
+    // has the right evidence on the same task" for actionable diagnostics.
+    const provenanceTasks = input.tasks.filter(task => validProvenances.includes(task.provenance));
+    if (provenanceTasks.length === 0) {
+      return { verdict: 'failed:phase5:no_context_bound_tasks', notes };
+    }
+    // Tasks with valid provenance exist but none passed the evidence filter.
+    // Report which specific evidence is missing for actionable diagnostics.
+    if (isToolFailureScenario) {
+      return { verdict: 'failed:phase4:missing_tool_call_failure_evidence', notes };
+    }
+    // For user_correction: determine whether owner_message or agent_turn is
+    // the missing piece (the task needs BOTH on the same task).
+    const hasOwnerOnAny = provenanceTasks.some(t => t.hasOwnerMessage === true);
+    return {
+      verdict: hasOwnerOnAny ? 'failed:phase4:missing_agent_turn' : 'failed:phase4:missing_owner_message',
+      notes,
+    };
+  }
   const taskIds = new Set(contextBoundTasks.map(task => task.taskId));
   const linkedCandidates = input.candidates.filter(candidate => taskIds.has(candidate.taskId));
   if (linkedCandidates.length === 0) return { verdict: 'failed:phase5:no_linked_candidates', notes };

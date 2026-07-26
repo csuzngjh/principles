@@ -571,10 +571,20 @@ function generateEvidence({ runId, trap, phase0R, phase1R, phase2R, phase3R, pha
   verdict = strictResult.verdict;
   verdictNotes.splice(0, verdictNotes.length, ...strictResult.notes);
 
-  if (phase4R.hasOwnerMessage || phase5R.tasks.some(t => t.hasOwnerMessage)) {
-    verdictNotes.push('Evidence contains owner_message (P0 fix verified)');
-  } else if (phase4R.painCount > 0) {
-    verdictNotes.push('Evidence missing owner_message (P0 fix may not be working for this path)');
+  const isToolFailureScenario = phase4R.painSource === 'tool_failure';
+
+  if (isToolFailureScenario) {
+    if (phase4R.hasToolCallFailure || phase5R.tasks.some(t => t.hasToolCallFailure)) {
+      verdictNotes.push('Evidence contains tool_call_failure (valid anchor for tool_failure scenario)');
+    } else if (phase4R.painCount > 0) {
+      verdictNotes.push('Evidence missing tool_call_failure (tool_failure scenario anchor)');
+    }
+  } else {
+    if (phase4R.hasOwnerMessage || phase5R.tasks.some(t => t.hasOwnerMessage)) {
+      verdictNotes.push('Evidence contains owner_message (P0 fix verified)');
+    } else if (phase4R.painCount > 0) {
+      verdictNotes.push('Evidence missing owner_message (P0 fix may not be working for this path)');
+    }
   }
   if (phase4R.hasAgentTurn || phase5R.tasks.some(t => t.hasAgentTurn)) {
     verdictNotes.push('Evidence contains agent_turn (P0 fix verified)');
@@ -632,10 +642,11 @@ ${(phase3R.raw ?? '').slice(0, 500)}
 - **Pain events found**: ${phase4R.painCount}
 - **Provenance**: ${phase4R.provenance ?? 'none'}
 - **Pain source**: ${phase4R.painSource ?? 'unknown'}
-- **Expected**: \`openclaw_context_bound\`
-- **Provenance correct**: ${phase4R.provenance === 'openclaw_context_bound' ? '✅ YES' : '❌ NO'}
+- **Expected provenance**: ${(phase4R.painSource === 'tool_failure') ? 'openclaw_context_bound or automatic_hook' : 'openclaw_context_bound'}
+- **Provenance correct**: ${(phase4R.painSource === 'tool_failure') ? (['openclaw_context_bound', 'automatic_hook'].includes(phase4R.provenance ?? '') ? '✅ YES' : '❌ NO') : (phase4R.provenance === 'openclaw_context_bound' ? '✅ YES' : '❌ NO')}
 - **Evidence entries**: ${phase4R.evidenceEntries?.length ?? 0}
 - **Has owner_message**: ${phase4R.hasOwnerMessage ? '✅ YES' : '❌ NO'}
+- **Has tool_call_failure**: ${phase4R.hasToolCallFailure ? '✅ YES' : '❌ NO'}
 - **Has agent_turn**: ${phase4R.hasAgentTurn ? '✅ YES' : '❌ NO'}
 ${(phase4R.evidenceEntries?.length ?? 0) > 0 ? `\n### Evidence Detail\n${phase4R.evidenceEntries.map(e => `- \`${e.sourceRef}\`: ${e.note?.slice(0, 100) ?? '(empty)'}`).join('\n')}` : ''}
 
