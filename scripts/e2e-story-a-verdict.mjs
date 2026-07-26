@@ -27,7 +27,16 @@ export function computeStoryAVerdict(input) {
       notes,
     };
   }
-  if (!input.hasAgentTurn) return { verdict: 'failed:phase4:missing_agent_turn', notes };
+  // agent_turn evidence is required for user_correction scenarios (the agent's
+  // behavioral response is essential context). For tool_failure scenarios it is
+  // optional: the diagnosis runs synchronously inside after_tool_call, BEFORE
+  // the current turn's assistant response is written to trajectory (that happens
+  // in after_llm_output, which fires later). So tool_call_failure evidence is
+  // the only behavioral anchor available at pain-trigger time — and it is
+  // sufficient (it includes the tool name, error type, and error detail).
+  if (!isToolFailureScenario && !input.hasAgentTurn) {
+    return { verdict: 'failed:phase4:missing_agent_turn', notes };
+  }
 
   // Context-bound task check is also scenario-dependent: a tool_failure pain
   // is produced by the after_tool_call hook, so its provenance is
