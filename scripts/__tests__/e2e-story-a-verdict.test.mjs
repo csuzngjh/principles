@@ -134,8 +134,17 @@ describe('Story A strict verdict', () => {
       expect(exitCodeForStoryAVerdict(result.verdict)).toBe(1);
     });
 
-    it('tool-failure scenario still requires agent_turn evidence', () => {
+    it('tool-failure scenario does NOT require agent_turn (diagnosis runs before assistant_turn exists)', () => {
+      // PRI-518: diagnosis runs synchronously inside after_tool_call, BEFORE the
+      // current turn's assistant response is written to trajectory (that happens
+      // in after_llm_output). So tool_call_failure evidence is the only behavioral
+      // anchor available at pain-trigger time — agent_turn is optional here.
       const result = computeStoryAVerdict({ ...toolFailureInput(), hasAgentTurn: false });
+      expect(result.verdict).toBe('story_a_validated');
+    });
+
+    it('user_correction scenario still requires agent_turn (unchanged)', () => {
+      const result = computeStoryAVerdict({ ...validInput(), hasAgentTurn: false });
       expect(result.verdict).toBe('failed:phase4:missing_agent_turn');
     });
 
