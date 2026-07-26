@@ -194,7 +194,11 @@ function phase0(trap, runId) {
 // ---------------------------------------------------------------------------
 
 function phase1() {
-  const status = sh('openclaw status', { timeout: 15000 });
+  // `openclaw status` can take ~45s on OpenClaw 2026.7.x (config load + plugin
+  // resolution + session table). The previous 15s timeout reliably produced
+  // empty stdout → false 'Gateway unreachable' SKIP. Bumped to 90s to match
+  // the agent probe budget (which already uses 60s/90s after PR #1258).
+  const status = sh('openclaw status', { timeout: 90000 });
   if (!status || status.includes('unreachable')) {
     return { ok: false, error: 'Gateway unreachable. Run: openclaw gateway run --force' };
   }
@@ -390,6 +394,7 @@ function phase4(ws, sessionKey, sinceTs) {
   let evidenceEntries = [];
   let hasOwnerMessage = false;
   let hasAgentTurn = false;
+  let hasToolCallFailure = false;
   const dbSearchPaths = [
     join(pdWs, '.pd', 'state.db'),
     join(pdWs, 'e2e', '.pd', 'state.db'),
@@ -413,6 +418,7 @@ function phase4(ws, sessionKey, sinceTs) {
               evidenceEntries = dj.evidence;
               hasOwnerMessage = evidenceEntries.some(e => e.sourceRef?.startsWith('owner_message:'));
               hasAgentTurn = evidenceEntries.some(e => e.sourceRef?.startsWith('agent_turn:'));
+              hasToolCallFailure = evidenceEntries.some(e => e.sourceRef?.startsWith('tool_call_failure:'));
             }
           } catch { /* invalid diagnosticJson */ }
         }
@@ -435,6 +441,7 @@ function phase4(ws, sessionKey, sinceTs) {
     evidenceEntries,
     hasOwnerMessage,
     hasAgentTurn,
+    hasToolCallFailure,
   };
 }
 
@@ -472,6 +479,7 @@ function phase5(ws, sinceTs) {
           evidenceCount: Array.isArray(dj?.evidence) ? dj.evidence.length : 0,
           hasOwnerMessage: Array.isArray(dj?.evidence) && dj.evidence.some(e => e.sourceRef?.startsWith('owner_message:')),
           hasAgentTurn: Array.isArray(dj?.evidence) && dj.evidence.some(e => e.sourceRef?.startsWith('agent_turn:')),
+          hasToolCallFailure: Array.isArray(dj?.evidence) && dj.evidence.some(e => e.sourceRef?.startsWith('tool_call_failure:')),
           diagnosticJson: dj,
         });
       }
@@ -554,6 +562,7 @@ function generateEvidence({ runId, trap, phase0R, phase1R, phase2R, phase3R, pha
     painSource: phase4R.painSource,
     hasOwnerMessage: phase4R.hasOwnerMessage || phase5R.tasks.some(task => task.hasOwnerMessage),
     hasAgentTurn: phase4R.hasAgentTurn || phase5R.tasks.some(task => task.hasAgentTurn),
+    hasToolCallFailure: phase4R.hasToolCallFailure || phase5R.tasks.some(task => task.hasToolCallFailure),
     tasks: phase5R.tasks,
     candidates: phase5R.candidates,
     integrityStatus: phase5R.integrity?.overallStatus,

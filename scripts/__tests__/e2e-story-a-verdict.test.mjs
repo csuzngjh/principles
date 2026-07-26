@@ -104,4 +104,52 @@ describe('Story A strict verdict', () => {
     const result = computeStoryAVerdict(validInput());
     expect(result.notes.some(n => n.includes('provenance=openclaw_context_bound'))).toBe(true);
   });
+
+  // PRI-518: tool_failure scenarios (trap-03) produce tool_call_failure
+  // evidence + automatic_hook provenance, NOT owner_message + openclaw_context_bound.
+  // The verdict must accept the legitimate evidence anchor for each scenario
+  // type rather than requiring owner_message for every scenario (a category
+  // error that blocked tool-failure runs even when candidates were produced).
+  describe('tool_failure scenario evidence anchor (PRI-518)', () => {
+    function toolFailureInput() {
+      return {
+        phase0Ok: true, phase1Ok: true, agentResponded: true,
+        painCount: 1, painSource: 'tool_failure',
+        hasOwnerMessage: false, hasAgentTurn: true, hasToolCallFailure: true,
+        tasks: [{ taskId: 'task-1', provenance: 'automatic_hook' }],
+        candidates: [{ taskId: 'task-1', candidateId: 'candidate-1', isAgentBehavior: true }],
+        integrityStatus: 'healthy', canaryStatus: 'healthy',
+      };
+    }
+
+    it('passes a tool-failure chain with tool_call_failure evidence + automatic_hook provenance', () => {
+      const result = computeStoryAVerdict(toolFailureInput());
+      expect(result.verdict).toBe('story_a_validated');
+      expect(exitCodeForStoryAVerdict(result.verdict)).toBe(0);
+    });
+
+    it('fails phase4 when tool-failure scenario has NO tool_call_failure evidence', () => {
+      const result = computeStoryAVerdict({ ...toolFailureInput(), hasToolCallFailure: false });
+      expect(result.verdict).toBe('failed:phase4:missing_tool_call_failure_evidence');
+      expect(exitCodeForStoryAVerdict(result.verdict)).toBe(1);
+    });
+
+    it('tool-failure scenario still requires agent_turn evidence', () => {
+      const result = computeStoryAVerdict({ ...toolFailureInput(), hasAgentTurn: false });
+      expect(result.verdict).toBe('failed:phase4:missing_agent_turn');
+    });
+
+    it('tool-failure scenario accepts openclaw_context_bound provenance too (both valid)', () => {
+      const result = computeStoryAVerdict({
+        ...toolFailureInput(),
+        tasks: [{ taskId: 'task-1', provenance: 'openclaw_context_bound' }],
+      });
+      expect(result.verdict).toBe('story_a_validated');
+    });
+
+    it('user_correction scenario is unchanged — still requires owner_message', () => {
+      const result = computeStoryAVerdict({ ...validInput(), hasOwnerMessage: false });
+      expect(result.verdict).toBe('failed:phase4:missing_owner_message');
+    });
+  });
 });
