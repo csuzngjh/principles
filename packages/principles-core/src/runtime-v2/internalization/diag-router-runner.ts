@@ -44,6 +44,7 @@ import { RouterPromptBuilder } from '../diagnostician/router-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -61,6 +62,23 @@ interface DiagRouterContext {
   readonly rootCauseOutput: DiagRootCauseOutputV1;
   readonly distillerArtifactId: string;
   readonly distillerOutput: DiagDistillerOutputV1;
+}
+
+/**
+ * Layer 0 (design §6.1, F17): diag_router's edge predecessor is
+ * `diag_distiller` — NOT rootcause, even though buildContext loads both.
+ * The rootcause artifact is still consumed by invokeRuntime via its normal
+ * path; only the distiller goes into `predecessorSummary`. Reusing the
+ * already-validated distiller object keeps the writer path at zero extra
+ * store reads (F3). Writer-side only — no manifest, no prompt change, no
+ * output-schema change (design §4.7.1).
+ */
+function toDistillerPredecessor(context: DiagRouterContext): LoadedPredecessorArtifact {
+  return {
+    artifactId: context.distillerArtifactId,
+    runnerKind: 'diag_distiller',
+    contentJson: context.distillerOutput,
+  };
 }
 
 // ── Callback type (removed — P0-1 fix) ─────────────────────────────────────
@@ -272,7 +290,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     output: DiagnosticianOutputV1,
     task: TaskRecord,
     contextHash: string,
-    _context: DiagRouterContext,
+    context: DiagRouterContext,
   ): Promise<PeerRunnerResult<DiagnosticianOutputV1>> {
     // 1. Store output before commit
     try {
@@ -286,6 +304,13 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     }
 
     // 2. Commit via DiagnosticianCommitter (reuse existing committer — same as monolith)
+    // Layer 0 (design §6.1, task 3.11): build the summary envelope here and pass
+    // the resulting contentJson to the committer, so the committed principle
+    // artifact carries the same `summary` / `predecessorSummary` fields every
+    // other SummaryRunnerKind writer attaches. `buildArtifactContentJson`
+    // returns `JSON.stringify(output)` verbatim when the flag is off — the
+    // committer then writes a byte-identical artifact (Requirement 11.5/11.9).
+    const routerContentJson = this.buildArtifactContentJson(taskId, 'diag_router', output, toDistillerPredecessor(context));
     let commitResult: CommitResult;
     try {
       commitResult = await this.committer.commit({
@@ -293,6 +318,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         taskId,
         output,
         idempotencyKey: `${taskId}:${runId}`,
+        contentJson: routerContentJson,
       });
     } catch (commitErr) {
       this.emitEvent('artifact_commit_failed', taskId, {

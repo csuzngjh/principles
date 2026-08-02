@@ -33,6 +33,7 @@ import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -47,6 +48,26 @@ interface PhilosopherContext {
   readonly contextHash: string;
   readonly dreamerArtifact: string;
   readonly sourceDreamerArtifactId: string;
+}
+
+/**
+ * Layer 0 (design §6.1): philosopher's edge predecessor is `dreamer`, and the
+ * dreamer artifact is already in `context` — this only re-parses the string
+ * the runner already holds, so the writer path stays at zero extra store
+ * reads (F3).
+ */
+function toDreamerPredecessor(context: PhilosopherContext): LoadedPredecessorArtifact {
+  let contentJson: unknown;
+  try {
+    contentJson = JSON.parse(context.dreamerArtifact);
+  } catch {
+    contentJson = context.dreamerArtifact;
+  }
+  return {
+    artifactId: context.sourceDreamerArtifactId,
+    runnerKind: 'dreamer',
+    contentJson,
+  };
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -286,7 +307,11 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // Layer 0 (design §6.1, task 3.11): philosopher forwards the dreamer
+        // five dimensions via `predecessorSummary` so scribe can read them
+        // without a cross-level fetch. Writer-side only — philosopher gains
+        // no manifest and no prompt change (design §4.7.1).
+        contentJson: this.buildArtifactContentJson(taskId, 'philosopher', output, toDreamerPredecessor(context)),
         createdAt: now,
         updatedAt: now,
       });

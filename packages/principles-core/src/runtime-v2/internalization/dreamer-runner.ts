@@ -23,6 +23,7 @@ import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type {
   PeerRunnerOptions,
   PeerRunnerDeps,
@@ -37,6 +38,13 @@ interface DreamerContext {
   readonly contextHash: string;
   readonly contextRefs: string[];
   readonly predecessorOutput: unknown;
+  /**
+   * Layer 0 (design §6.1): the edge predecessor as already loaded above —
+   * `diag_router` for dreamer. Carried on the context so the writer path can
+   * attach `predecessorSummary` with zero additional store reads (F3).
+   * Null when no succeeded dependency artifact was found.
+   */
+  readonly edgePredecessor: LoadedPredecessorArtifact | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -131,6 +139,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     const contextRefs: string[] = [];
     const rejectedDeps: string[] = [];
     let predecessorOutput: unknown = null;
+    let edgePredecessor: LoadedPredecessorArtifact | null = null;
 
     if (deps.length > 0) {
       const results = await Promise.allSettled(
@@ -152,11 +161,25 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
           }
           if (result.value.status === 'succeeded' && predecessorOutput === null) {
             const artifacts = await this.artifactStore.listBySourceTaskId(depId);
-            if (artifacts.length > 0 && artifacts[0]) {
+            const [first] = artifacts;
+            if (artifacts.length > 0 && first) {
               try {
-                predecessorOutput = JSON.parse(artifacts[0].contentJson);
+                predecessorOutput = JSON.parse(first.contentJson);
               } catch {
-                predecessorOutput = artifacts[0].contentJson;
+                predecessorOutput = first.contentJson;
+              }
+              // Layer 0 (design §6.1): dreamer's edge predecessor is
+              // diag_router. Reuse the object just parsed above — no extra
+              // store read (F3). Only claim the edge when the dependency
+              // task really is the diag_router stage; a dreamer seeded from
+              // some other upstream must not mislabel its predecessor kind
+              // (rc-6: lineage and its label come from the same source).
+              if (result.value.taskKind === 'diag_router') {
+                edgePredecessor = {
+                  artifactId: first.artifactId,
+                  runnerKind: 'diag_router',
+                  contentJson: predecessorOutput,
+                };
               }
             }
           }
@@ -172,7 +195,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     }
 
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
-    return { contextHash, contextRefs, predecessorOutput };
+    return { contextHash, contextRefs, predecessorOutput, edgePredecessor };
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
@@ -212,7 +235,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     output: DreamerOutput,
     task: TaskRecord,
     contextHash: string,
-    _context: DreamerContext,
+    context: DreamerContext,
   ): Promise<PeerRunnerResult<DreamerOutput>> {
     // Store output before marking succeeded
     try {
@@ -260,7 +283,10 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
         sourcePrincipleId: output.sourcePrincipleId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // Layer 0 (design §6.1, task 3.11): carries `summary` /
+        // `predecessorSummary` only when artifact_summary_redundancy is on;
+        // otherwise byte-identical to JSON.stringify(output).
+        contentJson: this.buildArtifactContentJson(taskId, 'dreamer', output, context.edgePredecessor),
         createdAt: now,
         updatedAt: now,
       });

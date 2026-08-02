@@ -46,6 +46,7 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
@@ -107,6 +108,31 @@ function extractScribeArtifactId(artificerContentJson: string): string | null {
   if (typeof direct === 'string' && direct.trim() !== '') return direct;
 
   return null;
+}
+
+
+/**
+ * Layer 0 (design §6.1, F17): evaluator's edge predecessor is `artificer` —
+ * NOT scribe, even though buildContext loads both. The scribe artifact is
+ * still consumed by invokeRuntime for code-review intent consistency; only the
+ * artificer goes into `predecessorSummary`. Reusing the already-loaded string
+ * keeps the writer path at zero extra store reads (F3). Returns null when no
+ * artificer artifact was resolved — the writer then emits
+ * `artifact_summary_predecessor_absent` and writes only the self `summary`.
+ */
+function toArtificerPredecessor(context: EvaluatorContext): LoadedPredecessorArtifact | null {
+  if (!context.artificerArtifact || !context.sourceArtificerArtifactId) return null;
+  let contentJson: unknown;
+  try {
+    contentJson = JSON.parse(context.artificerArtifact);
+  } catch {
+    contentJson = context.artificerArtifact;
+  }
+  return {
+    artifactId: context.sourceArtificerArtifactId,
+    runnerKind: 'artificer',
+    contentJson,
+  };
 }
 
 
@@ -470,7 +496,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // Layer 0 (design §6.1, task 3.11): evaluator's edge predecessor is
+        // artificer (NOT scribe — scribe is loaded for code review but is not
+        // the edge predecessor, F17). The scribe artifact still flows through
+        // the separate extractScribeArtifactId path (F3).
+        contentJson: this.buildArtifactContentJson(taskId, 'evaluator', output, toArtificerPredecessor(context)),
         createdAt: now,
         updatedAt: now,
       });
@@ -516,7 +546,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             sourceTaskId: taskId,
             lineageArtifactIds,
             validationStatus: 'pending',
-            contentJson: JSON.stringify(finalOutput),
+            // Layer 0 (design §6.1): re-build the envelope on the final output
+            // so the replay re-persist keeps the same `summary` /
+            // `predecessorSummary` fields as the initial write (the first write
+            // would otherwise be overwritten with a bare JSON.stringify).
+            contentJson: this.buildArtifactContentJson(taskId, 'evaluator', finalOutput, toArtificerPredecessor(context)),
             createdAt: now,
             updatedAt: new Date().toISOString(),
           });
