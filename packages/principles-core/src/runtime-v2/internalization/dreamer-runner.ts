@@ -163,22 +163,26 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
             const artifacts = await this.artifactStore.listBySourceTaskId(depId);
             const [first] = artifacts;
             if (artifacts.length > 0 && first) {
+              let parsedContent: unknown;
               try {
-                predecessorOutput = JSON.parse(first.contentJson);
+                parsedContent = JSON.parse(first.contentJson);
               } catch {
-                predecessorOutput = first.contentJson;
+                parsedContent = first.contentJson;
               }
+              predecessorOutput = parsedContent;
               // Layer 0 (design §6.1): dreamer's edge predecessor is
-              // diag_router. Reuse the object just parsed above — no extra
-              // store read (F3). Only claim the edge when the dependency
-              // task really is the diag_router stage; a dreamer seeded from
-              // some other upstream must not mislabel its predecessor kind
-              // (rc-6: lineage and its label come from the same source).
-              if (result.value.taskKind === 'diag_router') {
+              // diag_router. Claim the edge from the SAME already-fetched
+              // artifact (zero extra store reads, F3) when this dependency
+              // really is the diag_router stage. In the production pipeline
+              // diag_router is dreamer's only dependency, so it is always the
+              // first succeeded dep; the edgePredecessor===null guard keeps
+              // this correct even if a pathological multi-dep list surfaces a
+              // non-router first. rc-6: the label matches the dep's taskKind.
+              if (edgePredecessor === null && result.value.taskKind === 'diag_router') {
                 edgePredecessor = {
                   artifactId: first.artifactId,
                   runnerKind: 'diag_router',
-                  contentJson: predecessorOutput,
+                  contentJson: parsedContent,
                 };
               }
             }
