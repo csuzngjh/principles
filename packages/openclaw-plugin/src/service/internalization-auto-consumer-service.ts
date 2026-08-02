@@ -19,6 +19,7 @@ import {
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
+import { computeHash as contentHashFn } from '../utils/hashing.js';
 
 const INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS = 120_000;
 const INTERNALIZATION_AUTO_CONSUMER_INITIAL_DELAY_MS = 30_000;
@@ -232,6 +233,9 @@ export async function runConsumerCycle(
         eventEmitter: storeEmitter,
         artifactStore: stateManager.piArtifactStore,
         validator,
+        // Layer 0 (design §6.1): inject sha256-hex so the dreamer writer can
+        // attach a predecessorSummary.contentHash for staleness detection.
+        contentHashFn,
       },
       {
         owner: 'auto-consumer',

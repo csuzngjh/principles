@@ -28,7 +28,7 @@ import {
 // repair-loop wiring (isRepairLoopEnabled + seeder) is invoked in this CLI
 // path. EP-02: prior code passed only the 5 base deps, leaving the repair
 // loop as dead code at runtime.
-import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.js';
+import { createEvaluatorRunnerDeps, contentHashFn } from '../services/rulehost-pipeline-runner.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -490,14 +490,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         if (runnerKind === 'dreamer') {
           const validator = new DefaultDreamerValidator();
           const runner = new DreamerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'philosopher') {
           const validator = new DefaultPhilosopherValidator();
           const runner = new PhilosopherRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);
@@ -507,14 +507,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
           const validator = new DefaultScribeValidator();
           const runner = new ScribeRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'artificer') {
           const validator = new DefaultArtificerValidator();
           const runner = new ArtificerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);

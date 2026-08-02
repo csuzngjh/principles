@@ -66,10 +66,21 @@ import type {
   SeedArtificerRepairParams,
   EvaluatorValidator,
 } from '@principles/core/runtime-v2';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { loadPdConfig } from './pd-config-loader.js';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
+
+/**
+ * Layer 0 content-hash function for the internalization progressive
+ * disclosure (design §6.1). Core never imports `node:crypto`, so the plugin/CLI
+ * layer injects the algorithm. Consumed only when the
+ * `artifact_summary_redundancy` flag is on; harmless otherwise.
+ *
+ * Exported so other CLI command modules (e.g. `runtime-internalization-run-once`)
+ * can reuse the same algorithm without each re-importing `node:crypto`.
+ */
+export const contentHashFn = (input: string): string => createHash('sha256').update(input).digest('hex');
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -304,7 +315,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       stages.push({ name: 'dreamer', taskId: dreamerSeedTaskId, status: 'succeeded' });
     } else {
       const dreamerRunner = new DreamerRunner(
-        { stateManager, runtimeAdapter: agentAdapters.dreamer, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore },
+        { stateManager, runtimeAdapter: agentAdapters.dreamer, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore, contentHashFn },
         runnerOptsFor(agentAdapters.dreamer),
       );
       const dreamerResult = await runStage(dreamerRunner, dreamerSeedTaskId, { maxStageRetries, pollIntervalMs });
@@ -321,7 +332,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const philosopherTaskId = `${correlation}-philosopher-${Date.now().toString(36)}`;
     await createInternalizationTask(stateManager, philosopherTaskId, 'philosopher', [dreamerSeedTaskId], channel, timeoutMs);
     const philosopherRunner = new PhilosopherRunner(
-      { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore },
+      { stateManager, runtimeAdapter: agentAdapters.philosopher, eventEmitter, validator: new DefaultPhilosopherValidator(), artifactStore, contentHashFn },
       runnerOptsFor(agentAdapters.philosopher),
     );
     const philosopherResult = await runStage(philosopherRunner, philosopherTaskId, { maxStageRetries, pollIntervalMs });
@@ -337,7 +348,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const scribeTaskId = `${correlation}-scribe-${Date.now().toString(36)}`;
     await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs);
     const scribeRunner = new ScribeRunner(
-      { stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator(), artifactStore },
+      { stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator(), artifactStore, contentHashFn },
       runnerOptsFor(agentAdapters.scribe),
     );
     const scribeResult = await runStage(scribeRunner, scribeTaskId, { maxStageRetries, pollIntervalMs });
@@ -372,7 +383,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
-        contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack,
+        contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack, contentHashFn,
       },
       runnerOptsFor(capability.artificerAdapter),
     );
@@ -587,6 +598,11 @@ export interface CreateEvaluatorRunnerDepsInputs {
   readonly artifactStore: PIArtifactStore;
   /** Workspace directory containing `.pd/config.yaml` (flag source). */
   readonly workspaceDir: string;
+  /**
+   * Layer 0 content-hash function (design §6.1). Optional — defaults to the
+   * module-level sha256-hex `contentHashFn`. Allow override for tests.
+   */
+  readonly contentHashFn?: (input: string) => string;
 }
 
 /**
@@ -611,6 +627,10 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
     eventEmitter,
     validator,
     artifactStore,
+    // Layer 0 (design §6.1): inject the content-hash function so the evaluator
+    // writer can attach a `predecessorSummary.contentHash` for staleness
+    // detection. Defaults to the module-level sha256-hex constant.
+    contentHashFn: inputs.contentHashFn ?? contentHashFn,
     isRepairLoopEnabled: (): boolean => {
       // rc-9: never throw on malformed config — fail safe to false so the
       // legacy (non-repair) path runs. The malformed config is already
