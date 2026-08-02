@@ -51,6 +51,11 @@ import {
   redactTokenLikeValues,
   redactEnvLikeValues,
 } from '../feedback/redact-sensitive.js';
+import type { SummaryRunnerKind } from '../internalization/artifact-summary.js';
+import {
+  attachSummaryEnvelope,
+  type LoadedPredecessorArtifact,
+} from '../internalization/attach-summary-envelope.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -142,6 +147,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * When undefined, permanent failures do not write a draft — backward compatible.
    */
   private readonly pendingAgentDraftStore?: PendingAgentDraftStore;
+  /** Layer 0 summary envelope hash function, injected by the plugin/CLI layer (design §6.1). */
+  private readonly contentHashFn?: (input: string) => string;
   private phase: RunnerPhase = RunnerPhase.Idle;
 
   constructor(
@@ -154,6 +161,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     this.eventEmitter = deps.eventEmitter;
     this.artifactStore = deps.artifactStore;
     this.pendingAgentDraftStore = deps.pendingAgentDraftStore;
+    this.contentHashFn = deps.contentHashFn;
     this.config = config;
     this.resolvedOptions = resolvePeerRunnerOptions(options, config.defaultAgentId);
   }
@@ -823,6 +831,107 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     if (!effectiveConfig) return false;
     const flags = computeFeatureFlagsFromConfig(effectiveConfig);
     return isFeatureEnabled(flags, 'diagnostician_llm_degradation');
+  }
+
+  // ── Layer 0: summary envelope (design §6.1, PR 1 task 3.11) ────────────────
+
+  /**
+   * Whether the Layer 0 `artifact_summary_redundancy` flag is on.
+   * Returns false when effectiveConfig is not provided (legacy behavior:
+   * no summary written, contentJson shape unchanged).
+   */
+  protected isArtifactSummaryEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    const flags = computeFeatureFlagsFromConfig(effectiveConfig);
+    return isFeatureEnabled(flags, 'artifact_summary_redundancy');
+  }
+
+  /**
+   * Build the artifact `contentJson` string, optionally carrying the Layer 0
+   * summary envelope (design §6.1). Single wiring point shared by all 8
+   * writer paths (task 3.11), so no runner duplicates the flag check,
+   * the envelope construction, or the degradation telemetry.
+   *
+   * Contract (Requirements 1.1 / 1.8 / 1.10, F11):
+   *   - flag off → returns `JSON.stringify(output)` verbatim; contentJson is
+   *     byte-identical to the pre-Layer-0 shape (CP-32)
+   *   - flag on, derivation succeeds → `summary` (and `predecessorSummary`
+   *     when an edge predecessor was loaded) merged as sibling keys
+   *   - any derivation/predecessor degradation → an `artifact_summary_*`
+   *     telemetry event with an explicit reason (rc-9), and the task still
+   *     succeeds with its original result (summary is never load-bearing)
+   *   - never throws: a summary failure must not turn into `output_invalid`
+   *
+   * `loadedPredecessor` MUST be an object the runner's own `buildContext`
+   * already loaded — this method performs zero artifact-store reads (F3).
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params -- single shared wiring point (task 3.11); matches the 4 inputs every writer needs (taskId, kind, output, predecessor).
+  protected buildArtifactContentJson(
+    taskId: string,
+    runnerKind: SummaryRunnerKind,
+    output: unknown,
+    loadedPredecessor: LoadedPredecessorArtifact | null,
+  ): string {
+    if (!this.isArtifactSummaryEnabled()) {
+      return JSON.stringify(output);
+    }
+
+    try {
+      const hashFn = this.contentHashFn;
+      // Without an injected hash we cannot compute the predecessor
+      // contentHash that staleness detection depends on, so the predecessor
+      // ref is skipped explicitly rather than written without a hash.
+      const effectivePredecessor = hashFn ? loadedPredecessor : null;
+      if (!hashFn && loadedPredecessor !== null) {
+        this.emitEvent('artifact_summary_predecessor_skipped', taskId, {
+          runnerKind,
+          reason: 'content_hash_fn_not_injected',
+          nextAction: 'Inject contentHashFn into PeerRunnerDeps (plugin/CLI layer) to enable predecessorSummary.',
+        });
+      }
+
+      const envelope = attachSummaryEnvelope(
+        runnerKind,
+        output,
+        effectivePredecessor,
+        hashFn ?? ((input: string) => input),
+        (event) => {
+          this.emitEvent(event.type, taskId, { runnerKind: event.runnerKind, reason: event.reason });
+        },
+      );
+
+      if (envelope.summary === undefined) {
+        // Self-derivation failed; attachSummaryEnvelope already emitted
+        // artifact_summary_skipped with the reason.
+        return JSON.stringify(output);
+      }
+
+      // Merge as sibling keys. Spreading `output` first keeps every original
+      // key byte-identical; only `summary` / `predecessorSummary` are added.
+      if (output === null || typeof output !== 'object' || Array.isArray(output)) {
+        // Non-object outputs cannot carry sibling keys. deriveArtifactSummary
+        // would have already failed here, but stay defensive rather than
+        // producing a malformed envelope.
+        return JSON.stringify(output);
+      }
+
+      return JSON.stringify({
+        ...(output as Record<string, unknown>),
+        summary: envelope.summary,
+        ...(envelope.predecessorSummary !== undefined
+          ? { predecessorSummary: envelope.predecessorSummary }
+          : {}),
+      });
+    } catch (summaryErr) {
+      // F11: a summary failure must never change task success/failure.
+      this.emitEvent('artifact_summary_skipped', taskId, {
+        runnerKind,
+        reason: 'unexpected_error',
+        errorMessage: summaryErr instanceof Error ? summaryErr.message : String(summaryErr),
+      });
+      return JSON.stringify(output);
+    }
   }
 
   // ── Agent draft injection (Task 12) ────────────────────────────────────────

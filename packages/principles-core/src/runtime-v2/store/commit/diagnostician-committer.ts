@@ -42,6 +42,21 @@ export interface CommitInput {
   taskId: string;
   output: DiagnosticianOutputV1;
   idempotencyKey: string;
+  /**
+   * Optional pre-built `contentJson` for the committed artifact. When omitted,
+   * the committer serializes `output` itself (current behavior, shared with
+   * the legacy monolithic diagnostician).
+   *
+   * Used by Layer 0 of the internalization progressive disclosure (design
+   * §6.1, PR 1 task 3.11): the split diag-router runner builds an
+   * ArtifactSummary envelope and passes the resulting JSON string here so the
+   * committed principle artifact carries the same `summary` /
+   * `predecessorSummary` fields every other SummaryRunnerKind writer attaches.
+   * rc-9: when the runner's envelope build degrades it simply omits this
+   * field and the committer falls back to `JSON.stringify(output)` — never
+   * silent.
+   */
+  readonly contentJson?: string;
 }
 
 export interface CommitResult {
@@ -103,7 +118,7 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
         input.runId,
         input.taskId,
         'diagnostician_output',
-        JSON.stringify(input.output),
+        input.contentJson ?? JSON.stringify(input.output),
         now,
       );
 

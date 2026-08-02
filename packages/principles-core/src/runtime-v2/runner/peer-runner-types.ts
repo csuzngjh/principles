@@ -79,6 +79,18 @@ export interface PeerRunnerDeps {
    * the runner behaves as before (no draft written) — backward compatible.
    */
   readonly pendingAgentDraftStore?: PendingAgentDraftStore;
+  /**
+   * Optional content-hash function for the Layer 0 summary envelope
+   * (internalization progressive disclosure, design §6.1). Core must not
+   * import `node:crypto`, so the plugin/CLI layer injects the algorithm
+   * (e.g. sha256-hex).
+   *
+   * Only consumed when the `artifact_summary_redundancy` flag is on. When
+   * omitted while the flag is on, the self `summary` is still written but
+   * `predecessorSummary` is skipped with an explicit degradation reason
+   * (rc-9) — its `contentHash` cannot be computed without a hash function.
+   */
+  readonly contentHashFn?: (input: string) => string;
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────

@@ -167,6 +167,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // behavior (no repair task seeded, evaluator needs_revision just succeeds the task
   // with pending validation). Roll back = leave flag off (or set enabled: false in config).
   { id: 'evaluator_artificer_repair_loop', category: 'quiet', enabled: false, since: '2026-07-04', description: 'PRI-509: Evaluator→Artificer repair loop — auto-seed artificer repair task on needs_revision. Default off; flag-off = current behavior (no repair task seeded).' },
+  // Internalization progressive disclosure — Layer 0 (design §6.1, §8, PR 1).
+  // Writer-side ArtifactSummary + PredecessorSummaryRef envelope, merged into
+  // contentJson for all 8 SummaryRunnerKind stages. Default off; flag-off =
+  // no `summary` / `predecessorSummary` fields written, byte-identical to
+  // current contentJson shape (Requirement 11.5/11.8/11.9, CP-32).
+  { id: 'artifact_summary_redundancy', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 0 — writer-side ArtifactSummary + predecessorSummary envelope on all 8 SummaryRunnerKind stages. Default off; flag-off = current contentJson shape unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
