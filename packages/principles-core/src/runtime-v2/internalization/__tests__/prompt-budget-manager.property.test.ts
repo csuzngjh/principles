@@ -278,7 +278,7 @@ describe('CP-16 — bounded-safe preview serialization (rc-8, ERR-013)', () => {
       const c = capture();
       expect(() => allocateContext(manifest, map, c.emit)).not.toThrow();
       const result = allocateContext(manifest, map, c.emit);
-      const fieldText = result.fields['k'];
+      const fieldText = result.fields.k;
       if (fieldText !== undefined) {
         // safeStringifyPreview truncates at FIELD_PREVIEW_MAX_CHARS (600); the
         // budget layer may append a TRUNCATION_MARKER on partial truncate.

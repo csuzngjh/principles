@@ -88,37 +88,7 @@ export function resolveInjection(
   // treat an empty declaration as an empty-allocation fallback.
   const absentRatio = declaredCount > 0 ? absentCount / declaredCount : 1;
 
-  // Fallback trigger 1: nothing was allocated (empty allocation).
-  if (Object.keys(allocated.fields).length === 0) {
-    emitFallbackEvent(manifest, absentCount, declaredCount, absentRatio, emit);
-    return { kind: 'fallback', allocated, fellBack: true, reason: 'empty_allocation', absentRatio };
-  }
-  // Fallback trigger 2: all tier1-declared fields are absent. tier1 holds the
-  // bulk of the structured context; if none of it resolved, the focused
-  // context is too thin to beat the legacy full-predecessor injection.
-  const tier1AllAbsent =
-    manifest.tier1.length > 0 && manifest.tier1.every((p) => allocated.absent.includes(p));
-  if (tier1AllAbsent) {
-    emitFallbackEvent(manifest, absentCount, declaredCount, absentRatio, emit);
-    return { kind: 'fallback', allocated, fellBack: true, reason: 'tier1_all_absent', absentRatio };
-  }
-  // Fallback trigger 3: absent ratio exceeds the threshold.
-  if (absentRatio > MANIFEST_ABSENT_RATIO_THRESHOLD) {
-    emitFallbackEvent(manifest, absentCount, declaredCount, absentRatio, emit);
-    return { kind: 'fallback', allocated, fellBack: true, reason: 'absent_ratio_exceeded', absentRatio };
-  }
-
-  return { kind: 'focused', allocated, fellBack: false };
-}
-
-function emitFallbackEvent(
-  manifest: ContextManifest,
-  absentCount: number,
-  declaredCount: number,
-  absentRatio: number,
-  emit: (event: ResolveInjectionEmit) => void,
-): void {
-  emit({
+  const fallbackEvent = (): ManifestResolutionInsufficientEvent => ({
     type: 'manifest_resolution_insufficient',
     runnerKind: manifest.runnerKind,
     manifestId: manifest.manifestId,
@@ -127,4 +97,26 @@ function emitFallbackEvent(
     absentRatio,
     fallback: 'full_predecessor_injection',
   });
+
+  // Fallback trigger 1: nothing was allocated (empty allocation).
+  if (Object.keys(allocated.fields).length === 0) {
+    emit(fallbackEvent());
+    return { kind: 'fallback', allocated, fellBack: true, reason: 'empty_allocation', absentRatio };
+  }
+  // Fallback trigger 2: all tier1-declared fields are absent. tier1 holds the
+  // bulk of the structured context; if none of it resolved, the focused
+  // context is too thin to beat the legacy full-predecessor injection.
+  const tier1AllAbsent =
+    manifest.tier1.length > 0 && manifest.tier1.every((p) => allocated.absent.includes(p));
+  if (tier1AllAbsent) {
+    emit(fallbackEvent());
+    return { kind: 'fallback', allocated, fellBack: true, reason: 'tier1_all_absent', absentRatio };
+  }
+  // Fallback trigger 3: absent ratio exceeds the threshold.
+  if (absentRatio > MANIFEST_ABSENT_RATIO_THRESHOLD) {
+    emit(fallbackEvent());
+    return { kind: 'fallback', allocated, fellBack: true, reason: 'absent_ratio_exceeded', absentRatio };
+  }
+
+  return { kind: 'focused', allocated, fellBack: false };
 }

@@ -89,7 +89,7 @@ describe('CP-12 — manifest well-formedness', () => {
 
   it('non-string element in a tier → validation fails (rc-4)', () => {
     const bad = { ...DREAMER_MANIFEST, tier1: [...DREAMER_MANIFEST.tier1, 123 as unknown as string] };
-    const result = validateManifest(bad as ContextManifest);
+    const result = validateManifest(bad);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.kind).toBe('non_string_element');
   });
@@ -101,7 +101,7 @@ describe('CP-12 — manifest well-formedness', () => {
         fc.constantFrom('tier0', 'tier1', 'tier2', 'priority'),
         fc.oneof(fc.integer(), fc.boolean(), fc.constant(null), fc.constant(undefined)),
         (arrayName, badElement) => {
-          const arr = validBase[arrayName] as readonly string[];
+          const arr = validBase[arrayName];
           const corrupted = [...arr, badElement as unknown as string];
           const manifest = { ...validBase, [arrayName]: corrupted } as ContextManifest;
           const result = validateManifest(manifest);

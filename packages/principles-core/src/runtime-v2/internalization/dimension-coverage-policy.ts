@@ -52,7 +52,7 @@ export const DIMENSION_COVERAGE_POLICY: Readonly<Record<DreamerDimension, Dimens
  * array.
  */
 export const REQUIRED_FIDELITY_DIMENSIONS: readonly DreamerDimension[] = (
-  Object.entries(DIMENSION_COVERAGE_POLICY) as Array<[DreamerDimension, DimensionCoverageClass]>
+  Object.entries(DIMENSION_COVERAGE_POLICY) as [DreamerDimension, DimensionCoverageClass][]
 )
   .filter(([, cls]) => cls === 'required')
   .map(([dim]) => dim);
