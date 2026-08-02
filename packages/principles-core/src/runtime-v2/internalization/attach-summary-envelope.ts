@@ -66,7 +66,15 @@ function readExistingSummary(contentJson: unknown): ArtifactSummary | null {
     && Object.hasOwn(candidate, 'derivedFrom')
     && Object.hasOwn(candidate, 'omittedFields')
   ) {
-    return candidate as unknown as ArtifactSummary;
+    // Pure passthrough — the reused summary is forwarded verbatim into
+    // predecessorSummary.summary and serialized back to contentJson; it is
+    // never dereferenced as a typed ArtifactSummary in this path (no field of
+    // `candidate` is read here). Shape check (6 own keys present) is
+    // sufficient to distinguish a real summary envelope from arbitrary
+    // content. The read side (future CandidateLineage, PR 3) re-reads the
+    // stored value as `unknown` and narrows via type guards before use, so a
+    // malformed inner type cannot propagate into trusted logic.
+    return candidate as unknown as ArtifactSummary; // runtime-contract-exempt: ERR-001 pure passthrough reuse — shape-checked (6 own keys) but inner types not validated; forwarded verbatim into contentJson, read-side re-narrows as unknown
   }
   return null;
 }
