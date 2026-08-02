@@ -916,9 +916,28 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         return JSON.stringify(output);
       }
 
+      const outputRecord = output as Record<string, unknown>;
+      // P1 data-integrity guard (CodeRabbit PR #1273): several stage output
+      // schemas already declare a top-level `summary` field (diag_rootcause's
+      // symptom summary, diag_router's DiagnosticianOutputV1.summary). The
+      // Layer 0 envelope would OVERWRITE that legitimate field if added
+      // unconditionally (design §7 promises "不删不改任何既有字段"). When the
+      // collision is detected, skip writing the envelope `summary` key, emit a
+      // structured degradation (rc-9), and still attach `predecessorSummary`
+      // (which does not collide). The self-summary remains derivable on the
+      // read side from the unchanged output via deriveArtifactSummary.
+      const hasSummaryCollision = Object.hasOwn(outputRecord, 'summary');
+      if (hasSummaryCollision) {
+        this.emitEvent('artifact_summary_skipped', taskId, {
+          runnerKind,
+          reason: 'output_summary_key_collision',
+          nextAction: 'Runner output already declares a top-level `summary` field; the Layer 0 envelope summary key is skipped to avoid overwriting it. predecessorSummary is still attached.',
+        });
+      }
+
       return JSON.stringify({
-        ...(output as Record<string, unknown>),
-        summary: envelope.summary,
+        ...outputRecord,
+        ...(hasSummaryCollision ? {} : { summary: envelope.summary }),
         ...(envelope.predecessorSummary !== undefined
           ? { predecessorSummary: envelope.predecessorSummary }
           : {}),

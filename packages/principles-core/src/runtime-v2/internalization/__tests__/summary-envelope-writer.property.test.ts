@@ -249,6 +249,46 @@ describe('Layer 0 — CP-32 contentJson key-level compatibility', () => {
     expect(Object.hasOwn(parsed, 'summary')).toBe(true);
     expect(Object.hasOwn(parsed, 'predecessorSummary')).toBe(false);
   });
+
+  it('P1 regression: output already declaring a top-level `summary` field (diag_rootcause / diag_router) is NOT overwritten', () => {
+    // CodeRabbit PR #1273: DiagRootCauseOutputV1 and DiagnosticianOutputV1 both
+    // declare a top-level `summary` string field. The Layer 0 envelope must not
+    // clobber it. On collision, the envelope `summary` key is skipped, a
+    // structured degradation is emitted, and predecessorSummary is still
+    // attached (it does not collide).
+    const deps = createMockDeps();
+    const runner = new Layer0TestRunner(deps, makeEffectiveConfig({ summaryEnabled: true }));
+    const emitMock = deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>;
+
+    // diag_router-shaped output carries a legitimate top-level `summary` field.
+    const routerOutput = {
+      summary: 'route to internalization: principle guard', // legitimate output field
+      rootCause: 'rename without enumeration',
+      violatedPrinciples: [],
+      recommendations: [{ kind: 'principle', description: 'guard', triggerPattern: 'x', action: 'y' }],
+    };
+    const result = runner.callBuildArtifactContentJson(
+      TASK_ID,
+      'diag_router',
+      routerOutput,
+      makePredecessor('diag_distiller', { abstractedPrinciple: 'p', rationale: 'r', scope: 'general' }),
+    );
+    const parsed = JSON.parse(result) as Record<string, unknown>;
+
+    // The legitimate output.summary is preserved verbatim (NOT overwritten by
+    // the ArtifactSummary envelope object).
+    expect(parsed.summary).toBe('route to internalization: principle guard');
+    expect(typeof parsed.summary).toBe('string');
+
+    // predecessorSummary is still attached (no collision).
+    expect(Object.hasOwn(parsed, 'predecessorSummary')).toBe(true);
+    expect((parsed.predecessorSummary as Record<string, unknown>).runnerKind).toBe('diag_distiller');
+
+    // A structured degradation was emitted for the collision (rc-9).
+    const skipped = telemetryWithSuffix(emitMock, 'artifact_summary_skipped');
+    expect(skipped.length).toBe(1);
+    expect(skipped[0]?.payload?.reason).toBe('output_summary_key_collision');
+  });
 });
 
 // ── CP-04: derivation failure does not affect task success ───────────────────
