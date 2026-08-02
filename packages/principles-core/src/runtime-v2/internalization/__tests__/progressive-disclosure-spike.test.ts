@@ -1191,8 +1191,18 @@ describe('Phase 0 Spike 1.2 — 摘要级上下文的定位能力（阻塞门）
     }
   });
 
-  it(
-    'Route A：真实 LLM 仅凭摘要级上下文判断三段与维度；对照链不得被误报',
+  // Route A is the real-LLM Phase 0 value-validation gate (design §12.1).
+  // The gate has PASSED (2026-07-30, 4th rerun) — its blocking purpose is
+  // served. It must NOT run in regular CI: it spawns a real LLM agent
+  // (`openclaw agent --agent main`) requiring credentials/keys unavailable
+  // in CI, and it is non-deterministic by nature (LLM judgement).
+  //
+  // To re-run the gate manually (e.g. after a model swap or a criteria
+  // change), set PD_SPIKE_RUN_LLM=1 locally with the LLM key configured.
+  // Otherwise the test is skipped — never silently passes, never fails CI.
+  const runRouteA = process.env.PD_SPIKE_RUN_LLM === '1';
+  (runRouteA ? it : it.skip)(
+    'Route A：真实 LLM 仅凭摘要级上下文判断三段与维度；对照链不得被误报' + (runRouteA ? '' : '（skipped: PD_SPIKE_RUN_LLM 未设；门禁已于 2026-07-30 通过，CI 不重跑真实 LLM）'),
     async () => {
       for (const chain of SPIKE_CHAINS) {
         const context = buildEvaluatorStage1Context(chain);
