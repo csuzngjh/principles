@@ -231,12 +231,20 @@ describe('CP-07 — dreamer 5-dim flow & edge-predecessor wiring across the chai
   });
 
   it('property: for any legal dreamer output, the 5 dims survive into philosopher.predecessorSummary', () => {
+    // Non-blank visible-text generator: deriveArtifactSummary's readString
+    // trims and treats whitespace-only strings as missing (→ omittedFields).
+    // A generator that emits " " (all-whitespace) would correctly omit the
+    // dimension, contradicting this property. So generate strings guaranteed
+    // non-empty after trimming.
+    const nonBlankText = (max: number) =>
+      fc.array(fc.nat({ max: 25 }), { minLength: 1, maxLength: max })
+        .map((cps) => cps.map((cp) => String.fromCharCode(97 + (cp % 26))).join(''));
     const candidateGen = fc.record({
-      badDecision: fc.string({ minLength: 1, maxLength: 40 }),
-      betterDecision: fc.string({ minLength: 1, maxLength: 60 }),
-      rationale: fc.string({ minLength: 1, maxLength: 60 }),
+      badDecision: nonBlankText(40),
+      betterDecision: nonBlankText(60),
+      rationale: nonBlankText(60),
       riskLevel: fc.constantFrom('low', 'medium', 'high'),
-      strategicPerspective: fc.string({ minLength: 1, maxLength: 40 }),
+      strategicPerspective: nonBlankText(40),
     });
     const dreamerOutputGen = fc.record({
       candidates: fc.array(candidateGen, { minLength: 1, maxLength: 1 }),
