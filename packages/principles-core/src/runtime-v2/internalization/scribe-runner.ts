@@ -40,6 +40,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { OutputLanguage } from '../language-directive.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Scribe-specific context ──────────────────────────────────────────────────
 
@@ -48,6 +49,25 @@ interface ScribeContext {
   readonly contextHash: string;
   readonly philosopherArtifact: string;
   readonly sourcePhilosopherArtifactId: string;
+}
+
+/**
+ * Layer 0 (design §6.1): scribe's edge predecessor is `philosopher`, whose
+ * artifact `buildContext` already loaded — this only re-parses the string the
+ * runner already holds, so the writer path adds zero store reads (F3).
+ */
+function toPhilosopherPredecessor(context: ScribeContext): LoadedPredecessorArtifact {
+  let contentJson: unknown;
+  try {
+    contentJson = JSON.parse(context.philosopherArtifact);
+  } catch {
+    contentJson = context.philosopherArtifact;
+  }
+  return {
+    artifactId: context.sourcePhilosopherArtifactId,
+    runnerKind: 'philosopher',
+    contentJson,
+  };
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -292,7 +312,10 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // Layer 0 (design §6.1, task 3.11): scribe's principle text plus the
+        // philosopher-forwarded dreamer dimensions become the summary that
+        // artificer/evaluator read at tier0/tier1.
+        contentJson: this.buildArtifactContentJson(taskId, 'scribe', output, toPhilosopherPredecessor(context)),
         createdAt: now,
         updatedAt: now,
       });

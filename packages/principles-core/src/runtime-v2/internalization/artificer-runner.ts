@@ -48,6 +48,7 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
+import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Artificer-specific context ──────────────────────────────────────────────
 
@@ -84,6 +85,29 @@ interface ArtificerContext {
    * reads the current evaluator's feedback — never a cached value.
    */
   readonly repairFeedback: string | null;
+}
+
+/**
+ * Layer 0 (design §6.1): artificer's edge predecessor is `scribe`, whose
+ * artifact `buildContext` already loaded. Reusing that string keeps the writer
+ * path at zero extra store reads (F3). Returns null when no scribe artifact
+ * was resolved (buildContext's `empty-context` short-circuit, or a missing
+ * sourceTrace) — the writer then emits `artifact_summary_predecessor_absent`
+ * and writes only the self `summary` (rc-9).
+ */
+function toScribePredecessor(context: ArtificerContext): LoadedPredecessorArtifact | null {
+  if (!context.scribeArtifact || !context.sourceScribeArtifactId) return null;
+  let contentJson: unknown;
+  try {
+    contentJson = JSON.parse(context.scribeArtifact);
+  } catch {
+    contentJson = context.scribeArtifact;
+  }
+  return {
+    artifactId: context.sourceScribeArtifactId,
+    runnerKind: 'scribe',
+    contentJson,
+  };
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -626,7 +650,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
         sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(output),
+        // Layer 0 (design §6.1, task 3.11): artificer's edge predecessor is
+        // scribe. The dreamer 5-dim context still flows through the separate
+        // PRI-508 `resolveDreamerContext` path (F2) — it does NOT enter
+        // `predecessorSummary` (which holds exactly one edge predecessor).
+        contentJson: this.buildArtifactContentJson(taskId, 'artificer', output, toScribePredecessor(context)),
         createdAt: now,
         updatedAt: now,
       });
