@@ -56,10 +56,6 @@ export type ManifestValidationResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: ManifestWellFormednessError };
 
-function isStringArray(arr: readonly unknown[]): boolean {
-  return arr.every((el) => typeof el === 'string');
-}
-
 /** Deduplicate a string array preserving first-seen order (deterministic). */
 function dedupe(arr: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -158,7 +154,7 @@ export function validateManifest(
   }
 
   // element-wise string check (rc-4)
-  const arrays: Array<['tier0' | 'tier1' | 'tier2' | 'priority', readonly string[]]> = [
+  const arrays: ['tier0' | 'tier1' | 'tier2' | 'priority', readonly string[]][] = [
     ['tier0', manifest.tier0],
     ['tier1', manifest.tier1],
     ['tier2', manifest.tier2],
