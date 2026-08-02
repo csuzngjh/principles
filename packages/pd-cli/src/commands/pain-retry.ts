@@ -46,6 +46,9 @@ import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principle
 import type { Command } from 'commander';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
+import { createHash } from 'node:crypto';
+/** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
+const contentHashFn = (input: string): string => createHash('sha256').update(input).digest('hex');
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -537,15 +540,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
       const perStageTimeoutMs = pipelineTimeoutMs / 3;
       const rootCauseRunner = new DiagRootCauseRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
         { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const distillerRunner = new DiagDistillerRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
         { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const routerRunner = new DiagRouterRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
         { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
 

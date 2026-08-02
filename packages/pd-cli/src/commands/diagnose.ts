@@ -39,6 +39,9 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
+import { createHash } from 'node:crypto';
+/** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
+const contentHashFn = (input: string): string => createHash('sha256').update(input).digest('hex');
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import { resolveSourcePainIdFromDiagnostician } from './candidate.js';
@@ -380,15 +383,15 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
       const perStageTimeoutMs = pipelineTimeoutMs / 3;
       const rootCauseRunner = new DiagRootCauseRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
         { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const distillerRunner = new DiagDistillerRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
         { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
       const routerRunner = new DiagRouterRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
         { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
       );
 
