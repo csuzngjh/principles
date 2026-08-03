@@ -173,6 +173,20 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // no `summary` / `predecessorSummary` fields written, byte-identical to
   // current contentJson shape (Requirement 11.5/11.8/11.9, CP-32).
   { id: 'artifact_summary_redundancy', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 0 — writer-side ArtifactSummary + predecessorSummary envelope on all 8 SummaryRunnerKind stages. Default off; flag-off = current contentJson shape unchanged.' },
+  // Internalization progressive disclosure — Layer 1 (design §6.2/§6.3/§8, PR 2).
+  // Runners use a ContextManifest + PromptBudgetManager to focus injection with
+  // a token budget, with an information-floor fallback to the legacy
+  // full-predecessor injection when resolution is too sparse. Default off;
+  // flag-off = runners use the existing buildContext assembly (byte-identical).
+  // Independent of internalization_core_grounding (§8.1): budgetTokens covers
+  // ONLY manifest-declared fields, never core grounding text.
+  { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
+  // Internalization progressive disclosure — Layer 2 two-stage evaluation
+  // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally
+  // Stage 2 (tier2 full contentJson) when flagged/forced. Adds optional
+  // painCoverage / compressionFidelity to evaluator output. Default off;
+  // flag-off = single-stage evaluation (current behavior).
+  { id: 'progressive_evaluator', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 2 — two-stage evaluation with flagged criteria + painCoverage/compressionFidelity output fields. Default off; flag-off = single-stage evaluation unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

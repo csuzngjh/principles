@@ -39,6 +39,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
+import { ARTIFICER_MANIFEST } from './context-manifests.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -528,6 +529,18 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       scribeArtifactInput = JSON.parse(context.scribeArtifact);
     } catch {
       scribeArtifactInput = context.scribeArtifact;
+    }
+
+    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the artificer manifest
+    // against the loaded scribe predecessor. Focused → inject only allocated
+    // summary fields (dreamer 5-dim still flows via dreamerContext below);
+    // fallback → legacy full scribeArtifact; disabled → unchanged.
+    const scribePred = toScribePredecessor(context);
+    if (scribePred !== null) {
+      const resolved = this.resolveContextInjection(taskId, ARTIFICER_MANIFEST, scribePred.contentJson);
+      if (resolved.mode === 'focused') {
+        scribeArtifactInput = resolved.fields;
+      }
     }
 
     const builder = new ArtificerPromptBuilder();

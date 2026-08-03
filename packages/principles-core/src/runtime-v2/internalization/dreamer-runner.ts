@@ -20,6 +20,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
+import { DREAMER_MANIFEST } from './context-manifests.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -205,11 +206,22 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
     const {coreGrounding} = this.resolvedOptions;
     const builder = new DreamerPromptBuilder({ coreGrounding });
+    // Layer 1 (design §6.2/§6.3, task 5.9): when context_manifest_budget is on,
+    // resolve the dreamer manifest against the loaded diag_router predecessor.
+    // Focused → inject only the manifest-allocated summary fields; fallback →
+    // legacy full predecessorOutput (F13); disabled → unchanged.
+    let predecessorOutput: unknown = context.predecessorOutput;
+    if (context.edgePredecessor !== null) {
+      const resolved = this.resolveContextInjection(taskId, DREAMER_MANIFEST, context.edgePredecessor.contentJson);
+      if (resolved.mode === 'focused') {
+        predecessorOutput = resolved.fields;
+      }
+    }
     const { message } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
-      predecessorOutput: context.predecessorOutput,
+      predecessorOutput,
       coreGrounding,
     });
 

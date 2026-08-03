@@ -90,11 +90,39 @@ export interface EvaluatorOutputV1 {
  * output is V2 (code-bearing). V1 Artificer → Evaluator skips code review
  * entirely (no codeReview, no adversarialCases). Use `isEvaluatorOutputV2()`
  * after `validate()` to decide which assembly path applies.
+ *
+ * Layer 2 (progressive disclosure, design §6.5) adds two more optional fields:
+ *   - painCoverage: how well the dreamer covered the original pain signal
+ *   - compressionFidelity: per-dimension coverage of the dreamer 5-dim in the
+ *     principle text (required dims only in missingDimensions; optional dims in
+ *     optionalUncovered; excluded dims never appear — design §6.5.1)
  */
+export interface EvaluatorPainCoverage {
+  readonly fullyCovered: boolean;
+  readonly uncoveredAspects: readonly string[];
+  readonly explanation: string;
+}
+
+export interface EvaluatorCompressionFidelity {
+  readonly betterDecisionCovered: boolean;
+  readonly rationaleCovered: boolean;
+  readonly riskLevelCovered: boolean;
+  readonly badDecisionCovered: boolean;
+  /** Required dimensions missing from the principle text (required-only). */
+  readonly missingDimensions: readonly string[];
+  /** Optional dimensions not covered (diagnostic only, never flags). */
+  readonly optionalUncovered: readonly string[];
+  readonly explanation: string;
+}
+
 export interface EvaluatorOutputV2 extends EvaluatorOutputV1 {
   readonly codeReview?: EvaluatorCodeReview;
   readonly adversarialCases?: readonly AdversarialCase[];
   readonly adversarialResult?: EvaluatorAdversarialResult;
+  /** Layer 2 progressive disclosure (design §6.5). */
+  readonly painCoverage?: EvaluatorPainCoverage;
+  /** Layer 2 progressive disclosure (design §6.5.1). */
+  readonly compressionFidelity?: EvaluatorCompressionFidelity;
 }
 
 export const EVALUATOR_DECISIONS = ['approved', 'needs_revision', 'rejected'] as const;
@@ -293,7 +321,13 @@ export function isEvaluatorOutputV2(output: unknown): output is EvaluatorOutputV
   const hasCodeReview = Object.hasOwn(output, 'codeReview');
   const hasCases = Object.hasOwn(output, 'adversarialCases');
   const hasResult = Object.hasOwn(output, 'adversarialResult');
-  if (!hasCodeReview && !hasCases && !hasResult) return false;
+  // Layer 2 progressive disclosure fields (design §6.5 / 修正五 F8):
+  // adding painCoverage / compressionFidelity to the whitelist so a V2 output
+  // carrying only these new fields is correctly identified as V2 and its
+  // values are preserved (not silently dropped).
+  const hasPainCoverage = Object.hasOwn(output, 'painCoverage');
+  const hasCompressionFidelity = Object.hasOwn(output, 'compressionFidelity');
+  if (!hasCodeReview && !hasCases && !hasResult && !hasPainCoverage && !hasCompressionFidelity) return false;
   return (!hasCodeReview || validateCodeReview(output.codeReview).length === 0)
     && (!hasCases || validateAdversarialCases(output.adversarialCases).length === 0)
     && (!hasResult || validateAdversarialResult(output.adversarialResult).length === 0);
