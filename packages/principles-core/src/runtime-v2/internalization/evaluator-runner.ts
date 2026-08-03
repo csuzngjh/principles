@@ -47,6 +47,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
+import { EVALUATOR_STAGE1_MANIFEST } from './context-manifests.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
@@ -387,6 +388,19 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         parsedScribeArtifact = JSON.parse(context.scribeArtifact);
       } catch {
         parsedScribeArtifact = context.scribeArtifact;
+      }
+    }
+
+    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the evaluator Stage 1
+    // manifest against the loaded artificer predecessor (the edge predecessor).
+    // Focused → inject only allocated summary fields (scribe text, dreamer
+    // dims, pain summary); fallback → legacy full artificerArtifact; disabled
+    // → unchanged. Stage 2 manifest is Layer 2 (PR 4), not wired here.
+    const artificerPred = toArtificerPredecessor(context);
+    if (artificerPred !== null) {
+      const resolved = this.resolveContextInjection(taskId, 'evaluator', EVALUATOR_STAGE1_MANIFEST, artificerPred.contentJson);
+      if (resolved.mode === 'focused') {
+        parsedArtificerArtifact = resolved.fields;
       }
     }
 
