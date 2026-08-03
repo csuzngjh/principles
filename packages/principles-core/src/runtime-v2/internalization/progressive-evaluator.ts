@@ -19,12 +19,7 @@
  *   - Deterministic forced sampling via fnv1a32 (no Math.random, design §4.4).
  */
 
-import {
-  DIMENSION_COVERAGE_POLICY,
-  REQUIRED_FIDELITY_DIMENSIONS,
-  isRequiredDimension,
-  type DreamerDimension,
-} from './dimension-coverage-policy.js';
+import { isRequiredDimension } from './dimension-coverage-policy.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -240,6 +235,37 @@ export type ProgressiveEvaluatorEvent =
  * Forced sampling (~5%) serves as a false-negative check: if Stage 1 passed
  * but Stage 2 finds new concerns, emit `stage1_false_negative`.
  */
+
+/**
+ * Extract concern identifiers from an evaluator output (best-effort).
+ * Concerns are an array of objects with a `key` or `description` field.
+ */
+function extractConcernKeys(output: unknown): readonly string[] {
+  if (!isRecord(output)) return [];
+  const evaluation = Object.hasOwn(output, 'evaluation') ? output.evaluation : undefined;
+  if (!isRecord(evaluation)) return [];
+  const concerns = Object.hasOwn(evaluation, 'concerns') ? evaluation.concerns : undefined;
+  if (!Array.isArray(concerns)) return [];
+  return concerns
+    .map((c): string => {
+      if (!isRecord(c)) return '';
+      if (Object.hasOwn(c, 'key') && typeof c.key === 'string') return c.key;
+      if (Object.hasOwn(c, 'description') && typeof c.description === 'string') return c.description;
+      return '';
+    })
+    .filter((k) => k !== '');
+}
+
+/**
+ * Compute the set difference of concern keys between Stage 2 and Stage 1.
+ * Returns keys present in Stage 2 but not in Stage 1.
+ */
+function diffConcernKeys(stage2Output: unknown, stage1Output: unknown): readonly string[] {
+  const keys1 = extractConcernKeys(stage1Output);
+  const keys2 = extractConcernKeys(stage2Output);
+  const set1 = new Set(keys1);
+  return keys2.filter((k) => !set1.has(k));
+}
 export async function runProgressiveEvaluation(
   deps: ProgressiveEvaluatorDeps,
 ): Promise<ProgressiveEvaluationOutcome> {
@@ -292,35 +318,4 @@ export async function runProgressiveEvaluation(
     forcedStage2: forced,
     stage1FalseNegative: falseNeg,
   };
-}
-
-/**
- * Compute the set difference of concern keys between Stage 2 and Stage 1.
- * Returns keys present in Stage 2 but not in Stage 1.
- */
-function diffConcernKeys(stage2Output: unknown, stage1Output: unknown): readonly string[] {
-  const keys1 = extractConcernKeys(stage1Output);
-  const keys2 = extractConcernKeys(stage2Output);
-  const set1 = new Set(keys1);
-  return keys2.filter((k) => !set1.has(k));
-}
-
-/**
- * Extract concern identifiers from an evaluator output (best-effort).
- * Concerns are an array of objects with a `key` or `description` field.
- */
-function extractConcernKeys(output: unknown): readonly string[] {
-  if (!isRecord(output)) return [];
-  const evaluation = Object.hasOwn(output, 'evaluation') ? output.evaluation : undefined;
-  if (!isRecord(evaluation)) return [];
-  const concerns = Object.hasOwn(evaluation, 'concerns') ? evaluation.concerns : undefined;
-  if (!Array.isArray(concerns)) return [];
-  return concerns
-    .map((c): string => {
-      if (!isRecord(c)) return '';
-      if (Object.hasOwn(c, 'key') && typeof c.key === 'string') return c.key;
-      if (Object.hasOwn(c, 'description') && typeof c.description === 'string') return c.description;
-      return '';
-    })
-    .filter((k) => k !== '');
 }
