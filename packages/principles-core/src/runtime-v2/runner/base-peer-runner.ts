@@ -989,12 +989,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    *
    * budgetTokens scope (design §6.2.1): covers ONLY manifest-declared fields.
    *
-   * `taskId` + `runnerKind` are used for telemetry event attribution.
+   * `taskId` is used for telemetry event attribution (runnerKind comes from
+   * the manifest itself via event.runnerKind).
    */
-  // eslint-disable-next-line @typescript-eslint/max-params -- mirrors buildArtifactContentJson's 4-input shape (taskId/kind/manifest/predecessor); the manifest replaces the runnerKind-typed output.
   protected resolveContextInjection(
     taskId: string,
-    runnerKind: string,
     manifest: ContextManifest,
     predecessorContentJson: unknown,
   ): { mode: 'focused'; fields: Readonly<Record<string, string>> } | { mode: 'fallback' } | { mode: 'disabled' } {

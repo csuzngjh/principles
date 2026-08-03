@@ -537,7 +537,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // fallback → legacy full scribeArtifact; disabled → unchanged.
     const scribePred = toScribePredecessor(context);
     if (scribePred !== null) {
-      const resolved = this.resolveContextInjection(taskId, 'artificer', ARTIFICER_MANIFEST, scribePred.contentJson);
+      const resolved = this.resolveContextInjection(taskId, ARTIFICER_MANIFEST, scribePred.contentJson);
       if (resolved.mode === 'focused') {
         scribeArtifactInput = resolved.fields;
       }

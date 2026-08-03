@@ -212,7 +212,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     // legacy full predecessorOutput (F13); disabled → unchanged.
     let predecessorOutput: unknown = context.predecessorOutput;
     if (context.edgePredecessor !== null) {
-      const resolved = this.resolveContextInjection(taskId, 'dreamer', DREAMER_MANIFEST, context.edgePredecessor.contentJson);
+      const resolved = this.resolveContextInjection(taskId, DREAMER_MANIFEST, context.edgePredecessor.contentJson);
       if (resolved.mode === 'focused') {
         predecessorOutput = resolved.fields;
       }

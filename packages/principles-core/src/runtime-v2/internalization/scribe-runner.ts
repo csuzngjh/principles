@@ -211,7 +211,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // predecessorSummary). Focused → inject only allocated summary fields;
     // fallback → legacy full philosopherArtifact; disabled → unchanged.
     const philosopherPred = toPhilosopherPredecessor(context);
-    const resolved = this.resolveContextInjection(taskId, 'scribe', SCRIBE_MANIFEST, philosopherPred.contentJson);
+    const resolved = this.resolveContextInjection(taskId, SCRIBE_MANIFEST, philosopherPred.contentJson);
     if (resolved.mode === 'focused') {
       parsedPhilosopherArtifact = resolved.fields;
     }

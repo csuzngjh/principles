@@ -398,7 +398,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // → unchanged. Stage 2 manifest is Layer 2 (PR 4), not wired here.
     const artificerPred = toArtificerPredecessor(context);
     if (artificerPred !== null) {
-      const resolved = this.resolveContextInjection(taskId, 'evaluator', EVALUATOR_STAGE1_MANIFEST, artificerPred.contentJson);
+      const resolved = this.resolveContextInjection(taskId, EVALUATOR_STAGE1_MANIFEST, artificerPred.contentJson);
       if (resolved.mode === 'focused') {
         parsedArtificerArtifact = resolved.fields;
       }

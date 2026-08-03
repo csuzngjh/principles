@@ -238,7 +238,12 @@ export type ProgressiveEvaluatorEvent =
 
 /**
  * Extract concern identifiers from an evaluator output (best-effort).
- * Concerns are an array of objects with a `key` or `description` field.
+ * The evaluator schema (evaluator-output.ts) defines `evaluation.concerns` as
+ * a `string[]` — each concern is a plain string. This function returns those
+ * strings directly, filtering out any non-string elements defensively.
+ * (CodeRabbit PR #1277: previously assumed concerns were objects with key/
+ * description fields, but the schema is string[] — the mismatch meant
+ * diffConcernKeys always returned empty, disabling false-negative detection.)
  */
 function extractConcernKeys(output: unknown): readonly string[] {
   if (!isRecord(output)) return [];
@@ -246,14 +251,7 @@ function extractConcernKeys(output: unknown): readonly string[] {
   if (!isRecord(evaluation)) return [];
   const concerns = Object.hasOwn(evaluation, 'concerns') ? evaluation.concerns : undefined;
   if (!Array.isArray(concerns)) return [];
-  return concerns
-    .map((c): string => {
-      if (!isRecord(c)) return '';
-      if (Object.hasOwn(c, 'key') && typeof c.key === 'string') return c.key;
-      if (Object.hasOwn(c, 'description') && typeof c.description === 'string') return c.description;
-      return '';
-    })
-    .filter((k) => k !== '');
+  return concerns.filter((c): c is string => typeof c === 'string' && c !== '');
 }
 
 /**
