@@ -103,25 +103,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function readSummary(contentJson: unknown): ArtifactSummary | undefined {
   if (!isRecord(contentJson) || !Object.hasOwn(contentJson, 'summary')) return undefined;
-  const summary = contentJson.summary;
+  const { summary } = contentJson;
   if (!isRecord(summary)) return undefined;
+  // rc-2: full value-type validation, then construct a typed object (no as cast).
   if (
-    Object.hasOwn(summary, 'schemaVersion')
-    && Object.hasOwn(summary, 'runnerKind')
-    && typeof summary.runnerKind === 'string'
+    Object.hasOwn(summary, 'schemaVersion') && summary.schemaVersion === 1
+    && Object.hasOwn(summary, 'runnerKind') && typeof summary.runnerKind === 'string'
     && (SUMMARY_RUNNER_KINDS as readonly string[]).includes(summary.runnerKind)
-    && Object.hasOwn(summary, 'headline')
-    && typeof summary.headline === 'string'
-    && Object.hasOwn(summary, 'fields')
-    && isRecord(summary.fields)
+    && Object.hasOwn(summary, 'headline') && typeof summary.headline === 'string'
+    && Object.hasOwn(summary, 'fields') && isRecord(summary.fields)
     && Object.values(summary.fields).every((v) => typeof v === 'string')
-    && Object.hasOwn(summary, 'derivedFrom')
-    && summary.derivedFrom === 'structured_output'
-    && Object.hasOwn(summary, 'omittedFields')
-    && Array.isArray(summary.omittedFields)
+    && Object.hasOwn(summary, 'derivedFrom') && summary.derivedFrom === 'structured_output'
+    && Object.hasOwn(summary, 'omittedFields') && Array.isArray(summary.omittedFields)
     && (summary.omittedFields as readonly unknown[]).every((v) => typeof v === 'string')
   ) {
-    return summary as unknown as ArtifactSummary;
+    // runtime-contract-exempt: ERR-001 narrowing after full value-type validation: runnerKind checked against SUMMARY_RUNNER_KINDS, fields checked via Object.values().every(typeof string), omittedFields checked via Array.isArray + every. The casts are type-only — the values are already validated at runtime above.
+    return {
+      schemaVersion: 1,
+      runnerKind: summary.runnerKind as SummaryRunnerKind, // runtime-contract-exempt: ERR-001 validated via SUMMARY_RUNNER_KINDS.includes above
+      headline: summary.headline,
+      fields: summary.fields as Record<string, string>, // runtime-contract-exempt: ERR-001 validated via Object.values().every(typeof===string) above
+      derivedFrom: 'structured_output',
+      omittedFields: summary.omittedFields as readonly string[], // runtime-contract-exempt: ERR-001 validated via Array.isArray + every(typeof===string) above
+    };
   }
   return undefined;
 }
@@ -142,7 +146,7 @@ export class CandidateLineage {
     this.artifacts = deps.artifacts;
     this.tasks = deps.tasks;
     this.maxDepth = deps.maxDepth ?? DEFAULT_MAX_DEPTH;
-    this.emit = deps.emit ?? (() => {});
+    this.emit = deps.emit ?? (() => undefined);
   }
 
   /**
@@ -191,7 +195,7 @@ export class CandidateLineage {
 
     while (queue.length > 0) {
       if (depth >= this.maxDepth) {
-        const last = queue[0];
+        const [last] = queue;
         notes.push({ code: 'depth_limit_reached', artifactId: last ?? startArtifactId, detail: `maxDepth (${this.maxDepth}) reached; remaining ${queue.length} ancestor(s) not traversed` });
         this.emit({ type: 'lineage_partial', artifactId: last ?? startArtifactId, noteCode: 'depth_limit_reached', detail: `maxDepth ${this.maxDepth}` });
         break;
@@ -247,7 +251,7 @@ export class CandidateLineage {
         notes.push({ code: 'task_missing', artifactId, detail: `task ${artifact.sourceTaskId} not found; cannot determine stage via two-hop` });
         this.emit({ type: 'lineage_partial', artifactId, noteCode: 'task_missing', detail: `task ${artifact.sourceTaskId} missing` });
       } else {
-        taskKind = task.taskKind;
+        ({ taskKind } = task);
         runnerKind = (SUMMARY_RUNNER_KINDS as readonly string[]).includes(taskKind)
           ? (taskKind as SummaryRunnerKind)
           : 'unknown';
