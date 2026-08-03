@@ -103,6 +103,32 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
       );
     }
 
+    // CodeRabbit PR #1273 #14 / rc-9: when a caller supplies a pre-built
+    // contentJson (Layer 0 envelope), validate it is parseable JSON
+    // serializing a non-null object — otherwise the artifact row would
+    // diverge from the principle_candidates rows (derived from input.output)
+    // in the same transaction, and readers would fail to parse it. Fail loud
+    // rather than persisting an inconsistent artifact.
+    if (input.contentJson !== undefined) {
+      let parsedContentJson: unknown;
+      try {
+        parsedContentJson = JSON.parse(input.contentJson);
+      } catch {
+        throw new PDRuntimeError(
+          'input_invalid',
+          'CommitInput.contentJson must be a valid JSON string',
+          { taskId: input.taskId, runId: input.runId },
+        );
+      }
+      if (parsedContentJson === null || typeof parsedContentJson !== 'object' || Array.isArray(parsedContentJson)) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          'CommitInput.contentJson must serialize a non-null object',
+          { taskId: input.taskId, runId: input.runId },
+        );
+      }
+    }
+
     const commitId = randomUUID();
     const artifactId = randomUUID();
     const now = new Date().toISOString();

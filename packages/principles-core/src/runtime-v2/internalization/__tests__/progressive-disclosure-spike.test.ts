@@ -75,7 +75,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { runCliProcess } from '../../utils/cli-process-runner.js';
 import { EvaluatorPromptBuilder } from '../evaluator-prompt-builder.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
@@ -1163,6 +1163,10 @@ const results: {
 };
 
 function persistResults(): void {
+  // CodeRabbit PR #1273 #7: RESULTS_PATH targets .kiro/specs/... which is
+  // git-ignored and may not exist on a fresh clone / CI. mkdirSync recursive
+  // mirrors askAgent's handling of SPIKE_TMP_DIR (line 513).
+  mkdirSync(dirname(RESULTS_PATH), { recursive: true });
   writeFileSync(RESULTS_PATH, `${JSON.stringify(results, null, 2)}\n`, 'utf8');
 }
 
