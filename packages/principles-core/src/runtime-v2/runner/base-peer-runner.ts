@@ -56,6 +56,10 @@ import {
   attachSummaryEnvelope,
   type LoadedPredecessorArtifact,
 } from '../internalization/attach-summary-envelope.js';
+import type { ContextManifest } from '../internalization/context-manifest.js';
+import { declaredFields } from '../internalization/context-manifest.js';
+import { resolveInjection, type ResolveInjectionEmit, type ResolveInjectionResult } from '../internalization/resolve-injection.js';
+import { buildAvailableMap } from '../internalization/summary-field-reader.js';
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -951,6 +955,80 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       });
       return JSON.stringify(output);
     }
+  }
+
+  // ── Layer 1: manifest + budget injection (design §6.2/§6.3, PR 2 task 5.9) ──
+
+  /**
+   * Whether the Layer 1 `context_manifest_budget` flag is on. Returns false
+   * when effectiveConfig is absent (legacy: existing buildContext assembly).
+   */
+  protected isContextManifestBudgetEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    const flags = computeFeatureFlagsFromConfig(effectiveConfig);
+    return isFeatureEnabled(flags, 'context_manifest_budget');
+  }
+
+  /**
+   * Resolve the cross-level context injection for a runner via the Layer 1
+   * manifest + budget path (design §6.2/§6.3/§6.2.2).
+   *
+   * Single wiring point shared by the 4 peer runners (task 5.9). Returns:
+   *   - `{ mode: 'focused', fields }` — use the manifest-allocated fields as
+   *     the focused context (a `Record<string,string>` of path → preview text)
+   *   - `{ mode: 'fallback' }` — resolution was too sparse; the caller MUST
+   *     fall back to the legacy full-predecessor injection (F13). The fallback
+   *     emits exactly one `manifest_resolution_insufficient` event (rc-9).
+   *   - `{ mode: 'disabled' }` — flag off; caller uses the existing assembly.
+   *
+   * `predecessorContentJson` is the loaded predecessor artifact's contentJson
+   * (the same object buildContext already holds — zero extra store reads, F3).
+   * It carries the Layer 0 `summary` / `predecessorSummary` envelope; the
+   * summary-field-reader extracts the manifest-declared paths from it.
+   *
+   * budgetTokens scope (design §6.2.1): covers ONLY manifest-declared fields.
+   *
+   * `taskId` + `runnerKind` are used for telemetry event attribution.
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params -- mirrors buildArtifactContentJson's 4-input shape (taskId/kind/manifest/predecessor); the manifest replaces the runnerKind-typed output.
+  protected resolveContextInjection(
+    taskId: string,
+    runnerKind: string,
+    manifest: ContextManifest,
+    predecessorContentJson: unknown,
+  ): { mode: 'focused'; fields: Readonly<Record<string, string>> } | { mode: 'fallback' } | { mode: 'disabled' } {
+    if (!this.isContextManifestBudgetEnabled()) {
+      return { mode: 'disabled' };
+    }
+    const paths = declaredFields(manifest);
+    const available = buildAvailableMap(paths, predecessorContentJson);
+    const emit = (event: ResolveInjectionEmit): void => {
+      if (event.type === 'manifest_resolution_insufficient') {
+        this.emitEvent('manifest_resolution_insufficient', taskId, {
+          runnerKind: event.runnerKind,
+          manifestId: event.manifestId,
+          absentCount: event.absentCount,
+          declaredCount: event.declaredCount,
+          absentRatio: event.absentRatio,
+          fallback: event.fallback,
+        });
+      } else {
+        // context_truncated — surface as telemetry so Layer 3 can show it.
+        this.emitEvent('context_truncated', taskId, {
+          runnerKind: event.runnerKind,
+          manifestId: event.manifestId,
+          fieldPath: event.fieldPath,
+          reason: event.reason,
+          remainingBudgetTokens: event.remainingBudgetTokens,
+        });
+      }
+    };
+    const result: ResolveInjectionResult = resolveInjection(manifest, available, emit);
+    if (result.kind === 'focused') {
+      return { mode: 'focused', fields: result.allocated.fields };
+    }
+    return { mode: 'fallback' };
   }
 
   // ── Agent draft injection (Task 12) ────────────────────────────────────────

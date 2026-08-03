@@ -31,6 +31,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
+import { SCRIBE_MANIFEST } from './context-manifests.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -203,6 +204,16 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       parsedPhilosopherArtifact = JSON.parse(context.philosopherArtifact);
     } catch {
       parsedPhilosopherArtifact = context.philosopherArtifact;
+    }
+
+    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the scribe manifest against
+    // the loaded philosopher predecessor (carries dreamer 5-dim via its
+    // predecessorSummary). Focused → inject only allocated summary fields;
+    // fallback → legacy full philosopherArtifact; disabled → unchanged.
+    const philosopherPred = toPhilosopherPredecessor(context);
+    const resolved = this.resolveContextInjection(taskId, 'scribe', SCRIBE_MANIFEST, philosopherPred.contentJson);
+    if (resolved.mode === 'focused') {
+      parsedPhilosopherArtifact = resolved.fields;
     }
 
     const builder = new ScribePromptBuilder({ coreGrounding, outputLanguage: this.resolvedOptions.outputLanguage });
