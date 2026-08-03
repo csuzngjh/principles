@@ -11,6 +11,8 @@
 
 import {
   deriveArtifactSummary,
+  ARTIFACT_SUMMARY_SCHEMA_VERSION,
+  SUMMARY_RUNNER_KINDS,
   type ArtifactSummary,
   type ArtifactSummaryEnvelope,
   type SummaryRunnerKind,
@@ -58,25 +60,28 @@ function readExistingSummary(contentJson: unknown): ArtifactSummary | null {
   const { summary } = contentJson as Record<string, unknown>;
   if (summary === null || typeof summary !== 'object' || Array.isArray(summary)) return null;
   const candidate = summary as Record<string, unknown>;
-  if (
-    Object.hasOwn(candidate, 'schemaVersion')
-    && Object.hasOwn(candidate, 'runnerKind')
-    && Object.hasOwn(candidate, 'headline')
-    && Object.hasOwn(candidate, 'fields')
-    && Object.hasOwn(candidate, 'derivedFrom')
-    && Object.hasOwn(candidate, 'omittedFields')
-  ) {
-    // Pure passthrough — the reused summary is forwarded verbatim into
-    // predecessorSummary.summary and serialized back to contentJson; it is
-    // never dereferenced as a typed ArtifactSummary in this path (no field of
-    // `candidate` is read here). Shape check (6 own keys present) is
-    // sufficient to distinguish a real summary envelope from arbitrary
-    // content. The read side (future CandidateLineage, PR 3) re-reads the
-    // stored value as `unknown` and narrows via type guards before use, so a
-    // malformed inner type cannot propagate into trusted logic.
-    return candidate as unknown as ArtifactSummary; // runtime-contract-exempt: ERR-001 pure passthrough reuse — shape-checked (6 own keys) but inner types not validated; forwarded verbatim into contentJson, read-side re-narrows as unknown
-  }
-  return null;
+  // rc-2 / CodeRabbit PR #1273 #10: validate value types, not just key
+  // presence. A malformed summary (e.g. headline is a number, fields is an
+  // array) would otherwise be forwarded verbatim and persist invalid data.
+  // On any type mismatch, return null so the caller re-derives from the
+  // predecessor's contentJson instead of reusing garbage.
+  if (!Object.hasOwn(candidate, 'schemaVersion') || candidate.schemaVersion !== ARTIFACT_SUMMARY_SCHEMA_VERSION) return null;
+  if (!Object.hasOwn(candidate, 'runnerKind') || typeof candidate.runnerKind !== 'string' || !(SUMMARY_RUNNER_KINDS as readonly string[]).includes(candidate.runnerKind)) return null;
+  if (!Object.hasOwn(candidate, 'headline') || typeof candidate.headline !== 'string') return null;
+  if (!Object.hasOwn(candidate, 'fields') || candidate.fields === null || typeof candidate.fields !== 'object' || Array.isArray(candidate.fields)) return null;
+  const fieldsObj = candidate.fields as Record<string, unknown>;
+  if (!Object.values(fieldsObj).every((v) => typeof v === 'string')) return null;
+  if (!Object.hasOwn(candidate, 'derivedFrom') || candidate.derivedFrom !== 'structured_output') return null;
+  if (!Object.hasOwn(candidate, 'omittedFields') || !Array.isArray(candidate.omittedFields)) return null;
+  if (!(candidate.omittedFields as readonly unknown[]).every((v) => typeof v === 'string')) return null;
+  return {
+    schemaVersion: ARTIFACT_SUMMARY_SCHEMA_VERSION,
+    runnerKind: candidate.runnerKind as SummaryRunnerKind,
+    headline: candidate.headline,
+    fields: fieldsObj as Record<string, string>,
+    derivedFrom: 'structured_output',
+    omittedFields: candidate.omittedFields as readonly string[],
+  };
 }
 
 /**
