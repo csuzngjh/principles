@@ -42,6 +42,7 @@ import { handleRuntimePainFlood } from './commands/runtime-pain-flood-simulation
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
+import { handleRuntimeInternalizationContextTrace } from './commands/runtime-internalization-context-trace.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
@@ -605,6 +606,18 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationEnqueueSuccessors({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
+  });
+
+// Layer 3 (design §6.7, PR 5): read-only context-trace command.
+internalizationCmd
+  .command('context-trace')
+  .description('Trace the internalization context chain: summaries, three-segment diagnosis, truncations, degradations')
+  .requiredOption('-t, --task <taskId>', 'Task ID to trace')
+  .option('-a, --artifact <artifactId>', 'Specific artifact ID to start from')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON (default)')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationContextTrace({ workspace: opts.workspace, task: opts.task, artifact: opts.artifact, json: opts.json });
   });
 
 const activationCmd = runtimeCmd

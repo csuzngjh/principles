@@ -333,3 +333,7 @@ export {
   buildDreamerSeedFromCandidate,
   seedIntakeTask,
 } from './intake-to-internalization-bridge.js';
+
+// Layer 2 progressive disclosure — CandidateLineage (PR 3/5)
+export { CandidateLineage } from './candidate-lineage.js';
+export type { LineageTaskReader, LineageNode, LineageNote, LineageResult, LineageChain, LineageError } from './candidate-lineage.js';
