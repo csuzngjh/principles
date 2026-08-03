@@ -181,6 +181,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Independent of internalization_core_grounding (§8.1): budgetTokens covers
   // ONLY manifest-declared fields, never core grounding text.
   { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
+  // Internalization progressive disclosure — Layer 2 two-stage evaluation
+  // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally
+  // Stage 2 (tier2 full contentJson) when flagged/forced. Adds optional
+  // painCoverage / compressionFidelity to evaluator output. Default off;
+  // flag-off = single-stage evaluation (current behavior).
+  { id: 'progressive_evaluator', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 2 — two-stage evaluation with flagged criteria + painCoverage/compressionFidelity output fields. Default off; flag-off = single-stage evaluation unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
