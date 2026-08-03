@@ -178,8 +178,9 @@ export class CandidateLineage {
   // ── Internal traversal ─────────────────────────────────────────────────────
 
   /**
-   * Recursive resolution with cycle detection (via `visited`) and depth
-   * limiting. `visited` carries artifactIds already on the current path.
+   * Iterative BFS resolution with cycle detection (via `visited`) and depth
+   * limiting. `visited` carries artifactIds already resolved (prevents cycles
+   * and redundant fetches across the whole traversal, not just one path).
    */
   private async resolveChain(
     startArtifactId: string,
