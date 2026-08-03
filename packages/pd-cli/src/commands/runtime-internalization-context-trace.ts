@@ -17,10 +17,9 @@
  */
 
 import * as path from 'node:path';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
-import type { PIArtifactRecord } from '@principles/core/runtime-v2';
-import { isFeatureEnabled } from '@principles/core/runtime-v2';
 import {
+  RuntimeStateManager,
+  isFeatureEnabled,
   CandidateLineage,
   type LineageNode,
   type LineageNote,
@@ -227,7 +226,7 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
 
     // Build the output chain from resolved nodes.
     const chain = lineageResult.value.nodes.map((node: LineageNode): ChainNodeOutput => {
-      const contentJson = node.contentJson;
+      const { contentJson } = node;
       const summaryPresent = readSummaryPresent(contentJson);
       const predecessorSummaryPresent = readPredecessorSummaryPresent(contentJson);
       return {
