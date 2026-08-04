@@ -47,7 +47,8 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
-import { EVALUATOR_STAGE1_MANIFEST } from './context-manifests.js';
+import { EVALUATOR_STAGE1_MANIFEST, EVALUATOR_STAGE2_MANIFEST } from './context-manifests.js';
+import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
@@ -369,41 +370,95 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     throw new PDRuntimeError('input_invalid', 'Artificer dependency artifact not found');
   }
 
+  /** Synthetic RunHandle prefix for progressive-evaluator pre-resolved output. */
+  static readonly PROGRESSIVE_RUN_ID_PREFIX = '__progressive_evaluator_';
+  private progressiveFinalOutput: unknown = undefined;
+  private progressiveRunActive = false;
+
   async invokeRuntime(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
+    // Layer 2 (design §6.5, task 9.11): when progressive_evaluator flag is on,
+    // run two-stage evaluation (Stage 1 summary → flagged? → Stage 2 tier2).
+    // When off, the existing single-stage path runs unchanged.
+    if (!this.isProgressiveEvaluatorEnabled()) {
+      return this.invokeRuntimeSingleStage(taskId, context);
+    }
+
+    // ── Two-stage progressive evaluation ──
+    // Stage 1: summary-level evaluation (same prompt as single-stage, but
+    // uses EVALUATOR_STAGE1_MANIFEST for focused context).
+    const stage1Message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const stage1Output = await this.runSingleEvaluation(taskId, stage1Message);
+
+    // 9.4c (design §6.5.4, simplified): Stage 1 output contract violation check.
+    // If the output is not a valid object (JSON.parse failed inside runSingleEvaluation,
+    // or the shape is fundamentally wrong), emit a structured degradation and
+    // force Stage 2 (never silently treat as "no concerns / pass" — rc-3 + rc-9).
+    const stage1ContractViolated = stage1Output === null || typeof stage1Output !== 'object' || Array.isArray(stage1Output);
+    if (stage1ContractViolated) {
+      this.emitEvent('stage1_output_contract_violation', taskId, {
+        reason: 'output_not_object',
+        detail: 'Stage 1 output is not a valid JSON object — forcing Stage 2.',
+      });
+    }
+
+    // Evaluate flagged criteria on Stage 1 output.
+    // When contract is violated, ALL criteria fields are undetermined → forces Stage 2.
+    const d1 = stage1ContractViolated
+      ? { flagged: false, reasons: [] as const, undetermined: ['stage1_output_contract_violation'] }
+      : evaluateFlaggedCriteria(stage1Output);
+    const forced = isForcedStage2(taskId);
+
+    if (!d1.flagged && !forced && d1.undetermined.length === 0) {
+      // Stage 1 is sufficient — return its output as the final result.
+      this.progressiveFinalOutput = stage1Output;
+      this.progressiveRunActive = true;
+      return { runId: `${EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX}stage1`, runtimeKind: this.getRuntimeKind(), startedAt: new Date().toISOString() };
+    }
+
+    // Stage 2 triggered: independent re-evaluation with tier2 context.
+    // rc-7 / ERR-015 / ERR-018 / ERR-019: Stage 2 does NOT receive Stage 1
+    // output, concerns, or the FlaggedDecision. It is a fully independent call.
+    const stage2Message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
+    const stage2Output = await this.runSingleEvaluation(taskId, stage2Message);
+
+    this.progressiveFinalOutput = stage2Output;
+    this.progressiveRunActive = true;
+    return { runId: `${EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX}stage2`, runtimeKind: this.getRuntimeKind(), startedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Intercept fetchAndParseOutput for progressive-evaluator runs: when the
+   * runId is a synthetic progressive handle, return the pre-resolved output
+   * directly (the actual LLM call already happened inside invokeRuntime).
+   */
+  protected override async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
+    if (this.progressiveRunActive && runId.startsWith(EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX)) {
+      return this.progressiveFinalOutput;
+    }
+    return super.fetchAndParseOutput(runId, taskId);
+  }
+
+  /**
+   * Build the evaluator prompt with the given manifest's resolved context.
+   * Shared by single-stage and two-stage paths.
+   */
+  private buildEvaluatorPrompt(taskId: string, context: EvaluatorContext, manifest: typeof EVALUATOR_STAGE1_MANIFEST): string {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
-      try {
-        parsedArtificerArtifact = JSON.parse(context.artificerArtifact);
-      } catch {
-        parsedArtificerArtifact = context.artificerArtifact;
-      }
+      try { parsedArtificerArtifact = JSON.parse(context.artificerArtifact); } catch { parsedArtificerArtifact = context.artificerArtifact; }
     }
-
-    // PRD Decision 12: pass the scribe principle text so the LLM can judge
-    // code intentConsistency/scopePrecision. Null when unresolvable (V1 artificer
-    // output, or scribe artifact missing) — the prompt builder accepts undefined.
     let parsedScribeArtifact: unknown = undefined;
     if (context.scribeArtifact) {
-      try {
-        parsedScribeArtifact = JSON.parse(context.scribeArtifact);
-      } catch {
-        parsedScribeArtifact = context.scribeArtifact;
-      }
+      try { parsedScribeArtifact = JSON.parse(context.scribeArtifact); } catch { parsedScribeArtifact = context.scribeArtifact; }
     }
-
-    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the evaluator Stage 1
-    // manifest against the loaded artificer predecessor (the edge predecessor).
-    // Focused → inject only allocated summary fields (scribe text, dreamer
-    // dims, pain summary); fallback → legacy full artificerArtifact; disabled
-    // → unchanged. Stage 2 manifest is Layer 2 (PR 4), not wired here.
+    // Resolve manifest-injected focused fields (Layer 1).
     const artificerPred = toArtificerPredecessor(context);
     if (artificerPred !== null) {
-      const resolved = this.resolveContextInjection(taskId, EVALUATOR_STAGE1_MANIFEST, artificerPred.contentJson);
+      const resolved = this.resolveContextInjection(taskId, manifest, artificerPred.contentJson);
       if (resolved.mode === 'focused') {
         parsedArtificerArtifact = resolved.fields;
       }
     }
-
     const builder = new EvaluatorPromptBuilder();
     const { message } = builder.buildPrompt({
       taskId,
@@ -412,7 +467,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       scribeArtifact: parsedScribeArtifact,
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
     });
+    return message;
+  }
 
+  /** Original single-stage invokeRuntime (flag-off path). */
+  private async invokeRuntimeSingleStage(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
+    const message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },

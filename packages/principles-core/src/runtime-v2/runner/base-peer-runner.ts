@@ -177,7 +177,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     return this.phase;
   }
 
-  private getRuntimeKind(): RuntimeKind {
+  protected getRuntimeKind(): RuntimeKind {
     return (typeof this.runtimeAdapter.kind === 'function'
       ? this.runtimeAdapter.kind()
       : this.resolvedOptions.runtimeKind) as RuntimeKind;
@@ -382,7 +382,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   // ── Polling ────────────────────────────────────────────────────────────────
 
-  private async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
+  protected async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
     const deadline = Date.now() + this.resolvedOptions.timeoutMs;
     const terminalStatuses: readonly string[] = ['succeeded', 'failed', 'timed_out', 'cancelled'];
 
@@ -425,7 +425,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Returns `unknown` — the payload is untrusted LLM/runtime output.
    * Callers MUST validate before treating as TOutput (ERR-001, ERR-005).
    */
-  private async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
+  protected async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
     let result: Awaited<ReturnType<PDRuntimeAdapter['fetchOutput']>>;
     try {
       result = await this.runtimeAdapter.fetchOutput(runId);
@@ -968,6 +968,49 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     if (!effectiveConfig) return false;
     const flags = computeFeatureFlagsFromConfig(effectiveConfig);
     return isFeatureEnabled(flags, 'context_manifest_budget');
+  }
+
+  /**
+   * Whether the Layer 2 `progressive_evaluator` flag is on (design §6.5, PR 4).
+   * When on, the evaluator runner runs two-stage evaluation; off = single stage.
+   */
+  protected isProgressiveEvaluatorEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    const flags = computeFeatureFlagsFromConfig(effectiveConfig);
+    return isFeatureEnabled(flags, 'progressive_evaluator');
+  }
+
+  /**
+   * Run a single LLM evaluation: startRun → pollUntilTerminal → fetchAndParseOutput.
+   * Returns the untrusted payload (unknown). Used by the two-stage progressive
+   * evaluator to run Stage 1 and Stage 2 independently (design §6.5, PR 4 task 9.11).
+   *
+   * This method is protected (not private) so the EvaluatorRunner can call it
+   * twice (once per stage) from its overridden invokeRuntime.
+   */
+  protected async runSingleEvaluation(taskId: string, promptMessage: string): Promise<unknown> {
+    const runtimeKind = this.getRuntimeKind();
+    const runHandle = await this.runtimeAdapter.startRun({
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      taskRef: { taskId },
+      inputPayload: promptMessage,
+      contextItems: [],
+      outputSchemaRef: this.config.resultRefPrefix.includes('evaluator')
+        ? 'evaluator-output-v1'
+        : `${this.config.expectedTaskKind}-output-v1`,
+      timeoutMs: this.resolvedOptions.timeoutMs,
+    });
+    this.emitEvent('run_started', taskId, { runtimeKind, stage: 'progressive_evaluation' });
+
+    const finalStatus = await this.pollUntilTerminal(runHandle);
+    if (finalStatus.status !== 'succeeded') {
+      throw new PDRuntimeError(
+        finalStatus.status === 'timed_out' ? 'timeout' : 'execution_failed',
+        `Progressive evaluation run ${runHandle.runId} ended with status ${finalStatus.status}`,
+      );
+    }
+    return this.fetchAndParseOutput(runHandle.runId, taskId);
   }
 
   /**

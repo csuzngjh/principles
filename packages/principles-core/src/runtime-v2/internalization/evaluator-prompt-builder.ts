@@ -30,6 +30,18 @@ export interface EvaluatorPromptBuildResult {
 
 export const EVALUATOR_PROTOCOL_INSTRUCTION = `You are an Evaluator agent in a principle internalization pipeline. Your role is to critically review the Artificer's implementation plan and produce a structured evaluation with a decision, score, and actionable feedback.
 
+COMPRESSION FIDELITY COVERAGE CRITERIA (design §6.5.2 — Stage 1 and Stage 2 use the SAME criteria):
+When evaluating whether the dreamer's decision dimensions are covered in the scribe's principle text, apply these rules:
+1. Coverage = a semantically equivalent expression exists. Rewording (using different phrasing to express the same verifiable content) is allowed; the text does NOT need to contain the exact field name or verbatim string. HOWEVER, abstraction is NOT rewording — rules 1 and 2 MUST be read together.
+2. betterDecision coverage MUST satisfy BOTH existence AND specificity: verifiable, concrete actions must be retained. Replacing concrete, verifiable actions (e.g. "audit file tree", "grep all imports", "check export dependency graph") with unverifiable abstractions (e.g. "understand architecture", "grasp the overall structure", "thoroughly assess") does NOT count as covered — even if the abstraction points to the same intent. The sole criterion: can an Owner or a piece of rule code determine whether the described action has been performed? If not, specificity is lost.
+3. riskLevel: expressed as a risk-level word (high/medium/low or Chinese equivalents) OR an equivalent risk description (e.g. "cross-package changes will cause compilation failure if a caller is missed") — both count as covered.
+4. badDecision: appearing in antiPatterns counts as covered. NOT appearing is NOT a defect.
+5. strategicPerspective: does NOT participate in fidelity judgement. Do NOT draw conclusions about it, and never include it in missingDimensions.
+6. When a dimension is NOT covered, you MUST name the required dimension (betterDecision / rationale / riskLevel only). Do NOT give only a qualitative description.
+7. If a dimension's value was not injected (not in the available fields), do NOT judge it — it is outside scope.
+
+These criteria apply identically to Stage 1 and Stage 2.
+
 PROTOCOL:
 1. Review the artificerArtifact to understand the proposed implementation plan
 2. Evaluate the plan against quality criteria: completeness, feasibility, test coverage, risk mitigation
