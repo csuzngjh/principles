@@ -124,17 +124,36 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
   const taskId = opts.task;
 
   // Read feature flags from config (independent of stateManager).
+  // CodeRabbit PR #1278 #2: distinguish config-load failure from genuine
+  // flags-off — the former needs a different nextAction so the user doesn't
+  // waste time editing config that's actually unparseable.
   let summaryFlag = false;
   let manifestFlag = false;
   let progressiveFlag = false;
+  let configLoadError: string | null = null;
   try {
     const configLoadResult = loadPdConfig(workspaceDir);
     const flags = computeFlagsFromLoadResult(configLoadResult);
     summaryFlag = isFeatureEnabled(flags, 'artifact_summary_redundancy');
     manifestFlag = isFeatureEnabled(flags, 'context_manifest_budget');
     progressiveFlag = isFeatureEnabled(flags, 'progressive_evaluator');
-  } catch {
-    // Graceful degradation: treat as all-off if config can't be read.
+  } catch (configErr) {
+    configLoadError = configErr instanceof Error ? configErr.message : String(configErr);
+  }
+
+  // Config load failed → structured error (not "flags off" masquerade).
+  if (configLoadError !== null) {
+    const result: ContextTraceResult = {
+      ok: false,
+      command: 'runtime.internalization.context-trace',
+      taskId,
+      degradations: [],
+      error: { code: 'config_load_failed', message: safePreview(configLoadError) },
+      nextAction: 'Fix the .pd/config.yaml parse error, then re-run. The flags could not be read.',
+    };
+    console.log(JSON.stringify(result, null, 2));
+    process.exitCode = 1;
+    return;
   }
 
   // All flags off → structured "feature_disabled" output (still ok: true).
@@ -163,13 +182,17 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
     return;
   }
 
-  // Open state manager in read-only mode (cli-5: zero state writes).
-  const stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
+  // CodeRabbit PR #1278 #1: construct stateManager INSIDE the try block so
+  // a constructor throw is caught and produces structured JSON output (cli-6).
+  let stateManager: RuntimeStateManager | null = null;
   try {
+    // Open state manager in read-only mode (cli-5: zero state writes).
+    stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
     await stateManager.initialize();
+    const sm = stateManager;
 
     // Resolve the start artifact: either --artifact or the latest artifact for the task.
-    const artifactStore = stateManager.piArtifactStore;
+    const artifactStore = sm.piArtifactStore;
     let startArtifactId: string | undefined = opts.artifact;
 
     if (!startArtifactId) {
@@ -196,7 +219,7 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
     // Build LineageTaskReader adapter (first production implementation).
     const taskReader: LineageTaskReader = {
       async getTaskById(id: string) {
-        const t = await stateManager.getTask(id);
+        const t = await sm.getTask(id);
         return t === null ? null : { taskId: t.taskId, taskKind: t.taskKind };
       },
     };
@@ -297,6 +320,15 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
     process.exitCode = 1;
     return;
   } finally {
-    await stateManager.close();
+    // CodeRabbit PR #1278 #1: guard close() so it can't overwrite the result
+    // or throw unhandled if stateManager was never constructed.
+    if (stateManager !== null) {
+      try {
+        await stateManager.close();
+      } catch {
+        // Best-effort close on a read-only instance — swallow to preserve the
+        // structured JSON output already written to stdout.
+      }
+    }
   }
 }
