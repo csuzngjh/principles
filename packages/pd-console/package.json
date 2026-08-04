@@ -33,7 +33,7 @@
     "clsx": "^2.1.1",
     "i18next": "^26.1.0",
     "js-yaml": "^4.2.0",
-    "lucide-react": "^1.23.0",
+    "lucide-react": "^1.28.0",
     "postcss": "^8.5.14",
     "postcss-cli": "^11.0.1",
     "react": "^19.2.7",
