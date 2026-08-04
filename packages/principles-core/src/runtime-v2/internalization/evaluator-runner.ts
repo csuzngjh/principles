@@ -24,7 +24,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
-import type { RunHandle } from '../runtime-protocol.js';
+import type { RunHandle, RunStatus } from '../runtime-protocol.js';
 import type {
   EvaluatorOutputV1,
   EvaluatorOutputV2,
@@ -424,6 +424,19 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.progressiveFinalOutput = stage2Output;
     this.progressiveRunActive = true;
     return { runId: `${EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX}stage2`, runtimeKind: this.getRuntimeKind(), startedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Override pollUntilTerminal: for synthetic progressive-evaluator RunHandles,
+   * the LLM call already completed inside invokeRuntime — return succeeded
+   * immediately without hitting the real runtime adapter (which would fail on
+   * the synthetic runId). For normal handles, delegate to the base class.
+   */
+  protected override async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
+    if (this.progressiveRunActive && runHandle.runId.startsWith(EvaluatorRunner.PROGRESSIVE_RUN_ID_PREFIX)) {
+      return { status: 'succeeded', runId: runHandle.runId };
+    }
+    return super.pollUntilTerminal(runHandle);
   }
 
   /**
