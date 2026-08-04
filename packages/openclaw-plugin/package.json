@@ -79,7 +79,7 @@
     "@vitest/coverage-v8": "^4.1.9",
     "esbuild": "^0.28.1",
     "eslint": "^10.5.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.0.16",
     "vitest": "^4.1.10",
