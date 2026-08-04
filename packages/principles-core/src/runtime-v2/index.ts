@@ -218,6 +218,9 @@ export { SplitDiagnosticianRunner } from './internalization/split-diagnostician-
 export { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
 export { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
 export { DiagRouterRunner } from './internalization/diag-router-runner.js';
+// Layer 2 progressive disclosure — CandidateLineage (PR 3/5)
+export { CandidateLineage } from './internalization/candidate-lineage.js';
+export type { LineageTaskReader, LineageNode, LineageNote, LineageResult, LineageChain, LineageError } from './internalization/candidate-lineage.js';
 export { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
 export {
   IntentTensionSchema,
