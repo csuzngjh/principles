@@ -75,7 +75,11 @@ function captureStdout() {
 
 function getStdoutJson(): Record<string, unknown> {
   const full = stdoutCapture.join('\n');
-  return JSON.parse(full) as Record<string, unknown>;
+  const parsed: unknown = JSON.parse(full);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Expected JSON object in stdout but got: ${typeof parsed}`);
+  }
+  return parsed as Record<string, unknown>; // runtime-contract-exempt: ERR-001 narrowed from unknown via typeof + Array.isArray check above (test-only helper on trusted stdout JSON)
 }
 
 // ── Given ────────────────────────────────────────────────────────────────────
