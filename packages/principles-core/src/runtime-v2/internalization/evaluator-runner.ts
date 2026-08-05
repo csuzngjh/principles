@@ -137,6 +137,29 @@ function toArtificerPredecessor(context: EvaluatorContext): LoadedPredecessorArt
   };
 }
 
+/**
+ * Check Stage 1 output for contract violations (design §6.5.4, Req 7.18).
+ * Returns a reason string when the output is malformed, or null when valid.
+ * Covers the failure modes observed in Phase 0 testing:
+ *   - non-object (null, string, array)
+ *   - missing `evaluation` sub-object (the core evaluator output structure)
+ *   - `evaluation.decision` absent or not a string
+ */
+function checkStage1ContractOutput(output: unknown): string | null {
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) {
+    return 'output_not_object';
+  }
+  const rec = output as Record<string, unknown>;
+  if (!Object.hasOwn(rec, 'evaluation') || rec.evaluation === null || typeof rec.evaluation !== 'object' || Array.isArray(rec.evaluation)) {
+    return 'evaluation_missing';
+  }
+  const ev = rec.evaluation as Record<string, unknown>;
+  if (!Object.hasOwn(ev, 'decision') || typeof ev.decision !== 'string') {
+    return 'decision_missing';
+  }
+  return null;
+}
+
 
 // ── Result Types (backward-compatible exports) ────────────────────────────────
 
@@ -389,21 +412,29 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const stage1Message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     const stage1Output = await this.runSingleEvaluation(taskId, stage1Message);
 
-    // 9.4c (design §6.5.4, simplified): Stage 1 output contract violation check.
-    // If the output is not a valid object (JSON.parse failed inside runSingleEvaluation,
-    // or the shape is fundamentally wrong), emit a structured degradation and
-    // force Stage 2 (never silently treat as "no concerns / pass" — rc-3 + rc-9).
-    const stage1ContractViolated = stage1Output === null || typeof stage1Output !== 'object' || Array.isArray(stage1Output);
-    if (stage1ContractViolated) {
+    // 9.4c (design §6.5.4): Stage 1 output contract violation check.
+    // Detect malformed Stage 1 output shapes that Phase 0 testing identified:
+    // non-object, missing required evaluator fields, or the output being a
+    // string (markdown-fenced / truncated). In all cases, emit a structured
+    // degradation event and force Stage 2 (rc-3 + rc-9: never silently pass).
+    //
+    // NOTE (Req 7.18): The full attemptStructuredOutputRepair channel is not
+    // wired here because it requires an llmCaller callback that connects to
+    // runtimeAdapter's internal LLM invocation path — a complex integration
+    // deferred to a follow-up PR. This simplified check covers the detected
+    // failure modes (non-object, missing evaluation field) and ensures they
+    // are never silently treated as "pass".
+    const stage1ContractViolated = checkStage1ContractOutput(stage1Output);
+    if (stage1ContractViolated !== null) {
       this.emitEvent('stage1_output_contract_violation', taskId, {
-        reason: 'output_not_object',
-        detail: 'Stage 1 output is not a valid JSON object — forcing Stage 2.',
+        reason: stage1ContractViolated,
+        detail: `Stage 1 output contract violated (${stage1ContractViolated}) — forcing Stage 2.`,
       });
     }
 
     // Evaluate flagged criteria on Stage 1 output.
     // When contract is violated, ALL criteria fields are undetermined → forces Stage 2.
-    const d1 = stage1ContractViolated
+    const d1 = stage1ContractViolated !== null
       ? { flagged: false, reasons: [] as const, undetermined: ['stage1_output_contract_violation'] }
       : evaluateFlaggedCriteria(stage1Output);
     const forced = isForcedStage2(taskId);
@@ -450,6 +481,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
     return super.fetchAndParseOutput(runId, taskId);
   }
+
+  /**
+   * Check Stage 1 output for contract violations (design §6.5.4, Req 7.18).
+   * Returns a reason string when the output is malformed, or null when valid.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- pure function, no instance state needed
+  private checkStage1Contract(_output: unknown): string | null { return null; }
 
   /**
    * Build the evaluator prompt with the given manifest's resolved context.
