@@ -331,10 +331,23 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit --amend --no-edit
+          # Tag the release on the current HEAD (the commit that triggered
+          # this workflow run). We intentionally do NOT `git commit --amend`
+          # the trigger commit nor `git push origin HEAD:main --force-with-lease`:
+          # main is branch-protected (no force-push, requires PR + "Verify
+          # Merge Gate" status check), so any direct push to refs/heads/main
+          # is rejected with GH006, which has made this job fail on every
+          # main push since the branch protection was enabled.
+          #
+          # Tag refs (refs/tags/*) are NOT covered by branch protection, and
+          # this job already has `permissions: contents: write`, so pushing
+          # the tag succeeds. The version-sync file edits made earlier in
+          # this job (openclaw.plugin.json, README, root package.json) stay
+          # in the runner working tree and are not written back to main;
+          # that is acceptable because the next publish run's "Bump version"
+          # step resets the local version to the npm version via
+          # `npm version $NPM_VERSION --no-git-tag-version` before bumping.
           git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin HEAD:main --force-with-lease
           git push origin "v$VERSION"
           echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
 
