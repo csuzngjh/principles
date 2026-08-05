@@ -102,6 +102,119 @@ function readPredecessorSummaryPresent(contentJson: unknown): boolean {
   return Object.hasOwn(contentJson, 'predecessorSummary');
 }
 
+// ── Three-segment verdict computation (design §6.7, Req 10.6) ───────────────
+
+/** Required dreamer dimensions that should survive into the scribe's principle text. */
+const REQUIRED_DIMENSIONS = ['betterDecision', 'rationale', 'riskLevel'] as const;
+
+/**
+ * Read a dimension value from a node's predecessorSummary (if the node is
+ * downstream of dreamer, the predecessorSummary carries the dreamer dims).
+ */
+function readPredecessorDim(contentJson: unknown, dim: string): string | null {
+  if (!isRecord(contentJson)) return null;
+  const pred = Object.hasOwn(contentJson, 'predecessorSummary') ? contentJson.predecessorSummary : null;
+  if (!isRecord(pred)) return null;
+  const summary = Object.hasOwn(pred, 'summary') ? pred.summary : null;
+  if (!isRecord(summary)) return null;
+  const fields = Object.hasOwn(summary, 'fields') ? summary.fields : null;
+  if (!isRecord(fields)) return null;
+  const val = Object.hasOwn(fields, dim) ? fields[dim] : undefined;
+  return typeof val === 'string' && val.trim() !== '' ? val : null;
+}
+
+/**
+ * Check whether a node's own summary carries a given dimension.
+ */
+function readOwnDim(contentJson: unknown, dim: string): string | null {
+  if (!isRecord(contentJson)) return null;
+  const summary = Object.hasOwn(contentJson, 'summary') ? contentJson.summary : null;
+  if (!isRecord(summary)) return null;
+  const fields = Object.hasOwn(summary, 'fields') ? summary.fields : null;
+  if (!isRecord(fields)) return null;
+  const val = Object.hasOwn(fields, dim) ? fields[dim] : undefined;
+  return typeof val === 'string' && val.trim() !== '' ? val : null;
+}
+
+/**
+ * Compute three-segment diagnosis from the resolved chain nodes.
+ *
+ * Each segment checks whether required dimensions survived the compression hop:
+ * - pain_to_dreamer: did pain/diagnosis summaries reach the dreamer node?
+ * - dreamer_to_scribe: did dreamer's required dims survive into scribe's text?
+ * - scribe_to_artificer: did the principle text reach artificer?
+ *
+ * When a node is absent or has no summary, the segment is 'fail' (data missing).
+ * When a required dimension is absent in the downstream summary, it's 'degraded'.
+ * Otherwise 'pass'.
+ */
+function computeSegments(nodes: readonly LineageNode[]): SegmentOutput[] {
+  // Index nodes by taskKind for quick lookup.
+  const byKind = new Map<string, LineageNode>();
+  for (const n of nodes) {
+    if (!byKind.has(n.taskKind)) byKind.set(n.taskKind, n);
+  }
+  const dreamerNode = byKind.get('dreamer');
+  const scribeNode = byKind.get('scribe');
+  const artificerNode = byKind.get('artificer');
+
+  // Segment 1: pain_to_dreamer — pain/diagnosis summaries forwarded to dreamer?
+  let seg1Verdict: 'pass' | 'degraded' | 'fail' = 'pass';
+  let seg1Detail: string | null = null;
+  if (!dreamerNode) {
+    seg1Verdict = 'fail';
+    seg1Detail = 'Dreamer node not found in chain.';
+  } else if (!readSummaryPresent(dreamerNode.contentJson)) {
+    seg1Verdict = 'fail';
+    seg1Detail = `Dreamer artifact ${dreamerNode.artifactId} has no summary envelope.`;
+  } else if (!readPredecessorSummaryPresent(dreamerNode.contentJson)) {
+    seg1Verdict = 'degraded';
+    seg1Detail = 'Dreamer has no predecessorSummary (pain/diagnosis summary may not have been forwarded).';
+  }
+
+  // Segment 2: dreamer_to_scribe — did dreamer's required dims survive into scribe?
+  let seg2Verdict: 'pass' | 'degraded' | 'fail' = 'pass';
+  let seg2Detail: string | null = null;
+  const seg2Missing: string[] = [];
+  if (!scribeNode) {
+    seg2Verdict = 'fail';
+    seg2Detail = 'Scribe node not found in chain.';
+  } else if (!readSummaryPresent(scribeNode.contentJson)) {
+    seg2Verdict = 'fail';
+    seg2Detail = `Scribe artifact ${scribeNode.artifactId} has no summary envelope.`;
+  } else {
+    // Check if dreamer dims are reachable via scribe's predecessorSummary (via philosopher).
+    for (const dim of REQUIRED_DIMENSIONS) {
+      const ownVal = readOwnDim(scribeNode.contentJson, dim);
+      const predVal = readPredecessorDim(scribeNode.contentJson, dim);
+      if (ownVal === null && predVal === null) {
+        seg2Missing.push(dim);
+      }
+    }
+    if (seg2Missing.length > 0) {
+      seg2Verdict = 'degraded';
+      seg2Detail = `Required dimension(s) missing in scribe summary: ${seg2Missing.join(', ')}`;
+    }
+  }
+
+  // Segment 3: scribe_to_artificer — did the principle text reach artificer?
+  let seg3Verdict: 'pass' | 'degraded' | 'fail' = 'pass';
+  let seg3Detail: string | null = null;
+  if (!artificerNode) {
+    seg3Verdict = 'fail';
+    seg3Detail = 'Artificer node not found in chain.';
+  } else if (!readSummaryPresent(artificerNode.contentJson)) {
+    seg3Verdict = 'degraded';
+    seg3Detail = `Artificer artifact ${artificerNode.artifactId} has no summary envelope.`;
+  }
+
+  return [
+    { segment: 'pain_to_dreamer', verdict: seg1Verdict, missingDimensions: seg1Verdict === 'degraded' ? undefined : undefined, detail: seg1Detail },
+    { segment: 'dreamer_to_scribe', verdict: seg2Verdict, missingDimensions: seg2Missing.length > 0 ? seg2Missing : undefined, detail: seg2Detail },
+    { segment: 'scribe_to_artificer', verdict: seg3Verdict, detail: seg3Detail },
+  ];
+}
+
 // ── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleRuntimeInternalizationContextTrace(opts: ContextTraceOptions): Promise<void> {
@@ -280,12 +393,10 @@ export async function handleRuntimeInternalizationContextTrace(opts: ContextTrac
       }
     }
 
-    // Build three-segment diagnosis (basic: pass unless degraded notes exist).
-    const segments: SegmentOutput[] = [
-      { segment: 'pain_to_dreamer', verdict: 'pass', detail: null },
-      { segment: 'dreamer_to_scribe', verdict: 'pass', detail: null },
-      { segment: 'scribe_to_artificer', verdict: 'pass', detail: null },
-    ];
+    // Build three-segment diagnosis from chain data (design §6.7, Req 10.6).
+    // Each segment checks whether the downstream node's summary carries the
+    // expected dimensions from its edge predecessor.
+    const segments = computeSegments(lineageResult.value.nodes);
 
     const result: ContextTraceResult = {
       ok: true,
