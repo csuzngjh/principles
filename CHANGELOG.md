@@ -57,7 +57,7 @@
 * All MVP-Core features have `enabled: false` emergency disable via `.pd/config.yaml`
 * MVP-Gone flags (nocturnal, idle_trigger, model_training, trainer) cannot be re-enabled
 * Per-rule rollback via `pd runtime activation deactivate --activation-id <id>`
-* Version rollback: `git revert` + republish patch version via `npm run release`
+* Version rollback: `git revert` + republish patch version via the `Publish to npm` workflow (workflow_dispatch with `version_bump=patch`)
 
 # [1.73.0](https://github.com/csuzngjh/principles/compare/v1.7.6...v1.73.0) (2026-05-31)
 

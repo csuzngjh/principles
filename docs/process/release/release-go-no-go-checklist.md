@@ -121,7 +121,7 @@
 - [x] `npm unpublish` 流程已确认（npm 72 小时窗口）
   - Standard npm procedure: `npm unpublish <package>@<version>` within 72 hours of publish.
 - [x] 版本回退流程已确认（git revert + 重新发布 patch 版本）
-  - Standard procedure: git revert the release commit, then publish a new patch version via `npm run release`.
+  - Standard procedure: git revert the release commit, then publish a new patch version via the `Publish to npm` workflow (workflow_dispatch with `version_bump=patch`).
 - [ ] 紧急联系渠道已告知种子客户
   - BLOCKED: Requires manual confirmation. No emergency contact documentation found in codebase.
 
