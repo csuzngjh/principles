@@ -234,7 +234,14 @@ jobs:
               echo "Local version ($LOCAL_VERSION) matches npm ($NPM_VERSION)"
             fi
 
-            npm version "$BUMP" -m "chore(release): %s [skip ci]"
+            # --no-git-tag-version: only update package.json. Do NOT let
+            # `npm version` create a git commit or a v$VERSION tag here —
+            # the "Create Git tag and push" step below owns tag creation
+            # (tag-only release; we no longer push to main). Letting npm
+            # version create the tag would collide with `git tag -a` below
+            # (same name) and would also require git identity on the
+            # runner, which is not reliably set.
+            npm version "$BUMP" --no-git-tag-version
 
             NEW_VERSION=$(node -p "require('./package.json').version")
             echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
