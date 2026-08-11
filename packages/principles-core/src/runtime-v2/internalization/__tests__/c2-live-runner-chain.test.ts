@@ -192,6 +192,10 @@ async function walkFullChain(
     const successorId = commitResult.successorTaskId;
     const duplicated = `-${channel}-${channel}`;
     expect(successorId).not.toContain(duplicated);
+    // Defensive invariant: a task id must never contain the literal "-undefined"
+    // segment, even if some future code path reaches the successor construction
+    // with an absent channel.
+    expect(successorId).not.toContain('-undefined');
 
     actualChain.push(actualSuccessor.taskKind);
     currentTaskId = commitResult.successorTaskId;

@@ -443,7 +443,14 @@ export class InternalizationOrchestrator {
     // don't re-append the channel we are about to add back.
     const successorRoot = proposal.correlationId
       ?? stripTrailingChannel(taskId, proposal.channel);
-    const successorTaskId = `${proposal.taskKind}-${successorRoot}-${proposal.channel}`;
+    // Omit the channel segment entirely when it is absent, so the id never
+    // ends with a literal "-undefined". (No current code path reaches here
+    // with channel=undefined — the diagnostician chain terminates at
+    // diag_router which has no successor — but this keeps the invariant
+    // defensive rather than relying on that fact staying true.)
+    const successorTaskId = proposal.channel
+      ? `${proposal.taskKind}-${successorRoot}-${proposal.channel}`
+      : `${proposal.taskKind}-${successorRoot}`;
     const successorMetadata: PITaskMetadata = {
       dependencyTaskIds: proposal.dependencyTaskIds,
       channel: proposal.channel,
