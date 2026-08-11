@@ -925,7 +925,16 @@ function injectLocalWorkspacePackages() {
 function installTargetDependencies() {
     console.log('\n📦 Installing production dependencies in target...');
     try {
-        execSync('npm install --omit=dev --no-audit --no-fund --prefer-offline', {
+        // --legacy-peer-deps: the plugin's devDependencies include @typescript-eslint
+        // (peer typescript <6.1) which npm 7+ strictly validates even under --omit=dev,
+        // causing ETARGET. Since production install omits devDeps anyway, legacy peer
+        // resolution is safe and only bypasses the over-strict peer check.
+        //
+        // --prefer-offline removed: it caused ETARGET for better-sqlite3@^13.0.1 when
+        // the local npm cache was stale (registry had 13.0.3 but cache only had an
+        // older resolution). Letting npm use its default offline/online heuristic
+        // avoids the stale-cache hard failure.
+        execSync('npm install --omit=dev --no-audit --no-fund --legacy-peer-deps', {
             cwd: INSTALL_DIR,
             stdio: 'inherit'
         });

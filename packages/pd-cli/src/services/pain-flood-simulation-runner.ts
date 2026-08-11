@@ -84,6 +84,11 @@ async function runScenario(
         painType: signal.painType,
         source: 'pain-flood-simulation',
         reason: signal.reason,
+        // Synthetic flood is a deterministic dedup/stress tool — it has no real
+        // host session. Provide synthetic evidence so the PEAT-B1 admission gate
+        // (default-on) does not short-circuit every signal before diagnosis,
+        // which would mask the dedup behaviour this tool exists to verify.
+        evidence: [{ sourceRef: `synthetic-flood:${signal.painId}`, note: 'Synthetic flood deterministic evidence anchor' }],
       });
 
       if (result.status === 'failed' || result.status === 'retried') {
