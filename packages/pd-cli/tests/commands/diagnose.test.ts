@@ -443,6 +443,84 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
+  it('P1: missing --runtime with no config binding refuses with missing_runtime (no test-double default)', async () => {
+    // Regression for the silent test-double default bug. Without --runtime and
+    // with no usable .pd/config.yaml binding, the command must refuse loudly
+    // (rc-9-no-silent-fallback) instead of defaulting to test-double and
+    // producing fake/failed diagnostic data in a real workspace.
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: { ok: false, reason: 'no_runtime_binding', message: 'no binding', nextAction: 'set runtime' },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] } as never,
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(true);
+
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      // runtime intentionally omitted
+      json: true,
+    } as DiagnoseRunOptions);
+
+    // Config was consulted (not silently skipped).
+    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/tmp/fake-workspace');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.ok).toBe(false);
+    expect(jsonOutput.reason).toBe('missing_runtime');
+    expect(jsonOutput.nextAction).toContain('--runtime');
+
+    consoleLogSpy.mockRestore();
+    consoleErrSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('P1: missing --runtime resolves kind from .pd/config.yaml (honors config, no test-double default)', async () => {
+    // When --runtime is absent but .pd/config.yaml binds openclaw-cli, the
+    // resolved kind must come from config — proving test-double is no longer
+    // the default. Mirrors DPB-09 but omits --runtime to exercise the new
+    // config-resolution path.
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'gateway',
+        timeoutMs: 300000,
+        agentId: 'main',
+      },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] } as never,
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      // runtime intentionally omitted — must be resolved from config
+      openclawGateway: true,
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/tmp/fake-workspace');
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'gateway' }),
+    );
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   it('DPB-09: openclaw-cli --openclaw-gateway constructs adapter with runtimeMode=gateway', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
