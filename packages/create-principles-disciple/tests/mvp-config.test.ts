@@ -1113,23 +1113,23 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
   it('installer.ts throws on story-a failure (not skipped)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('updateOpenClawConfig'));
+    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('runHostInstallers'));
     expect(storyASection).toContain('throw new Error');
     expect(storyASection).not.toContain("verification.storyA = 'skipped'");
   });
 
-  it('updateOpenClawConfig runs after all verification', () => {
+  it('runHostInstallers runs after all verification', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const storyALastIndex = content.lastIndexOf("verification.storyA = 'passed'");
-    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
+    const updateConfigIndex = content.indexOf('await runHostInstallers(');
     expect(updateConfigIndex).toBeGreaterThan(storyALastIndex);
   });
 
-  it('cleanupBackup runs after updateOpenClawConfig', () => {
+  it('cleanupBackup runs after runHostInstallers', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
+    const updateConfigIndex = content.indexOf('await runHostInstallers(');
     const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
     expect(cleanupIndex).toBeGreaterThan(updateConfigIndex);
   });

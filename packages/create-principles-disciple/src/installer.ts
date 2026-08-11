@@ -19,11 +19,12 @@ import {
   getInstalledBinDir,
   getInstalledConsoleDir,
   isWindows,
-  validateOpenClawConfig,
   type ComponentStatus,
   type VerificationResult,
   type RuntimeProfileInput,
 } from './mvp-config.js';
+import { getHostInstallers, type HostTarget } from './installers/index.js';
+import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -200,7 +201,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Generating config.yaml', weight: 2 },
   { name: 'Creating config', weight: 2 },
   { name: 'Verifying demo', weight: 5 },
-  { name: 'Updating OpenClaw config', weight: 3 },
+  { name: 'Updating host config', weight: 3 },
 ];
 
 const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
@@ -311,102 +312,11 @@ async function installPluginToStaging(pluginDir: string): Promise<void> {
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
 }
 
-async function updateOpenClawConfig(): Promise<void> {
-  const configDir = getOpenClawDir();
-  const configPath = path.join(configDir, 'openclaw.json');
-
-  if (!existsSync(configPath)) return;
-
-  const rawConfig = readFileSync(configPath, 'utf-8');
-  const config: unknown = JSON.parse(rawConfig);
-
-  const validation = validateOpenClawConfig(config);
-  if (!validation.valid) {
-    throw new Error(`Malformed openclaw.json: ${validation.error}. Fix manually and re-run installer.`);
-  }
-
-  if (config === null || typeof config !== 'object' || Array.isArray(config)) return;
-
-  const configObj = { ...(config as Record<string, unknown>) };
-
-  if (!configObj.plugins) configObj.plugins = {};
-  if (typeof configObj.plugins !== 'object' || configObj.plugins === null || Array.isArray(configObj.plugins)) {
-    throw new Error('openclaw.json plugins field is malformed. Fix manually and re-run installer.');
-  }
-  const plugins = { ...(configObj.plugins as Record<string, unknown>) };
-
-  if (!plugins.allow) plugins.allow = [];
-  if (!Array.isArray(plugins.allow)) {
-    throw new Error('openclaw.json plugins.allow is not an array. Fix manually and re-run installer.');
-  }
-  const allow = (plugins.allow as unknown[]).filter((a): a is string => typeof a === 'string');
-  if (!allow.includes('principles-disciple')) {
-    allow.push('principles-disciple');
-  }
-  plugins.allow = allow;
-
-  if (!plugins.entries) plugins.entries = {};
-  if (typeof plugins.entries !== 'object' || plugins.entries === null || Array.isArray(plugins.entries)) {
-    throw new Error('openclaw.json plugins.entries is malformed. Fix manually and re-run installer.');
-  }
-  const entries = { ...(plugins.entries as Record<string, unknown>) };
-  // Merge with existing config — preserve hooks, config, and other user settings
-  const existingEntry = (typeof entries['principles-disciple'] === 'object' && entries['principles-disciple'] !== null && !Array.isArray(entries['principles-disciple']))
-    ? { ...(entries['principles-disciple'] as Record<string, unknown>) }
-    : {};
-  entries['principles-disciple'] = { ...existingEntry, enabled: true };
-  plugins.entries = entries;
-
-  // Do NOT write plugins.installs — OpenClaw manages install records in
-  // ~/.openclaw/plugins/installs.json and strips plugins.installs from
-  // openclaw.json on every write. Writing it here causes duplicate
-  // registration and config corruption loops.
-
-  // PRI-343: Deep-merge allowConversationAccess: true into the config
-  // This ensures the field survives openclaw doctor --fix backup restores
-  const mergedConfigObj = ensureConversationAccess(configObj);
-  writeFileSync(configPath, JSON.stringify(mergedConfigObj, null, 2));
-
-  // Write install record to installs.json (the canonical store)
-  const installsDir = path.join(configDir, 'plugins');
-  const installsPath = path.join(installsDir, 'installs.json');
-  try {
-    if (!existsSync(installsDir)) {
-      mkdirSync(installsDir, { recursive: true });
-    }
-    let installs: Record<string, unknown> = { version: 1, installRecords: {} };
-    if (existsSync(installsPath)) {
-      const raw = readFileSync(installsPath, 'utf-8');
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        installs = parsed as Record<string, unknown>;
-      }
-    }
-    if (!installs.installRecords || typeof installs.installRecords !== 'object') {
-      installs.installRecords = {};
-    }
-    const extDir = getPluginExtDir();
-    const pkgPath = path.join(extDir, 'package.json');
-    let version: string | undefined = undefined;
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-        if (typeof pkg === 'object' && pkg !== null && Object.hasOwn(pkg, 'version')) {
-          version = (pkg as Record<string, unknown>).version as string;
-        }
-      } catch { /* ignore */ }
-    }
-    (installs.installRecords as Record<string, unknown>)['principles-disciple'] = {
-      source: 'path',
-      installPath: extDir,
-      ...(version ? { version } : {}),
-      installedAt: new Date().toISOString(),
-    };
-    writeFileSync(installsPath, JSON.stringify(installs, null, 2));
-  } catch {
-    // Non-fatal — installs.json is managed by OpenClaw and will self-heal
-  }
-}
+// ADR-0020 §2.3: The OpenClaw config write logic previously lived here as
+// `updateOpenClawConfig()`. It has been extracted to OpenClawHostInstaller
+// (./installers/openclaw-host-installer.ts) and is invoked via
+// `runHostInstallers()` below. This file no longer writes openclaw.json
+// directly — the HostInstaller interface keeps install/uninstall host-agnostic.
 
 async function installPluginDependencies(): Promise<void> {
   const extDir = getPluginExtDir();
@@ -1187,6 +1097,42 @@ export interface InstallResult {
   /** Task 8: URL the browser was opened to when the installer auto-launched the
    * console via `pd console open`. Undefined when auto-launch was skipped or failed. */
   consoleUrl?: string;
+  /** ADR-0020 §2.3: Host-side install results (one per HostInstaller). */
+  hostResults?: HostInstallResult[];
+}
+
+/**
+ * ADR-0020 §2.3: Run host installers for the selected HostTarget.
+ *
+ * Iterates the concrete HostInstaller instances returned by getHostInstallers()
+ * and calls install() on each. Returns an array of results — one per host.
+ *
+ * rc-9: failures in one host do NOT abort the other (e.g. if Codex adapter
+ * is missing, OpenClaw install still succeeds). Each result includes a
+ * structured reason + nextAction.
+ */
+async function runHostInstallers(
+  host: HostTarget,
+  ctx: HostInstallContext,
+): Promise<HostInstallResult[]> {
+  const installers = getHostInstallers(host);
+  const results: HostInstallResult[] = [];
+  for (const installer of installers) {
+    try {
+      const result = await installer.install(ctx);
+      results.push(result);
+    } catch (err) {
+      // rc-9: never silently swallow — record as failure with reason.
+      results.push({
+        success: false,
+        hostId: installer.hostId,
+        configAction: 'skipped',
+        reason: `Installer threw: ${err instanceof Error ? err.message : String(err)}`,
+        nextAction: `Check ${installer.hostId} host configuration and re-run: npx create-principles-disciple install --host ${installer.hostId}`,
+      });
+    }
+  }
+  return results;
 }
 
 export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
@@ -1344,8 +1290,29 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     }
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Updating OpenClaw config...');
-    await updateOpenClawConfig();
+    if (spinner) updateProgress(spinner, stepIndex, 'Updating host config...');
+    const hostResults = await runHostInstallers(options.host, {
+      workspaceDir: options.workspaceDir,
+      pluginDir,
+      language: options.language,
+      mode: options.mode,
+      runtimeProfile: options.runtimeProfile
+        ? {
+            provider: options.runtimeProfile.provider,
+            model: options.runtimeProfile.model,
+            apiKeyEnv: options.runtimeProfile.apiKeyEnv,
+          }
+        : undefined,
+    });
+
+    // Report host install results (rc-9: surface failures, don't silently swallow).
+    for (const hr of hostResults) {
+      if (!hr.success) {
+        logger.warn(`Host "${hr.hostId}" install: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction}`);
+      } else if (hr.configAction === 'skipped') {
+        logger.info(`Host "${hr.hostId}" install: ${hr.reason ?? 'skipped'}. Next: ${hr.nextAction}`);
+      }
+    }
 
     cleanupBackup(backupDir);
     if (spinner) spinner.succeed('Install complete!');
@@ -1389,6 +1356,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
+      hostResults,
     };
   } catch (error) {
     if (spinner) spinner.fail('Install failed');

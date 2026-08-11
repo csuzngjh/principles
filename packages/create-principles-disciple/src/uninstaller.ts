@@ -9,15 +9,23 @@
  *    - Memory files (.principles/ directory)
  *    - State files (.state/ directory)
  *    - Any user data
+ *
+ * ADR-0020 §2.3: Multi-host uninstall. Host-side config cleanup (openclaw.json
+ * entries, ~/.codex/hooks.json entries, wrapper scripts) is delegated to
+ * HostInstaller.uninstall() implementations. Workspace user data is always
+ * preserved regardless of host target.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
+import * as os from 'os';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
+import { getHostInstallers, type HostTarget } from './installers/index.js';
+import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
 
 export interface UninstallResult {
   success: boolean;
@@ -34,7 +42,12 @@ async function detectAndSetLanguage(lang?: string): Promise<void> {
 }
 
 /**
- * Check install status
+ * Check install status across all hosts (OpenClaw + Codex).
+ *
+ * ADR-0020 §2.3: Detects PD install markers for each registered host.
+ * Returns aggregated status so `pd status` / `npx create-principles-disciple
+ * status` shows the full picture regardless of which host was selected
+ * during install.
  */
 export function checkInstallStatus(): {
   isInstalled: boolean;
@@ -46,14 +59,25 @@ export function checkInstallStatus(): {
   }[];
 } {
   const configDir = getOpenClawConfigDir();
-
   const lang = getLanguage();
-  const paths = [
+
+  // OpenClaw paths
+  const openclawPaths = [
     { path: getPluginExtDir(), name: lang === 'zh' ? '插件扩展目录' : 'Plugin extension directory', type: 'dir' as const },
-    { path: path.join(configDir, 'principles-disciple.json'), name: lang === 'zh' ? '配置文件' : 'Config file', type: 'file' as const },
+    { path: path.join(configDir, 'principles-disciple.json'), name: lang === 'zh' ? 'OpenClaw 配置文件' : 'OpenClaw config file', type: 'file' as const },
   ];
 
-  const checkedPaths = paths.map(p => ({
+  // Codex paths (ADR-0020)
+  const pdCodexDir = path.join(os.homedir(), '.pd', 'codex');
+  const codexPaths = [
+    { path: path.join(pdCodexDir, 'pd-hooks.marker'), name: lang === 'zh' ? 'Codex 安装标记' : 'Codex install marker', type: 'file' as const },
+    { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
+    { path: path.join(os.homedir(), '.codex', 'hooks.json'), name: lang === 'zh' ? 'Codex hooks.json' : 'Codex hooks.json', type: 'file' as const },
+  ];
+
+  const allPaths = [...openclawPaths, ...codexPaths];
+
+  const checkedPaths = allPaths.map(p => ({
     exists: existsSync(p.path),
     path: p.path,
     name: p.name,
@@ -149,78 +173,10 @@ function getWorkspacePath(): string | null {
 }
 
 /**
- * Remove principles-disciple entries from openclaw.json
- * Cleans plugins.allow, plugins.entries, and plugins.installs
- */
-function cleanupOpenClawConfig(): { cleaned: boolean; error?: string } {
-  const configDir = getOpenClawConfigDir();
-  const configPath = path.join(configDir, 'openclaw.json');
-
-  if (!existsSync(configPath)) {
-    return { cleaned: false };
-  }
-
-  try {
-    const raw = readFileSync(configPath, 'utf-8');
-    const config: unknown = JSON.parse(raw);
-
-    if (config === null || typeof config !== 'object' || Array.isArray(config)) {
-      return { cleaned: false, error: 'openclaw.json is not an object' };
-    }
-
-    const configObj = config as Record<string, unknown>;
-    let modified = false;
-
-    // Clean plugins.allow
-    if (Array.isArray(configObj.plugins) || typeof configObj.plugins !== 'object' || configObj.plugins === null) {
-      // plugins is not an object, skip
-    } else {
-      const plugins = configObj.plugins as Record<string, unknown>;
-
-      // Remove from plugins.allow
-      if (Array.isArray(plugins.allow)) {
-        const before = plugins.allow.length;
-        const filtered = (plugins.allow as unknown[]).filter(
-          (a): a is string => typeof a === 'string' && a !== 'principles-disciple'
-        );
-        plugins.allow = filtered;
-        if (filtered.length !== before) modified = true;
-      }
-
-      // Remove from plugins.entries
-      if (typeof plugins.entries === 'object' && plugins.entries !== null && !Array.isArray(plugins.entries)) {
-        const entries = plugins.entries as Record<string, unknown>;
-        if (Object.hasOwn(entries, 'principles-disciple')) {
-          delete entries['principles-disciple'];
-          modified = true;
-        }
-      }
-
-      // Remove from plugins.installs (legacy field, but clean it up anyway)
-      if (typeof plugins.installs === 'object' && plugins.installs !== null && !Array.isArray(plugins.installs)) {
-        const installs = plugins.installs as Record<string, unknown>;
-        if (Object.hasOwn(installs, 'principles-disciple')) {
-          delete installs['principles-disciple'];
-          modified = true;
-        }
-      }
-    }
-
-    if (modified) {
-      writeFileSync(configPath, JSON.stringify(configObj, null, 2) + '\n');
-      return { cleaned: true };
-    }
-
-    return { cleaned: false };
-  } catch (err) {
-    return { cleaned: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
  * Execute uninstall
  *
  * @param options.force Skip confirmation prompt (dangerous, for scripts only)
+ * @param options.host   ADR-0020: 'openclaw' | 'codex' | 'all' (default 'all')
  */
 const REMOVE_RETRY_ATTEMPTS = 3;
 const REMOVE_RETRY_DELAY_MS = 1000;
@@ -243,6 +199,16 @@ export async function uninstall(
   options: {
     force?: boolean;
     lang?: string;
+    /**
+     * ADR-0020 §2.3: Host target for uninstall.
+     * - 'openclaw' — clean up OpenClaw config only.
+     * - 'codex'    — clean up Codex hooks only.
+     * - 'all' (default) — clean up both hosts.
+     *
+     * Default is 'all' for thorough cleanup (unlike install where default
+     * is 'openclaw' for backward compatibility).
+     */
+    host?: HostTarget;
   } = {}
 ): Promise<UninstallResult> {
   await detectAndSetLanguage(options.lang);
@@ -353,12 +319,28 @@ export async function uninstall(
     result.removedGlobalShims = removed;
     result.skippedGlobalShims = skipped;
 
-    // 6.5. Clean up openclaw.json entries
-    const configCleanup = cleanupOpenClawConfig();
-    if (configCleanup.cleaned) {
-      logger.success(t('openclaw_config_cleaned') || 'openclaw.json: removed principles-disciple entries');
-    } else if (configCleanup.error) {
-      logger.warn(`${t('openclaw_config_cleanup_failed') || 'openclaw.json cleanup failed'}: ${configCleanup.error}`);
+    // 6.5. ADR-0020 §2.3: Clean up host-side configs via HostInstallers.
+    // Replaces the old cleanupOpenClawConfig() with multi-host delegation.
+    const hostTarget: HostTarget = options.host ?? 'all';
+    const hostInstallers = getHostInstallers(hostTarget);
+    for (const installer of hostInstallers) {
+      try {
+        const ctx: HostUninstallContext = {
+          language: getLanguage(),
+          force: options.force === true,
+        };
+        const hostResult: HostUninstallResult = await installer.uninstall(ctx);
+        if (hostResult.success) {
+          if (hostResult.removedPaths.length > 0) {
+            logger.success(`Host "${installer.hostId}": cleaned ${hostResult.removedPaths.length} path(s)`);
+          }
+        } else {
+          logger.warn(`Host "${installer.hostId}" cleanup: ${hostResult.reason ?? 'partial failure'}. Next: ${hostResult.nextAction}`);
+        }
+      } catch (err) {
+        // rc-9: never silently swallow — surface the failure.
+        logger.warn(`Host "${installer.hostId}" cleanup threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // 7. Record preserved paths

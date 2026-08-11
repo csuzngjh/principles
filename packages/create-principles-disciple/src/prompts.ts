@@ -4,6 +4,7 @@ import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
 import { MVP_CHANNELS, type MvpChannel, type RuntimeProfileInput } from './mvp-config.js';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
+import { type HostTarget } from './installers/index.js';
 
 export interface InstallOptions {
   language: Language;
@@ -11,6 +12,13 @@ export interface InstallOptions {
   workspaceDir: string;
   channels: MvpChannel[];
   overwriteConfig: boolean;
+  /**
+   * ADR-0020 §2.3: Host target for install/uninstall.
+   * - 'openclaw' (default) — writes ~/.openclaw/openclaw.json.
+   * - 'codex'              — writes ~/.codex/hooks.json.
+   * - 'all'                — writes both.
+   */
+  host: HostTarget;
   /** Fix-4 (P0-BUG-4): optional LLM runtime profile collected during prompts. */
   runtimeProfile?: RuntimeProfileInput;
 }
@@ -80,6 +88,36 @@ async function promptRuntimeProfile(): Promise<RuntimeProfileInput | undefined> 
     model: modelDefault,
     apiKeyEnv: apiKeyEnv.trim(),
   };
+}
+
+/**
+ * ADR-0020 §2.3: Prompt for host target (interactive mode only).
+ *
+ * Default is 'openclaw' for backward compatibility. Operators who also use
+ * Codex CLI should select 'codex' or 'all'.
+ */
+async function promptHost(defaultHost: HostTarget = 'openclaw'): Promise<HostTarget> {
+  return await select({
+    message: 'Select host platform / 选择主机平台',
+    choices: [
+      {
+        name: 'OpenClaw (default)',
+        value: 'openclaw' as const,
+        description: 'Writes ~/.openclaw/openclaw.json — PD runs as an OpenClaw plugin.',
+      },
+      {
+        name: 'Codex CLI',
+        value: 'codex' as const,
+        description: 'Writes ~/.codex/hooks.json — PD runs as a Codex hook subprocess.',
+      },
+      {
+        name: 'All hosts',
+        value: 'all' as const,
+        description: 'Writes both OpenClaw and Codex configs — for operators using multiple hosts.',
+      },
+    ],
+    default: defaultHost,
+  });
 }
 
 async function promptLanguage(): Promise<Language> {
@@ -160,6 +198,7 @@ function showMvpCoreChannels(): void {
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {
   console.log(`\n${t('install_config')}`);
   console.log(`  ${t('language')}: ${options.language}`);
+  console.log(`  Host platform: ${options.host ?? 'openclaw (default)'}`);
   console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
   console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
   console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
@@ -184,6 +223,9 @@ export async function runPrompts(
 
   const language = cliOptions.language ?? await promptLanguage();
   setLanguage(language);
+
+  // ADR-0020 §2.3: prompt for host target if not supplied via --host.
+  const host = cliOptions.host ?? await promptHost();
 
   let { mode } = cliOptions;
   if (!mode) {
@@ -214,6 +256,7 @@ export async function runPrompts(
     workspaceDir,
     channels: [...MVP_CHANNELS],
     overwriteConfig: false,
+    host,
     runtimeProfile,
   };
 
