@@ -1113,7 +1113,15 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
   it('installer.ts throws on story-a failure (not skipped)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('runHostInstallers'));
+    // Boundary must use the call site ('await runHostInstallers('), not the
+    // function declaration. indexOf('runHostInstallers') matches the function
+    // declaration which appears BEFORE 'story-a' in the file, so substring
+    // would swap the args and extract the wrong range — silently breaking the
+    // assertion (EP-09 Test Reality Gap: test passes on unintended path).
+    const storyASection = content.substring(
+      content.indexOf('story-a'),
+      content.indexOf('await runHostInstallers('),
+    );
     expect(storyASection).toContain('throw new Error');
     expect(storyASection).not.toContain("verification.storyA = 'skipped'");
   });
@@ -1122,16 +1130,16 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const storyALastIndex = content.lastIndexOf("verification.storyA = 'passed'");
-    const updateConfigIndex = content.indexOf('await runHostInstallers(');
-    expect(updateConfigIndex).toBeGreaterThan(storyALastIndex);
+    const hostInstallersIndex = content.indexOf('await runHostInstallers(');
+    expect(hostInstallersIndex).toBeGreaterThan(storyALastIndex);
   });
 
   it('cleanupBackup runs after runHostInstallers', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const updateConfigIndex = content.indexOf('await runHostInstallers(');
+    const hostInstallersIndex = content.indexOf('await runHostInstallers(');
     const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
-    expect(cleanupIndex).toBeGreaterThan(updateConfigIndex);
+    expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
   });
 
   it('catch block kills console child process', () => {

@@ -233,6 +233,9 @@ export class CodexHostInstaller implements HostInstaller {
     }
 
     // 2. Write wrapper script to ~/.pd/codex/pd-hook-entry.cjs
+    //    (marker file is written AFTER mergeHooksJson succeeds — see step 3.
+    //    Writing the marker before the merge would make detect() report a
+    //    failed install as installed, violating rc-3-fail-loud-missing.)
     try {
       if (!existsSync(pdCodexDir)) {
         mkdirSync(pdCodexDir, { recursive: true });
@@ -240,6 +243,28 @@ export class CodexHostInstaller implements HostInstaller {
       const wrapperPath = path.join(pdCodexDir, 'pd-hook-entry.cjs');
       const wrapperContent = buildWrapperScriptContent(pdHookPath, ctx.workspaceDir);
       writeFileSync(wrapperPath, wrapperContent, { encoding: 'utf-8' });
+
+      // 3. Merge PD hook entries into ~/.codex/hooks.json (append, never overwrite).
+      //    If hooks.json is malformed, mergeHooksJson returns 'preserved' without
+      //    writing any PD entries. This MUST surface as a failure (rc-3 / rc-9)
+      //    — otherwise the user would see "install succeeded" while Codex never
+      //    triggers PD hooks. The marker is NOT written in this branch, so
+      //    detect() correctly reports "not installed".
+      const configAction = this.mergeHooksJson(hooksJsonPath, wrapperPath, ctx.workspaceDir);
+
+      if (configAction === 'preserved') {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configPath: hooksJsonPath,
+          configAction,
+          reason: `${hooksJsonPath} is malformed (not a JSON object). PD did not write any hook entries to avoid overwriting the user's config.`,
+          nextAction: `Manually fix ${hooksJsonPath} (must be a JSON object), then re-run: npx create-principles-disciple install --host codex`,
+        };
+      }
+
+      // 4. Merge succeeded — now safe to record the marker. detect() will
+      //    only report installed when hooks.json actually contains PD entries.
       writeFileSync(markerPath, JSON.stringify({
         installedAt: new Date().toISOString(),
         workspaceDir: ctx.workspaceDir,
@@ -247,9 +272,6 @@ export class CodexHostInstaller implements HostInstaller {
         wrapperPath,
         events: CODEX_EVENTS,
       }, null, 2), { encoding: 'utf-8' });
-
-      // 3. Merge PD hook entries into ~/.codex/hooks.json (append, never overwrite)
-      const configAction = this.mergeHooksJson(hooksJsonPath, wrapperPath, ctx.workspaceDir);
 
       return {
         success: true,

@@ -67,12 +67,18 @@ export function checkInstallStatus(): {
     { path: path.join(configDir, 'principles-disciple.json'), name: lang === 'zh' ? 'OpenClaw 配置文件' : 'OpenClaw config file', type: 'file' as const },
   ];
 
-  // Codex paths (ADR-0020)
+  // Codex paths (ADR-0020).
+  // NOTE: ~/.codex/hooks.json is intentionally NOT in this deletion set.
+  // It is a shared host config file — CodexHostInstaller.uninstall() removes
+  // only PD-owned entries (matched by __pd_marker) from it. If it were listed
+  // here, the generic delete loop below would delete the entire file,
+  // destroying the user's non-PD Codex hooks. Also, including it would make
+  // isInstalled=true for any user who merely has a hooks.json, even if PD
+  // was never installed.
   const pdCodexDir = path.join(os.homedir(), '.pd', 'codex');
   const codexPaths = [
     { path: path.join(pdCodexDir, 'pd-hooks.marker'), name: lang === 'zh' ? 'Codex 安装标记' : 'Codex install marker', type: 'file' as const },
     { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
-    { path: path.join(os.homedir(), '.codex', 'hooks.json'), name: lang === 'zh' ? 'Codex hooks.json' : 'Codex hooks.json', type: 'file' as const },
   ];
 
   const allPaths = [...openclawPaths, ...codexPaths];
