@@ -90,7 +90,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.79.4",
+    "@earendil-works/pi-agent-core": "^0.84.1",
     "@earendil-works/pi-ai": "^0.84.1",
     "@mariozechner/pi-ai": "^0.73.1",
     "@sinclair/typebox": "^0.34.48",
