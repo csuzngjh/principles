@@ -135,7 +135,8 @@ export class OpenClawHostInstaller implements HostInstaller {
         };
       }
 
-      const configObj = { ...(config as Record<string, unknown>) };
+      // rc-2: isRecord narrows config to Record<string, unknown> without `as` cast.
+      const configObj = isRecord(config) ? { ...config } : {};
 
       // Ensure plugins.allow includes principles-disciple
       if (!configObj.plugins) configObj.plugins = {};
@@ -234,26 +235,30 @@ export class OpenClawHostInstaller implements HostInstaller {
           installs = parsed;
         }
       }
-      if (!installs.installRecords || typeof installs.installRecords !== 'object') {
-        installs.installRecords = {};
-      }
+      // rc-2: isRecord narrows installRecords without `as` cast (ERR-001 recurrence).
+      // Replaces the prior `typeof !== 'object'` check — isRecord also rejects arrays,
+      // which the old check silently allowed through.
+      const installRecords: Record<string, unknown> = isRecord(installs.installRecords)
+        ? installs.installRecords
+        : {};
       const extDir = getPluginExtDir();
       const pkgPath = path.join(extDir, 'package.json');
       let version: string | undefined = undefined;
       if (existsSync(pkgPath)) {
         try {
           const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-          if (isRecord(pkg) && Object.hasOwn(pkg, 'version')) {
-            version = pkg.version as string;
+          if (isRecord(pkg) && Object.hasOwn(pkg, 'version') && typeof pkg.version === 'string') {
+            ({ version } = pkg);
           }
         } catch { /* ignore */ }
       }
-      (installs.installRecords as Record<string, unknown>)['principles-disciple'] = {
+      installRecords['principles-disciple'] = {
         source: 'path',
         installPath: extDir,
         ...(version ? { version } : {}),
         installedAt: new Date().toISOString(),
       };
+      installs.installRecords = installRecords;
       writeFileSync(installsPath, JSON.stringify(installs, null, 2));
     } catch {
       // Non-fatal — installs.json is managed by OpenClaw and will self-heal
@@ -291,7 +296,8 @@ export class OpenClawHostInstaller implements HostInstaller {
         };
       }
 
-      const configObj = config as Record<string, unknown>;
+      // rc-2: isRecord narrows without `as` cast.
+      const configObj = isRecord(config) ? config : {};
       let modified = false;
 
       if (isRecord(configObj.plugins)) {
