@@ -303,3 +303,142 @@
 - ❌ "这个 ADR 当时是 Accepted 的，应该实施"
 
 只有 **从外部用户来的真实信号** 才算触发。维护者自己的"洁癖驱动" / "完美主义驱动" 全部不满足触发条件。
+
+---
+
+## 18. Codex 价值最大化：7 条战略建议（GPT-5.6+ 时代）
+
+> **Source**: `docs/architecture/CODEX_CLI_ADAPTER_SPEC.md` §11.2
+> **Added**: 2026-08-11
+> **Context**: Codex MVP 适配（PRI-278~282）落地后，如何让 PD 借力 Codex 原生能力（Guardian / Memory 流水线 / Ultra reasoning / Subagent roles / Skills / Goals）发挥 GPT-5.6+ 模型最大价值。**这些策略全部默认 Hold，不纳入 MVP 工单。**
+
+### 18.1 Guardian 作为 PD principle 执行层
+
+**Hold reason**: MVP 阶段 PD 用 `PreToolUse` + `permissionDecision: "deny"` 自己 block；Guardian 集成需要验证 Codex Guardian API 稳定性和 `codex-auto-review` 模型质量。
+
+**重启条件**（**全部满足**才启动）:
+- [ ] Codex MVP 适配（PRI-278~282）已合并并运行 ≥ 1 个月
+- [ ] 至少 1 个种子客户反馈"PD block 的理由不够智能"或"想要更精细的审批策略"
+- [ ] Codex Guardian API 稳定（无 breaking change ≥ 2 个 minor 版本）
+- [ ] Spike 实验：用 `codex-auto-review` 模型对 ≥ 20 个真实 pain signal 审批，准确率 ≥ 85%
+
+**启动后预期收益**:
+- PD principle block 质量直接受益于 GPT-5.6 + `codex-auto-review` 模型升级
+- 借力 Guardian 熔断器（CyberModel policy 1 次就熔断）做高风险行为变更防护
+- 减少 PD 自有 LLM 调用开销
+
+**估时**: 1.5-2 周
+
+**关联**: SPEC §11.2 策略 1
+
+---
+
+### 18.2 借鉴 Memory 两阶段流水线重构 pain→principle pipeline
+
+**Hold reason**: MVP 用单阶段 EvolutionWorker（且 Codex 上需先解决长跑服务替代，见隐藏工单 A）。
+
+**重启条件**:
+- [ ] Codex MVP 适配已合并
+- [ ] 长跑服务替代方案（隐藏工单 A）已落地
+- [ ] 至少 1 个种子客户反馈"principle 提炼太慢"或"跨会话不记得之前的提炼"
+- [ ] Spike 实验：Codex Memory 两阶段流水线在 ≥ 50 个 rollout 上验证 pain→principle 转化质量
+
+**启动后预期收益**:
+- 解决 Codex 无长跑服务的根本缺口
+- principle 提炼蹭到 GPT-5.6 code_mode_only 优化
+- 架构与 Codex 原生对齐，减少维护成本
+
+**估时**: 2-3 周
+
+**关联**: SPEC §11.2 策略 2；隐藏工单 A
+
+---
+
+### 18.3 Ultra reasoning 4 智能体并行多维 pain 分析
+
+**Hold reason**: 单模型串行分析在 MVP 阶段够用；4-agent 并行需要验证 token 成本和聚合质量。
+
+**重启条件**:
+- [ ] 至少 1 个种子客户反馈"principle 提炼维度单一"或"漏判了某个维度"
+- [ ] `reasoning_effort: "ultra"` 在 ≥ 20 个真实 pain signal 上验证 token 成本可接受（< 3x 标准）
+- [ ] 4 个并行智能体的聚合策略通过 Spike 验证（语义/行为/历史/风险四维）
+
+**启动后预期收益**:
+- principle 提炼从"单模型串行 7 阶段"升级为"4 智能体并行多维"
+- 直接受益于 GPT-5.6 ultra reasoning 能力
+- 提炼质量显著提升
+
+**估时**: 1-1.5 周
+
+**关联**: SPEC §11.2 策略 3
+
+---
+
+### 18.4 PD peer-runners 映射 Codex subagent roles
+
+**Hold reason**: MVP 阶段 PD 的 7 个 peer-runner 通过 `PDRuntimeAdapter` 统一调用；role 映射需要验证 Codex role 配置灵活性。
+
+**重启条件**:
+- [ ] Codex MVP 适配已合并
+- [ ] 至少 1 个种子客户反馈"Diagnostician 用 mini 模型就够了"或"Artificer 需要更强模型"
+- [ ] Codex subagent role 系统支持自定义 role（验证 `core/src/agent/role.rs`）
+
+**启动后预期收益**:
+- 每个 peer-runner 用最合适的模型（Diagnostician=mini, Artificer=sol, Evaluator=terra）
+- 借力 Codex role 级 reasoning_effort / service_tier 配置
+- 降低 token 成本（mini 模型 30% 配额）
+
+**估时**: 1-1.5 周
+
+**关联**: SPEC §11.2 策略 4
+
+---
+
+### 18.5 PD 打包为 Codex Skill（第二分发渠道）
+
+**Hold reason**: MVP 阶段通过 plugin bundle 分发；Skill 分发需要验证 SkillMcpDependencyInstall 稳定性。
+
+**重启条件**:
+- [ ] Codex MVP 适配已合并并运行 ≥ 1 个月
+- [ ] 至少 1 个种子客户反馈"plugin bundle 安装太复杂"或"想要 @pd 直接调用"
+- [ ] Codex Skills API 稳定（无 breaking change ≥ 2 个 minor 版本）
+- [ ] PD 的 MCP 依赖（Linear/GitHub）通过 SkillMcpDependencyInstall 自动安装验证
+
+**启动后预期收益**:
+- 降低安装摩擦（skill 安装 vs plugin bundle 配置 + trust）
+- 蹭到 Codex skill 分发生态
+- 支持 `@pd` 隐式调用（MentionsV2 默认 ON）
+
+**估时**: 1 周
+
+**关联**: SPEC §11.2 策略 6
+
+---
+
+### 18.6 Goals 系统挂载 principle 长期演进
+
+**Hold reason**: MVP 阶段 principle 生命周期由 Ledger 管理；Goals 集成需要验证 Codex Goals API 稳定性。
+
+**重启条件**:
+- [ ] Codex MVP 适配已合并
+- [ ] 至少 1 个种子客户反馈"想看到 principle 的长期演进轨迹"或"principle 失败了但不知道卡在哪"
+- [ ] Codex Goals API 稳定（`ext/goal/` 无 breaking change）
+- [ ] Spike 实验：principle 激活时创建 Goal，验证 `blocked` 需要 3 次连续失败的语义是否符合 PD 需求
+
+**启动后预期收益**:
+- principle 生命周期挂载到 Codex 原生 Goals 系统
+- 借力 automatic goal continuation
+- `budget_limit_steering_item` 在预算耗尽时让 agent 主动总结沉淀
+
+**估时**: 1-1.5 周
+
+**关联**: SPEC §11.2 策略 7
+
+---
+
+### 18.7 Annual review 特别条款
+
+上述 7 条战略建议的触发条件**必须来自外部用户信号**，不得由维护者自行触发。每年 5 月 annual review 时，需额外检查：
+- Codex 是否有 breaking change 导致某条策略不再可行
+- 是否有新的 Codex 原生能力（如新 feature flag）可以借力
+- GPT-5.x 模型升级是否改变了某条策略的成本收益比
