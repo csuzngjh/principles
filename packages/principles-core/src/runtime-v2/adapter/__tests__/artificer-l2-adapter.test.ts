@@ -63,6 +63,12 @@ vi.mock('@earendil-works/pi-ai', () => ({
   getProviders: vi.fn(() => []),
 }));
 
+// streamSimple is imported from @earendil-works/pi-ai/compat by artificer-l2-adapter
+// and passed to the mocked runAgentLoop. Use the real implementation so other
+// compat exports (getProviders/getModel/completeSimple) used by resolveL2Model
+// remain intact — runAgentLoop is mocked, so streamSimple is never invoked.
+
+
 vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
@@ -257,7 +263,7 @@ describe('PRI-439 ArtificerL2Adapter — exhaustion (no fallback)', () => {
     await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/without a submit_rulecode call/);
 
     // No output stored for the failed run — fetchOutput returns null.
-    const runs = (adapter as unknown as { runs: Map<string, { output: unknown }> }).runs;
+    const {runs} = (adapter as unknown as { runs: Map<string, { output: unknown }> });
     expect(runs.size).toBe(1);
     for (const [, state] of runs) {
       expect(state.output).toBeNull();
@@ -274,7 +280,9 @@ describe('PRI-439 ArtificerL2Adapter — exhaustion (no fallback)', () => {
       (c: unknown[]) => (c[0] as { eventType: string }).eventType === 'artificer_l2_complete',
     );
     expect(completeCalls.length).toBe(1);
-    const payload = (completeCalls[0]![0] as { payload: { succeeded: boolean } }).payload;
+    const [firstCall] = completeCalls;
+    if (!firstCall) throw new Error('expected artificer_l2_complete call');
+    const {payload} = (firstCall[0] as { payload: { succeeded: boolean } });
     expect(payload.succeeded).toBe(false);
   });
 });
@@ -399,7 +407,9 @@ describe('PRI-439 ArtificerL2Adapter — telemetry', () => {
       (c: unknown[]) => (c[0] as { eventType: string }).eventType === 'artificer_l2_complete',
     );
     expect(completeCalls.length).toBe(1);
-    const payload = (completeCalls[0]![0] as { payload: { succeeded: boolean } }).payload;
+    const [firstCall] = completeCalls;
+    if (!firstCall) throw new Error('expected artificer_l2_complete call');
+    const {payload} = (firstCall[0] as { payload: { succeeded: boolean } });
     expect(payload.succeeded).toBe(true);
   });
 });
