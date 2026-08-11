@@ -45,6 +45,11 @@ import type { HostEvent, HostEventKind, HostEventResult } from '@principles/core
 /** Environment variable map (avoids NodeJS global namespace for ESLint). */
 type EnvMap = Record<string, string | undefined>;
 
+/** Type guard: narrows unknown to a mutable record (rc-2: no `as` bypass). */
+function isObjectPayload(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 // ─── Public entry (exported for testability) ────────────────────────────────
 export interface PdHookResult {
   /** stdout JSON to emit (object, will be JSON.stringify'd by the caller). */
@@ -108,11 +113,11 @@ export function processHookInvocation(
   }
 
   // ─── Inject workspace_dir (Codex does not pass it in the payload) ────────
-  if (typeof rawPayload === 'object' && rawPayload !== null && !Array.isArray(rawPayload)) {
-    const payload = rawPayload as Record<string, unknown>;
-    if (!Object.hasOwn(payload, 'workspace_dir')) {
+  // rc-2: use type guard instead of `as` cast to narrow JSON.parse result.
+  if (isObjectPayload(rawPayload)) {
+    if (!Object.hasOwn(rawPayload, 'workspace_dir')) {
       const ws = env.PD_WORKSPACE_DIR ?? process.cwd();
-      payload.workspace_dir = ws;
+      rawPayload.workspace_dir = ws;
     }
   }
 

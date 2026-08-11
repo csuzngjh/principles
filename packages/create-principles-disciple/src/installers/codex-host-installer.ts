@@ -49,7 +49,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isStringArray(value: unknown): value is unknown[] {
+function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
@@ -321,7 +321,7 @@ export class CodexHostInstaller implements HostInstaller {
       group.__pd_marker = PD_MARKER;
 
       const existingGroups = existing[eventName];
-      if (isStringArray(existingGroups)) {
+      if (isUnknownArray(existingGroups)) {
         // Filter out previously-PD-owned groups, then append the new one.
         // rc-2: no `as` bypass — use Object.hasOwn to check marker presence.
         const filtered: unknown[] = existingGroups.filter((g) =>
@@ -357,7 +357,7 @@ export class CodexHostInstaller implements HostInstaller {
 
           for (const eventName of CODEX_EVENTS) {
             const groups = config[eventName];
-            if (isStringArray(groups)) {
+            if (isUnknownArray(groups)) {
               const before = groups.length;
               // rc-2: use Object.hasOwn instead of `as` cast for marker check.
               const filtered: unknown[] = groups.filter((g) =>
@@ -454,7 +454,7 @@ export class CodexHostInstaller implements HostInstaller {
         if (isRecord(parsed)) {
           for (const eventName of CODEX_EVENTS) {
             const groups = parsed[eventName];
-            if (isStringArray(groups)) {
+            if (isUnknownArray(groups)) {
               const hasPd = groups.some((g) =>
                 isRecord(g) && Object.hasOwn(g, '__pd_marker') && g.__pd_marker === 'pd-owned',
               );
