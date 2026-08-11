@@ -84,25 +84,28 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function assertNoExtraFields(result: HostEventResult, allowedDecisionFields: readonly string[]): void {
+function assertNoExtraFields(result: HostEventResult): void {
   // The HostEventResult only has: decision, reason, modifiedInput,
   // additionalContext, source. We don't reject based on extra HostEventResult
   // fields (they are interpreted, not passed through), but we DO validate
   // that the values map cleanly to Codex's allowed fields.
+  //
+  // rc-9-no-silent-fallback: `modifiedInput` is not supported on ANY Codex
+  // event (Codex's output schema has no field for it). Previously this check
+  // was only in encodePreToolUse, silently dropping the value on other events.
+  // Now called from encodeCodexOutput before the switch, so all events fail
+  // loud instead of silently dropping.
   if (result.modifiedInput !== undefined) {
     throw new CodexEncoderError(
       `HostEventResult.modifiedInput is not supported on Codex (cannot rewrite tool input)`,
       'Codex PreToolUse supports `deny` (block) or `allow` (proceed); use `deny` + reason to block, or `allow` + additionalContext to advise.',
     );
   }
-  void allowedDecisionFields; // reserved for future per-decision field validation
 }
 
 // ─── Per-event encoders (declared before public encoder to satisfy
 //     @typescript-eslint/no-use-before-define) ────────────────────────────────
 function encodePreToolUse(result: HostEventResult): CodexPreToolUseOutput {
-  assertNoExtraFields(result, ['permissionDecision', 'reason', 'additionalContext', 'systemMessage']);
-
   const permissionDecision: 'allow' | 'deny' = result.decision === 'deny' ? 'deny' : 'allow';
 
   const output: CodexPreToolUseOutput = {
@@ -148,8 +151,14 @@ function encodeUserPromptSubmit(result: HostEventResult): CodexUserPromptSubmitO
   // uses `additionalContext` for prompt injection. If PD returns deny, we
   // translate it to a systemMessage + continue:true (cannot block prompt submit
   // without disrupting the agent loop).
+  //
+  // rc-9: merge with existing additionalContext instead of overwriting —
+  // previously `deny + reason` would silently replace the injected context.
   if (result.decision === 'deny' && result.reason !== undefined) {
-    output.additionalContext = `[PD] ${result.reason}`;
+    const denyNote = `[PD] ${result.reason}`;
+    output.additionalContext = result.additionalContext !== undefined
+      ? `${result.additionalContext}\n${denyNote}`
+      : denyNote;
   }
 
   return output;
@@ -198,6 +207,10 @@ export function encodeCodexOutput(result: HostEventResult, kind: string): CodexH
       'Drop additionalContext or supply non-empty injection text.',
     );
   }
+
+  // rc-9-no-silent-fallback: validate no unsupported fields before encoding.
+  // Called here (not per-encoder) so ALL event kinds check modifiedInput.
+  assertNoExtraFields(result);
 
   switch (kind) {
     case 'before_tool_call':

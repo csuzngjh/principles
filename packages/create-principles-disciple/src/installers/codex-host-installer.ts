@@ -53,6 +53,18 @@ function isUnknownArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
 
+/**
+ * Type guard: extracts `.code` from a thrown error without `as NodeJS.ErrnoException`.
+ * ESLint `no-undef` flags the `NodeJS` namespace; this helper avoids it.
+ */
+function getErrorCode(err: unknown): string | undefined {
+  if (err !== null && typeof err === 'object' && Object.hasOwn(err, 'code')) {
+    const { code } = err as { code?: unknown };
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+}
+
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getCodexDir(): string {
   return path.join(os.homedir(), '.codex');
@@ -313,18 +325,23 @@ export class CodexHostInstaller implements HostInstaller {
     let existing: Record<string, unknown> = {};
     let action: 'created' | 'updated' | 'preserved' = 'created';
 
-    if (existsSync(hooksJsonPath)) {
-      try {
-        const raw = readFileSync(hooksJsonPath, 'utf-8');
-        const parsed: unknown = JSON.parse(raw);
-        if (isRecord(parsed)) {
-          existing = { ...parsed };
-          action = 'updated';
-        } else {
-          // Malformed — back off, don't overwrite
-          action = 'preserved';
-        }
-      } catch {
+    // CodeQL TOCTOU fix: try/catch read instead of existsSync+readFileSync.
+    // ENOENT → 'created' (file doesn't exist yet); other parse errors → 'preserved'.
+    try {
+      const raw = readFileSync(hooksJsonPath, 'utf-8');
+      const parsed: unknown = JSON.parse(raw);
+      if (isRecord(parsed)) {
+        existing = { ...parsed };
+        action = 'updated';
+      } else {
+        // Malformed — back off, don't overwrite
+        action = 'preserved';
+      }
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (code === 'ENOENT') {
+        // File doesn't exist — 'created' (default action stays)
+      } else {
         // Malformed JSON — back off
         action = 'preserved';
       }
@@ -367,39 +384,43 @@ export class CodexHostInstaller implements HostInstaller {
     const removedPaths: string[] = [];
     const preservedPaths: string[] = [];
 
-    // 1. Remove PD-owned entries from hooks.json
-    if (existsSync(hooksJsonPath)) {
-      try {
-        const raw = readFileSync(hooksJsonPath, 'utf-8');
-        const parsed: unknown = JSON.parse(raw);
-        if (isRecord(parsed)) {
-          const config = { ...parsed };
-          let modified = false;
-          const PD_MARKER = 'pd-owned';
+    // 1. Remove PD-owned entries from hooks.json.
+    //    CodeQL TOCTOU fix: try/catch read instead of existsSync+readFileSync.
+    try {
+      const raw = readFileSync(hooksJsonPath, 'utf-8');
+      const parsed: unknown = JSON.parse(raw);
+      if (isRecord(parsed)) {
+        const config = { ...parsed };
+        let modified = false;
+        const PD_MARKER = 'pd-owned';
 
-          for (const eventName of CODEX_EVENTS) {
-            const groups = config[eventName];
-            if (isUnknownArray(groups)) {
-              const before = groups.length;
-              // rc-2: use Object.hasOwn instead of `as` cast for marker check.
-              const filtered: unknown[] = groups.filter((g) =>
-                !(isRecord(g) && Object.hasOwn(g, '__pd_marker') && g.__pd_marker === PD_MARKER),
-              );
-              if (filtered.length === 0) {
-                delete config[eventName];
-              } else {
-                config[eventName] = filtered;
-              }
-              if (filtered.length !== before) modified = true;
+        for (const eventName of CODEX_EVENTS) {
+          const groups = config[eventName];
+          if (isUnknownArray(groups)) {
+            const before = groups.length;
+            // rc-2: use Object.hasOwn instead of `as` cast for marker check.
+            const filtered: unknown[] = groups.filter((g) =>
+              !(isRecord(g) && Object.hasOwn(g, '__pd_marker') && g.__pd_marker === PD_MARKER),
+            );
+            if (filtered.length === 0) {
+              delete config[eventName];
+            } else {
+              config[eventName] = filtered;
             }
-          }
-
-          if (modified) {
-            writeFileSync(hooksJsonPath, JSON.stringify(config, null, 2), { encoding: 'utf-8' });
-            removedPaths.push(hooksJsonPath);
+            if (filtered.length !== before) modified = true;
           }
         }
-      } catch {
+
+        if (modified) {
+          writeFileSync(hooksJsonPath, JSON.stringify(config, null, 2), { encoding: 'utf-8' });
+          removedPaths.push(hooksJsonPath);
+        }
+      }
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (code === 'ENOENT') {
+        // hooks.json not found — nothing to clean, proceed to marker cleanup.
+      } else {
         // Malformed hooks.json — can't safely merge. Leave it alone.
         preservedPaths.push(hooksJsonPath);
       }

@@ -1306,16 +1306,29 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
+    // rc-9 propagation: if ANY host installer failed, the aggregate install
+    // result is NOT successful — callers (CLI, tests) must see the failure.
+    // Previously failures were only logged, leaving `success: true` even when
+    // a host adapter failed to install (silent failure).
+    const hostFailures: string[] = [];
     for (const hr of hostResults) {
       if (!hr.success) {
-        logger.warn(`Host "${hr.hostId}" install: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction}`);
+        const msg = `Host "${hr.hostId}": ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction}`;
+        hostFailures.push(msg);
+        logger.warn(msg);
       } else if (hr.configAction === 'skipped') {
         logger.info(`Host "${hr.hostId}" install: ${hr.reason ?? 'skipped'}. Next: ${hr.nextAction}`);
       }
     }
 
     cleanupBackup(backupDir);
-    if (spinner) spinner.succeed('Install complete!');
+    if (spinner) {
+      if (hostFailures.length > 0) {
+        spinner.warn('Install complete with host warnings');
+      } else {
+        spinner.succeed('Install complete!');
+      }
+    }
 
     killConsoleChild();
 
@@ -1327,6 +1340,10 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
+    // A host installer failure means the install is not fully successful,
+    // even if all component verifications passed. The operator should see
+    // success=false and be guided to fix the failed host.
+    const hasHostFailures = hostFailures.length > 0;
     const nextActions: string[] = [];
     if (components.cli === 'verified') {
       nextActions.push(`pd runtime canary --workspace "${options.workspaceDir}" --json`);
@@ -1345,9 +1362,11 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (launchResult.fallbackAction) {
       nextActions.push(launchResult.fallbackAction);
     }
+    // Append host-failure remediation actions so the operator knows what to fix.
+    nextActions.push(...hostFailures);
 
     return {
-      success: isComplete,
+      success: isComplete && !hasHostFailures,
       workspaceDir: options.workspaceDir,
       configYamlPath,
       templatesCount: templatesCount + principlesCount,

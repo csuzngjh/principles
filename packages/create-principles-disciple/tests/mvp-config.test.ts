@@ -1142,6 +1142,31 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
   });
 
+  // Regression (CodeRabbit #3758794660, rc-9): HostInstaller failures MUST
+  // propagate to the aggregate InstallResult.success. Previously failures
+  // were only logged, leaving success:true even when a host adapter failed.
+  it('propagates host installer failures to aggregate success (rc-9)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    // The return statement must include `!hasHostFailures` in the success field
+    const returnBlock = content.substring(
+      content.indexOf('return {'),
+      content.indexOf('} catch (error)'),
+    );
+    // Find the success line in the return block
+    expect(returnBlock).toContain('!hasHostFailures');
+    // hostFailures must be populated from hr.success === false
+    expect(content).toContain('hostFailures.push');
+    // hostFailures must be appended to nextActions
+    expect(content).toContain('nextActions.push(...hostFailures)');
+  });
+
+  it('spinner shows warning when host failures occur', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain("spinner.warn('Install complete with host warnings')");
+  });
+
   it('catch block kills console child process', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');

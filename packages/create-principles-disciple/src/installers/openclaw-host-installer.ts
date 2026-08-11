@@ -37,6 +37,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Type guard: extracts `.code` from a thrown error without `as NodeJS.ErrnoException`.
+ * ESLint `no-undef` flags the `NodeJS` namespace; this helper avoids it.
+ */
+function getErrorCode(err: unknown): string | undefined {
+  if (err !== null && typeof err === 'object' && Object.hasOwn(err, 'code')) {
+    const { code } = err as { code?: unknown };
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+}
+
+/**
  * PRI-343: Pure function — deep-merges allowConversationAccess: true into
  * the openclaw.json config without mutating the input.
  *
@@ -94,22 +106,28 @@ export class OpenClawHostInstaller implements HostInstaller {
     const configDir = getOpenClawDir();
     const configPath = path.join(configDir, 'openclaw.json');
 
-    // No openclaw.json — nothing to merge into. The OpenClaw gateway creates
-    // this file on first run; if it doesn't exist, PD's config is inert until
-    // the gateway starts. This is not an error — report as skipped.
-    if (!existsSync(configPath)) {
-      return {
-        success: true,
-        hostId: this.hostId,
-        configPath,
-        configAction: 'skipped',
-        reason: 'openclaw.json does not exist yet — PD plugin entries will be registered when OpenClaw gateway first starts.',
-        nextAction: `Start OpenClaw gateway (openclaw gateway start), then verify: openclaw plugin list`,
-      };
+    // CodeQL TOCTOU fix: use try/catch read instead of existsSync+readFileSync.
+    // The OpenClaw gateway creates openclaw.json on first run; if it doesn't
+    // exist, PD's config is inert until the gateway starts. Not an error.
+    let rawConfig: string;
+    try {
+      rawConfig = readFileSync(configPath, 'utf-8');
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (code === 'ENOENT') {
+        return {
+          success: true,
+          hostId: this.hostId,
+          configPath,
+          configAction: 'skipped',
+          reason: 'openclaw.json does not exist yet — PD plugin entries will be registered when OpenClaw gateway first starts.',
+          nextAction: `Start OpenClaw gateway (openclaw gateway start), then verify: openclaw plugin list`,
+        };
+      }
+      throw err;
     }
 
     try {
-      const rawConfig = readFileSync(configPath, 'utf-8');
       const config: unknown = JSON.parse(rawConfig);
 
       const validation = validateOpenClawConfig(config);
@@ -224,15 +242,22 @@ export class OpenClawHostInstaller implements HostInstaller {
     const installsDir = path.join(configDir, 'plugins');
     const installsPath = path.join(installsDir, 'installs.json');
     try {
+      // CodeQL TOCTOU fix: mkdirSync is idempotent (no pre-check needed);
+      // readFileSync uses try/catch instead of existsSync+read.
       if (!existsSync(installsDir)) {
         mkdirSync(installsDir, { recursive: true });
       }
       let installs: Record<string, unknown> = { version: 1, installRecords: {} };
-      if (existsSync(installsPath)) {
+      try {
         const raw = readFileSync(installsPath, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
         if (isRecord(parsed)) {
           installs = parsed;
+        }
+      } catch (err) {
+        const code = getErrorCode(err);
+        if (code !== 'ENOENT') {
+          // Malformed JSON — skip merge, will overwrite below
         }
       }
       // rc-2: isRecord narrows installRecords without `as` cast (ERR-001 recurrence).
@@ -244,14 +269,12 @@ export class OpenClawHostInstaller implements HostInstaller {
       const extDir = getPluginExtDir();
       const pkgPath = path.join(extDir, 'package.json');
       let version: string | undefined = undefined;
-      if (existsSync(pkgPath)) {
-        try {
-          const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-          if (isRecord(pkg) && Object.hasOwn(pkg, 'version') && typeof pkg.version === 'string') {
-            ({ version } = pkg);
-          }
-        } catch { /* ignore */ }
-      }
+      try {
+        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (isRecord(pkg) && Object.hasOwn(pkg, 'version') && typeof pkg.version === 'string') {
+          ({ version } = pkg);
+        }
+      } catch { /* ignore — ENOENT or malformed package.json */ }
       installRecords['principles-disciple'] = {
         source: 'path',
         installPath: extDir,
@@ -271,18 +294,25 @@ export class OpenClawHostInstaller implements HostInstaller {
     const removedPaths: string[] = [];
     const preservedPaths: string[] = [];
 
-    if (!existsSync(configPath)) {
-      return {
-        success: true,
-        hostId: this.hostId,
-        removedPaths,
-        preservedPaths,
-        nextAction: 'openclaw.json not found — nothing to clean.',
-      };
+    // CodeQL TOCTOU fix: try/catch read instead of existsSync+readFileSync.
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, 'utf-8');
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (code === 'ENOENT') {
+        return {
+          success: true,
+          hostId: this.hostId,
+          removedPaths,
+          preservedPaths,
+          nextAction: 'openclaw.json not found — nothing to clean.',
+        };
+      }
+      throw err;
     }
 
     try {
-      const raw = readFileSync(configPath, 'utf-8');
       const config: unknown = JSON.parse(raw);
 
       if (config === null || typeof config !== 'object' || Array.isArray(config)) {

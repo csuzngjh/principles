@@ -196,6 +196,37 @@ describe('CodexHooksHostAdapter', () => {
       expect(() => adapter.encodeOutput(bad, 'before_tool_call')).toThrow(/modifiedInput/);
     });
 
+    // Regression (CodeRabbit #3758794602, rc-9): assertNoExtraFields MUST be
+    // called for ALL event kinds, not just PreToolUse. Previously
+    // modifiedInput was silently dropped on PostToolUse/UserPromptSubmit/
+    // SessionStart because the check only lived in encodePreToolUse.
+    it('rejects modifiedInput on PostToolUse (rc-9: no silent drop)', () => {
+      const bad: HostEventResult = {
+        decision: 'modify',
+        modifiedInput: { foo: 'bar' },
+        source: 'codex:posttooluse',
+      };
+      expect(() => adapter.encodeOutput(bad, 'after_tool_call')).toThrow(/modifiedInput/);
+    });
+
+    it('rejects modifiedInput on UserPromptSubmit (rc-9: no silent drop)', () => {
+      const bad: HostEventResult = {
+        decision: 'modify',
+        modifiedInput: { prompt: 'safe' },
+        source: 'codex:userpromptsubmit',
+      };
+      expect(() => adapter.encodeOutput(bad, 'before_prompt_build')).toThrow(/modifiedInput/);
+    });
+
+    it('rejects modifiedInput on SessionStart (rc-9: no silent drop)', () => {
+      const bad: HostEventResult = {
+        decision: 'modify',
+        modifiedInput: { state: 'init' },
+        source: 'codex:sessionstart',
+      };
+      expect(() => adapter.encodeOutput(bad, 'session_start')).toThrow(/modifiedInput/);
+    });
+
     it('requires non-empty reason for deny', () => {
       const bad: HostEventResult = {
         decision: 'deny',
@@ -248,6 +279,23 @@ describe('CodexHooksHostAdapter', () => {
       };
       const out = adapter.encodeOutput(result, 'before_prompt_build') as { additionalContext: string };
       expect(out.additionalContext).toContain('prompt looks unsafe');
+    });
+
+    // Regression (CodeRabbit #3758794608, rc-9): deny + reason MUST merge with
+    // existing additionalContext, not overwrite it. Previously the deny branch
+    // would silently replace the injected context with just `[PD] ${reason}`.
+    it('merges deny+reason with existing additionalContext (not overwrite)', () => {
+      const result: HostEventResult = {
+        decision: 'deny',
+        reason: 'prompt looks unsafe',
+        additionalContext: 'Remember: never delete /etc',
+        source: 'codex:userpromptsubmit',
+      };
+      const out = adapter.encodeOutput(result, 'before_prompt_build') as { additionalContext: string };
+      // Both must be present — the injected context must NOT be silently dropped.
+      expect(out.additionalContext).toContain('Remember: never delete /etc');
+      expect(out.additionalContext).toContain('prompt looks unsafe');
+      expect(out.additionalContext).toContain('[PD]');
     });
   });
 
