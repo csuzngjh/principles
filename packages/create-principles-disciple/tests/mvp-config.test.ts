@@ -1113,25 +1113,58 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
   it('installer.ts throws on story-a failure (not skipped)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('updateOpenClawConfig'));
+    // Boundary must use the call site ('await runHostInstallers('), not the
+    // function declaration. indexOf('runHostInstallers') matches the function
+    // declaration which appears BEFORE 'story-a' in the file, so substring
+    // would swap the args and extract the wrong range — silently breaking the
+    // assertion (EP-09 Test Reality Gap: test passes on unintended path).
+    const storyASection = content.substring(
+      content.indexOf('story-a'),
+      content.indexOf('await runHostInstallers('),
+    );
     expect(storyASection).toContain('throw new Error');
     expect(storyASection).not.toContain("verification.storyA = 'skipped'");
   });
 
-  it('updateOpenClawConfig runs after all verification', () => {
+  it('runHostInstallers runs after all verification', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const storyALastIndex = content.lastIndexOf("verification.storyA = 'passed'");
-    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
-    expect(updateConfigIndex).toBeGreaterThan(storyALastIndex);
+    const hostInstallersIndex = content.indexOf('await runHostInstallers(');
+    expect(hostInstallersIndex).toBeGreaterThan(storyALastIndex);
   });
 
-  it('cleanupBackup runs after updateOpenClawConfig', () => {
+  it('cleanupBackup runs after runHostInstallers', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
+    const hostInstallersIndex = content.indexOf('await runHostInstallers(');
     const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
-    expect(cleanupIndex).toBeGreaterThan(updateConfigIndex);
+    expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
+  });
+
+  // Regression (CodeRabbit #3758794660, rc-9): HostInstaller failures MUST
+  // propagate to the aggregate InstallResult.success. Previously failures
+  // were only logged, leaving success:true even when a host adapter failed.
+  it('propagates host installer failures to aggregate success (rc-9)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    // The return statement must include `!hasHostFailures` in the success field
+    const returnBlock = content.substring(
+      content.indexOf('return {'),
+      content.indexOf('} catch (error)'),
+    );
+    // Find the success line in the return block
+    expect(returnBlock).toContain('!hasHostFailures');
+    // hostFailures must be populated from hr.success === false
+    expect(content).toContain('hostFailures.push');
+    // hostFailures must be appended to nextActions
+    expect(content).toContain('nextActions.push(...hostFailures)');
+  });
+
+  it('spinner shows warning when host failures occur', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain("spinner.warn('Install complete with host warnings')");
   });
 
   it('catch block kills console child process', () => {

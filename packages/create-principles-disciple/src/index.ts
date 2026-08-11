@@ -13,6 +13,7 @@ import {
   buildFailureOutput,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
+import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
 
 export { isLanguage } from './i18n.js';
 
@@ -53,6 +54,23 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   setLanguage(options.lang);
 
+  // ADR-0020 §2.3: Validate --host value. Default is 'openclaw' for backward compat.
+  const rawHost = typeof options.host === 'string' ? options.host : 'openclaw';
+  if (!isHostTarget(rawHost)) {
+    if (jsonMode) {
+      console.log(JSON.stringify(buildFailureOutput(
+        'invalid_host',
+        `--host must be one of: ${HOST_TARGETS.join(', ')}. Got: ${JSON.stringify(rawHost)}. Next: re-run with --host openclaw (or --host codex / --host all)`,
+      ), null, 2));
+    } else {
+      logger.error(`--host must be one of: ${HOST_TARGETS.join(', ')}. Got: ${JSON.stringify(rawHost)}`);
+      logger.info(`Next: re-run with --host openclaw (or --host codex / --host all)`);
+    }
+    process.exit(1);
+    return;
+  }
+  const host: HostTarget = rawHost;
+
   if (jsonMode) {
     setQuietMode(true);
   }
@@ -78,23 +96,30 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     logger.success(`Node.js ${env.nodeVersion}`);
   }
 
-  if (!env.hasOpenClaw) {
+  // ADR-0020: OpenClaw check is only required when host includes 'openclaw'.
+  // For --host codex, the operator may not have OpenClaw installed at all.
+  const needsOpenClaw = host === 'openclaw' || host === 'all';
+  if (needsOpenClaw && !env.hasOpenClaw) {
     if (jsonMode) {
       console.log(JSON.stringify(buildFailureOutput(
         'openclaw_not_found',
-        `${t('openclaw_required')} ${t('openclaw_install_hint')} | ${t('next_action')}: ${t('openclaw_rerun_hint')}`,
+        `${t('openclaw_required')} ${t('openclaw_install_hint')} | ${t('next_action')}: ${t('openclaw_rerun_hint')} or use --host codex to skip OpenClaw`,
       ), null, 2));
     } else {
       logger.error(`\u274C ${t('openclaw_required')}`);
       logger.info(`   ${t('openclaw_install_hint')}`);
-      logger.info(`   ${t('next_action')}: ${t('openclaw_rerun_hint')}`);
+      logger.info(`   ${t('next_action')}: ${t('openclaw_rerun_hint')} or use --host codex to skip OpenClaw`);
     }
     process.exit(1);
     return;
   }
 
-  if (!jsonMode) {
+  if (!jsonMode && needsOpenClaw) {
     logger.success(`OpenClaw ${env.openclawVersion}`);
+  }
+
+  if (!jsonMode && host === 'codex') {
+    logger.info(`Host: Codex CLI (OpenClaw not required)`);
   }
 
   if (jsonMode && !options.yes && !options.nonInteractive) {
@@ -106,6 +131,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const cliOptions: Partial<InstallOptions> = {
     language: options.lang,
     workspaceDir: typeof options.workspace === 'string' ? options.workspace : undefined,
+    host,
   };
 
   if (options.force) {
@@ -193,6 +219,8 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
         channels: [...MVP_CHANNELS],
         overwriteConfig: false,
+        // ADR-0020 §2.3: propagate validated host target into install options.
+        host,
         runtimeProfile: cliOptions.runtimeProfile,
       }
     : await runPrompts(cliOptions, workspaceInfo);
@@ -307,14 +335,26 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
     return;
   }
   setLanguage(options.lang);
+
+  // ADR-0020 §2.3: validate --host (default 'all' for uninstall).
+  const rawHost = typeof options.host === 'string' ? options.host : 'all';
+  if (!isHostTarget(rawHost)) {
+    logger.error(`--host must be one of: ${HOST_TARGETS.join(', ')}. Got: ${JSON.stringify(rawHost)}`);
+    logger.info(`Next: re-run with --host openclaw (or --host codex / --host all)`);
+    process.exit(1);
+    return;
+  }
+  const host: HostTarget = rawHost;
+
   console.log(banner);
   console.log();
 
-  logger.info('Preparing to uninstall Principles Disciple...\n');
+  logger.info(`Preparing to uninstall Principles Disciple (host: ${host})...\n`);
 
   const result = await uninstall({
     force: options.force === true,
     lang: options.lang,
+    host,
   });
 
   if (!result.success) {
@@ -381,6 +421,8 @@ program
   .option('--provider <provider>', 'LLM provider for pd.default profile (openai/anthropic/deepseek). Enables non-interactive runtime profile config.')
   .option('--api-key-env <name>', 'Environment variable name holding the LLM API key (e.g. OPENAI_API_KEY). Requires --provider.')
   .option('--model <model>', 'LLM model id (optional; sensible default per provider if omitted)')
+  // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
+  .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
   .action(async (options) => {
     await runInstall(options);
   });
@@ -392,6 +434,9 @@ program
   .description('Uninstall Principles Disciple (preserves user data)')
   .option('-f, --force', 'Force uninstall without confirmation', false)
   .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
+  // ADR-0020 §2.3: host-scoped uninstall. Default 'all' cleans every host
+  // PD ever registered with. Operators can scope to one host via --host codex.
+  .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'all')
   .action(async (options) => {
     await runUninstall(options);
   });

@@ -264,3 +264,36 @@ export type {
 // PD Config — context injection types re-exported for openclaw-plugin consumers
 export type { ContextInjectionConfig, EvolutionContextConfig, ProjectFocusMode } from './runtime-v2/config/index.js';
 export { DEFAULT_CONTEXT_INJECTION } from './runtime-v2/config/index.js';
+
+// Host Adapter — Multi-platform host abstraction (ADR-0020 §2.2, §2.3)
+// Pure types + type guards. No I/O. Import from '@principles/core/host' for
+// the dedicated subpath, or from '@principles/core' for the barrel export.
+// Two abstractions: HostAdapter (runtime hooks) + HostInstaller (install lifecycle).
+export type {
+  HostEventKind,
+  HostEventContext,
+  HostEvent,
+  HostDecision,
+  HostEventResult,
+  HostAdapter,
+  HostInstallContext,
+  HostRuntimeProfileInput,
+  HostUninstallContext,
+  HostConfigAction,
+  HostInstallResult,
+  HostUninstallResult,
+  HostDetectResult,
+  HostDetectPath,
+  HostInstaller,
+} from './host/index.js';
+export {
+  HOST_EVENT_KINDS,
+  isHostEventKind,
+  isHostDecision,
+  isHostEventContext,
+  isHostEvent,
+  isHostEventResult,
+  isHostConfigAction,
+  isHostInstallResult,
+  isHostUninstallResult,
+} from './host/index.js';

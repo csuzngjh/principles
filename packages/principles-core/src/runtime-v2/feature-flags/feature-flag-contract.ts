@@ -187,6 +187,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // painCoverage / compressionFidelity to evaluator output. Default off;
   // flag-off = single-stage evaluation (current behavior).
   { id: 'progressive_evaluator', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 2 — two-stage evaluation with flagged criteria + painCoverage/compressionFidelity output fields. Default off; flag-off = single-stage evaluation unchanged.' },
+  // ADR-0020: Codex CLI host adapter. The adapter ships dark — hooks output {} + exit 0
+  // when this flag is off. Flip to true only after PRI-282 E2E validation passes on pinned
+  // Codex version >= 0.124.0. Roll back = set enabled: false in .pd/config.yaml.
+  // The abstraction_layer_v1 flag is NOT registered in MVP (OpenClaw refactor deferred).
+  { id: 'host.codex', category: 'quiet', enabled: false, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default off; flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Flip to true after PRI-282 E2E passes.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
