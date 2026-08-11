@@ -1012,6 +1012,10 @@ describe('EvidenceChainConsoleModel — PRI-340 human-readable fields', () => {
 // ── PRI-380: Evidence chain lineage join with Runtime V2 task IDs ─────────────
 
 describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => {
+  // NOTE: the test below seeds 308 filler pain_events before the one under
+  // test, so the evidence-chain join legitimately takes ~2-3.5s on CI. The
+  // vitest default 5000ms timeout is too tight (observed flaking just over
+  // the boundary); 15s gives comfortable headroom without masking hangs.
   it('links pain_309 to diagnosis_manual_* task via input_ref, surfaces candidate and dreamer pending', async () => {
     const trajDb = createTrajectoryDb();
     // Simulate pain_events with auto-increment id = 309
@@ -1059,7 +1063,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     expect(record!.confidence).toBe(0.85);
     // Dreamer pending should be reflected
     expect(record!.dreamerTaskStatus).toBe('pending');
-  });
+  }, 15000);
 
   it('falls back to timestamp cross-reference and retrieves candidate via candidateByTaskId', async () => {
     const trajDb = createTrajectoryDb();
