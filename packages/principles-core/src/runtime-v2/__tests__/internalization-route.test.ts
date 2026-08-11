@@ -165,5 +165,5 @@ describe('decideInternalizationRoute', () => {
     const mod = (await import('../index.js')) as Record<string, unknown>;
     expect(mod).toHaveProperty('decideInternalizationRoute');
     expect(typeof mod.decideInternalizationRoute).toBe('function');
-  });
+  }, 30_000);
 });

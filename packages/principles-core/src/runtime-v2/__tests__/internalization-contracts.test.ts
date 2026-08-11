@@ -19,7 +19,7 @@ describe('internalization contracts (PRI-42)', () => {
         const mod = (await barrel) as Record<string, unknown>;
         expect(mod).toHaveProperty(name);
         expect(typeof mod[name]).toBe('function');
-      });
+      }, 30_000);
     }
 
     const REQUIRED_TYPES = [

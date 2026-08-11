@@ -34,7 +34,7 @@
  */
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
-import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai/compat';
+import { getModel, getProviders, completeSimple, streamSimple } from '@earendil-works/pi-ai/compat';
 import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai/compat';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
@@ -399,6 +399,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
           loopConfig,
           async (event: AgentEvent) => { void event; },
           abortController.signal,
+          streamSimple,
         );
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);

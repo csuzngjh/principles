@@ -53,6 +53,7 @@ vi.mock('@earendil-works/pi-agent-core', () => ({
 // in all tests (via the custom baseUrl path), so provide stubs.
 vi.mock('@earendil-works/pi-ai/compat', () => ({
   completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
   getModel: vi.fn(() => ({ id: 'test', name: 'test', api: 'openai-completions', provider: 'test-provider' })),
   getProviders: vi.fn(() => []),
 }));
