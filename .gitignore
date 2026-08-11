@@ -115,6 +115,7 @@ myagents/
 .kiro
 # AI tool state and temp files
 .tmp-trainer/
+.tmp-linear-comments/
 .bg-shell/
 .greptile/
 

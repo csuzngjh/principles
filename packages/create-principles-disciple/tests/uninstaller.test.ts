@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as fse from 'fs-extra';
+import * as path from 'path';
 import { isPdOwnedShim, checkInstallStatus } from '../src/uninstaller.js';
 import { getInstalledBinDir, isWindows } from '../src/mvp-config.js';
 
@@ -110,5 +111,35 @@ describe('checkInstallStatus', () => {
 
     expect(result.paths.some(p => p.exists && p.path.includes('extension'))).toBe(true);
     expect(result.paths.some(p => !p.exists && p.path.includes('principles-disciple.json'))).toBe(true);
+  });
+
+  // Regression (CodeRabbit PR #1298 finding): ~/.codex/hooks.json MUST NOT
+  // appear in the deletion paths. It is a shared host config file whose PD
+  // entries are cleaned by CodexHostInstaller.uninstall() via __pd_marker
+  // filtering. If listed here, the generic delete loop would delete the entire
+  // file, destroying the user's non-PD Codex hooks (data loss).
+  it('does NOT include ~/.codex/hooks.json in deletion paths', () => {
+    mockExistsSync.mockReturnValue(true);
+
+    const result = checkInstallStatus();
+
+    const hooksJsonEntry = result.paths.find(p => p.path.endsWith('.codex') && p.path.includes('hooks.json'));
+    expect(hooksJsonEntry).toBeUndefined();
+    // Sanity: the path must not appear anywhere in the paths list
+    expect(result.paths.some(p => p.path.includes(path.join('.codex', 'hooks.json')))).toBe(false);
+  });
+
+  // Regression: a user who merely has ~/.codex/hooks.json (but never installed
+  // PD) must NOT be reported as "installed" — that would launch the delete
+  // loop against hooks.json. isInstalled must key off PD-owned markers only.
+  it('isInstalled is false when only ~/.codex/hooks.json exists (no PD markers)', () => {
+    mockExistsSync.mockImplementation((p) => {
+      // Only hooks.json exists — no PD marker, no wrapper, no OpenClaw files
+      return p.toString().includes(path.join('.codex', 'hooks.json'));
+    });
+
+    const result = checkInstallStatus();
+
+    expect(result.isInstalled).toBe(false);
   });
 });
