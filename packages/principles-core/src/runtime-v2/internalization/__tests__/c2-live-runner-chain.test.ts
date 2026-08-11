@@ -158,6 +158,12 @@ async function walkFullChain(
   let currentTaskId = dreamerTaskId;
   const actualChain: string[] = ['dreamer'];
 
+  // Derive the channel from the seeded dreamer taskId (dreamer-<cand>-<channel>)
+  // so the regression assertion below works for both prompt and code_tool_hook
+  // channels without a separate parameter.
+  const dreamerSegments = dreamerTaskId.split('-');
+  const channel = dreamerSegments[dreamerSegments.length - 1];
+
   for (let i = 0; i < EXPECTED_CHAIN.length - 1; i++) {
     const expectedNextKind = EXPECTED_CHAIN[i + 1];
     if (!expectedNextKind) {
@@ -175,6 +181,21 @@ async function walkFullChain(
     const actualSuccessor = await readActualSuccessor(stateManager, commitResult.successorTaskId);
     expect(actualSuccessor.taskKind).toBe(expectedNextKind);
     expect(actualSuccessor.status).toBe('pending');
+
+    // Regression guard (acceptance 2026-08-11): the channel suffix MUST NOT
+    // accumulate across the peer-runner chain. Every successor taskId derives
+    // its root from the same correlationId (candidateId), so the channel
+    // segment `-<channel>` appears EXACTLY ONCE at the tail, regardless of how
+    // many hops deep we are. Before the fix, scribe ids looked like
+    // `scribe-philosopher-dreamer-<cand>-prompt-prompt-prompt` (3× channel),
+    // which broke the scribe/evaluator output validators (taskId mismatch).
+    const successorId = commitResult.successorTaskId;
+    const duplicated = `-${channel}-${channel}`;
+    expect(successorId).not.toContain(duplicated);
+    // Defensive invariant: a task id must never contain the literal "-undefined"
+    // segment, even if some future code path reaches the successor construction
+    // with an absent channel.
+    expect(successorId).not.toContain('-undefined');
 
     actualChain.push(actualSuccessor.taskKind);
     currentTaskId = commitResult.successorTaskId;

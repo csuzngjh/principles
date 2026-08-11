@@ -28,6 +28,25 @@ import {
 import { getDiagSuccessors } from './internalization-job-graph.js';
 import { PDRuntimeError } from '../error-categories.js';
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Strip a trailing `-<channel>` segment from a task id so that re-appending
+ * `-${channel}` does not accumulate duplicates.
+ *
+ * Used as a fallback when proposal.correlationId is unavailable (e.g. legacy
+ * diagnostician-chain seeds). Example: `dreamer-cand-1-prompt` + channel
+ * `prompt` → `dreamer-cand-1`.
+ *
+ * Guarded: only strips when the suffix EXACTLY matches the channel, so task ids
+ * that merely contain the channel substring elsewhere are left intact.
+ */
+function stripTrailingChannel(taskId: string, channel: string | undefined): string {
+  if (!channel) return taskId;
+  const suffix = `-${channel}`;
+  return taskId.endsWith(suffix) ? taskId.slice(0, taskId.length - suffix.length) : taskId;
+}
+
 // ── Result Types ─────────────────────────────────────────────────────────────
 
 export interface NoReadyTasksResult {
@@ -406,7 +425,32 @@ export class InternalizationOrchestrator {
       };
     }
 
-    const successorTaskId = `${proposal.taskKind}-${taskId}-${proposal.channel}`;
+    // Successor taskId must be STABLE across the whole peer-runner chain so that
+    // every layer (dreamer/philosopher/scribe/artificer/evaluator) derives its id
+    // from the SAME root, not from the predecessor's full id (which already
+    // carries the channel suffix). Building from the source taskId caused the
+    // channel suffix to accumulate on every hop:
+    //   dreamer-<cand>-prompt → philosopher-dreamer-<cand>-prompt-prompt
+    //                        → scribe-philosopher-dreamer-<cand>-prompt-prompt-prompt
+    // and the scribe/evaluator output validators (which echo the task id they
+    // received) then mismatched the DB id, breaking scribe→artificer→evaluator.
+    //
+    // Root = proposal.correlationId (the original candidateId set at intake,
+    // see intake-to-internalization-bridge.ts). It is channel-free and identical
+    // for every successor in the chain, so `${kind}-${root}-${channel}` is stable.
+    // Fallback: when correlationId is absent (diagnostician chain seeds it as
+    // undefined), use the source taskId but strip a trailing `-<channel>` so we
+    // don't re-append the channel we are about to add back.
+    const successorRoot = proposal.correlationId
+      ?? stripTrailingChannel(taskId, proposal.channel);
+    // Omit the channel segment entirely when it is absent, so the id never
+    // ends with a literal "-undefined". (No current code path reaches here
+    // with channel=undefined — the diagnostician chain terminates at
+    // diag_router which has no successor — but this keeps the invariant
+    // defensive rather than relying on that fact staying true.)
+    const successorTaskId = proposal.channel
+      ? `${proposal.taskKind}-${successorRoot}-${proposal.channel}`
+      : `${proposal.taskKind}-${successorRoot}`;
     const successorMetadata: PITaskMetadata = {
       dependencyTaskIds: proposal.dependencyTaskIds,
       channel: proposal.channel,

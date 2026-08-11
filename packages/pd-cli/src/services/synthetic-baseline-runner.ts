@@ -218,6 +218,13 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
       painType: 'tool_failure',
       source: 'synthetic-baseline',
       reason: 'Synthetic baseline deterministic pain signal',
+      // Synthetic baseline is a deterministic smoke tool — it has no real host
+      // session to harvest evidence from. Provide a synthetic evidence entry so
+      // the PEAT-B1 admission gate (painEvidenceAdmission, default-on) does not
+      // short-circuit the pain before diagnosis. Without this, the baseline
+      // reports `short_circuited: input evidence empty` and every downstream
+      // stage fails, even though the pipeline itself is healthy.
+      evidence: [{ sourceRef: `synthetic:${painId}`, note: 'Synthetic baseline deterministic evidence anchor' }],
     });
 
     const painPassed = bridgeResult.status === 'succeeded';
