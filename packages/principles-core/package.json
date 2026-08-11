@@ -94,11 +94,11 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.79.4",
-    "@earendil-works/pi-ai": "^0.80.7",
+    "@earendil-works/pi-agent-core": "^0.84.1",
+    "@earendil-works/pi-ai": "^0.84.1",
     "@mariozechner/pi-ai": "^0.73.1",
     "@sinclair/typebox": "^0.34.48",
-    "better-sqlite3": "^13.0.1",
+    "better-sqlite3": "^13.0.3",
     "js-yaml": "^4.1.1",
     "typebox": "^1.2.2"
   },
