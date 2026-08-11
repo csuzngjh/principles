@@ -721,7 +721,8 @@ export interface SpikeLineageViolation {
   readonly actual: string;
 }
 
-function pushIfMismatch(
+// test-fixture helper: 6 params map 1:1 to the violation record fields.
+function pushIfMismatch( // eslint-disable-line @typescript-eslint/max-params
   out: SpikeLineageViolation[],
   chainId: SpikeChainId,
   stage: SpikeStageKind,
