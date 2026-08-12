@@ -155,7 +155,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-058 | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation | PRI-304 |
 | ERR-059 | Nullish coalescing dead code — always-defined default shadows user override in effective config merge | PRI-304 |
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
-| ERR-080 | Size bound applied to raw input then content escaped — escaped output exceeds budget due to entity expansion | PRI-467 / PR #1059 |
+| ERR-080 | Control (size bound / path check) applied to the RAW input form instead of the CANONICAL/transformed form — bound is bypassable (escaped output exceeds budget; path traversal evades a /prefix match) | PRI-467 / PR #1059, PR #1302 |
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 | ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
@@ -815,9 +815,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 94 |
-| Last updated | 2026-08-11 |
+| Last updated | 2026-08-12 |
 | Top category | Schema & Type |
-| Recurring errors | 47 |
+| Recurring errors | 48 |
 
 ---
 
@@ -1248,18 +1248,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-080]** | Size bound applied to raw input then content escaped — escaped output exceeds budget due to entity expansion
+**[ERR-080]** | Control applied to the RAW input form instead of the CANONICAL/transformed form — size bound applied pre-escape (escaped output exceeds budget), or path-prefix check applied to the raw param path instead of normalizedPath (traversal bypasses the match)
 
 - **What happened**: In `buildIntentFrictionBlock()` (`packages/principles-core/src/runtime-v2/intent/intent-friction-block.ts`), the `INTENT_INJECT_MAX_CHARS` bound (4000 chars) was applied to the RAW intent content via `slice()`, and then `escapeXml()` was called on the already-bounded slice. Because XML entity expansion is length-increasing (`&` → `&amp;` = 5x, `<` → `&lt;` = 4x), the escaped output could exceed the budget. A 4000-char raw string of `&` would be bounded to 4000 chars, then escaped to ~20000 chars of `&amp;` — 5x over the budget. The prompt hook's 9000-char `truncateInjectionToBudget` size guard provided a hard upper bound, but the `INTENT_INJECT_MAX_CHARS` contract was silently violated.
 - **Why it's wrong**: The bound exists to limit how much untrusted INTENT.md content is injected into the prompt (a prompt-budget / trust-boundary control). Applying the bound to the pre-transformation input defeats the bound because a length-increasing transformation happens after the check. This is the same class as ERR-056 (redaction/truncation applied at the wrong point in the pipeline) and ERR-024 (security validator exists but is not wired into the real enforcement path) — the control exists but is applied at the wrong layer, so it does not protect the actual emitted output.
-- **Generalized failure mode**: When bounding text that undergoes a length-increasing transformation (XML/HTML escaping, URL percent-encoding, JSON stringification with escaping, base64 encoding), assistants must bound the POST-transformation output, not the pre-transformation input. Otherwise the transformed output can exceed the budget by the expansion factor (up to 5x for XML escaping of `&`, 3x for URL encoding of some chars).
+- **Generalized failure mode**: When bounding text that undergoes a length-increasing transformation (XML/HTML escaping, URL percent-encoding, JSON stringification with escaping, base64 encoding), assistants must bound the POST-transformation output, not the pre-transformation input. Otherwise the transformed output can exceed the budget by the expansion factor (up to 5x for XML escaping of `&`, 3x for URL encoding of some chars). The same root cause applies to SEMANTIC transformations that change which value a control should match, not just length-increasing ones: a path-prefix or path-segment check applied to the RAW tool param (`input.action.paramsSummary.path`) instead of the CANONICAL normalized path (`input.action.normalizedPath`) is bypassable via traversal — `/project/../../etc/passwd` does not match `/etc` as a raw prefix, but normalizes to `/etc/passwd`. General rule: apply the control to the canonical/transformed form, not the raw form.
 - **Correct approach**: Escape FIRST, then bound the escaped content to `INTENT_INJECT_MAX_CHARS` (minus the truncation marker length). Append the truncation marker after the budget cut. The marker is short (~60 chars), contains no XML special chars, and the prompt hook's 9000-char size guard provides a hard upper bound on the total block.
-- **How to prevent**: During PR review of any size-bounding logic on content that is subsequently transformed (escaped, encoded, stringified): check that the bound is applied to the FINAL output form, not an intermediate form. Ask: "does any transformation between the bound check and the output expand the content?" If yes, move the bound after the transformation. Add a regression test using expandable chars (e.g., 5000 `&` chars) to verify the escaped output respects the budget.
+- **How to prevent**: During PR review of any size-bounding logic on content that is subsequently transformed (escaped, encoded, stringified): check that the bound is applied to the FINAL output form, not an intermediate form. Ask: "does any transformation between the bound check and the output expand the content?" If yes, move the bound after the transformation. Add a regression test using expandable chars (e.g., 5000 `&` chars) to verify the escaped output respects the budget. For path-based rule logic (PD RuleCode exemplars or production rules that gate on file paths): check that path matching reads `input.action.normalizedPath` (canonical) FIRST, falling back to `input.action.paramsSummary.path` only when normalizedPath is null — a traversal-shaped param path (`/project/../../etc/passwd`) must still match when its normalized form (`/etc/passwd`) does. Review trigger: any rule string containing `paramsSummary.path` without `normalizedPath ?? …` precedence.
 - **Regression guard**: `packages/principles-core/src/runtime-v2/intent/__tests__/intent-friction-block.test.ts` — "bounds the ESCAPED content to INTENT_INJECT_MAX_CHARS even with expandable chars" (5000 `&` chars → escaped output must be ≤ `INTENT_INJECT_MAX_CHARS + 2`, must contain truncation marker, must not contain raw unescaped `&`).
 - **Related ERRs**: ERR-056 (security transformation applied at wrong point in pipeline), ERR-024 (security validator not wired into real enforcement path), ERR-014 (bounding asymmetry across code paths), ERR-017 (unsafe serialization on unknown values), ERR-081 (same PR, TOCTOU in stat-then-read file size cap).
 - **Source**: PRI-467 / PR #1059 (CodeRabbit review)
 - **Date**: 2026-06-25
-- **Recurrence**: None
+- **Recurrence**: 2026-08-12 PR #1302 (CodeRabbit review, semantic-canonicalization flavor): the demo RuleCode exemplar in `story-a-demo.ts` / `proven-channel-baseline.ts` used `String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? "")` — raw path first, so `/project/../../etc/passwd` bypassed the `/etc` block (demo activations run in the production RuleHost shadow, so this was a real, if low-impact, correctness gap). Fixed by swapping to `normalizedPath ?? paramsSummary.path`; regression test in `story-a-demo.test.ts` ("blocks via normalizedPath even when paramsSummary.path is a traversal").
 
 ---
 
