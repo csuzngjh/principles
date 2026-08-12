@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runConsumerCycle } from '../src/service/internalization-auto-consumer-service.js';
-import { DreamerRunner, OpenClawCliRuntimeAdapter, PiAiRuntimeAdapter } from '@principles/core/runtime-v2';
+import { DreamerRunner, PhilosopherRunner, OpenClawCliRuntimeAdapter, PiAiRuntimeAdapter } from '@principles/core/runtime-v2';
 
 // We mock the dictionary service to prevent unwanted DB lookups
 vi.mock('../src/core/dictionary-service.js', () => ({
@@ -215,5 +215,76 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
     // The captured adapter should be an instance of OpenClawCliRuntimeAdapter, not PiAiRuntimeAdapter
     expect(capturedAdapter).toBeInstanceOf(OpenClawCliRuntimeAdapter);
     expect(capturedAdapter).not.toBeInstanceOf(PiAiRuntimeAdapter);
+  });
+
+  it('dispatches PhilosopherRunner (not DreamerRunner) when a philosopher task is ready under full-chain scope', async () => {
+    // internalization_full_chain is a core flag (default ON) — the auto-consumer
+    // must advance past dreamer to philosopher when a philosopher task's
+    // dependencies are satisfied. EP-02: proves the new dispatch path actually
+    // reaches PhilosopherRunner (not just dreamer).
+    const db = new Database(dbPath);
+    const now = new Date().toISOString();
+    const dreamerDiag = JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } });
+    const philDiag = JSON.stringify({ pi_metadata: { dependencyTaskIds: ['dreamer-dep-1'], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } });
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, diagnostic_json, created_at, updated_at, result_ref) VALUES (?, 'dreamer', 'succeeded', 1, 3, ?, ?, ?, 'dreamer://run_dreamer-dep-1_1')`)
+      .run('dreamer-dep-1', dreamerDiag, now, now);
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, diagnostic_json, created_at, updated_at) VALUES (?, 'philosopher', 'pending', 0, 3, ?, ?, ?)`)
+      .run('philosopher-task-1', philDiag, now, now);
+    db.close();
+
+    let philosopherRunCalled = false;
+    vi.spyOn(PhilosopherRunner.prototype, 'run').mockImplementation(async () => {
+      philosopherRunCalled = true;
+      return { status: 'succeeded', runId: 'mock-phil', artifactId: 'mock-phil-art', resultRef: 'philosopher://mock' };
+    });
+    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async () => {
+      throw new Error('DreamerRunner must not run when only a philosopher task is ready');
+    });
+
+    const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    // commitNextTaskProposal may throw on the sparse fixture (mock artifactId not
+    // in pi_artifacts); we assert the dispatch signal, not the commit side-effect.
+    try { await runConsumerCycle(workspaceDir, mockLogger); } catch { /* see comment above */ }
+
+    expect(philosopherRunCalled).toBe(true);
+  });
+
+  it('does NOT advance past dreamer when internalization_full_chain is disabled (flag-off rollback)', async () => {
+    // Rewrite config to explicitly disable the core flag — auto-consumer must
+    // revert to dreamer-only scope (DEFAULT_CONSUMER_RUNNER_KINDS), so a ready
+    // philosopher task is never dispatched. EP-03: rollback path is observable.
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const config = {
+      version: 1,
+      features: {
+        internalization_auto_consumer: { category: 'quiet', enabled: true },
+        internalization_full_chain: { category: 'core', enabled: false },
+      },
+      runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
+      internalAgents: { defaultRuntime: 'openclaw.default', agents: { dreamer: { enabled: true } } },
+    };
+    fs.writeFileSync(configPath, yaml.dump(config, { schema: yaml.JSON_SCHEMA }), 'utf8');
+
+    const db = new Database(dbPath);
+    const now = new Date().toISOString();
+    const dreamerDiag = JSON.stringify({ pi_metadata: { dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } });
+    const philDiag = JSON.stringify({ pi_metadata: { dependencyTaskIds: ['dreamer-dep-2'], channel: 'prompt', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] } });
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, diagnostic_json, created_at, updated_at, result_ref) VALUES (?, 'dreamer', 'succeeded', 1, 3, ?, ?, ?, 'dreamer://run_dreamer-dep-2_1')`)
+      .run('dreamer-dep-2', dreamerDiag, now, now);
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, diagnostic_json, created_at, updated_at) VALUES (?, 'philosopher', 'pending', 0, 3, ?, ?, ?)`)
+      .run('philosopher-task-2', philDiag, now, now);
+    db.close();
+
+    let philosopherRunCalled = false;
+    vi.spyOn(PhilosopherRunner.prototype, 'run').mockImplementation(async () => {
+      philosopherRunCalled = true;
+      return { status: 'succeeded', runId: 'mock-phil', artifactId: 'mock-phil-art', resultRef: 'philosopher://mock' };
+    });
+
+    const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    try { await runConsumerCycle(workspaceDir, mockLogger); } catch { /* sparse fixture */ }
+
+    // flag-off → runnerKinds = ['dreamer'] only → philosopher never dispatched
+    expect(philosopherRunCalled).toBe(false);
   });
 });

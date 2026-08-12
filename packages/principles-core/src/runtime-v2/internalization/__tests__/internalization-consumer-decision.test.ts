@@ -3,6 +3,7 @@ import {
   computeConsumerDecision,
   DEFAULT_CONSUMER_MAX_TASKS_PER_CYCLE,
   DEFAULT_CONSUMER_RUNNER_KINDS,
+  FULL_CHAIN_CONSUMER_RUNNER_KINDS,
 } from '../internalization-consumer-decision.js';
 
 describe('computeConsumerDecision', () => {
@@ -261,5 +262,34 @@ describe('computeConsumerDecision — boundary conditions', () => {
       maxTasksPerCycle: 5,
     });
     expect(equal.maxTasksPerCycle).toBe(5);
+  });
+
+  it('honors explicit runnerKinds override (full-chain scope)', () => {
+    // The auto-consumer service passes FULL_CHAIN_CONSUMER_RUNNER_KINDS when
+    // internalization_full_chain is ON; the decision echoes it back so the
+    // wake-loop advances dreamer→…→evaluator instead of dreamer-only.
+    const fullChain = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 3,
+      runnerKinds: FULL_CHAIN_CONSUMER_RUNNER_KINDS,
+    });
+    expect(fullChain.shouldConsume).toBe(true);
+    expect(fullChain.runnerKinds).toEqual(FULL_CHAIN_CONSUMER_RUNNER_KINDS);
+    expect(fullChain.runnerKinds).not.toContain('rollout_reviewer');
+
+    // No-ready-tasks path also echoes the override (used in SKIP telemetry).
+    const noTasks = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 0,
+      runnerKinds: FULL_CHAIN_CONSUMER_RUNNER_KINDS,
+    });
+    expect(noTasks.runnerKinds).toEqual(FULL_CHAIN_CONSUMER_RUNNER_KINDS);
+
+    // Omitting runnerKinds falls back to dreamer-only (flag-off rollback).
+    const defaulted = computeConsumerDecision({
+      autoConsumerEnabled: true,
+      readyTaskCount: 3,
+    });
+    expect(defaulted.runnerKinds).toEqual(['dreamer']);
   });
 });
