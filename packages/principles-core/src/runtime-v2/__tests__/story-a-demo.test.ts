@@ -238,7 +238,7 @@ describe('Story A\' pure helpers', () => {
   });
 
   describe('createDemoSandboxEvaluate', () => {
-    const code = 'function evaluate(input, helpers) { var p = String(input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "blocked" }; return { decision: "allow", matched: false, reason: "ok" }; }';
+    const code = 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "blocked" }; return { decision: "allow", matched: false, reason: "ok" }; }';
 
     it('maps block path to block decision', () => {
       const fn = createDemoSandboxEvaluate(code);
@@ -266,6 +266,20 @@ describe('Story A\' pure helpers', () => {
       const result = fn(input, {} as RuleHostHelpers);
       expect(result.decision).toBe('allow');
       expect(result.matched).toBe(false);
+    });
+
+    it('blocks via normalizedPath even when paramsSummary.path is a traversal', () => {
+      const fn = createDemoSandboxEvaluate(code);
+      const input = {
+        action: { toolName: 'write_file', normalizedPath: '/etc/passwd', paramsSummary: { path: '/project/../../etc/passwd', content: 'bad' } },
+        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
+        session: { currentGfi: 0, recentThinking: false },
+        evolution: { epTier: 0 },
+        derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
+      } as RuleHostInput;
+      const result = fn(input, {} as RuleHostHelpers);
+      expect(result.decision).toBe('block');
+      expect(result.matched).toBe(true);
     });
 
     it('returns allow for non-object result', () => {

@@ -129,7 +129,7 @@ export function makeRuleArtifactRecord(runId: string, principleRecord: PIArtifac
     contentJson: JSON.stringify({
       principleId: principleRecord.sourcePrincipleId,
       ruleId,
-      implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Demo: system path blocked" }; return { decision: "allow", matched: false, reason: "Demo: path is safe" }; }',
+      implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Demo: system path blocked" }; return { decision: "allow", matched: false, reason: "Demo: path is safe" }; }',
       goldenTrace,
       ruleHostGateDecision: 'accepted_shadow',
       affectedTools: ['write_file'],
