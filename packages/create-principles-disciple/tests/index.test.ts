@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Command } from 'commander';
 import { isLanguage } from '../src/i18n.js';
 
 describe('isLanguage type guard', () => {
@@ -42,5 +43,31 @@ describe('Language validation edge cases', () => {
     expect(isLanguage(' zh')).toBe(false);
     expect(isLanguage('zh ')).toBe(false);
     expect(isLanguage(' zh ')).toBe(false);
+  });
+});
+
+// cli-7: exercise the actual --stop-gateway flag registration contract.
+// Mirrors the option declared on the `install` command in src/index.ts.
+describe('--stop-gateway flag parsing (cli-7)', () => {
+  function buildInstallCommand(): Command {
+    const program = new Command();
+    program
+      .command('install', { isDefault: true, hidden: true })
+      .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false);
+    return program;
+  }
+
+  it('defaults stopGateway to false when the flag is absent', () => {
+    const program = buildInstallCommand();
+    program.parse(['node', 'create-principles-disciple']);
+    const installCommand = program.commands.find((c) => c.name() === 'install');
+    expect(installCommand?.opts().stopGateway).toBe(false);
+  });
+
+  it('sets stopGateway to true when --stop-gateway is passed', () => {
+    const program = buildInstallCommand();
+    program.parse(['node', 'create-principles-disciple', '--stop-gateway']);
+    const installCommand = program.commands.find((c) => c.name() === 'install');
+    expect(installCommand?.opts().stopGateway).toBe(true);
   });
 });

@@ -132,6 +132,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     language: options.lang,
     workspaceDir: typeof options.workspace === 'string' ? options.workspace : undefined,
     host,
+    stopGateway: options.stopGateway === true,
   };
 
   if (options.force) {
@@ -222,6 +223,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         // ADR-0020 §2.3: propagate validated host target into install options.
         host,
         runtimeProfile: cliOptions.runtimeProfile,
+        stopGateway: cliOptions.stopGateway === true,
       }
     : await runPrompts(cliOptions, workspaceInfo);
 
@@ -235,7 +237,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const result = await install(installOptions, PLUGIN_DIR, jsonMode);
+  const result = await install(installOptions, PLUGIN_DIR, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
 
   if (jsonMode) {
     const output = {
@@ -423,6 +425,9 @@ program
   .option('--model <model>', 'LLM model id (optional; sensible default per provider if omitted)')
   // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
   .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
+  // Gateway lock prevention: auto-stop a running OpenClaw gateway before
+  // install (avoids EPERM on the backup rename) and restart it afterwards.
+  .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false)
   .action(async (options) => {
     await runInstall(options);
   });
