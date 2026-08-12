@@ -86,7 +86,6 @@ describe('PRI-455: pd runtime --help shows only MVP owner subcommands', () => {
     'canary',
     'synthetic',
     'uat',
-    'internalization',
     'recovery',
     'pruning',
     'diagnostics',
