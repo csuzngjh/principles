@@ -3,7 +3,15 @@ import {
   createRuntimeStateHandle,
   InternalizationOrchestrator,
   DreamerRunner,
+  PhilosopherRunner,
+  ScribeRunner,
+  ArtificerRunner,
+  EvaluatorRunner,
   DefaultDreamerValidator,
+  DefaultPhilosopherValidator,
+  DefaultScribeValidator,
+  DefaultArtificerValidator,
+  DefaultEvaluatorValidator,
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
   buildL2PrincipleReaderFromLedger,
@@ -12,9 +20,12 @@ import {
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
   computeConsumerDecision,
+  FULL_CHAIN_CONSUMER_RUNNER_KINDS,
+  DEFAULT_CONSUMER_RUNNER_KINDS,
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
+  type WakeOnceResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -137,9 +148,18 @@ export async function runConsumerCycle(
       logger.warn(`[PD:AutoConsumer] Backlog detected: ${snapshot.readyTasks.length} tasks ready. Processing only one task.`);
     }
 
+    // PRI-419 amendment: when internalization_full_chain is ON (default), the
+    // auto-consumer advances the full dreamer→…→evaluator chain so artifacts
+    // reach validation_status='validated'. flag-off reverts to dreamer-only.
+    const fullChainFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_full_chain');
+    const consumerRunnerKinds = fullChainFlag.enabled
+      ? FULL_CHAIN_CONSUMER_RUNNER_KINDS
+      : DEFAULT_CONSUMER_RUNNER_KINDS;
+
     const decision = computeConsumerDecision({
       autoConsumerEnabled: true,
       readyTaskCount: snapshot.readyTasks.length,
+      runnerKinds: consumerRunnerKinds,
     });
 
     if (!decision.shouldConsume) {
@@ -157,25 +177,41 @@ export async function runConsumerCycle(
       { owner: 'auto-consumer', runtimeKind, dryRun: true },
     );
 
-    const wakeResult = await orchestrator.wakeOnce('dreamer');
+    // Advance the configured runner kinds in priority order (dreamer first,
+    // then philosopher→…→evaluator under full-chain scope). Lease the first
+    // ready task whose dependencies are satisfied. rollout_reviewer is never
+    // in the auto-consume set — it stays a manual Owner gate.
+    let wakeResult: Extract<WakeOnceResult, { decision: 'would_lease' }> | null = null;
+    let lastSkipDecision = 'no_ready_tasks';
+    let lastSkipReason: string | undefined;
+    for (const kind of decision.runnerKinds) {
+      const candidate = await orchestrator.wakeOnce(kind);
+      if (candidate.decision === 'would_lease') {
+        wakeResult = candidate;
+        break;
+      }
+      lastSkipDecision = candidate.decision;
+      if (candidate.decision === 'no_ready_tasks') {
+        lastSkipReason = candidate.reason;
+      }
+    }
 
-    if (wakeResult.decision !== 'would_lease') {
-      const skipPayload: Record<string, unknown> = {
-        decision: wakeResult.decision,
-      };
-      if (wakeResult.decision === 'no_ready_tasks') {
-        skipPayload.reason = wakeResult.reason;
+    if (!wakeResult) {
+      const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
+      if (lastSkipReason) {
+        skipPayload.reason = lastSkipReason;
       }
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify(skipPayload));
-      logger.info(`[PD:AutoConsumer] No task to consume: ${wakeResult.decision}`);
+      logger.info(`[PD:AutoConsumer] No task to consume: ${lastSkipDecision}`);
       return;
     }
 
     let adapter: PDRuntimeAdapter;
     if (runtimeKind === 'pi-ai') {
-      // PRI-419: when l2_dreamer flag is on, route through the L2 multi-turn agent loop.
+      // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
+      // through the L2 multi-turn agent loop. Non-dreamer runners always use PiAi.
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
-      if (l2Flag.enabled) {
+      if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
         const stateDir = `${workspaceDir}/.state`;
         const principleReader = buildL2PrincipleReaderFromLedger(loadLedger(stateDir), {
           logger: { warn: (msg) => logger.warn(msg) },
@@ -225,29 +261,60 @@ export async function runConsumerCycle(
       throw new Error(`Unsupported runtime kind resolved for auto-consumer: ${runtimeKind}`);
     }
 
-    const validator = new DefaultDreamerValidator();
-    const runner = new DreamerRunner(
-      {
-        stateManager,
-        runtimeAdapter: adapter,
-        eventEmitter: storeEmitter,
-        artifactStore: stateManager.piArtifactStore,
-        validator,
-        // Layer 0 (design §6.1): inject sha256-hex so the dreamer writer can
-        // attach a predecessorSummary.contentHash for staleness detection.
-        contentHashFn,
-      },
-      {
-        owner: 'auto-consumer',
-        runtimeKind,
-      },
-    );
-
     const taskId = wakeResult.taskId;
-    logger.info(`[PD:AutoConsumer] Running dreamer task: ${taskId}`);
+    const taskKind = wakeResult.taskKind;
+    const runnerOptions = { owner: 'auto-consumer' as const, runtimeKind };
+
+    // Dispatch by leased task kind. rollout_reviewer and diagnostician stages
+    // are never auto-consumed (excluded from FULL_CHAIN_CONSUMER_RUNNER_KINDS),
+    // so they should not reach the default branch — fail loud if they do (EP-03).
+    let runner: DreamerRunner | PhilosopherRunner | ScribeRunner | ArtificerRunner | EvaluatorRunner;
+    switch (taskKind) {
+      case 'dreamer':
+        runner = new DreamerRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDreamerValidator(), contentHashFn },
+          runnerOptions,
+        );
+        break;
+      case 'philosopher':
+        runner = new PhilosopherRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultPhilosopherValidator(), contentHashFn },
+          runnerOptions,
+        );
+        break;
+      case 'scribe':
+        runner = new ScribeRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator(), contentHashFn },
+          runnerOptions,
+        );
+        break;
+      case 'artificer':
+        runner = new ArtificerRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(), contentHashFn },
+          runnerOptions,
+        );
+        break;
+      case 'evaluator':
+        // Base construction — the PRI-509 repair loop is intentionally NOT
+        // wired here; it stays opt-in via the separate evaluator_artificer_repair_loop
+        // flag (quiet, default off). When omitted, evaluator follows the legacy
+        // needs_revision path (no repair task seeded), which is sufficient for
+        // artifacts to reach validation_status='validated' on approved candidates.
+        runner = new EvaluatorRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator() },
+          runnerOptions,
+        );
+        break;
+      default:
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({ decision: 'no_runner_for_kind', taskKind }));
+        logger.warn(`[PD:AutoConsumer] No auto-consumer runner for task kind '${taskKind}'; skipping. Advance manually: pd runtime internalization run-once --runner ${taskKind}`);
+        return;
+    }
+
+    logger.info(`[PD:AutoConsumer] Running ${taskKind} task: ${taskId}`);
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RUN', JSON.stringify({
       taskId,
-      taskKind: 'dreamer',
+      taskKind,
     }));
 
     let runResult;

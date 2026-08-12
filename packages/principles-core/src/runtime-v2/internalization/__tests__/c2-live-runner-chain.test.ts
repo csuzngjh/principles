@@ -385,22 +385,32 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     expect(agents.agents.rolloutReviewer.enabled).toBe(false);
   });
 
-  // ── MVP_CORE_TASK_KINDS excludes rollout_reviewer ─────────────────────────
+  // ── MVP_CORE_TASK_KINDS includes rollout_reviewer (manual-gate kind) ────────
 
-  it('MVP_CORE_TASK_KINDS excludes rollout_reviewer', async () => {
+  it('MVP_CORE_TASK_KINDS includes all 6 peer-runner kinds (rollout_reviewer = manual gate)', async () => {
     const { MVP_CORE_TASK_KINDS } = await import('../queue-actionability.js');
     expect(MVP_CORE_TASK_KINDS).toContain('dreamer');
     expect(MVP_CORE_TASK_KINDS).toContain('philosopher');
     expect(MVP_CORE_TASK_KINDS).toContain('scribe');
     expect(MVP_CORE_TASK_KINDS).toContain('artificer');
     expect(MVP_CORE_TASK_KINDS).toContain('evaluator');
-    expect(MVP_CORE_TASK_KINDS).not.toContain('rollout_reviewer');
+    expect(MVP_CORE_TASK_KINDS).toContain('rollout_reviewer');
   });
 
-  // ── DEFAULT_CONSUMER_RUNNER_KINDS is dreamer-only ────────────────────────
+  // ── DEFAULT_CONSUMER_RUNNER_KINDS is dreamer-only (flag-off rollback) ──────
 
-  it('DEFAULT_CONSUMER_RUNNER_KINDS is dreamer-only', async () => {
+  it('DEFAULT_CONSUMER_RUNNER_KINDS is dreamer-only (flag-off rollback default)', async () => {
     const { DEFAULT_CONSUMER_RUNNER_KINDS } = await import('../internalization-consumer-decision.js');
     expect(DEFAULT_CONSUMER_RUNNER_KINDS).toEqual(['dreamer']);
+  });
+
+  // ── FULL_CHAIN_CONSUMER_RUNNER_KINDS (flag-on scope) excludes rollout_reviewer ─
+
+  it('FULL_CHAIN_CONSUMER_RUNNER_KINDS advances dreamer→…→evaluator and excludes rollout_reviewer', async () => {
+    const { FULL_CHAIN_CONSUMER_RUNNER_KINDS } = await import('../internalization-consumer-decision.js');
+    expect(FULL_CHAIN_CONSUMER_RUNNER_KINDS).toEqual([
+      'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator',
+    ]);
+    expect(FULL_CHAIN_CONSUMER_RUNNER_KINDS).not.toContain('rollout_reviewer');
   });
 });

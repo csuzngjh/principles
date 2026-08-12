@@ -1084,6 +1084,7 @@ export {
   computeConsumerDecision,
   DEFAULT_CONSUMER_MAX_TASKS_PER_CYCLE,
   DEFAULT_CONSUMER_RUNNER_KINDS,
+  FULL_CHAIN_CONSUMER_RUNNER_KINDS,
 } from './internalization/internalization-consumer-decision.js';
 export type {
   ConsumerDecision,
