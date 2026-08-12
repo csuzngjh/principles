@@ -8,7 +8,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as path from 'path';
 import { CodexHostInstaller } from '../src/installers/codex-host-installer.js';
 
 // Mock fs (hoisted). vi.mock is hoisted by vitest before imports execute,

@@ -247,17 +247,34 @@ export class OpenClawHostInstaller implements HostInstaller {
       if (!existsSync(installsDir)) {
         mkdirSync(installsDir, { recursive: true });
       }
-      let installs: Record<string, unknown> = { version: 1, installRecords: {} };
+      // rc-3/rc-9: Only initialize a fresh record on ENOENT (file doesn't exist).
+      // For any other read/parse failure (EACCES, EIO, malformed JSON), or when the
+      // parsed value is not a record, RETURN without writing — overwriting would
+      // destroy other plugins' installRecords. Non-fatal: OpenClaw self-heals.
+      let installs: Record<string, unknown>;
       try {
         const raw = readFileSync(installsPath, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
-        if (isRecord(parsed)) {
-          installs = parsed;
+        if (!isRecord(parsed)) {
+          // Parsed to a non-object (array/string/null) — preserve original file.
+          return;
         }
+        // rc-3/rc-9: if installRecords exists but is not a record (null/array/
+        // string), preserve the original file rather than overwriting it with
+        // an empty object. Missing installRecords is a compatible format and
+        // will be initialized to {} below (CodeRabbit #3762804744).
+        if (Object.hasOwn(parsed, 'installRecords') && !isRecord(parsed.installRecords)) {
+          return;
+        }
+        installs = parsed;
       } catch (err) {
         const code = getErrorCode(err);
-        if (code !== 'ENOENT') {
-          // Malformed JSON — skip merge, will overwrite below
+        if (code === 'ENOENT') {
+          // File doesn't exist — initialize fresh record (first install).
+          installs = { version: 1, installRecords: {} };
+        } else {
+          // EACCES / EIO / malformed JSON — preserve original file, do not overwrite.
+          return;
         }
       }
       // rc-2: isRecord narrows installRecords without `as` cast (ERR-001 recurrence).

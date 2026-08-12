@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import type { Principle, PrincipleEvaluatorLevel, PrincipleDetectorSpec } from '../../src/core/evolution-types.js';
+import { safeRmDir } from '../test-utils.js';
 
 const tempDirs: string[] = [];
 
@@ -15,7 +16,9 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Use safeRmDir to tolerate ENOTEMPTY race (async log flusher draining).
+    // See test-utils.ts for rationale.
+    safeRmDir(dir);
   }
 });
 
