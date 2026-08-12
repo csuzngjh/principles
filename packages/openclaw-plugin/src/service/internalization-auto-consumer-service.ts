@@ -190,10 +190,10 @@ export async function runConsumerCycle(
         wakeResult = candidate;
         break;
       }
+      // Keep decision/reason paired across iterations so the final SKIP log
+      // never reports a stale reason from an earlier kind (EP-03 observability).
       lastSkipDecision = candidate.decision;
-      if (candidate.decision === 'no_ready_tasks') {
-        lastSkipReason = candidate.reason;
-      }
+      lastSkipReason = candidate.decision === 'no_ready_tasks' ? candidate.reason : undefined;
     }
 
     if (!wakeResult) {
