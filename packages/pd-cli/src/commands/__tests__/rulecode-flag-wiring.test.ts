@@ -52,6 +52,13 @@ function freshProgram(): Command {
   return program;
 }
 
+/** Find a subcommand by name, throwing if absent (replaces non-null assertions). */
+function requireSubcommand(parent: Command, name: string): Command {
+  const cmd = parent.commands.find((c) => c.name() === name);
+  if (!cmd) throw new Error(`Expected subcommand "${name}" to be registered`);
+  return cmd;
+}
+
 describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
   // ── spec subcommand ───────────────────────────────────────────────────────
 
@@ -62,10 +69,10 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     const specCmd = rulecodeCmd.commands.find((c) => c.name() === 'spec');
     expect(specCmd).toBeDefined();
 
-    const jsonOpt = specCmd!.options.find((o) => o.long === '--json');
+    const jsonOpt = (specCmd as Command).options.find((o) => o.long === '--json');
     expect(jsonOpt).toBeDefined();
 
-    const wsOpt = specCmd!.options.find((o) => o.long === '--workspace');
+    const wsOpt = (specCmd as Command).options.find((o) => o.long === '--workspace');
     expect(wsOpt).toBeDefined();
     expect(wsOpt?.short).toBe('-w');
   });
@@ -75,7 +82,7 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     const rulecodeCmd = registerRulecodeCommand(program);
 
     const specCmd = rulecodeCmd.commands.find((c) => c.name() === 'spec');
-    const codeOpt = specCmd!.options.find((o) => o.long === '--code');
+    const codeOpt = (specCmd as Command).options.find((o) => o.long === '--code');
     expect(codeOpt).toBeUndefined();
   });
 
@@ -88,16 +95,16 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     const validateCmd = rulecodeCmd.commands.find((c) => c.name() === 'validate');
     expect(validateCmd).toBeDefined();
 
-    const codeOpt = validateCmd!.options.find((o) => o.long === '--code');
+    const codeOpt = (validateCmd as Command).options.find((o) => o.long === '--code');
     expect(codeOpt).toBeDefined();
 
-    const codeFileOpt = validateCmd!.options.find((o) => o.long === '--code-file');
+    const codeFileOpt = (validateCmd as Command).options.find((o) => o.long === '--code-file');
     expect(codeFileOpt).toBeDefined();
 
-    const jsonOpt = validateCmd!.options.find((o) => o.long === '--json');
+    const jsonOpt = (validateCmd as Command).options.find((o) => o.long === '--json');
     expect(jsonOpt).toBeDefined();
 
-    const wsOpt = validateCmd!.options.find((o) => o.long === '--workspace');
+    const wsOpt = (validateCmd as Command).options.find((o) => o.long === '--workspace');
     expect(wsOpt).toBeDefined();
     expect(wsOpt?.short).toBe('-w');
   });
@@ -105,7 +112,7 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
   it('validate --code is NOT required at parser level (can use --code-file instead)', async () => {
     const program = freshProgram();
     const rulecodeCmd = registerRulecodeCommand(program);
-    const validateCmd = rulecodeCmd.commands.find((c) => c.name() === 'validate')!;
+    const validateCmd = requireSubcommand(rulecodeCmd, 'validate');
     const captured: CapturedAction = { opts: null };
     attachCapture(validateCmd, captured);
 
@@ -113,7 +120,7 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     await program.parseAsync(['node', 'pd', 'rulecode', 'validate', '--json']);
 
     expect(captured.opts).not.toBeNull();
-    expect(captured.opts!.code).toBeUndefined();
+    expect((captured.opts as ActionOptions).code).toBeUndefined();
   });
 
   // ── replay subcommand ─────────────────────────────────────────────────────
@@ -125,19 +132,19 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     const replayCmd = rulecodeCmd.commands.find((c) => c.name() === 'replay');
     expect(replayCmd).toBeDefined();
 
-    const codeOpt = replayCmd!.options.find((o) => o.long === '--code');
+    const codeOpt = (replayCmd as Command).options.find((o) => o.long === '--code');
     expect(codeOpt).toBeDefined();
 
-    const codeFileOpt = replayCmd!.options.find((o) => o.long === '--code-file');
+    const codeFileOpt = (replayCmd as Command).options.find((o) => o.long === '--code-file');
     expect(codeFileOpt).toBeDefined();
 
-    const gtOpt = replayCmd!.options.find((o) => o.long === '--golden-trace');
+    const gtOpt = (replayCmd as Command).options.find((o) => o.long === '--golden-trace');
     expect(gtOpt).toBeDefined();
 
-    const jsonOpt = replayCmd!.options.find((o) => o.long === '--json');
+    const jsonOpt = (replayCmd as Command).options.find((o) => o.long === '--json');
     expect(jsonOpt).toBeDefined();
 
-    const wsOpt = replayCmd!.options.find((o) => o.long === '--workspace');
+    const wsOpt = (replayCmd as Command).options.find((o) => o.long === '--workspace');
     expect(wsOpt).toBeDefined();
     expect(wsOpt?.short).toBe('-w');
   });
@@ -147,7 +154,7 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     const rulecodeCmd = registerRulecodeCommand(program);
 
     const replayCmd = rulecodeCmd.commands.find((c) => c.name() === 'replay');
-    const gtOpt = replayCmd!.options.find((o) => o.long === '--golden-trace');
+    const gtOpt = (replayCmd as Command).options.find((o) => o.long === '--golden-trace');
     expect(gtOpt?.required).toBe(true);
   });
 
@@ -168,20 +175,20 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
   it('parseAsync dispatches spec subcommand with json=true', async () => {
     const program = freshProgram();
     const rulecodeCmd = registerRulecodeCommand(program);
-    const specCmd = rulecodeCmd.commands.find((c) => c.name() === 'spec')!;
+    const specCmd = requireSubcommand(rulecodeCmd, 'spec');
     const captured: CapturedAction = { opts: null };
     attachCapture(specCmd, captured);
 
     await program.parseAsync(['node', 'pd', 'rulecode', 'spec', '--json']);
 
     expect(captured.opts).not.toBeNull();
-    expect(captured.opts!.json).toBe(true);
+    expect((captured.opts as ActionOptions).json).toBe(true);
   });
 
   it('parseAsync dispatches validate with --code', async () => {
     const program = freshProgram();
     const rulecodeCmd = registerRulecodeCommand(program);
-    const validateCmd = rulecodeCmd.commands.find((c) => c.name() === 'validate')!;
+    const validateCmd = requireSubcommand(rulecodeCmd, 'validate');
     const captured: CapturedAction = { opts: null };
     attachCapture(validateCmd, captured);
 
@@ -192,14 +199,14 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     ]);
 
     expect(captured.opts).not.toBeNull();
-    expect(captured.opts!.code).toContain('function evaluate');
-    expect(captured.opts!.json).toBe(true);
+    expect((captured.opts as ActionOptions).code).toContain('function evaluate');
+    expect((captured.opts as ActionOptions).json).toBe(true);
   });
 
   it('parseAsync dispatches replay with --code and --golden-trace', async () => {
     const program = freshProgram();
     const rulecodeCmd = registerRulecodeCommand(program);
-    const replayCmd = rulecodeCmd.commands.find((c) => c.name() === 'replay')!;
+    const replayCmd = requireSubcommand(rulecodeCmd, 'replay');
     const captured: CapturedAction = { opts: null };
     attachCapture(replayCmd, captured);
 
@@ -211,9 +218,9 @@ describe('pd rulecode — flag wiring (CLI gate rule 7)', () => {
     ]);
 
     expect(captured.opts).not.toBeNull();
-    expect(captured.opts!.code).toContain('function evaluate');
-    expect(captured.opts!.goldenTrace).toBe('/tmp/trace.json');
-    expect(captured.opts!.json).toBe(true);
+    expect((captured.opts as ActionOptions).code).toContain('function evaluate');
+    expect((captured.opts as ActionOptions).goldenTrace).toBe('/tmp/trace.json');
+    expect((captured.opts as ActionOptions).json).toBe(true);
   });
 
   it('parseAsync rejects replay without --golden-trace (requiredOption)', async () => {

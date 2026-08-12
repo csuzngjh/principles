@@ -238,8 +238,10 @@ describe('Story A\' pure helpers', () => {
   });
 
   describe('createDemoSandboxEvaluate', () => {
-    it('maps "block" return to block decision', () => {
-      const fn = createDemoSandboxEvaluate('return params.path?.startsWith("/etc") ? "block" : "allow";');
+    const code = 'function evaluate(input, helpers) { var p = String(input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "blocked" }; return { decision: "allow", matched: false, reason: "ok" }; }';
+
+    it('maps block path to block decision', () => {
+      const fn = createDemoSandboxEvaluate(code);
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/etc/passwd', content: 'bad' } },
         workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
@@ -252,8 +254,8 @@ describe('Story A\' pure helpers', () => {
       expect(result.matched).toBe(true);
     });
 
-    it('maps "allow" return to allow decision', () => {
-      const fn = createDemoSandboxEvaluate('return params.path?.startsWith("/etc") ? "block" : "allow";');
+    it('maps safe path to allow decision', () => {
+      const fn = createDemoSandboxEvaluate(code);
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/project/src/config.json', content: '{}' } },
         workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
@@ -263,10 +265,10 @@ describe('Story A\' pure helpers', () => {
       } as RuleHostInput;
       const result = fn(input, {} as RuleHostHelpers);
       expect(result.decision).toBe('allow');
-      expect(result.matched).toBe(true);
+      expect(result.matched).toBe(false);
     });
 
-    it('maps any non-"block" return to allow', () => {
+    it('returns allow for non-object result', () => {
       const fn = createDemoSandboxEvaluate('return "other";');
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: {} },
@@ -277,6 +279,7 @@ describe('Story A\' pure helpers', () => {
       } as RuleHostInput;
       const result = fn(input, {} as RuleHostHelpers);
       expect(result.decision).toBe('allow');
+      expect(result.matched).toBe(false);
     });
   });
 
