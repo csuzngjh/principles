@@ -259,6 +259,13 @@ export class OpenClawHostInstaller implements HostInstaller {
           // Parsed to a non-object (array/string/null) — preserve original file.
           return;
         }
+        // rc-3/rc-9: if installRecords exists but is not a record (null/array/
+        // string), preserve the original file rather than overwriting it with
+        // an empty object. Missing installRecords is a compatible format and
+        // will be initialized to {} below (CodeRabbit #3762804744).
+        if (Object.hasOwn(parsed, 'installRecords') && !isRecord(parsed.installRecords)) {
+          return;
+        }
         installs = parsed;
       } catch (err) {
         const code = getErrorCode(err);
