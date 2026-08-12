@@ -43,6 +43,7 @@ import { createHash } from 'node:crypto';
 /** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
 const contentHashFn = (input: string): string => createHash('sha256').update(input).digest('hex');
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
+import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import { resolveSourcePainIdFromDiagnostician } from './candidate.js';
 import * as path from 'path';
@@ -207,7 +208,38 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     return;
   }
 
-  const runtimeKind = opts.runtime ?? 'test-double';
+  // Resolve runtime kind. P1 fix (mirrors pain-retry.ts): pd diagnose run
+  // must NOT default to test-double. Without --runtime, the split pipeline
+  // would validate the test-double's stale DiagnosticianOutputV1-shaped
+  // payload against DiagRootCauseOutputV1Schema and fail with
+  // max_attempts_exceeded — silently producing failed/fake diagnostic data
+  // in a real workspace. Fall back to .pd/config.yaml first; refuse if
+  // nothing is bound. (rc-9-no-silent-fallback / ERR-002; EP-03, EP-04)
+  let runtimeKind = opts.runtime;
+  if (!runtimeKind) {
+    const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+    if (!isRuntimeConfigError(resolved.result) && resolved.result.runtimeKind) {
+      ({ runtimeKind } = resolved.result);
+    }
+  }
+
+  if (!runtimeKind) {
+    const missingRuntime = {
+      ok: false,
+      reason: 'missing_runtime',
+      message:
+        'No --runtime specified and no .pd/config.yaml runtime binding found. pd diagnose run must not default to test-double to prevent fake data in real workspaces.',
+      nextAction: `Specify --runtime explicitly: pd diagnose run --task-id ${opts.taskId} --runtime pi-ai --provider <provider> --model <model> --apiKeyEnv <ENV>`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(missingRuntime, null, 2));
+    } else {
+      console.error(`error: ${missingRuntime.message}`);
+      console.error(`Next action: ${missingRuntime.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
