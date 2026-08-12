@@ -158,7 +158,7 @@ Codex has no OpenClaw slash-command equivalent. Owner operates PD via `pd-cli` w
 **How is it observed?** ADR-0020 is a documentation deliverable. Observation = (a) the ADR file exists at `docs/adr/0020-codex-cli-host-adapter.md` with Status: Accepted; (b) `host.codex` flag appears in `feature-flag-contract.ts` `DEFAULT_FEATURE_FLAGS`; (c) `feature-flag-contract.test.ts` passes (asserting the flag is registered with correct category/enabled/since).
 
 ### 4.3 `mvp-q-3-how-disabled`
-**How is it disabled?** The ADR itself cannot be "disabled" — it is a record of a decision. The `host.codex` feature flag it registers defaults to `false`. Codex adapter behavior is dark until PRI-282 flips the flag to `true`. Roll back = set `host.codex.enabled: false` in `.pd/config.yaml`.
+**How is it disabled?** The ADR itself cannot be "disabled" — it is a record of a decision. The `host.codex` feature flag defaults to `true` (flipped to MVP-Core on 2026-08-12 after PRI-282 E2E validation passed). Roll back = set `host.codex.enabled: false` in `.pd/config.yaml`. When disabled, `pd-hook.js` short-circuits to `{}` + exit 0 and SystemLogger records the skip (rc-9).
 
 ### 4.4 `mvp-q-4-emotional-value`
 **What emotional value does it deliver?** This ADR reduces **失控感** (loss of control): the owner sees a clear architectural plan before any code is written, rather than discovering ad-hoc choices during review. It creates **沉淀感** (accumulation): the SPEC v4.1 + ADR-0020 pair is institutional memory that survives across sessions and engineers. The multi-host installer design reduces **疲惫感** (fatigue): one `create-principles-disciple` invocation handles both OpenClaw and Codex, rather than two separate installers with divergent UX.
