@@ -116,7 +116,7 @@ function makeRuleArtifact(): PIArtifactSnapshot {
     contentJson: JSON.stringify({
       principleId: SYNTH_PRINCIPLE_ID,
       ruleId: SYNTH_RULE_ID,
-      implementationCode: 'function evaluate(toolName, params) { return params.path?.startsWith("/etc") ? "block" : "allow"; }',
+      implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Synthetic: system path blocked" }; return { decision: "allow", matched: false, reason: "Synthetic: path is safe" }; }',
       goldenTrace,
       ruleHostGateDecision: 'accepted_shadow',
       affectedTools: ['write_file'],

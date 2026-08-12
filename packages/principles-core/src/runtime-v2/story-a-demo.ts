@@ -129,7 +129,7 @@ export function makeRuleArtifactRecord(runId: string, principleRecord: PIArtifac
     contentJson: JSON.stringify({
       principleId: principleRecord.sourcePrincipleId,
       ruleId,
-      implementationCode: 'function evaluate(toolName, params) { return params.path?.startsWith("/etc") ? "block" : "allow"; }',
+      implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Demo: system path blocked" }; return { decision: "allow", matched: false, reason: "Demo: path is safe" }; }',
       goldenTrace,
       ruleHostGateDecision: 'accepted_shadow',
       affectedTools: ['write_file'],
@@ -158,19 +158,17 @@ export function computeDemoStatus(
 
 export function createDemoSandboxEvaluate(
   implementationCode: string,
-): (input: RuleHostInput, _helpers: RuleHostHelpers) => RuleHostResult {
-  const wrappedCode = `${implementationCode}; return evaluate(toolName, params);`;
-  const rawEvaluate = new Function('toolName', 'params', wrappedCode) as
-    (toolName: string, params: Record<string, unknown>) => string;
+): (input: RuleHostInput, helpers: RuleHostHelpers) => RuleHostResult {
+  const wrappedCode = `${implementationCode}; return evaluate(input, helpers);`;
+  const rawEvaluate = new Function('input', 'helpers', wrappedCode) as
+    (input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
 
-  return (input: RuleHostInput, _helpers: RuleHostHelpers): RuleHostResult => {
-    const {toolName} = input.action;
-    const params = input.action.paramsSummary;
-    const result = rawEvaluate(toolName, params);
-    if (result === 'block') {
-      return { decision: 'block', matched: true, reason: 'Demo rule: blocked by sandbox evaluation' };
+  return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
+    const result = rawEvaluate(input, helpers);
+    if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+      return { decision: 'allow', matched: false, reason: 'Demo sandbox: evaluate returned non-object' };
     }
-    return { decision: 'allow', matched: true, reason: 'Demo rule: allowed by sandbox evaluation' };
+    return result as RuleHostResult;
   };
 }
 
