@@ -5,7 +5,7 @@ import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
 const dispatch = vi.fn<(event: HostEvent, next: (event: HostEvent) => Promise<HostEventResult>) => Promise<HostEventResult>>(
   (event, next) => next(event),
 );
-const createHostRuntime = vi.fn();
+const createProductionHostRuntime = vi.fn();
 const handleBeforePromptBuild = vi.fn();
 const handleBeforeToolCall = vi.fn();
 const handleAfterToolCall = vi.fn();
@@ -19,11 +19,11 @@ vi.mock('../src/core/config-health.js', async (importOriginal) => {
 
 vi.mock('@principles/host-runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@principles/host-runtime')>();
-  createHostRuntime.mockImplementation((options) => {
-    const runtime = actual.createHostRuntime(options);
+  createProductionHostRuntime.mockImplementation((options) => {
+    const runtime = actual.createProductionHostRuntime(options);
     return { ...runtime, dispatch: (event: HostEvent) => dispatch(event, runtime.dispatch) };
   });
-  return { ...actual, createHostRuntime };
+  return { ...actual, createProductionHostRuntime };
 });
 vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild }));
 vi.mock('../src/hooks/gate.js', () => ({ handleBeforeToolCall }));
@@ -80,7 +80,7 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     vi.useFakeTimers();
     dispatch.mockReset();
     dispatch.mockImplementation((event, next) => next(event));
-    createHostRuntime.mockClear();
+    createProductionHostRuntime.mockClear();
     handleBeforePromptBuild.mockReset();
     handleBeforeToolCall.mockReset();
     handleAfterToolCall.mockReset();
@@ -118,7 +118,7 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
       workspaceDir: 'D:/workspace', sessionId: 'session-1', agentId: 'agent-1', trigger: 'user',
     });
 
-    expect(createHostRuntime).toHaveBeenCalled();
+    expect(createProductionHostRuntime).toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ kind: hookName, source: `openclaw:${hookName}` }),
       expect.any(Function),

@@ -4,6 +4,10 @@ import {
   type HostEvent,
   type HostEventResult,
 } from '@principles/core/host';
+import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
+
+export * from './active-principle-prompt.js';
+export * from './pd-config.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
@@ -151,4 +155,27 @@ export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
       return { ok: true, workspaceDir, routes: HOST_RUNTIME_ROUTES };
     },
   };
+}
+
+export function createProductionHostRuntime(
+  options: Pick<HostRuntimeOptions, 'beforeToolCall' | 'afterToolCall'> & {
+    beforePromptBuild?: (event: HostEvent, prompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>>) => HostEventResult | Promise<HostEventResult>;
+    promptExcludePrincipleIds?: (event: HostEvent) => ReadonlySet<string>;
+  },
+): HostRuntime {
+  return createHostRuntime({
+    ...options,
+    async beforePromptBuild(event) {
+      const prompt = await buildActivePrinciplePromptContext({
+        workspaceDir: event.context.workspaceDir,
+        excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
+      });
+      if (options.beforePromptBuild) return options.beforePromptBuild(event, prompt);
+      return {
+        decision: prompt.additionalContext.length > 0 ? 'modify' : 'allow',
+        source: event.source,
+        ...(prompt.additionalContext.length > 0 ? { additionalContext: prompt.additionalContext } : {}),
+      };
+    },
+  });
 }

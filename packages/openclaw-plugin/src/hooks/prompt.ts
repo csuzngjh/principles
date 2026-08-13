@@ -13,6 +13,7 @@ import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/
 import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
+import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -192,7 +193,8 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
-  ctx: PluginHookAgentContext & { api?: PromptHookApi }
+  ctx: PluginHookAgentContext & { api?: PromptHookApi },
+  sharedActivePrinciplePrompt?: ActivePrinciplePromptResult,
 ): Promise<PluginHookBeforePromptBuildResult | void> {
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
@@ -475,8 +477,10 @@ export async function handleBeforePromptBuild(
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
-    const reader = new PromptActivationReader(wctx.workspaceDir, { logger });
-    const v2Result = await reader.readActivatedPrinciples();
+    const reader = sharedActivePrinciplePrompt ? undefined : new PromptActivationReader(wctx.workspaceDir, { logger });
+    const v2Result = sharedActivePrinciplePrompt
+      ? { principles: [], warnings: sharedActivePrinciplePrompt.warnings, source: 'runtime_v2' as const }
+      : await reader!.readActivatedPrinciples();
 
     if (v2Result.warnings.length > 0) {
       logger?.info?.(`[PD:RuntimeV2] Activation read warnings: ${v2Result.warnings.join('; ')}`);
@@ -498,7 +502,10 @@ export async function handleBeforePromptBuild(
 
     dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
-    if (dedupedV2.length > 0) {
+    if (sharedActivePrinciplePrompt) {
+      runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
+      for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
+    } else if (dedupedV2.length > 0) {
       const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
       if (truncated) {
         logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
@@ -516,15 +523,17 @@ export async function handleBeforePromptBuild(
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         principleIds: [...runtimeV2PrincipleIds],
-        activationIds: dedupedV2.map((p) => p.activationId),
-        artifactIds: dedupedV2.map((p) => p.artifactId),
+        activationIds: sharedActivePrinciplePrompt?.activationIds ?? dedupedV2.map((p) => p.activationId),
+        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? dedupedV2.map((p) => p.artifactId),
         injectedCount: runtimeV2PrincipleIds.size,
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,
         budget: RUNTIME_V2_PRINCIPLE_BUDGET,
         ...(runtimeV2PrincipleIds.size === 0
           ? {
-              skipReason: v2Result.principles.length === 0
+              skipReason: sharedActivePrinciplePrompt
+                ? 'no_validated_activations'
+                : v2Result.principles.length === 0
                 ? 'no_validated_activations'
                 : 'all_deduped_against_legacy',
               nextAction: v2Result.principles.length === 0
@@ -583,7 +592,8 @@ export async function handleBeforePromptBuild(
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
-    const directiveText = renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
+    const directiveText = sharedActivePrinciplePrompt?.additionalContext
+      ?? renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
     prependSystemContext += directiveText;
   }
 

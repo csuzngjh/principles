@@ -115,6 +115,13 @@ registry.when('OpenClaw builds the next prompt', async () => {
 });
 registry.then('the returned system context contains that activated principle', () => {
   expect(result, logMessages.join('\n')).toEqual(expect.objectContaining({ prependSystemContext: expect.stringContaining(PRINCIPLE_TEXT) }));
+  if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'prependSystemContext')) {
+    throw new Error(`Expected production prompt result; logs=${logMessages.join('\n')}`);
+  }
+  const promptContext = Object.getOwnPropertyDescriptor(result, 'prependSystemContext')?.value;
+  expect(typeof promptContext).toBe('string');
+  if (typeof promptContext !== 'string') throw new Error('Expected prependSystemContext string');
+  expect(promptContext.split(PRINCIPLE_TEXT)).toHaveLength(2);
 });
 registry.given('an approved live RuleHost rule is active', async () => {
   insertArtifact({ id: 'art-rule-523', kind: 'rule', principleId: 'P_RULE_523', ruleId: 'R_SHARED_523', content: {

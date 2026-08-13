@@ -1,4 +1,4 @@
-import { createHostRuntime, type HostRuntime } from '@principles/host-runtime';
+import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime } from '@principles/host-runtime';
 import type { HostEvent, HostEventContext, HostEventResult } from '@principles/core/host';
 import type {
   PluginHookAgentContext,
@@ -21,7 +21,8 @@ type NativeResult =
   | { kind: 'after_tool_call'; value: void };
 
 export interface OpenClawHostRuntimeOptions {
-  beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void>;
+  beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
+  promptExcludePrincipleIds?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): ReadonlySet<string>;
   beforeToolCall(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext): PluginHookBeforeToolCallResult | void;
   afterToolCall(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): void;
 }
@@ -63,11 +64,16 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     return result;
   }
 
-  const runtime = createHostRuntime({
-    async beforePromptBuild(event) {
+  const runtime = createProductionHostRuntime({
+    promptExcludePrincipleIds(event) {
+      const payload = payloadFor(event);
+      if (payload.kind !== 'before_prompt_build') throw new Error('OpenClaw prompt exclusion payload mismatch');
+      return options.promptExcludePrincipleIds?.(payload.event, payload.context) ?? new Set();
+    },
+    async beforePromptBuild(event, prompt) {
       const payload = payloadFor(event);
       if (payload.kind !== 'before_prompt_build') throw new Error('OpenClaw prompt payload mismatch');
-      const value = await options.beforePromptBuild(payload.event, payload.context);
+      const value = await options.beforePromptBuild(payload.event, payload.context, prompt);
       return recordResult(event, { kind: payload.kind, value }, value ? 'modify' : 'allow');
     },
     async beforeToolCall(event) {

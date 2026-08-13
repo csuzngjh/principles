@@ -252,10 +252,21 @@ const plugin = {
 
     const language = (api.pluginConfig?.language as string) || 'en';
     const sharedHostRuntime = createOpenClawHostRuntime({
-      beforePromptBuild: (event, context) => handleBeforePromptBuild(event, {
+      promptExcludePrincipleIds: (_event, context) => {
+        const excluded = new Set<string>();
+        try {
+          const reducer = WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }).evolutionReducer;
+          for (const principle of reducer.getActivePrinciples()) excluded.add(principle.id);
+          for (const principle of reducer.getProbationPrinciples()) excluded.add(principle.id);
+        } catch (error) {
+          api.logger.info(`[PD:RuntimeV2] Legacy principle dedup unavailable; continuing with shared active principles: ${String(error)}`);
+        }
+        return excluded;
+      },
+      beforePromptBuild: (event, context, activePrinciplePrompt) => handleBeforePromptBuild(event, {
         ...context,
         api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
-      }),
+      }, activePrinciplePrompt),
       beforeToolCall: (event, context) => handleBeforeToolCall(event, {
         ...context,
         pluginConfig: api.pluginConfig ?? {},
