@@ -526,6 +526,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — handler-only tests miss Commander wiring for new CLI commands.
   - 2026-06-29 PR #1121 (CodeRabbit review): `pd activation promote` command had 3 handler-level tests in `runtime-activation.test.ts` but no parser-level wiring test, violating `cli-7-test-wiring`. Fix: extracted `registerRuntimeActivationPromoteCommand` helper (mirrors `registerRunRuleHostCommand` pattern) and added `runtime-activation-promote-flag-wiring.test.ts` with 14 parser tests covering option registration, `--no-*` negation absence, required-option rejection, and `-w` shorthand parsing.
   - Same PR also surfaced a sibling CLI gate violation (Finding 2): `resolveWorkspaceDir()` was called outside the `try` block in `handleRuntimeActivationPromote`, violating `cli-2-exit-stops` — if workspace resolution threw, the exception escaped the catch and broke the `--json` single-object contract. Fix: moved workspace resolution + `RuntimeStateManager` construction inside `try`, used `stateManager?.close()` in `finally`.
+  - 2026-08-13 PR #1309 (self-review): new `maxTokens` pi-ai config was wired through `RuntimeConfig`/adapter but had NO Commander `--maxTokens` flag and NO flag-wiring test — asymmetric with `maxRetries`/`timeoutMs` which have both. Handler tests for the retry path existed but none exercised `parseAsync` with the new flag. Fix: added `.option('--maxTokens <n>', ...)` to `registerPainRetryCommand`, threaded `opts.maxTokens ?? policyConfig?.maxTokens`, added `pain-retry-maxTokens-flag.test.ts` (3 parser tests: numeric parse, parseInt path, omitted→undefined). Also caught the numeric-validation error message omitting `maxTokens` (message now lists all three numeric options).
 
 ---
 
@@ -815,9 +816,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 94 |
-| Last updated | 2026-08-12 |
+| Last updated | 2026-08-13 |
 | Top category | Schema & Type |
-| Recurring errors | 48 |
+| Recurring errors | 49 |
 
 ---
 
