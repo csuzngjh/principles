@@ -20,6 +20,7 @@ import {
   getInstalledBinDir,
   isWindows,
   generateConfigYamlContent,
+  migrateHostRuntimeFlagsInConfigYaml,
   getConfigYamlPath,
   validateConfigYamlFull,
   readEnabledChannelsFromConfigYaml,
@@ -1475,6 +1476,35 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
+  it('persists both PRI-523 host rollout flags in fresh config', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    expect(features['host.codex']).toEqual({ category: 'core', enabled: true });
+    expect(features.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('adds missing PRI-523 flags to a migrated config while preserving explicit rollback values', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-migration-'));
+    const configDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'config.yaml');
+    const existing = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = existing.features as Record<string, unknown>;
+    delete features.abstraction_layer_v1;
+    features['host.codex'] = { category: 'core', enabled: false };
+    fs.writeFileSync(configPath, yaml.dump(existing), 'utf8');
+
+    try {
+      expect(migrateHostRuntimeFlagsInConfigYaml(tmpDir)).toBe(true);
+      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const migratedFeatures = migrated.features as Record<string, unknown>;
+      expect(migratedFeatures['host.codex']).toEqual({ category: 'core', enabled: false });
+      expect(migratedFeatures.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
     // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
     const parsed: unknown = yaml.load(generateConfigYamlContent());
@@ -1527,7 +1557,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'host.codex', 'prompt']);
   });
 
   it('written to temp workspace is loadable', () => {

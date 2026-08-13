@@ -54,7 +54,8 @@ import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { checkSurfaceGuard, guardHook, guardService } from '@principles/core/runtime-v2';
+import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
+import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
@@ -168,6 +169,24 @@ export function shouldStartInternalizationAutoConsumer(
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
+export function shouldUseSharedHostRuntime(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): { enabled: boolean; source: string; rollbackReason: string | null } {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'abstraction_layer_v1', logger);
+  if (flag.enabled) return { enabled: true, source: flag.source, rollbackReason: null };
+  return {
+    enabled: false,
+    source: flag.source,
+    rollbackReason: JSON.stringify({
+      reason: 'abstraction_layer_v1_disabled',
+      nextAction: 'set features.abstraction_layer_v1.enabled=true in .pd/config.yaml for controlled shared-runtime parity validation',
+      route: 'openclaw_legacy',
+      flagSource: flag.source,
+    }),
+  };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -232,6 +251,21 @@ const plugin = {
     }
 
     const language = (api.pluginConfig?.language as string) || 'en';
+    const sharedHostRuntime = createOpenClawHostRuntime({
+      beforePromptBuild: (event, context) => handleBeforePromptBuild(event, {
+        ...context,
+        api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
+      }),
+      beforeToolCall: (event, context) => handleBeforeToolCall(event, {
+        ...context,
+        pluginConfig: api.pluginConfig ?? {},
+        logger: api.logger,
+      }),
+      afterToolCall: (event, context) => handleAfterToolCall(event, {
+        ...context,
+        pluginConfig: api.pluginConfig ?? {},
+      }, api),
+    });
 
     // ── Hook: Prompt Building ──
     api.on(
@@ -311,7 +345,14 @@ const plugin = {
             }
           }
 
-          const result = await handleBeforePromptBuild(event, { ...ctx, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'], workspaceDir });
+          const hookContext = { ...ctx, workspaceDir };
+          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+          if (!runtimeGate.enabled) {
+            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
+          }
+          const result = runtimeGate.enabled
+            ? await sharedHostRuntime.dispatchBeforePromptBuild(event, hookContext)
+            : await handleBeforePromptBuild(event, { ...hookContext, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] });
           
           // Record success
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
@@ -334,7 +375,7 @@ const plugin = {
     // ── Hook: Security Gate ──
     api.on(
       'before_tool_call',
-      guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
+      guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void | Promise<PluginHookBeforeToolCallResult | void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_tool_call');
         if (!wsResult.ok) {
           api.logger.error(
@@ -352,13 +393,31 @@ const plugin = {
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
-          const result = handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
-
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-            hook: 'before_tool_call'
-          }, { flushImmediately: true });
-
-          return result;
+          const hookContext = { ...ctx, workspaceDir, pluginConfig, logger };
+          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+          if (!runtimeGate.enabled) {
+            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
+            const result = handleBeforeToolCall(event, hookContext);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call'
+            }, { flushImmediately: true });
+            return result;
+          }
+          return sharedHostRuntime.dispatchBeforeToolCall(event, hookContext).then((result) => {
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call'
+            }, { flushImmediately: true });
+            return result;
+          }).catch((err: unknown) => {
+            const errorPreview = err instanceof Error
+              ? err.message.slice(0, 500)
+              : safeStringifyPreview(err).slice(0, 500);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call', error: errorPreview
+            }, { flushImmediately: true });
+            api.logger.error(`[PD] Error in before_tool_call: ${errorPreview}`);
+            return undefined;
+          });
         } catch (err) {
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call',
@@ -375,7 +434,7 @@ const plugin = {
     // 10s gives 2x headroom over busy_timeout. fail-open means agent is unaffected.
     api.on(
       'after_tool_call',
-      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void | Promise<void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_tool_call');
         if (!wsResult.ok) {
           api.logger.error(
@@ -393,11 +452,29 @@ const plugin = {
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
-          handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
-
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-            hook: 'after_tool_call'
-          }, { flushImmediately: true });
+          const hookContext = { ...ctx, workspaceDir, pluginConfig };
+          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+          if (!runtimeGate.enabled) {
+            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
+            handleAfterToolCall(event, hookContext, api);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call'
+            }, { flushImmediately: true });
+            return;
+          }
+          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then(() => {
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call'
+            }, { flushImmediately: true });
+          }).catch((err: unknown) => {
+            const errorPreview = err instanceof Error
+              ? err.message.slice(0, 500)
+              : safeStringifyPreview(err).slice(0, 500);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call', error: errorPreview
+            }, { flushImmediately: true });
+            api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${errorPreview}`);
+          });
         } catch (err) {
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',

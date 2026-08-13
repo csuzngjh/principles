@@ -8,9 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=principles-disciple",
-    "lint": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
-    "lint:fix": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npm run build --workspace=principles-disciple",
+    "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
+    "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",
     "typecheck:pd-console": "cd packages/pd-console && npx tsc --noEmit",
     "check:generated-artifacts": "node scripts/check-generated-artifacts.cjs",

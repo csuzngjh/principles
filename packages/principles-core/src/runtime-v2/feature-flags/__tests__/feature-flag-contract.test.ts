@@ -618,3 +618,24 @@ describe('new_user_onboarding flag', () => {
     expect(result.flags.new_user_onboarding?.enabled).toBe(true);
   });
 });
+
+describe('PRI-523 shared host runtime rollout flag', () => {
+  it('registers abstraction_layer_v1 as quiet, default-off, and dated to the accepted exception', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'abstraction_layer_v1');
+    expect(flag).toMatchObject({
+      id: 'abstraction_layer_v1',
+      category: 'quiet',
+      enabled: false,
+      since: '2026-08-13',
+    });
+  });
+
+  it('honors an explicit abstraction_layer_v1 rollback', () => {
+    const result = computeEffectiveFlags(
+      { abstraction_layer_v1: { category: 'quiet', enabled: false } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/config.yaml',
+    );
+    expect(result.flags.abstraction_layer_v1?.enabled).toBe(false);
+  });
+});

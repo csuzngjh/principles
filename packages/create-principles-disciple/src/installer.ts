@@ -12,8 +12,8 @@ import { t } from './i18n.js';
 import type { InstallOptions } from './prompts.js';
 import {
   generateConfigYamlContent,
+  migrateHostRuntimeFlagsInConfigYaml,
   getConfigYamlPath,
-  validateConfigYamlFull,
   readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
   getPluginExtDir,
@@ -1086,7 +1086,10 @@ async function generateConfigYamlConfig(
   // PRI-308: preserve existing valid config.yaml (file exists — either
   // pre-existing or created concurrently between ensureDir and writeFileSync).
   try {
-    validateConfigYamlFull(workspaceDir);
+    const hostFlagsMigrated = migrateHostRuntimeFlagsInConfigYaml(workspaceDir);
+    if (hostFlagsMigrated) {
+      logger.info('Added PRI-523 host rollout flags to existing .pd/config.yaml without changing explicit values');
+    }
     // Existing config is structurally valid — preserve it
     logger.info(`Existing .pd/config.yaml is valid, preserving it`);
     // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via

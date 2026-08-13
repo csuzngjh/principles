@@ -204,6 +204,9 @@ jobs:
       - name: Build core
         run: npm run build --workspace=@principles/core
 
+      - name: Build host runtime
+        run: npm run build --workspace=@principles/host-runtime
+
       - name: Build target package
         run: |
           PKG_DIR="${{ matrix.pkg_dir }}"

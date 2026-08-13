@@ -1,6 +1,6 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
@@ -280,6 +280,7 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
       defer_archive:      { category: 'core',  enabled: true },
       // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
       code_rule_capability: { category: 'core', enabled: true },
+      'host.codex':        { category: 'core', enabled: true },
       // MVP-Quiet (ADR-0014 §2.5)
       correction_observer:{ category: 'quiet', enabled: false },
       feedback_channel:   { category: 'quiet', enabled: true },
@@ -289,6 +290,7 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },
+      abstraction_layer_v1: { category: 'quiet', enabled: false },
       // MVP-Gone (ADR-0014 §2.6)
       nocturnal:          { category: 'gone',  enabled: false },
       idle_trigger:       { category: 'gone',  enabled: false },
@@ -412,6 +414,41 @@ export function validateConfigYamlFull(workspaceDir: string): void {
   if (!Object.hasOwn(agents, 'defaultRuntime') || typeof agents.defaultRuntime !== 'string' || agents.defaultRuntime.length === 0) {
     throw new Error(`config.yaml at ${configPath}: 'internalAgents.defaultRuntime' must be a non-empty string, got ${!Object.hasOwn(agents, 'defaultRuntime') ? 'missing' : typeof agents.defaultRuntime}. Delete the file and re-run the installer.`);
   }
+}
+
+/**
+ * PRI-523: add the two explicit host rollout flags to an existing valid config.
+ * Existing values are authoritative and are never overwritten.
+ */
+export function migrateHostRuntimeFlagsInConfigYaml(workspaceDir: string): boolean {
+  validateConfigYamlFull(workspaceDir);
+  const configPath = getConfigYamlPath(workspaceDir);
+  const parsed: unknown = yaml.load(readFileSync(configPath, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`config.yaml at ${configPath} must be an object. Fix it before retrying migration.`);
+  }
+  const featuresValue = Object.getOwnPropertyDescriptor(parsed, 'features')?.value;
+  if (typeof featuresValue !== 'object' || featuresValue === null || Array.isArray(featuresValue)) {
+    throw new Error(`config.yaml at ${configPath}: 'features' must be an object. Fix it before retrying migration.`);
+  }
+
+  let changed = false;
+  if (!Object.hasOwn(featuresValue, 'host.codex')) {
+    Object.defineProperty(featuresValue, 'host.codex', {
+      value: { category: 'core', enabled: true }, enumerable: true, writable: true, configurable: true,
+    });
+    changed = true;
+  }
+  if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
+    Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
+      value: { category: 'quiet', enabled: false }, enumerable: true, writable: true, configurable: true,
+    });
+    changed = true;
+  }
+  if (changed) {
+    writeFileSync(configPath, yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' }), 'utf8');
+  }
+  return changed;
 }
 
 /**
