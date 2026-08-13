@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -277,6 +277,48 @@ describe('shared production RuleHost gate kernel', () => {
     expect(runtimeSource.match(/runInContext/g)).toHaveLength(2);
     expect(runtimeSource.indexOf('const EVALUATION_PROCESS_SOURCE')).toBeLessThan(runtimeSource.indexOf('runInContext'));
     expect(runtimeSource).toContain("spawnSync(process.execPath, ['--max-old-space-size=32'");
+  });
+
+  it('rejects an oversized artifact envelope before parsing its small RuleCode', async () => {
+    const workspaceDir = tempWorkspace();
+    const oversizedEnvelopeCode = `function evaluate() { return { decision: 'block', matched: true, reason: 'OVERSIZED_ENVELOPE_MUST_NOT_RUN_523' }; }`;
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      const now = new Date().toISOString();
+      connection.getDb().prepare(`
+        INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('art-oversized-envelope', 'rule', 'task-oversized-envelope', 'P_ENVELOPE_523', 'R_ENVELOPE_523', '[]', 'validated', JSON.stringify({
+        ruleId: 'R_ENVELOPE_523', principleId: 'P_ENVELOPE_523', implementationCode: oversizedEnvelopeCode,
+        irrelevant: 'x'.repeat(600_000),
+      }), now, now);
+      await new SqliteActivationStateStore(connection).recordActivation({
+        activationId: 'act-oversized-envelope', idempotencyKey: 'oversized-envelope::live', artifactId: 'art-oversized-envelope',
+        channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: 'impl://R_ENVELOPE_523', activatedAt: now, deactivatedAt: null,
+      });
+    } finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow', warnings: [expect.stringMatching(/artifact_content_budget_exceeded.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it.each(['resolve', 'reject'] as const)('clears the provider deadline timer after early %s', async (settlement) => {
+    vi.useFakeTimers();
+    try {
+      const workspaceDir = tempWorkspace();
+      const provider = settlement === 'resolve'
+        ? () => Promise.resolve(undefined)
+        : () => Promise.reject(new Error('EARLY_PROVIDER_REJECT_523'));
+      const runtime = createProductionHostRuntime({
+        ruleContextProvider: provider,
+        afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
+      });
+      const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+      expect(result.decision).toBe('allow');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 
   it('loads a live SQLite RuleCode and uniquely denies unsafe input while allowing the safe control', async () => {

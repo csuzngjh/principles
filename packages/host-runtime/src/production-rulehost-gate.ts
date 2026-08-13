@@ -27,6 +27,7 @@ import {
 const WARNING_LIMIT = 500;
 const MAX_WARNINGS = 16;
 const GATE_DEADLINE_MS = 3_000;
+const ARTIFACT_CONTENT_BYTES = 512 * 1024;
 
 function boundedWarning(reason: string, nextAction: string): string {
   return `${reason}; nextAction=${nextAction}`.replace(/\s+/g, ' ').slice(0, WARNING_LIMIT);
@@ -40,16 +41,24 @@ function remainingGateMs(startedAt: number): number {
   return GATE_DEADLINE_MS - (Date.now() - startedAt);
 }
 
+function createDeadlinePromise<T>(remaining: number): { promise: Promise<T>; clear: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('gate_deadline_exceeded')), remaining);
+    timer.unref?.();
+  });
+  return { promise, clear: () => { if (timer !== undefined) clearTimeout(timer); } };
+}
+
 async function withinGateDeadline<T>(value: T | Promise<T>, startedAt: number): Promise<T> {
   const remaining = remainingGateMs(startedAt);
   if (remaining <= 0) throw new Error('gate_deadline_exceeded');
-  return Promise.race([
-    Promise.resolve(value),
-    new Promise<T>((_resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('gate_deadline_exceeded')), remaining);
-      timer.unref?.();
-    }),
-  ]);
+  const deadline = createDeadlinePromise<T>(remaining);
+  try {
+    return await Promise.race([Promise.resolve(value), deadline.promise]);
+  } finally {
+    deadline.clear();
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -168,7 +177,8 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     try {
       const rows: unknown = connection.getDb().prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
-               p.content_json, p.source_rule_id, p.source_principle_id
+               p.source_rule_id, p.source_principle_id,
+               length(CAST(p.content_json AS BLOB)) AS content_bytes
         FROM activations a JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
@@ -179,6 +189,15 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       } else if (rows.length > MAX_ACTIVE_RULES) {
         return { decision: 'allow', source: event.source, warnings: [boundedWarning(`active_rule_limit_exceeded: maximum ${MAX_ACTIVE_RULES}`, 'deactivate excess active RuleHost rules and retry')], metadata: { evaluatedLiveRules: 0 } };
       } else {
+        for (const row of rows) {
+          if (!isRecord(row) || typeof row.content_bytes !== 'number' || !Number.isSafeInteger(row.content_bytes) || row.content_bytes < 0) {
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning('artifact_content_size_invalid', 'inspect state.db artifact content integrity')], metadata: { evaluatedLiveRules: 0 } };
+          }
+          if (row.content_bytes > ARTIFACT_CONTENT_BYTES) {
+            const activation = typeof row.activation_id === 'string' ? row.activation_id : 'unknown';
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activation} bytes=${row.content_bytes} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: { evaluatedLiveRules: 0 } };
+          }
+        }
         const groups = new Map<string, Record<string, unknown>[]>();
         for (const row of rows) {
           if (!isRecord(row) || typeof row.target_ref !== 'string' || row.target_ref.length === 0) {
@@ -198,10 +217,27 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           if (!row || row.action !== 'code_tool_hook_live_activate') continue;
           const activationId = row.activation_id;
           const artifactId = row.artifact_id;
-          const contentJson = row.content_json;
-          if (typeof activationId !== 'string' || typeof artifactId !== 'string' || typeof contentJson !== 'string') {
+          const expectedContentBytes = row.content_bytes;
+          if (typeof activationId !== 'string' || typeof artifactId !== 'string' || typeof expectedContentBytes !== 'number') {
             addWarning(warnings, 'activation_required_fields_invalid', 'deactivate and recreate the activation');
             continue;
+          }
+          const contentRow: unknown = connection.getDb().prepare(`
+            SELECT content_json, length(CAST(content_json AS BLOB)) AS content_bytes
+            FROM pi_artifacts WHERE artifact_id = ?
+          `).get(artifactId);
+          if (!isRecord(contentRow) || typeof contentRow.content_json !== 'string'
+            || typeof contentRow.content_bytes !== 'number' || !Number.isSafeInteger(contentRow.content_bytes)) {
+            addWarning(warnings, `activation_artifact_invalid: ${activationId}`, 'inspect state.db artifact content integrity');
+            continue;
+          }
+          const contentJson = contentRow.content_json;
+          const returnedContentBytes = Buffer.byteLength(contentJson, 'utf8');
+          if (contentRow.content_bytes > ARTIFACT_CONTENT_BYTES || returnedContentBytes > ARTIFACT_CONTENT_BYTES) {
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_budget_exceeded: activation=${activationId} bytes=${Math.max(contentRow.content_bytes, returnedContentBytes)} maximum=${ARTIFACT_CONTENT_BYTES}`, 'reduce the active artifact envelope and reactivate the rule')], metadata: { evaluatedLiveRules: 0 } };
+          }
+          if (contentRow.content_bytes !== expectedContentBytes || returnedContentBytes !== contentRow.content_bytes) {
+            return { decision: 'allow', source: event.source, warnings: [boundedWarning(`artifact_content_size_changed: activation=${activationId}`, 'retry after the active artifact update completes')], metadata: { evaluatedLiveRules: 0 } };
           }
           try {
             const content: unknown = JSON.parse(contentJson);
