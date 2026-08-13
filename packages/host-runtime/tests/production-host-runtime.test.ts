@@ -240,20 +240,20 @@ function evaluate(input) {
 var meta = { name: 'shared-gate-523', version: '1', ruleId: 'R_SHARED_GATE_523', coversCondition: 'all' };
 `;
 
-async function seedLiveRule(workspaceDir: string, implementationCode: string, requiresContextVersion?: 2): Promise<void> {
+async function seedLiveRule(workspaceDir: string, implementationCode: string, requiresContextVersion?: 2, suffix = ''): Promise<void> {
   const connection = new SqliteConnection(workspaceDir);
   try {
     const now = new Date().toISOString();
     connection.getDb().prepare(`
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('art-shared-gate', 'rule', 'task-shared-gate', 'P_SHARED_GATE_523', 'R_SHARED_GATE_523', '[]', 'validated', JSON.stringify({
+    `).run(`art-shared-gate${suffix}`, 'rule', `task-shared-gate${suffix}`, 'P_SHARED_GATE_523', `R_SHARED_GATE_523${suffix}`, '[]', 'validated', JSON.stringify({
       principleId: 'P_SHARED_GATE_523', ruleId: 'R_SHARED_GATE_523', implementationCode,
       ...(requiresContextVersion === 2 ? { requiresContextVersion: 2 } : {}),
     }), now, now);
     await new SqliteActivationStateStore(connection).recordActivation({
-      activationId: 'act-shared-gate', idempotencyKey: 'shared-gate::live', artifactId: 'art-shared-gate',
-      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: 'impl://R_SHARED_GATE_523',
+      activationId: `act-shared-gate${suffix}`, idempotencyKey: `shared-gate${suffix}::live`, artifactId: `art-shared-gate${suffix}`,
+      channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', targetRef: `impl://R_SHARED_GATE_523${suffix}`,
       activatedAt: now, deactivatedAt: null,
     });
   } finally {
@@ -271,6 +271,14 @@ function gateEvent(workspaceDir: string, filePath: string) {
 }
 
 describe('shared production RuleHost gate kernel', () => {
+  it('keeps node:vm execution exclusively inside the bounded child source', () => {
+    const runtimeSource = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'rule-implementation-runtime.ts'), 'utf8');
+    expect(runtimeSource).not.toMatch(/^import .*node:vm/m);
+    expect(runtimeSource.match(/runInContext/g)).toHaveLength(2);
+    expect(runtimeSource.indexOf('const EVALUATION_PROCESS_SOURCE')).toBeLessThan(runtimeSource.indexOf('runInContext'));
+    expect(runtimeSource).toContain("spawnSync(process.execPath, ['--max-old-space-size=32'");
+  });
+
   it('loads a live SQLite RuleCode and uniquely denies unsafe input while allowing the safe control', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
@@ -357,6 +365,68 @@ describe('shared production RuleHost gate kernel', () => {
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/safe/project.txt'))).resolves.toMatchObject({
       decision: 'allow', metadata: { ruleDecision: 'requireApproval', evaluatedLiveRules: 1 },
+    });
+  });
+
+  it.each([
+    ['top-level infinite loop', 'while (true) {}', /rule_batch_timeout.*nextAction=/],
+    ['invalid source', 'function evaluate( {', /implementation_unhealthy.*nextAction=/],
+    ['oversized source', `function evaluate() { return { decision: 'allow', matched: false, reason: '${'x'.repeat(300_000)}' }; }`, /rule_source_budget_exceeded.*nextAction=/],
+    ['oversized output', `function evaluate() { return { decision: 'allow', matched: false, reason: 'x'.repeat(100000) }; }`, /rule_batch_output_exceeded.*nextAction=/],
+    ['bounded memory', `var x = []; while (true) { x.push('${'x'.repeat(10_000)}' + x.length); }`, /rule_batch_(?:failed|timeout).*nextAction=/],
+  ])('fails open observably when child RuleCode hits %s', async (_caseName, code, warning) => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, code);
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow', warnings: [expect.stringMatching(warning)],
+    });
+  });
+
+  it('bounds total multi-rule gate elapsed time independently of active rule count', async () => {
+    const workspaceDir = tempWorkspace();
+    for (let index = 0; index < 8; index += 1) {
+      await seedLiveRule(workspaceDir, `function evaluate() { const until = Date.now() + 800; while (Date.now() < until) {} return { decision: 'allow', matched: false, reason: 'slow-${index}' }; }`, undefined, `-${index}`);
+    }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    const started = Date.now();
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    const elapsedMs = Date.now() - started;
+    expect(result).toMatchObject({ decision: 'allow', warnings: [expect.stringMatching(/rule_batch_timeout.*nextAction=/)] });
+    expect(elapsedMs).toBeLessThan(4_000);
+  }, 10_000);
+
+  it('caps active rules before executing unbounded workspace state', async () => {
+    const workspaceDir = tempWorkspace();
+    for (let index = 0; index < 40; index += 1) await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, `-${index}`);
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result).toMatchObject({ decision: 'allow', warnings: [expect.stringMatching(/active_rule_limit_exceeded.*nextAction=/)] });
+    expect(result.warnings?.length).toBeLessThanOrEqual(16);
+  });
+
+  it('caps observable warnings from malformed activation rows', async () => {
+    const workspaceDir = tempWorkspace();
+    for (let index = 0; index < 20; index += 1) await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, `-warning-${index}`);
+    const connection = new SqliteConnection(workspaceDir);
+    try { connection.getDb().prepare("UPDATE activations SET target_ref = ''").run(); }
+    finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result).toMatchObject({ decision: 'allow', warnings: expect.any(Array) });
+    expect(result.warnings).toHaveLength(16);
+    expect(result.warnings?.every((warning) => warning.length <= 500 && warning.includes('nextAction='))).toBe(true);
+  });
+
+  it('skips an invalid rule observably while a healthy sibling still denies', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, 'function evaluate( {', undefined, '-invalid');
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, '-healthy');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'deny', reason: SHARED_GATE_REASON,
+      warnings: [expect.stringMatching(/implementation_unhealthy.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 1 },
     });
   });
 });
