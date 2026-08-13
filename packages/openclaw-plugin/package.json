@@ -70,6 +70,7 @@
     "sync-plugin": "node scripts/sync-plugin.mjs"
   },
   "devDependencies": {
+    "@principles/host-runtime": "^0.1.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
@@ -96,7 +97,6 @@
   },
   "dependencies": {
     "@principles/core": "^1.74.1",
-    "@principles/host-runtime": "^0.1.0",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^13.0.3",
     "commander": "^12.0.0",

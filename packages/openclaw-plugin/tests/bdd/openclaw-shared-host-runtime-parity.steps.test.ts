@@ -1,0 +1,145 @@
+import { afterEach, expect, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+import * as yaml from 'js-yaml';
+import {
+  getDefaultPdConfig,
+  SqliteActivationStateStore,
+  SqliteConnection,
+} from '@principles/core/runtime-v2';
+import plugin from '../../src/index.js';
+import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { EventLogService } from '../../src/core/event-log.js';
+import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
+import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
+
+// The OpenClaw host config file lives outside a workspace. Keep that host-owned
+// boundary isolated while exercising the real plugin registration, dispatcher,
+// handlers, SQLite stores, RuleHost, and trajectory persistence below.
+vi.mock('../../src/core/config-health.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/config-health.js')>();
+  return { ...actual, ensureConversationAccessInConfig: vi.fn(() => false) };
+});
+
+const PRINCIPLE_TEXT = 'SHARED_RUNTIME_OWNER_PRINCIPLE_523';
+const RULE_REASON = 'SHARED_RUNTIME_DENY_523';
+const RULE_CODE = `
+function evaluate(input) {
+  var p = input.action.normalizedPath || '';
+  if (p.indexOf('/etc/') === 0) return { decision: 'block', matched: true, reason: '${RULE_REASON}' };
+  return { decision: 'allow', matched: false, reason: 'not matched' };
+}
+var meta = { name: 'shared-runtime-parity', version: '1', ruleId: 'R_SHARED_523', coversCondition: 'all' };
+`;
+
+type Hook = (...args: unknown[]) => unknown;
+const registry = createStepRegistry();
+let workspaceDir = '';
+let connection: SqliteConnection | undefined;
+let hooks = new Map<string, Hook>();
+let result: unknown;
+let logMessages: string[] = [];
+const originalPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+
+function apiForWorkspace(): OpenClawPluginApi {
+  const logger = { debug(...args: unknown[]) { logMessages.push(args.join(' ')); }, info(...args: unknown[]) { logMessages.push(args.join(' ')); }, warn(...args: unknown[]) { logMessages.push(args.join(' ')); }, error(...args: unknown[]) { logMessages.push(args.join(' ')); } };
+  return {
+    id: 'principles-disciple', rootDir: workspaceDir, pluginConfig: {}, config: {}, logger,
+    registerCommand() {}, registerService() {}, registerTool() {}, registerHttpRoute() {},
+    on(event, handler) { hooks.set(event, handler as Hook); },
+  };
+}
+
+function writeConfig(): void {
+  const config = getDefaultPdConfig();
+  config.features.abstraction_layer_v1.enabled = true;
+  config.features.evolution_worker.enabled = false;
+  config.features.correction_observer.enabled = false;
+  config.features.internalization_auto_consumer.enabled = false;
+  fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
+}
+
+function insertArtifact(input: { id: string; kind: 'principle' | 'rule'; principleId: string; ruleId?: string; content: object }): void {
+  const now = new Date().toISOString();
+  connection!.getDb().prepare(`
+    INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(input.id, input.kind, 'task-shared-523', input.principleId, input.ruleId ?? null, '[]', 'validated', JSON.stringify(input.content), now, now);
+}
+
+async function activate(input: { id: string; channel: 'prompt' | 'code_tool_hook'; action: 'prompt_activate' | 'code_tool_hook_live_activate'; target: string }): Promise<void> {
+  await new SqliteActivationStateStore(connection!).recordActivation({
+    activationId: `act-${input.id}`, idempotencyKey: `${input.id}::${input.channel}`,
+    artifactId: input.id, channel: input.channel, action: input.action,
+    targetRef: input.target, activatedAt: new Date().toISOString(), deactivatedAt: null,
+  });
+}
+
+afterEach(() => {
+  try { connection?.close(); } catch { /* best effort */ }
+  connection = undefined;
+  WorkspaceContext.clearCache();
+  EventLogService.disposeAll();
+  if (workspaceDir) {
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* Windows may retain native SQLite handles briefly */ }
+  }
+  workspaceDir = '';
+  hooks = new Map();
+  result = undefined;
+  logMessages = [];
+  if (originalPdWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR;
+  else process.env.PD_WORKSPACE_DIR = originalPdWorkspaceDir;
+});
+
+registry.given('an isolated OpenClaw workspace with abstraction_layer_v1 enabled', () => {
+  workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-bdd-'));
+  process.env.PD_WORKSPACE_DIR = workspaceDir;
+  writeConfig();
+  connection = new SqliteConnection(workspaceDir);
+  connection.getDb();
+});
+registry.given('the OpenClaw plugin is registered through its production entry point', () => {
+  plugin.register(apiForWorkspace());
+});
+registry.given('an approved prompt principle is active', async () => {
+  insertArtifact({ id: 'art-prompt-523', kind: 'principle', principleId: 'P_SHARED_523', content: { principleId: 'P_SHARED_523', text: PRINCIPLE_TEXT } });
+  await activate({ id: 'art-prompt-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_SHARED_523' });
+});
+registry.when('OpenClaw builds the next prompt', async () => {
+  result = await hooks.get('before_prompt_build')!({ prompt: 'help', messages: [] }, { workspaceDir, sessionId: 'session-prompt-523', agentId: 'main' });
+});
+registry.then('the returned system context contains that activated principle', () => {
+  expect(result, logMessages.join('\n')).toEqual(expect.objectContaining({ prependSystemContext: expect.stringContaining(PRINCIPLE_TEXT) }));
+});
+registry.given('an approved live RuleHost rule is active', async () => {
+  insertArtifact({ id: 'art-rule-523', kind: 'rule', principleId: 'P_RULE_523', ruleId: 'R_SHARED_523', content: {
+    principleId: 'P_RULE_523', ruleId: 'R_SHARED_523', implementationCode: RULE_CODE,
+    goldenTrace: { traceId: 'trace-523', cases: [], createdAt: new Date().toISOString(), version: 1 },
+    ruleHostGateDecision: 'accepted_shadow', affectedTools: ['write_file'], painReasonSummary: 'protect system paths',
+  } });
+  await activate({ id: 'art-rule-523', channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_SHARED_523' });
+});
+registry.when('OpenClaw checks a write to a protected system path', async () => {
+  result = await hooks.get('before_tool_call')!({ toolName: 'write_file', params: { file_path: '/etc/passwd', content: 'bad' } }, { workspaceDir, sessionId: 'session-gate-523', agentId: 'main' });
+});
+registry.then('the tool call is denied with the rule reason', () => {
+  expect(result, logMessages.join('\n')).toEqual(expect.objectContaining({ block: true, blockReason: expect.stringContaining(RULE_REASON) }));
+});
+registry.when('OpenClaw reports an owner pain signal after a tool call', async () => {
+  await hooks.get('after_tool_call')!({ toolName: 'pain', params: { input: 'owner correction 523' }, result: {} }, { workspaceDir, sessionId: 'session-pain-523', agentId: 'main' });
+});
+registry.then('a pain evidence row is persisted in the workspace trajectory', () => {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  const row = db.prepare('SELECT source, score, text FROM pain_events WHERE session_id = ?').get('session-pain-523');
+  db.close();
+  expect(row).toEqual(expect.objectContaining({ source: 'manual', score: 100, text: 'owner correction 523' }));
+});
+
+defineFeature(
+  fs.readFileSync(resolveFeaturePath('docs/specs/features/story-a/openclaw-shared-host-runtime-parity.feature'), 'utf8'),
+  registry,
+);
