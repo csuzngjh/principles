@@ -7,6 +7,8 @@ import {
   evaluateTriage,
   evaluateTriggerController,
   resolveSourceKind,
+  sanitizeToolParams,
+  sanitizeValue,
 } from '@principles/core/runtime-v2';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 
@@ -31,6 +33,7 @@ export interface ProductionPainEnrichment {
 }
 
 export type PainEnrichmentProvider = (event: HostEvent) => unknown | Promise<unknown>;
+export type PainDatabaseFactory = (databasePath: string) => Database.Database;
 
 interface NormalizedOutcome {
   failure: boolean;
@@ -128,20 +131,22 @@ function preview(value: unknown): string | null {
   }
 }
 
-function ids(event: HostEvent, outcome: NormalizedOutcome, canonicalEventId?: string): { eventId: string; painId: string } {
+function ids(input: { event: HostEvent; outcome: NormalizedOutcome; sanitizedParams: Record<string, unknown>; canonicalEventId?: string }): { eventId: string; painId: string } {
+  const { event, outcome, sanitizedParams, canonicalEventId } = input;
   const canonical = stable({
     workspaceDir: path.resolve(event.context.workspaceDir),
     sessionId: event.context.sessionId,
     turnId: event.context.turnId ?? null,
     toolName: event.context.toolName,
     source: event.source,
-    params: outcome.params,
-    result: outcome.result,
+    suppliedEventId: canonicalEventId ?? null,
+    params: sanitizedParams,
+    result: sanitizeValue(outcome.result, 0, event.context.workspaceDir),
     error: outcome.error ?? null,
+    exitCode: outcome.exitCode,
+    failure: outcome.failure,
   });
-  const digest = createHash('sha256').update(canonicalEventId
-    ? stable({ source: event.source, sessionId: event.context.sessionId, eventId: canonicalEventId })
-    : canonical).digest('hex');
+  const digest = createHash('sha256').update(canonical).digest('hex');
   return { eventId: `host_${digest}`, painId: `pain_host_${digest}` };
 }
 
@@ -151,10 +156,28 @@ function hasCanonicalSchema(db: Database.Database): boolean {
   return tables.length === 3 && index !== undefined;
 }
 
-export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider } = {}) {
+export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory } = {}) {
   return async (event: HostEvent): Promise<HostEventResult> => {
-    const warnings: string[] = [];
     const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
+    if (!fs.existsSync(dbPath)) {
+      return { decision: 'observe', source: event.source, warnings: ['trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
+    }
+
+    let db: Database.Database | undefined;
+    try {
+      db = options.painDatabaseFactory ? options.painDatabaseFactory(dbPath) : new Database(dbPath);
+      db.pragma('busy_timeout = 5000');
+      if (!hasCanonicalSchema(db)) {
+        db.close();
+        db = undefined;
+        return { decision: 'observe', source: event.source, warnings: ['trajectory_schema_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'run the supported PD workspace migration' } };
+      }
+    } catch (error) {
+      try { db?.close(); } catch { /* best-effort cleanup of an unusable handle */ }
+      return { decision: 'observe', source: event.source, warnings: [`trajectory_database_unavailable:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect or repair the selected PD trajectory database' } };
+    }
+
+    const warnings: string[] = [];
     let enrichment: ProductionPainEnrichment | null;
     try {
       enrichment = parseEnrichment(await options.painEnrichmentProvider?.(event));
@@ -163,13 +186,12 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       enrichment = null;
     }
     if (!enrichment) {
+      try { db.close(); } catch { /* no business write occurred */ }
       return { decision: 'observe', source: event.source, warnings: warnings.length > 0 ? warnings : ['pain_enrichment_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect host pain enrichment input' } };
-    }
-    if (!fs.existsSync(dbPath)) {
-      return { decision: 'observe', source: event.source, warnings: ['trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
     }
 
     const outcome = normalizeOutcome(event);
+    const sanitizedParams = sanitizeToolParams(outcome.params, event.context.workspaceDir);
     const toolName = event.context.toolName ?? '';
     const sourceObservation = buildToolFailureObservation({ toolName, error: outcome.error, exitCode: outcome.exitCode });
     const sourceKind = resolveSourceKind({
@@ -187,27 +209,23 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const triage = evaluateTriage({ sourceKind, score: painScore, consecutiveErrors: enrichment.consecutiveErrors, isRisky });
     const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: cooldownActive, isValid: true, score: painScore, sessionId: event.context.sessionId });
     const admitted = outcome.failure && WRITE_TOOLS.has(toolName) && trigger.shouldCreateDiagnosticTask;
-    const { eventId, painId } = ids(event, outcome, enrichment.eventId);
+    const { eventId, painId } = ids({ event, outcome, sanitizedParams, ...(enrichment.eventId ? { canonicalEventId: enrichment.eventId } : {}) });
     const createdAt = new Date().toISOString();
-    const paramsJson = stable({ eventId, source: event.source, toolInput: outcome.params });
+    const paramsJson = stable(sanitizedParams);
+    const resultPreview = preview({ eventId, result: sanitizeValue(outcome.result, 0, event.context.workspaceDir) });
     let duplicate = false;
     let duplicateAdmitted = false;
 
-    const db = new Database(dbPath);
     try {
-      db.pragma('busy_timeout = 5000');
-      if (!hasCanonicalSchema(db)) {
-        return { decision: 'observe', source: event.source, warnings: ['trajectory_schema_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'run the supported PD workspace migration' } };
-      }
       db.transaction(() => {
-        if (db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ?').get(event.context.sessionId, toolName, paramsJson)) {
+        if (db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?').get(event.context.sessionId, toolName, paramsJson, outcome.failure ? 'failure' : 'success', outcome.exitCode, outcome.error ?? null, resultPreview)) {
           duplicate = true;
           duplicateAdmitted = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined;
           return;
         }
         db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`).run(event.context.sessionId, createdAt, createdAt);
         db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(event.context.sessionId, toolName, outcome.failure ? 'failure' : 'success', outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, preview(outcome.result), createdAt);
+          .run(event.context.sessionId, toolName, outcome.failure ? 'failure' : 'success', outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt);
         if (admitted) {
           const reason = `Tool ${toolName} failed on ${relativePath}; diagnosticGate=${trigger.reason}`;
           db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -218,7 +236,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     } catch (error) {
       return { decision: 'observe', source: event.source, warnings: [`trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.failure ? 'failure' : 'success', admitted: false, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
     } finally {
-      db.close();
+      try { db.close(); } catch { /* write result already determined; cleanup is best-effort */ }
     }
 
     const effectiveAdmitted = admitted || duplicateAdmitted;

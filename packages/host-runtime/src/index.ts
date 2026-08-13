@@ -7,7 +7,7 @@ import {
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
-import { createProductionPainEvidenceHandler, type PainEnrichmentProvider } from './production-pain-evidence.js';
+import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type PainEnrichmentProvider } from './production-pain-evidence.js';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
@@ -174,6 +174,7 @@ export function createProductionHostRuntime(
     ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
     ruleImplementationRuntime?: RuleImplementationRuntime;
     painEnrichmentProvider?: PainEnrichmentProvider;
+    painDatabaseFactory?: PainDatabaseFactory;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
@@ -184,6 +185,7 @@ export function createProductionHostRuntime(
   return createHostRuntime({
     afterToolCall: options.afterToolCall ?? createProductionPainEvidenceHandler({
       ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
+      ...(options.painDatabaseFactory ? { painDatabaseFactory: options.painDatabaseFactory } : {}),
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {

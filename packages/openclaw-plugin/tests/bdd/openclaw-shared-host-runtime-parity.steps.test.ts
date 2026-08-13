@@ -15,6 +15,7 @@ import plugin from '../../src/index.js';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
+import { assembleHistoryFromRows } from '../../src/core/rule-context-assembler.js';
 import type { EvolutionLoopEvent } from '../../src/core/evolution-types.js';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
@@ -110,6 +111,9 @@ registry.given('an isolated OpenClaw workspace with abstraction_layer_v1 enabled
   fs.writeFileSync(path.join(workspaceDir, '.principles', 'PROFILE.json'), JSON.stringify({ risk_paths: ['/etc'] }), 'utf8');
   connection = new SqliteConnection(workspaceDir);
   connection.getDb();
+  // Production startup owns workspace initialization; the after-tool kernel
+  // must consume this canonical schema without silently bootstrapping it.
+  void WorkspaceContext.fromHookContext({ workspaceDir }).trajectory;
 });
 registry.given('the OpenClaw plugin is registered through its production entry point', () => {
   plugin.register(apiForWorkspace());
@@ -248,12 +252,15 @@ registry.when('OpenClaw reports a failed write to a risky path', async () => {
 registry.then('one lineaged automatic pain and its tool evidence are persisted', () => {
   expect(fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db')), logMessages.join('\n')).toBe(true);
   const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-  const tools = db.prepare('SELECT session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls WHERE session_id = ?').all('session-auto-pain-523');
+  const tools = db.prepare('SELECT id, session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls WHERE session_id = ?').all('session-auto-pain-523');
   const pains = db.prepare('SELECT session_id, source, score, reason, origin, canonical_pain_id FROM pain_events WHERE session_id = ?').all('session-auto-pain-523');
   db.close();
   expect(tools).toHaveLength(1);
   expect(tools[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1, error_message: 'EACCES permission denied' }));
-  expect(String(Object.getOwnPropertyDescriptor(tools[0] as object, 'params_json')?.value)).toContain('openclaw:after_tool_call');
+  const paramsJson = String(Object.getOwnPropertyDescriptor(tools[0] as object, 'params_json')?.value);
+  expect(JSON.parse(paramsJson)).toEqual({ content: 'unsafe', file_path: '<path:pd-shared-kernel>' });
+  const replay = assembleHistoryFromRows([{ id: Number(Object.getOwnPropertyDescriptor(tools[0] as object, 'id')?.value), toolName: 'write_file', outcome: 'failure', paramsJson }], false, workspaceDir);
+  expect(replay).toEqual(expect.objectContaining({ status: 'available', calls: [expect.objectContaining({ normalizedPath: '<path:pd-shared-kernel>' })] }));
   expect(pains, JSON.stringify(result)).toHaveLength(1);
   expect(pains[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', source: 'tool_failure', score: 70, origin: 'system_infer' }));
   expect(String(Object.getOwnPropertyDescriptor(pains[0] as object, 'reason')?.value)).toContain('write_file');

@@ -209,6 +209,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 **[ERR-002]** | Catch-and-degrade pattern silently swallows failure reasons
 
+- **2026-08-13 PRI-523 C1.3 recurrence**: SQLite construction/pragma/schema checks occurred outside the guarded failure boundary and enrichment ran before readiness. Corrupt/injected-open failures now return a bounded structured warning + nextAction without rejection, partial write, bootstrap, or host side effects.
+
 - **What happened**: `buildFullTraceSafe()` catch block caught all exceptions and returned `null` with no observability — no logging, no error propagation, no ambiguity notes.
 - **Why it's wrong**: Downstream diagnostician receives `fullTrace: null` and cannot distinguish between "no painId provided" and "trace construction crashed". Degradation is correct design, but degradation ≠ silence. Silent degradation hides bugs and makes debugging impossible.
 - **Correct approach**: Catch blocks in degrade patterns must propagate the failure reason through at least one channel: `ambiguityNotes`, telemetry, or logging.
@@ -304,6 +306,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-190
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — lineage/source fields come from the wrong task or are racy across a read-then-write.
+  - 2026-08-13 PRI-523 C1.3 quality review: a supplied host event ID could override canonical identity, so its lineage no longer matched a changed payload/outcome. Fixed by binding workspace/source/session/tool/sanitized payload/outcome and supplied ID into one digest, with collision and exact-retry regressions.
   - 2026-06-20 PRI-435 (PR#982): `resolveSourcePainIdFromDiagnostician()` lacked `taskKind === 'diagnostician'` guard — added kind guard + corruption regression
   - 2026-06-19 PRI-408 (PR#972): `assembleRuleArtifact` set `sourcePrincipleId: undefined`; `sqlite-approval-store.edit()` read-then-write race → atomic `SET previous_artifact_id`
   - Pattern: lineage from unverified task or non-atomic read-then-write. Fix: verify task kind; atomic writes; mismatch regression tests.
@@ -863,6 +866,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 **[ERR-055]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
 
+- **2026-08-13 PRI-523 C1.3 recurrence**: the shared sanitizer documented ANY-segment key redaction but only applied value-shaped token regexes, allowing `token` and nested `authorization` values through. Fixed in the canonical core sanitizer with nested sensitive-key regressions and verified through persisted host-runtime evidence.
+
 - **What happened**: `isSensitiveKey()` required EVERY segment of a composite key to match `SENSITIVE_KEY_SEGMENTS`. This meant `github_token` (segments: `["github", "token"]`) was NOT flagged because "github" is not in the sensitive set. Only keys where ALL segments were sensitive (e.g., `auth_token` where both "auth" and "token" are in the set) were caught.
 - **Why it's wrong**: The privacy guarantee is that any key containing a sensitive segment should be redacted. Using ALL-segment logic inverts this — it only redacts when the entire key name is composed of sensitive words. This is a security vulnerability: `db_password`, `github_token`, `api_key`, `aws_secret` all pass through unredacted.
 - **Correct approach**: A key should be sensitive if ANY of its segments matches a sensitive segment. Change the logic from "all segments must match" to "at least one segment must match". Keep the empty-segment guard to avoid false positives on empty strings.
@@ -1252,7 +1257,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-25
 - **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
   - 2026-08-13 PRI-523: config migration first lacked atomic locking, then removed unowned stale-looking locks. It now atomically replaces under an owned lock and fails loud after bounded no-unlink contention.
-  - 2026-08-13 PRI-523 C1.3 self-review: the first shared PostToolUse kernel checked duplicates only when an event had already produced a `pain_events` row, so repeated successful/control host events wrote duplicate `tool_calls` evidence. The same implementation also hashed an optional host event ID without namespacing it by host source and session, allowing unrelated events with reused IDs to collide. Fixed by making the canonical tool evidence row the dedup claim for every outcome, deriving the digest from `{source, sessionId, eventId}`, and adding cross-runtime success/failure retry tests plus transaction-rollback coverage. For event-driven idempotency, review every outcome branch (success, rejected, admitted, failure) and namespace host IDs before hashing.
+  - 2026-08-13 PRI-523 C1.3 self-review and quality-review correction: the first shared PostToolUse kernel checked duplicates only when an event had already produced a `pain_events` row, so repeated successful/control host events wrote duplicate `tool_calls` evidence. Its follow-up digest still allowed the supplied host event ID to replace payload/outcome identity. Fixed by making canonical tool evidence the all-outcome dedup claim and binding canonical workspace/source/session/tool/sanitized payload/outcome plus supplied ID into the digest; same ID with different payload/outcome remains distinct while exact cross-runtime retries deduplicate.
 
 ---
 

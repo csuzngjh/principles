@@ -27,6 +27,7 @@ export const MAX_EVIDENCE_VALUE_CHARS = 200;
 const MAX_DEPTH = 4;
 const MAX_KEYS = 50;
 const MAX_ARRAY_ITEMS = 20;
+const SENSITIVE_KEY_PARTS = new Set(['token', 'secret', 'password', 'authorization', 'apikey', 'accesstoken', 'refreshtoken']);
 
 // ── Token patterns ──
 
@@ -63,6 +64,11 @@ const ABSOLUTE_PATH_IN_STRING_RE =
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSensitiveKey(key: string): boolean {
+  const parts = key.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return parts.some((part) => SENSITIVE_KEY_PARTS.has(part)) || SENSITIVE_KEY_PARTS.has(parts.join(''));
 }
 
 /**
@@ -197,7 +203,7 @@ export function sanitizeValue(
         result['<truncated>'] = `${Object.keys(value).length - count} more keys`;
         break;
       }
-      result[k] = sanitizeValue(v, depth + 1, workspaceDir);
+      result[k] = isSensitiveKey(k) ? '<sensitive___REDACTED___field>' : sanitizeValue(v, depth + 1, workspaceDir);
       count++;
     }
     return result;

@@ -132,7 +132,9 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
         : enrichedValue };
     }
     if (payload.kind === 'after_tool_call' && !native) {
-      await options.onAfterToolResult?.(payload.event, payload.context, result);
+      if (result.metadata?.outcome !== 'unavailable') {
+        await options.onAfterToolResult?.(payload.event, payload.context, result);
+      }
       return { kind: payload.kind, value: undefined };
     }
     if (!native || native.kind !== payload.kind) {
