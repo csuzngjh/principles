@@ -9,6 +9,8 @@ const createProductionHostRuntime = vi.fn();
 const handleBeforePromptBuild = vi.fn();
 const handleBeforeToolCall = vi.fn();
 const handleAfterToolCall = vi.fn();
+const prepareOrdinaryAfterToolCallForSharedRuntime = vi.fn(() => ({}));
+const handleSharedPainEvidenceResult = vi.fn();
 const sharedEnabled = vi.hoisted(() => ({ value: true }));
 const ensureConversationAccessInConfig = vi.hoisted(() => vi.fn(() => false));
 
@@ -27,7 +29,7 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
 });
 vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild }));
 vi.mock('../src/hooks/gate.js', () => ({ handleBeforeToolCall }));
-vi.mock('../src/hooks/pain.js', () => ({ handleAfterToolCall }));
+vi.mock('../src/hooks/pain.js', () => ({ handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime, handleSharedPainEvidenceResult }));
 vi.mock('../src/core/pd-config-loader.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/core/pd-config-loader.js')>();
   return {
@@ -84,6 +86,8 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     handleBeforePromptBuild.mockReset();
     handleBeforeToolCall.mockReset();
     handleAfterToolCall.mockReset();
+    prepareOrdinaryAfterToolCallForSharedRuntime.mockClear();
+    handleSharedPainEvidenceResult.mockClear();
     sharedEnabled.value = true;
     ensureConversationAccessInConfig.mockClear();
   });
@@ -123,7 +127,11 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
       expect.objectContaining({ kind: hookName, source: `openclaw:${hookName}` }),
       expect.any(Function),
     );
-    if (hookName === 'after_tool_call') expect(handleAfterToolCall).toHaveBeenCalledOnce();
+    if (hookName === 'after_tool_call') {
+      expect(prepareOrdinaryAfterToolCallForSharedRuntime).toHaveBeenCalledOnce();
+      expect(handleSharedPainEvidenceResult).toHaveBeenCalledOnce();
+      expect(handleAfterToolCall).not.toHaveBeenCalled();
+    }
     if (hookName === 'before_tool_call') expect(handleBeforeToolCall).not.toHaveBeenCalled();
     expect(result).toEqual(nativeResult);
   });

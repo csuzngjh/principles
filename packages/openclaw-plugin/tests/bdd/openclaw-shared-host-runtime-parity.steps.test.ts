@@ -106,6 +106,8 @@ registry.given('an isolated OpenClaw workspace with abstraction_layer_v1 enabled
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-bdd-'));
   process.env.PD_WORKSPACE_DIR = workspaceDir;
   writeConfig();
+  fs.mkdirSync(path.join(workspaceDir, '.principles'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceDir, '.principles', 'PROFILE.json'), JSON.stringify({ risk_paths: ['/etc'] }), 'utf8');
   connection = new SqliteConnection(workspaceDir);
   connection.getDb();
 });
@@ -236,6 +238,26 @@ registry.then('a pain evidence row is persisted in the workspace trajectory', ()
   const row = db.prepare('SELECT source, score, text FROM pain_events WHERE session_id = ?').get('session-pain-523');
   db.close();
   expect(row).toEqual(expect.objectContaining({ source: 'manual', score: 100, text: 'owner correction 523' }));
+});
+registry.when('OpenClaw reports a failed write to a risky path', async () => {
+  result = await hooks.get('after_tool_call')!(
+    { toolName: 'write_file', params: { file_path: '/etc/pd-shared-kernel', content: 'unsafe' }, result: { exitCode: 1 }, error: 'EACCES permission denied' },
+    { workspaceDir, sessionId: 'session-auto-pain-523', agentId: 'agent-openclaw-523' },
+  );
+});
+registry.then('one lineaged automatic pain and its tool evidence are persisted', () => {
+  expect(fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db')), logMessages.join('\n')).toBe(true);
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  const tools = db.prepare('SELECT session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls WHERE session_id = ?').all('session-auto-pain-523');
+  const pains = db.prepare('SELECT session_id, source, score, reason, origin, canonical_pain_id FROM pain_events WHERE session_id = ?').all('session-auto-pain-523');
+  db.close();
+  expect(tools).toHaveLength(1);
+  expect(tools[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1, error_message: 'EACCES permission denied' }));
+  expect(String(Object.getOwnPropertyDescriptor(tools[0] as object, 'params_json')?.value)).toContain('openclaw:after_tool_call');
+  expect(pains, JSON.stringify(result)).toHaveLength(1);
+  expect(pains[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', source: 'tool_failure', score: 70, origin: 'system_infer' }));
+  expect(String(Object.getOwnPropertyDescriptor(pains[0] as object, 'reason')?.value)).toContain('write_file');
+  expect(String(Object.getOwnPropertyDescriptor(pains[0] as object, 'canonical_pain_id')?.value)).toMatch(/^pain_host_/);
 });
 
 defineFeature(

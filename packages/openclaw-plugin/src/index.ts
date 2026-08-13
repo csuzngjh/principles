@@ -22,7 +22,7 @@ import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, selectLegacyPrinciplesForPrompt, type LegacyPrinciplePromptSelection } from './hooks/prompt.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
-import { handleAfterToolCall } from './hooks/pain.js';
+import { handleAfterToolCall, handleSharedPainEvidenceResult, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
@@ -295,10 +295,15 @@ const plugin = {
           });
         }
       },
-      afterToolCall: (event, context) => handleAfterToolCall(event, {
+      painEnrichmentProvider: (event, context) => prepareOrdinaryAfterToolCallForSharedRuntime(event, {
         ...context,
+        workspaceDir: context.workspaceDir ?? '',
         pluginConfig: api.pluginConfig ?? {},
-      }, api),
+      }),
+      onAfterToolResult: (event, context, result) => handleSharedPainEvidenceResult(event, {
+        ...context,
+        workspaceDir: context.workspaceDir ?? '',
+      }, result),
     });
 
     // ── Hook: Prompt Building ──
@@ -494,6 +499,13 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'after_tool_call'
             }, { flushImmediately: true });
+            return;
+          }
+          // Manual Owner pain remains an OpenClaw-owned path; PRI-523 shares
+          // only ordinary after-tool classification/admission/evidence.
+          if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
+            handleAfterToolCall(event, hookContext, api);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
             return;
           }
           return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then(() => {

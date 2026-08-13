@@ -426,6 +426,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-201 / PR #663 (Codex review, variant A); PRI-480 / PR #1089 (CodeRabbit review, variant B)
 - **Date**: 2026-05-21 (variant A); 2026-06-28 (variant B)
 - **Recurrence**: Yes — same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent.
+  - 2026-08-13 PRI-523 C1.3 self-review: the first shared PostToolUse enrichment validator used direct property reads after only checking that the value was object-like, so inherited enrichment fields could be treated as host-owned facts. Fixed by reading own data descriptors only and adding a regression where an inherited event ID cannot deduplicate two distinct canonical events.
   - 2026-06-28 PRI-480 (PR #1089) variant B: `canonicalizeToolKind()` lookup-table indexing returned `Object.prototype` for `__proto__` — fixed with `Object.hasOwn` guard
   - 2026-06-14 PRI-394 (PR #926): SQLite INSERT guessed column names — same trust-boundary pattern on DB schema
   - Earlier recurrences (PR#702-#810): variant A — `computeEffectiveFlags()` lacked dangerous-key rejection; Scribe/Evaluator/Artificer validators used direct property access. See git history.
@@ -1144,6 +1145,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
   - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
+  - 2026-08-13 PRI-523 C1.3 self-review (corrected classification): the OpenClaw host-owned diagnosis continuation must remain best-effort so the PostToolUse hook returns after durable shared SQLite persistence, but the first implementation used bare `void emitPainDetectedEvent(...)` with no lifecycle-owned rejection handling or test drain. Fixed with an explicit scheduler that attaches an immediate catch, emits bounded reason/nextAction, removes settled promises, and exposes a test-only drain. The rejected-continuation regression proves observability without extending hook latency.
 
 ---
 
@@ -1250,6 +1252,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-25
 - **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
   - 2026-08-13 PRI-523: config migration first lacked atomic locking, then removed unowned stale-looking locks. It now atomically replaces under an owned lock and fails loud after bounded no-unlink contention.
+  - 2026-08-13 PRI-523 C1.3 self-review: the first shared PostToolUse kernel checked duplicates only when an event had already produced a `pain_events` row, so repeated successful/control host events wrote duplicate `tool_calls` evidence. The same implementation also hashed an optional host event ID without namespacing it by host source and session, allowing unrelated events with reused IDs to collide. Fixed by making the canonical tool evidence row the dedup claim for every outcome, deriving the digest from `{source, sessionId, eventId}`, and adding cross-runtime success/failure retry tests plus transaction-rollback coverage. For event-driven idempotency, review every outcome branch (success, rejected, admitted, failure) and namespace host IDs before hashing.
 
 ---
 

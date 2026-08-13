@@ -7,11 +7,13 @@ import {
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
+import { createProductionPainEvidenceHandler, type PainEnrichmentProvider } from './production-pain-evidence.js';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
+export * from './production-pain-evidence.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
@@ -164,14 +166,15 @@ export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
 }
 
 export function createProductionHostRuntime(
-  options: Pick<HostRuntimeOptions, 'afterToolCall'> & {
+  options: Partial<Pick<HostRuntimeOptions, 'afterToolCall'>> & {
     beforeToolCall?: HostRuntimePort;
     beforePromptBuild?: (event: HostEvent, prompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>>) => HostEventResult | Promise<HostEventResult>;
     promptExcludePrincipleIds?: (event: HostEvent) => ReadonlySet<string>;
     ruleContextProvider?: RuleContextProvider;
     ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
     ruleImplementationRuntime?: RuleImplementationRuntime;
-  },
+    painEnrichmentProvider?: PainEnrichmentProvider;
+  } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
     ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
@@ -179,7 +182,9 @@ export function createProductionHostRuntime(
     ...(options.ruleImplementationRuntime ? { implementationRuntime: options.ruleImplementationRuntime } : {}),
   });
   return createHostRuntime({
-    afterToolCall: options.afterToolCall,
+    afterToolCall: options.afterToolCall ?? createProductionPainEvidenceHandler({
+      ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
+    }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
       const prompt = await buildActivePrinciplePromptContext({

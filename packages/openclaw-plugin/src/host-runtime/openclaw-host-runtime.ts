@@ -1,4 +1,4 @@
-import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime, type ProductionRuleContextRequest } from '@principles/host-runtime';
+import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime, type ProductionRuleContextRequest, type ProductionPainEnrichment } from '@principles/host-runtime';
 import type { HostEvent, HostEventContext, HostEventResult } from '@principles/core/host';
 import type {
   PluginHookAgentContext,
@@ -26,7 +26,8 @@ export interface OpenClawHostRuntimeOptions {
   ruleContextProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   ruleInputEnrichmentProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   onBeforeToolResult?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, result: HostEventResult): PluginHookBeforeToolCallResult | void;
-  afterToolCall(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): void;
+  painEnrichmentProvider?(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): ProductionPainEnrichment | Promise<ProductionPainEnrichment>;
+  onAfterToolResult?(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext, result: HostEventResult): void | Promise<void>;
 }
 
 export interface OpenClawHostRuntime {
@@ -98,11 +99,10 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       const value = await options.beforePromptBuild(payload.event, payload.context, prompt);
       return recordResult(event, { kind: payload.kind, value }, value ? 'modify' : 'allow');
     },
-    async afterToolCall(event) {
+    painEnrichmentProvider(event) {
       const payload = payloadFor(event);
       if (payload.kind !== 'after_tool_call') throw new Error('OpenClaw pain payload mismatch');
-      options.afterToolCall(payload.event, payload.context);
-      return recordResult(event, { kind: payload.kind, value: undefined }, 'observe');
+      return options.painEnrichmentProvider?.(payload.event, payload.context);
     },
   });
 
@@ -111,10 +111,16 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     payloads.set(token, payload);
     const event: HostEvent = {
       kind: payload.kind,
-      context: contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
+      context: {
+        ...contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
+        ...(payload.kind === 'after_tool_call' ? {
+          toolInput: payload.event.params ?? {},
+          toolOutput: { error: payload.event.error, result: payload.event.result, durationMs: payload.event.durationMs },
+        } : {}),
+      },
       rawPayload: payload.kind === 'before_tool_call'
         ? { nativeToken: token, toolInput: { toolName: payload.event.toolName, params: payload.event.params ?? {} } }
-        : token,
+        : { nativeToken: token },
       source: `openclaw:${payload.kind}`,
     };
     const result = await runtime.dispatch(event);
@@ -124,6 +130,10 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       return { kind: payload.kind, value: result.decision === 'deny'
         ? { block: true, blockReason: result.reason }
         : enrichedValue };
+    }
+    if (payload.kind === 'after_tool_call' && !native) {
+      await options.onAfterToolResult?.(payload.event, payload.context, result);
+      return { kind: payload.kind, value: undefined };
     }
     if (!native || native.kind !== payload.kind) {
       throw new Error(`OpenClaw ${payload.kind} result mapping is missing`);
