@@ -246,14 +246,17 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   // Stamp plugin/openclaw.plugin.json (if it has a version field)
   // CodeQL: same TOCTOU false positive as above — build script, single-threaded.
   const bundledManifestPath = join(PLUGIN_DEST, 'openclaw.plugin.json');
-  if (existsSync(bundledManifestPath)) {
-    const manifest = JSON.parse(readFileSync(bundledManifestPath, 'utf-8'));
+  try {
+    const manifestRaw = readFileSync(bundledManifestPath, 'utf-8');
+    const manifest = JSON.parse(manifestRaw);
     if (manifest.version) {
       const oldManifestVersion = manifest.version;
       manifest.version = npmPluginVersion;
       writeFileSync(bundledManifestPath, JSON.stringify(manifest, null, 2) + '\n');
       console.log(`  ✅ openclaw.plugin.json: ${oldManifestVersion} → ${npmPluginVersion}`);
     }
+  } catch {
+    console.log('  ⚠️  openclaw.plugin.json not found or unreadable — skipping version stamp');
   }
 }
 
