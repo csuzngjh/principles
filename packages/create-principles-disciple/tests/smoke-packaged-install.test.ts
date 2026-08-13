@@ -118,6 +118,8 @@ describe('Real packaged install smoke test', () => {
 
     const pluginPkgJson = JSON.parse(fs.readFileSync(path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'plugin', 'package.json'), 'utf-8'));
     expect(pluginPkgJson.dependencies?.['@principles/core']).toBe('file:./core');
+    expect(pluginPkgJson.dependencies?.['@principles/host-runtime']).toBeUndefined();
+    expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
 
   it('--json install produces parseable JSON with all components verified', () => {

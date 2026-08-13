@@ -74,15 +74,24 @@ function readLockPid(lockPath: string, ops: ConfigFileOps): number | null {
   }
 }
 
-function isProcessAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+export interface ConfigFileLockOptions {
+  ops?: ConfigFileOps;
+  maxAttempts?: number;
+  sleep?: (milliseconds: number) => void;
 }
 
 /** Cross-process O_EXCL lock following the project's Runtime V2 lock convention. */
-export function withConfigFileLock<T>(filePath: string, action: () => T, ops: ConfigFileOps = FILE_OPS): T {
+export function withConfigFileLock<T>(
+  filePath: string,
+  action: () => T,
+  options: ConfigFileLockOptions = {},
+): T {
+  const ops = options.ops ?? FILE_OPS;
   const lockPath = `${filePath}.lock`;
+  const maxAttempts = options.maxAttempts ?? 50;
+  const wait = options.sleep ?? sleepSync;
   let acquired = false;
-  for (let attempt = 0; attempt < 50 && !acquired; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts && !acquired; attempt += 1) {
     let lockFd: number | undefined;
     try {
       lockFd = ops.openSync(lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
@@ -97,16 +106,20 @@ export function withConfigFileLock<T>(filePath: string, action: () => T, ops: Co
         try { ops.unlinkSync(lockPath); } catch { /* preserve the acquisition error */ }
       }
       if (errnoCode(error) !== 'EEXIST') throw error;
-      const holderPid = readLockPid(lockPath, ops);
-      if (holderPid === null || !isProcessAlive(holderPid)) {
-        try { ops.unlinkSync(lockPath); } catch { /* another contender may have won */ }
-      } else if (attempt < 49) {
-        sleepSync(Math.min(10 * 2 ** attempt, 500));
+      // Ownership rule: EEXIST never authorizes deletion. PID/age metadata may
+      // be stale or malformed, but only the creator may remove this lock.
+      if (attempt < maxAttempts - 1) {
+        wait(Math.min(10 * 2 ** attempt, 500));
       }
     }
   }
   if (!acquired) {
-    throw new Error(`Failed to acquire config lock ${lockPath}. Retry after the active installer exits.`);
+    const holderPid = readLockPid(lockPath, ops);
+    const holder = holderPid === null ? 'unknown' : `PID ${holderPid}`;
+    throw new Error(
+      `Failed to acquire config lock ${lockPath}; holder ${holder}; ` +
+      'nextAction=remove the lock manually only after verifying no installer is active',
+    );
   }
   try {
     return action();

@@ -1993,6 +1993,10 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(content).toContain("'@principles/core', 'file:./core'");
     expect(content).toContain("'@principles/core', 'file:../core'");
   });
+
+  it('bundle-plugin.mjs removes the inlined host runtime from the bundled plugin manifest', () => {
+    expect(content).toContain("removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime')");
+  });
 });
 
 describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {

@@ -29,10 +29,31 @@ describe('withConfigFileLock', () => {
     const target = path.join(dir, 'config.yaml');
     try {
       expect(() => withConfigFileLock(target, () => undefined, {
-        ...fs,
-        writeSync: () => { throw new Error('injected lock metadata failure'); },
+        ops: {
+          ...fs,
+          writeSync: () => { throw new Error('injected lock metadata failure'); },
+        },
       })).toThrow(/injected lock metadata failure/);
       expect(fs.existsSync(`${target}.lock`)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['stale-looking-owner', 'not-a-pid'])('never deletes or replaces a pre-existing lock owned by %s', (metadata) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-lock-'));
+    const target = path.join(dir, 'config.yaml');
+    const lockPath = `${target}.lock`;
+    fs.writeFileSync(lockPath, metadata, 'utf8');
+    const sleepCalls: number[] = [];
+    try {
+      expect(() => withConfigFileLock(target, () => undefined, {
+        ops: fs,
+        maxAttempts: 2,
+        sleep: (milliseconds) => { sleepCalls.push(milliseconds); },
+      })).toThrow(/Failed to acquire config lock.*holder (unknown|PID).*nextAction=remove the lock manually only after verifying no installer is active/);
+      expect(fs.readFileSync(lockPath, 'utf8')).toBe(metadata);
+      expect(sleepCalls).toEqual([10]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

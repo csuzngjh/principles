@@ -198,7 +198,24 @@ function rewriteBundledDependency(pkgPath, label, depName, replacement) {
   }
 }
 
+function removeBundledDependency(pkgPath, label, depName) {
+  if (!existsSync(pkgPath)) return;
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  let changed = false;
+  for (const section of ['dependencies', 'devDependencies']) {
+    if (pkg[section] && Object.hasOwn(pkg[section], depName)) {
+      delete pkg[section][depName];
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    console.log(`  ✅ Removed inlined ${depName} from ${label}/package.json`);
+  }
+}
+
 rewriteBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core', 'file:./core');
+removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
