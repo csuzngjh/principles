@@ -863,9 +863,10 @@
       "applyFullUpdate": "全量更新",
       "fullUpdating": "全量更新中…",
       "fullUpdateSuccess": "全量更新完成。",
-      "confirmFullUpdateTitle": "确认全量更新",
+      "confirmFullUpdateTitle": "确认更新",
       "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。你自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
-      "fullUpdateRestartPrompt": "全量更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。"
+      "fullUpdateRestartPrompt": "更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。",
+      "whatsNew": "更新内容"
     },
     "intent": {
       "eyebrow": "拥有者意图",

@@ -328,12 +328,24 @@ export function UpdatePage() {
             </div>
           )}
 
-          {/* Check button — secondary style (tool page, lower visual weight) */}
+          {/* What's new — changelog from GitHub Release */}
+          {statusData?.changelog && statusData.hasUpdate && (
+            <div className="mt-4 p-4 rounded-[4px] border border-line bg-surface/50">
+              <p className="text-[12px] font-mono text-ink-3 uppercase tracking-wide mb-2">
+                {t("pages.update.whatsNew")}
+              </p>
+              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[200px] overflow-y-auto whitespace-pre-wrap">
+                {statusData.changelog.split("---")[0]}
+              </div>
+            </div>
+          )}
+
+          {/* Buttons — one check + one update */}
           <div className="mt-5 pt-4 border-t border-line flex items-center gap-3 flex-wrap">
             <button
               type="button"
               onClick={handleCheckForUpdates}
-              disabled={checking || updating || fullUpdating}
+              disabled={checking || fullUpdating}
               className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
@@ -341,11 +353,11 @@ export function UpdatePage() {
             {!isUpToDate && (
               <button
                 type="button"
-                onClick={() => setShowUpdateDialog(true)}
-                disabled={updating || checking || fullUpdating}
+                onClick={() => setShowFullUpdateDialog(true)}
+                disabled={checking || fullUpdating}
                 className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
-                {updating ? (
+                {fullUpdating ? (
                   <span className="flex items-center gap-1.5">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     {t("pages.update.updating")}
@@ -355,22 +367,6 @@ export function UpdatePage() {
                 )}
               </button>
             )}
-            {/* Full update — always available; covers all packages via the installer */}
-            <button
-              type="button"
-              onClick={() => setShowFullUpdateDialog(true)}
-              disabled={updating || checking || fullUpdating}
-              className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-            >
-              {fullUpdating ? (
-                <span className="flex items-center gap-1.5">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t("pages.update.fullUpdating")}
-                </span>
-              ) : (
-                t("pages.update.applyFullUpdate")
-              )}
-            </button>
           </div>
 
           {/* Update result message — enhanced card */}
@@ -508,24 +504,6 @@ export function UpdatePage() {
       </div>
 
       {/* Update confirmation dialog */}
-      <AlertDialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("pages.update.confirmUpdateTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("pages.update.confirmUpdateDesc", { version: statusData?.latestVersion ?? "latest" })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApplyUpdate}>
-              {t("pages.update.applyUpdate")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Full update confirmation dialog */}
       <AlertDialog open={showFullUpdateDialog} onOpenChange={setShowFullUpdateDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

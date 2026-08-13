@@ -863,9 +863,10 @@
       "applyFullUpdate": "Full Update",
       "fullUpdating": "Full update in progress…",
       "fullUpdateSuccess": "Full update completed.",
-      "confirmFullUpdateTitle": "Confirm Full Update",
+      "confirmFullUpdateTitle": "Confirm Update",
       "confirmFullUpdateDesc": "Downloads and updates all PD packages (plugin, console, core, CLI). Usually takes just a few seconds. Your custom files (AGENTS.md etc.) are not affected. You will need to restart the console after completion.",
-      "fullUpdateRestartPrompt": "Full update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again."
+      "fullUpdateRestartPrompt": "Update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again.",
+      "whatsNew": "What's New"
     },
     "intent": {
       "eyebrow": "Owner Intent",

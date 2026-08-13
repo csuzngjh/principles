@@ -237,26 +237,39 @@ async function doCheckForUpdates(currentVersion: string) {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const rawData: unknown = await response.json();
-      if (typeof rawData !== 'object' || rawData === null) throw new Error('Invalid registry response');
-      const data = rawData as Record<string, unknown>;
-      if (typeof data.version !== 'string') throw new Error('Invalid registry response: missing version');
-      latestVersion = data.version;
+      if (!isRecord(rawData)) throw new Error('Invalid registry response');
+      if (typeof rawData.version !== 'string') throw new Error('Invalid registry response: missing version');
+      latestVersion = rawData.version;
     } finally {
       clearTimeout(timeoutId);
     }
+
+    // Fetch release notes from GitHub for the latest version (best-effort,
+    // non-blocking — if it fails, the UI still shows version info without notes).
+    let changelog = '';
+    try {
+      const ghResponse = await fetch(
+        `https://api.github.com/repos/csuzngjh/principles/releases/tags/v${latestVersion}`,
+        { signal: AbortSignal.timeout(5000), headers: { Accept: 'application/vnd.github.v3+json' } },
+      );
+      if (ghResponse.ok) {
+        const ghData: unknown = await ghResponse.json();
+        if (isRecord(ghData) && typeof ghData.body === 'string') {
+          changelog = ghData.body;
+        }
+      }
+    } catch { /* best-effort — changelog is optional */ }
+
     return {
       hasUpdate: semver.gt(latestVersion, currentVersion),
       currentVersion,
       latestVersion,
+      changelog,
     };
   } catch (error) {
     return {
       hasUpdate: false,
       currentVersion,
-      // Contract with the UI (UpdatePage.tsx) requires latestVersion to be a
-      // string. When the registry check fails we don't know the latest version,
-      // so emit an empty string to keep the response shape stable and let the
-      // UI surface `error` instead of crashing the whole page.
       latestVersion: '',
       error: error instanceof Error ? error.message : 'Unknown error',
     };
