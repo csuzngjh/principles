@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOpenClawHostRuntime } from '../src/host-runtime/openclaw-host-runtime.js';
 
@@ -11,12 +12,17 @@ afterEach(() => {
 });
 
 describe('OpenClaw shared pain readiness boundary', () => {
-  it.each(['missing', 'corrupt'] as const)('does not run host enrichment or continuation when the trajectory database is %s', async (state) => {
+  it.each(['missing', 'corrupt', 'malformed'] as const)('does not run host enrichment or continuation when the trajectory database is %s', async (state) => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), `pd-openclaw-${state}-`));
     workspaces.push(workspaceDir);
     if (state === 'corrupt') {
       fs.mkdirSync(path.join(workspaceDir, '.state'));
       fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'not sqlite');
+    } else if (state === 'malformed') {
+      fs.mkdirSync(path.join(workspaceDir, '.state'));
+      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+      db.exec('CREATE TABLE sessions (session_id TEXT PRIMARY KEY); CREATE TABLE tool_calls (id INTEGER PRIMARY KEY); CREATE TABLE pain_events (id INTEGER PRIMARY KEY, canonical_pain_id TEXT); CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;');
+      db.close();
     }
     const painEnrichmentProvider = vi.fn(() => ({}));
     const onAfterToolResult = vi.fn();
@@ -33,6 +39,6 @@ describe('OpenClaw shared pain readiness boundary', () => {
 
     expect(painEnrichmentProvider).not.toHaveBeenCalled();
     expect(onAfterToolResult).not.toHaveBeenCalled();
-    expect(fs.readdirSync(workspaceDir)).toEqual(state === 'corrupt' ? ['.state'] : []);
+    expect(fs.readdirSync(workspaceDir)).toEqual(state === 'missing' ? [] : ['.state']);
   });
 });

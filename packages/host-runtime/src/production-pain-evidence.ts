@@ -150,10 +150,43 @@ function ids(input: { event: HostEvent; outcome: NormalizedOutcome; sanitizedPar
   return { eventId: `host_${digest}`, painId: `pain_host_${digest}` };
 }
 
+const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
+  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', gfi_before: 'REAL', gfi_after: 'REAL', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT' },
+  pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', created_at: 'TEXT' },
+};
+
+function pragmaField(row: unknown, key: string): unknown {
+  return isRecord(row) && Object.hasOwn(row, key) ? Object.getOwnPropertyDescriptor(row, key)?.value : undefined;
+}
+
 function hasCanonicalSchema(db: Database.Database): boolean {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sessions','tool_calls','pain_events')").all();
-  const index = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_pain_events_canonical_pain_id'").get();
-  return tables.length === 3 && index !== undefined;
+  for (const [table, required] of Object.entries(REQUIRED_COLUMNS)) {
+    const rows: unknown[] = db.prepare(`PRAGMA table_info(${table})`).all();
+    const actual = new Map<string, string>();
+    for (const row of rows) {
+      const name = pragmaField(row, 'name');
+      const type = pragmaField(row, 'type');
+      if (typeof name !== 'string' || typeof type !== 'string') return false;
+      actual.set(name, type.toUpperCase());
+    }
+    for (const [name, type] of Object.entries(required)) {
+      if (actual.get(name) !== type) return false;
+    }
+  }
+  const indexes: unknown[] = db.prepare('PRAGMA index_list(pain_events)').all();
+  const canonical = indexes.find((row) => pragmaField(row, 'name') === 'idx_pain_events_canonical_pain_id');
+  if (pragmaField(canonical, 'unique') !== 1 || pragmaField(canonical, 'partial') !== 1) return false;
+  const indexColumns: unknown[] = db.prepare('PRAGMA index_info(idx_pain_events_canonical_pain_id)').all();
+  if (indexColumns.length !== 1 || pragmaField(indexColumns[0], 'name') !== 'canonical_pain_id') return false;
+  // Preparing the exact production statements proves syntax/column readiness
+  // without executing mutation or invoking host enrichment side effects.
+  db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?');
+  db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?');
+  db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
+  db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  db.prepare('INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  return true;
 }
 
 export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory } = {}) {

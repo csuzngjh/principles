@@ -194,6 +194,23 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(fs.readFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'utf8')).toBe('not sqlite');
   });
 
+  it('rejects recognizable trajectory tables with a missing required column before enrichment or mutation', async () => {
+    const workspaceDir = workspaceWithTrajectory();
+    const schema = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    schema.exec('ALTER TABLE tool_calls DROP COLUMN result_preview');
+    schema.close();
+    let enrichmentCalls = 0;
+
+    const result = await createProductionHostRuntime({ painEnrichmentProvider: () => { enrichmentCalls += 1; return {}; } }).dispatch(failedWrite(workspaceDir));
+
+    expect(enrichmentCalls).toBe(0);
+    expect(result).toEqual(expect.objectContaining({ warnings: ['trajectory_schema_invalid'], metadata: expect.objectContaining({ nextAction: 'run the supported PD workspace migration' }) }));
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM sessions').get()).toEqual({ count: 0 });
+    db.close();
+  });
+
   it('fails open observably when the database factory throws before enrichment', async () => {
     const workspaceDir = workspaceWithTrajectory();
     let enrichmentCalls = 0;
