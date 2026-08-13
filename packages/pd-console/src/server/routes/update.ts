@@ -583,24 +583,20 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       copyDirRecursive(pluginSrc, extDir, SKIP_DIRS);
     }
 
-    //    b. console/ → extDir/console/ (full replace — pure JS, not locked)
+    //    b. console/ → extDir/console/ (overwrite dist/ files; do NOT rmSync —
+    //       console/node_modules/ may contain locked native modules like
+    //       better-sqlite3 that the running console process holds via dlopen)
     const consoleSrc = path.join(tempDir, 'console');
     const consoleDest = path.join(extDir, 'console');
     if (fs.existsSync(consoleSrc)) {
-      if (fs.existsSync(consoleDest)) {
-        fs.rmSync(consoleDest, { recursive: true, force: true });
-      }
-      copyDirRecursive(consoleSrc, consoleDest);
+      copyDirRecursive(consoleSrc, consoleDest, SKIP_DIRS);
     }
 
-    //    c. core/ → extDir/core/ (full replace)
+    //    c. core/ → extDir/core/ (overwrite, skip node_modules for safety)
     const coreSrc = path.join(tempDir, 'core');
     const coreDest = path.join(extDir, 'core');
     if (fs.existsSync(coreSrc)) {
-      if (fs.existsSync(coreDest)) {
-        fs.rmSync(coreDest, { recursive: true, force: true });
-      }
-      copyDirRecursive(coreSrc, coreDest);
+      copyDirRecursive(coreSrc, coreDest, SKIP_DIRS);
     }
 
     //    d. pd-cli/dist + package.json → extDir/pd-cli/ (overwrite only,

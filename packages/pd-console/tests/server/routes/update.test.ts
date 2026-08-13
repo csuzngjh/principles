@@ -1414,6 +1414,60 @@ describe('handleUpdateRoute', () => {
       expect(fs.existsSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'core', 'marker'))).toBe(true);
     });
 
+    it('should preserve console/node_modules during update (no rmSync)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing console with node_modules (contains native module marker)
+      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', 'better-sqlite3'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', 'better-sqlite3', 'locked.node'), 'native');
+      fs.mkdirSync(path.join(pluginDir, 'console', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'dist', 'server.js'), 'old console');
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      // console/node_modules must survive (would cause EPERM if rmSync'd)
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', 'better-sqlite3', 'locked.node'))).toBe(true);
+      // But console/dist/server.js should be updated
+      expect(fs.readFileSync(path.join(pluginDir, 'console', 'dist', 'server.js'), 'utf-8')).toBe('new console');
+    });
+
     it('should detect dependency changes and include hint in message', async () => {
       const { execSync: execSyncMock } = await import('child_process');
 
