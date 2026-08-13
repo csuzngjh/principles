@@ -11,6 +11,15 @@ describe('classifyTaskActionability', () => {
     enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
     actionableTaskKinds: new Set(MVP_CORE_TASK_KINDS),
   };
+  // Policy that deliberately excludes rollout_reviewer. Used to exercise the
+  // task_kind_not_mvp_actionable suppression PATH independently of the
+  // MVP_CORE_TASK_KINDS constant contents (rollout_reviewer was promoted into
+  // the constant as a manual-gate kind; the suppression logic itself is
+  // unchanged and must still be covered by a test).
+  const rolloutExcludedPolicy: ActionabilityPolicyInput = {
+    enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+    actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator']),
+  };
 
   it('classifies enabled-channel MVP-Core dreamer as actionable', () => {
     const result = classifyTaskActionability(
@@ -49,10 +58,10 @@ describe('classifyTaskActionability', () => {
     expect(result.diagnostic.channel).toBe('skill');
   });
 
-  it('suppresses rollout_reviewer task with task_kind_not_mvp_actionable reason', () => {
+  it('suppresses a kind excluded from actionableTaskKinds with task_kind_not_mvp_actionable reason', () => {
     const result = classifyTaskActionability(
       { taskId: 'rollout-abc-prompt', taskKind: 'rollout_reviewer', channel: 'prompt' },
-      defaultPolicy,
+      rolloutExcludedPolicy,
     );
     expect(result.actionable).toBe(false);
     if (result.actionable) throw new Error('expected not actionable');
@@ -90,7 +99,7 @@ describe('classifyTaskActionability', () => {
   it('preserves taskId, taskKind, channel, status in suppressed diagnostic', () => {
     const result = classifyTaskActionability(
       { taskId: 'rr-abc-prompt', taskKind: 'rollout_reviewer', channel: 'prompt' },
-      defaultPolicy,
+      rolloutExcludedPolicy,
     );
     if (result.actionable) throw new Error('expected not actionable');
     const d: SuppressedDiagnostic = result.diagnostic;
@@ -110,7 +119,7 @@ describe('MVP_CORE_TASK_KINDS constant', () => {
     expect(MVP_CORE_TASK_KINDS).toContain('evaluator');
   });
 
-  it('does not include post-MVP runners', () => {
-    expect(MVP_CORE_TASK_KINDS).not.toContain('rollout_reviewer');
+  it('includes rollout_reviewer (manual-gate kind — visible in queue, not auto-consumed)', () => {
+    expect(MVP_CORE_TASK_KINDS).toContain('rollout_reviewer');
   });
 });

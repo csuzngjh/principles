@@ -305,25 +305,25 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     roleZh: '原则生效前的最后一道审查',
     roleEn: 'Final review before a principle goes live',
     detailZh:
-      '评估员通过后，上线评审员做最终把关——评估上线风险、安全检查，决定是否真的推向 rollout。\n\n它本就是 MVP-Quiet 默认关闭的，关掉不影响任何功能。',
+      '评估员通过后，上线评审员做最终把关——评估上线风险、安全检查，决定是否真的推向 rollout。\n\n它在 MVP_CORE_TASK_KINDS 白名单中（队列可见），但 auto-consumer 不会自动推进它——作为原则进入 approval 队列前的最后一道人工关，由 Owner 手动触发。',
     detailEn:
-      'After the Evaluator passes, the Rollout Reviewer does the final gate — assessing rollout risks and safety checks, deciding whether to actually push to rollout.\n\nIt is already MVP-Quiet (off by default); disabling does not affect any functionality.',
+      'After the Evaluator passes, the Rollout Reviewer does the final gate — assessing rollout risks and safety checks, deciding whether to actually push to rollout.\n\nIt is in the MVP_CORE_TASK_KINDS whitelist (visible in the queue), but the auto-consumer does NOT advance it — it is the last manual Owner gate before the approval queue, triggered by hand.',
     impactLevel: 'green',
-    impactZh: '无影响。本就是 MVP-Quiet 默认关闭。',
-    impactEn: 'No impact. Already MVP-Quiet (off by default).',
+    impactZh: '手动触发的最后关。不被 auto-consumer 自动消费。',
+    impactEn: 'Manual last gate. Not auto-consumed by the auto-consumer.',
     techDetailZh: {
-      'MVP 状态': 'MVP-Quiet。不在 `MVP_CORE_TASK_KINDS` 白名单中。',
+      'MVP 状态': 'MVP-Core（手动）。在 `MVP_CORE_TASK_KINDS` 中，但不被 auto-consumer 自动推进——由 Owner 手动触发（`pd runtime internalization run-once --runner rollout_reviewer`）。',
       '输出': '`RolloutReviewerOutputV1` · approve_rollout / needs_revision / reject + rolloutRisks + safetyChecks',
       '实现': '唯一不继承 `BasePeerRunner` 的 peer runner',
     },
     techDetailEn: {
-      'MVP status': 'MVP-Quiet. Not in the `MVP_CORE_TASK_KINDS` whitelist.',
+      'MVP status': 'MVP-Core (manual). In `MVP_CORE_TASK_KINDS`, but NOT auto-advanced — triggered by hand (pd runtime internalization run-once --runner rollout_reviewer).',
       'Output': '`RolloutReviewerOutputV1` · approve_rollout / needs_revision / reject + rolloutRisks + safetyChecks',
       'Implementation': 'The only peer runner that does not extend `BasePeerRunner`',
     },
-    isCore: false,
-    mvpNoteZh: 'MVP-Quiet。不在 MVP_CORE_TASK_KINDS 白名单中。',
-    mvpNoteEn: 'MVP-Quiet. Not in the MVP_CORE_TASK_KINDS whitelist.',
+    isCore: true,
+    mvpNoteZh: 'MVP-Core（手动触发）。在白名单中但不被 auto-consumer 自动消费。',
+    mvpNoteEn: 'MVP-Core (manual trigger). In the whitelist but not auto-consumed.',
   },
 
   correctionObserver: {
