@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -206,6 +207,53 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
 // because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
+
+// ---------------------------------------------------------------------------
+// Version sync: stamp the bundled plugin with the latest published
+// principles-disciple npm version.
+//
+// The working tree's packages/openclaw-plugin/package.json version is
+// permanently stale (CI bumps versions at publish time but never writes back
+// to main). Without this sync, the bundled plugin carries a stale version,
+// causing a permanent false "update available" after install.
+// ---------------------------------------------------------------------------
+console.log('\n🔢 Syncing bundled plugin version to latest npm principles-disciple...');
+
+let npmPluginVersion = null;
+try {
+  npmPluginVersion = execSync('npm view principles-disciple version', {
+    encoding: 'utf-8',
+    timeout: 15000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+} catch (e) {
+  console.warn('  ⚠️  Could not fetch principles-disciple version from npm — using working-tree version.');
+  console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
+}
+
+if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
+  // Stamp plugin/package.json
+  const bundledPluginPkgPath = join(PLUGIN_DEST, 'package.json');
+  if (existsSync(bundledPluginPkgPath)) {
+    const pkg = JSON.parse(readFileSync(bundledPluginPkgPath, 'utf-8'));
+    const oldVersion = pkg.version;
+    pkg.version = npmPluginVersion;
+    writeFileSync(bundledPluginPkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    console.log(`  ✅ plugin/package.json: ${oldVersion} → ${npmPluginVersion}`);
+  }
+
+  // Stamp plugin/openclaw.plugin.json (if it has a version field)
+  const bundledManifestPath = join(PLUGIN_DEST, 'openclaw.plugin.json');
+  if (existsSync(bundledManifestPath)) {
+    const manifest = JSON.parse(readFileSync(bundledManifestPath, 'utf-8'));
+    if (manifest.version) {
+      const oldManifestVersion = manifest.version;
+      manifest.version = npmPluginVersion;
+      writeFileSync(bundledManifestPath, JSON.stringify(manifest, null, 2) + '\n');
+      console.log(`  ✅ openclaw.plugin.json: ${oldManifestVersion} → ${npmPluginVersion}`);
+    }
+  }
+}
 
 console.log('\n🔍 Verifying hook activation contract...');
 

@@ -201,6 +201,8 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 const REQUEST_TIMEOUT_MS = 10000;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
+// Full update runs the installer (npm install × 3 + verification) — allow 10 min.
+const UPDATE_APPLY_FULL_TIMEOUT_MS = 600000;
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
@@ -377,9 +379,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         const isApply = subPath === '/apply';
+        const isApplyFull = subPath === '/apply-full';
+        const timeout = isApplyFull ? UPDATE_APPLY_FULL_TIMEOUT_MS
+          : isApply ? UPDATE_APPLY_TIMEOUT_MS
+          : undefined;
         asyncHandler(
           () => handleUpdateRoute(req, res, services.workspaceDir, subPath),
-          isApply ? UPDATE_APPLY_TIMEOUT_MS : undefined,
+          timeout,
         )(req, res);
         return;
       }
