@@ -221,3 +221,39 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
 
   return { isRunning: true, port, pid };
 }
+
+export interface GatewayControlResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Run `openclaw gateway <subcommand>` (service-level: launchd/systemd/schtasks).
+ * rc-9: never throws — returns {ok:false, error} so callers can degrade with a
+ * structured reason + nextAction instead of crashing mid-install.
+ */
+function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
+  try {
+    execSync(`openclaw gateway ${subcommand}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `\`openclaw gateway ${subcommand}\` failed: ${msg}` };
+  }
+}
+
+/**
+ * Stop the OpenClaw gateway service. Call before mutating the plugin ext dir
+ * to release file locks held on native modules (EPERM on backup rename).
+ */
+export async function stopOpenClawGateway(): Promise<GatewayControlResult> {
+  return runGatewayServiceCommand('stop');
+}
+
+/**
+ * Start the OpenClaw gateway service (inverse of stopOpenClawGateway). Called
+ * after install completes (success or failure) to leave the gateway running.
+ */
+export async function restartOpenClawGateway(): Promise<GatewayControlResult> {
+  return runGatewayServiceCommand('start');
+}

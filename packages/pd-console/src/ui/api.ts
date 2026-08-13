@@ -535,6 +535,13 @@ async function applyUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
   }, validateApplyUpdateResult);
 }
 
+async function applyFullUpdate(): Promise<ApiResponse<ApplyUpdateResultData>> {
+  return request<ApplyUpdateResultData>('/api/update/apply-full', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }, validateApplyUpdateResult);
+}
+
 async function rollbackUpdate(backupDir: string): Promise<ApiResponse<RollbackResultData>> {
   return request<RollbackResultData>('/api/update/rollback', {
     method: 'POST',
@@ -750,6 +757,7 @@ export {
   fetchUpdateStatus,
   fetchUpdateHistory,
   applyUpdate,
+  applyFullUpdate,
   rollbackUpdate,
   fetchEvidenceChain,
   fetchIntentSummary,

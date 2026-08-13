@@ -103,6 +103,7 @@ describe("AGENT_METADATA: isCore assignment", () => {
       "scribe",
       "artificer",
       "evaluator",
+      "rolloutReviewer",
       "correctionObserver",
       "empathyObserver",
     ];
@@ -112,7 +113,7 @@ describe("AGENT_METADATA: isCore assignment", () => {
   });
 
   it("isCore=false for optional agents (MVP-Quiet, direct toggle)", () => {
-    const optionalAgents = ["philosopher", "rolloutReviewer"];
+    const optionalAgents = ["philosopher"];
     for (const name of optionalAgents) {
       expect(AGENT_METADATA[name].isCore).toBe(false);
     }

@@ -14,12 +14,24 @@ import type { RunnerKind, PeerRunnerKind, InternalizationChannel } from './peer-
 
 // ── MVP-Core task kinds ──────────────────────────────────────────────────────
 
+/**
+ * Task kinds considered operator-actionable: visible as `ready` (not
+ * `suppressed`) in the queue snapshot and counted toward `readyTaskCount`.
+ *
+ * `rollout_reviewer` is included so operators can see pending rollout-review
+ * tasks and advance them manually (`pd runtime internalization run-once
+ * --runner rollout_reviewer`). It is NOT auto-consumed — the auto-consumer's
+ * execution scope is governed independently by FULL_CHAIN_CONSUMER_RUNNER_KINDS
+ * (internalization-consumer-decision.ts), which deliberately excludes it,
+ * keeping rollout review as the last manual Owner gate before approval.
+ */
 export const MVP_CORE_TASK_KINDS: readonly PeerRunnerKind[] = [
   'dreamer',
   'philosopher',
   'scribe',
   'artificer',
   'evaluator',
+  'rollout_reviewer',
 ] as const;
 
 // ── Types ────────────────────────────────────────────────────────────────────

@@ -98,6 +98,18 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'correction_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Optional LLM optimization service for correction keywords; synchronous correction detection remains active independently' },
   { id: 'signal_collector', category: 'quiet', enabled: false, since: '2026-06-30', description: 'Unified signal collection host (correction + empathy upstream merge). NOTE: keyword detection (high-precision phrases) runs regardless of this flag; this flag only gates the LLM deep-judgment path (ambiguous terms / missed keywords). Quiet flag: dogfood-only until validated.' },
   { id: 'internalization_auto_consumer', category: 'quiet', enabled: true, since: '2026-06-13', description: 'Bounded auto-consumer for dreamer internalization tasks — prevents ready tasks from pending forever (PRI-381; quiet flag, default on, disableable via config)' },
+  // PRI-419 amendment: internalization auto-consumer full-chain scope.
+  // Extends auto-consumer advancement from dreamer-only to the full peer-runner
+  // chain (dreamer→philosopher→scribe→artificer→evaluator) so artifacts reach
+  // validation_status='validated' unattended. rollout_reviewer is deliberately
+  // EXCLUDED — it stays a manual Owner gate before the approval queue
+  // (advanced via `pd runtime internalization run-once --runner rollout_reviewer`).
+  // Maintainer-approved MVP-Core (2026-08-12): default ON. Roll back = set
+  // enabled: false in .pd/config.yaml → auto-consumer reverts to dreamer-only
+  // (DEFAULT_CONSUMER_RUNNER_KINDS). The scope sets are independent: see
+  // FULL_CHAIN_CONSUMER_RUNNER_KINDS vs DEFAULT_CONSUMER_RUNNER_KINDS in
+  // internalization-consumer-decision.ts.
+  { id: 'internalization_full_chain', category: 'core', enabled: true, since: '2026-08-12', description: 'PRI-419 amendment: auto-consumer advances dreamer→…→evaluator (full chain) so artifacts reach validated. rollout_reviewer stays manual. Default ON; flag-off = dreamer-only.' },
   // PRI-408: Story A approval-completion orchestrator. Replaces the demo direct-writer
   // activation path with a formal ApprovalCompletionService that validates approval state,
   // enforces idempotency, and dispatches via ActivationDispatcher with rolloutDecision='approved'.

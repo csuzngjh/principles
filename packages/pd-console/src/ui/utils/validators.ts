@@ -832,6 +832,8 @@ export interface UpdateStatusData {
   latestVersion: string;
   hasUpdate: boolean;
   error?: string;
+  /** True when Codex host is also installed (triggers a warning banner). */
+  codexInstalled?: boolean;
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
@@ -847,6 +849,10 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   // Optional error field (present when registry check fails)
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
+  }
+  // Optional codexInstalled field (present when Codex host is detected)
+  if (Object.hasOwn(v, 'codexInstalled') && typeof v.codexInstalled === 'boolean') {
+    result.codexInstalled = v.codexInstalled;
   }
   return result;
 }
@@ -1770,6 +1776,14 @@ export interface ApplyUpdateResultData {
   updatedFiles?: string[];
   backupPath?: string;
   newVersion?: string;
+  /** True when the update only covered the OpenClaw plugin (Codex adapter not updated). */
+  partialUpdate?: boolean;
+  /** True when a console restart is needed to load the new code (full update). */
+  requiresRestart?: boolean;
+  /** Structured error reason (e.g. 'file_locked' for EPERM). */
+  reason?: string;
+  /** Suggested next action when the update fails. */
+  nextAction?: string;
 }
 
 export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | null {
@@ -1788,6 +1802,18 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   }
   if (Object.hasOwn(v, 'newVersion') && isString(v.newVersion)) {
     result.newVersion = v.newVersion;
+  }
+  if (Object.hasOwn(v, 'partialUpdate') && typeof v.partialUpdate === 'boolean') {
+    result.partialUpdate = v.partialUpdate;
+  }
+  if (Object.hasOwn(v, 'requiresRestart') && typeof v.requiresRestart === 'boolean') {
+    result.requiresRestart = v.requiresRestart;
+  }
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) {
+    result.reason = v.reason;
+  }
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
+    result.nextAction = v.nextAction;
   }
   return result;
 }

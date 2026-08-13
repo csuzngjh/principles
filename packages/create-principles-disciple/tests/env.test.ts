@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as childProcess from 'child_process';
+import * as net from 'net';
 import * as path from 'path';
-import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir } from '../src/utils/env.js';
+import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 
 vi.mock('fs');
 vi.mock('os');
@@ -209,6 +210,66 @@ describe('environment detection utilities', () => {
   describe('getPluginExtDir', () => {
     it('returns correct plugin extension directory', () => {
       expect(getPluginExtDir()).toBe(path.join('/home/user', '.openclaw', 'extensions', 'principles-disciple'));
+    });
+  });
+
+  describe('gateway service control (stopOpenClawGateway / restartOpenClawGateway)', () => {
+    it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop"', async () => {
+      mockExecSync.mockImplementation(() => '');
+      const res = await stopOpenClawGateway();
+      expect(res.ok).toBe(true);
+      expect(mockExecSync).toHaveBeenCalledWith('openclaw gateway stop', expect.objectContaining({ timeout: 15000 }));
+    });
+
+    it('restartOpenClawGateway returns ok:true and invokes "openclaw gateway start"', async () => {
+      mockExecSync.mockImplementation(() => '');
+      const res = await restartOpenClawGateway();
+      expect(res.ok).toBe(true);
+      expect(mockExecSync).toHaveBeenCalledWith('openclaw gateway start', expect.objectContaining({ timeout: 15000 }));
+    });
+
+    // rc-9: control helpers must NEVER throw — they degrade with a structured
+    // reason so the installer can emit nextAction instead of crashing.
+    it('stopOpenClawGateway returns ok:false (does not throw) when execSync throws', async () => {
+      mockExecSync.mockImplementation(() => { throw new Error('service not found'); });
+      const res = await stopOpenClawGateway();
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('openclaw gateway stop');
+      expect(res.error).toMatch(/failed/);
+    });
+
+    it('restartOpenClawGateway returns ok:false (does not throw) when execSync throws', async () => {
+      mockExecSync.mockImplementation(() => { throw new Error('boom'); });
+      const res = await restartOpenClawGateway();
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('openclaw gateway start');
+      expect(res.error).toMatch(/failed/);
+    });
+  });
+
+  describe('checkOpenClawGateway', () => {
+    it('returns isRunning:false when openclaw.json is missing', async () => {
+      mockExistsSync.mockReturnValue(false);
+      const status = await checkOpenClawGateway();
+      expect(status.isRunning).toBe(false);
+    });
+
+    it('returns isRunning:true with port when a gateway is listening on the configured port', async () => {
+      // Spin up a real ephemeral TCP listener so checkPortListening connects.
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      try {
+        mockExistsSync.mockReturnValue(true); // openclaw.json present
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { port } }));
+        const status = await checkOpenClawGateway();
+        expect(status.isRunning).toBe(true);
+        expect(status.port).toBe(port);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });

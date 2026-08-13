@@ -442,3 +442,82 @@
 - Codex 是否有 breaking change 导致某条策略不再可行
 - 是否有新的 Codex 原生能力（如新 feature flag）可以借力
 - GPT-5.x 模型升级是否改变了某条策略的成本收益比
+
+---
+
+## 19. 长跑服务替代（PRI-521）
+
+> **Source**: Codex 适配过程中识别的衍生工作
+> **Added**: 2026-08-12
+> **Linear**: PRI-521 (Backlog)
+
+**Hold reason**: MVP 阶段 OpenClaw 通过 EvolutionWorker 后台服务实现长跑 pain→principle 提炼。Codex CLI 无原生长跑服务，MVP 阶段通过 `pd-hook.js` + `PostToolUse async: true` 做最佳努力。真正的长跑服务替代需要验证 Codex 原生机制（Memory 流水线 / Goals / subagent）是否可复用。
+
+**重启条件**（**全部满足**才启动）:
+- [ ] Codex MVP 适配（PRI-278~282）已合并并运行 ≥ 1 个月
+- [ ] 至少 1 个种子客户反馈"principle 提炼没跑完就中断了"或"跨会话不记得提炼进度"
+- [ ] §18.2 Memory 两阶段流水线 Spike 已完成，确认 Codex Memory API 可用
+- [ ] 至少 1 次出现"长任务被中断后重启从零开始"的真实事故
+
+**启动后预期收益**:
+- 解决 Codex 无长跑服务的根本缺口
+- principle 提炼可跨会话续跑
+- 架构与 Codex 原生对齐，减少维护成本
+
+**估时**: 2-3 周（含 Memory 流水线集成或自建后台服务）
+
+**关联**: §18.2；CODEX_CLI_ADAPTER_SPEC §11.2 策略 2
+
+---
+
+## 20. 16 个 Slash 命令迁移到 pd-cli（PRI-522）
+
+> **Source**: Codex 适配过程中识别的衍生工作
+> **Added**: 2026-08-12
+> **Linear**: PRI-522 (Todo)
+
+**Hold reason**: MVP 阶段 OpenClaw 通过 plugin commands 注册 slash 命令（/pd-status, /pd-pain 等 16 个）。Codex CLI 无原生 slash 命令注册机制，MVP 阶段通过 `pd` CLI + `pd-hook.js` 内联响应做最佳努力。完整迁移需要统一命令接口设计。
+
+**重启条件**（**全部满足**才启动）:
+- [ ] Codex MVP 适配（PRI-278~282）已合并并运行 ≥ 1 个月
+- [ ] 至少 1 个种子客户反馈"在 Codex 里找不到 /pd-status 命令"或"命令体验不一致"
+- [ ] Codex Skills API 稳定（无 breaking change ≥ 2 个 minor 版本）
+- [ ] pd-cli 已支持 `--json` 严格输出（cli-1-strict-json 验证通过）
+
+**启动后预期收益**:
+- 统一 OpenClaw / Codex / ChatGPT Web 三平台的命令接口
+- 用户通过 `pd <command>` 或 `@pd <command>` 获得一致体验
+- 借力 Codex Skills 实现 `@pd` 隐式调用（§18.5）
+
+**估时**: 2-3 周（含 16 个命令的接口统一 + Codex Skill 封装）
+
+**关联**: §18.5；CODEX_CLI_ADAPTER_SPEC §11.2 策略 6
+
+---
+
+## 21. ChatGPT/Codex 插件市场发布
+
+> **Source**: `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`
+> **Added**: 2026-08-12
+> **Context**: PD 当前仅通过 `create-principles-disciple` 安装器以 CLI 方式工作。ChatGPT/Codex 插件市场提供一键安装、自动注册 hooks、跨平台分发的可能性。
+
+**Hold reason**: MVP 阶段聚焦 CLI 路径（已完成）。插件市场发布需要验证 PLUGIN_DATA 持久性、多 workspace 支持、以及 ChatGPT Web 无 hooks 的降级体验。
+
+**重启条件**（**全部满足**才启动）:
+- [ ] Codex MVP 适配（PRI-278~282）已合并并运行 ≥ 1 个月
+- [ ] 至少 1 个种子客户反馈"CLI 安装太复杂"或"想要一键安装"
+- [ ] `pd-hook.js` 已适配 `PLUGIN_DATA` 环境变量（`resolveWorkspaceDir()` 优先级）
+- [ ] ChatGPT/Codex 插件市场接受第三方插件提交（验证提交门户开放）
+- [ ] PLUGIN_DATA 持久性已验证（卸载后数据是否保留）
+- [ ] ChatGPT Web 无 hooks 平台的降级体验（Skills only）已设计并验证
+
+**启动后预期收益**:
+- 一键安装（无需 CLI 安装器）
+- 跨平台分发（Codex CLI + ChatGPT 桌面应用 Codex 模式）
+- 市场自动更新
+- 降低安装摩擦，扩大用户基数
+
+**估时**: 3-4 周（含 plugin.json + hooks + skills + MCP server + 提交审核）
+
+**关联**: `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`；§18.5 Codex Skill 分发
+

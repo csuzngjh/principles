@@ -17,6 +17,7 @@ import {
   fetchUpdateStatus,
   fetchUpdateHistory,
   applyUpdate,
+  applyFullUpdate,
   rollbackUpdate,
 } from "../../api.js";
 import type {
@@ -74,8 +75,14 @@ export function UpdatePage() {
     newVersion?: string;
     updatedFiles?: string[];
     fromVersion?: string;
+    partialUpdate?: boolean;
+    requiresRestart?: boolean;
+    reason?: string;
+    nextAction?: string;
   } | null>(null);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
+  const [fullUpdating, setFullUpdating] = useState(false);
   const [showRollbackDialog, setShowRollbackDialog] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -162,14 +169,44 @@ export function UpdatePage() {
         newVersion: data.newVersion,
         updatedFiles: data.updatedFiles,
         fromVersion: statusData?.currentVersion,
+        partialUpdate: data.partialUpdate,
       });
       toast.success(t('pages.update.updateSuccess', { version: data.newVersion ?? 'latest' }));
       await loadData();
     } else {
-      setUpdateResult({ success: false, message: data.message });
+      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction });
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData]);
+
+  const handleApplyFullUpdate = useCallback(async () => {
+    setShowFullUpdateDialog(false);
+    setFullUpdating(true);
+    setUpdateResult(null);
+    const result = await applyFullUpdate();
+    setFullUpdating(false);
+    if (!result.success) {
+      setUpdateResult({ success: false, message: result.error ?? 'Unknown error' });
+      toast.error(t('pages.update.updateFailed', { message: result.error ?? 'Unknown error' }));
+      return;
+    }
+    const data = result.data as ApplyUpdateResultData;
+    if (data.success) {
+      setUpdateResult({
+        success: true,
+        message: data.message,
+        newVersion: data.newVersion,
+        fromVersion: statusData?.currentVersion,
+        requiresRestart: data.requiresRestart,
+        partialUpdate: data.partialUpdate,
+      });
+      toast.success(t('pages.update.fullUpdateSuccess'));
+      await loadData();
+    } else {
+      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction });
+      toast.error(t('pages.update.updateFailed', { message: data.message }));
+    }
+  }, [t, loadData, statusData?.currentVersion]);
 
   const handleRollback = useCallback(async (backupDir: string) => {
     setShowRollbackDialog(null);
@@ -282,12 +319,21 @@ export function UpdatePage() {
             </div>
           )}
 
+          {/* Codex host warning — Web UI update only covers the OpenClaw plugin */}
+          {statusData?.codexInstalled && (
+            <div className="mt-4 p-3 rounded-[4px] border border-amber/30 bg-amber/5">
+              <p className="text-[12px] text-amber leading-relaxed">
+                {t("pages.update.codexWarning")}
+              </p>
+            </div>
+          )}
+
           {/* Check button — secondary style (tool page, lower visual weight) */}
-          <div className="mt-5 pt-4 border-t border-line flex items-center gap-3">
+          <div className="mt-5 pt-4 border-t border-line flex items-center gap-3 flex-wrap">
             <button
               type="button"
               onClick={handleCheckForUpdates}
-              disabled={checking || updating}
+              disabled={checking || updating || fullUpdating}
               className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
@@ -296,7 +342,7 @@ export function UpdatePage() {
               <button
                 type="button"
                 onClick={() => setShowUpdateDialog(true)}
-                disabled={updating || checking}
+                disabled={updating || checking || fullUpdating}
                 className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {updating ? (
@@ -309,6 +355,22 @@ export function UpdatePage() {
                 )}
               </button>
             )}
+            {/* Full update — always available; covers all packages via the installer */}
+            <button
+              type="button"
+              onClick={() => setShowFullUpdateDialog(true)}
+              disabled={updating || checking || fullUpdating}
+              className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            >
+              {fullUpdating ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t("pages.update.fullUpdating")}
+                </span>
+              ) : (
+                t("pages.update.applyFullUpdate")
+              )}
+            </button>
           </div>
 
           {/* Update result message — enhanced card */}
@@ -341,8 +403,26 @@ export function UpdatePage() {
                     </p>
                   )}
                   {/* Restart hint (success only) */}
-                  {updateResult.success && (
+                  {updateResult.success && !updateResult.requiresRestart && (
                     <p className="mt-2 text-[12px] font-mono text-ink-4">{t("pages.update.restartHint")}</p>
+                  )}
+                  {/* Full update restart prompt (requires console restart) */}
+                  {updateResult.success && updateResult.requiresRestart && (
+                    <p className="mt-2 p-2 rounded-[3px] bg-amber/5 border border-amber/20 text-[12px] text-amber leading-relaxed">
+                      {t("pages.update.fullUpdateRestartPrompt")}
+                    </p>
+                  )}
+                  {/* Partial update hint (success + Codex installed) */}
+                  {updateResult.success && updateResult.partialUpdate && (
+                    <p className="mt-1 text-[12px] text-amber leading-relaxed">
+                      {t("pages.update.partialUpdateHint")}
+                    </p>
+                  )}
+                  {/* Structured next action for lock errors */}
+                  {!updateResult.success && updateResult.nextAction && (
+                    <p className="mt-1 text-[12px] text-ink-4 font-mono leading-relaxed">
+                      {updateResult.nextAction}
+                    </p>
                   )}
                   {/* Network error hint + retry (failure only) */}
                   {!updateResult.success && (
@@ -440,6 +520,24 @@ export function UpdatePage() {
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleApplyUpdate}>
               {t("pages.update.applyUpdate")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Full update confirmation dialog */}
+      <AlertDialog open={showFullUpdateDialog} onOpenChange={setShowFullUpdateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("pages.update.confirmFullUpdateTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("pages.update.confirmFullUpdateDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleApplyFullUpdate}>
+              {t("pages.update.applyFullUpdate")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

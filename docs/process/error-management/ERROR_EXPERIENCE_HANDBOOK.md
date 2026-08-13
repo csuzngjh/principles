@@ -73,6 +73,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-077 | API migration silently drops input parameters — characterization tests don't verify parameter parity | PRI-454 |
 | ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
 | ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
+| ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
 
 ---
 
@@ -815,7 +816,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 94 |
+| Total lessons | 96 |
 | Last updated | 2026-08-13 |
 | Top category | Schema & Type |
 | Recurring errors | 49 |
@@ -1506,4 +1507,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-009 (silent skip of invalid data — same data-integrity family, different root cause: that one *accepts* invalid input silently, this one *overwrites* valid input silently), ERR-083 (shared-store contract change without cross-package caller audit — same "the writer doesn't own the full field-name space" theme).
 - **Source**: PR #1273 (CodeRabbit review + self-review)
 - **Date**: 2026-08-02
+- **Recurrence**: None
+
+---
+
+**[ERR-096]** | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal
+
+- **What happened**: In the `create-principles-disciple` installer gateway pre-flight, `install()` showed a 3-way interactive `@inquirer/prompts` `select` (stop / proceed / abort) when the OpenClaw gateway was running. Prompting was gated on `!quiet`, where `quiet` is `install()`'s mode parameter set to `jsonMode` (true only under `--json`). The CLI also exposes `--yes` / `--non-interactive`, which are non-interactive but NOT `--json`. So a `--yes` run with the gateway up had `quiet=false` → `interactive=true` → `install()` invoked `select` and **hung waiting for stdin**, breaking the `--yes` non-interactive contract and any CI/script relying on `--yes`. Caught in adversarial self-review before PR handoff; no `--yes` user was affected.
+- **Why it's wrong**: Two distinct concerns — "suppress human output/spinner" (`jsonMode`) and "allow interactive prompting" (`nonInteractive` = `--yes` || `--non-interactive` || `--json`) — were collapsed into one boolean. They differ exactly for `--yes` (human output ON, prompting OFF). Gating prompts on the subset flag (`jsonMode`) is wrong because `--yes` sits in the "no prompts" set but outside the "no output" set. Same shape as ERR-034: the caller consumed a subset/proxy signal instead of the canonical one.
+- **Generalized failure mode**: When a CLI handler's behavior depends on whether prompting/interaction is allowed, it must consume the real `nonInteractive` signal threaded from the CLI — never a proxy like `jsonMode`/`quiet` that covers only a subset of non-interactive modes. A single CLI commonly has several non-interactive modes that share "don't prompt" but differ on "emit human output" (or vice versa); collapsing them into one boolean silently breaks the modes that lie in only one of the two sets.
+- **Correct approach**: Thread the actual `nonInteractive` flag from the CLI layer into the handler, separate from `jsonMode`. In the installer this became `InstallRunMode { quiet?: boolean; nonInteractive?: boolean }` with `nonInteractive` defaulting to `quiet` (jsonMode always implies non-interactive); `index.ts` passes `{ quiet: jsonMode, nonInteractive: Boolean(nonInteractive) }`. Prompt-gating uses `!nonInteractive`; spinner/output suppression uses `quiet`.
+- **How to prevent**: When gating ANY interactive behavior (`inquirer` `select`/`confirm`/`input`, TTY reads, interactive prompts) on a CLI mode flag, enumerate every non-interactive invocation mode (`--json`, `--yes`, `--non-interactive`, CI/embedded callers) and confirm the gating flag is true for ALL of them — not just `--json`. Reviewer trigger: any new `inquirer`/`select`/`confirm`/`prompt` call inside a function also reachable from `--yes` or `--json` — ask "is this skipped under `--yes` too, or only under `--json`?".
+- **Regression guard**: `packages/create-principles-disciple/tests/installer.test.ts` — "--yes mode (quiet=false, nonInteractive=true) aborts without prompting when the gateway is running" asserts that `{ quiet: false, nonInteractive: true }` + gateway running + no `--stop-gateway` returns `reason: 'gateway_running_aborted: ...'` without invoking the prompt or `stopOpenClawGateway`.
+- **Related ERRs**: ERR-034 (canonical signal not consumed by caller — same "subset/proxy instead of the full signal" shape; different domain: runtime-config resolver vs CLI prompt-gating), ERR-063 / ERR-021 (CLI flag→handler wiring family — but those are parser-wiring gaps; ERR-096 is in-handler flag semantics, not parsing).
+- **Source**: fix/installer-gateway-lock (self-review before PR)
+- **Date**: 2026-08-12
 - **Recurrence**: None

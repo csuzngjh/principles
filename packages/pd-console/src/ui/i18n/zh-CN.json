@@ -857,7 +857,15 @@
       "restartHintAfterRollback": "请重启 pd-console 以加载回滚后的版本。",
       "filesUpdated": "更新了 {{count}} 个文件",
       "networkErrorHint": "请检查网络连接后重试。",
-      "retry": "重试"
+      "retry": "重试",
+      "codexWarning": "检测到 Codex Host 已安装。此处的更新仅覆盖 OpenClaw 插件代码，不会更新 Codex 适配器（@principles/codex-adapter）。如需完整更新，请运行安装器。",
+      "partialUpdateHint": "插件代码已更新。如需更新完整运行时（含 Codex 适配器和依赖），请运行：npx create-principles-disciple",
+      "applyFullUpdate": "全量更新",
+      "fullUpdating": "全量更新中…",
+      "fullUpdateSuccess": "全量更新完成。",
+      "confirmFullUpdateTitle": "确认全量更新",
+      "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。你自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
+      "fullUpdateRestartPrompt": "全量更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。"
     },
     "intent": {
       "eyebrow": "拥有者意图",
