@@ -160,6 +160,21 @@ function pragmaField(row: unknown, key: string): unknown {
   return isRecord(row) && Object.hasOwn(row, key) ? Object.getOwnPropertyDescriptor(row, key)?.value : undefined;
 }
 
+function hasCanonicalIndexPredicate(db: Database.Database): boolean {
+  const row: unknown = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").get('idx_pain_events_canonical_pain_id');
+  const sql = pragmaField(row, 'sql');
+  if (typeof sql !== 'string' || sql.length === 0 || sql.length > 2_000) return false;
+  const normalized = sql
+    .replace(/["'`]/g, '')
+    .replace(/\[|\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/;$/, '')
+    .toUpperCase();
+  const whereIndex = normalized.indexOf(' WHERE ');
+  return whereIndex >= 0 && normalized.slice(whereIndex + 7) === 'CANONICAL_PAIN_ID IS NOT NULL';
+}
+
 function hasCanonicalSchema(db: Database.Database): boolean {
   for (const [table, required] of Object.entries(REQUIRED_COLUMNS)) {
     const rows: unknown[] = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -177,6 +192,7 @@ function hasCanonicalSchema(db: Database.Database): boolean {
   const indexes: unknown[] = db.prepare('PRAGMA index_list(pain_events)').all();
   const canonical = indexes.find((row) => pragmaField(row, 'name') === 'idx_pain_events_canonical_pain_id');
   if (pragmaField(canonical, 'unique') !== 1 || pragmaField(canonical, 'partial') !== 1) return false;
+  if (!hasCanonicalIndexPredicate(db)) return false;
   const indexColumns: unknown[] = db.prepare('PRAGMA index_info(idx_pain_events_canonical_pain_id)').all();
   if (indexColumns.length !== 1 || pragmaField(indexColumns[0], 'name') !== 'canonical_pain_id') return false;
   // Preparing the exact production statements proves syntax/column readiness
