@@ -588,13 +588,16 @@ async function doApplyFullUpdate(workspaceDir: string) {
     }
   }
 
+  // Capture the current version BEFORE the installer runs, for history.
+  const fromVersion = readCurrentVersion(resolvePluginDir(workspaceDir)) ?? 'unknown';
+
   try {
     // 2. Run the installer non-interactively (smart mode preserves user files)
     const result = await runInstallerNonInteractive(workspaceDir);
 
     // 3. Record history
     appendUpdateHistory(workspaceDir, {
-      fromVersion: 'full-update',
+      fromVersion,
       toVersion: result.newVersion ?? 'unknown',
       success: result.success,
     });
