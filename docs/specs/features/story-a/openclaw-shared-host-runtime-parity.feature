@@ -27,6 +27,11 @@ Feature: OpenClaw shared host runtime preserves MVP behavior
     When OpenClaw checks a write to a protected system path
     Then the tool call is denied with the rule reason
 
+  Scenario: A live RuleHost rule allows the safe control write
+    Given an approved live RuleHost rule is active
+    When OpenClaw checks a write to a safe project path
+    Then the tool call is allowed by the evaluated live rule
+
   Scenario: An owner pain signal is persisted as evidence
     When OpenClaw reports an owner pain signal after a tool call
     Then a pain evidence row is persisted in the workspace trajectory

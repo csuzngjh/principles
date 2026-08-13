@@ -135,6 +135,10 @@ export interface HostEventResult {
   readonly additionalContext?: string;
   /** Telemetry source, lineaged with the originating HostEvent.source (rc-6). */
   readonly source: string;
+  /** Host-neutral, bounded degradation notices; adapters decide how to surface them. */
+  readonly warnings?: readonly string[];
+  /** Host-neutral evaluation facts; adapters must not forward these into strict host schemas. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 // ─── HostAdapter interface ───────────────────────────────────────────────────
@@ -239,6 +243,12 @@ export function isHostEvent(value: unknown): value is HostEvent {
 export function isHostEventResult(value: unknown): value is HostEventResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const obj = value as Record<string, unknown>;
+  if (Object.hasOwn(obj, 'warnings')) {
+    if (!Array.isArray(obj.warnings) || !obj.warnings.every((warning) => typeof warning === 'string')) return false;
+  }
+  if (Object.hasOwn(obj, 'metadata') && (typeof obj.metadata !== 'object' || obj.metadata === null || Array.isArray(obj.metadata))) {
+    return false;
+  }
   return (
     isHostDecision(obj.decision) &&
     typeof obj.source === 'string'

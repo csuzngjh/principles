@@ -21,6 +21,7 @@ import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
+import type { HostEventResult } from '@principles/core/host';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -63,7 +64,7 @@ export function handleBeforeToolCall(
     // PRI-483 Phase 4: assemble RuleContextV2 when `rulecode_context_v2` flag is ON.
     // flag OFF → undefined (v1 zero-change, no trajectory access).
     // flag ON  → RuleContextV2 (available or unavailable). Never throws (ERR-024).
-    const ruleContext = _buildRuleContextIfEnabled(wctx, relPath, ctx.sessionId, logger);
+    const ruleContext = buildRuleContextIfEnabled(wctx, relPath, ctx.sessionId, logger);
     const hostInput: RuleHostInput = {
       action,
       workspace: {
@@ -392,6 +393,19 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
   }
 }
 
+export function buildOpenClawRuleInputEnrichment(
+  event: PluginHookBeforeToolCallEvent,
+  workspaceDir: string,
+  sessionId: string | undefined,
+) {
+  return {
+    currentGfi: _getCurrentGfi(sessionId),
+    recentThinking: _hasRecentThinking(sessionId),
+    epTier: _getEpTier(workspaceDir),
+    bashRisk: _getBashRisk(event),
+  };
+}
+
 /**
  * PRI-483 Phase 4 — Build RuleContextV2 for RuleHost.evaluate when the
  * `rulecode_context_v2` feature flag is ON. Returns `undefined` when the flag
@@ -405,7 +419,7 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
  *
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §5.3
  */
-function _buildRuleContextIfEnabled(
+export function buildRuleContextIfEnabled(
   wctx: WorkspaceContext,
   targetPath: string,
   sessionId: string | undefined,
@@ -445,5 +459,39 @@ function _buildRuleContextIfEnabled(
   } catch (err) {
     logger?.warn?.(`[PD_GATE] RuleContext v2: buildProductionRuleContext threw unexpectedly, using unavailable context: ${String(err)}`);
     return UNAVAILABLE_RULE_CONTEXT;
+  }
+}
+
+export function handleSharedRuleHostResult(
+  event: PluginHookBeforeToolCallEvent,
+  ctx: PluginHookToolContext & { workspaceDir: string; logger?: Partial<PluginLogger> },
+  result: HostEventResult,
+): void {
+  const logger = ctx.logger ?? console;
+  for (const warning of result.warnings ?? []) logger.warn?.(`[PD_GATE:RULE_HOST] ${warning}`);
+  const evaluatedLiveRules = result.metadata?.['evaluatedLiveRules'];
+  logger.info?.(`[PD_GATE:RULE_HOST] shared production gate evaluated; liveRules=${typeof evaluatedLiveRules === 'number' ? evaluatedLiveRules : 'unknown'} decision=${result.decision}`);
+  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
+    isBashTool: BASH_TOOLS_SET.has(event.toolName),
+    isWriteTool: WRITE_TOOLS.has(event.toolName),
+  });
+  if (action.normalizedPath === null) return;
+  const metadata = result.metadata;
+  const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
+  const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
+  try {
+    const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+    eventLog.recordRuleHostEvaluated({
+      toolName: event.toolName, filePath: action.normalizedPath,
+      matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
+      ruleId, activationMode: 'live',
+    });
+    if (result.decision === 'deny') {
+      eventLog.recordRuleEnforced({ ruleId: ruleId ?? 'unknown', principleId: principleId ?? 'unknown', enforcement: 'block', toolName: event.toolName, filePath: action.normalizedPath });
+      eventLog.recordRuleHostBlocked({ toolName: event.toolName, filePath: action.normalizedPath, reason: result.reason ?? 'RuleHost denied the tool call', ruleId });
+    }
+  } catch (error: unknown) {
+    logger.warn?.(`[PD_GATE] Failed to record shared RuleHost result: ${String(error)}`);
   }
 }

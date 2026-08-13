@@ -1,4 +1,4 @@
-import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime } from '@principles/host-runtime';
+import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime, type ProductionRuleContextRequest } from '@principles/host-runtime';
 import type { HostEvent, HostEventContext, HostEventResult } from '@principles/core/host';
 import type {
   PluginHookAgentContext,
@@ -23,7 +23,9 @@ type NativeResult =
 export interface OpenClawHostRuntimeOptions {
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
   promptExcludePrincipleIds?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): ReadonlySet<string>;
-  beforeToolCall(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext): PluginHookBeforeToolCallResult | void;
+  ruleContextProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
+  ruleInputEnrichmentProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
+  onBeforeToolResult?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, result: HostEventResult): PluginHookBeforeToolCallResult | void;
   afterToolCall(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): void;
 }
 
@@ -46,7 +48,11 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     if (typeof event.rawPayload !== 'object' || event.rawPayload === null) {
       throw new Error(`OpenClaw ${event.kind} dispatch is missing its native payload token`);
     }
-    const payload = payloads.get(event.rawPayload);
+    const token = Object.hasOwn(event.rawPayload, 'nativeToken')
+      ? Reflect.get(event.rawPayload, 'nativeToken')
+      : event.rawPayload;
+    if (typeof token !== 'object' || token === null) throw new Error(`OpenClaw ${event.kind} dispatch has an invalid native payload token`);
+    const payload = payloads.get(token);
     if (!payload || payload.kind !== event.kind) {
       throw new Error(`OpenClaw ${event.kind} dispatch has a mismatched native payload`);
     }
@@ -65,6 +71,22 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
   }
 
   const runtime = createProductionHostRuntime({
+    ruleContextProvider(request) {
+      if (typeof request.rawPayload !== 'object' || request.rawPayload === null) throw new Error('OpenClaw rule context request is missing its native payload');
+      const token = Reflect.get(request.rawPayload, 'nativeToken');
+      if (typeof token !== 'object' || token === null) throw new Error('OpenClaw rule context request has an invalid native token');
+      const payload = payloads.get(token);
+      if (!payload || payload.kind !== 'before_tool_call') throw new Error('OpenClaw rule context request has a mismatched native payload');
+      return options.ruleContextProvider?.(payload.event, payload.context, request);
+    },
+    ruleInputEnrichmentProvider(request) {
+      if (typeof request.rawPayload !== 'object' || request.rawPayload === null) throw new Error('OpenClaw rule enrichment request is missing its native payload');
+      const token = Reflect.get(request.rawPayload, 'nativeToken');
+      if (typeof token !== 'object' || token === null) throw new Error('OpenClaw rule enrichment request has an invalid native token');
+      const payload = payloads.get(token);
+      if (!payload || payload.kind !== 'before_tool_call') throw new Error('OpenClaw rule enrichment request has a mismatched native payload');
+      return options.ruleInputEnrichmentProvider?.(payload.event, payload.context, request);
+    },
     promptExcludePrincipleIds(event) {
       const payload = payloadFor(event);
       if (payload.kind !== 'before_prompt_build') throw new Error('OpenClaw prompt exclusion payload mismatch');
@@ -75,16 +97,6 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       if (payload.kind !== 'before_prompt_build') throw new Error('OpenClaw prompt payload mismatch');
       const value = await options.beforePromptBuild(payload.event, payload.context, prompt);
       return recordResult(event, { kind: payload.kind, value }, value ? 'modify' : 'allow');
-    },
-    async beforeToolCall(event) {
-      const payload = payloadFor(event);
-      if (payload.kind !== 'before_tool_call') throw new Error('OpenClaw gate payload mismatch');
-      const value = options.beforeToolCall(payload.event, payload.context);
-      const denied = value?.skipToolCall === true || value?.block === true;
-      const decision = denied ? 'deny' : value ? 'modify' : 'allow';
-      const rawReason = value?.reason ?? value?.blockReason;
-      const reason = typeof rawReason === 'string' && rawReason.trim().length > 0 ? rawReason : undefined;
-      return recordResult(event, { kind: payload.kind, value }, decision, reason);
     },
     async afterToolCall(event) {
       const payload = payloadFor(event);
@@ -100,11 +112,19 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const event: HostEvent = {
       kind: payload.kind,
       context: contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
-      rawPayload: token,
+      rawPayload: payload.kind === 'before_tool_call'
+        ? { nativeToken: token, toolInput: { toolName: payload.event.toolName, params: payload.event.params ?? {} } }
+        : token,
       source: `openclaw:${payload.kind}`,
     };
     const result = await runtime.dispatch(event);
     const native = results.get(result);
+    if (payload.kind === 'before_tool_call' && !native) {
+      const enrichedValue = options.onBeforeToolResult?.(payload.event, payload.context, result);
+      return { kind: payload.kind, value: result.decision === 'deny'
+        ? { block: true, blockReason: result.reason }
+        : enrichedValue };
+    }
     if (!native || native.kind !== payload.kind) {
       throw new Error(`OpenClaw ${payload.kind} result mapping is missing`);
     }

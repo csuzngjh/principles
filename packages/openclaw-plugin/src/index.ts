@@ -21,7 +21,7 @@ export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, selectLegacyPrinciplesForPrompt, type LegacyPrinciplePromptSelection } from './hooks/prompt.js';
-import { handleBeforeToolCall } from './hooks/gate.js';
+import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
@@ -272,11 +272,29 @@ const plugin = {
           api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
         }, activePrinciplePrompt, prepared);
       },
-      beforeToolCall: (event, context) => handleBeforeToolCall(event, {
-        ...context,
-        pluginConfig: api.pluginConfig ?? {},
-        logger: api.logger,
-      }),
+      ruleContextProvider: (_event, context, request) => buildRuleContextIfEnabled(
+        WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
+        request.targetPath,
+        context.sessionId,
+        api.logger,
+      ),
+      ruleInputEnrichmentProvider: (event, context) => buildOpenClawRuleInputEnrichment(event, context.workspaceDir ?? '', context.sessionId),
+      onBeforeToolResult: (event, context, result) => {
+        if (!context.workspaceDir) {
+          api.logger.warn('[PD_GATE:RULE_HOST] shared result mapping skipped: workspaceDir missing; nextAction=inspect OpenClaw hook context');
+          return;
+        }
+        handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir, logger: api.logger }, result);
+        const ruleDecision = result.metadata?.['ruleDecision'];
+        if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
+          return handleBeforeToolCall(event, {
+            ...context,
+            workspaceDir: context.workspaceDir,
+            pluginConfig: api.pluginConfig ?? {},
+            logger: api.logger,
+          });
+        }
+      },
       afterToolCall: (event, context) => handleAfterToolCall(event, {
         ...context,
         pluginConfig: api.pluginConfig ?? {},

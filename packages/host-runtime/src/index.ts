@@ -5,9 +5,13 @@ import {
   type HostEventResult,
 } from '@principles/core/host';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
+import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
+import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
+export * from './production-rulehost-gate.js';
+export * from './rule-implementation-runtime.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
@@ -85,6 +89,8 @@ function hasNonEmptyOptionalString(value: string | undefined): boolean {
 }
 
 function hasValidResultSemantics(event: HostEvent, result: HostEventResult): boolean {
+  if (result.warnings !== undefined && (!Array.isArray(result.warnings) || !result.warnings.every(isNonEmptyString))) return false;
+  if (result.metadata !== undefined && (typeof result.metadata !== 'object' || result.metadata === null || Array.isArray(result.metadata))) return false;
   if (!isNonEmptyString(result.source) || !hasNonEmptyOptionalString(result.reason) || !hasNonEmptyOptionalString(result.additionalContext)) {
     return false;
   }
@@ -158,13 +164,23 @@ export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
 }
 
 export function createProductionHostRuntime(
-  options: Pick<HostRuntimeOptions, 'beforeToolCall' | 'afterToolCall'> & {
+  options: Pick<HostRuntimeOptions, 'afterToolCall'> & {
+    beforeToolCall?: HostRuntimePort;
     beforePromptBuild?: (event: HostEvent, prompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>>) => HostEventResult | Promise<HostEventResult>;
     promptExcludePrincipleIds?: (event: HostEvent) => ReadonlySet<string>;
+    ruleContextProvider?: RuleContextProvider;
+    ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
+    ruleImplementationRuntime?: RuleImplementationRuntime;
   },
 ): HostRuntime {
+  const productionGate = createProductionRuleHostGate({
+    ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
+    ...(options.ruleInputEnrichmentProvider ? { ruleInputEnrichmentProvider: options.ruleInputEnrichmentProvider } : {}),
+    ...(options.ruleImplementationRuntime ? { implementationRuntime: options.ruleImplementationRuntime } : {}),
+  });
   return createHostRuntime({
-    ...options,
+    afterToolCall: options.afterToolCall,
+    beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,

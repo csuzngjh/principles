@@ -104,7 +104,7 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
 
   it.each([
     ['before_prompt_build', { prompt: 'hello', messages: [] }, { prependContext: 'shared prompt' }],
-    ['before_tool_call', { toolName: 'write_file', params: { path: 'x' } }, { skipToolCall: true, reason: 'shared deny' }],
+    ['before_tool_call', { toolName: 'write_file', params: { path: 'x' } }, undefined],
     ['after_tool_call', { toolName: 'write_file', result: 'ok' }, undefined],
   ] as const)('routes %s through the shared runtime and preserves the native result/side effect', async (hookName, nativeEvent, nativeResult) => {
     const { api, hooks } = createApi();
@@ -124,6 +124,7 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
       expect.any(Function),
     );
     if (hookName === 'after_tool_call') expect(handleAfterToolCall).toHaveBeenCalledOnce();
+    if (hookName === 'before_tool_call') expect(handleBeforeToolCall).not.toHaveBeenCalled();
     expect(result).toEqual(nativeResult);
   });
 

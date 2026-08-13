@@ -219,6 +219,15 @@ registry.when('OpenClaw checks a write to a protected system path', async () => 
 registry.then('the tool call is denied with the rule reason', () => {
   expect(result, logMessages.join('\n')).toEqual(expect.objectContaining({ block: true, blockReason: expect.stringContaining(RULE_REASON) }));
 });
+registry.when('OpenClaw checks a write to a safe project path', async () => {
+  result = await hooks.get('before_tool_call')!({ toolName: 'write_file', params: { file_path: path.join(workspaceDir, 'safe.txt'), content: 'safe' } }, { workspaceDir, sessionId: 'session-safe-gate-523', agentId: 'main' });
+});
+registry.then('the tool call is allowed by the evaluated live rule', () => {
+  expect(result).toBeUndefined();
+  expect(logMessages.join('\n')).not.toContain(RULE_REASON);
+  expect(logMessages.join('\n')).not.toContain('activation_db_not_found');
+  expect(logMessages.join('\n')).toContain('shared production gate evaluated; liveRules=1 decision=allow');
+});
 registry.when('OpenClaw reports an owner pain signal after a tool call', async () => {
   await hooks.get('after_tool_call')!({ toolName: 'pain', params: { input: 'owner correction 523' }, result: {} }, { workspaceDir, sessionId: 'session-pain-523', agentId: 'main' });
 });
