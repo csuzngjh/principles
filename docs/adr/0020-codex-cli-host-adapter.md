@@ -277,7 +277,7 @@ The first supported distribution channels are:
 
 Both routes require Workspace-scoped use in Codex CLI/Desktop after the Owner reviews and trusts the hooks.
 
-The plugin requires an existing Node.js runtime `>=20` (the repository compatibility matrix tests Node 20 and 22). Neither Marketplace installation nor Workspace publication installs Node. Setup and health validation must fail loud before hook activation when `node` is missing or reports a version below 20, with the detected state, a structured reason, and the next action to install/upgrade Node and retry.
+PRI-523 declares Node.js `>=20` as the plugin support baseline; this is a target contract, not evidence that current CI already validates compatibility. Before Node compatibility is claimed, installed-bundle, `codex-adapter`, and `host-runtime` package tests must be added and pass on both Node 20 and Node 22. Neither Marketplace installation nor Workspace publication installs Node. Setup and health validation must fail loud before hook activation when `node` is missing or reports a version below 20, with the detected state, a structured reason, and the next action to install/upgrade Node and retry.
 
 Do not document `~/.codex/plugins/cache/...` as an installation target or direct mutation of `~/.codex/hooks.json` as the preferred plugin path. Those are obsolete implementation assumptions from §2.3. The bundled default is `hooks/hooks.json` unless the manifest declares another path.
 

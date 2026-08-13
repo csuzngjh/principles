@@ -112,7 +112,7 @@ The bundle invokes one validated entrypoint through `PLUGIN_ROOT`:
 
 The exact matcher/event payload and output schema remain governed by `CODEX_CLI_ADAPTER_SPEC.md` and codec fixtures. The installed bundle must be tested; a source-tree-only test is insufficient.
 
-Node.js `>=20` is a delivery prerequisite (repository CI compatibility matrix: Node 20 and 22). The installer package's broader historical engine declaration does not expand this plugin support contract. Repository Marketplace installation and Workspace publication do not install Node. Setup and health checks must detect `node` and its major version before enabling hooks; missing/unsupported Node is a failed prerequisite with a structured reason and next action, not a warning followed by partial installation.
+PRI-523 declares Node.js `>=20` as the delivery support baseline. This declaration is not a claim that the current CI matrix already proves plugin compatibility. Before compatibility is claimed, installed-bundle tests plus the `codex-adapter` and `host-runtime` package suites must be added and pass on both Node 20 and Node 22. The installer package's broader historical engine declaration does not expand this plugin contract. Repository Marketplace installation and Workspace publication do not install Node. Setup and health checks must detect `node` and its major version before enabling hooks; missing/unsupported Node is a failed prerequisite with a structured reason and next action, not a warning followed by partial installation.
 
 ## 5. Runtime and state authority
 
@@ -178,7 +178,7 @@ PRI-523 is accepted only when the installed repository-Marketplace bundle, in on
 - **Kill switch**: after `host.codex.enabled: false`, all three effects are absent and the structured disabled reason is observable.
 - **Bundle reality**: tests install/use the packaged plugin layout and default `hooks/hooks.json`, not a hand-wired source path.
 - **Quoted path**: the installed bundle runs successfully when `PLUGIN_ROOT` contains spaces; all hook commands keep the executable script path quoted.
-- **Node prerequisite**: setup/health succeeds on supported Node 20/22 and fails loud with reason/next action when Node is missing or below 20.
+- **Node evidence gate**: before compatibility is claimed, add and pass installed-bundle, `codex-adapter`, and `host-runtime` package tests on both Node 20 and Node 22; setup/health must also fail loud with reason/next action when Node is missing or below 20.
 - **Workspace publication**: after repository/personal Marketplace testing, a Workspace admin can publish that local plugin to selected roles without rewriting either Workspace authority path.
 - **Explicit flags**: fresh and migrated `.pd/config.yaml` contain both entries, and loader tests exercise `host.codex` neutral rollback and `abstraction_layer_v1` legacy rollback.
 
