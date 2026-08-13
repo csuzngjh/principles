@@ -212,7 +212,11 @@ jobs:
           elif [ "$PKG_DIR" = "pd-cli" ]; then
             npm run build --workspace=@principles/pd-cli
           elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
+            # esbuild first (cleans dist, produces bundle.js), then tsc --emitDeclarationOnly
+            # (adds .d.ts without overwriting esbuild's .js output). Both needed: pd-cli
+            # imports types from principles-disciple, bundle-plugin.mjs needs bundle.js.
             npm run build:production --workspace=principles-disciple
+            npm run build:types --workspace=principles-disciple
             npm run build --workspace=@principles/pd-cli
             npm run build --workspace=@principles/pd-console
             cd packages/create-principles-disciple && npm run build
