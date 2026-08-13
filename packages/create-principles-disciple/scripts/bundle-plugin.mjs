@@ -233,16 +233,18 @@ try {
 
 if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   // Stamp plugin/package.json
+  // CodeQL: TOCTOU here is a false positive — this is a single-threaded build
+  // script; the file was just written by the copy step above with no concurrency.
   const bundledPluginPkgPath = join(PLUGIN_DEST, 'package.json');
-  if (existsSync(bundledPluginPkgPath)) {
-    const pkg = JSON.parse(readFileSync(bundledPluginPkgPath, 'utf-8'));
-    const oldVersion = pkg.version;
-    pkg.version = npmPluginVersion;
-    writeFileSync(bundledPluginPkgPath, JSON.stringify(pkg, null, 2) + '\n');
-    console.log(`  ✅ plugin/package.json: ${oldVersion} → ${npmPluginVersion}`);
-  }
+  const pkgRaw = readFileSync(bundledPluginPkgPath, 'utf-8');
+  const pkg = JSON.parse(pkgRaw);
+  const oldVersion = pkg.version;
+  pkg.version = npmPluginVersion;
+  writeFileSync(bundledPluginPkgPath, JSON.stringify(pkg, null, 2) + '\n');
+  console.log(`  ✅ plugin/package.json: ${oldVersion} → ${npmPluginVersion}`);
 
   // Stamp plugin/openclaw.plugin.json (if it has a version field)
+  // CodeQL: same TOCTOU false positive as above — build script, single-threaded.
   const bundledManifestPath = join(PLUGIN_DEST, 'openclaw.plugin.json');
   if (existsSync(bundledManifestPath)) {
     const manifest = JSON.parse(readFileSync(bundledManifestPath, 'utf-8'));

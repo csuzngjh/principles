@@ -345,8 +345,7 @@ async function doApplyUpdate(
     }
 
     // 3. Download and extract new version (with timeout + retry)
-    const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-'));
     const dlResponse = await fetchWithRetry(tarball, 'Download');
     const buffer = Buffer.from(await dlResponse.arrayBuffer());
     const tarballPath = path.join(tempDir, 'package.tgz');
@@ -549,8 +548,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     if (!tarball) return { success: false, message: 'Missing tarball URL', requiresRestart: false };
 
     // 3. Download + extract tarball (contains plugin/, console/, core/, pd-cli/)
-    tempDir = path.join(os.tmpdir(), `pd-full-update-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-full-update-'));
     const dlResponse = await fetchWithRetry(tarball, 'Download');
     const buffer = Buffer.from(await dlResponse.arrayBuffer());
     const tarballPath = path.join(tempDir, 'package.tgz');

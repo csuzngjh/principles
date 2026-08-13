@@ -212,7 +212,7 @@ describe('handleUpdateRoute', () => {
       // Mock fetch for multi-call: registry info then tarball download
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -271,7 +271,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -315,7 +315,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -547,7 +547,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '3.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -790,7 +790,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -839,7 +839,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -887,7 +887,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -1029,7 +1029,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -1081,7 +1081,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -1173,7 +1173,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
@@ -1302,7 +1302,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1366,7 +1366,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
@@ -1419,7 +1419,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
@@ -1473,7 +1473,7 @@ describe('handleUpdateRoute', () => {
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
-        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
           return Promise.resolve({
             ok: true,
             json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
