@@ -51,6 +51,18 @@ import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 export { buildTrajectoryEvidence };
 
 const pendingPainContinuations = new Set<Promise<void>>();
+const PAIN_CONTINUATION_TIMEOUT_MS = 30_000;
+
+function logPainContinuationFailure(workspaceDir: string, reason: string): void {
+  try {
+    SystemLogger.log(workspaceDir, 'PAIN_CONTINUATION_FAILED', JSON.stringify({
+      reason: reason.slice(0, 200),
+      nextAction: 'inspect the admitted pain and retry diagnosis from the persisted canonical pain ID',
+    }));
+  } catch {
+    // Logging must not turn a best-effort continuation into an unhandled rejection.
+  }
+}
 
 /**
  * Host-owned best-effort continuation after durable shared persistence.
@@ -58,12 +70,24 @@ const pendingPainContinuations = new Set<Promise<void>>();
  * and tests/shutdown code can explicitly drain scheduled work.
  */
 export function schedulePainContinuation(workspaceDir: string, continuation: Promise<void>): void {
-  const observed = continuation.catch((error: unknown) => {
-    SystemLogger.log(workspaceDir, 'PAIN_CONTINUATION_FAILED', JSON.stringify({
-      reason: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
-      nextAction: 'inspect the admitted pain and retry diagnosis from the persisted canonical pain ID',
-    }));
-  }).finally(() => {
+  let finished = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bounded = new Promise<void>((resolve) => {
+    const finish = (reason?: string): void => {
+      if (finished) return;
+      finished = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (reason) logPainContinuationFailure(workspaceDir, reason);
+      resolve();
+    };
+    continuation.then(
+      () => finish(),
+      (error: unknown) => finish(error instanceof Error ? error.message : String(error)),
+    );
+    timer = setTimeout(() => finish(`pain_continuation_timeout:${PAIN_CONTINUATION_TIMEOUT_MS}ms`), PAIN_CONTINUATION_TIMEOUT_MS);
+  });
+  const observed = bounded.finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
     pendingPainContinuations.delete(observed);
   });
   pendingPainContinuations.add(observed);
