@@ -106,6 +106,55 @@ describe('Empty string validation in pi-ai profiles', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts valid positive maxTokens', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.max-tokens-ok'] = {
+      type: 'pi-ai',
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      maxTokens: 16000,
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects non-numeric maxTokens', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.max-tokens-string'] = {
+      type: 'pi-ai',
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      maxTokens: '16000',
+    } as unknown as typeof raw.runtimeProfiles[string];
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('maxTokens') &&
+      e.reason.includes('finite number')
+    )).toBe(true);
+  });
+
+  it('rejects non-positive maxTokens', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['pd.max-tokens-zero'] = {
+      type: 'pi-ai',
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      maxTokens: 0,
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('maxTokens') &&
+      e.reason.includes('positive')
+    )).toBe(true);
+  });
+
   it('still rejects missing provider key (presence required)', () => {
     const raw = makeValidConfig();
     raw.runtimeProfiles['pd.missing-provider'] = {

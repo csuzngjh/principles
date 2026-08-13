@@ -480,6 +480,42 @@ describe('checkAgentRuntimeReadiness', () => {
     expect(resultUnset.readiness).toBe('not_ready');
     expect(resultUnset.reason).toContain('not set');
   });
+
+  it('returns ready with reasoning-model guidance for deepseek without explicit maxTokens', () => {
+    // Reasoning providers (e.g. DeepSeek) share the max_tokens budget between
+    // chain-of-thought and final answer; the readiness check surfaces a hint
+    // when maxTokens is not explicitly configured.
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
+      },
+      (name) => name === 'DEEPSEEK_API_KEY' ? 'sk-ds-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('ready');
+    expect(result.reason).toContain('reasoning model');
+    expect(result.reason).toContain('maxTokens');
+  });
+
+  it('returns ready WITHOUT reasoning-model hint when deepseek has explicit maxTokens', () => {
+    // When maxTokens is explicitly configured, the guidance branch is skipped
+    // and the plain ready result is returned.
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
+        maxTokens: 16000,
+      },
+      (name) => name === 'DEEPSEEK_API_KEY' ? 'sk-ds-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('ready');
+    // Plain ready result has no reason field (guidance branch skipped).
+    expect(result.reason).toBeUndefined();
+  });
 });
 
 // ── createAdapterConfigFromProfile ───────────────────────────────────────────
