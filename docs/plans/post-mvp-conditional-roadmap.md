@@ -513,18 +513,20 @@ The Owner explicitly approved this slice on 2026-08-12/13 after selecting "revis
 - package the Codex adapter for repository/personal Marketplace installation;
 - use default `hooks/hooks.json` or a manifest-declared hook path;
 - use `PLUGIN_ROOT` for packaged code and `PLUGIN_DATA` only for plugin-private auxiliary data;
-- preserve the selected Workspace's `.pd/config.yaml` and workspace state as the authority;
+- preserve both selected-Workspace authority paths defined by `DATA_ARCHITECTURE.md`: `.pd/config.yaml` + `.pd/state.db` for config/Runtime V2 SQLite, and `.state/principle_training_state.json` + existing `.state/` runtime/host artifacts for the principle ledger and host evidence;
 - require Owner hook review/trust before the three MVP-Core paths operate;
 - deliver only prompt injection, before-tool RuleHost enforcement, and after-tool pain/evidence capture through the shared host runtime;
 - retain `host.codex` as the Codex kill switch.
 
-**Observable acceptance / rollback**: repository-Marketplace install + trust must demonstrate all three paths in one Workspace and parity with OpenClaw. `host.codex.enabled: false` must neutralize Codex hooks with a structured skip reason and without changing OpenClaw or Workspace data. See ADR-0020 §10.5 for the exact contract.
+**Supported distribution order**: first validate through a repository/personal Marketplace. After that passes, a Workspace admin may publish the local plugin to selected Workspace roles. Workspace publication is organization-internal and is not evidence that the universal public directory accepts lifecycle-hook plugins.
+
+**Observable acceptance / rollback**: repository-Marketplace install + trust must demonstrate all three paths in one Workspace and parity with OpenClaw; the same bundle must then be publishable by a Workspace admin to selected roles without changing either authority path. `host.codex.enabled: false` must neutralize Codex hooks with a structured skip reason and without changing OpenClaw, `.pd/`, or `.state/` data. See ADR-0020 §10.5 for the exact contract.
 
 ### 21.2 Still Hold: public directory and advanced parity
 
 The following work remains subject to external evidence and is not authorized by PRI-523:
 
-- public-directory submission/review for a lifecycle-hook plugin;
+- universal public-directory submission/review for a lifecycle-hook plugin (distinct from supported organization-internal Workspace publication);
 - ChatGPT Web/Mobile feature parity through Skills or MCP;
 - an MCP server, public Web commands, or automatic Skill activation;
 - public-marketplace auto-update promises;
@@ -572,8 +574,8 @@ The following work remains subject to external evidence and is not authorized by
 - schedulers, daemons, general memory, tool repair/retry, and autonomous task/value decisions;
 - any new activation channel or host beyond the PRI-523 contract.
 
-**Rollback**: `host.codex` disables Codex. The OpenClaw migration must retain the legacy route behind `abstraction_layer_v1` until parity acceptance passes; flag-off returns to legacy orchestration without data migration. Both flags require production-loader and test coverage before use.
+**Rollback**: `host.codex` is the existing default-on MVP-Core Codex kill switch; §2.4's old quiet/default-off instruction is superseded. For OpenClaw, PRI-523 must register `abstraction_layer_v1` as core/default-off/since 2026-08-13: off = legacy orchestration, on = shared host runtime. It may flip on only after parity acceptance, and the legacy route must remain so flag-off restores it without migration. Both flags require production-loader and test coverage. Neither rollback may modify `.pd/` SQLite/config state or `.state/` ledger/runtime artifacts.
 
 **Emotional value**: one authoritative Workspace plus observable host parity reduces **失控感 / 不信任感** and creates **掌控感 / 安心感**; a shared correction path reduces repeated cross-host maintenance **疲惫感** without adding Owner-facing noise.
 
-**关联**: ADR-0020 §10; `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`
+**关联**: ADR-0020 §10; `docs/architecture/DATA_ARCHITECTURE.md`; `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`
