@@ -306,6 +306,40 @@ jobs:
       - name: Build and test
         run: npm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime
 
+  test-host-runtime-parity:
+    name: Test host runtime parity (Node.js ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      - name: Build runtime dependencies and OpenClaw plugin
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/host-runtime
+          npm run build --workspace=principles-disciple
+
+      - name: Verify real OpenClaw host parity and published bundle
+        run: npm run test:host-runtime-parity --workspace=principles-disciple
+
   build-openclaw-plugin:
     name: Build OpenClaw Plugin
     runs-on: ubuntu-latest
