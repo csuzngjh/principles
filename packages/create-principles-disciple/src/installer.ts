@@ -303,8 +303,16 @@ async function resolveGatewayAction(
   return choice;
 }
 
-/** Install aborted because the gateway was running and the user/flag chose not to stop it. */
-function buildGatewayAbortResult(options: InstallOptions): InstallResult {
+/**
+ * Structured failure result for a gateway pre-flight refusal — either the run
+ * aborted (gateway running, not stopped) or --stop-gateway was requested but
+ * `openclaw gateway stop` failed. All components stay 'skipped': both refusal
+ * paths return before any mutation (cli-5).
+ */
+function buildGatewayRefusalResult(
+  options: InstallOptions,
+  detail: { reason: string; nextAction: string; error?: string },
+): InstallResult {
   return {
     success: false,
     workspaceDir: options.workspaceDir,
@@ -313,24 +321,9 @@ function buildGatewayAbortResult(options: InstallOptions): InstallResult {
     components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
     verification: { features: 'skipped', storyA: 'skipped' },
     enabledChannels: options.channels,
-    nextAction: t('gateway_aborted_next'),
-    reason: `gateway_running_aborted: ${t('gateway_aborted_reason')}`,
-  };
-}
-
-/** --stop-gateway was requested but `openclaw gateway stop` failed. */
-function buildGatewayStopFailedResult(options: InstallOptions, error?: string): InstallResult {
-  return {
-    success: false,
-    workspaceDir: options.workspaceDir,
-    configYamlPath: getConfigYamlPath(options.workspaceDir),
-    templatesCount: 0,
-    components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
-    verification: { features: 'skipped', storyA: 'skipped' },
-    enabledChannels: options.channels,
-    nextAction: t('gateway_stop_failed_next'),
-    reason: `gateway_stop_failed: ${t('gateway_stop_failed_reason')}${error ? ` — ${error}` : ''}`,
-    error,
+    nextAction: detail.nextAction,
+    reason: detail.reason,
+    ...(detail.error !== undefined ? { error: detail.error } : {}),
   };
 }
 
@@ -1230,14 +1223,21 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     });
     if (action === 'abort') {
       logger.warn(t('gateway_aborted_reason'));
-      return buildGatewayAbortResult(options);
+      return buildGatewayRefusalResult(options, {
+        reason: `gateway_running_aborted: ${t('gateway_aborted_reason')}`,
+        nextAction: t('gateway_aborted_next'),
+      });
     }
     if (action === 'stop') {
       if (!quiet) logger.info(t('gateway_stopping'));
       const stopRes = await stopOpenClawGateway();
       if (!stopRes.ok) {
         logger.error(`${t('gateway_stop_failed')} ${stopRes.error ?? ''}`);
-        return buildGatewayStopFailedResult(options, stopRes.error);
+        return buildGatewayRefusalResult(options, {
+          reason: `gateway_stop_failed: ${t('gateway_stop_failed_reason')}${stopRes.error ? ` — ${stopRes.error}` : ''}`,
+          nextAction: t('gateway_stop_failed_next'),
+          error: stopRes.error,
+        });
       }
       if (!quiet) logger.success(t('gateway_stopped'));
       restartedGateway = true; // restart after install, even on failure
