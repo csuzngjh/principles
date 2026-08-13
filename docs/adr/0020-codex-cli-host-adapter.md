@@ -277,6 +277,8 @@ The first supported distribution channels are:
 
 Both routes require Workspace-scoped use in Codex CLI/Desktop after the Owner reviews and trusts the hooks.
 
+The plugin requires an existing Node.js runtime `>=20` (the repository compatibility matrix tests Node 20 and 22). Neither Marketplace installation nor Workspace publication installs Node. Setup and health validation must fail loud before hook activation when `node` is missing or reports a version below 20, with the detected state, a structured reason, and the next action to install/upgrade Node and retry.
+
 Do not document `~/.codex/plugins/cache/...` as an installation target or direct mutation of `~/.codex/hooks.json` as the preferred plugin path. Those are obsolete implementation assumptions from §2.3. The bundled default is `hooks/hooks.json` unless the manifest declares another path.
 
 OpenAI's current public submission documentation lists Skills and MCP servers, but does not confirm lifecycle-hook plugins as a public-directory submission type. Repository Marketplace distribution is supported now; public-directory submission remains gated and must not be advertised as available.
@@ -287,12 +289,26 @@ OpenAI's current public submission documentation lists Skills and MCP servers, b
 
 Acceptance is exact and Owner-visible: after installing PRI-523 from the repository Marketplace into a Workspace and trusting its hooks, (a) a prompt receives the same active-principle context as OpenClaw, (b) a known RuleHost fixture denies the same before-tool call in both hosts, and (c) a completed tool call creates pain/evidence with Codex source lineage in that same Workspace; host-runtime contract tests and one OpenClaw/Codex parity E2E must prove all three.
 
+Fresh setup and migration must persist both entries explicitly under `.pd/config.yaml.features` rather than relying only on registry defaults:
+
+```yaml
+features:
+  host.codex:
+    category: core
+    enabled: true
+  abstraction_layer_v1:
+    category: quiet
+    enabled: false
+```
+
+Registry metadata retains `host.codex.since: '2026-08-11'` and registers `abstraction_layer_v1.since: '2026-08-13'`. Loader/migration tests must cover fresh config, migrated config, explicit `host.codex.enabled: false`, and explicit `abstraction_layer_v1.enabled: false`; each operator rollback must select the neutral/legacy route and emit its observable reason. Installed-bundle acceptance must also execute from a `PLUGIN_ROOT` path containing spaces, proving that every hook command quotes the path correctly.
+
 Rollback is also exact: setting `host.codex.enabled: false` in the Workspace `.pd/config.yaml` makes every Codex hook return the host's neutral allow/empty result, records the structured skip reason, and leaves OpenClaw plus both Workspace authority paths unchanged.
 
 This amendment changes the active flag contract unambiguously:
 
 - `host.codex` remains the existing MVP-Core kill switch, currently default-on after PRI-282 validation; §2.4's historical `quiet`/default-off instruction is superseded. PRI-523 does not create a second Codex flag.
-- `abstraction_layer_v1` is now required for the OpenClaw cutover: register it as `category: core`, `enabled: false`, `since: '2026-08-13'`. `false` routes OpenClaw through its legacy orchestration; `true` routes OpenClaw through `@principles/host-runtime`. It may be enabled only after the parity acceptance in this section passes, and setting it back to `false` is the no-migration rollback.
+- `abstraction_layer_v1` is now required for the OpenClaw cutover: register it as `category: quiet`, `enabled: false`, `since: '2026-08-13'`. `false` routes OpenClaw through its legacy orchestration; `true` is allowed only for controlled parity validation and routes OpenClaw through `@principles/host-runtime`. It may be promoted to `category: core`, `enabled: true` only after both OpenClaw parity and Codex installed-bundle E2E acceptance in this section pass. Setting it back to `false` is the no-migration rollback.
 
 Neither flag contract counts as implemented until the production `.pd/config.yaml` loader and tests exercise it. The legacy OpenClaw route must not be removed in PRI-523.
 
