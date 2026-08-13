@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,10 +7,9 @@ import * as os from 'os';
 // Mock fetch globally
 vi.stubGlobal('fetch', vi.fn());
 
-// Mock child_process (execSync: tar/gateway; spawn: installer in /apply-full)
+// Mock child_process (execSync: tar extraction + gateway control)
 vi.mock('child_process', () => ({
   execSync: vi.fn(),
-  spawn: vi.fn(),
 }));
 
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
@@ -1212,7 +1210,8 @@ describe('handleUpdateRoute', () => {
       expect(body.data.success).toBe(false);
       expect(body.data.reason).toBe('file_locked');
       expect(body.data.nextAction).toBeDefined();
-      expect(body.data.nextAction).toContain('gateway stop');
+      expect(body.data.nextAction).toBeDefined();
+      expect(body.data.nextAction).toContain('重启');
     });
   });
 
@@ -1295,102 +1294,172 @@ describe('handleUpdateRoute', () => {
     });
   });
 
-  // ── Full update (/apply-full) ────────────────────────────────────────
+  // ── Full update (/apply-full) — inline tarball download + file copy ──
 
   describe('POST /apply-full', () => {
-    /**
-     * Create a mock child process that emits JSON stdout + exit code.
-     * Mimics `spawn(...)` return for the installer.
-     */
-    function mockInstallerSpawn(opts: {
-      stdout?: string;
-      exitCode?: number | null;
-      error?: Error;
-    }) {
-      const { stdout = '', exitCode = 0, error } = opts;
-      const child = new EventEmitter() as EventEmitter & {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      };
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
+    it('should copy plugin, console, core, pd-cli from installer tarball', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
 
-      // Defer events so listeners can attach first
-      setImmediate(() => {
-        if (error) {
-          child.emit('error', error);
-          return;
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              version: '1.105.0',
+              dist: { tarball: 'https://example.com/installer.tgz' },
+            }),
+          } as Response);
         }
-        if (stdout) {
-          child.stdout.emit('data', Buffer.from(stdout));
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'console', 'dist', 'web'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'dist', 'index.js'), 'new core');
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
         }
-        child.emit('close', exitCode);
-      });
+      }) as unknown as typeof execSyncMock);
 
-      return child as unknown as import('child_process').ChildProcess;
-    }
-
-    it('should return success when installer exits 0 with success JSON', async () => {
-      const { spawn: spawnMock } = await import('child_process');
-
-      // Mock spawn to return a fake installer child process
-      vi.mocked(spawnMock).mockReturnValue(mockInstallerSpawn({
-        stdout: JSON.stringify({ success: true, workspace: workspaceDir }),
-        exitCode: 0,
-      }));
-
-      // Write current version so readCurrentVersion works after install
-      fs.writeFileSync(path.join(pluginDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+      // Existing install
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+      fs.mkdirSync(path.join(pluginDir, 'console', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'dist', 'server.js'), 'old console');
 
       const req = createMockRequest('POST', {});
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
 
-      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
-      const body = parseResponseBody<{ data: { success: boolean; requiresRestart: boolean } }>(res);
+      const body = parseResponseBody<{ data: { success: boolean; requiresRestart: boolean; newVersion?: string } }>(res);
       expect(body.data.success).toBe(true);
       expect(body.data.requiresRestart).toBe(true);
+      expect(body.data.newVersion).toBe('2.0.0');
+
+      // Verify all 4 packages updated
+      expect(fs.readFileSync(path.join(pluginDir, 'dist', 'bundle.js'), 'utf-8')).toBe('new plugin code');
+      expect(fs.readFileSync(path.join(pluginDir, 'console', 'dist', 'server.js'), 'utf-8')).toBe('new console code');
+      expect(fs.readFileSync(path.join(pluginDir, 'core', 'dist', 'index.js'), 'utf-8')).toBe('new core');
+      expect(fs.readFileSync(path.join(pluginDir, 'pd-cli', 'dist', 'index.js'), 'utf-8')).toBe('new cli');
     });
 
-    it('should return failure when installer reports success=false', async () => {
-      const { spawn: spawnMock } = await import('child_process');
+    it('should preserve pd-cli/node_modules during update (no rmSync)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
 
-      vi.mocked(spawnMock).mockReturnValue(mockInstallerSpawn({
-        stdout: JSON.stringify({
-          success: false,
-          reason: 'gateway_running_aborted',
-          nextAction: 'Stop the gateway first',
-        }),
-        exitCode: 1,
-      }));
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              version: '1.105.0',
+              dist: { tarball: 'https://example.com/installer.tgz' },
+            }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing pd-cli with node_modules symlinks (marker)
+      fs.mkdirSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'core'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'core', 'marker'), 'symlink');
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
 
       const req = createMockRequest('POST', {});
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
 
-      const body = parseResponseBody<{ data: { success: boolean; reason?: string; nextAction?: string } }>(res);
-      expect(body.data.success).toBe(false);
-      expect(body.data.reason).toBe('gateway_running_aborted');
-      expect(body.data.nextAction).toBe('Stop the gateway first');
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      // pd-cli/node_modules must survive
+      expect(fs.existsSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'core', 'marker'))).toBe(true);
     });
 
-    it('should return failure when spawn itself errors', async () => {
-      const { spawn: spawnMock } = await import('child_process');
+    it('should detect dependency changes and include hint in message', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
 
-      vi.mocked(spawnMock).mockReturnValue(mockInstallerSpawn({
-        error: new Error('spawn npx ENOENT'),
-      }));
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            // Deps CHANGED: better-sqlite3 ^14.0.0 (was ^13.0.3)
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^14.0.0', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Old deps: better-sqlite3 ^13.0.3
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
 
       const req = createMockRequest('POST', {});
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
 
-      const body = parseResponseBody<{ data: { success: boolean; nextAction?: string } }>(res);
-      expect(body.data.success).toBe(false);
-      expect(body.data.nextAction).toContain('npx');
+      const body = parseResponseBody<{ data: { success: boolean; message: string } }>(res);
+      expect(body.data.success).toBe(true);
+      expect(body.data.message).toContain('dependencies may have changed');
     });
 
     it('should return 405 for non-POST method', async () => {

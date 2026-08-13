@@ -201,8 +201,8 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 const REQUEST_TIMEOUT_MS = 10000;
 const UPDATE_APPLY_TIMEOUT_MS = 120000;
-// Full update runs the installer (npm install × 3 + verification) — allow 10 min.
-const UPDATE_APPLY_FULL_TIMEOUT_MS = 600000;
+// Full update downloads a tarball + copies files — allow 3 min for slow networks.
+const UPDATE_APPLY_FULL_TIMEOUT_MS = 180000;
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 

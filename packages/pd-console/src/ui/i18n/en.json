@@ -864,7 +864,7 @@
       "fullUpdating": "Full update in progress…",
       "fullUpdateSuccess": "Full update completed.",
       "confirmFullUpdateTitle": "Confirm Full Update",
-      "confirmFullUpdateDesc": "This will reinstall all PD packages (plugin, console, core, CLI, dependencies) via the installer. Expect 2-5 minutes. Your custom files (AGENTS.md etc.) are preserved; new versions go into .update sidecar files. You will need to restart the console after completion.",
+      "confirmFullUpdateDesc": "Downloads and updates all PD packages (plugin, console, core, CLI). Usually takes just a few seconds. Your custom files (AGENTS.md etc.) are not affected. You will need to restart the console after completion.",
       "fullUpdateRestartPrompt": "Full update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again."
     },
     "intent": {

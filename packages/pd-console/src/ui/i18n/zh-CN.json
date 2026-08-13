@@ -864,7 +864,7 @@
       "fullUpdating": "全量更新中…",
       "fullUpdateSuccess": "全量更新完成。",
       "confirmFullUpdateTitle": "确认全量更新",
-      "confirmFullUpdateDesc": "将通过安装器重新安装全部 PD 代码包（插件、控制台、核心、CLI、依赖）。预计需要 2-5 分钟。你自定义的文件（AGENTS.md 等）会被保留，新版写入 .update 旁车文件。更新完成后需要手动重启控制台。",
+      "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。你自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
       "fullUpdateRestartPrompt": "全量更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。"
     },
     "intent": {

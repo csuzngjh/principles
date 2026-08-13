@@ -11,7 +11,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
-import { spawn } from 'child_process';
 import semver from 'semver';
 import {
   sendSuccess,
@@ -438,7 +437,7 @@ async function doApplyUpdate(
         success: false,
         message: 'Update blocked by file lock (OpenClaw gateway may still be running)',
         reason: 'file_locked',
-        nextAction: 'Run `openclaw gateway stop` and retry, or use the CLI installer: npx create-principles-disciple --stop-gateway',
+        nextAction: '请重启电脑后再次尝试更新。',
       };
     }
     return {
@@ -485,129 +484,195 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
 }
 
 // ---------------------------------------------------------------------------
-// Full update — delegates to the CLI installer for a complete reinstall
+// Full update — inline tarball download + file copy (no external installer)
 // ---------------------------------------------------------------------------
 
-const INSTALLER_TIMEOUT_MS = 600_000; // 10 minutes (npm install × 3 + verification)
+// The installer package bundles ALL sub-packages (plugin, console, core,
+// pd-cli). We download it directly and copy the pre-built dist/ directories.
+// This is seconds-fast (no npm install) and requires no CLI/npx — the entire
+// operation happens inside the console HTTP handler.
+const NPM_REGISTRY_INSTALLER = 'https://registry.npmjs.org/create-principles-disciple/latest';
 
 /**
- * Run the installer non-interactively. The installer publishes JSON on stdout
- * (via --json) and exits 0 on success. We stop the gateway ourselves before
- * spawning so the installer doesn't need --stop-gateway (which may not exist
- * in older published versions).
+ * Compare two dependency maps for meaningful differences.
+ * Ignores `@principles/core` (always `file:./core` in bundled packages).
  */
-function runInstallerNonInteractive(workspaceDir: string): Promise<{
+function depsMeaningfullyChanged(
+  oldDeps: Record<string, unknown> | undefined,
+  newDeps: Record<string, unknown> | undefined,
+): boolean {
+  const a: Record<string, unknown> = {};
+  const b: Record<string, unknown> = {};
+  // Normalize: strip @principles/core (file: ref is not a real version)
+  for (const [k, v] of Object.entries(oldDeps ?? {})) {
+    if (k !== '@principles/core') a[k] = v;
+  }
+  for (const [k, v] of Object.entries(newDeps ?? {})) {
+    if (k !== '@principles/core') b[k] = v;
+  }
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  if (aKeys.length !== bKeys.length) return true;
+  return aKeys.some((k, i) => bKeys[i] !== k || a[k] !== b[k]);
+}
+
+async function doInlineFullUpdate(workspaceDir: string): Promise<{
   success: boolean;
   message: string;
   reason?: string;
   nextAction?: string;
   newVersion?: string;
+  requiresRestart: boolean;
 }> {
-  return new Promise((resolve) => {
-    const args = [
-      'create-principles-disciple',
-      '--json',
-      '--yes',
-      '--smart',
-      '--workspace', workspaceDir,
-    ];
+  const extDir = resolvePluginDir(workspaceDir);
 
-    const child = spawn('npx', args, {
-      cwd: os.homedir(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-      timeout: INSTALLER_TIMEOUT_MS,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
-    child.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-    child.on('error', (err: Error) => {
-      resolve({
-        success: false,
-        message: `Failed to start installer: ${err.message}`,
-        nextAction: 'Ensure Node.js and npx are available. You can also run manually: npx create-principles-disciple --yes --smart',
-      });
-    });
-
-    child.on('close', (code: number | null) => {
-      // Try to parse JSON output from the installer
-      try {
-        const parsed: unknown = JSON.parse(stdout);
-        if (isRecord(parsed)) {
-          const success = code === 0 && parsed.success === true;
-          return resolve({
-            success,
-            message: success
-              ? 'Full update completed successfully'
-              : (typeof parsed.reason === 'string' ? parsed.reason : 'Installer reported failure'),
-            reason: success ? undefined : (typeof parsed.reason === 'string' ? parsed.reason : 'installer_failed'),
-            nextAction: success ? undefined : (typeof parsed.nextAction === 'string' ? parsed.nextAction : undefined),
-            newVersion: readCurrentVersion(resolvePluginDir(workspaceDir)),
-          });
-        }
-      } catch { /* JSON parse failed — fall through to raw handling */ }
-
-      if (code === 0) {
-        resolve({
-          success: true,
-          message: 'Full update completed successfully',
-          newVersion: readCurrentVersion(resolvePluginDir(workspaceDir)),
-        });
-      } else if (code === null) {
-        resolve({
-          success: false,
-          message: 'Installer timed out (10 minutes). The update may be incomplete.',
-          reason: 'installer_timeout',
-          nextAction: 'Run manually: npx create-principles-disciple --yes --smart',
-        });
-      } else {
-        resolve({
-          success: false,
-          message: `Installer exited with code ${code}`,
-          reason: 'installer_exit_error',
-          nextAction: stderr.trim() || 'Run manually: npx create-principles-disciple --yes --smart',
-        });
-      }
-    });
-  });
-}
-
-async function doApplyFullUpdate(workspaceDir: string) {
-  // 1. Stop gateway ourselves (don't rely on installer's --stop-gateway flag,
-  //    which may not exist in older published versions).
+  // 1. Stop gateway (releases native module locks held by the gateway process)
   const gatewayStatus = await checkOpenClawGateway();
   let gatewayWasStopped = false;
   if (gatewayStatus.isRunning) {
     const stopRes = stopOpenClawGateway();
-    if (stopRes.ok) {
-      gatewayWasStopped = true;
-    }
+    if (stopRes.ok) gatewayWasStopped = true;
   }
 
-  // Capture the current version BEFORE the installer runs, for history.
-  const fromVersion = readCurrentVersion(resolvePluginDir(workspaceDir)) ?? 'unknown';
+  // Capture version before changes
+  const fromVersion = readCurrentVersion(extDir) ?? 'unknown';
+  let tempDir: string | undefined;
 
   try {
-    // 2. Run the installer non-interactively (smart mode preserves user files)
-    const result = await runInstallerNonInteractive(workspaceDir);
+    // 2. Fetch installer package info from npm
+    const response = await fetchWithRetry(NPM_REGISTRY_INSTALLER, 'Installer registry check');
+    const rawData: unknown = await response.json();
+    if (!isRecord(rawData)) return { success: false, message: 'Invalid registry response', requiresRestart: false };
+    const toVersion = typeof rawData.version === 'string' ? rawData.version : undefined;
+    const dist = isRecord(rawData.dist) ? rawData.dist : null;
+    const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
+    if (!tarball) return { success: false, message: 'Missing tarball URL', requiresRestart: false };
 
-    // 3. Record history
+    // 3. Download + extract tarball (contains plugin/, console/, core/, pd-cli/)
+    tempDir = path.join(os.tmpdir(), `pd-full-update-${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    const dlResponse = await fetchWithRetry(tarball, 'Download');
+    const buffer = Buffer.from(await dlResponse.arrayBuffer());
+    const tarballPath = path.join(tempDir, 'package.tgz');
+    fs.writeFileSync(tarballPath, buffer);
+    execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+    fs.unlinkSync(tarballPath);
+
+    // 4. Detect dependency changes (informational — logged but not blocking;
+    //    the .js files are still updated; node_modules stays as-is)
+    let depsChanged = false;
+    const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
+    const oldPkgPath = path.join(extDir, 'package.json');
+    if (fs.existsSync(newPkgPath) && fs.existsSync(oldPkgPath)) {
+      try {
+        const newPkg: unknown = JSON.parse(fs.readFileSync(newPkgPath, 'utf-8'));
+        const oldPkg: unknown = JSON.parse(fs.readFileSync(oldPkgPath, 'utf-8'));
+        if (isRecord(newPkg) && isRecord(oldPkg)) {
+          depsChanged = depsMeaningfullyChanged(
+            isRecord(oldPkg.dependencies) ? oldPkg.dependencies : undefined,
+            isRecord(newPkg.dependencies) ? newPkg.dependencies : undefined,
+          );
+        }
+      } catch { /* best-effort comparison */ }
+    }
+
+    // 5. Copy files — 4 subdirectory mappings
+    //    a. plugin/* → extDir/* (flattened, skip node_modules)
+    const pluginSrc = path.join(tempDir, 'plugin');
+    if (fs.existsSync(pluginSrc)) {
+      copyDirRecursive(pluginSrc, extDir, SKIP_DIRS);
+    }
+
+    //    b. console/ → extDir/console/ (full replace — pure JS, not locked)
+    const consoleSrc = path.join(tempDir, 'console');
+    const consoleDest = path.join(extDir, 'console');
+    if (fs.existsSync(consoleSrc)) {
+      if (fs.existsSync(consoleDest)) {
+        fs.rmSync(consoleDest, { recursive: true, force: true });
+      }
+      copyDirRecursive(consoleSrc, consoleDest);
+    }
+
+    //    c. core/ → extDir/core/ (full replace)
+    const coreSrc = path.join(tempDir, 'core');
+    const coreDest = path.join(extDir, 'core');
+    if (fs.existsSync(coreSrc)) {
+      if (fs.existsSync(coreDest)) {
+        fs.rmSync(coreDest, { recursive: true, force: true });
+      }
+      copyDirRecursive(coreSrc, coreDest);
+    }
+
+    //    d. pd-cli/dist + package.json → extDir/pd-cli/ (overwrite only,
+    //       do NOT rmSync — preserves node_modules symlinks created at install)
+    const pdCliSrc = path.join(tempDir, 'pd-cli');
+    const pdCliDest = path.join(extDir, 'pd-cli');
+    if (fs.existsSync(pdCliSrc)) {
+      const distSrc = path.join(pdCliSrc, 'dist');
+      const distDest = path.join(pdCliDest, 'dist');
+      if (fs.existsSync(distSrc)) {
+        if (fs.existsSync(distDest)) fs.rmSync(distDest, { recursive: true, force: true });
+        copyDirRecursive(distSrc, distDest);
+      }
+      const pkgSrc = path.join(pdCliSrc, 'package.json');
+      if (fs.existsSync(pkgSrc)) {
+        copyFileTo(pkgSrc, path.join(pdCliDest, 'package.json'));
+      }
+    }
+
+    // 6. Cleanup temp dir
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    // 7. Record history
+    const newVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
     appendUpdateHistory(workspaceDir, {
       fromVersion,
-      toVersion: result.newVersion ?? 'unknown',
-      success: result.success,
+      toVersion: newVersion,
+      success: true,
     });
 
     return {
-      ...result,
+      success: true,
+      message: depsChanged
+        ? 'Full update completed. Some dependencies may have changed — if you encounter issues, restart your computer and try again.'
+        : 'Full update completed successfully',
+      newVersion,
       requiresRestart: true,
     };
+  } catch (error) {
+    // Clean up temp dir on failure
+    if (tempDir && fs.existsSync(tempDir)) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
+
+    // Record failed update
+    appendUpdateHistory(workspaceDir, {
+      fromVersion,
+      toVersion: 'failed',
+      success: false,
+    });
+
+    if (isLockError) {
+      return {
+        success: false,
+        message: 'Update blocked by a file lock. The OpenClaw gateway may still be running.',
+        reason: 'file_locked',
+        nextAction: 'Please restart your computer, then try the update again.',
+        requiresRestart: false,
+      };
+    }
+    return {
+      success: false,
+      message: errorMsg,
+      requiresRestart: false,
+    };
   } finally {
-    // 4. Restart gateway regardless of success/failure
+    // 8. Restart gateway regardless of success/failure
     if (gatewayWasStopped) {
       restartOpenClawGateway();
     }
@@ -735,11 +800,11 @@ export async function handleUpdateRoute(
     return;
   }
 
-  // POST /apply-full — delegate to the CLI installer for a complete reinstall
+  // POST /apply-full — inline tarball download + file copy (no external installer)
   if (subPath === '/apply-full') {
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
-      const result = await doApplyFullUpdate(workspaceDir);
+      const result = await doInlineFullUpdate(workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
