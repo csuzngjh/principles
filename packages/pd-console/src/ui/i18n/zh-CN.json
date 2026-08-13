@@ -73,7 +73,7 @@
       "stagnationNeverActivated": "已批准但从未激活",
       "stagnationNoPain": "未收到行为偏差信号",
       "stagnationDaysSince": "天",
-      "deviationDisclaimer": "PD 暂按单条呈现，自动同类识别功能暂未上线。",
+      "deviationDisclaimer": "PD 暂按单条呈现，自动相似度检测功能暂未上线。",
       "deviationDetailPending": "单条偏差证据将在后端提供行为偏差信号详情后显示（CR5）。",
       "footer": "这一页只回答一个问题：现在该做什么判断。",
       "dailyThought": {
@@ -173,7 +173,7 @@
       "eyebrow": "行为证据",
       "title": "行为证据",
       "description": "只有值得治理的行为证据，才应进入原则审查。此页面展示 PD 观察到的真实行为信号及其链路状态——不展示原始聊天、原始轨迹或关于行为改善的虚假声明。",
-      "honestyNote": "PD 按单条呈现每条证据。自动同类识别功能暂未上线。此处展示的证据源自真实 pain_events、诊断任务和候选记录。",
+      "honestyNote": "PD 按单条呈现每条证据。自动相似度检测功能暂未上线。此处展示的证据源自真实 pain_events、诊断任务和候选记录。",
       "loadError": "无法加载行为证据",
       "validationError": "数据格式验证失败，请刷新重试",
       "emptyTitle": "尚未捕获行为证据",
