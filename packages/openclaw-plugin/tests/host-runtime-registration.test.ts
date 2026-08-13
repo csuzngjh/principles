@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
 
@@ -10,6 +10,12 @@ const handleBeforePromptBuild = vi.fn();
 const handleBeforeToolCall = vi.fn();
 const handleAfterToolCall = vi.fn();
 const sharedEnabled = vi.hoisted(() => ({ value: true }));
+const ensureConversationAccessInConfig = vi.hoisted(() => vi.fn(() => false));
+
+vi.mock('../src/core/config-health.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/config-health.js')>();
+  return { ...actual, ensureConversationAccessInConfig };
+});
 
 vi.mock('@principles/host-runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@principles/host-runtime')>();
@@ -55,7 +61,13 @@ function createApi(): { api: OpenClawPluginApi; hooks: Map<string, Hook>; info: 
     id: 'principles-disciple',
     rootDir: '/plugin',
     pluginConfig: { language: 'en' },
-    config: {},
+    config: {
+      plugins: {
+        entries: {
+          'principles-disciple': { hooks: { allowConversationAccess: true } },
+        },
+      },
+    },
     logger: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
     registerCommand: vi.fn(), registerService: vi.fn(), registerTool: vi.fn(), registerHttpRoute: vi.fn(),
     on: (name, handler) => { hooks.set(name, handler); },
@@ -65,6 +77,7 @@ function createApi(): { api: OpenClawPluginApi; hooks: Map<string, Hook>; info: 
 
 describe('PRI-523 OpenClaw production registration uses shared host runtime', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     dispatch.mockReset();
     dispatch.mockImplementation((event, next) => next(event));
     createHostRuntime.mockClear();
@@ -72,6 +85,21 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     handleBeforeToolCall.mockReset();
     handleAfterToolCall.mockReset();
     sharedEnabled.value = true;
+    ensureConversationAccessInConfig.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('does not schedule a delayed write to the real OpenClaw home config', async () => {
+    const { api } = createApi();
+    plugin.register(api);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(ensureConversationAccessInConfig).not.toHaveBeenCalled();
   });
 
   it.each([

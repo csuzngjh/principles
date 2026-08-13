@@ -47,7 +47,8 @@ const originalPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
 function apiForWorkspace(): OpenClawPluginApi {
   const logger = { debug(...args: unknown[]) { logMessages.push(args.join(' ')); }, info(...args: unknown[]) { logMessages.push(args.join(' ')); }, warn(...args: unknown[]) { logMessages.push(args.join(' ')); }, error(...args: unknown[]) { logMessages.push(args.join(' ')); } };
   return {
-    id: 'principles-disciple', rootDir: workspaceDir, pluginConfig: {}, config: {}, logger,
+    id: 'principles-disciple', rootDir: workspaceDir, pluginConfig: {},
+    config: { plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } }, logger,
     registerCommand() {}, registerService() {}, registerTool() {}, registerHttpRoute() {},
     on(event, handler) { hooks.set(event, handler as Hook); },
   };

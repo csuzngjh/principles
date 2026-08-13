@@ -52,8 +52,13 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     return payload;
   }
 
-  function recordResult(event: HostEvent, native: NativeResult, decision: HostEventResult['decision']): HostEventResult {
-    const result: HostEventResult = { decision, source: event.source };
+  function recordResult(
+    event: HostEvent,
+    native: NativeResult,
+    decision: HostEventResult['decision'],
+    reason?: string,
+  ): HostEventResult {
+    const result: HostEventResult = { decision, source: event.source, ...(reason ? { reason } : {}) };
     results.set(result, native);
     return result;
   }
@@ -69,8 +74,11 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       const payload = payloadFor(event);
       if (payload.kind !== 'before_tool_call') throw new Error('OpenClaw gate payload mismatch');
       const value = options.beforeToolCall(payload.event, payload.context);
-      const decision = value?.skipToolCall ? 'deny' : value ? 'modify' : 'allow';
-      return recordResult(event, { kind: payload.kind, value }, decision);
+      const denied = value?.skipToolCall === true || value?.block === true;
+      const decision = denied ? 'deny' : value ? 'modify' : 'allow';
+      const rawReason = value?.reason ?? value?.blockReason;
+      const reason = typeof rawReason === 'string' && rawReason.trim().length > 0 ? rawReason : undefined;
+      return recordResult(event, { kind: payload.kind, value }, decision, reason);
     },
     async afterToolCall(event) {
       const payload = payloadFor(event);

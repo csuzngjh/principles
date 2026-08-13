@@ -1,7 +1,8 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
+import { atomicReplaceTextFile, withConfigFileLock } from './utils/config-file-io.js';
 
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
@@ -420,35 +421,52 @@ export function validateConfigYamlFull(workspaceDir: string): void {
  * PRI-523: add the two explicit host rollout flags to an existing valid config.
  * Existing values are authoritative and are never overwritten.
  */
-export function migrateHostRuntimeFlagsInConfigYaml(workspaceDir: string): boolean {
-  validateConfigYamlFull(workspaceDir);
-  const configPath = getConfigYamlPath(workspaceDir);
-  const parsed: unknown = yaml.load(readFileSync(configPath, 'utf8'));
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`config.yaml at ${configPath} must be an object. Fix it before retrying migration.`);
-  }
-  const featuresValue = Object.getOwnPropertyDescriptor(parsed, 'features')?.value;
-  if (typeof featuresValue !== 'object' || featuresValue === null || Array.isArray(featuresValue)) {
-    throw new Error(`config.yaml at ${configPath}: 'features' must be an object. Fix it before retrying migration.`);
-  }
+export interface HostRuntimeConfigMigrationDeps {
+  withLock<T>(filePath: string, action: () => T): T;
+  atomicReplace(filePath: string, content: string): void;
+}
 
-  let changed = false;
-  if (!Object.hasOwn(featuresValue, 'host.codex')) {
-    Object.defineProperty(featuresValue, 'host.codex', {
-      value: { category: 'core', enabled: true }, enumerable: true, writable: true, configurable: true,
-    });
-    changed = true;
-  }
-  if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
-    Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
-      value: { category: 'quiet', enabled: false }, enumerable: true, writable: true, configurable: true,
-    });
-    changed = true;
-  }
-  if (changed) {
-    writeFileSync(configPath, yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' }), 'utf8');
-  }
-  return changed;
+const HOST_RUNTIME_CONFIG_MIGRATION_DEPS: HostRuntimeConfigMigrationDeps = {
+  withLock: withConfigFileLock,
+  atomicReplace: atomicReplaceTextFile,
+};
+
+export function migrateHostRuntimeFlagsInConfigYaml(
+  workspaceDir: string,
+  deps: HostRuntimeConfigMigrationDeps = HOST_RUNTIME_CONFIG_MIGRATION_DEPS,
+): boolean {
+  const configPath = getConfigYamlPath(workspaceDir);
+  return deps.withLock(configPath, () => {
+    // The locked reread is authoritative; validation before lock acquisition
+    // would leave a lost-update window for an Owner edit.
+    validateConfigYamlFull(workspaceDir);
+    const parsed: unknown = yaml.load(readFileSync(configPath, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`config.yaml at ${configPath} must be an object. Fix it before retrying migration.`);
+    }
+    const featuresValue = Object.getOwnPropertyDescriptor(parsed, 'features')?.value;
+    if (typeof featuresValue !== 'object' || featuresValue === null || Array.isArray(featuresValue)) {
+      throw new Error(`config.yaml at ${configPath}: 'features' must be an object. Fix it before retrying migration.`);
+    }
+
+    let changed = false;
+    if (!Object.hasOwn(featuresValue, 'host.codex')) {
+      Object.defineProperty(featuresValue, 'host.codex', {
+        value: { category: 'core', enabled: true }, enumerable: true, writable: true, configurable: true,
+      });
+      changed = true;
+    }
+    if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
+      Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
+        value: { category: 'quiet', enabled: false }, enumerable: true, writable: true, configurable: true,
+      });
+      changed = true;
+    }
+    if (changed) {
+      deps.atomicReplace(configPath, yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' }));
+    }
+    return changed;
+  });
 }
 
 /**

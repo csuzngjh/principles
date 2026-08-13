@@ -59,10 +59,54 @@ function portFor(event: HostEvent, options: HostRuntimeOptions): HostRuntimePort
   }
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isAbsoluteWorkspace(value: string): boolean {
+  return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function hasValidRouteSemantics(event: HostEvent): boolean {
+  if (!isNonEmptyString(event.context.workspaceDir) || !isAbsoluteWorkspace(event.context.workspaceDir)) return false;
+  if (!isNonEmptyString(event.context.sessionId) || !isNonEmptyString(event.source)) return false;
+  if (event.kind === 'before_tool_call' || event.kind === 'after_tool_call') {
+    return isNonEmptyString(event.context.toolName);
+  }
+  return true;
+}
+
+function hasNonEmptyOptionalString(value: string | undefined): boolean {
+  return value === undefined || isNonEmptyString(value);
+}
+
+function hasValidResultSemantics(event: HostEvent, result: HostEventResult): boolean {
+  if (!isNonEmptyString(result.source) || !hasNonEmptyOptionalString(result.reason) || !hasNonEmptyOptionalString(result.additionalContext)) {
+    return false;
+  }
+  const hasReason = result.reason !== undefined;
+  const hasModifiedInput = result.modifiedInput !== undefined;
+  const hasAdditionalContext = result.additionalContext !== undefined;
+
+  switch (event.kind) {
+    case 'before_prompt_build':
+      return (result.decision === 'allow' || result.decision === 'modify') && !hasReason && !hasModifiedInput;
+    case 'before_tool_call':
+      if (result.decision === 'observe') return false;
+      if (result.decision === 'deny') return hasReason && !hasModifiedInput && !hasAdditionalContext;
+      if (hasReason) return false;
+      return !hasModifiedInput || result.decision === 'modify';
+    case 'after_tool_call':
+      return result.decision === 'observe' && !hasReason && !hasModifiedInput && !hasAdditionalContext;
+    default:
+      return false;
+  }
+}
+
 export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
   return {
     async dispatch(event: HostEvent): Promise<HostEventResult> {
-      if (!isHostEvent(event)) {
+      if (!isHostEvent(event) || !hasValidRouteSemantics(event)) {
         throw new HostRuntimeDispatchError(
           'invalid_host_event',
           'Decode and validate the host event before dispatch',
@@ -70,7 +114,7 @@ export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
       }
 
       const result: unknown = await portFor(event, options)(event);
-      if (!isHostEventResult(result)) {
+      if (!isHostEventResult(result) || !hasValidResultSemantics(event, result)) {
         throw new HostRuntimeDispatchError(
           'invalid_handler_result',
           `Handler for ${event.kind} must return a valid HostEventResult`,
@@ -92,6 +136,15 @@ export function createHostRuntime(options: HostRuntimeOptions): HostRuntime {
           workspaceDir,
           routes: HOST_RUNTIME_ROUTES,
           reason: 'workspace_dir_missing',
+          nextAction: 'Resolve an absolute workspace directory before probing host runtime health',
+        };
+      }
+      if (!isAbsoluteWorkspace(workspaceDir)) {
+        return {
+          ok: false,
+          workspaceDir,
+          routes: HOST_RUNTIME_ROUTES,
+          reason: 'workspace_dir_invalid',
           nextAction: 'Resolve an absolute workspace directory before probing host runtime health',
         };
       }

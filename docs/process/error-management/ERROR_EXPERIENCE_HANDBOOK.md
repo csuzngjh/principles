@@ -374,6 +374,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
+  - 2026-08-13 PRI-523: structural guards accepted blank/relative route fields and incompatible results. Added semantic route validation and fail-loud tables.
   - 2026-07-23 PRI-518: `DiagnosticianOutputV1Schema.recommendations` was `Type.Array(...)` with no `minItems`, and `DefaultDiagnosticianValidator` iterated `for (const rec of output.recommendations)` with no length check, so a structurally valid output with `recommendations: []` committed ZERO owner-reviewable candidates and marked the diagnosis task SUCCEEDED with no structured reason. This was the root cause of the Story A "4 pain records, 8 leased tasks, 0 candidates" symptom. Fixed by adding `minItems: 1` to the schema + an explicit validator length check + a committer guard (defense-in-depth). An intentional "no action" decision MUST be expressed as a `{ kind: 'defer', ... }` recommendation. The convention already existed on sibling schemas (`dreamer-output.candidates`, `artificer-output.affectedTools` both use `minItems: 1`) but was missed on `recommendations`.
   - 2026-06-25 PRI-459 (PR#1045): `createRule`/`createImplementation` silently overwrote existing id (orphaning parent link)
   - 2026-06-23 PR#1026: 4 review `as`-bypass violations (`(err as Error)`, `this.token as string`, etc.)
@@ -1142,6 +1143,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount.
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
+  - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
 
 ---
 
@@ -1247,6 +1249,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-459 / PR #1045
 - **Date**: 2026-06-25
 - **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
+  - 2026-08-13 PRI-523: unlocked direct config migration risked lost updates/torn YAML. Added locked authoritative reread plus flushed same-dir atomic replacement and failure tests.
 
 ---
 

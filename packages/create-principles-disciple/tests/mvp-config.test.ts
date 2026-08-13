@@ -1505,6 +1505,34 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
+  it('rereads authoritative YAML under lock and preserves a concurrent owner update', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-concurrent-'));
+    const configDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'config.yaml');
+    const original = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    delete (original.features as Record<string, unknown>).abstraction_layer_v1;
+    fs.writeFileSync(configPath, yaml.dump(original), 'utf8');
+
+    try {
+      migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: (_filePath, action) => {
+          const ownerUpdate = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+          ownerUpdate.ownerNote = 'concurrent-update-kept';
+          fs.writeFileSync(configPath, yaml.dump(ownerUpdate), 'utf8');
+          return action();
+        },
+        atomicReplace: (filePath, content) => fs.writeFileSync(filePath, content, 'utf8'),
+      });
+
+      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      expect(migrated.ownerNote).toBe('concurrent-update-kept');
+      expect((migrated.features as Record<string, unknown>).abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
     // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
     const parsed: unknown = yaml.load(generateConfigYamlContent());

@@ -34,7 +34,9 @@ describe('published OpenClaw bundle host-runtime safety', () => {
     if (typeof filename !== 'string') throw new Error('npm pack filename is missing');
 
     const consumerDir = path.join(tempDir, 'consumer');
+    const isolatedHome = path.join(tempDir, 'home');
     fs.mkdirSync(consumerDir);
+    fs.mkdirSync(isolatedHome);
     fs.writeFileSync(path.join(consumerDir, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     runNpm(['install', path.join(tempDir, filename), '--ignore-scripts', '--omit=optional', '--no-package-lock'], {
       cwd: consumerDir, stdio: 'pipe', timeout: 120_000,
@@ -42,7 +44,9 @@ describe('published OpenClaw bundle host-runtime safety', () => {
     expect(fs.existsSync(path.join(consumerDir, 'node_modules', '@principles', 'host-runtime'))).toBe(false);
     execFileSync(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(new URL(`file:///${path.join(consumerDir, 'node_modules', 'principles-disciple', 'dist', 'bundle.js').replace(/\\/g, '/')}`).href)})`], {
       cwd: consumerDir, stdio: 'pipe', timeout: 30_000,
+      env: { ...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome },
     });
+    expect(fs.existsSync(path.join(isolatedHome, '.openclaw', 'openclaw.json'))).toBe(false);
   }, 180_000);
 
   afterAll(() => {
