@@ -100,6 +100,14 @@ const translations: Record<Language, Record<string, string>> = {
     gateway_stop_failed_reason: 'Could not auto-stop the OpenClaw gateway.',
     gateway_stop_failed_next: 'Stop it manually (openclaw gateway stop) and re-run, or re-run with --stop-gateway.',
     gateway_proceed_warn: 'Proceeding anyway — file-lock failure (EPERM) is likely. Stop the gateway and re-run if it fails.',
+    // Install failure / rollback result strings (catch block). EP-11.
+    rollback_no_changes: 'No changes were made — the existing install was not modified (no backup was created).',
+    rollback_restored: 'Previous install has been restored.',
+    rollback_failed: 'CRITICAL: Rollback also failed — installation state is uncertain. {restoreError} Resolve manually: check {extDir} and {backupDir}',
+    next_no_changes_lock: 'A file lock blocked the backup (EPERM). Stop the OpenClaw gateway (openclaw gateway stop, or re-run with --stop-gateway) and retry.',
+    next_no_changes_other: 'Fix the error above and re-run the installer. The existing install was not modified.',
+    next_restored: 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.',
+    next_restore_failed: 'Installation and rollback both failed. Check {extDir} and {backupDir} manually. Error: {errorMsg}',
   },
   zh: {
     select_language: '选择语言',
@@ -200,6 +208,14 @@ const translations: Record<Language, Record<string, string>> = {
     gateway_stop_failed_reason: '无法自动停止 OpenClaw gateway。',
     gateway_stop_failed_next: '请手动停止（openclaw gateway stop）后重新运行，或用 --stop-gateway 重新运行。',
     gateway_proceed_warn: '强行继续 —— 很可能因文件锁失败 (EPERM)。若失败请停止 gateway 后重新运行。',
+    // 安装失败 / 回滚结果字符串（catch 块）。EP-11。
+    rollback_no_changes: '未做任何改动 —— 现有安装未被修改（未创建备份）。',
+    rollback_restored: '已恢复到之前的安装。',
+    rollback_failed: '严重：回滚也失败了 —— 安装状态不确定。{restoreError} 请手动处理：检查 {extDir} 和 {backupDir}',
+    next_no_changes_lock: '文件锁阻塞了备份 (EPERM)。请停止 OpenClaw gateway（openclaw gateway stop，或用 --stop-gateway 重新运行）后重试。',
+    next_no_changes_other: '请修复上方错误后重新运行安装器。现有安装未被修改。',
+    next_restored: '请检查上方错误。已恢复到之前的安装。修复问题后重新运行安装器。',
+    next_restore_failed: '安装与回滚均失败。请手动检查 {extDir} 和 {backupDir}。错误：{errorMsg}',
   },
 };
 

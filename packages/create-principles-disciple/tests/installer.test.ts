@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as childProcess from 'child_process';
 import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess, install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
+import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
 
 vi.mock('fs');
@@ -282,12 +283,19 @@ const baseInstallOptions: InstallOptions = {
 };
 
 describe('install() gateway lock pre-flight', () => {
+  // Pin English so string assertions on operator-visible failure text are
+  // deterministic (the catch block now routes through t()).
+  let savedLang: 'zh' | 'en';
+
   beforeEach(() => {
     vi.clearAllMocks();
+    savedLang = 'zh';
+    setLanguage('en');
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    setLanguage(savedLang);
   });
 
   // cli-5: the abort path must NOT mutate — gateway is never stopped and no

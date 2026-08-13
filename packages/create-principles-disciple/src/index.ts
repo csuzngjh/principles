@@ -400,7 +400,10 @@ async function showStatus(options: Record<string, unknown>): Promise<void> {
   }
 }
 
-const program = new Command();
+// cli-7: exported so parser tests can inspect the REAL option registration
+// (catches removal/rename/default-change of flags). Not .parse()'d on import —
+// see the main-module guard at the bottom of this file.
+export const program = new Command();
 
 program
   .name('create-principles-disciple')
@@ -454,13 +457,18 @@ program
     await showStatus(options);
   });
 
-process.on('uncaughtException', (error) => {
-  if (error instanceof Error && error.name === 'ExitPromptError') {
-    logger.info('Goodbye!');
-  } else {
-    logger.error(`Uncaught error: ${error.message}`);
-    process.exit(1);
-  }
-});
+// cli-7: only wire the process handler and parse argv when this module is the
+// CLI entry point — NOT when imported by tests (which inspect `program` opts
+// directly). Without this guard, importing index.js would run the installer.
+if (url.pathToFileURL(process.argv[1] ?? '').href === import.meta.url) {
+  process.on('uncaughtException', (error) => {
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      logger.info('Goodbye!');
+    } else {
+      logger.error(`Uncaught error: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
-program.parse(process.argv);
+  program.parse(process.argv);
+}

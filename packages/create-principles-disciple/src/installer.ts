@@ -1492,18 +1492,26 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // and nothing was restored. The old code printed "Previous install has been
     // restored." here, which was misleading (success-shaped, no restore).
     const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
+    const extDir = getPluginExtDir();
+    // EP-11: all operator-visible failure/rollback text goes through t().
     const rollbackSuffix = !backupDir
-      ? 'No changes were made — the existing install was not modified (no backup was created).'
+      ? t('rollback_no_changes')
       : restoreResult.restored
-        ? 'Previous install has been restored.'
-        : `CRITICAL: Rollback also failed — installation state is uncertain. ${restoreResult.error ?? ''} Resolve manually: check ${getPluginExtDir()} and ${backupDir}`;
+        ? t('rollback_restored')
+        : t('rollback_failed')
+          .replace('{restoreError}', restoreResult.error ?? '')
+          .replace('{extDir}', extDir)
+          .replace('{backupDir}', backupDir);
     const nextAction = !backupDir
       ? (isLockError
-        ? 'A file lock blocked the backup (EPERM). Stop the OpenClaw gateway (openclaw gateway stop, or re-run with --stop-gateway) and retry.'
-        : 'Fix the error above and re-run the installer. The existing install was not modified.')
+        ? t('next_no_changes_lock')
+        : t('next_no_changes_other'))
       : restoreResult.restored
-        ? 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.'
-        : `Installation and rollback both failed. Check ${getPluginExtDir()} and ${backupDir} manually. Error: ${errorMsg}`;
+        ? t('next_restored')
+        : t('next_restore_failed')
+          .replace('{extDir}', extDir)
+          .replace('{backupDir}', backupDir)
+          .replace('{errorMsg}', errorMsg);
     const reason = !backupDir
       ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
       : restoreResult.restored

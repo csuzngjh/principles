@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { Command } from 'commander';
 import { isLanguage } from '../src/i18n.js';
+import { program } from '../src/index.js';
 
 describe('isLanguage type guard', () => {
   it('returns true for valid languages', () => {
@@ -46,28 +46,28 @@ describe('Language validation edge cases', () => {
   });
 });
 
-// cli-7: exercise the actual --stop-gateway flag registration contract.
-// Mirrors the option declared on the `install` command in src/index.ts.
-describe('--stop-gateway flag parsing (cli-7)', () => {
-  function buildInstallCommand(): Command {
-    const program = new Command();
-    program
-      .command('install', { isDefault: true, hidden: true })
-      .option('--stop-gateway', 'Stop the OpenClaw gateway before install if running, restart after', false);
-    return program;
-  }
+// cli-7: inspect the REAL option registration on the production program so the
+// test fails if --stop-gateway is removed, renamed, or its default changes in
+// src/index.ts. We inspect .options rather than calling .parse() because parse
+// would fire the install command's action (runInstall) and run the installer.
+describe('--stop-gateway flag registration (cli-7, real program)', () => {
+  const installCmd = program.commands.find((c) => c.name() === 'install');
 
-  it('defaults stopGateway to false when the flag is absent', () => {
-    const program = buildInstallCommand();
-    program.parse(['node', 'create-principles-disciple']);
-    const installCommand = program.commands.find((c) => c.name() === 'install');
-    expect(installCommand?.opts().stopGateway).toBe(false);
+  it('is registered on the install command', () => {
+    expect(installCmd).toBeDefined();
+    const opt = installCmd!.options.find((o) => o.long === '--stop-gateway');
+    expect(opt).toBeDefined();
   });
 
-  it('sets stopGateway to true when --stop-gateway is passed', () => {
-    const program = buildInstallCommand();
-    program.parse(['node', 'create-principles-disciple', '--stop-gateway']);
-    const installCommand = program.commands.find((c) => c.name() === 'install');
-    expect(installCommand?.opts().stopGateway).toBe(true);
+  it('defaults to false', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--stop-gateway');
+    expect(opt?.defaultValue).toBe(false);
+  });
+
+  it('is a boolean toggle (no value placeholder) so presence parses to true', () => {
+    const opt = installCmd!.options.find((o) => o.long === '--stop-gateway');
+    // flags has no <value>/[value] suffix => Commander sets opts.stopGateway
+    // (camelCase) to true when present, defaultValue when absent.
+    expect(opt?.flags).toBe('--stop-gateway');
   });
 });
