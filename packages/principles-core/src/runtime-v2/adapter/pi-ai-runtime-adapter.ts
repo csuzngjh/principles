@@ -420,6 +420,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey,
         timeoutMs,
         maxRetries: 0,
+        maxTokens: this.resolveMaxTokens(),
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses

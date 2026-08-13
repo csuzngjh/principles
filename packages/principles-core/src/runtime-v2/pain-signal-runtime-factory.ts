@@ -473,6 +473,7 @@ export async function createPainSignalBridge(
         model: String(runtimeConfig.model),
         apiKeyEnv: String(runtimeConfig.apiKeyEnv),
         maxRetries: runtimeConfig.maxRetries,
+        maxTokens: runtimeConfig.maxTokens,
         timeoutMs: runtimeConfig.timeoutMs,
         baseUrl: runtimeConfig.baseUrl,
         workspace: opts.workspaceDir,
