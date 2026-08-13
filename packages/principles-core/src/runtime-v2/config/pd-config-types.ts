@@ -57,6 +57,15 @@ export interface PdLocalRuntimeProfile {
   /** Optional maximum number of retries */
   maxRetries?: number;
   /**
+   * Optional maximum output tokens for LLM completion (max_tokens).
+   * Applies to all pi-ai adapter calls (probe, complete, repair).
+   * When unset, the adapter falls back to a safe default.
+   * For reasoning/thinking models (e.g. DeepSeek V4), set this high enough
+   * to cover chain-of-thought + final output (reasoning_content and content
+   * share the same max_tokens budget).
+   */
+  maxTokens?: number;
+  /**
    * Optional system prompt passed to pi-ai Context.systemPrompt.
    * Enables Anthropic system-prompt caching and OpenAI developer-role priority.
    * Design intent: "system prompt is agent profile's responsibility" (DPB-07).

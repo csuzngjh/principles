@@ -71,6 +71,7 @@ interface PainRetryOptions {
   apiKeyEnv?: string;
   baseUrl?: string;
   maxRetries?: number;
+  maxTokens?: number;
   timeoutMs?: number;
 }
 
@@ -420,6 +421,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       const apiKeyEnv = opts.apiKeyEnv ?? policyConfig?.apiKeyEnv;
       const baseUrl = opts.baseUrl ?? policyConfig?.baseUrl;
       const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
+      const maxTokens = opts.maxTokens ?? policyConfig?.maxTokens;
       const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
 
       // Validate required string fields: must be non-blank strings
@@ -445,12 +447,15 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       if (effectiveTimeoutMs !== undefined && effectiveTimeoutMs !== null && !(Number.isFinite(effectiveTimeoutMs) && effectiveTimeoutMs > 0)) {
         invalidNumeric.push(`timeoutMs (got: ${effectiveTimeoutMs})`);
       }
+      if (maxTokens !== undefined && maxTokens !== null && !(Number.isFinite(maxTokens) && maxTokens > 0)) {
+        invalidNumeric.push(`maxTokens (got: ${maxTokens})`);
+      }
       if (invalidNumeric.length > 0) {
         return refuseExit(opts, {
           painId: opts.painId,
           taskId,
           reason: `invalid_numeric_config: ${invalidNumeric.join(', ')}`,
-          message: `Invalid numeric pi-ai config: ${invalidNumeric.join(', ')}. maxRetries must be a non-negative integer; timeoutMs must be a positive number.`,
+          message: `Invalid numeric pi-ai config: ${invalidNumeric.join(', ')}. maxRetries must be a non-negative integer; timeoutMs and maxTokens must be positive numbers.`,
           nextAction: 'Fix the numeric values and retry.',
         });
       }
@@ -485,6 +490,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         apiKeyEnv: validApiKeyEnv,
         baseUrl,
         maxRetries,
+        maxTokens,
         timeoutMs: effectiveTimeoutMs,
         workspace: workspaceDir,
       });
@@ -876,6 +882,7 @@ export function registerPainRetryCommand(
     .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
     .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
     .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
+    .option('--maxTokens <n>', 'Max output tokens (max_tokens) for pi-ai LLM calls — for pi-ai, falls back to policy', parseInt)
     .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
     .option('--force', 'Allow retry of already-succeeded tasks')
     .option('--json', 'Output raw JSON')

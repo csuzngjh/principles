@@ -103,6 +103,7 @@ export interface ResolveAdapterOptions {
     apiKeyEnv?: string;
     baseUrl?: string;
     maxRetries?: number;
+    maxTokens?: number;
   };
   /**
    * CLI override for openclaw mode (from --openclaw-local / --openclaw-gateway flags).
@@ -215,6 +216,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const apiKeyEnv = opts.piAiOverrides?.apiKeyEnv ?? configFields.apiKeyEnv;
     const baseUrl = opts.piAiOverrides?.baseUrl ?? configFields.baseUrl;
     const maxRetries = opts.piAiOverrides?.maxRetries ?? configFields.maxRetries;
+    const maxTokens = opts.piAiOverrides?.maxTokens ?? configFields.maxTokens;
     const adapterTimeoutMs = opts.timeoutMs ?? configFields.timeoutMs;
 
     // PRI-431 Step 1d + PR review fix: manual missing-field check on MERGED values
@@ -283,6 +285,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       model: String(model),
       apiKeyEnv: String(apiKeyEnv),
       maxRetries,
+      maxTokens,
       timeoutMs: adapterTimeoutMs,
       baseUrl,
       workspace: opts.workspaceDir,

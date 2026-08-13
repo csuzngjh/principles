@@ -73,7 +73,7 @@
       "stagnationNeverActivated": "已批准但从未激活",
       "stagnationNoPain": "未收到行为偏差信号",
       "stagnationDaysSince": "天",
-      "deviationDisclaimer": "PD 暂按单条呈现，自动同类识别为 post-MVP。",
+      "deviationDisclaimer": "PD 暂按单条呈现，自动相似度检测功能暂未上线。",
       "deviationDetailPending": "单条偏差证据将在后端提供行为偏差信号详情后显示（CR5）。",
       "footer": "这一页只回答一个问题：现在该做什么判断。",
       "dailyThought": {
@@ -173,7 +173,7 @@
       "eyebrow": "行为证据",
       "title": "行为证据",
       "description": "只有值得治理的行为证据，才应进入原则审查。此页面展示 PD 观察到的真实行为信号及其链路状态——不展示原始聊天、原始轨迹或关于行为改善的虚假声明。",
-      "honestyNote": "PD 按单条呈现每条证据。自动同类识别为 post-MVP 能力。此处展示的证据源自真实 pain_events、诊断任务和候选记录。",
+      "honestyNote": "PD 按单条呈现每条证据。自动相似度检测功能暂未上线。此处展示的证据源自真实 pain_events、诊断任务和候选记录。",
       "loadError": "无法加载行为证据",
       "validationError": "数据格式验证失败，请刷新重试",
       "emptyTitle": "尚未捕获行为证据",
@@ -460,7 +460,7 @@
         "reasonDataUnavailable": "数据暂不可用",
         "reasonAlreadyHandled": "已处理",
         "reasonNoRecords": "暂无待审批记录",
-        "reasonUnsupportedChannel": "不是 MVP 支持通道",
+        "reasonUnsupportedChannel": "当前版本暂不支持该通道",
         "unactionableReasonPrefix": "不可操作原因: "
       }
     },
@@ -472,7 +472,7 @@
       "summaryInactive": "条未激活",
       "summaryNeverActivated": "条从未激活",
       "boundaryLabel": "能力边界",
-      "boundaryText": "PD 暂无法统计原则在后续任务中被触发的次数，也无法自动判断行为是否改变（需要语义匹配和反馈闭环，属于 post-MVP）。",
+      "boundaryText": "PD 暂无法统计原则在后续任务中被触发的次数，也无法自动判断行为是否改变（需要语义匹配和反馈闭环，当前版本暂不支持）。",
       "sectionActive": "已激活原则",
       "sectionInactive": "未激活原则",
       "sectionNeverActivated": "已批准但从未激活",
@@ -888,7 +888,7 @@
       },
       "flagDisabled": {
         "title": "意图工程已关闭",
-        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。"
+        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是默认的安静状态。"
       },
       "notFound": {
         "title": "未找到 INTENT.md",

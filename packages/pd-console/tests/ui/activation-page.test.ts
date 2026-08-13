@@ -440,22 +440,26 @@ describe("Activation i18n: Chinese copy follows E.1 mixed-language rules", () =>
 // ── Capability boundary text is present ──────────────────────────────────────
 
 describe("Activation: capability boundary declaration is present in i18n", () => {
-  it("English boundaryText mentions post-MVP and semantic matching", () => {
+  it("English boundaryText mentions capability boundary without dev jargon", () => {
     const enActivation = enJson.pages?.activation as Record<string, unknown> | undefined;
     expect(enActivation).toBeDefined();
     const boundaryText = enActivation?.boundaryText as string | undefined;
     expect(boundaryText).toBeDefined();
-    expect(boundaryText).toContain("post-MVP");
+    // User-facing copy must not use dev jargon like "post-MVP".
+    expect(boundaryText).not.toContain("post-MVP");
     expect(boundaryText).toContain("semantic matching");
+    expect(boundaryText).toContain("current version");
   });
 
-  it("Chinese boundaryText mentions post-MVP and semantic matching", () => {
+  it("Chinese boundaryText mentions capability boundary without dev jargon", () => {
     const zhActivation = zhJson.pages?.activation as Record<string, unknown> | undefined;
     expect(zhActivation).toBeDefined();
     const boundaryText = zhActivation?.boundaryText as string | undefined;
     expect(boundaryText).toBeDefined();
-    expect(boundaryText).toContain("post-MVP");
+    // User-facing copy must not use dev jargon like "post-MVP".
+    expect(boundaryText).not.toContain("post-MVP");
     expect(boundaryText).toContain("语义匹配");
+    expect(boundaryText).toContain("当前版本");
   });
 });
 

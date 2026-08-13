@@ -247,6 +247,7 @@ export async function runConsumerCycle(
           model: runtimeConfigResult.model ?? 'gpt-4o',
           apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
           maxRetries: runtimeConfigResult.maxRetries,
+          maxTokens: runtimeConfigResult.maxTokens,
           timeoutMs: runtimeConfigResult.timeoutMs,
           baseUrl: runtimeConfigResult.baseUrl,
           workspace: workspaceDir,

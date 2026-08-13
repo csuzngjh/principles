@@ -349,6 +349,34 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     return this.runtimeKind;
   }
 
+  /**
+   * Resolve the effective max_tokens budget for LLM calls.
+   *
+   * Priority:
+   *   1. Explicit profile config (maxTokens in .pd/config.yaml) — always wins.
+   *   2. Reasoning-capable models default to a larger budget (16K) because
+   *      chain-of-thought (reasoning_content) and the final answer (content)
+   *      SHARE the same max_tokens budget. A 4096 cap leaves reasoning models
+   *      (e.g. DeepSeek V4 Flash) with an empty final answer after spending
+   *      the whole budget on thinking — which breaks structured JSON output
+   *      extraction and all downstream repair mechanisms.
+   *   3. Non-reasoning models keep the historical 4096 default.
+   *
+   * BUG-007a still applies: the cap prevents runaway thinking, it just starts
+   * from a value that actually fits thinking + JSON output.
+   */
+  private resolveMaxTokens(): number {
+    // 1. Explicit profile config always wins.
+    if (this.config.maxTokens !== undefined) return this.config.maxTokens;
+    // 2. Known reasoning providers need a larger budget: chain-of-thought
+    //    (reasoning_content) and the final answer (content) share max_tokens,
+    //    so 4096 can be exhausted by thinking alone, yielding empty content
+    //    that breaks JSON extraction. DeepSeek V4 is the canonical case.
+    if (/deepseek/i.test(this.config.provider)) return 16_000;
+    // 3. Everything else keeps the historical 4096 default (BUG-007a cap).
+    return 4096;
+  }
+
   async getCapabilities(): Promise<RuntimeCapabilities> {
     return this.defaultCapabilities;
   }
@@ -392,6 +420,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey,
         timeoutMs,
         maxRetries: 0,
+        maxTokens: this.resolveMaxTokens(),
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
@@ -913,7 +942,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.config.maxTokens ?? 4096,
+        maxTokens: this.resolveMaxTokens(),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -992,7 +1021,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.config.maxTokens ?? 4096,
+        maxTokens: this.resolveMaxTokens(),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1098,7 +1127,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
-      maxTokens: this.config.maxTokens ?? 4096,
+      maxTokens: this.resolveMaxTokens(),
     });
 
     // extractAssistantTextOrThrow throws:
@@ -1180,7 +1209,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           apiKey: options.apiKey,
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
-          maxTokens: this.config.maxTokens ?? 4096, // BUG-007a: prevent reasoning models from exhausting budget
+          maxTokens: this.resolveMaxTokens(), // BUG-007a: prevent reasoning models from exhausting budget
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;

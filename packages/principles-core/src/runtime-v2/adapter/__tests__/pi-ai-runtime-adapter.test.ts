@@ -1836,6 +1836,26 @@ describe('PiAiRuntimeAdapter', () => {
       expect(options.maxTokens).toBe(8192);
     });
 
+    it('completeWithRetry uses 16K default for deepseek reasoning provider', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only', provider: 'deepseek', model: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxTokens).toBe(16000);
+    });
+
+    it('completeWithRetry keeps 4096 default for non-deepseek provider', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only', provider: 'openai', model: 'gpt-4o' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxTokens).toBe(4096);
+    });
+
     it('mixed content: text + thinking → prefers text content (regression)', async () => {
       // When both text and thinking are present, text should be preferred
       const mixedResponse = {
