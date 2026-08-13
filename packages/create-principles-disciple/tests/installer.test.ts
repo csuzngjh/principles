@@ -1,13 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
-import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess } from '../src/installer.js';
+import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess, install } from '../src/installer.js';
+import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
+import { setLanguage } from '../src/i18n.js';
+import type { InstallOptions } from '../src/prompts.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => Buffer.from('')),
   execSync: vi.fn(() => Buffer.from('')),
 }));
+// Control the gateway detection + service-control helpers without spawning real
+// processes. Spread importOriginal so other env exports (detectWorkspace, etc.)
+// used elsewhere stay intact.
+vi.mock('../src/utils/env.js', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    checkOpenClawGateway: vi.fn(),
+    stopOpenClawGateway: vi.fn(),
+    restartOpenClawGateway: vi.fn(),
+  };
+});
 
 describe('validateWorkspacePath security guard', () => {
   it('accepts path within workspace', () => {
@@ -254,5 +269,91 @@ describe('ensureConversationAccess — PRI-343', () => {
     // Other fields preserved
     expect(entry.enabled).toBe(true);
     expect(entry.model).toBe('gpt-4');
+  });
+});
+
+const baseInstallOptions: InstallOptions = {
+  language: 'en',
+  mode: 'smart',
+  workspaceDir: '/tmp/pd-test-ws',
+  channels: [],
+  overwriteConfig: false,
+  host: 'openclaw',
+  stopGateway: false,
+};
+
+describe('install() gateway lock pre-flight', () => {
+  // Pin English so string assertions on operator-visible failure text are
+  // deterministic (the catch block now routes through t()).
+  let savedLang: 'zh' | 'en';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    savedLang = 'zh';
+    setLanguage('en');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setLanguage(savedLang);
+  });
+
+  // cli-5: the abort path must NOT mutate — gateway is never stopped and no
+  // install step runs. This is the core fix: the old code warned + proceeded
+  // into a known-likely EPERM; now non-interactive mode refuses cleanly.
+  it('aborts cleanly (no mutation) when gateway is running in non-interactive mode without --stop-gateway', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
+
+    const result = await install({ ...baseInstallOptions, stopGateway: false }, '/nonexistent/plugin', { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_running_aborted:/);
+    // No mutation: gateway never stopped, restart never invoked.
+    expect(stopOpenClawGateway).not.toHaveBeenCalled();
+    expect(restartOpenClawGateway).not.toHaveBeenCalled();
+  });
+
+  // Regression: `--yes` is non-interactive but NOT json (quiet=false, human
+  // output on). interactive must follow nonInteractive, NOT quiet — otherwise
+  // a `--yes` run with the gateway up would hang on an interactive prompt.
+  it('--yes mode (quiet=false, nonInteractive=true) aborts without prompting when the gateway is running', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
+
+    // quiet=false (not --json), nonInteractive=true (--yes): must NOT prompt.
+    const result = await install({ ...baseInstallOptions, stopGateway: false }, '/nonexistent/plugin', { quiet: false, nonInteractive: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^gateway_running_aborted:/);
+    expect(stopOpenClawGateway).not.toHaveBeenCalled();
+  });
+
+  it('--stop-gateway stops the gateway and restarts it even when a later step fails (finally)', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789 });
+    vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
+    vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
+
+    // fs is auto-mocked -> checkBuiltPlugin throws ("Built plugin files missing")
+    // -> catch -> finally(restart). Verifies restart runs on failure too.
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, '/nonexistent/plugin', { quiet: true });
+
+    expect(stopOpenClawGateway).toHaveBeenCalledTimes(1);
+    expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+  });
+
+  // ERR-046 / rc-9: when install fails before a backup is created, the result
+  // must NOT claim "Previous install has been restored" (the old misleading
+  // success-shaped message). backupDir stays null -> "not modified" branch.
+  it('reports "not modified" (never "restored") when install fails before a backup is created', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+
+    const result = await install({ ...baseInstallOptions }, '/nonexistent/plugin', { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^install_failed_before_mutation:/);
+    expect(result.error).toMatch(/not modified/);
+    expect(result.error).not.toMatch(/has been restored/);
   });
 });

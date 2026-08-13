@@ -5,8 +5,10 @@ import * as http from 'http';
 import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
 import ora, { type Ora } from 'ora';
+import { select } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
-import { checkOpenClawGateway } from './utils/env.js';
+import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway, type OpenClawGatewayStatus } from './utils/env.js';
+import { t } from './i18n.js';
 import type { InstallOptions } from './prompts.js';
 import {
   generateConfigYamlContent,
@@ -118,8 +120,8 @@ async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> 
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
 
-    // 动态导入 i18n 以避免循环依赖
-    const { t } = await import('./i18n.js');
+    // `t` is the module-level i18n translator (imported at top of file).
+    // i18n.ts has no imports, so there is no circular dependency.
 
     const hint = errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')
       ? t('npm_hint_network_timeout').replace('{path}', cwd)
@@ -263,6 +265,66 @@ function cleanupBackup(backupDir: string | null): void {
   } catch {
     // non-fatal
   }
+}
+
+// --- OpenClaw gateway lock handling (EPERM prevention) ---------------------
+// The gateway holds file handles on native .node modules inside the plugin ext
+// dir. Renaming that dir for backup fails with EPERM on Windows while the
+// gateway is running. These helpers decide + execute stop/start so install()
+// never falls through into a known-likely EPERM.
+
+type GatewayAction = 'stop' | 'proceed' | 'abort';
+
+/**
+ * Decide how to handle a running gateway.
+ * - --stop-gateway flag → 'stop' (auto-stop, no prompt, even in interactive).
+ * - non-interactive (quiet/--json/--yes) without the flag → 'abort' (refuse
+ *   cleanly; rc-9: do NOT silently proceed into a known failure).
+ * - interactive without the flag → warn + 3-way prompt (stop / proceed / abort).
+ */
+async function resolveGatewayAction(
+  status: OpenClawGatewayStatus,
+  opts: { stopGateway: boolean; interactive: boolean },
+): Promise<GatewayAction> {
+  if (opts.stopGateway) return 'stop';
+  if (!opts.interactive) return 'abort';
+  const portInfo = status.port ? ` (port ${status.port})` : '';
+  const pidInfo = status.pid ? `, PID ${status.pid}` : '';
+  logger.warn(`${t('gateway_running')}${portInfo}${pidInfo}.`);
+  logger.warn(t('gateway_lock_warning'));
+  const choice = await select<GatewayAction>({
+    message: t('gateway_prompt_title'),
+    choices: [
+      { value: 'stop', name: t('gateway_choice_stop') },
+      { value: 'proceed', name: t('gateway_choice_proceed') },
+      { value: 'abort', name: t('gateway_choice_abort') },
+    ],
+  });
+  return choice;
+}
+
+/**
+ * Structured failure result for a gateway pre-flight refusal — either the run
+ * aborted (gateway running, not stopped) or --stop-gateway was requested but
+ * `openclaw gateway stop` failed. All components stay 'skipped': both refusal
+ * paths return before any mutation (cli-5).
+ */
+function buildGatewayRefusalResult(
+  options: InstallOptions,
+  detail: { reason: string; nextAction: string; error?: string },
+): InstallResult {
+  return {
+    success: false,
+    workspaceDir: options.workspaceDir,
+    configYamlPath: getConfigYamlPath(options.workspaceDir),
+    templatesCount: 0,
+    components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+    verification: { features: 'skipped', storyA: 'skipped' },
+    enabledChannels: options.channels,
+    nextAction: detail.nextAction,
+    reason: detail.reason,
+    ...(detail.error !== undefined ? { error: detail.error } : {}),
+  };
 }
 
 export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
@@ -1135,15 +1197,54 @@ async function runHostInstallers(
   return results;
 }
 
-export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
+export interface InstallRunMode {
+  /** Suppress human output (spinner / progress). True under --json. */
+  quiet?: boolean;
+  /** No interactive prompts. True under --yes / --non-interactive / --json. */
+  nonInteractive?: boolean;
+}
+
+export async function install(options: InstallOptions, pluginDir: string, mode: InstallRunMode = {}): Promise<InstallResult> {
+  // `quiet` (= jsonMode) suppresses human output / spinner. `nonInteractive`
+  // (--yes/--non-interactive/--json) gates PROMPTING. They differ for `--yes`
+  // (human output on, but must NOT prompt). nonInteractive defaults to quiet
+  // because jsonMode always implies non-interactive.
+  const quiet = mode.quiet === true;
+  const nonInteractive = mode.nonInteractive ?? quiet;
+  // Gateway lock pre-flight: a running gateway holds native-module file handles
+  // that make the backup rename fail with EPERM. Decide stop/abort/proceed
+  // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
+  let restartedGateway = false;
   const gatewayStatus = await checkOpenClawGateway();
   if (gatewayStatus.isRunning) {
-    const portInfo = gatewayStatus.port ? ` (port ${gatewayStatus.port})` : '';
-    const pidInfo = gatewayStatus.pid ? `, PID ${gatewayStatus.pid}` : '';
-    logger.warn(`OpenClaw gateway is running${portInfo}${pidInfo}.`);
-    logger.warn('This may cause file lock issues during installation (EPERM on native modules).');
-    logger.warn('Recommendation: stop OpenClaw first with "openclaw gateway stop", then re-run the installer.');
-    logger.warn('Proceeding anyway — if installation fails, stop OpenClaw and retry.\n');
+    const action = await resolveGatewayAction(gatewayStatus, {
+      stopGateway: options.stopGateway,
+      interactive: !nonInteractive,
+    });
+    if (action === 'abort') {
+      logger.warn(t('gateway_aborted_reason'));
+      return buildGatewayRefusalResult(options, {
+        reason: `gateway_running_aborted: ${t('gateway_aborted_reason')}`,
+        nextAction: t('gateway_aborted_next'),
+      });
+    }
+    if (action === 'stop') {
+      if (!quiet) logger.info(t('gateway_stopping'));
+      const stopRes = await stopOpenClawGateway();
+      if (!stopRes.ok) {
+        logger.error(`${t('gateway_stop_failed')} ${stopRes.error ?? ''}`);
+        return buildGatewayRefusalResult(options, {
+          reason: `gateway_stop_failed: ${t('gateway_stop_failed_reason')}${stopRes.error ? ` — ${stopRes.error}` : ''}`,
+          nextAction: t('gateway_stop_failed_next'),
+          error: stopRes.error,
+        });
+      }
+      if (!quiet) logger.success(t('gateway_stopped'));
+      restartedGateway = true; // restart after install, even on failure
+    } else {
+      // action === 'proceed': user accepted the risk of EPERM.
+      logger.warn(t('gateway_proceed_warn'));
+    }
   }
 
   const spinner = quiet ? null : ora('Installing...').start();
@@ -1385,15 +1486,37 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     const restoreResult = restoreBackup(backupDir);
 
     const errorMsg = error instanceof Error ? error.message : String(error);
-    const rollbackSuffix = restoreResult.restored
-      ? 'Previous install has been restored.'
-      : `CRITICAL: Rollback also failed — installation state is uncertain. ${restoreResult.error ?? ''} Resolve manually: check ${getPluginExtDir()} and ${backupDir}`;
-    const nextAction = restoreResult.restored
-      ? 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.'
-      : `Installation and rollback both failed. Check ${getPluginExtDir()} and ${backupDir} manually. Error: ${errorMsg}`;
-    const reason = restoreResult.restored
-      ? errorMsg
-      : `install_failed_rollback_failed: ${errorMsg}`;
+    // ERR-046 / rc-9: never claim a restore that didn't happen. When backupDir
+    // is null, the backup step never completed (it threw — e.g. EPERM — or
+    // there was no existing install), so the existing install was never moved
+    // and nothing was restored. The old code printed "Previous install has been
+    // restored." here, which was misleading (success-shaped, no restore).
+    const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
+    const extDir = getPluginExtDir();
+    // EP-11: all operator-visible failure/rollback text goes through t().
+    const rollbackSuffix = !backupDir
+      ? t('rollback_no_changes')
+      : restoreResult.restored
+        ? t('rollback_restored')
+        : t('rollback_failed')
+          .replace('{restoreError}', restoreResult.error ?? '')
+          .replace('{extDir}', extDir)
+          .replace('{backupDir}', backupDir);
+    const nextAction = !backupDir
+      ? (isLockError
+        ? t('next_no_changes_lock')
+        : t('next_no_changes_other'))
+      : restoreResult.restored
+        ? t('next_restored')
+        : t('next_restore_failed')
+          .replace('{extDir}', extDir)
+          .replace('{backupDir}', backupDir)
+          .replace('{errorMsg}', errorMsg);
+    const reason = !backupDir
+      ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
+      : restoreResult.restored
+        ? errorMsg
+        : `install_failed_rollback_failed: ${errorMsg}`;
 
     return {
       success: false,
@@ -1407,5 +1530,19 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       reason,
       error: `${errorMsg} — ${rollbackSuffix}`,
     };
+  } finally {
+    // If we stopped the gateway at the pre-flight, restart it regardless of
+    // install outcome (success or failure) — never leave the gateway down.
+    // rc-9: a restart failure is reported but does not override the install
+    // result already computed above.
+    if (restartedGateway) {
+      if (!quiet) logger.info(t('gateway_restarting'));
+      const restartRes = await restartOpenClawGateway();
+      if (restartRes.ok) {
+        if (!quiet) logger.success(t('gateway_restarted'));
+      } else {
+        logger.error(`${t('gateway_restart_failed')} ${restartRes.error ?? ''}`);
+      }
+    }
   }
 }

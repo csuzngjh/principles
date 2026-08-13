@@ -905,8 +905,13 @@ describe('Rollback failure is not swallowed (P1-4 fix)', () => {
 
   it('rollback failure reason includes manual resolution path', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
-    const content = fs.readFileSync(installerPath, 'utf-8');
-    expect(content).toContain('installation state is uncertain');
+    const installer = fs.readFileSync(installerPath, 'utf-8');
+    // EP-11: the message moved to the i18n table (rollback_failed key); the
+    // installer references the key. Assert both the reference and the message.
+    expect(installer).toContain("t('rollback_failed')");
+    const i18nPath = path.resolve(__dirname, '..', 'src', 'i18n.ts');
+    const i18n = fs.readFileSync(i18nPath, 'utf-8');
+    expect(i18n).toContain('installation state is uncertain');
   });
 });
 

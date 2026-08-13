@@ -21,6 +21,12 @@ export interface InstallOptions {
   host: HostTarget;
   /** Fix-4 (P0-BUG-4): optional LLM runtime profile collected during prompts. */
   runtimeProfile?: RuntimeProfileInput;
+  /**
+   * When true, the installer auto-stops a running OpenClaw gateway before
+   * install (to avoid EPERM on the backup rename) and restarts it afterwards.
+   * Set by the --stop-gateway CLI flag.
+   */
+  stopGateway: boolean;
 }
 
 // Fix-4 (P0-BUG-4): Supported pi-ai providers for the interactive prompt.
@@ -258,6 +264,7 @@ export async function runPrompts(
     overwriteConfig: false,
     host,
     runtimeProfile,
+    stopGateway: cliOptions.stopGateway === true,
   };
 
   const confirmed = await promptConfirm(options);
