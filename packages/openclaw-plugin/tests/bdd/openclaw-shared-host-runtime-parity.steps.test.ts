@@ -8,6 +8,8 @@ import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
   SqliteConnection,
+  appendPruningReview,
+  clearPruningMaskCache,
 } from '@principles/core/runtime-v2';
 import plugin from '../../src/index.js';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
@@ -26,6 +28,8 @@ vi.mock('../../src/core/config-health.js', async (importOriginal) => {
 });
 
 const PRINCIPLE_TEXT = 'When shared runtime correction, then follow the owner-approved shared runtime principle.';
+const MASKED_TEXT = 'When masked shared overlap, then preserve it through Runtime V2.';
+const BUDGET_TEXT = 'When budget omitted shared overlap, then preserve it through Runtime V2.';
 const RULE_REASON = 'SHARED_RUNTIME_DENY_523';
 const RULE_CODE = `
 function evaluate(input) {
@@ -86,6 +90,7 @@ afterEach(() => {
   connection = undefined;
   WorkspaceContext.clearCache();
   EventLogService.disposeAll();
+  clearPruningMaskCache();
   if (workspaceDir) {
     try { fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* Windows may retain native SQLite handles briefly */ }
   }
@@ -130,6 +135,49 @@ registry.given('an approved prompt principle is active', async () => {
   insertArtifact({ id: 'art-prompt-523', kind: 'principle', principleId: 'P_SHARED_523', content: { principleId: 'P_SHARED_523', text: PRINCIPLE_TEXT } });
   await activate({ id: 'art-prompt-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_SHARED_523' });
 });
+function seedLegacyProbation(input: { id: string; trigger: string; action: string; timestamp: string }): void {
+  const reducer = WorkspaceContext.fromHookContext({ workspaceDir }).evolutionReducer;
+  reducer.emitSync({
+    ts: input.timestamp,
+    type: 'candidate_created',
+    data: { painId: `pain-${input.id}`, painType: 'tool_failure', principleId: input.id, trigger: input.trigger, action: input.action, status: 'candidate', evaluability: 'manual_only' },
+  });
+  reducer.emitSync({
+    ts: input.timestamp,
+    type: 'principle_promoted',
+    data: { principleId: input.id, from: 'candidate', to: 'probation', reason: 'bdd fixture', successCount: 0 },
+  });
+}
+registry.given('an overlapping prompt principle is masked from legacy injection', async () => {
+  seedLegacyProbation({ id: 'P_MASKED_523', trigger: 'masked shared overlap', action: 'preserve it through Runtime V2', timestamp: new Date().toISOString() });
+  appendPruningReview(workspaceDir, { principleId: 'P_MASKED_523', decision: 'archive-candidate', note: 'BDD selected-only dedup' });
+  clearPruningMaskCache();
+  insertArtifact({ id: 'art-masked-523', kind: 'principle', principleId: 'P_MASKED_523', content: { principleId: 'P_MASKED_523', text: MASKED_TEXT } });
+  await activate({ id: 'art-masked-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_MASKED_523' });
+});
+registry.then('the Runtime V2 directive contains that masked overlap exactly once', () => {
+  expectPromptDirectiveExactlyOnce('P_MASKED_523', MASKED_TEXT);
+});
+registry.given('an overlapping prompt principle is omitted by the legacy prompt budget', async () => {
+  const base = Date.now();
+  for (let index = 0; index < 4; index += 1) {
+    seedLegacyProbation({ id: `P_FILLER_${index}`, trigger: `filler ${index}`, action: 'x'.repeat(950), timestamp: new Date(base + 10_000 - index).toISOString() });
+  }
+  seedLegacyProbation({ id: 'P_BUDGET_523', trigger: 'budget omitted shared overlap', action: 'preserve it through Runtime V2', timestamp: new Date(base).toISOString() });
+  insertArtifact({ id: 'art-budget-523', kind: 'principle', principleId: 'P_BUDGET_523', content: { principleId: 'P_BUDGET_523', text: BUDGET_TEXT } });
+  await activate({ id: 'art-budget-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_BUDGET_523' });
+});
+registry.then('the Runtime V2 directive contains that budget-omitted overlap exactly once', () => {
+  expectPromptDirectiveExactlyOnce('P_BUDGET_523', BUDGET_TEXT);
+});
+function expectPromptDirectiveExactlyOnce(principleId: string, text: string): void {
+  if (typeof result !== 'object' || result === null) throw new Error(`Expected prompt result; logs=${logMessages.join('\n')}`);
+  const prepend = Object.getOwnPropertyDescriptor(result, 'prependSystemContext')?.value;
+  const append = Object.getOwnPropertyDescriptor(result, 'appendSystemContext')?.value;
+  if (typeof prepend !== 'string' || typeof append !== 'string') throw new Error('Expected prompt context strings');
+  expect(`${prepend}\n${append}`.split(text)).toHaveLength(2);
+  expect(prepend).toContain(`<directive id="${principleId}"`);
+}
 registry.when('OpenClaw builds the next prompt', async () => {
   result = await hooks.get('before_prompt_build')!({ prompt: 'help', messages: [] }, { workspaceDir, sessionId: 'session-prompt-523', agentId: 'main' });
 });

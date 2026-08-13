@@ -7,6 +7,7 @@ import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
   SqliteConnection,
+  renderPrinciplesToDirectives,
 } from '@principles/core/runtime-v2';
 import {
   buildActivePrinciplePromptContext,
@@ -85,6 +86,17 @@ describe('shared production workspace and config', () => {
 });
 
 describe('shared production active-principle prompt kernel', () => {
+  it('does not create or migrate state when the read-only state database is missing', async () => {
+    const workspaceDir = tempWorkspace();
+    const before = fs.readdirSync(path.join(workspaceDir, '.pd')).sort();
+
+    const result = await buildActivePrinciplePromptContext({ workspaceDir });
+
+    expect(result.additionalContext).toBe('');
+    expect(result.warnings).toContain('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
+    expect(fs.readdirSync(path.join(workspaceDir, '.pd')).sort()).toEqual(before);
+  });
+
   it('dispatches through the production runtime and reads a real activation plus artifact', async () => {
     const workspaceDir = tempWorkspace();
     const connection = new SqliteConnection(workspaceDir);
@@ -157,7 +169,7 @@ describe('shared production active-principle prompt kernel', () => {
     expect(result.additionalContext.length).toBeLessThanOrEqual(result.budget);
   });
 
-  it('excludes deactivated principles and keeps many short active directives within the production prompt cap', async () => {
+  it('bounds the final escaped directive block to 2000 characters without cutting directive tags', async () => {
     const workspaceDir = tempWorkspace();
     const connection = new SqliteConnection(workspaceDir);
     try {
@@ -167,10 +179,10 @@ describe('shared production active-principle prompt kernel', () => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const store = new SqliteActivationStateStore(connection);
-      for (let index = 0; index < 100; index += 1) {
+      for (let index = 0; index < 10; index += 1) {
         const artifactId = `art-bounded-${index}`;
         const principleId = `P_BOUNDED_${index}`;
-        artifactInsert.run(artifactId, 'principle', `task-bounded-${index}`, principleId, null, '[]', 'validated', JSON.stringify({ principleId, text: `short-${index}` }), now, now);
+        artifactInsert.run(artifactId, 'principle', `task-bounded-${index}`, principleId, null, '[]', 'validated', JSON.stringify({ principleId, text: `${index}-${'&'.repeat(100)}` }), now, now);
         await store.recordActivation({ activationId: `act-bounded-${index}`, idempotencyKey: `${artifactId}::prompt`, artifactId, channel: 'prompt', action: 'prompt_activate', targetRef: `ledger://${principleId}`, activatedAt: now, deactivatedAt: null });
       }
       expect(await store.deactivateActivation('act-bounded-0', now)).toBe(true);
@@ -180,6 +192,35 @@ describe('shared production active-principle prompt kernel', () => {
 
     const result = await buildActivePrinciplePromptContext({ workspaceDir });
     expect(result.additionalContext).not.toContain('P_BOUNDED_0"');
-    expect(result.additionalContext.length).toBeLessThanOrEqual(9_000);
+    expect(result.budget).toBe(2_000);
+    expect(result.additionalContext.length).toBeLessThanOrEqual(2_000);
+    expect(result.truncated).toBe(true);
+    expect(result.additionalContext.match(/<directive /g)?.length).toBe(result.additionalContext.match(/<\/directive>/g)?.length);
+    expect(result.additionalContext.endsWith('Note: These directives do not override safety, security, or core system policy.')).toBe(true);
+  });
+
+  it('admits a whole escaped directive that exactly fits the final 2000-character budget', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      const now = new Date().toISOString();
+      const principleId = 'P_EXACT_FIT';
+      const emptyRendered = renderPrinciplesToDirectives([
+        { principleId, text: '', artifactId: 'art-exact-fit', activationId: 'act-exact-fit' },
+      ], new Set([principleId]));
+      const text = 'x'.repeat(2_000 - emptyRendered.length);
+      connection.getDb().prepare(`
+        INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('art-exact-fit', 'principle', 'task-exact-fit', principleId, null, '[]', 'validated', JSON.stringify({ principleId, text }), now, now);
+      await new SqliteActivationStateStore(connection).recordActivation({ activationId: 'act-exact-fit', idempotencyKey: 'exact-fit::prompt', artifactId: 'art-exact-fit', channel: 'prompt', action: 'prompt_activate', targetRef: `ledger://${principleId}`, activatedAt: now, deactivatedAt: null });
+    } finally {
+      connection.close();
+    }
+
+    const result = await buildActivePrinciplePromptContext({ workspaceDir });
+    expect(result.additionalContext).toHaveLength(2_000);
+    expect(result.truncated).toBe(false);
+    expect(result.principleIds).toEqual(['P_EXACT_FIT']);
   });
 });

@@ -20,7 +20,7 @@ export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccess
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
-import { handleBeforePromptBuild } from './hooks/prompt.js';
+import { handleBeforePromptBuild, selectLegacyPrinciplesForPrompt, type LegacyPrinciplePromptSelection } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
@@ -251,22 +251,27 @@ const plugin = {
     }
 
     const language = (api.pluginConfig?.language as string) || 'en';
+    const preparedLegacyPromptSelections = new WeakMap<PluginHookBeforePromptBuildEvent, LegacyPrinciplePromptSelection>();
     const sharedHostRuntime = createOpenClawHostRuntime({
-      promptExcludePrincipleIds: (_event, context) => {
-        const excluded = new Set<string>();
+      promptExcludePrincipleIds: (event, context) => {
         try {
           const reducer = WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }).evolutionReducer;
-          for (const principle of reducer.getActivePrinciples()) excluded.add(principle.id);
-          for (const principle of reducer.getProbationPrinciples()) excluded.add(principle.id);
+          const selection = selectLegacyPrinciplesForPrompt(context.workspaceDir ?? '', reducer, api.logger);
+          preparedLegacyPromptSelections.set(event, selection);
+          return selection.selectedIds;
         } catch (error) {
           api.logger.info(`[PD:RuntimeV2] Legacy principle dedup unavailable; continuing with shared active principles: ${String(error)}`);
+          return new Set<string>();
         }
-        return excluded;
       },
-      beforePromptBuild: (event, context, activePrinciplePrompt) => handleBeforePromptBuild(event, {
-        ...context,
-        api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
-      }, activePrinciplePrompt),
+      beforePromptBuild: async (event, context, activePrinciplePrompt) => {
+        const prepared = preparedLegacyPromptSelections.get(event);
+        preparedLegacyPromptSelections.delete(event);
+        return handleBeforePromptBuild(event, {
+          ...context,
+          api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
+        }, activePrinciplePrompt, prepared);
+      },
       beforeToolCall: (event, context) => handleBeforeToolCall(event, {
         ...context,
         pluginConfig: api.pluginConfig ?? {},

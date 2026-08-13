@@ -33,6 +33,44 @@ import {
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
+import type { InjectablePrinciple } from '../core/principle-injection.js';
+
+export interface LegacyPrinciplePromptSelection {
+  active: InjectablePrinciple[];
+  probation: InjectablePrinciple[];
+  content: string;
+  selectedIds: ReadonlySet<string>;
+}
+
+export function selectLegacyPrinciplesForPrompt(
+  workspaceDir: string,
+  reducer: Pick<WorkspaceContext['evolutionReducer'], 'getActivePrinciples' | 'getProbationPrinciples'>,
+  logger?: PluginLogger,
+): LegacyPrinciplePromptSelection {
+  const allActive = reducer.getActivePrinciples();
+  const allProbation = reducer.getProbationPrinciples();
+  let maskedIds = new Set<string>();
+  try {
+    maskedIds = getCachedMaskedPrincipleSet(workspaceDir);
+  } catch (error) {
+    const message = `[PD:Pruning] Failed to read review log — all principles injected: ${error instanceof Error ? error.message : String(error)}`;
+    if (logger?.info) logger.info(message);
+    else console.error(message);
+  }
+  const activeSelection = selectPrinciplesForInjection(allActive.filter((principle) => !maskedIds.has(principle.id)), DEFAULT_PRINCIPLE_BUDGET);
+  const probationSelection = selectPrinciplesForInjection(allProbation.filter((principle) => !maskedIds.has(principle.id)), 1000);
+  if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
+    logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.selected.length}/${allActive.length} (${activeSelection.totalChars}c), probation=${probationSelection.selected.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
+  }
+  const active = activeSelection.selected;
+  const probation = probationSelection.selected;
+  return {
+    active,
+    probation,
+    content: active.length > 0 || probation.length > 0 ? formatEvolutionPrinciples(active, probation) : '',
+    selectedIds: new Set([...active, ...probation].map((principle) => principle.id)),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -195,6 +233,7 @@ export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi },
   sharedActivePrinciplePrompt?: ActivePrinciplePromptResult,
+  preparedLegacyPrinciples?: LegacyPrinciplePromptSelection,
 ): Promise<PluginHookBeforePromptBuildResult | void> {
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
@@ -419,41 +458,8 @@ export async function handleBeforePromptBuild(
   let evolutionPrinciplesContent = '';
   try {
     const reducer = wctx.evolutionReducer;
-    const allActive = reducer.getActivePrinciples();
-    const allProbation = reducer.getProbationPrinciples();
-
-    // Pruning mask: exclude principles whose latest review is archive-candidate
-    let maskedIds = new Set<string>();
-    try {
-      maskedIds = getCachedMaskedPrincipleSet(wctx.workspaceDir);
-    } catch (err) {
-      // Safe degradation: if review log unreadable, inject all principles
-      const msg = err instanceof Error ? err.message : String(err);
-      if (logger?.info) {
-        logger.info(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
-      } else {
-        console.error(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
-      }
-    }
-
-    // Budget-aware selection: prioritize P0>P1>P2 and recency
-    const activeSelection = selectPrinciplesForInjection(
-      allActive.filter(p => !maskedIds.has(p.id)),
-      DEFAULT_PRINCIPLE_BUDGET,
-    );
-    const active = activeSelection.selected;
-
-    // Probation principles get a smaller sub-budget (1000 chars)
-    const probationBudget = 1000;
-    const probationSelection = selectPrinciplesForInjection(
-      allProbation.filter(p => !maskedIds.has(p.id)),
-      probationBudget,
-    );
-    const probation = probationSelection.selected;
-
-    if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
-      logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.breakdown.p0 + activeSelection.breakdown.p1 + activeSelection.breakdown.p2}/${allActive.length} (${activeSelection.totalChars}c), probation=${probation.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
-    }
+    const selection = preparedLegacyPrinciples ?? selectLegacyPrinciplesForPrompt(wctx.workspaceDir, reducer, logger);
+    const { probation } = selection;
 
     if (ctx.sessionId) {
       if (probation.length > 0) {
@@ -462,9 +468,7 @@ export async function handleBeforePromptBuild(
         clearInjectedProbationIds(ctx.sessionId, workspaceDir);
       }
     }
-    if (active.length > 0 || probation.length > 0) {
-      evolutionPrinciplesContent = formatEvolutionPrinciples(active, probation);
-    }
+    evolutionPrinciplesContent = selection.content;
   } catch (e) {
     if (ctx.sessionId) {
       clearInjectedProbationIds(ctx.sessionId, workspaceDir);

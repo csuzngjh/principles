@@ -82,6 +82,27 @@ describe('SqliteConnection readonly mode', () => {
     expect(mockPragma).not.toHaveBeenCalledWith(expect.stringContaining('journal_mode'));
   });
 
+  it('side-effect-free readonly mode neither bootstraps, migrates, sets pragmas, nor checkpoints', () => {
+    mockExistsSync.mockReturnValue(false);
+    const mockExec = vi.fn();
+    const mockPragma = vi.fn();
+    const mockClose = vi.fn();
+    Database.mockImplementation(function () {
+      return { exec: mockExec, pragma: mockPragma, prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })), close: mockClose };
+    });
+
+    const conn = new SqliteConnection({ workspaceDir: WS, readonly: true, bootstrapIfMissing: false });
+    conn.getDb();
+    conn.close();
+
+    expect(Database).toHaveBeenCalledTimes(1);
+    expect(Database).toHaveBeenCalledWith(expect.any(String), { readonly: true, fileMustExist: true });
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(mockPragma).not.toHaveBeenCalled();
+    expect(mockClose).toHaveBeenCalledOnce();
+  });
+
   it('runs schema init in writable mode', () => {
     const mockExec = vi.fn();
     const mockPragma = vi.fn((sql) => {

@@ -2,13 +2,15 @@ import {
   RUNTIME_V2_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
+  SqlitePIArtifactStore,
   computeFeatureFlagsFromConfig,
   filterPromptActivations,
   renderPrinciplesToDirectives,
   resolvePrincipleFromArtifact,
-  trimToBudget,
   type ActivatedPrinciple,
 } from '@principles/core/runtime-v2';
+import fs from 'node:fs';
+import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
@@ -44,26 +46,38 @@ export async function buildActivePrinciplePromptContext(input: {
   }
 
   let connection: SqliteConnection | undefined;
+  const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
+  if (!fs.existsSync(stateDbPath)) {
+    warnings.push('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
+    return {
+      additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
+      budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds,
+      excludedCount: 0, allValidatedPrinciplesExcluded: false,
+    };
+  }
   try {
-    connection = new SqliteConnection(input.workspaceDir);
+    connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false });
     const activations = filterPromptActivations(await new SqliteActivationStateStore(connection).listPromptActivations());
+    const artifactStore = new SqlitePIArtifactStore(connection);
     for (const activation of activations) {
-      let row: unknown | null;
+      let artifact;
       try {
-        row = connection.getDb().prepare(`
-          SELECT artifact_id, artifact_kind, content_json, validation_status
-          FROM pi_artifacts WHERE artifact_id = ?
-        `).get(activation.artifactId) ?? null;
+        artifact = await artifactStore.getArtifactById(activation.artifactId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         warnings.push(`artifact_query_failed: artifactId=${activation.artifactId} reason=${message}; nextAction=check_pi_artifacts_table`);
         continue;
       }
-      if (row === null) {
+      if (artifact === null) {
         warnings.push(`artifact_not_found: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table_or_remove_stale_activation`);
         continue;
       }
-      const resolved = resolvePrincipleFromArtifact(row, activation);
+      const resolved = resolvePrincipleFromArtifact({
+        artifact_id: artifact.artifactId,
+        artifact_kind: artifact.artifactKind,
+        content_json: artifact.contentJson,
+        validation_status: artifact.validationStatus,
+      }, activation);
       if (!resolved.ok) {
         warnings.push(resolved.warning);
         continue;
@@ -81,16 +95,24 @@ export async function buildActivePrinciplePromptContext(input: {
     connection?.close();
   }
 
-  const selected = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
-  const included = principles.filter((principle) => selected.injectedIds.has(principle.principleId));
-  let additionalContext = renderPrinciplesToDirectives(included, new Set(included.map((principle) => principle.principleId)), escapeXml);
-  let bounded = false;
-  while (additionalContext.length > 9_000 && included.length > 0) {
-    included.pop();
-    bounded = true;
-    additionalContext = renderPrinciplesToDirectives(included, new Set(included.map((principle) => principle.principleId)), escapeXml);
+  const included: ActivatedPrinciple[] = [];
+  let additionalContext = '';
+  let truncated = false;
+  for (const principle of principles) {
+    const candidate = [...included, principle];
+    const candidateContext = renderPrinciplesToDirectives(
+      candidate,
+      new Set(candidate.map((entry) => entry.principleId)),
+      escapeXml,
+    );
+    if (candidateContext.length > RUNTIME_V2_PRINCIPLE_BUDGET) {
+      truncated = true;
+      break;
+    }
+    included.push(principle);
+    additionalContext = candidateContext;
   }
-  if (bounded) {
+  if (truncated) {
     warnings.push('prompt_context_truncated: production_prompt_cap; nextAction=reduce_active_prompt_principles');
   }
   const injectedIds = new Set(included.map((principle) => principle.principleId));
@@ -101,7 +123,7 @@ export async function buildActivePrinciplePromptContext(input: {
     artifactIds: included.map((principle) => principle.artifactId),
     warnings,
     budget: RUNTIME_V2_PRINCIPLE_BUDGET,
-    truncated: selected.truncated || bounded,
+    truncated,
     excludedPrincipleIds,
     excludedCount: excludedPrincipleIds.length,
     allValidatedPrinciplesExcluded: excludedPrincipleIds.length > 0 && principles.length === 0,
