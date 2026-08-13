@@ -6,6 +6,7 @@
 > **Context**: MVP-First (ADR-0014), Codex CLI adapter scoping (PRI-278~282, PRI-521, PRI-522)
 > **Supersedes**: None (refines ADR-0014 §2.3 activation channels)
 > **Related SPEC**: [`docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`](../architecture/CODEX_CLI_ADAPTER_SPEC.md) v4.1
+> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10
 
 ## 1. Context
 
@@ -221,3 +222,84 @@ Tracked in [`docs/plans/post-mvp-conditional-roadmap.md`](../plans/post-mvp-cond
 - `packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts` — `DEFAULT_FEATURE_FLAGS`
 - `packages/create-principles-disciple/src/installer.ts` — existing OpenClaw-only installer
 - `packages/create-principles-disciple/src/uninstaller.ts` — existing OpenClaw-only uninstaller
+
+---
+
+## 10. Amendment (2026-08-13): Owner Exception — Shared Host Runtime and Codex Desktop Plugin
+
+> **Status of amendment**: Accepted (explicit maintainer-approved `mvp-exception`)
+> **Authority**: [PRI-523](https://linear.app/principles-disciple/issue/PRI-523), Owner decision recorded 2026-08-12/13: "revise ADR, then share runtime"
+> **Supersedes within this ADR**: §2.2's Codex-only implementation, §2.3's cache/global-hooks installation preference, Alternative E's MVP rejection, §5's statement that OpenClaw stays unchanged, §7's "No MVP-Core expansion", and the OpenClaw/shared-runtime items in §8
+
+### 10.1 Why this is an exception, not satisfaction of the old restart conditions
+
+The external-signal restart conditions previously attached to `OpenClawHostAdapter` were not met. The Owner explicitly approved a narrow exception after the implemented Codex package proved to be only a codec/install skeleton: its `invokeBusinessLogic()` currently always allows, while the working OpenClaw plugin already owns the I/O orchestration required by the same three user-visible paths. Keeping two orchestration implementations would make the new host appear installed without delivering PD behavior.
+
+This amendment authorizes only the minimum reuse required to make the already-approved Codex host real. It does not reopen general multi-host architecture work.
+
+### 10.2 Decision: shared I/O orchestration with thin host adapters
+
+Create `@principles/host-runtime` as a shared **I/O orchestration** package. It may compose the existing pure domain APIs from `@principles/core`, workspace persistence, feature flags, logging, and the three approved host-triggered behavior paths. It does not move I/O into `packages/principles-core/src/`.
+
+Both host packages become thin protocol adapters:
+
+- `packages/openclaw-plugin/` translates OpenClaw hook payloads/results and calls `@principles/host-runtime`.
+- `packages/codex-adapter/` validates/encodes Codex hook JSON and calls the same runtime.
+- Host-specific installation, trust, protocol codecs, and result shapes remain in their host packages; business orchestration is not copied between them.
+
+The exception exposes exactly three MVP-Core behavior paths:
+
+1. **Prompt injection** — provide Owner-approved active principles to the host prompt context.
+2. **Before-tool RuleHost enforcement** — evaluate a tool call and return the host-specific allow/deny result.
+3. **After-tool pain/evidence capture** — record owner-relevant behavioral evidence and its lineage in the authoritative workspace.
+
+This is a host-surface refactor of existing MVP-Core behavior, not a fourth activation channel. `defer_archive` remains an owner-reviewed activation outcome in the domain, but it does not require a separate host hook path.
+
+### 10.3 Explicitly still deferred
+
+This exception does not authorize:
+
+- outbound host runtimes that make PD drive Codex or another agent;
+- long-running service replacement (PRI-521), schedulers, background daemons, or cross-session continuation;
+- general memory, tool repair/retry, autonomous value decisions, or task execution;
+- advanced Skill/MCP parity for ChatGPT Web/Mobile or other hosts;
+- public-directory publication until OpenAI documents a submission type that accepts lifecycle-hook plugins.
+
+### 10.4 Supported Codex distribution facts
+
+For the pinned implementation baseline, Codex 0.147 supports plugin-bundled hooks from the default `hooks/hooks.json` path or a manifest-declared hooks path. Hook commands may resolve packaged code with `PLUGIN_ROOT` and plugin-private data with `PLUGIN_DATA`; hooks remain subject to the Codex hook-trust flow.
+
+The first supported distribution channels are:
+
+- a repository/personal Marketplace source that installs the plugin into Codex; and
+- Workspace-scoped use in Codex CLI/Desktop after the Owner reviews and trusts the hooks.
+
+Do not document `~/.codex/plugins/cache/...` as an installation target or direct mutation of `~/.codex/hooks.json` as the preferred plugin path. Those are obsolete implementation assumptions from §2.3. The bundled default is `hooks/hooks.json` unless the manifest declares another path.
+
+OpenAI's current public submission documentation lists Skills and MCP servers, but does not confirm lifecycle-hook plugins as a public-directory submission type. Repository Marketplace distribution is supported now; public-directory submission remains gated and must not be advertised as available.
+
+`PLUGIN_DATA` is plugin-private auxiliary storage, not the authority for PD principles, evidence, or feature flags. The current Workspace and its `.pd/config.yaml`/workspace state remain authoritative so OpenClaw and Codex observe the same governed behavior. `PLUGIN_ROOT` identifies packaged code/assets.
+
+### 10.5 Observable acceptance and rollback
+
+Acceptance is exact and Owner-visible: after installing PRI-523 from the repository Marketplace into a Workspace and trusting its hooks, (a) a prompt receives the same active-principle context as OpenClaw, (b) a known RuleHost fixture denies the same before-tool call in both hosts, and (c) a completed tool call creates pain/evidence with Codex source lineage in that same Workspace; host-runtime contract tests and one OpenClaw/Codex parity E2E must prove all three.
+
+Rollback is also exact: setting `host.codex.enabled: false` in the Workspace `.pd/config.yaml` makes every Codex hook return the host's neutral allow/empty result, records the structured skip reason, and leaves OpenClaw and Workspace data unchanged. The OpenClaw cutover must retain its legacy orchestration behind the already-planned `abstraction_layer_v1` flag until parity acceptance passes; disabling that flag restores the legacy OpenClaw path without data migration. Neither flag may count as available until the production loader and tests exercise it.
+
+### 10.6 Emotional-value review
+
+This exception reduces **失控感** and **不信任感**: installation alone is no longer mistaken for working governance, hook trust is explicit, and the three behavior paths have observable parity evidence. It creates **掌控感** and **安心感** because the Owner keeps approval authority, one Workspace remains the source of truth, and `host.codex` provides an immediate, non-destructive kill switch. Sharing the runtime also reduces **疲惫感** by preventing the same correction from drifting across host-specific implementations, without adding new dashboards or attention noise.
+
+### 10.7 Error-pattern guard
+
+- **ERR-002 / EP-03**: flag-off and degraded hook paths must record a reason; neutral output must never become silent success.
+- **ERR-040 / EP-06**: repository Marketplace contents and `hooks/hooks.json` are the distributable source of truth; tests must exercise the installed bundle, not only source files.
+- **ERR-012 / EP-10**: implementation must compare against the current branch/base and keep the refactor diff free of stale or unrelated host changes.
+
+Runtime-contract rules `rc-1` through `rc-9` apply to the future codec/runtime implementation. CLI rules `cli-1` through `cli-7` are N/A to this documentation amendment and become applicable only if PRI-523 changes operator commands.
+
+### 10.8 References
+
+- [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) — authoritative MVP exception and acceptance contract
+- [`CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`](../architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md) — distribution draft, still gated for public submission
+- [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md) — exception/hold split
