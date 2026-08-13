@@ -460,7 +460,7 @@
         "reasonDataUnavailable": "数据暂不可用",
         "reasonAlreadyHandled": "已处理",
         "reasonNoRecords": "暂无待审批记录",
-        "reasonUnsupportedChannel": "不是 MVP 支持通道",
+        "reasonUnsupportedChannel": "当前版本暂不支持该通道",
         "unactionableReasonPrefix": "不可操作原因: "
       }
     },
@@ -880,7 +880,7 @@
       },
       "flagDisabled": {
         "title": "意图工程已关闭",
-        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是 MVP-Quiet 的默认状态。"
+        "description": "intent_engineering 功能标志未开启。PD 当前不会读取 INTENT.md，不会将意图上下文注入提示词，也不会在诊断中呈现意图张力。这是默认的安静状态。"
       },
       "notFound": {
         "title": "未找到 INTENT.md",

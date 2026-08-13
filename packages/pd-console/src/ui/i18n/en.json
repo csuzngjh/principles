@@ -460,7 +460,7 @@
         "reasonDataUnavailable": "Data temporarily unavailable",
         "reasonAlreadyHandled": "Already handled",
         "reasonNoRecords": "No pending approval records",
-        "reasonUnsupportedChannel": "Not an MVP supported channel",
+        "reasonUnsupportedChannel": "Not a supported channel in the current version",
         "unactionableReasonPrefix": "Unactionable reason: "
       }
     },
@@ -880,7 +880,7 @@
       },
       "flagDisabled": {
         "title": "Intent Engineering is off",
-        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default MVP-Quiet state."
+        "description": "The intent_engineering feature flag is disabled. PD is not reading INTENT.md, not injecting intent context into prompts, and not surfacing intent tension in diagnosis. This is the default quiet state."
       },
       "notFound": {
         "title": "No INTENT.md found",
