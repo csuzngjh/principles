@@ -13,6 +13,7 @@ import plugin from '../../src/index.js';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
+import type { EvolutionLoopEvent } from '../../src/core/evolution-types.js';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
 
@@ -24,7 +25,7 @@ vi.mock('../../src/core/config-health.js', async (importOriginal) => {
   return { ...actual, ensureConversationAccessInConfig: vi.fn(() => false) };
 });
 
-const PRINCIPLE_TEXT = 'SHARED_RUNTIME_OWNER_PRINCIPLE_523';
+const PRINCIPLE_TEXT = 'When shared runtime correction, then follow the owner-approved shared runtime principle.';
 const RULE_REASON = 'SHARED_RUNTIME_DENY_523';
 const RULE_CODE = `
 function evaluate(input) {
@@ -107,6 +108,25 @@ registry.given('the OpenClaw plugin is registered through its production entry p
   plugin.register(apiForWorkspace());
 });
 registry.given('an approved prompt principle is active', async () => {
+  const now = new Date().toISOString();
+  const reducer = WorkspaceContext.fromHookContext({ workspaceDir }).evolutionReducer;
+  const legacyEvents: EvolutionLoopEvent[] = [
+    {
+      ts: now,
+      type: 'candidate_created',
+      data: {
+        painId: 'pain-shared-523', painType: 'tool_failure', principleId: 'P_SHARED_523',
+        trigger: 'shared runtime correction', action: 'follow the owner-approved shared runtime principle',
+        status: 'candidate', evaluability: 'manual_only',
+      },
+    },
+    {
+      ts: now,
+      type: 'principle_promoted',
+      data: { principleId: 'P_SHARED_523', from: 'candidate', to: 'probation', reason: 'bdd fixture', successCount: 0 },
+    },
+  ];
+  for (const event of legacyEvents) reducer.emitSync(event);
   insertArtifact({ id: 'art-prompt-523', kind: 'principle', principleId: 'P_SHARED_523', content: { principleId: 'P_SHARED_523', text: PRINCIPLE_TEXT } });
   await activate({ id: 'art-prompt-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_SHARED_523' });
 });
@@ -114,14 +134,28 @@ registry.when('OpenClaw builds the next prompt', async () => {
   result = await hooks.get('before_prompt_build')!({ prompt: 'help', messages: [] }, { workspaceDir, sessionId: 'session-prompt-523', agentId: 'main' });
 });
 registry.then('the returned system context contains that activated principle', () => {
-  expect(result, logMessages.join('\n')).toEqual(expect.objectContaining({ prependSystemContext: expect.stringContaining(PRINCIPLE_TEXT) }));
-  if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'prependSystemContext')) {
+  if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'prependSystemContext') || !Object.hasOwn(result, 'appendSystemContext')) {
     throw new Error(`Expected production prompt result; logs=${logMessages.join('\n')}`);
   }
-  const promptContext = Object.getOwnPropertyDescriptor(result, 'prependSystemContext')?.value;
-  expect(typeof promptContext).toBe('string');
-  if (typeof promptContext !== 'string') throw new Error('Expected prependSystemContext string');
-  expect(promptContext.split(PRINCIPLE_TEXT)).toHaveLength(2);
+  const prepend = Object.getOwnPropertyDescriptor(result, 'prependSystemContext')?.value;
+  const append = Object.getOwnPropertyDescriptor(result, 'appendSystemContext')?.value;
+  if (typeof prepend !== 'string' || typeof append !== 'string') throw new Error('Expected prompt context strings');
+  expect(`${prepend}\n${append}`.split(PRINCIPLE_TEXT)).toHaveLength(2);
+  expect(prepend).not.toContain(`<directive id="P_SHARED_523"`);
+
+  EventLogService.disposeAll();
+  const logsDir = path.join(workspaceDir, '.state', 'logs');
+  const eventsFile = fs.readdirSync(logsDir).find((file) => file.startsWith('events_') && file.endsWith('.jsonl'));
+  if (!eventsFile) throw new Error('Expected persisted event log');
+  const entries = fs.readFileSync(path.join(logsDir, eventsFile), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as unknown);
+  const injection = entries.find((entry) => typeof entry === 'object' && entry !== null && Object.getOwnPropertyDescriptor(entry, 'type')?.value === 'runtime_v2_prompt_activations_injected');
+  if (typeof injection !== 'object' || injection === null) throw new Error('Expected Runtime V2 injection metadata');
+  const data = Object.getOwnPropertyDescriptor(injection, 'data')?.value;
+  expect(data).toEqual(expect.objectContaining({
+    injectedCount: 0,
+    skipReason: 'all_deduped_against_legacy',
+    nextAction: 'legacy evolution reducer already contains these principle IDs',
+  }));
 });
 registry.given('an approved live RuleHost rule is active', async () => {
   insertArtifact({ id: 'art-rule-523', kind: 'rule', principleId: 'P_RULE_523', ruleId: 'R_SHARED_523', content: {

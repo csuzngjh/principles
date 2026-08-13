@@ -122,7 +122,14 @@ describe('shared production active-principle prompt kernel', () => {
     await expect(buildActivePrinciplePromptContext({
       workspaceDir,
       excludePrincipleIds: new Set(['P_SHARED_PROMPT']),
-    })).resolves.toMatchObject({ additionalContext: '', principleIds: [] });
+    })).resolves.toMatchObject({
+      additionalContext: '',
+      principleIds: [],
+      excludedPrincipleIds: ['P_SHARED_PROMPT'],
+      excludedCount: 1,
+      exclusionReason: 'host_principle_overlap',
+      allValidatedPrinciplesExcluded: true,
+    });
   });
 
   it('omits invalid artifacts with an observable warning and bounds rendered output', async () => {

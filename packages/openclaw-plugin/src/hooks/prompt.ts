@@ -519,6 +519,8 @@ export async function handleBeforePromptBuild(
     // ── Emit structured observability event ──
     try {
       const eventLog = wctx.eventLog;
+      const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
+        && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
@@ -532,13 +534,17 @@ export async function handleBeforePromptBuild(
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt
-                ? 'no_validated_activations'
+                ? allSharedPrinciplesExcluded
+                  ? 'all_deduped_against_legacy'
+                  : 'no_validated_activations'
                 : v2Result.principles.length === 0
                 ? 'no_validated_activations'
                 : 'all_deduped_against_legacy',
-              nextAction: v2Result.principles.length === 0
-                ? 'check activations table for prompt channel rows with validated artifacts'
-                : 'legacy evolution reducer already contains these principle IDs',
+              nextAction: allSharedPrinciplesExcluded
+                ? 'legacy evolution reducer already contains these principle IDs'
+                : v2Result.principles.length === 0
+                  ? 'check activations table for prompt channel rows with validated artifacts'
+                  : 'legacy evolution reducer already contains these principle IDs',
             }
           : {}),
       });

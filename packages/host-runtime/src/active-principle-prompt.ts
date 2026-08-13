@@ -20,6 +20,10 @@ export interface ActivePrinciplePromptResult {
   warnings: string[];
   budget: number;
   truncated: boolean;
+  excludedPrincipleIds: string[];
+  excludedCount: number;
+  exclusionReason?: 'host_principle_overlap';
+  allValidatedPrinciplesExcluded: boolean;
 }
 
 export async function buildActivePrinciplePromptContext(input: {
@@ -28,6 +32,7 @@ export async function buildActivePrinciplePromptContext(input: {
 }): Promise<ActivePrinciplePromptResult> {
   const warnings: string[] = [];
   const principles: ActivatedPrinciple[] = [];
+  const excludedPrincipleIds: string[] = [];
   const config = loadPdConfigForPlugin(input.workspaceDir);
   if (!config.ok) {
     warnings.push(...config.errors.map((error) => `config_invalid: ${error.reason}; nextAction=${error.nextAction}`));
@@ -35,7 +40,7 @@ export async function buildActivePrinciplePromptContext(input: {
   const promptFlag = computeFeatureFlagsFromConfig(config.effective).flags.prompt;
   if (!promptFlag?.enabled) {
     warnings.push('prompt_feature_disabled; nextAction=set features.prompt.enabled=true in .pd/config.yaml');
-    return { additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings, budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false };
+    return { additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings, budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds, excludedCount: 0, allValidatedPrinciplesExcluded: false };
   }
 
   let connection: SqliteConnection | undefined;
@@ -63,7 +68,11 @@ export async function buildActivePrinciplePromptContext(input: {
         warnings.push(resolved.warning);
         continue;
       }
-      if (!input.excludePrincipleIds?.has(resolved.principle.principleId)) principles.push(resolved.principle);
+      if (input.excludePrincipleIds?.has(resolved.principle.principleId)) {
+        excludedPrincipleIds.push(resolved.principle.principleId);
+      } else {
+        principles.push(resolved.principle);
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -93,5 +102,9 @@ export async function buildActivePrinciplePromptContext(input: {
     warnings,
     budget: RUNTIME_V2_PRINCIPLE_BUDGET,
     truncated: selected.truncated || bounded,
+    excludedPrincipleIds,
+    excludedCount: excludedPrincipleIds.length,
+    allValidatedPrinciplesExcluded: excludedPrincipleIds.length > 0 && principles.length === 0,
+    ...(excludedPrincipleIds.length > 0 ? { exclusionReason: 'host_principle_overlap' as const } : {}),
   };
 }
