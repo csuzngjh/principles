@@ -539,7 +539,7 @@ runtimeHealthCmd
   });
 
 const internalizationCmd = runtimeCmd
-  .command('internalization', { hidden: true })
+  .command('internalization')
   .description('Internalization Engine operator visibility');
 
 internalizationCmd
