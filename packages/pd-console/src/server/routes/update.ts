@@ -20,13 +20,26 @@ import {
   sendNotFound,
 } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
+import {
+  checkOpenClawGateway,
+  stopOpenClawGateway,
+  restartOpenClawGateway,
+} from '../utils/gateway.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const NPM_REGISTRY_LATEST = 'https://registry.npmjs.org/create-principles-disciple/latest';
+// Fix: compare against the PLUGIN package (principles-disciple), not the
+// installer package (create-principles-disciple). These are independently
+// versioned — comparing them caused a permanent false "update available".
+const NPM_REGISTRY_LATEST = 'https://registry.npmjs.org/principles-disciple/latest';
 const WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'CLAUDE.md'];
+
+// Directories to skip during backup and diff. node_modules contains native
+// .node addons locked by the gateway/console processes (EPERM on copyfile),
+// npm symlinks/junctions, and thousands of regenerable files.
+const SKIP_DIRS = new Set(['node_modules']);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,6 +98,11 @@ function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
+// rc-2: type guard for parsed JSON objects (avoid `as` cast).
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isValidMergeStrategy(value: unknown): value is 'smart' | 'overwrite' | 'keep' {
   return typeof value === 'string' && (value === 'smart' || value === 'overwrite' || value === 'keep');
 }
@@ -104,14 +122,29 @@ function validatePathInWorkspace(target: string, workspaceDir: string): boolean 
 // Core update operations (inline to avoid cross-package import)
 // ---------------------------------------------------------------------------
 
-function copyDirRecursive(src: string, dest: string): void {
+/**
+ * Recursively copy a directory tree.
+ *
+ * skipDirs: directory names to skip at every recursion level (e.g. node_modules).
+ * Symlinks are skipped to avoid Windows junction EPERM on copyFileSync.
+ */
+function copyDirRecursive(
+  src: string,
+  dest: string,
+  skipDirs?: Set<string>,
+): void {
+  const skip = skipDirs ?? new Set();
   fs.mkdirSync(dest, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
+    if (skip.has(entry.name)) continue;
+    // Skip symlinks — on Windows, npm junctions cause EPERM when copyFileSync
+    // tries to read them as regular files. They are regenerable (npm install).
+    if (entry.isSymbolicLink()) continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
+      copyDirRecursive(srcPath, destPath, skipDirs);
     } else {
       fs.copyFileSync(srcPath, destPath);
     }
@@ -134,14 +167,16 @@ interface LocalDiffResult {
   deleted: string[];
 }
 
-function getAllFilesLocal(dir: string): string[] {
+function getAllFilesLocal(dir: string, skipDirs?: Set<string>): string[] {
+  const skip = skipDirs ?? new Set();
   const result: string[] = [];
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
+      if (skip.has(entry.name)) continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        const subFiles = getAllFilesLocal(fullPath);
+        const subFiles = getAllFilesLocal(fullPath, skipDirs);
         result.push(...subFiles.map(f => path.join(entry.name, f)));
       } else {
         result.push(entry.name);
@@ -155,8 +190,8 @@ function computeDiffLocal(currentDir: string, newDir: string): LocalDiffResult {
   const modified: string[] = [];
   const added: string[] = [];
   const deleted: string[] = [];
-  const currentFiles = getAllFilesLocal(currentDir);
-  const newFiles = getAllFilesLocal(newDir);
+  const currentFiles = getAllFilesLocal(currentDir, SKIP_DIRS);
+  const newFiles = getAllFilesLocal(newDir, SKIP_DIRS);
   const currentSet = new Set(currentFiles);
   const newSet = new Set(newFiles);
 
@@ -175,6 +210,20 @@ function computeDiffLocal(currentDir: string, newDir: string): LocalDiffResult {
     if (!currentSet.has(file)) added.push(file);
   }
   return { modified, added, deleted };
+}
+
+/**
+ * Detect whether PD is also installed for the Codex host.
+ *
+ * The Web UI update only covers the OpenClaw extension directory. If Codex
+ * is installed (~/.codex/hooks.json or ~/.pd/codex/ exists), the user needs
+ * to know that the Codex adapter (@principles/codex-adapter) is NOT updated
+ * by this mechanism.
+ */
+function detectCodexInstall(): boolean {
+  const codexHooks = path.join(os.homedir(), '.codex', 'hooks.json');
+  const pdCodexDir = path.join(os.homedir(), '.pd', 'codex');
+  return fs.existsSync(codexHooks) || fs.existsSync(pdCodexDir);
 }
 
 async function doCheckForUpdates(currentVersion: string) {
@@ -255,6 +304,23 @@ async function doApplyUpdate(
   const { targetDir, mergeStrategy, createBackup } = options;
   let backupPath: string | undefined = undefined;
   let appliedChanges = false;
+  let gatewayWasStopped = false;
+  const codexInstalled = detectCodexInstall();
+
+  // Fix 5: stop the OpenClaw gateway before file mutations to release file
+  // locks on native modules. Best-effort — if `openclaw` is not in PATH or
+  // the gateway isn't running, we proceed (dist/*.js files are not locked).
+  const gatewayStatus = await checkOpenClawGateway();
+  if (gatewayStatus.isRunning) {
+    const stopRes = stopOpenClawGateway();
+    if (stopRes.ok) {
+      gatewayWasStopped = true;
+    }
+    // If stop failed, proceed anyway — the file operations below don't touch
+    // node_modules (excluded from backup and diff), so locks on native modules
+    // don't matter. dist/*.js files are read-once by Node, never locked.
+  }
+
   try {
     // 0. Save current version BEFORE any changes
     const fromVersion = readCurrentVersion(targetDir) ?? 'unknown';
@@ -270,16 +336,16 @@ async function doApplyUpdate(
     const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
 
-    // 2. Create backup if requested
+    // 2. Create backup if requested (Fix 2: skip node_modules to avoid EPERM
+    //    from locked native modules and npm symlinks/junctions)
     if (createBackup) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       backupPath = path.join(path.dirname(targetDir), `.pd-backup-${timestamp}`);
-      copyDirRecursive(targetDir, backupPath);
+      copyDirRecursive(targetDir, backupPath, SKIP_DIRS);
     }
 
     // 3. Download and extract new version (with timeout + retry)
-    const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-'));
     const dlResponse = await fetchWithRetry(tarball, 'Download');
     const buffer = Buffer.from(await dlResponse.arrayBuffer());
     const tarballPath = path.join(tempDir, 'package.tgz');
@@ -287,7 +353,12 @@ async function doApplyUpdate(
     execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
-    // 4. Compute diff and apply
+    // 4. Compute diff and apply.
+    // Fix 3: we ONLY apply modified + added files. We deliberately skip ALL
+    // deletions — the tarball (principles-disciple) only contains dist/,
+    // scripts/, templates/, openclaw.plugin.json, package.json, while the
+    // installed extension also has console/, core/, pd-cli/, node_modules/,
+    // bin/, docs/. Deleting those would destroy the installation.
     appliedChanges = true;
     const diff = computeDiffLocal(targetDir, tempDir);
     const updatedFiles: string[] = [];
@@ -318,15 +389,7 @@ async function doApplyUpdate(
       updatedFiles.push(file);
     }
 
-    for (const file of diff.deleted) {
-      // Only delete non-workspace files, or workspace files when strategy is overwrite
-      if (isWorkspaceFile(file) && mergeStrategy !== 'overwrite') {
-        continue;
-      }
-      const filePath = path.join(targetDir, file);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      updatedFiles.push(file);
-    }
+    // Fix 3: deletions intentionally skipped — see comment above.
 
     // 5. Update package.json version
     const pkgPath = path.join(targetDir, 'package.json');
@@ -355,16 +418,37 @@ async function doApplyUpdate(
       updatedFiles,
       backupPath,
       newVersion: toVersion,
+      // Signal to the UI that Codex adapter was not covered by this update.
+      partialUpdate: codexInstalled,
     };
   } catch (error) {
+    // Fix 6: EPERM-aware structured error (rc-9 / cli-6: reason + nextAction)
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
+
     // Clean up backup only if we failed before applying any file changes
     if (!appliedChanges && backupPath && fs.existsSync(backupPath)) {
       try { fs.rmSync(backupPath, { recursive: true, force: true }); } catch { /* best effort */ }
     }
+
+    if (isLockError) {
+      return {
+        success: false,
+        message: 'Update blocked by file lock (OpenClaw gateway may still be running)',
+        reason: 'file_locked',
+        nextAction: '请重启电脑后再次尝试更新。',
+      };
+    }
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: errorMsg,
     };
+  } finally {
+    // Fix 5: restart the gateway if we stopped it (even on failure), so the
+    // user is never left without a running gateway. Mirrors installer.ts behavior.
+    if (gatewayWasStopped) {
+      restartOpenClawGateway();
+    }
   }
 }
 
@@ -374,9 +458,11 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
     if (!fs.existsSync(backupDir)) {
       return { success: false, message: 'Backup not found' };
     }
-    if (fs.existsSync(targetDir)) {
-      fs.rmSync(targetDir, { recursive: true, force: true });
-    }
+    // Fix 4: do NOT rmSync the entire targetDir — the backup excludes
+    // node_modules, so a delete+restore would leave the installation without
+    // dependencies. Instead, overwrite from backup: modified files (dist/,
+    // package.json, etc.) get the backup version, while node_modules/console/
+    // core/ (not in the backup) are left untouched.
     copyDirRecursive(backupDir, targetDir);
 
     // Record rollback history
@@ -393,6 +479,197 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error',
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full update — inline tarball download + file copy (no external installer)
+// ---------------------------------------------------------------------------
+
+// The installer package bundles ALL sub-packages (plugin, console, core,
+// pd-cli). We download it directly and copy the pre-built dist/ directories.
+// This is seconds-fast (no npm install) and requires no CLI/npx — the entire
+// operation happens inside the console HTTP handler.
+const NPM_REGISTRY_INSTALLER = 'https://registry.npmjs.org/create-principles-disciple/latest';
+
+/**
+ * Compare two dependency maps for meaningful differences.
+ * Ignores `@principles/core` (always `file:./core` in bundled packages).
+ */
+function depsMeaningfullyChanged(
+  oldDeps: Record<string, unknown> | undefined,
+  newDeps: Record<string, unknown> | undefined,
+): boolean {
+  const a: Record<string, unknown> = {};
+  const b: Record<string, unknown> = {};
+  // Normalize: strip @principles/core (file: ref is not a real version)
+  for (const [k, v] of Object.entries(oldDeps ?? {})) {
+    if (k !== '@principles/core') a[k] = v;
+  }
+  for (const [k, v] of Object.entries(newDeps ?? {})) {
+    if (k !== '@principles/core') b[k] = v;
+  }
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  if (aKeys.length !== bKeys.length) return true;
+  return aKeys.some((k, i) => bKeys[i] !== k || a[k] !== b[k]);
+}
+
+async function doInlineFullUpdate(workspaceDir: string): Promise<{
+  success: boolean;
+  message: string;
+  reason?: string;
+  nextAction?: string;
+  newVersion?: string;
+  requiresRestart: boolean;
+}> {
+  const extDir = resolvePluginDir(workspaceDir);
+
+  // 1. Stop gateway (releases native module locks held by the gateway process)
+  const gatewayStatus = await checkOpenClawGateway();
+  let gatewayWasStopped = false;
+  if (gatewayStatus.isRunning) {
+    const stopRes = stopOpenClawGateway();
+    if (stopRes.ok) gatewayWasStopped = true;
+  }
+
+  // Capture version before changes
+  const fromVersion = readCurrentVersion(extDir) ?? 'unknown';
+  let tempDir: string | undefined;
+
+  try {
+    // 2. Fetch installer package info from npm
+    const response = await fetchWithRetry(NPM_REGISTRY_INSTALLER, 'Installer registry check');
+    const rawData: unknown = await response.json();
+    if (!isRecord(rawData)) return { success: false, message: 'Invalid registry response', requiresRestart: false };
+    const toVersion = typeof rawData.version === 'string' ? rawData.version : undefined;
+    const dist = isRecord(rawData.dist) ? rawData.dist : null;
+    const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
+    if (!tarball) return { success: false, message: 'Missing tarball URL', requiresRestart: false };
+
+    // 3. Download + extract tarball (contains plugin/, console/, core/, pd-cli/)
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-full-update-'));
+    const dlResponse = await fetchWithRetry(tarball, 'Download');
+    const buffer = Buffer.from(await dlResponse.arrayBuffer());
+    const tarballPath = path.join(tempDir, 'package.tgz');
+    fs.writeFileSync(tarballPath, buffer);
+    execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+    fs.unlinkSync(tarballPath);
+
+    // 4. Detect dependency changes (informational — logged but not blocking;
+    //    the .js files are still updated; node_modules stays as-is)
+    let depsChanged = false;
+    const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
+    const oldPkgPath = path.join(extDir, 'package.json');
+    if (fs.existsSync(newPkgPath) && fs.existsSync(oldPkgPath)) {
+      try {
+        const newPkg: unknown = JSON.parse(fs.readFileSync(newPkgPath, 'utf-8'));
+        const oldPkg: unknown = JSON.parse(fs.readFileSync(oldPkgPath, 'utf-8'));
+        if (isRecord(newPkg) && isRecord(oldPkg)) {
+          depsChanged = depsMeaningfullyChanged(
+            isRecord(oldPkg.dependencies) ? oldPkg.dependencies : undefined,
+            isRecord(newPkg.dependencies) ? newPkg.dependencies : undefined,
+          );
+        }
+      } catch { /* best-effort comparison */ }
+    }
+
+    // 5. Copy files — 4 subdirectory mappings
+    //    a. plugin/* → extDir/* (flattened, skip node_modules)
+    const pluginSrc = path.join(tempDir, 'plugin');
+    if (fs.existsSync(pluginSrc)) {
+      copyDirRecursive(pluginSrc, extDir, SKIP_DIRS);
+    }
+
+    //    b. console/ → extDir/console/ (overwrite dist/ files; do NOT rmSync —
+    //       console/node_modules/ may contain locked native modules like
+    //       better-sqlite3 that the running console process holds via dlopen)
+    const consoleSrc = path.join(tempDir, 'console');
+    const consoleDest = path.join(extDir, 'console');
+    if (fs.existsSync(consoleSrc)) {
+      copyDirRecursive(consoleSrc, consoleDest, SKIP_DIRS);
+    }
+
+    //    c. core/ → extDir/core/ (overwrite, skip node_modules for safety)
+    const coreSrc = path.join(tempDir, 'core');
+    const coreDest = path.join(extDir, 'core');
+    if (fs.existsSync(coreSrc)) {
+      copyDirRecursive(coreSrc, coreDest, SKIP_DIRS);
+    }
+
+    //    d. pd-cli/dist + package.json → extDir/pd-cli/ (overwrite only,
+    //       do NOT rmSync — preserves node_modules symlinks created at install)
+    const pdCliSrc = path.join(tempDir, 'pd-cli');
+    const pdCliDest = path.join(extDir, 'pd-cli');
+    if (fs.existsSync(pdCliSrc)) {
+      const distSrc = path.join(pdCliSrc, 'dist');
+      const distDest = path.join(pdCliDest, 'dist');
+      if (fs.existsSync(distSrc)) {
+        if (fs.existsSync(distDest)) fs.rmSync(distDest, { recursive: true, force: true });
+        copyDirRecursive(distSrc, distDest);
+      }
+      const pkgSrc = path.join(pdCliSrc, 'package.json');
+      if (fs.existsSync(pkgSrc)) {
+        copyFileTo(pkgSrc, path.join(pdCliDest, 'package.json'));
+      }
+    }
+
+    // 6. Cleanup temp dir
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    // 7. Record history
+    const newVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
+    appendUpdateHistory(workspaceDir, {
+      fromVersion,
+      toVersion: newVersion,
+      success: true,
+    });
+
+    return {
+      success: true,
+      message: depsChanged
+        ? 'Full update completed. Some dependencies may have changed — if you encounter issues, restart your computer and try again.'
+        : 'Full update completed successfully',
+      newVersion,
+      requiresRestart: true,
+    };
+  } catch (error) {
+    // Clean up temp dir on failure
+    if (tempDir && fs.existsSync(tempDir)) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
+
+    // Record failed update
+    appendUpdateHistory(workspaceDir, {
+      fromVersion,
+      toVersion: 'failed',
+      success: false,
+    });
+
+    if (isLockError) {
+      return {
+        success: false,
+        message: 'Update blocked by a file lock. The OpenClaw gateway may still be running.',
+        reason: 'file_locked',
+        nextAction: 'Please restart your computer, then try the update again.',
+        requiresRestart: false,
+      };
+    }
+    return {
+      success: false,
+      message: errorMsg,
+      requiresRestart: false,
+    };
+  } finally {
+    // 8. Restart gateway regardless of success/failure
+    if (gatewayWasStopped) {
+      restartOpenClawGateway();
+    }
   }
 }
 
@@ -416,17 +693,19 @@ export async function handleUpdateRoute(
       // 返回 degraded 状态 + reason，而非 500。前端 validateUpdateStatus 要求
       // currentVersion/latestVersion 为 string，hasUpdate 为 boolean。
       const currentVersion = readCurrentVersion(pluginDir);
+      const codexInstalled = detectCodexInstall();
       if (!currentVersion) {
         sendSuccess(res, {
           hasUpdate: false,
           currentVersion: 'unknown',
           latestVersion: '',
+          codexInstalled,
           error: 'Could not determine current version (plugin not installed)',
         });
         return;
       }
       const result = await doCheckForUpdates(currentVersion);
-      sendSuccess(res, result);
+      sendSuccess(res, { ...result, codexInstalled });
     } catch (err) {
       sendError(res, 500, 'update_check_error', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -511,6 +790,18 @@ export async function handleUpdateRoute(
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_rollback_error', err instanceof Error ? err.message : 'Unknown error');
+    }
+    return;
+  }
+
+  // POST /apply-full — inline tarball download + file copy (no external installer)
+  if (subPath === '/apply-full') {
+    if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
+    try {
+      const result = await doInlineFullUpdate(workspaceDir);
+      sendSuccess(res, result);
+    } catch (err) {
+      sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
     }
     return;
   }

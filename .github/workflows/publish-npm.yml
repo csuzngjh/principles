@@ -30,6 +30,11 @@ on:
       - 'packages/principles-core/**'
       - 'packages/pd-cli/**'
       - 'packages/create-principles-disciple/**'
+  schedule:
+    # Every Friday 04:00 UTC = Beijing 12:00 — weekly release.
+    # Publishes principles-disciple + create-principles-disciple so users
+    # get the latest pd-console/core/cli via the Web UI full update.
+    - cron: '0 4 * * 5'
 
 concurrency:
   group: publish-npm-${{ github.ref }}
@@ -69,6 +74,26 @@ jobs:
                 exit 1
                 ;;
             esac
+            exit 0
+          fi
+
+          # Weekly schedule: publish principles-disciple + create-principles-disciple
+          # so users get the latest pd-console/core/cli via Web UI full update.
+          # Skip if no commits since the last tag (avoid empty releases).
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LAST_TAG" ]; then
+              COMMITS_SINCE=$(git rev-list --count "$LAST_TAG"..HEAD 2>/dev/null || echo "0")
+              if [ "$COMMITS_SINCE" -eq 0 ]; then
+                echo "No commits since $LAST_TAG — skipping weekly release"
+                echo "matrix=[]" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+              echo "Weekly release: $COMMITS_SINCE commits since $LAST_TAG"
+            fi
+            # principles-disciple first (so bundle-plugin.mjs can sync version),
+            # then create-principles-disciple (bundles all latest code).
+            echo 'matrix=[{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"},{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
             exit 0
           fi
 

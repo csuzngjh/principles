@@ -857,7 +857,15 @@
       "restartHintAfterRollback": "Please restart pd-console to load the rolled-back version.",
       "filesUpdated": "Updated {{count}} files",
       "networkErrorHint": "Please check your network connection and try again.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "codexWarning": "Codex Host detected. This update only covers the OpenClaw plugin code and does not update the Codex adapter (@principles/codex-adapter). For a full update, run the installer.",
+      "partialUpdateHint": "Plugin code updated. To update the full runtime (including the Codex adapter and dependencies), run: npx create-principles-disciple",
+      "applyFullUpdate": "Full Update",
+      "fullUpdating": "Full update in progress…",
+      "fullUpdateSuccess": "Full update completed.",
+      "confirmFullUpdateTitle": "Confirm Full Update",
+      "confirmFullUpdateDesc": "Downloads and updates all PD packages (plugin, console, core, CLI). Usually takes just a few seconds. Your custom files (AGENTS.md etc.) are not affected. You will need to restart the console after completion.",
+      "fullUpdateRestartPrompt": "Full update complete. Please restart the console to load the new version: press Ctrl+C, then run pd console again."
     },
     "intent": {
       "eyebrow": "Owner Intent",
