@@ -220,6 +220,14 @@ function validatePdLocalProfile(
     errors.push(err(`${path}.maxRetries`, `profile '${profileId}' maxRetries must be an integer, got ${maxRetries}`, `Set maxRetries in profile '${profileId}' to a non-negative integer`));
   }
 
+  const maxTokens = readOwn(raw, 'maxTokens');
+  if (maxTokens !== undefined && !isNumber(maxTokens)) {
+    errors.push(err(`${path}.maxTokens`, `profile '${profileId}' maxTokens must be a finite number, got ${safePreview(maxTokens)}`, `Fix maxTokens in profile '${profileId}'`));
+  }
+  if (isNumber(maxTokens) && maxTokens <= 0) {
+    errors.push(err(`${path}.maxTokens`, `profile '${profileId}' maxTokens must be positive, got ${maxTokens}`, `Set maxTokens in profile '${profileId}' to a positive number`));
+  }
+
   // Reject raw secret values
   const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token', 'secret', 'password', 'auth'];
   for (const fk of forbiddenValueKeys) {
@@ -241,6 +249,7 @@ function validatePdLocalProfile(
   if (isString(baseUrl)) result.baseUrl = baseUrl;
   if (isNumber(timeoutMs)) result.timeoutMs = timeoutMs;
   if (isNumber(maxRetries)) result.maxRetries = maxRetries;
+  if (isNumber(maxTokens)) result.maxTokens = maxTokens;
   return { ok: true, value: result };
 }
 

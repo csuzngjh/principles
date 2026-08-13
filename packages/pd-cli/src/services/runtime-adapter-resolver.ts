@@ -215,6 +215,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     const apiKeyEnv = opts.piAiOverrides?.apiKeyEnv ?? configFields.apiKeyEnv;
     const baseUrl = opts.piAiOverrides?.baseUrl ?? configFields.baseUrl;
     const maxRetries = opts.piAiOverrides?.maxRetries ?? configFields.maxRetries;
+    const {maxTokens} = configFields;
     const adapterTimeoutMs = opts.timeoutMs ?? configFields.timeoutMs;
 
     // PRI-431 Step 1d + PR review fix: manual missing-field check on MERGED values
@@ -283,6 +284,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       model: String(model),
       apiKeyEnv: String(apiKeyEnv),
       maxRetries,
+      maxTokens,
       timeoutMs: adapterTimeoutMs,
       baseUrl,
       workspace: opts.workspaceDir,

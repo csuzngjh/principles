@@ -95,6 +95,8 @@ export interface RuntimeConfig {
   model?: string;
   apiKeyEnv?: string;
   maxRetries?: number;
+  /** Max output tokens (max_tokens) for pi-ai LLM calls. */
+  maxTokens?: number;
   /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
   baseUrl?: string;
   /** Optional system prompt (flows from profile to PiAiRuntimeAdapter). */
@@ -353,6 +355,7 @@ export function resolveRuntimeConfigFromPdConfig(
       baseUrl: adapterConfig.baseUrl,
       timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxRetries: adapterConfig.maxRetries,
+      maxTokens: adapterConfig.maxTokens,
       agentId: 'main',
       ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
     };

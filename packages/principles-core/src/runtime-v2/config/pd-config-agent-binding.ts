@@ -60,6 +60,8 @@ export interface PiAiAdapterConfigResult {
   baseUrl?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  /** Optional max output tokens (max_tokens) for pi-ai LLM calls. */
+  maxTokens?: number;
   /** Optional system prompt (from profile, flows to PiAiRuntimeAdapter). */
   systemPrompt?: string;
   workspace: string;
@@ -139,6 +141,20 @@ function checkPdLocalReadiness(
       readiness: 'not_ready',
       reason: `Environment variable '${profile.apiKeyEnv}' is set but empty. An API key value is required.`,
       nextAction: `Provide a non-empty value for '${profile.apiKeyEnv}' or change apiKeyEnv in .pd/config.yaml to reference a different env var`,
+    };
+  }
+
+  // Reasoning-model guidance: chain-of-thought (reasoning_content) and the
+  // final answer share the same max_tokens budget. If a known reasoning
+  // provider (e.g. DeepSeek) is used without an explicit maxTokens, the
+  // adapter falls back to a larger default (16K), but we surface a hint so
+  // operators know the budget is tunable via .pd/config.yaml.
+  const reasoningProvider = /deepseek/i.test(profile.provider);
+  if (reasoningProvider && profile.maxTokens === undefined) {
+    return {
+      readiness: 'ready',
+      reason: `pi-ai profile ready. NOTE: '${profile.provider}' is a reasoning model — thinking tokens share the max_tokens budget. Consider setting maxTokens in .pd/config.yaml (default: 16000) to avoid truncated JSON output on complex diagnoses.`,
+      nextAction: 'Optional: add maxTokens (e.g. 16000) to the pi-ai runtime profile in .pd/config.yaml',
     };
   }
 
@@ -270,6 +286,9 @@ export function createAdapterConfigFromProfile(
     }
     if (profile.maxRetries !== undefined) {
       result.maxRetries = profile.maxRetries;
+    }
+    if (profile.maxTokens !== undefined) {
+      result.maxTokens = profile.maxTokens;
     }
     if (profile.systemPrompt) {
       result.systemPrompt = profile.systemPrompt;
