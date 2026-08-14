@@ -1,0 +1,6 @@
+{
+  "codexAdapter": "0.1.0",
+  "hostRuntime": "0.1.0",
+  "core": "1.74.1",
+  "note": "Pinned runtime versions installed by $pd-setup. Release process: update these pins to the exact versions published in the same release, after npm smoke + install tests pass (ADR-0020 §10.4 / CHATGPT_PLUGIN_MARKETPLACE_SPEC Phase D)."
+}

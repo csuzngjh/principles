@@ -1,0 +1,23 @@
+{
+  "name": "principles-disciple",
+  "version": "0.1.0",
+  "description": "Owner-governed behavior internalization for Codex: injects approved principles into prompts, gates risky tool calls with owner-approved rules, and records pain evidence — all reviewable and reversible.",
+  "author": {
+    "name": "Principles Disciple",
+    "url": "https://github.com/csuzngjh/principles"
+  },
+  "homepage": "https://github.com/csuzngjh/principles#readme",
+  "repository": "https://github.com/csuzngjh/principles",
+  "license": "MIT",
+  "keywords": ["principles", "governance", "hooks", "guardrails", "behavior"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Principles Disciple",
+    "shortDescription": "Owner-governed principles that actually steer Codex",
+    "longDescription": "Principles Disciple turns your corrections into durable behavior: approved principles are injected into session context, owner-approved rules can deny risky tool calls before they run, and failed tool calls are recorded as reviewable evidence. Run $pd-setup to initialize a workspace, $pd-status to inspect health, $pd-review to open the owner console, and $pd-disable to stop all Codex behavior immediately.",
+    "developerName": "Principles Disciple",
+    "category": "Productivity",
+    "websiteURL": "https://github.com/csuzngjh/principles",
+    "brandColor": "#3B82F6"
+  }
+}

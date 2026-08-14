@@ -230,6 +230,9 @@ jobs:
           if [ "$PKG_DIR" = "openclaw-plugin" ]; then
             npm run build --workspace=principles-disciple
           elif [ "$PKG_DIR" = "pd-cli" ]; then
+            # pd-cli imports types from principles-disciple — build it first
+            # (same ordering the create-principles-disciple branch uses).
+            npm run build --workspace=principles-disciple
             npm run build --workspace=@principles/pd-cli
           elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
             # esbuild first (cleans dist, produces bundle.js), then tsc --emitDeclarationOnly
