@@ -22,7 +22,7 @@
   },
   "files": [
     "dist",
-    "hooks"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",

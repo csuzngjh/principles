@@ -13,6 +13,8 @@ on:
           - '@principles/core'
           - '@principles/pd-cli'
           - create-principles-disciple
+          - '@principles/host-runtime'
+          - '@principles/codex-adapter'
       version_bump:
         description: 'Version bump type'
         required: false
@@ -30,6 +32,8 @@ on:
       - 'packages/principles-core/**'
       - 'packages/pd-cli/**'
       - 'packages/create-principles-disciple/**'
+      - 'packages/host-runtime/**'
+      - 'packages/codex-adapter/**'
   schedule:
     # Every Friday 04:00 UTC = Beijing 12:00 — weekly release.
     # Publishes principles-disciple + create-principles-disciple so users
@@ -68,6 +72,12 @@ jobs:
                 ;;
               "create-principles-disciple")
                 echo 'matrix=[{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
+                ;;
+              "@principles/host-runtime")
+                echo 'matrix=[{"pkg_dir":"host-runtime","npm_name":"@principles/host-runtime"}]' >> $GITHUB_OUTPUT
+                ;;
+              "@principles/codex-adapter")
+                echo 'matrix=[{"pkg_dir":"codex-adapter","npm_name":"@principles/codex-adapter"}]' >> $GITHUB_OUTPUT
                 ;;
               *)
                 echo "Unknown package: $INPUT"
@@ -130,6 +140,8 @@ jobs:
           check_and_add "openclaw-plugin" "principles-disciple"
           check_and_add "pd-cli" "@principles/pd-cli"
           check_and_add "create-principles-disciple" "create-principles-disciple"
+          check_and_add "host-runtime" "@principles/host-runtime"
+          check_and_add "codex-adapter" "@principles/codex-adapter"
 
           MATRIX+="]"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -223,6 +235,10 @@ jobs:
             npm run build --workspace=@principles/pd-cli
             npm run build --workspace=@principles/pd-console
             cd packages/create-principles-disciple && npm run build
+          elif [ "$PKG_DIR" = "host-runtime" ]; then
+            npm run build --workspace=@principles/host-runtime
+          elif [ "$PKG_DIR" = "codex-adapter" ]; then
+            npm run build --workspace=@principles/codex-adapter
           fi
 
       - name: Verify package dry-run
