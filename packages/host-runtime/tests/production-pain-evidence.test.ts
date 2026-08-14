@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
 import { extractFilePathFromParams } from '@principles/core/runtime-v2';
 import { createProductionHostRuntime } from '../src/index.js';
+import { productionPainCooldownEntryCountForTest, resetProductionPainCooldownForTest } from '../src/production-pain-evidence.js';
 
 const workspaces: string[] = [];
 
@@ -69,6 +70,31 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).toContain('write_file');
     expect(String(Object.getOwnPropertyDescriptor(pain as object, 'canonical_pain_id')?.value)).toMatch(/^pain_host_/);
     expect(JSON.parse(String(Object.getOwnPropertyDescriptor(tool as object, 'params_json')?.value))).toEqual({ content: 'blocked content', file_path: '<path:passwd>' });
+  });
+
+  it('evicts expired cooldown entries so the module-level map stays bounded', async () => {
+    resetProductionPainCooldownForTest();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t0 = new Date('2026-08-14T00:00:00Z').getTime();
+      vi.setSystemTime(t0);
+      const workspaceDir = workspaceWithTrajectory();
+      const runtime = createProductionHostRuntime();
+      const failing = (error: string): HostEvent => ({
+        ...failedWrite(workspaceDir),
+        context: { ...failedWrite(workspaceDir).context, toolOutput: { error, result: { exitCode: 1 }, durationMs: 12 } },
+      });
+      await runtime.dispatch(failing('EACCES failure one'));
+      expect(productionPainCooldownEntryCountForTest()).toBe(1);
+      // 16 minutes later the first key is outside the 15-minute cooldown
+      // window: the new admission must sweep it instead of accumulating.
+      vi.setSystemTime(t0 + 16 * 60 * 1000);
+      await runtime.dispatch(failing('EACCES failure two'));
+      expect(productionPainCooldownEntryCountForTest()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      resetProductionPainCooldownForTest();
+    }
   });
 
   it('deduplicates concurrent retries from the same canonical host event', async () => {

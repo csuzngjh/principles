@@ -76,7 +76,16 @@ async function main(): Promise<void> {
     process.stdout.write('{}\n');
     return;
   }
-  const result = await processHookInvocation(raw);
+  let result: PdHookResult;
+  try {
+    result = await processHookInvocation(raw);
+  } catch (error) {
+    // Fail-open belt for an unexpected pre-dispatch throw (e.g. a workspace
+    // resolution race): Codex must still receive exactly one JSON object on
+    // stdout and a bounded diagnostic on stderr — never a bare crash.
+    process.stderr.write(`${diagnostic(`hook_pipeline_unexpected:${errorMessage(error)}`, 'Retry the tool call; if it repeats, inspect PD stderr and the Workspace .pd/config.yaml state.')}\n`);
+    result = { stdout: {}, exitCode: 0, stderr: [] };
+  }
   for (const line of result.stderr) process.stderr.write(`${line}\n`);
   process.stdout.write(`${JSON.stringify(result.stdout)}\n`);
   process.exitCode = result.exitCode;

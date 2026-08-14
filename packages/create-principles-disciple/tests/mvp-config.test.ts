@@ -20,6 +20,7 @@ import {
   getInstalledBinDir,
   isWindows,
   generateConfigYamlContent,
+  HostRuntimeConfigMigrationInfraError,
   migrateHostRuntimeFlagsInConfigYaml,
   getConfigYamlPath,
   validateConfigYamlFull,
@@ -2068,5 +2069,72 @@ describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', 
     const content = fs.readFileSync(pluginIndexPath, 'utf-8');
     expect(content).toContain('export { initTrajectorySchema }');
     expect(content).toContain('export { initWorkflowSchema }');
+  });
+});
+
+// ─── PRI-523 review: infra failures are not "malformed config" ───────────────
+// Lock contention and atomic-write EPERM/ENOSPC must surface as
+// HostRuntimeConfigMigrationInfraError so the installer advises retrying —
+// never deleting — a valid .pd/config.yaml. Validation failures stay plain.
+describe('migrateHostRuntimeFlagsInConfigYaml — infra failure classification', () => {
+  function writeValidConfig(tmpDir: string): string {
+    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
+    return configPath;
+  }
+
+  it('classifies config-lock unavailability as infra, with the config left unchanged', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-lock-'));
+    try {
+      const configPath = writeValidConfig(tmpDir);
+      const before = fs.readFileSync(configPath, 'utf8');
+      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: () => {
+          throw new Error('Failed to acquire config lock /x/.pd/config.yaml.lock; holder PID 42; nextAction=remove the lock manually only after verifying no installer is active');
+        },
+        atomicReplace: () => { throw new Error('atomicReplace must not run when the lock fails'); },
+      })).toThrow(HostRuntimeConfigMigrationInfraError);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies an atomic-replace EPERM as infra', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-eperm-'));
+    try {
+      // Drop one rollout flag so the migration actually attempts the write
+      // (a fully-flagged fresh config is a no-op and never calls atomicReplace).
+      const configPath = writeValidConfig(tmpDir);
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      delete (parsed.features as Record<string, unknown>).abstraction_layer_v1;
+      fs.writeFileSync(configPath, yaml.dump(parsed), 'utf8');
+      const eperm = Object.assign(new Error("EPERM: operation not permitted, rename '/x/.pd/config.yaml'"), { code: 'EPERM' });
+      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: (_filePath, action) => action(),
+        atomicReplace: () => { throw eperm; },
+      })).toThrow(HostRuntimeConfigMigrationInfraError);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps validation failures (malformed config) as plain errors, not infra', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-malformed-'));
+    try {
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, 'features: [not, an, object]\n', 'utf8');
+      const capture = (): unknown => {
+        try { migrateHostRuntimeFlagsInConfigYaml(tmpDir); } catch (error) { return error; }
+        return undefined;
+      };
+      const thrown = capture();
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(HostRuntimeConfigMigrationInfraError);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

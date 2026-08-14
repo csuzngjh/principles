@@ -29,15 +29,30 @@ export function getPdConfigPath(workspaceDir: string): string {
   return path.join(workspaceDir, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
 }
 
+/**
+ * A config candidate counts only when stat still sees a regular file.
+ * stat alone (no existsSync+stat pair) closes the TOCTOU window: the
+ * installer replaces .pd/config.yaml via atomic rename, and a hook that
+ * resolves the workspace mid-replacement would otherwise see exists=true
+ * then throw from statSync — crashing the hook before its fail-open
+ * handling instead of returning a structured resolution result.
+ */
+function isConfigFileAt(dir: string): boolean {
+  try {
+    return fs.statSync(getPdConfigPath(dir)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function resolveNearestPdWorkspace(cwd: string, legacyFallback?: string): PdWorkspaceResolution {
   if (!path.isAbsolute(cwd)) {
     return { ok: false, cwd, reason: 'cwd_not_absolute', nextAction: 'Provide an absolute cwd before resolving the PD Workspace' };
   }
   let current = path.resolve(cwd);
   while (true) {
-    const configPath = getPdConfigPath(current);
-    if (fs.existsSync(configPath) && fs.statSync(configPath).isFile()) {
-      return { ok: true, workspaceDir: current, configPath, source: 'nearest' };
+    if (isConfigFileAt(current)) {
+      return { ok: true, workspaceDir: current, configPath: getPdConfigPath(current), source: 'nearest' };
     }
     const parent = path.dirname(current);
     if (parent === current) break;
@@ -45,9 +60,8 @@ export function resolveNearestPdWorkspace(cwd: string, legacyFallback?: string):
   }
   if (legacyFallback && path.isAbsolute(legacyFallback)) {
     const workspaceDir = path.resolve(legacyFallback);
-    const configPath = getPdConfigPath(workspaceDir);
-    if (fs.existsSync(configPath) && fs.statSync(configPath).isFile()) {
-      return { ok: true, workspaceDir, configPath, source: 'legacy_fallback' };
+    if (isConfigFileAt(workspaceDir)) {
+      return { ok: true, workspaceDir, configPath: getPdConfigPath(workspaceDir), source: 'legacy_fallback' };
     }
   }
   return {

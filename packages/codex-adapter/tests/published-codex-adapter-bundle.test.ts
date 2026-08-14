@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const npmCli = process.env.npm_execpath;
@@ -83,7 +83,10 @@ describe('published @principles/codex-adapter bundle safety', () => {
     // imports correctly.
     execFileSync(
       process.execPath,
-      ['--input-type=module', '--eval', `await import(${JSON.stringify(new URL(`file:///${path.join(consumerDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'index.js').replace(/\\/g, '/')}`).href)})`],
+      // pathToFileURL — not manual `file:///` concatenation: on POSIX the
+      // joined absolute path would produce file:////... which Node cannot
+      // import (ERR_INVALID_FILE_URL_HOST).
+      ['--input-type=module', '--eval', `await import(${JSON.stringify(pathToFileURL(path.join(consumerDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'index.js')).href)})`],
       { cwd: consumerDir, stdio: 'pipe', timeout: 30_000 },
     );
   }, 180_000);

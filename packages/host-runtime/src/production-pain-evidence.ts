@@ -14,6 +14,7 @@ import type { HostEvent, HostEventResult } from '@principles/core/host';
 
 const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace']);
 const MAX_PREVIEW = 500;
+const PAIN_COOLDOWN_WINDOW_MS = 15 * 60 * 1000;
 const cooldowns = new Map<string, number>();
 
 export interface PainEvidenceEntry {
@@ -254,7 +255,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const errorHash = enrichment.errorHash ?? createHash('sha256').update(outcome.error ?? String(outcome.exitCode)).digest('hex');
     const cooldownKey = `${path.resolve(event.context.workspaceDir)}:${event.context.sessionId}:${sourceObservation.failureSource}:${errorHash}`;
     const last = cooldowns.get(cooldownKey);
-    const cooldownActive = last !== undefined && Date.now() - last < 15 * 60 * 1000;
+    const cooldownActive = last !== undefined && Date.now() - last < PAIN_COOLDOWN_WINDOW_MS;
     const triage = evaluateTriage({ sourceKind, score: painScore, consecutiveErrors: enrichment.consecutiveErrors, isRisky });
     const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: cooldownActive, isValid: true, score: painScore, sessionId: event.context.sessionId });
     const admitted = outcome.failure && WRITE_TOOLS.has(toolName) && trigger.shouldCreateDiagnosticTask;
@@ -281,7 +282,17 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
             .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', 1, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, createdAt);
         }
       })();
-      if (admitted && !duplicate) cooldowns.set(cooldownKey, Date.now());
+      if (admitted && !duplicate) {
+        const admittedAt = Date.now();
+        // Bound the module-level cooldown map in long-lived host processes
+        // (OpenClaw): keys carry sessionId + errorHash, so unbounded retention
+        // grows monotonically. Evict entries outside the cooldown window —
+        // they can never be consulted again.
+        for (const [staleKey, staleAt] of cooldowns) {
+          if (admittedAt - staleAt >= PAIN_COOLDOWN_WINDOW_MS) cooldowns.delete(staleKey);
+        }
+        cooldowns.set(cooldownKey, admittedAt);
+      }
     } catch (error) {
       return { decision: 'observe', source: event.source, warnings: [`trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.failure ? 'failure' : 'success', admitted: false, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
     } finally {
@@ -300,4 +311,8 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
 
 export function resetProductionPainCooldownForTest(): void {
   cooldowns.clear();
+}
+
+export function productionPainCooldownEntryCountForTest(): number {
+  return cooldowns.size;
 }

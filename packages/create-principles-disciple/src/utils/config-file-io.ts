@@ -17,7 +17,8 @@ export interface ConfigFileOps {
 
 const FILE_OPS: ConfigFileOps = fs;
 
-function errnoCode(value: unknown): string | undefined {
+/** Extract a POSIX errno code (EPERM/EACCES/ENOENT/...) from a thrown fs error. */
+export function errnoCode(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'code')) return undefined;
   const { code } = value as { code?: unknown };
   return typeof code === 'string' ? code : undefined;

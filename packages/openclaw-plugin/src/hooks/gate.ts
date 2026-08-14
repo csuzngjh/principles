@@ -471,13 +471,23 @@ export function handleSharedRuleHostResult(
   for (const warning of result.warnings ?? []) logger.warn?.(`[PD_GATE:RULE_HOST] ${warning}`);
   const evaluatedLiveRules = result.metadata?.['evaluatedLiveRules'];
   logger.info?.(`[PD_GATE:RULE_HOST] shared production gate evaluated; liveRules=${typeof evaluatedLiveRules === 'number' ? evaluatedLiveRules : 'unknown'} decision=${result.decision}`);
+  const metadata = result.metadata;
+  const ruleDecision = metadata?.['ruleDecision'];
+  if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
+    // These decision kinds are OpenClaw-owned (approval UX / auto-correct):
+    // onBeforeToolResult falls back to the legacy handleBeforeToolCall, which
+    // re-evaluates and records the actual decision events. Recording an
+    // 'allow' evaluation here too would emit a duplicate, inconsistent
+    // rulehost_evaluated row for the same tool call.
+    logger.info?.(`[PD_GATE:RULE_HOST] shared result carries ruleDecision=${String(ruleDecision)}; the legacy handler records the decision events`);
+    return;
+  }
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     isBashTool: BASH_TOOLS_SET.has(event.toolName),
     isWriteTool: WRITE_TOOLS.has(event.toolName),
   });
   if (action.normalizedPath === null) return;
-  const metadata = result.metadata;
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
   const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
   try {

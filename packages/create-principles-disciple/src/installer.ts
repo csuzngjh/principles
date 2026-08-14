@@ -12,6 +12,7 @@ import { t } from './i18n.js';
 import type { InstallOptions } from './prompts.js';
 import {
   generateConfigYamlContent,
+  HostRuntimeConfigMigrationInfraError,
   migrateHostRuntimeFlagsInConfigYaml,
   getConfigYamlPath,
   readEnabledChannelsFromConfigYaml,
@@ -1145,6 +1146,17 @@ async function generateConfigYamlConfig(
     }
     return configPath;
   } catch (e) {
+    if (e instanceof HostRuntimeConfigMigrationInfraError) {
+      // Lock contention / atomic-write EPERM etc. while adding the host
+      // rollout flags: the config file is NOT necessarily malformed. Do NOT
+      // advise deleting it — that would destroy a valid Owner config.
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Failed to add PRI-523 host rollout flags to existing .pd/config.yaml: ${reason}. ` +
+        'The existing config was left unchanged. Close other installers or tools holding .pd/config.yaml.lock, check disk permissions and free space, then re-run the installer.',
+        { cause: e },
+      );
+    }
     // Existing config is malformed — fail loud, do not overwrite
     const reason = e instanceof Error ? e.message : String(e);
     throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });

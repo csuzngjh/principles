@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
@@ -9,15 +10,18 @@ import { createStepRegistry, defineFeature } from '../../principles-core/tests/b
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 
 const dirs: string[] = [];
-function workspace(): string {
+function workspace(enabled = true): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-production-')); dirs.push(root);
   fs.mkdirSync(path.join(root, '.pd'), { recursive: true });
-  const config = getDefaultPdConfig(); config.features['host.codex'].enabled = true;
+  const config = getDefaultPdConfig(); config.features['host.codex'].enabled = enabled;
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
   return root;
 }
 function invoke(payload: unknown) {
-  return spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'dist', 'pd-hook.js')], { input: JSON.stringify(payload), encoding: 'utf8' });
+  // fileURLToPath instead of import.meta.dirname: dirname needs Node >=20.11
+  // while ADR-0020 declares Node >=20 for the host runtime.
+  const hookEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'pd-hook.js');
+  return spawnSync(process.execPath, [hookEntry], { input: JSON.stringify(payload), encoding: 'utf8' });
 }
 function base(root: string) { return { session_id: 'codex-session-523', turn_id: 'codex-turn-523', transcript_path: null, cwd: root, model: 'gpt-5.6', permission_mode: 'default' }; }
 async function artifact(root: string, input: { id: string; kind: 'principle' | 'rule'; principleId: string; ruleId?: string; content: object; channel: 'prompt' | 'code_tool_hook'; action: 'prompt_activate' | 'code_tool_hook_live_activate'; target: string }) {
@@ -67,6 +71,18 @@ describe('pd-hook executable shared MVP paths', () => {
     const db = new Database(path.join(root, '.state', 'trajectory.db'), { readonly: true });
     const rows = db.prepare('SELECT session_id, tool_name, outcome, exit_code FROM tool_calls').all(); db.close();
     expect(rows).toEqual([{ session_id: 'codex-session-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1 }]);
+  });
+
+  it('creates no workspace state when host.codex is disabled (flag-off no-side-effect)', () => {
+    // mvp-q-3 rollback path: flag-off must mean {} + exit 0 + a stderr skip
+    // reason and NO DB bootstrap — an enabled PostToolUse would have created
+    // .state/trajectory.db, so its absence proves no business side effects.
+    const root = workspace(false);
+    const result = invoke({ ...base(root), hook_event_name: 'PostToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'blocked.txt'), content: 'x' }, tool_response: { exitCode: 1, error: 'EACCES' }, tool_use_id: 'call-flag-off' });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({});
+    expect(result.stderr.trim()).toEqual(expect.stringContaining('host.codex_disabled'));
+    expect(fs.existsSync(path.join(root, '.state'))).toBe(false);
   });
 });
 

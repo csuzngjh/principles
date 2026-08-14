@@ -24,17 +24,26 @@ try {
       const context = vm.createContext(Object.create(null));
       new vm.Script(normalize(rule.source), { filename: rule.filename }).runInContext(context, { timeout: 1000 });
       if (!context.__pdRuleModule || typeof context.__pdRuleModule.evaluate !== 'function') throw new Error('compiled module has no evaluate function');
-      const input = workerData.input;
-      context.__pdCallInput = input;
-      context.__pdCallHelpers = Object.freeze({
-        isRiskPath: () => input.workspace.isRiskPath,
-        getToolName: () => input.action.toolName,
-        getEstimatedLineChanges: () => input.derived.estimatedLineChanges,
-        getBashRisk: () => input.derived.bashRisk,
-        hasPlanFile: () => input.workspace.hasPlanFile,
-        getPlanStatus: () => input.workspace.planStatus,
-        getEpTier: () => input.evolution.epTier,
-      });
+      // Sandbox boundary: hand the context ONLY a primitive JSON string and
+      // build the call input + helpers with the context's own intrinsics.
+      // Passing host-realm objects (the parsed input, a host-built helpers
+      // object) would let rule source walk .constructor.constructor back to
+      // the host realm's Function constructor and reach the child process
+      // and require — a full sandbox escape with user privileges.
+      context.__pdInputJson = JSON.stringify(workerData.input);
+      new vm.Script(
+        'const __pdCallInput = JSON.parse(globalThis.__pdInputJson);' +
+        'delete globalThis.__pdInputJson;' +
+        'const __pdCallHelpers = Object.freeze({' +
+        ' isRiskPath: () => __pdCallInput.workspace.isRiskPath,' +
+        ' getToolName: () => __pdCallInput.action.toolName,' +
+        ' getEstimatedLineChanges: () => __pdCallInput.derived.estimatedLineChanges,' +
+        ' getBashRisk: () => __pdCallInput.derived.bashRisk,' +
+        ' hasPlanFile: () => __pdCallInput.workspace.hasPlanFile,' +
+        ' getPlanStatus: () => __pdCallInput.workspace.planStatus,' +
+        ' getEpTier: () => __pdCallInput.evolution.epTier' +
+        '});', { filename: rule.filename + '.bootstrap' }
+      ).runInContext(context, { timeout: 1000 });
       const result = new vm.Script('__pdRuleModule.evaluate(__pdCallInput, __pdCallHelpers)', { filename: rule.filename + '.call' })
         .runInContext(context, { timeout: 1000 });
       results.push({ ok: true, result });

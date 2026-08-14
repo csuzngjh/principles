@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import {
   getDefaultPdConfig,
@@ -272,9 +273,13 @@ function gateEvent(workspaceDir: string, filePath: string) {
 
 describe('shared production RuleHost gate kernel', () => {
   it('keeps node:vm execution exclusively inside the bounded child source', () => {
-    const runtimeSource = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'rule-implementation-runtime.ts'), 'utf8');
+    // fileURLToPath (not import.meta.dirname): dirname needs Node >= 20.11,
+    // and ADR-0020 declares Node >= 20 support for the host runtime.
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const runtimeSource = fs.readFileSync(path.join(testDir, '..', 'src', 'rule-implementation-runtime.ts'), 'utf8');
     expect(runtimeSource).not.toMatch(/^import .*node:vm/m);
-    expect(runtimeSource.match(/runInContext/g)).toHaveLength(2);
+    // 3 runInContext calls: compile rule, bootstrap the JSON-only call input, invoke evaluate.
+    expect(runtimeSource.match(/runInContext/g)).toHaveLength(3);
     expect(runtimeSource.indexOf('const EVALUATION_PROCESS_SOURCE')).toBeLessThan(runtimeSource.indexOf('runInContext'));
     expect(runtimeSource).toContain("spawnSync(process.execPath, ['--max-old-space-size=32'");
   });
