@@ -834,6 +834,8 @@ export interface UpdateStatusData {
   error?: string;
   /** True when Codex host is also installed (triggers a warning banner). */
   codexInstalled?: boolean;
+  /** Release notes for the latest version (markdown, from GitHub Releases). */
+  changelog?: string;
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
@@ -846,13 +848,14 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
     latestVersion: v.latestVersion,
     hasUpdate: v.hasUpdate,
   };
-  // Optional error field (present when registry check fails)
   if (Object.hasOwn(v, 'error') && isString(v.error)) {
     result.error = v.error;
   }
-  // Optional codexInstalled field (present when Codex host is detected)
   if (Object.hasOwn(v, 'codexInstalled') && typeof v.codexInstalled === 'boolean') {
     result.codexInstalled = v.codexInstalled;
+  }
+  if (Object.hasOwn(v, 'changelog') && isString(v.changelog)) {
+    result.changelog = v.changelog;
   }
   return result;
 }

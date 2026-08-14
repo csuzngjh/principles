@@ -145,6 +145,33 @@ describe('handleUpdateRoute', () => {
       expect(body.data.latestVersion).toBe('2.0.0');
     });
 
+    it('should include changelog from GitHub Release when update is available', async () => {
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0' }),
+          } as Response);
+        }
+        if (urlStr.startsWith('https://api.github.com/')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ body: '## V2.0.0 — Bug fixes\n\n- Fixed update EPERM' }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: false, status: 404 } as Response);
+      }) as unknown as typeof fetch);
+
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+      const body = parseResponseBody<{ data: { changelog?: string } }>(res);
+      expect(body.data.changelog).toContain('Bug fixes');
+    });
+
     it('should return hasUpdate false when current is latest', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
