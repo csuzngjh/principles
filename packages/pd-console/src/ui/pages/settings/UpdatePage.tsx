@@ -334,8 +334,8 @@ export function UpdatePage() {
               <p className="text-[12px] font-mono text-ink-3 uppercase tracking-wide mb-2">
                 {t("pages.update.whatsNew")}
               </p>
-              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[200px] overflow-y-auto whitespace-pre-wrap">
-                {statusData.changelog.split("---")[0]}
+              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap">
+                {statusData.changelog}
               </div>
             </div>
           )}

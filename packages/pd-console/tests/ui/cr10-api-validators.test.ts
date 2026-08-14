@@ -533,6 +533,12 @@ describe('validateUpdateStatus', () => {
   it('rejects wrong types', () => {
     expect(validateUpdateStatus({ ...validStatus, hasUpdate: 'yes' })).toBeNull();
   });
+
+  it('accepts optional changelog field', () => {
+    const result = validateUpdateStatus({ ...validStatus, changelog: '## What\'s new\n- Bug fix' });
+    expect(result).not.toBeNull();
+    expect(result!.changelog).toBe('## What\'s new\n- Bug fix');
+  });
 });
 
 // ── validateConfigSummary ─────────────────────────────────────────────────────
