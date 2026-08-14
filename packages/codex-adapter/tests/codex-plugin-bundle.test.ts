@@ -286,6 +286,85 @@ describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5
   }, 60_000);
 });
 
+describe('review-round regressions (PR #1316 review)', () => {
+  it('pd-locate.compareVersionDirs sorts numerically and drops invalid versions lowest', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const { compareVersionDirs } = req(path.join(pluginDir, 'scripts', 'pd-locate.cjs')) as { compareVersionDirs: (a: string, b: string) => number };
+    expect(compareVersionDirs('0.9.0', '0.10.0')).toBeLessThan(0);
+    expect(compareVersionDirs('1.10.0', '1.9.0')).toBeGreaterThan(0);
+    expect(compareVersionDirs('0.1.0', '0.1.0')).toBe(0);
+    expect(compareVersionDirs('not-a-version', '0.0.1')).toBeLessThanOrEqual(0);
+  });
+
+  it('pd-disable never touches a sibling feature when host.codex lacks enabled (block YAML)', () => {
+    const workspace = tempDir('pd-disable-sibling-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    // host.codex block WITHOUT enabled; a sibling feature WITH enabled must survive.
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), [
+      'features:',
+      '  host.codex:',
+      '    category: core',
+      '  prompt:',
+      '    category: core',
+      '    enabled: true',
+      'internalAgents:',
+      '  defaultRuntime: profile-full',
+      '',
+    ].join('\n'), 'utf8');
+    const configPath = path.join(workspace, '.pd', 'config.yaml');
+    const script = path.join(pluginDir, 'scripts', 'pd-disable.cjs');
+    const result = spawnSync(process.execPath, [script], { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('host_codex_entry_missing');
+    const after = fs.readFileSync(configPath, 'utf8');
+    expect(after).toContain('    enabled: true'); // sibling prompt untouched
+  }, 60_000);
+
+  it('rejects --workspace without a value instead of silently using cwd', () => {
+    for (const scriptName of ['pd-disable.cjs', 'pd-review.cjs', 'pd-setup.cjs', 'pd-status.cjs']) {
+      const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', scriptName), '--workspace'], { cwd: os.tmpdir(), encoding: 'utf8', timeout: 30_000 });
+      expect(result.status, scriptName).not.toBe(0);
+      expect(result.stderr, scriptName).toContain('workspace_value_missing');
+    }
+  }, 90_000);
+
+  it('pd-status reads host.codex from flow-style (JSON) configs', () => {
+    const workspace = tempDir('pd-status-json-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({
+      features: { 'host.codex': { category: 'core', enabled: true } },
+    }), 'utf8');
+    const dataDir = tempDir('pd-status-data-');
+    const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
+      '--plugin-root', pluginDir, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
+      { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
+    expect(result.status === 0 || result.status === 1).toBe(true); // report always renders
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; detail?: string }> };
+    const wsCheck = report.checks.find((check) => check.name === 'workspace');
+    expect(wsCheck?.detail).toContain('host.codex enabled');
+  }, 60_000);
+
+  it('pd-status reports pin state honestly when runtime exists but pins are unreadable', () => {
+    const workspace = tempDir('pd-status-pin-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({
+      features: { 'host.codex': { category: 'core', enabled: true } },
+    }), 'utf8');
+    const dataDir = tempDir('pd-status-pin-data-');
+    // Adapter present, but plugin root override points at a dir with no runtime-version.json.
+    const fakeRoot = tempDir('pd-status-fake-root-');
+    fs.mkdirSync(fakeRoot, { recursive: true });
+    const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
+      '--plugin-root', fakeRoot, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
+      { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; detail?: string }> };
+    const runtimeCheck = report.checks.find((check) => check.name === 'runtime');
+    expect(runtimeCheck?.detail).toContain('not installed');
+    expect(runtimeCheck?.detail).not.toContain('pinned match');
+  }, 60_000);
+});
+
 describe('pd-disable.cjs kill switch', () => {
   it('flips host.codex.enabled in the nearest .pd/config.yaml and is idempotent', async () => {
     const workspace = tempDir('pd-disable-ws-');

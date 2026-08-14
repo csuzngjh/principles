@@ -20,7 +20,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { locatePluginRoot, locatePluginData } = require('./pd-locate.cjs');
+const { locatePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -32,30 +32,43 @@ function npmCliPath() {
   // Prefer invoking npm through the same Node binary (no shell, spaces-safe).
   const bundled = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
   if (fs.existsSync(bundled)) return { node: process.execPath, args: [bundled] };
-  return { node: process.platform === 'win32' ? 'npm.cmd' : 'npm', args: [] };
+  // Fallback: the platform launcher. On Windows .cmd shims need a shell
+  // (EINVAL otherwise); no user-controlled data appears in these args.
+  return process.platform === 'win32'
+    ? { node: 'npm.cmd', args: [], shell: true }
+    : { node: 'npm', args: [] };
 }
 
 function runNpm(args, options) {
   const cli = npmCliPath();
-  return spawnSync(cli.node, [...cli.args, ...args], { encoding: 'utf8', ...options });
+  return spawnSync(cli.node, [...cli.args, ...args], { encoding: 'utf8', ...options, ...(cli.shell ? { shell: true } : {}) });
 }
 
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, skipInit: false, json: false };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--plugin-root') out.pluginRoot = argv[++i];
-    else if (argv[i] === '--plugin-data') out.pluginData = argv[++i];
-    else if (argv[i] === '--workspace') out.workspace = argv[++i];
-    else if (argv[i] === '--skip-init') out.skipInit = true;
+    if (argv[i] === '--plugin-root') {
+      const value = requireFlagValue(argv, i, '--plugin-root');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.pluginRoot = value.value; i += 1;
+    } else if (argv[i] === '--plugin-data') {
+      const value = requireFlagValue(argv, i, '--plugin-data');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.pluginData = value.value; i += 1;
+    } else if (argv[i] === '--workspace') {
+      const value = requireFlagValue(argv, i, '--workspace');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.workspace = value.value; i += 1;
+    } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
-    else return { error: `unknown_argument:${argv[i]}` };
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --skip-init --json' };
   }
   return out;
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.error) { fail(args.error, 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --skip-init --json'); return; }
+  if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
   const workspaceDir = path.resolve(args.workspace ?? process.cwd());
 
   // 1. Environment gate.
@@ -64,7 +77,7 @@ function main() {
     fail(`node_version_unsupported:${process.versions.node}`, 'Install Node.js >= 20 (https://nodejs.org), restart Codex, and re-run $pd-setup.');
     return;
   }
-  const npmProbe = runNpm(['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const npmProbe = runNpm(['--version'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
   if (npmProbe.status !== 0) {
     fail('npm_not_available', 'npm must be on PATH (it ships with Node.js). Verify with `npm --version` in a terminal, then re-run $pd-setup.');
     return;
@@ -83,9 +96,16 @@ function main() {
     fail(`runtime_version_file_invalid:${error.message.slice(0, 160)}`, 'Reinstall the plugin (codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles).');
     return;
   }
+  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core };
+  const missingPins = Object.entries(desired)
+    .filter(([, value]) => typeof value !== 'string' || value.length === 0)
+    .map(([key]) => key);
+  if (missingPins.length > 0) {
+    fail(`runtime_version_file_invalid:missing_pins:${missingPins.join(',')}`, 'Reinstall the plugin — its runtime-version.json is incomplete.');
+    return;
+  }
   const runtimeDir = path.join(data.pluginData, 'runtime');
   const markerPath = path.join(runtimeDir, '.pd-runtime.json');
-  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core };
   let installNeeded = true;
   try {
     const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -96,8 +116,7 @@ function main() {
 
   if (installNeeded) {
     fs.mkdirSync(runtimeDir, { recursive: true });
-    const pkgJson = path.join(runtimeDir, 'package.json');
-    if (!fs.existsSync(pkgJson)) fs.writeFileSync(pkgJson, JSON.stringify({ name: 'pd-plugin-runtime', private: true }, null, 2));
+    fs.writeFileSync(path.join(runtimeDir, 'package.json'), JSON.stringify({ name: 'pd-plugin-runtime', private: true }, null, 2));
     const install = runNpm(
       [
         'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
@@ -127,11 +146,16 @@ function main() {
   // 3. Workspace init through the existing production command.
   let initResult = 'skipped';
   if (!args.skipInit) {
-    const pd = spawnSync(process.platform === 'win32' ? 'pd.cmd' : 'pd', ['runtime', 'init', '--workspace', workspaceDir, '--confirm'], { encoding: 'utf8', timeout: 120_000 });
-    if (pd.error || pd.status !== 0) {
+    const pd = pdCliCommand();
+    if (!pd) {
+      fail('pd_cli_unavailable', 'Install the PD CLI globally first: npm install -g @principles/pd-cli — then re-run $pd-setup. (--skip-init skips this check.)');
+      return;
+    }
+    const init = spawnSync(pd.command, [...pd.prefix, 'runtime', 'init', '--workspace', workspaceDir, '--confirm'], { encoding: 'utf8', timeout: 120_000 });
+    if (init.error || init.status !== 0) {
       fail(
-        `pd_cli_unavailable_or_init_failed:${(pd.error ? pd.error.message : String(pd.stderr)).slice(0, 200).replace(/\s+/g, ' ')}`,
-        'Install the PD CLI first: npm install -g @principles/pd-cli — then re-run $pd-setup. (--skip-init skips this check.)',
+        `pd_runtime_init_failed:${(init.error ? init.error.message : String(init.stderr)).slice(0, 200).replace(/\s+/g, ' ')}`,
+        'Reinstall the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-setup. (--skip-init skips this check.)',
       );
       return;
     }

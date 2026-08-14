@@ -13,7 +13,7 @@ Prepares the current workspace so owner-approved principles actually steer this 
 
    bash / zsh:
    ```bash
-   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-setup.cjs 2>/dev/null | sort | tail -1)"
+   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-setup.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)"
    ```
 
    PowerShell:

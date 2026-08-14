@@ -10,14 +10,17 @@
  * required to stop PD behavior.
  *
  * The edit is targeted and line-based (zero dependencies, works even when the
- * runtime is not installed): only the `enabled:` line inside the
- * `features: → host.codex:` block is rewritten, via write-temp-then-rename.
+ * runtime is not installed): only the `enabled:` line that is a DIRECT child
+ * of the `features: → host.codex:` block is rewritten — the scan stops at the
+ * first non-empty line at or below host.codex's own indent, so a sibling
+ * feature's `enabled:` can never be touched. Flow-style (JSON) configs are
+ * handled via a JSON parse path. Writes go through write-temp-then-rename.
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { locateWorkspace } = require('./pd-locate.cjs');
+const { locateWorkspace, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:disable] status=failed reason=${reason}`);
@@ -25,26 +28,38 @@ function fail(reason, nextAction) {
   process.exitCode = 1;
 }
 
-/** Rewrite the enabled value inside the host.codex block of BLOCK-style YAML.
- * Returns the new content, or undefined when the block cannot be located. */
+/** Rewrite the enabled value among the DIRECT children of the host.codex
+ * block in BLOCK-style YAML. Returns the new content, undefined when the
+ * block/entry cannot be located safely (never touches a sibling feature). */
 function rewriteBlockYaml(raw, target) {
   const lines = raw.split(/\r?\n/);
   let inFeatures = false;
   let hostLine = -1;
+  let hostIndent = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (/^features:\s*$/.test(line)) { inFeatures = true; continue; }
-    if (/^\S/.test(line)) { if (inFeatures && hostLine === -1) inFeatures = false; }
-    if (inFeatures && /^\s+host\.codex:\s*$/.test(line)) { hostLine = i; break; }
+    if (/^\S/.test(line)) { if (inFeatures && hostLine === -1) inFeatures = false; continue; }
+    if (inFeatures) {
+      const match = /^(\s+)host\.codex:\s*$/.exec(line);
+      if (match) { hostLine = i; hostIndent = match[1].length; break; }
+    }
   }
   if (hostLine === -1) return undefined;
   for (let i = hostLine + 1; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/^\S/.test(line)) break;
-    if (/^\s{2,}enabled:\s*(true|false)\s*$/.test(line)) {
+    if (line.trim().length === 0) continue;
+    const indentMatch = /^(\s*)/.exec(line);
+    const indent = indentMatch ? indentMatch[1].length : 0;
+    // Leaving the host.codex block: any non-empty line at or above its indent.
+    if (indent <= hostIndent) return undefined; // block ended without an enabled child
+    if (indent !== hostIndent + 2) continue; // deeper-nested content is not a direct child
+    const enabledMatch = /^enabled:\s*(true|false)\s*$/.exec(line.trim());
+    if (enabledMatch) {
       lines[i] = line.replace(/enabled:\s*(true|false)/, `enabled: ${target}`);
       return lines.join('\n');
     }
+    // Other direct children (e.g. "category: core") — keep scanning.
   }
   return undefined;
 }
@@ -70,8 +85,11 @@ function main() {
   let workspaceArg;
   let target = false;
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--workspace') workspaceArg = argv[++i];
-    else if (argv[i] === '--enable') target = true;
+    if (argv[i] === '--workspace') {
+      const value = requireFlagValue(argv, i, '--workspace');
+      if (!value.ok) { fail(value.reason, value.nextAction); return; }
+      workspaceArg = value.value; i += 1;
+    } else if (argv[i] === '--enable') target = true;
     else { fail(`unknown_argument:${argv[i]}`, 'Supported: --workspace <dir> --enable'); return; }
   }
 

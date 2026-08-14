@@ -13,7 +13,7 @@ Opens the existing pd-console (the same owner-review UI used with the OpenClaw h
 
    bash / zsh:
    ```bash
-   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-review.cjs 2>/dev/null | sort | tail -1)"
+   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-review.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)"
    ```
 
    PowerShell:

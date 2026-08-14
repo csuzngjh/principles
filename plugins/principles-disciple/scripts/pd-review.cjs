@@ -9,8 +9,7 @@
 'use strict';
 
 const { spawn } = require('child_process');
-const path = require('path');
-const { locateWorkspace } = require('./pd-locate.cjs');
+const { locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:review] status=failed reason=${reason}`);
@@ -22,20 +21,27 @@ function main() {
   const argv = process.argv.slice(2);
   let workspaceArg;
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--workspace') workspaceArg = argv[++i];
-    else { fail(`unknown_argument:${argv[i]}`, 'Supported: --workspace <dir>'); return; }
+    if (argv[i] === '--workspace') {
+      const value = requireFlagValue(argv, i, '--workspace');
+      if (!value.ok) { fail(value.reason, value.nextAction); return; }
+      workspaceArg = value.value; i += 1;
+    } else { fail(`unknown_argument:${argv[i]}`, 'Supported: --workspace <dir>'); return; }
   }
 
   const ws = locateWorkspace(workspaceArg ?? process.cwd());
   if (!ws.ok) { fail(ws.reason, `${ws.nextAction} Review needs an initialized workspace.`); return; }
 
-  const child = spawn(process.platform === 'win32' ? 'pd.cmd' : 'pd', ['console', 'open', '--workspace', ws.workspaceDir], {
+  const pd = pdCliCommand();
+  if (!pd) {
+    fail('pd_cli_unavailable', 'Install the PD CLI globally first: npm install -g @principles/pd-cli — then re-run $pd-review.');
+    return;
+  }
+  const child = spawn(pd.command, [...pd.prefix, 'console', 'open', '--workspace', ws.workspaceDir], {
     detached: true,
     stdio: 'ignore',
-    shell: false,
   });
   child.on('error', (error) => {
-    fail(`pd_console_failed:${error.message.slice(0, 160)}`, 'Install the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-review.');
+    fail(`pd_console_failed:${error.message.slice(0, 160)}`, 'Reinstall the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-review.');
   });
   child.unref();
 

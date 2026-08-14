@@ -13,7 +13,7 @@ A read-only snapshot that answers "is PD actually steering this session?" in one
 
    bash / zsh:
    ```bash
-   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-status.cjs 2>/dev/null | sort | tail -1)" --workspace "$PWD"
+   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-status.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)" --workspace "$PWD"
    ```
 
    PowerShell:

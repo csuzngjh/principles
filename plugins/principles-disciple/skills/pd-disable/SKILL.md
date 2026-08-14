@@ -13,7 +13,7 @@ Turns PD's Codex behavior off instantly and reversibly: every hook returns the n
 
    bash / zsh:
    ```bash
-   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-disable.cjs 2>/dev/null | sort | tail -1)"
+   node "$(ls -1d "$HOME/.codex/plugins/cache/"*/principles-disciple/*/scripts/pd-disable.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)"
    ```
 
    PowerShell:
@@ -21,7 +21,7 @@ Turns PD's Codex behavior off instantly and reversibly: every hook returns the n
    node (Get-ChildItem "$env:USERPROFILE\.codex\plugins\cache\*\principles-disciple\*\scripts\pd-disable.cjs" | Sort-Object FullName | Select-Object -Last 1).FullName
    ```
 
-   Re-enable: append ` --enable`.
+   Re-enable: append `--enable`.
 
 2. Confirm to the user in one sentence: disabled ("PD is now inert in Codex; your data is untouched") or enabled ("PD is steering again from the next message"). The script is idempotent — running it twice is safe.
 

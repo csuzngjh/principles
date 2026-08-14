@@ -13,15 +13,24 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { codexDir, locatePluginData, locatePluginRoot, locateWorkspace } = require('./pd-locate.cjs');
+const { codexDir, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, json: false, pdHealth: false };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--plugin-root') out.pluginRoot = argv[++i];
-    else if (argv[i] === '--plugin-data') out.pluginData = argv[++i];
-    else if (argv[i] === '--workspace') out.workspace = argv[++i];
-    else if (argv[i] === '--json') out.json = true;
+    if (argv[i] === '--plugin-root') {
+      const value = requireFlagValue(argv, i, '--plugin-root');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.pluginRoot = value.value; i += 1;
+    } else if (argv[i] === '--plugin-data') {
+      const value = requireFlagValue(argv, i, '--plugin-data');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.pluginData = value.value; i += 1;
+    } else if (argv[i] === '--workspace') {
+      const value = requireFlagValue(argv, i, '--workspace');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      out.workspace = value.value; i += 1;
+    } else if (argv[i] === '--json') out.json = true;
     else if (argv[i] === '--pd-health') out.pdHealth = true;
     else return { error: `unknown_argument:${argv[i]}` };
   }
@@ -37,11 +46,25 @@ function readInstalledVersion(runtimeDir, packageName) {
   }
 }
 
-/** Minimal, dependency-free read of the host.codex enabled value written by
- * PD tooling (stable "features:" → "host.codex:" → "enabled:" shape). */
+/** Read host.codex.enabled from the workspace config. PD tooling writes both
+ * block YAML and flow-style JSON (valid YAML); parse JSON first, then fall
+ * back to a line scan of the block form. */
 function readHostCodexFlag(configPath) {
   let raw;
   try { raw = fs.readFileSync(configPath, 'utf8'); } catch { return { enabled: 'unknown', reason: 'config_unreadable' }; }
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      const features = parsed.features;
+      if (typeof features === 'object' && features !== null && !Array.isArray(features) && Object.hasOwn(features, 'host.codex')) {
+        const entry = features['host.codex'];
+        if (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof entry.enabled === 'boolean') {
+          return { enabled: entry.enabled };
+        }
+      }
+      return { enabled: 'unknown', reason: 'host_codex_entry_missing' };
+    }
+  } catch { /* not JSON — fall through to the block-YAML scan */ }
   const lines = raw.split(/\r?\n/);
   let inFeatures = false;
   let inHostCodex = false;
@@ -93,12 +116,16 @@ function main() {
   if (data.ok) {
     const runtimeDir = path.join(data.pluginData, 'runtime');
     let pins = null;
-    try { pins = JSON.parse(fs.readFileSync(path.join(root.ok ? root.pluginRoot : '', 'runtime-version.json'), 'utf8')); } catch { /* pin check skipped */ }
+    if (root.ok) {
+      try { pins = JSON.parse(fs.readFileSync(path.join(root.pluginRoot, 'runtime-version.json'), 'utf8')); } catch { /* pin check reported as unverified */ }
+    }
     const adapter = readInstalledVersion(runtimeDir, '@principles/codex-adapter');
     const hostRuntime = readInstalledVersion(runtimeDir, '@principles/host-runtime');
     if (adapter === 'not-installed') {
       push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-setup skill to install the pinned runtime.');
-    } else if (pins && (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime)) {
+    } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string') {
+      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
+    } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime) {
       push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime} != pinned ${pins.codexAdapter}+${pins.hostRuntime}`, 'Re-run $pd-setup to realign the runtime with the pinned versions.');
     } else {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pinned match)`);
@@ -124,11 +151,16 @@ function main() {
   else push('hookTrust', 'degraded', trust.reason, trust.nextAction);
 
   if (args.pdHealth) {
-    const pd = spawnSync(process.platform === 'win32' ? 'pd.cmd' : 'pd', ['health', '--host', 'codex', '--json'], { encoding: 'utf8', timeout: 60_000 });
-    if (pd.status === 0 && pd.stdout.trim()) {
-      try { report.pdHealth = JSON.parse(pd.stdout); } catch { report.pdHealth = { parseError: true, raw: pd.stdout.slice(0, 500) }; }
+    const pd = pdCliCommand();
+    if (pd) {
+      const health = spawnSync(pd.command, [...pd.prefix, 'health', '--host', 'codex', '--json'], { encoding: 'utf8', timeout: 60_000 });
+      if (health.status === 0 && health.stdout.trim()) {
+        try { report.pdHealth = JSON.parse(health.stdout); } catch { report.pdHealth = { parseError: true, raw: health.stdout.slice(0, 500) }; }
+      } else {
+        push('pdHealth', 'degraded', health.error ? 'pd_failed' : `exit_${health.status}`, 'Reinstall the PD CLI: npm install -g @principles/pd-cli');
+      }
     } else {
-      push('pdHealth', 'degraded', pd.error ? 'pd_not_found' : `exit_${pd.status}`, 'Install the PD CLI: npm install -g @principles/pd-cli');
+      push('pdHealth', 'degraded', 'pd_not_found', 'Install the PD CLI: npm install -g @principles/pd-cli');
     }
   }
 
