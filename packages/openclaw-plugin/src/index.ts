@@ -237,6 +237,26 @@ const plugin = {
     }, 1000);
     healthCheckTimer.unref(); // Don't keep process alive for health check
 
+    // Cache the shared-runtime gate per workspace so the hot-path tool hooks
+    // (before_tool_call / after_tool_call) don't re-read the feature flag on
+    // every call, and so the disabled-path rollback log is emitted once per
+    // workspace. PD loads feature flags at startup, so a config change requires
+    // a gateway restart to take effect.
+    const runtimeGateCache = new Map<string, ReturnType<typeof shouldUseSharedHostRuntime>>();
+    const loggedRollbackWorkspaces = new Set<string>();
+    const runtimeGateFor = (workspaceDir: string): ReturnType<typeof shouldUseSharedHostRuntime> => {
+      let gate = runtimeGateCache.get(workspaceDir);
+      if (!gate) {
+        gate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+        runtimeGateCache.set(workspaceDir, gate);
+      }
+      if (!gate.enabled && !loggedRollbackWorkspaces.has(workspaceDir)) {
+        loggedRollbackWorkspaces.add(workspaceDir);
+        api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${gate.rollbackReason}`);
+      }
+      return gate;
+    };
+
     // ── MVP Surface Guard (PRI-289): Verify surface classification ──
     const surfaceGuard = checkSurfaceGuard();
     if (!surfaceGuard.passed) {
@@ -385,10 +405,7 @@ const plugin = {
           }
 
           const hookContext = { ...ctx, workspaceDir };
-          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
-          if (!runtimeGate.enabled) {
-            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
-          }
+          const runtimeGate = runtimeGateFor(workspaceDir);
           const result = runtimeGate.enabled
             ? await sharedHostRuntime.dispatchBeforePromptBuild(event, hookContext)
             : await handleBeforePromptBuild(event, { ...hookContext, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] });
@@ -433,9 +450,8 @@ const plugin = {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
           const hookContext = { ...ctx, workspaceDir, pluginConfig, logger };
-          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+          const runtimeGate = runtimeGateFor(workspaceDir);
           if (!runtimeGate.enabled) {
-            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
             const result = handleBeforeToolCall(event, hookContext);
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'before_tool_call'
@@ -492,9 +508,8 @@ const plugin = {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
           const hookContext = { ...ctx, workspaceDir, pluginConfig };
-          const runtimeGate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+          const runtimeGate = runtimeGateFor(workspaceDir);
           if (!runtimeGate.enabled) {
-            api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${runtimeGate.rollbackReason}`);
             handleAfterToolCall(event, hookContext, api);
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'after_tool_call'

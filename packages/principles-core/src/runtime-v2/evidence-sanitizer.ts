@@ -68,7 +68,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function isSensitiveKey(key: string): boolean {
   const parts = key.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  return parts.some((part) => SENSITIVE_KEY_PARTS.has(part)) || SENSITIVE_KEY_PARTS.has(parts.join(''));
+  // A sensitive word may span several camelCase/underscore segments, e.g.
+  // `userApiKey` → ['user','api','key'] where 'apikey' is the sensitive word.
+  // Check every contiguous subsequence join so `userApiKey`/`openaiApiKey`
+  // match, while a plain `tokenizer` (single segment) does not.
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i; j < parts.length; j++) {
+      const joined = parts.slice(i, j + 1).join('');
+      if (SENSITIVE_KEY_PARTS.has(joined)) return true;
+    }
+  }
+  return false;
 }
 
 /**

@@ -345,6 +345,24 @@ describe('sanitizeToolParams', () => {
     });
   });
 
+  it('redacts combined sensitive keys but not lookalike ones', () => {
+    expect(sanitizeToolParams({
+      userApiKey: 'secret',
+      openaiApiKey: 'secret',
+      clientSecretId: 'secret',
+      access_token: 'secret',
+      tokenizer: 'not-a-secret',
+      file_path: 'src/auth.ts',
+    })).toEqual({
+      userApiKey: '<sensitive___REDACTED___field>',
+      openaiApiKey: '<sensitive___REDACTED___field>',
+      clientSecretId: '<sensitive___REDACTED___field>',
+      access_token: '<sensitive___REDACTED___field>',
+      tokenizer: 'not-a-secret',
+      file_path: 'src/auth.ts',
+    });
+  });
+
   it('converges paths with workspaceDir', () => {
     const params = {
       file_path: '/workspace/repo/src/config.ts',

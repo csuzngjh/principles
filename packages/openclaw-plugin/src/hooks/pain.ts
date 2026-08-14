@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import { normalizeProfile } from '../core/profile.js';
 import { getSession, trackFriction } from '../core/session-tracker.js';
+import type { SessionState } from '../core/session-tracker.js';
 import { computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -305,7 +306,7 @@ export function handleAfterToolCall(
   // ── Stage 2: Build Observation ──
   const observation = buildToolCallObservation(event, outcome, effectiveWorkspaceDir, profile);
 
-  let latestFailureState: import('../core/session-tracker.js').SessionState | undefined;
+  let latestFailureState: SessionState | undefined;
 
   if (outcome.isFailure) {
     // ── Stage 3a: Friction + Recording (Failure) ──
@@ -372,7 +373,7 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
   const rawEventId = Object.hasOwn(event, 'toolUseId') ? event.toolUseId
     : Object.hasOwn(event, 'toolCallId') ? event.toolCallId
     : undefined;
-  let latestFailureState: import('../core/session-tracker.js').SessionState | undefined;
+  let latestFailureState: SessionState | undefined;
   if (outcome.isFailure) {
     latestFailureState = handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
     handleProbationFeedback(sessionId, event.toolName, ctx.workspaceDir, wctx, false);

@@ -35,6 +35,8 @@ interface CodexHealthReport {
     name: 'host.codex';
     enabled: boolean;
     source: 'user_config' | 'defaults' | 'malformed';
+    reason?: string;
+    nextAction?: string;
   };
   hooksTrust: {
     detectable: boolean;
@@ -179,6 +181,12 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
       name: 'host.codex',
       enabled: hostCodexEnabled,
       source: featureFlagSource,
+      ...(hostCodexEnabled
+        ? {}
+        : {
+            reason: 'host_codex_disabled',
+            nextAction: `Enable the Codex host adapter by setting features.host.codex.enabled=true in ${resolvedWorkspace}/.pd/config.yaml, then re-run \`pd health --host codex\`.`,
+          }),
     },
     hooksTrust,
     dualRegistration,
@@ -205,6 +213,10 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   console.log(`featureFlag.name: ${report.featureFlag.name}`);
   console.log(`featureFlag.enabled: ${report.featureFlag.enabled}`);
   console.log(`featureFlag.source: ${report.featureFlag.source}`);
+  if (report.featureFlag.reason) {
+    console.log(`featureFlag.reason: ${report.featureFlag.reason}`);
+    console.log(`featureFlag.nextAction: ${report.featureFlag.nextAction ?? ''}`);
+  }
   console.log(`hooksTrust.detectable: ${report.hooksTrust.detectable}`);
   if (report.hooksTrust.trusted !== undefined) {
     console.log(`hooksTrust.trusted: ${report.hooksTrust.trusted}`);

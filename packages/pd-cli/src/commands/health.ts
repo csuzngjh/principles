@@ -11,10 +11,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import type { Command } from 'commander';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
 import type { PainChainTrace } from '@principles/core/runtime-v2';
 import { getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
+import { handleHealthCodex } from './health-codex.js';
 
 interface LastSuccessfulChain {
   painId?: string;
@@ -187,4 +189,62 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   }
 
   writeHealth();
+}
+
+/**
+ * Handlers backing the `pd health` command. Injected so the registration
+ * wiring test can exercise the real `registerHealthCommand` without executing
+ * real workspace/DB I/O; production uses the defaults.
+ */
+interface HealthCommandHandlers {
+  health?: typeof handleHealth;
+  healthCodex?: typeof handleHealthCodex;
+}
+
+/**
+ * Registers the `pd health` command on a Commander program.
+ *
+ * cli-7 test-wiring: this is the single registration used by both the CLI
+ * entrypoint and the wiring test, so a test exercising it covers the real
+ * production command (options + --host dispatch), not a copy.
+ *
+ * --host accepts only `openclaw` and `codex`; any other value is rejected with
+ * a structured reason/nextAction and a non-zero exit (cli-1/cli-2/cli-6). When
+ * `--json` is set, the rejection is emitted as exactly one parseable JSON
+ * object on stdout.
+ */
+export function registerHealthCommand(program: Command, handlers: HealthCommandHandlers = {}): void {
+  const healthHandler = handlers.health ?? handleHealth;
+  const codexHandler = handlers.healthCodex ?? handleHealthCodex;
+  program
+    .command('health')
+    .description('Show health diagnostics for all workspaces')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--json', 'Output raw JSON')
+    .option('--host <host>', 'Host to inspect (openclaw|codex). Defaults to openclaw workspace health.')
+    .action(async (opts) => {
+      const host = opts.host ?? 'openclaw';
+      if (host !== 'codex' && host !== 'openclaw') {
+        // cli-2: exit-stops — return after setting exitCode.
+        if (opts.json) {
+          console.log(JSON.stringify({
+            ok: false,
+            reason: 'invalid_host',
+            host,
+            nextAction: `Use a supported host: openclaw or codex.`,
+          }));
+          process.exitCode = 1;
+          return;
+        }
+        console.error(`Invalid --host "${host}". Supported hosts: openclaw, codex.`);
+        console.error(`nextAction: run \`pd health --host openclaw\` or \`pd health --host codex\`.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (host === 'codex') {
+        await codexHandler(opts);
+        return;
+      }
+      await healthHandler(opts);
+    });
 }
