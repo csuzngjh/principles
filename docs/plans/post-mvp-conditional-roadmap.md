@@ -7,8 +7,8 @@
 
 ## 0. 使用规则
 
-1. 本文档的工作**全部默认状态：Hold**
-2. 启动前必须满足"重启条件"全部 bullets
+1. 本文档的工作**全部默认状态：Hold**。唯一例外是 Owner 以带 `mvp-exception` 的权威工单明确批准并在本文件记录的窄范围工作；例外不表示原重启条件已经满足。
+2. 启动前必须满足"重启条件"全部 bullets；按第 1 条记录的 Owner `mvp-exception` 仅豁免其明确范围
 3. 启动前必须更新本文档，把"启动状态"改为 In Progress 并附时间戳和触发证据
 4. 任何 Linear issue 引用本表的工作时，issue 描述必须包含触发条件验证 checklist
 5. 6 个月不重启的工作进入 **annual review**：判断是否仍然 relevant；如不 relevant 则关闭
@@ -499,25 +499,85 @@
 
 > **Source**: `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`
 > **Added**: 2026-08-12
-> **Context**: PD 当前仅通过 `create-principles-disciple` 安装器以 CLI 方式工作。ChatGPT/Codex 插件市场提供一键安装、自动注册 hooks、跨平台分发的可能性。
+> **Amended**: 2026-08-13
+> **Linear**: [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) (`mvp-exception`)
+> **Status**: **Split — repository Marketplace + Workspace plugin active by Owner exception; public directory and advanced parity remain Hold**
+> **Context**: Codex 0.147 supports repository/personal Marketplace installation and plugin-bundled lifecycle hooks. Public submission documentation currently confirms Skills/MCP types only and does not confirm lifecycle-hook plugins.
 
-**Hold reason**: MVP 阶段聚焦 CLI 路径（已完成）。插件市场发布需要验证 PLUGIN_DATA 持久性、多 workspace 支持、以及 ChatGPT Web 无 hooks 的降级体验。
+### 21.1 Active exception: repository Marketplace + Workspace plugin
+
+The Owner explicitly approved this slice on 2026-08-12/13 after selecting "revise ADR, then share runtime." The old external-signal conditions were **not** satisfied; PRI-523 is the authority for this narrow exception.
+
+**Active scope**:
+
+- package the Codex adapter for repository/personal Marketplace installation;
+- use default `hooks/hooks.json` or a manifest-declared hook path;
+- use `PLUGIN_ROOT` for packaged code and `PLUGIN_DATA` only for plugin-private auxiliary data;
+- preserve both selected-Workspace authority paths defined by `DATA_ARCHITECTURE.md`: `.pd/config.yaml` + `.pd/state.db` for config/Runtime V2 SQLite, and `.state/principle_training_state.json` + existing `.state/` runtime/host artifacts for the principle ledger and host evidence;
+- require Owner hook review/trust before the three MVP-Core paths operate;
+- deliver only prompt injection, before-tool RuleHost enforcement, and after-tool pain/evidence capture through the shared host runtime;
+- retain `host.codex` as the Codex kill switch.
+
+**Supported distribution order**: first validate through a repository/personal Marketplace. After that passes, a Workspace admin may publish the local plugin to selected Workspace roles. Workspace publication is organization-internal and is not evidence that the universal public directory accepts lifecycle-hook plugins.
+
+**Runtime prerequisite**: PRI-523 declares Node.js `>=20` as the support baseline, installed separately. This does not claim current CI compatibility evidence. Before compatibility is claimed, installed-bundle, `codex-adapter`, and `host-runtime` package tests must be added and pass on Node 20 and Node 22. Marketplace and Workspace publication do not install Node. Setup/health must refuse activation with a structured reason and next action when Node is missing or unsupported.
+
+**Observable acceptance / rollback**: repository-Marketplace install + trust must demonstrate all three paths in one Workspace and parity with OpenClaw, including an installed `PLUGIN_ROOT` path containing spaces; the same bundle must then be publishable by a Workspace admin to selected roles without changing either authority path. Fresh and migrated `.pd/config.yaml` files must explicitly contain `features.host.codex` (core/on) and `features.abstraction_layer_v1` (quiet/off), and loader tests must exercise both operator rollbacks instead of relying only on implicit defaults. `host.codex.enabled: false` must neutralize Codex hooks with a structured skip reason and without changing OpenClaw, `.pd/`, or `.state/` data. See ADR-0020 §10.5 for the exact contract.
+
+### 21.2 Still Hold: public directory and advanced parity
+
+The following work remains subject to external evidence and is not authorized by PRI-523:
+
+- universal public-directory submission/review for a lifecycle-hook plugin (distinct from supported organization-internal Workspace publication);
+- ChatGPT Web/Mobile feature parity through Skills or MCP;
+- an MCP server, public Web commands, or automatic Skill activation;
+- public-marketplace auto-update promises;
+- additional-host distribution beyond OpenClaw and Codex Workspace use.
 
 **重启条件**（**全部满足**才启动）:
-- [ ] Codex MVP 适配（PRI-278~282）已合并并运行 ≥ 1 个月
-- [ ] 至少 1 个种子客户反馈"CLI 安装太复杂"或"想要一键安装"
-- [ ] `pd-hook.js` 已适配 `PLUGIN_DATA` 环境变量（`resolveWorkspaceDir()` 优先级）
-- [ ] ChatGPT/Codex 插件市场接受第三方插件提交（验证提交门户开放）
-- [ ] PLUGIN_DATA 持久性已验证（卸载后数据是否保留）
-- [ ] ChatGPT Web 无 hooks 平台的降级体验（Skills only）已设计并验证
+
+- [ ] OpenAI public submission documentation explicitly accepts lifecycle-hook plugins (not only Skills/MCP)
+- [ ] 至少 1 个种子客户明确需要 public-directory discovery or Web/Mobile parity
+- [ ] Workspace and plugin-private data lifecycle/retention semantics have been verified
+- [ ] The proposed Skill/MCP surface stays inside PRODUCT_IDENTITY and does not become general task execution or memory
 
 **启动后预期收益**:
-- 一键安装（无需 CLI 安装器）
-- 跨平台分发（Codex CLI + ChatGPT 桌面应用 Codex 模式）
-- 市场自动更新
-- 降低安装摩擦，扩大用户基数
+- repository Marketplace: 降低 Codex CLI/Desktop Workspace 安装摩擦（PRI-523 active）
+- public directory, if later verified: improve discovery without overstating unsupported hook submission
+- advanced parity, if later demanded: provide a deliberately scoped non-hook experience
 
-**估时**: 3-4 周（含 plugin.json + hooks + skills + MCP server + 提交审核）
+**估时**: PRI-523 covers only repository Marketplace + Workspace plugin. Public submission and advanced parity must be re-estimated after their gates are met.
 
 **关联**: `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`；§18.5 Codex Skill 分发
 
+---
+
+## 22. Shared host runtime / OpenClaw HostAdapter cutover (PRI-523)
+
+> **Added**: 2026-08-13
+> **Linear**: [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) (`mvp-exception`)
+> **Status**: **Active by explicit Owner exception**
+
+**Original Hold reason**: ADR-0020 deferred an OpenClaw HostAdapter migration until MVP stability plus external second-host value, to avoid regressions in the only proven host path.
+
+**Exception record**: those external-signal restart conditions were not met. The Owner nevertheless approved a narrow cutover after review showed the Codex adapter's business invocation remained allow-only and duplicating OpenClaw orchestration would create false installation success and host drift.
+
+**Active scope**:
+
+- create the shared I/O orchestration package `@principles/host-runtime`;
+- make OpenClaw and Codex thin protocol adapters over it;
+- share only prompt injection, before-tool RuleHost enforcement, and after-tool pain/evidence capture;
+- preserve existing owner approval, workspace persistence, lineage, feature flags, and host-specific codecs/trust.
+
+**Still Hold**:
+
+- PRI-521 long-running service replacement;
+- outbound Codex/host runtime execution;
+- schedulers, daemons, general memory, tool repair/retry, and autonomous task/value decisions;
+- any new activation channel or host beyond the PRI-523 contract.
+
+**Rollback**: `host.codex` is the existing core/default-on Codex kill switch; §2.4's old quiet/default-off instruction is superseded. For OpenClaw, PRI-523 must register `abstraction_layer_v1` as quiet/default-off/since 2026-08-13: off = legacy orchestration, on = controlled shared-runtime parity validation. Promotion to core/default-on requires both OpenClaw parity and Codex E2E acceptance. Fresh/migrated `.pd/config.yaml` must persist both entries explicitly, and loader tests must prove each operator rollback. The legacy route remains so flag-off restores it without migration. Neither rollback may modify `.pd/` SQLite/config state or `.state/` ledger/runtime artifacts.
+
+**Emotional value**: one authoritative Workspace plus observable host parity reduces **失控感 / 不信任感** and creates **掌控感 / 安心感**; a shared correction path reduces repeated cross-host maintenance **疲惫感** without adding Owner-facing noise.
+
+**关联**: ADR-0020 §10; `docs/architecture/DATA_ARCHITECTURE.md`; `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`

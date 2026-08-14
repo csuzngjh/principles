@@ -203,8 +203,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // 2026-08-12 after PRI-282 E2E validation passed (pd-hook stdin/stdout
   // contract, output whitelist, HostAdapter decode/encode for all 4 events).
   // Roll back = set host.codex.enabled: false in .pd/config.yaml.
-  // The abstraction_layer_v1 flag is NOT registered in MVP (OpenClaw refactor deferred).
   { id: 'host.codex', category: 'core', enabled: true, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default ON (flipped 2026-08-12 after PRI-282 E2E). Flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Disable via .pd/config.yaml: host.codex: { enabled: false }.' },
+  { id: 'abstraction_layer_v1', category: 'quiet', enabled: false, since: '2026-08-13', description: 'PRI-523 shared host-runtime cutover for OpenClaw. Default OFF preserves the legacy route; enable only for controlled parity validation.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

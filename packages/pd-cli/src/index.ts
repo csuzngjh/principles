@@ -14,7 +14,7 @@ import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
-import { handleHealth } from './commands/health.js';
+import { registerHealthCommand } from './commands/health.js';
 import { handleTaskShow, registerTaskListCommand } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
@@ -160,14 +160,7 @@ tasksCmd
     await handleEvolutionTasksShow({ id });
   });
 
-program
-  .command('health')
-  .description('Show health diagnostics for all workspaces')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleHealth(opts);
-  });
+registerHealthCommand(program);
 
 // ── Runtime v2 task/run commands ──────────────────────────────────────────────鈹€鈹€鈹€鈹€鈹€鈹€
 

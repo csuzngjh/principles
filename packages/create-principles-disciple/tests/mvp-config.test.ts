@@ -20,6 +20,8 @@ import {
   getInstalledBinDir,
   isWindows,
   generateConfigYamlContent,
+  HostRuntimeConfigMigrationInfraError,
+  migrateHostRuntimeFlagsInConfigYaml,
   getConfigYamlPath,
   validateConfigYamlFull,
   readEnabledChannelsFromConfigYaml,
@@ -1475,6 +1477,63 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
+  it('persists both PRI-523 host rollout flags in fresh config', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    expect(features['host.codex']).toEqual({ category: 'core', enabled: true });
+    expect(features.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('adds missing PRI-523 flags to a migrated config while preserving explicit rollback values', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-migration-'));
+    const configDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'config.yaml');
+    const existing = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = existing.features as Record<string, unknown>;
+    delete features.abstraction_layer_v1;
+    features['host.codex'] = { category: 'core', enabled: false };
+    fs.writeFileSync(configPath, yaml.dump(existing), 'utf8');
+
+    try {
+      expect(migrateHostRuntimeFlagsInConfigYaml(tmpDir)).toBe(true);
+      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const migratedFeatures = migrated.features as Record<string, unknown>;
+      expect(migratedFeatures['host.codex']).toEqual({ category: 'core', enabled: false });
+      expect(migratedFeatures.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rereads authoritative YAML under lock and preserves a concurrent owner update', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-concurrent-'));
+    const configDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, 'config.yaml');
+    const original = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    delete (original.features as Record<string, unknown>).abstraction_layer_v1;
+    fs.writeFileSync(configPath, yaml.dump(original), 'utf8');
+
+    try {
+      migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: (_filePath, action) => {
+          const ownerUpdate = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+          ownerUpdate.ownerNote = 'concurrent-update-kept';
+          fs.writeFileSync(configPath, yaml.dump(ownerUpdate), 'utf8');
+          return action();
+        },
+        atomicReplace: (filePath, content) => fs.writeFileSync(filePath, content, 'utf8'),
+      });
+
+      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      expect(migrated.ownerNote).toBe('concurrent-update-kept');
+      expect((migrated.features as Record<string, unknown>).abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
     // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
     const parsed: unknown = yaml.load(generateConfigYamlContent());
@@ -1527,7 +1586,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'host.codex', 'prompt']);
   });
 
   it('written to temp workspace is loadable', () => {
@@ -1935,6 +1994,10 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(content).toContain("'@principles/core', 'file:./core'");
     expect(content).toContain("'@principles/core', 'file:../core'");
   });
+
+  it('bundle-plugin.mjs removes the inlined host runtime from the bundled plugin manifest', () => {
+    expect(content).toContain("removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime')");
+  });
 });
 
 describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {
@@ -2006,5 +2069,72 @@ describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', 
     const content = fs.readFileSync(pluginIndexPath, 'utf-8');
     expect(content).toContain('export { initTrajectorySchema }');
     expect(content).toContain('export { initWorkflowSchema }');
+  });
+});
+
+// ─── PRI-523 review: infra failures are not "malformed config" ───────────────
+// Lock contention and atomic-write EPERM/ENOSPC must surface as
+// HostRuntimeConfigMigrationInfraError so the installer advises retrying —
+// never deleting — a valid .pd/config.yaml. Validation failures stay plain.
+describe('migrateHostRuntimeFlagsInConfigYaml — infra failure classification', () => {
+  function writeValidConfig(tmpDir: string): string {
+    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
+    return configPath;
+  }
+
+  it('classifies config-lock unavailability as infra, with the config left unchanged', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-lock-'));
+    try {
+      const configPath = writeValidConfig(tmpDir);
+      const before = fs.readFileSync(configPath, 'utf8');
+      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: () => {
+          throw new Error('Failed to acquire config lock /x/.pd/config.yaml.lock; holder PID 42; nextAction=remove the lock manually only after verifying no installer is active');
+        },
+        atomicReplace: () => { throw new Error('atomicReplace must not run when the lock fails'); },
+      })).toThrow(HostRuntimeConfigMigrationInfraError);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies an atomic-replace EPERM as infra', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-eperm-'));
+    try {
+      // Drop one rollout flag so the migration actually attempts the write
+      // (a fully-flagged fresh config is a no-op and never calls atomicReplace).
+      const configPath = writeValidConfig(tmpDir);
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      delete (parsed.features as Record<string, unknown>).abstraction_layer_v1;
+      fs.writeFileSync(configPath, yaml.dump(parsed), 'utf8');
+      const eperm = Object.assign(new Error("EPERM: operation not permitted, rename '/x/.pd/config.yaml'"), { code: 'EPERM' });
+      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
+        withLock: (_filePath, action) => action(),
+        atomicReplace: () => { throw eperm; },
+      })).toThrow(HostRuntimeConfigMigrationInfraError);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps validation failures (malformed config) as plain errors, not infra', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-malformed-'));
+    try {
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, 'features: [not, an, object]\n', 'utf8');
+      const capture = (): unknown => {
+        try { migrateHostRuntimeFlagsInConfigYaml(tmpDir); } catch (error) { return error; }
+        return undefined;
+      };
+      const thrown = capture();
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(HostRuntimeConfigMigrationInfraError);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

@@ -1881,7 +1881,7 @@ export class TrajectoryDatabase {
 
     // Generate sample ID from correction turn + first recent call (or correction id if no calls)
     const refForHash = successfulCalls[0]?.id ?? correctionTurn.id;
-    const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${refForHash}`).digest('hex').slice(0, 12)}`;
+    const sampleId = `sample_${crypto.createHash('sha256').update(`${sessionId}:${correctionTurn.id}:${refForHash}`).digest('hex').slice(0, 12)}`;
     const userRawText = this.restoreRawText(correctionTurn.raw_text as string | null, correctionTurn.blob_ref as string | null);
 
     // Quality scoring: correction cue is always valuable

@@ -13,6 +13,7 @@ import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/
 import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
+import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -32,6 +33,44 @@ import {
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
+import type { InjectablePrinciple } from '../core/principle-injection.js';
+
+export interface LegacyPrinciplePromptSelection {
+  active: InjectablePrinciple[];
+  probation: InjectablePrinciple[];
+  content: string;
+  selectedIds: ReadonlySet<string>;
+}
+
+export function selectLegacyPrinciplesForPrompt(
+  workspaceDir: string,
+  reducer: Pick<WorkspaceContext['evolutionReducer'], 'getActivePrinciples' | 'getProbationPrinciples'>,
+  logger?: PluginLogger,
+): LegacyPrinciplePromptSelection {
+  const allActive = reducer.getActivePrinciples();
+  const allProbation = reducer.getProbationPrinciples();
+  let maskedIds = new Set<string>();
+  try {
+    maskedIds = getCachedMaskedPrincipleSet(workspaceDir);
+  } catch (error) {
+    const message = `[PD:Pruning] Failed to read review log — all principles injected: ${error instanceof Error ? error.message : String(error)}`;
+    if (logger?.info) logger.info(message);
+    else console.error(message);
+  }
+  const activeSelection = selectPrinciplesForInjection(allActive.filter((principle) => !maskedIds.has(principle.id)), DEFAULT_PRINCIPLE_BUDGET);
+  const probationSelection = selectPrinciplesForInjection(allProbation.filter((principle) => !maskedIds.has(principle.id)), 1000);
+  if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
+    logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.selected.length}/${allActive.length} (${activeSelection.totalChars}c), probation=${probationSelection.selected.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
+  }
+  const active = activeSelection.selected;
+  const probation = probationSelection.selected;
+  return {
+    active,
+    probation,
+    content: active.length > 0 || probation.length > 0 ? formatEvolutionPrinciples(active, probation) : '',
+    selectedIds: new Set([...active, ...probation].map((principle) => principle.id)),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -192,7 +231,9 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
-  ctx: PluginHookAgentContext & { api?: PromptHookApi }
+  ctx: PluginHookAgentContext & { api?: PromptHookApi },
+  sharedActivePrinciplePrompt?: ActivePrinciplePromptResult,
+  preparedLegacyPrinciples?: LegacyPrinciplePromptSelection,
 ): Promise<PluginHookBeforePromptBuildResult | void> {
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
@@ -417,41 +458,8 @@ export async function handleBeforePromptBuild(
   let evolutionPrinciplesContent = '';
   try {
     const reducer = wctx.evolutionReducer;
-    const allActive = reducer.getActivePrinciples();
-    const allProbation = reducer.getProbationPrinciples();
-
-    // Pruning mask: exclude principles whose latest review is archive-candidate
-    let maskedIds = new Set<string>();
-    try {
-      maskedIds = getCachedMaskedPrincipleSet(wctx.workspaceDir);
-    } catch (err) {
-      // Safe degradation: if review log unreadable, inject all principles
-      const msg = err instanceof Error ? err.message : String(err);
-      if (logger?.info) {
-        logger.info(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
-      } else {
-        console.error(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
-      }
-    }
-
-    // Budget-aware selection: prioritize P0>P1>P2 and recency
-    const activeSelection = selectPrinciplesForInjection(
-      allActive.filter(p => !maskedIds.has(p.id)),
-      DEFAULT_PRINCIPLE_BUDGET,
-    );
-    const active = activeSelection.selected;
-
-    // Probation principles get a smaller sub-budget (1000 chars)
-    const probationBudget = 1000;
-    const probationSelection = selectPrinciplesForInjection(
-      allProbation.filter(p => !maskedIds.has(p.id)),
-      probationBudget,
-    );
-    const probation = probationSelection.selected;
-
-    if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
-      logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.breakdown.p0 + activeSelection.breakdown.p1 + activeSelection.breakdown.p2}/${allActive.length} (${activeSelection.totalChars}c), probation=${probation.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
-    }
+    const selection = preparedLegacyPrinciples ?? selectLegacyPrinciplesForPrompt(wctx.workspaceDir, reducer, logger);
+    const { probation } = selection;
 
     if (ctx.sessionId) {
       if (probation.length > 0) {
@@ -460,9 +468,7 @@ export async function handleBeforePromptBuild(
         clearInjectedProbationIds(ctx.sessionId, workspaceDir);
       }
     }
-    if (active.length > 0 || probation.length > 0) {
-      evolutionPrinciplesContent = formatEvolutionPrinciples(active, probation);
-    }
+    evolutionPrinciplesContent = selection.content;
   } catch (e) {
     if (ctx.sessionId) {
       clearInjectedProbationIds(ctx.sessionId, workspaceDir);
@@ -475,8 +481,10 @@ export async function handleBeforePromptBuild(
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
-    const reader = new PromptActivationReader(wctx.workspaceDir, { logger });
-    const v2Result = await reader.readActivatedPrinciples();
+    const reader = sharedActivePrinciplePrompt ? undefined : new PromptActivationReader(wctx.workspaceDir, { logger });
+    const v2Result = sharedActivePrinciplePrompt
+      ? { principles: [], warnings: sharedActivePrinciplePrompt.warnings, source: 'runtime_v2' as const }
+      : await reader!.readActivatedPrinciples();
 
     if (v2Result.warnings.length > 0) {
       logger?.info?.(`[PD:RuntimeV2] Activation read warnings: ${v2Result.warnings.join('; ')}`);
@@ -498,7 +506,10 @@ export async function handleBeforePromptBuild(
 
     dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
-    if (dedupedV2.length > 0) {
+    if (sharedActivePrinciplePrompt) {
+      runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
+      for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
+    } else if (dedupedV2.length > 0) {
       const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
       if (truncated) {
         logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
@@ -512,24 +523,32 @@ export async function handleBeforePromptBuild(
     // ── Emit structured observability event ──
     try {
       const eventLog = wctx.eventLog;
+      const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
+        && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         principleIds: [...runtimeV2PrincipleIds],
-        activationIds: dedupedV2.map((p) => p.activationId),
-        artifactIds: dedupedV2.map((p) => p.artifactId),
+        activationIds: sharedActivePrinciplePrompt?.activationIds ?? dedupedV2.map((p) => p.activationId),
+        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? dedupedV2.map((p) => p.artifactId),
         injectedCount: runtimeV2PrincipleIds.size,
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,
         budget: RUNTIME_V2_PRINCIPLE_BUDGET,
         ...(runtimeV2PrincipleIds.size === 0
           ? {
-              skipReason: v2Result.principles.length === 0
+              skipReason: sharedActivePrinciplePrompt
+                ? allSharedPrinciplesExcluded
+                  ? 'all_deduped_against_legacy'
+                  : 'no_validated_activations'
+                : v2Result.principles.length === 0
                 ? 'no_validated_activations'
                 : 'all_deduped_against_legacy',
-              nextAction: v2Result.principles.length === 0
-                ? 'check activations table for prompt channel rows with validated artifacts'
-                : 'legacy evolution reducer already contains these principle IDs',
+              nextAction: allSharedPrinciplesExcluded
+                ? 'legacy evolution reducer already contains these principle IDs'
+                : v2Result.principles.length === 0
+                  ? 'check activations table for prompt channel rows with validated artifacts'
+                  : 'legacy evolution reducer already contains these principle IDs',
             }
           : {}),
       });
@@ -583,7 +602,8 @@ export async function handleBeforePromptBuild(
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
-    const directiveText = renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
+    const directiveText = sharedActivePrinciplePrompt?.additionalContext
+      ?? renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
     prependSystemContext += directiveText;
   }
 

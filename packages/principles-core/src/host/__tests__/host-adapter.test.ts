@@ -116,5 +116,19 @@ describe('HostAdapter type guards (ADR-0020)', () => {
     ])('rejects %p', (value) => {
       expect(isHostEventResult(value)).toBe(false);
     });
+
+    it('accepts valid warnings and metadata', () => {
+      expect(isHostEventResult({ decision: 'allow', source: 'x', warnings: ['w1'], metadata: { k: 1 } })).toBe(true);
+    });
+
+    it.each([
+      [{ decision: 'allow', source: 'x', warnings: 'not-array' }],
+      [{ decision: 'allow', source: 'x', warnings: [123] }],
+      [{ decision: 'allow', source: 'x', metadata: 'not-object' }],
+      [{ decision: 'allow', source: 'x', metadata: null }],
+      [{ decision: 'allow', source: 'x', metadata: [] }],
+    ])('rejects malformed optional fields %p', (value) => {
+      expect(isHostEventResult(value)).toBe(false);
+    });
   });
 });

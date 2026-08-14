@@ -6,6 +6,8 @@
 > **Context**: MVP-First (ADR-0014), Codex CLI adapter scoping (PRI-278~282, PRI-521, PRI-522)
 > **Supersedes**: None (refines ADR-0014 §2.3 activation channels)
 > **Related SPEC**: [`docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`](../architecture/CODEX_CLI_ADAPTER_SPEC.md) v4.1
+> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10
+> **Active reading rule**: Where §10 conflicts with earlier text, §10 controls. In particular, §§2.2-2.4, Alternative E, the "OpenClaw stays unchanged" consequence in §5, the old scope statement in §7, and the OpenClaw/shared-runtime items in §8 are retained only as 2026-08-11 decision history, not current implementation instructions.
 
 ## 1. Context
 
@@ -38,11 +40,11 @@ packages/codex-adapter/
 
 The package depends on `@principles/core` for the `HostAdapter` interface and shared types. It does NOT depend on `packages/openclaw-plugin/`.
 
-### 2.2 `HostAdapter` interface in `@principles/core`
+### 2.2 `HostAdapter` interface in `@principles/core` (historical; superseded by §10)
 
 Define a pure-types `HostAdapter` interface in `packages/principles-core/src/host/host-adapter.ts` (no I/O — pure logic boundary per ADR-0005). Only `CodexHooksHostAdapter` implements it in MVP. An `OpenClawHostAdapter` implementation is **deferred to Post-MVP** — OpenClaw keeps its direct `api.on()` registration unchanged, eliminating the largest regression risk on the only production-stable activation path.
 
-### 2.3 Multi-host installer/uninstaller abstraction
+### 2.3 Multi-host installer/uninstaller abstraction (historical installation facts; superseded by §10)
 
 **Problem**: `packages/create-principles-disciple/src/installer.ts` and `uninstaller.ts` are hardcoded to OpenClaw:
 - `getOpenClawDir()`, `getPluginExtDir()` assume OpenClaw's `~/.openclaw/extensions/` layout
@@ -98,7 +100,7 @@ Each host gets a concrete implementation:
 - Existing `cleanupOpenClawConfig()` becomes `OpenClawHostInstaller.uninstall()` config cleanup
 - Zero behavior change — pure refactor to fit the `HostInstaller` interface
 
-### 2.4 Feature flag: `host.codex`
+### 2.4 Feature flag: `host.codex` (historical flag contract; superseded by §10.5)
 
 Register `host.codex` in `DEFAULT_FEATURE_FLAGS`:
 - `category: 'quiet'` (per ADR-0014 §2.5; unsolicited new code defaults to MVP-Quiet)
@@ -144,7 +146,7 @@ Codex has no OpenClaw slash-command equivalent. Owner operates PD via `pd-cli` w
 **Rejected**: The two hosts have fundamentally different extension models (in-process JS vs. out-of-process stdin/stdout JSON). Mixing them creates a god-package and makes it impossible to ship OpenClaw without Codex (or vice versa). Separate packages allow independent versioning and testing.
 
 ### E. Refactor OpenClaw to use `HostAdapter` in MVP (shadow mode)
-**Rejected for MVP**: Eliminating regression risk on the only production-stable activation path is more valuable than DRY purity. OpenClaw refactor is tracked in `docs/plans/post-mvp-conditional-roadmap.md` with explicit restart conditions.
+**Historical outcome (2026-08-11; superseded by §10)**: This was rejected for MVP at the time. PRI-523's explicit Owner exception now authorizes the narrower shared-runtime cutover and defines its required flag/rollback contract in §10.5.
 
 ### F. Single global installer that auto-detects host
 **Rejected as default behavior**: Owner must explicitly choose which hosts to install PD for. Auto-detection is used only to **suggest** defaults in the prompt ("Detected Codex CLI at ~/.codex/. Install for Codex? (Y/n)"). Silent dual-install without consent violates the confirm-first principle.
@@ -167,7 +169,7 @@ Codex has no OpenClaw slash-command equivalent. Owner operates PD via `pd-cli` w
 
 ### Positive
 - New host = one `HostAdapter` impl + one `HostInstaller` impl + registration + tests. Business logic shared via `@principles/core`.
-- OpenClaw path stays unchanged in MVP — zero regression risk on production-stable path.
+- OpenClaw path stays unchanged in MVP — zero regression risk on production-stable path. **Historical 2026-08-11 consequence; superseded by the gated cutover in §10.2/§10.5.**
 - Codex has **equivalent gate coverage** to OpenClaw for function tools (Bash, apply_patch, MCP tools all trigger PreToolUse per `dispatcher.rs:61-63`).
 - Multi-host installer/uninstaller makes PD a first-class dual-host citizen without coupling the two hosts' code.
 - `packages/codex-adapter/` is independently versionable, testable, and can be published as a separate npm package if needed.
@@ -192,17 +194,17 @@ See SPEC §7 for the full risk table including `suppressOutput` unimplemented, `
 
 ## 7. Compliance
 
-- **ADR-0014**: Feature flag `host.codex` registered as `quiet`, default off. No MVP-Core expansion. PRI-279 + PRI-521 deferred per §2.4-§2.6.
+- **ADR-0014 (historical 2026-08-11 assessment; superseded by §10)**: Feature flag `host.codex` registered as `quiet`, default off. No MVP-Core expansion. PRI-279 + PRI-521 deferred per §2.4-§2.6.
 - **ADR-0005 (Core vs Plugin boundary)**: `HostAdapter` interface (pure types) in `@principles/core`; `CodexHooksHostAdapter` (I/O) in `packages/codex-adapter/`.
 - **rc-1 to rc-9**: codec treats stdin as `unknown`, uses type guards (no `as`), fails loud on missing fields, validates array elements, uses `Object.hasOwn`, maintains lineage consistency, distinguishes loop states, uses bounded serialization, emits reasons on all degradation paths.
 - **cli-1 to cli-7**: `pd health --host codex` (PRI-522) follows strict JSON, exit-stops, flag-wiring, dry-run/confirm mutex, failure-no-mutation, output-next-action, test-wiring.
 - **Error Handbook**: No new ERR entry needed for this ADR (documentation-only deliverable). PRI-280 implementation will reference ERR-001 (treat-as-unknown), ERR-005 (as-bypass), ERR-009 (fail-loud-missing), ERR-015/018/019 (loop state freshness) per the Runtime Contract Rules.
 
-## 8. Post-MVP Debt
+## 8. Post-MVP Debt (historical 2026-08-11 classification; OpenClaw/shared-runtime items superseded by §10)
 
 Tracked in [`docs/plans/post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md):
-- **OpenClawHostAdapter refactor**: OpenClaw's direct `api.on()` registration migrates to `HostAdapter` interface. Restart condition: MVP ships + 30 days stable + owner signals second-host value realized.
-- **`abstraction_layer_v1` flag**: registered when OpenClaw refactor starts.
+- **OpenClawHostAdapter refactor (historical)**: the old external-signal restart condition is superseded only for PRI-523's narrow shared-runtime cutover; §10 is the active scope.
+- **`abstraction_layer_v1` flag (historical placeholder)**: §10.5 now requires its registration and defines exact off/on behavior; this bullet is not an instruction to wait for Post-MVP.
 - **PRI-279 (CodexCliRuntimeAdapter)**: outbound internalization on Codex. Restart condition: owner feedback requires diagnostician/dreamer/evaluator running on Codex directly.
 - **PRI-521 (long-running service replacement)**: 4 services migrated to Codex-compatible trigger model. Restarts with PRI-279.
 
@@ -221,3 +223,130 @@ Tracked in [`docs/plans/post-mvp-conditional-roadmap.md`](../plans/post-mvp-cond
 - `packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts` — `DEFAULT_FEATURE_FLAGS`
 - `packages/create-principles-disciple/src/installer.ts` — existing OpenClaw-only installer
 - `packages/create-principles-disciple/src/uninstaller.ts` — existing OpenClaw-only uninstaller
+
+---
+
+## 10. Amendment (2026-08-13): Owner Exception — Shared Host Runtime and Codex Desktop Plugin
+
+> **Status of amendment**: Accepted (explicit maintainer-approved `mvp-exception`)
+> **Authority**: [PRI-523](https://linear.app/principles-disciple/issue/PRI-523), Owner decision recorded 2026-08-12/13: "revise ADR, then share runtime"
+> **Supersedes within this ADR**: §2.2's Codex-only implementation, §2.3's cache/global-hooks installation preference, §2.4's `host.codex` category/default and instruction not to register `abstraction_layer_v1`, Alternative E's MVP rejection, §5's statement that OpenClaw stays unchanged, §7's "No MVP-Core expansion", and the OpenClaw/shared-runtime items in §8. Those historical passages are retained as decision history and are not active implementation instructions after this amendment.
+
+### 10.1 Why this is an exception, not satisfaction of the old restart conditions
+
+The external-signal restart conditions previously attached to `OpenClawHostAdapter` were not met. The Owner explicitly approved a narrow exception after the implemented Codex package proved to be only a codec/install skeleton: its `invokeBusinessLogic()` currently always allows, while the working OpenClaw plugin already owns the I/O orchestration required by the same three user-visible paths. Keeping two orchestration implementations would make the new host appear installed without delivering PD behavior.
+
+This amendment authorizes only the minimum reuse required to make the already-approved Codex host real. It does not reopen general multi-host architecture work.
+
+### 10.2 Decision: shared I/O orchestration with thin host adapters
+
+Create `@principles/host-runtime` as a shared **I/O orchestration** package. It may compose the existing pure domain APIs from `@principles/core`, workspace persistence, feature flags, logging, and the three approved host-triggered behavior paths. It does not move I/O into `packages/principles-core/src/`.
+
+Both host packages become thin protocol adapters:
+
+- `packages/openclaw-plugin/` translates OpenClaw hook payloads/results and calls `@principles/host-runtime`.
+- `packages/codex-adapter/` validates/encodes Codex hook JSON and calls the same runtime.
+- Host-specific installation, trust, protocol codecs, and result shapes remain in their host packages; business orchestration is not copied between them.
+
+The exception exposes exactly three MVP-Core behavior paths:
+
+1. **Prompt injection** — provide Owner-approved active principles to the host prompt context.
+2. **Before-tool RuleHost enforcement** — evaluate a tool call and return the host-specific allow/deny result.
+3. **After-tool pain/evidence capture** — record owner-relevant behavioral evidence and its lineage in the authoritative workspace.
+
+This is a host-surface refactor of existing MVP-Core behavior, not a fourth activation channel. `defer_archive` remains an owner-reviewed activation outcome in the domain, but it does not require a separate host hook path.
+
+### 10.2.1 Decision mapping under the shared protocol (clarified 2026-08-14)
+
+`HostEventResult.decision` in `@principles/core` has exactly four legal values: `'allow' | 'deny' | 'modify' | 'observe'` (see `host-adapter.ts:113`, `isHostDecision`). The earlier PRI-523 plan text referenced four OpenClaw-era RuleHost decisions (`allow` / `block` / `requireApproval` / `auto_correct`) and asked for a per-decision Codex mapping. Under the shared runtime that mapping is no longer applicable, because `production-rulehost-gate.ts` collapses RuleCode evaluation into the new protocol before any host codec sees it:
+
+- RuleHost `block` → shared runtime `deny` (with owner-visible reason).
+- RuleHost `allow` / no matching activation → shared runtime `allow`.
+- `requireApproval` and `auto_correct` are OpenClaw-private legacy decisions emitted by the old `gate.ts` RuleHost path. The shared runtime does not produce them, so Codex never receives them and no host-level mapping is required.
+
+Codex therefore encodes only `allow` / `deny` / `modify(additionalContext)` / `observe`. The `modify` path is used exclusively for `before_prompt_build` additional-context injection, not for tool-input rewriting (Codex 0.147 has no `modifiedInput` field that RuleCode can populate). This is a protocol convergence, not a feature loss: OpenClaw keeps its legacy `requireApproval` / `auto_correct` handling intact through `gate.ts`, and Codex gets equivalent gate coverage through `deny` + reason.
+
+### 10.3 Explicitly still deferred
+
+This exception does not authorize:
+
+- outbound host runtimes that make PD drive Codex or another agent;
+- long-running service replacement (PRI-521), schedulers, background daemons, or cross-session continuation;
+- general memory, tool repair/retry, autonomous value decisions, or task execution;
+- advanced Skill/MCP parity for ChatGPT Web/Mobile or other hosts;
+- public-directory publication until OpenAI documents a submission type that accepts lifecycle-hook plugins.
+
+### 10.4 Supported Codex distribution facts
+
+For the pinned implementation baseline, Codex 0.147 supports plugin-bundled hooks from the default `hooks/hooks.json` path or a manifest-declared hooks path. Hook commands may resolve packaged code with `PLUGIN_ROOT` and plugin-private data with `PLUGIN_DATA`; hooks remain subject to the Codex hook-trust flow.
+
+The first supported distribution channels are:
+
+1. **Repository/personal Marketplace testing** — install the plugin from its repository source into Codex and validate it in Codex CLI/Desktop.
+2. **Workspace publication** — after that testing passes, a Workspace admin publishes the local plugin to selected Workspace roles. This is organization-internal distribution, not the universal OpenAI public directory.
+
+Both routes require Workspace-scoped use in Codex CLI/Desktop after the Owner reviews and trusts the hooks.
+
+PRI-523 declares Node.js `>=20` as the plugin support baseline; this is a target contract, not evidence that current CI already validates compatibility. Before Node compatibility is claimed, installed-bundle, `codex-adapter`, and `host-runtime` package tests must be added and pass on both Node 20 and Node 22. Neither Marketplace installation nor Workspace publication installs Node. Setup and health validation must fail loud before hook activation when `node` is missing or reports a version below 20, with the detected state, a structured reason, and the next action to install/upgrade Node and retry.
+
+Do not document `~/.codex/plugins/cache/...` as an installation target or direct mutation of `~/.codex/hooks.json` as the preferred plugin path. Those are obsolete implementation assumptions from §2.3. The bundled default is `hooks/hooks.json` unless the manifest declares another path.
+
+OpenAI's current public submission documentation lists Skills and MCP servers, but does not confirm lifecycle-hook plugins as a public-directory submission type. Repository Marketplace distribution is supported now; public-directory submission remains gated and must not be advertised as available.
+
+`PLUGIN_DATA` is plugin-private auxiliary storage, not the authority for PD principles, evidence, or feature flags. Per [`DATA_ARCHITECTURE.md`](../architecture/DATA_ARCHITECTURE.md), the current Workspace has two authoritative physical stores that both hosts must share: `{workspace}/.pd/config.yaml` plus `{workspace}/.pd/state.db` for configuration and Runtime V2 SQLite state, and `{workspace}/.state/principle_training_state.json` for the Principle Tree ledger. Existing `.state/` runtime/host artifacts, including trajectory and session evidence, remain Workspace-scoped rather than moving into `PLUGIN_DATA`. `PLUGIN_ROOT` identifies packaged code/assets.
+
+### 10.5 Observable acceptance and rollback
+
+Acceptance is exact and Owner-visible: after installing PRI-523 from the repository Marketplace into a Workspace and trusting its hooks, (a) a prompt receives the same active-principle context as OpenClaw, (b) a known RuleHost fixture denies the same before-tool call in both hosts, and (c) a completed tool call creates pain/evidence with Codex source lineage in that same Workspace; host-runtime contract tests and one OpenClaw/Codex parity E2E must prove all three.
+
+Fresh setup and migration must persist both entries explicitly under `.pd/config.yaml.features` rather than relying only on registry defaults:
+
+```yaml
+features:
+  host.codex:
+    category: core
+    enabled: true
+  abstraction_layer_v1:
+    category: quiet
+    enabled: false
+```
+
+Registry metadata retains `host.codex.since: '2026-08-11'` and registers `abstraction_layer_v1.since: '2026-08-13'`. Loader/migration tests must cover fresh config, migrated config, explicit `host.codex.enabled: false`, and explicit `abstraction_layer_v1.enabled: false`; each operator rollback must select the neutral/legacy route and emit its observable reason. Installed-bundle acceptance must also execute from a `PLUGIN_ROOT` path containing spaces, proving that every hook command quotes the path correctly.
+
+Rollback is also exact: setting `host.codex.enabled: false` in the Workspace `.pd/config.yaml` makes every Codex hook return the host's neutral allow/empty result, records the structured skip reason, and leaves OpenClaw plus both Workspace authority paths unchanged.
+
+### 10.5.1 Cooldown behavior under per-invocation host processes (clarified 2026-08-14)
+
+`production-pain-evidence.ts` keeps an in-memory `cooldowns` Map keyed by `workspaceDir:sessionId:failureSource:errorHash` with a 15-minute window. In OpenClaw's long-running process this Map persists across hook calls. Codex spawns a fresh Node process per hook invocation (`spawnSync` in `pd-hook.production.test.ts` proves this), so the Map is empty on every entry and the in-memory cooldown is effectively inactive on the Codex host.
+
+This is accepted fail-open behavior, not a defect, because two stronger guards remain in force:
+
+1. **`canonical_pain_id` idempotency** — `production-pain-evidence.ts:261` derives a stable hash from `workspace + session + toolName + errorHash` and queries `pain_signals` before insert. A duplicate canonical id sets `duplicate = true` and the pain record is not re-created, even when the in-memory cooldown has expired (or was never populated).
+2. **Conservative collection direction** — pain capture is fail-open by design (prefer recording extra evidence to silently dropping it). Trajectory rows may be written more than once for the same errorHash within 15 minutes on Codex, but this does not produce duplicate pain records, duplicate diagnostic tasks, or owner-visible noise.
+
+Persisting cooldown to SQLite was considered and rejected: it would add I/O on the hot pain path, diverge from OpenClaw's in-memory cooldown (creating a dual-track state), and contradict the shared-runtime goal of one orchestration path. If future evidence shows trajectory volume becoming a problem on Codex, a follow-up issue may add a bounded trajectory dedup query; that is not required for MVP acceptance.
+
+This amendment changes the active flag contract unambiguously:
+
+- `host.codex` remains the existing MVP-Core kill switch, currently default-on after PRI-282 validation; §2.4's historical `quiet`/default-off instruction is superseded. PRI-523 does not create a second Codex flag.
+- `abstraction_layer_v1` is now required for the OpenClaw cutover: register it as `category: quiet`, `enabled: false`, `since: '2026-08-13'`. `false` routes OpenClaw through its legacy orchestration; `true` is allowed only for controlled parity validation and routes OpenClaw through `@principles/host-runtime`. It may be promoted to `category: core`, `enabled: true` only after both OpenClaw parity and Codex installed-bundle E2E acceptance in this section pass. Setting it back to `false` is the no-migration rollback.
+
+Neither flag contract counts as implemented until the production `.pd/config.yaml` loader and tests exercise it. The legacy OpenClaw route must not be removed in PRI-523.
+
+### 10.6 Emotional-value review
+
+This exception reduces **失控感** and **不信任感**: installation alone is no longer mistaken for working governance, hook trust is explicit, and the three behavior paths have observable parity evidence. It creates **掌控感** and **安心感** because the Owner keeps approval authority, one Workspace remains the source of truth, and `host.codex` provides an immediate, non-destructive kill switch. Sharing the runtime also reduces **疲惫感** by preventing the same correction from drifting across host-specific implementations, without adding new dashboards or attention noise.
+
+### 10.7 Error-pattern guard
+
+- **ERR-002 / EP-03**: flag-off and degraded hook paths must record a reason; neutral output must never become silent success.
+- **ERR-040 / EP-06**: repository Marketplace contents and `hooks/hooks.json` are the distributable source of truth; tests must exercise the installed bundle, not only source files.
+- **ERR-012 / EP-10**: implementation must compare against the current branch/base and keep the refactor diff free of stale or unrelated host changes.
+
+Runtime-contract rules `rc-1` through `rc-9` apply to the future codec/runtime implementation. CLI rules `cli-1` through `cli-7` are N/A to this documentation amendment and become applicable only if PRI-523 changes operator commands.
+
+### 10.8 References
+
+- [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) — authoritative MVP exception and acceptance contract
+- [`CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`](../architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md) — distribution draft, still gated for public submission
+- [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md) — exception/hold split

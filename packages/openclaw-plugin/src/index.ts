@@ -20,9 +20,9 @@ export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccess
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
-import { handleBeforePromptBuild } from './hooks/prompt.js';
-import { handleBeforeToolCall } from './hooks/gate.js';
-import { handleAfterToolCall } from './hooks/pain.js';
+import { handleBeforePromptBuild, selectLegacyPrinciplesForPrompt, type LegacyPrinciplePromptSelection } from './hooks/prompt.js';
+import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
+import { handleAfterToolCall, handleSharedPainEvidenceResult, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
@@ -54,7 +54,8 @@ import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { checkSurfaceGuard, guardHook, guardService } from '@principles/core/runtime-v2';
+import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
+import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
@@ -168,6 +169,24 @@ export function shouldStartInternalizationAutoConsumer(
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
+export function shouldUseSharedHostRuntime(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): { enabled: boolean; source: string; rollbackReason: string | null } {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'abstraction_layer_v1', logger);
+  if (flag.enabled) return { enabled: true, source: flag.source, rollbackReason: null };
+  return {
+    enabled: false,
+    source: flag.source,
+    rollbackReason: JSON.stringify({
+      reason: 'abstraction_layer_v1_disabled',
+      nextAction: 'set features.abstraction_layer_v1.enabled=true in .pd/config.yaml for controlled shared-runtime parity validation',
+      route: 'openclaw_legacy',
+      flagSource: flag.source,
+    }),
+  };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -218,6 +237,26 @@ const plugin = {
     }, 1000);
     healthCheckTimer.unref(); // Don't keep process alive for health check
 
+    // Cache the shared-runtime gate per workspace so the hot-path tool hooks
+    // (before_tool_call / after_tool_call) don't re-read the feature flag on
+    // every call, and so the disabled-path rollback log is emitted once per
+    // workspace. PD loads feature flags at startup, so a config change requires
+    // a gateway restart to take effect.
+    const runtimeGateCache = new Map<string, ReturnType<typeof shouldUseSharedHostRuntime>>();
+    const loggedRollbackWorkspaces = new Set<string>();
+    const runtimeGateFor = (workspaceDir: string): ReturnType<typeof shouldUseSharedHostRuntime> => {
+      let gate = runtimeGateCache.get(workspaceDir);
+      if (!gate) {
+        gate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
+        runtimeGateCache.set(workspaceDir, gate);
+      }
+      if (!gate.enabled && !loggedRollbackWorkspaces.has(workspaceDir)) {
+        loggedRollbackWorkspaces.add(workspaceDir);
+        api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${gate.rollbackReason}`);
+      }
+      return gate;
+    };
+
     // ── MVP Surface Guard (PRI-289): Verify surface classification ──
     const surfaceGuard = checkSurfaceGuard();
     if (!surfaceGuard.passed) {
@@ -232,6 +271,60 @@ const plugin = {
     }
 
     const language = (api.pluginConfig?.language as string) || 'en';
+    const preparedLegacyPromptSelections = new WeakMap<PluginHookBeforePromptBuildEvent, LegacyPrinciplePromptSelection>();
+    const sharedHostRuntime = createOpenClawHostRuntime({
+      promptExcludePrincipleIds: (event, context) => {
+        try {
+          const reducer = WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }).evolutionReducer;
+          const selection = selectLegacyPrinciplesForPrompt(context.workspaceDir ?? '', reducer, api.logger);
+          preparedLegacyPromptSelections.set(event, selection);
+          return selection.selectedIds;
+        } catch (error) {
+          api.logger.info(`[PD:RuntimeV2] Legacy principle dedup unavailable; continuing with shared active principles: ${String(error)}`);
+          return new Set<string>();
+        }
+      },
+      beforePromptBuild: async (event, context, activePrinciplePrompt) => {
+        const prepared = preparedLegacyPromptSelections.get(event);
+        preparedLegacyPromptSelections.delete(event);
+        return handleBeforePromptBuild(event, {
+          ...context,
+          api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
+        }, activePrinciplePrompt, prepared);
+      },
+      ruleContextProvider: (_event, context, request) => buildRuleContextIfEnabled(
+        WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
+        request.targetPath,
+        context.sessionId,
+        api.logger,
+      ),
+      ruleInputEnrichmentProvider: (event, context) => buildOpenClawRuleInputEnrichment(event, context.workspaceDir ?? '', context.sessionId),
+      onBeforeToolResult: (event, context, result) => {
+        if (!context.workspaceDir) {
+          api.logger.warn('[PD_GATE:RULE_HOST] shared result mapping skipped: workspaceDir missing; nextAction=inspect OpenClaw hook context');
+          return;
+        }
+        handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir, logger: api.logger }, result);
+        const ruleDecision = result.metadata?.['ruleDecision'];
+        if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
+          return handleBeforeToolCall(event, {
+            ...context,
+            workspaceDir: context.workspaceDir,
+            pluginConfig: api.pluginConfig ?? {},
+            logger: api.logger,
+          });
+        }
+      },
+      painEnrichmentProvider: (event, context) => prepareOrdinaryAfterToolCallForSharedRuntime(event, {
+        ...context,
+        workspaceDir: context.workspaceDir ?? '',
+        pluginConfig: api.pluginConfig ?? {},
+      }),
+      onAfterToolResult: (event, context, result) => handleSharedPainEvidenceResult(event, {
+        ...context,
+        workspaceDir: context.workspaceDir ?? '',
+      }, result),
+    });
 
     // ── Hook: Prompt Building ──
     api.on(
@@ -311,7 +404,11 @@ const plugin = {
             }
           }
 
-          const result = await handleBeforePromptBuild(event, { ...ctx, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'], workspaceDir });
+          const hookContext = { ...ctx, workspaceDir };
+          const runtimeGate = runtimeGateFor(workspaceDir);
+          const result = runtimeGate.enabled
+            ? await sharedHostRuntime.dispatchBeforePromptBuild(event, hookContext)
+            : await handleBeforePromptBuild(event, { ...hookContext, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] });
           
           // Record success
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
@@ -334,7 +431,7 @@ const plugin = {
     // ── Hook: Security Gate ──
     api.on(
       'before_tool_call',
-      guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
+      guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void | Promise<PluginHookBeforeToolCallResult | void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_tool_call');
         if (!wsResult.ok) {
           api.logger.error(
@@ -352,13 +449,30 @@ const plugin = {
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
-          const result = handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
-
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-            hook: 'before_tool_call'
-          }, { flushImmediately: true });
-
-          return result;
+          const hookContext = { ...ctx, workspaceDir, pluginConfig, logger };
+          const runtimeGate = runtimeGateFor(workspaceDir);
+          if (!runtimeGate.enabled) {
+            const result = handleBeforeToolCall(event, hookContext);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call'
+            }, { flushImmediately: true });
+            return result;
+          }
+          return sharedHostRuntime.dispatchBeforeToolCall(event, hookContext).then((result) => {
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call'
+            }, { flushImmediately: true });
+            return result;
+          }).catch((err: unknown) => {
+            const errorPreview = err instanceof Error
+              ? err.message.slice(0, 500)
+              : safeStringifyPreview(err).slice(0, 500);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'before_tool_call', error: errorPreview
+            }, { flushImmediately: true });
+            api.logger.error(`[PD] Error in before_tool_call: ${errorPreview}`);
+            return undefined;
+          });
         } catch (err) {
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call',
@@ -375,7 +489,7 @@ const plugin = {
     // 10s gives 2x headroom over busy_timeout. fail-open means agent is unaffected.
     api.on(
       'after_tool_call',
-      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void | Promise<void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_tool_call');
         if (!wsResult.ok) {
           api.logger.error(
@@ -393,11 +507,35 @@ const plugin = {
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
-          handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
-
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-            hook: 'after_tool_call'
-          }, { flushImmediately: true });
+          const hookContext = { ...ctx, workspaceDir, pluginConfig };
+          const runtimeGate = runtimeGateFor(workspaceDir);
+          if (!runtimeGate.enabled) {
+            handleAfterToolCall(event, hookContext, api);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call'
+            }, { flushImmediately: true });
+            return;
+          }
+          // Manual Owner pain remains an OpenClaw-owned path; PRI-523 shares
+          // only ordinary after-tool classification/admission/evidence.
+          if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
+            handleAfterToolCall(event, hookContext, api);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
+            return;
+          }
+          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then(() => {
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call'
+            }, { flushImmediately: true });
+          }).catch((err: unknown) => {
+            const errorPreview = err instanceof Error
+              ? err.message.slice(0, 500)
+              : safeStringifyPreview(err).slice(0, 500);
+            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+              hook: 'after_tool_call', error: errorPreview
+            }, { flushImmediately: true });
+            api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${errorPreview}`);
+          });
         } catch (err) {
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',

@@ -228,6 +228,7 @@ export function handleFrictionTrackingForFailure(
   workspaceDir: string,
   config: { get: (key: string) => unknown },
   wctx: WorkspaceContext,
+  options: { recordTrajectory?: boolean } = {},
 ): SessionState {
   const deltaF = (config.get('scores.tool_failure_friction') as number) || 30;
   const updatedState = trackFriction(sessionId, deltaF, observation.errorHash, workspaceDir, { source: outcome.failureSource });
@@ -251,7 +252,7 @@ export function handleFrictionTrackingForFailure(
     gfiAfter: updatedState.currentGfi,
   });
 
-  wctx.trajectory?.recordToolCall?.({
+  if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
     sessionId,
     toolName: event.toolName,
     outcome: 'failure',
@@ -281,6 +282,7 @@ export function handleFrictionTrackingForSuccess(
   gfiBefore: number,
   workspaceDir: string,
   wctx: WorkspaceContext,
+  options: { recordTrajectory?: boolean } = {},
 ): SessionState {
   const session = getSession(sessionId);
   const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
@@ -305,7 +307,7 @@ export function handleFrictionTrackingForSuccess(
     reason: 'tool_success',
   });
 
-  wctx.trajectory?.recordToolCall?.({
+  if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
     sessionId,
     toolName: event.toolName,
     outcome: 'success',

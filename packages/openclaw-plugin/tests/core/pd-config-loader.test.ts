@@ -302,6 +302,18 @@ describe('Feature flag loading from .pd/config.yaml', () => {
       expect(result.source).toBe('user_config');
     } finally { rmTmpDir(tmp); }
   });
+
+  it('honors explicit abstraction_layer_v1=false as the OpenClaw legacy rollback', () => {
+    const tmp = mkTmpDir();
+    const parsed = yaml.load(makeValidConfigWithObserverDisabled()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    features.abstraction_layer_v1 = { category: 'quiet', enabled: false };
+    writeConfig(tmp, yaml.dump(parsed));
+    try {
+      const result = loadFeatureFlagFromConfig(tmp, 'abstraction_layer_v1');
+      expect(result).toEqual({ enabled: false, source: 'user_config' });
+    } finally { rmTmpDir(tmp); }
+  });
 });
 
 // ── Plugin config load ───────────────────────────────────────────────────────

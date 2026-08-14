@@ -1,107 +1,84 @@
-# ChatGPT/Codex Plugin Marketplace SPEC (DRAFT v0.1)
+# Codex Repository Marketplace Plugin SPEC v0.2
 
-> **Status**: DRAFT — for owner review before promotion to v1.0
+> **Status**: **Accepted** for repository/personal Marketplace testing, organization-internal Workspace publication, and local shared-runtime delivery (all sections except §9)
+> **Draft/Hold boundary**: §9 universal public-directory submission only
 > **Created**: 2026-08-12
-> **Depends on**: ADR-0020 (Codex CLI Host Adapter), CODEX_CLI_ADAPTER_SPEC v4.1
-> **Scope**: Post-MVP — not blocking MVP launch
+> **Amended**: 2026-08-13
+> **Authority**: [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) (`mvp-exception`), ADR-0020 §10
+> **Baseline**: Codex 0.147
+> **Depends on**: ADR-0020; `CODEX_CLI_ADAPTER_SPEC.md` for the validated hook codec contract
 
-## 1. Motivation
+## 1. Decision and scope
 
-PD 当前仅通过 `create-principles-disciple` 安装器以 CLI 方式工作（编辑 `~/.codex/hooks.json`）。
-ChatGPT/Codex 插件市场提供了一键安装、自动注册 hooks、跨平台分发的可能性。
+PD will first ship as a Codex plugin installed from a repository/personal Marketplace and used in a selected Codex CLI/Desktop Workspace. The plugin uses trusted lifecycle hooks to expose the same three MVP-Core host behaviors as OpenClaw:
 
-**目标**: 将 PD 打包为 ChatGPT/Codex 插件市场插件，实现：
-- 一键安装（无需 CLI 安装器）
-- 自动注册 hooks（用户审查信任后）
-- 跨平台（Codex CLI + ChatGPT 桌面应用 Codex 模式）
-- 市场分发与版本更新
+1. prompt injection;
+2. before-tool RuleHost enforcement;
+3. after-tool pain/evidence capture.
 
-## 2. Platform Coverage
+The plugin does not add a new activation channel. It packages the Codex protocol adapter and calls the shared `@principles/host-runtime` orchestration approved by ADR-0020 §10.
 
-| 平台 | Skills | Hooks | MCP Server | PD 覆盖 |
-|------|--------|-------|------------|---------|
-| ChatGPT Web | ✅ | ❌ | ✅ | Skills only（thinking-OS 指导） |
-| ChatGPT Desktop | ✅ | ✅ (Codex mode) | ✅ | Full（hooks + skills） |
-| ChatGPT Mobile | ✅ | ❌ | ✅ | Skills only |
-| Codex CLI | ✅ | ✅ | ✅ | Full |
-| Codex Desktop | ✅ | ✅ | ✅ | Full |
-| IDE Extension | ❌ | ❌ | ❌ | 不支持 |
+This accepted local-delivery scope intentionally does **not** claim universal public-directory availability, ChatGPT Web/Mobile hook support, IDE parity, automatic public updates, or public submission acceptance. OpenAI's current public submission documentation lists Skills and MCP servers; it does not confirm lifecycle-hook plugins as a submission type. Only that universal public-directory portion remains Draft/Hold in §9. The historical `.draft.md` filename is retained to avoid link churn; the status block and per-section status control.
 
-**关键限制**: Hooks 仅在 Codex 环境中工作（CLI + 桌面应用 Codex 模式）。
-ChatGPT Web/Mobile 仅支持 Skills 和 MCP Server。
+## 2. Verified Codex 0.147 platform contract
 
-## 3. Plugin Structure
+| Capability | Status used by this SPEC | Constraint |
+|---|---|---|
+| Plugin-bundled lifecycle hooks | Verified | Codex loads default `hooks/hooks.json` or the manifest-declared hooks path |
+| `PLUGIN_ROOT` | Verified | Location of the installed plugin's code/assets; use it in hook commands |
+| `PLUGIN_DATA` | Verified | Plugin-private writable auxiliary storage; not PD Workspace state authority |
+| Hook trust | Required | Owner must review/trust hooks before relying on their behavior |
+| Repository/personal Marketplace | Supported first route | Test/install the local plugin source in Codex CLI/Desktop |
+| Workspace publication | Supported second route after testing | Workspace admin publishes the local plugin to selected roles; organization-internal only |
+| Public directory lifecycle-hook submission | Unverified | Current public submission types mention Skills/MCP, not lifecycle hooks |
 
-```
-principles-disciple-plugin/
+When this document conflicts with a later Codex release, implementation must pin/re-verify the host version before changing product claims.
+
+## 3. Package layout
+
+The repository Marketplace entry points to a plugin bundle with this minimum layout:
+
+```text
+principles-disciple/
 ├── .codex-plugin/
-│   └── plugin.json                 # 必需：插件清单
+│   └── plugin.json
 ├── hooks/
-│   ├── hooks.json                  # 生命周期 hooks 注册
-│   └── pd-hook.js                  # PD 单入口脚本（复用现有）
-├── skills/
-│   └── pd-thinking-os/
-│       └── SKILL.md                # thinking-OS 指导（全平台可用）
-├── .mcp.json                       # 可选：MCP server 配置
-└── assets/
-    ├── icon.png                    # 插件图标
-    └── logo.png                    # 插件 logo
+│   ├── hooks.json
+│   └── pd-hook.js
+└── package payload required by pd-hook.js
 ```
 
-## 4. plugin.json Manifest
+`hooks/hooks.json` is the default hook location. A manifest may declare another hook path, but PD should use the default unless packaging evidence requires an override. Do not install directly into Codex's internal cache and do not make direct `~/.codex/hooks.json` mutation the preferred plugin flow.
 
-```json
-{
-  "name": "principles-disciple",
-  "version": "0.1.0",
-  "description": "Owner-governed behavior internalization for AI agents",
-  "author": {
-    "name": "Principles Disciple",
-    "url": "https://github.com/csuzngjh/principles"
-  },
-  "license": "MIT",
-  "keywords": ["principles", "behavior", "internalization", "agent-governance"],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
-  "interface": {
-    "displayName": "Principles Disciple",
-    "shortDescription": "Governed agent behavior internalization",
-    "longDescription": "Captures repeated owner-relevant behavior evidence, distills reviewed principles, and applies approved, reversible behavior changes.",
-    "category": "Productivity",
-    "capabilities": ["Read", "Write"],
-    "defaultPrompt": [
-      "Use Principles Disciple to review my agent's tool call patterns.",
-      "Use Principles Disciple to inject thinking-OS principles."
-    ]
-  }
-}
-```
+Skills, MCP configuration, icons, and marketing assets are not required for PRI-523 acceptance. Adding them requires its own scoped decision.
 
-## 5. hooks/hooks.json
+## 4. Hook registration
+
+The bundle invokes one validated entrypoint through `PLUGIN_ROOT`:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|apply_patch|Write|Edit",
+        "matcher": "Bash|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/hooks/pd-hook.js",
-            "timeout": 5000
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.js\"",
+            "timeout": 5
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|apply_patch|Write|Edit",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/hooks/pd-hook.js",
-            "timeout": 5000,
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.js\"",
+            "timeout": 5,
             "async": true
           }
         ]
@@ -112,8 +89,8 @@ principles-disciple-plugin/
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/hooks/pd-hook.js",
-            "timeout": 5000
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.js\"",
+            "timeout": 5
           }
         ]
       }
@@ -123,8 +100,8 @@ principles-disciple-plugin/
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/hooks/pd-hook.js",
-            "timeout": 5000
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.js\"",
+            "timeout": 5
           }
         ]
       }
@@ -133,189 +110,120 @@ principles-disciple-plugin/
 }
 ```
 
-**关键变化 vs CLI hooks.json**:
-- `${PD_HOOK_PATH}` → `${PLUGIN_ROOT}/hooks/pd-hook.js`
-- `workspace_dir` → `PLUGIN_DATA` 环境变量（插件可写数据目录）
+The exact matcher/event payload and output schema remain governed by `CODEX_CLI_ADAPTER_SPEC.md` and codec fixtures. The installed bundle must be tested; a source-tree-only test is insufficient.
 
-## 6. pd-hook.js 适配
+PRI-523 declares Node.js `>=20` as the delivery support baseline. This declaration is not a claim that the current CI matrix already proves plugin compatibility. Before compatibility is claimed, installed-bundle tests plus the `codex-adapter` and `host-runtime` package suites must be added and pass on both Node 20 and Node 22. The installer package's broader historical engine declaration does not expand this plugin contract. Repository Marketplace installation and Workspace publication do not install Node. Setup and health checks must detect `node` and its major version before enabling hooks; missing/unsupported Node is a failed prerequisite with a structured reason and next action, not a warning followed by partial installation.
 
-### 6.1 环境变量优先级
+## 5. Runtime and state authority
 
-```typescript
-// 当前 CLI 方式：
-//   PD_WORKSPACE_DIR env → stdin.workspace_dir → fallback
-//
-// 插件方式（新增）：
-//   PLUGIN_DATA env → PD_WORKSPACE_DIR env → stdin.workspace_dir → fallback
+### 5.1 Responsibilities
+
+- `codex-adapter`: validate Codex stdin, map host events, encode only schema-valid stdout, and handle Codex trust/install concerns.
+- `@principles/host-runtime`: orchestrate the three approved I/O behavior paths.
+- `@principles/core`: pure domain logic only; no filesystem, database, network, or host I/O.
+- `openclaw-plugin`: translate OpenClaw events/results and call the same host runtime.
+
+### 5.2 Workspace authority
+
+The selected Workspace remains authoritative through the two physical stores defined by [`DATA_ARCHITECTURE.md`](./DATA_ARCHITECTURE.md):
+
+```text
+<workspace>/.pd/
+├── config.yaml                         # unified workspace config and feature flags
+└── state.db                            # Runtime V2 SQLite tasks/runs/artifacts/approvals
+
+<workspace>/.state/
+├── principle_training_state.json       # Principle Tree ledger
+├── trajectory.db                       # host trajectory/pain/evidence support state
+└── sessions/ and other runtime artifacts
 ```
 
-PD 的 `pd-hook.js` 需要修改 `resolveWorkspaceDir()` 逻辑，优先使用 `PLUGIN_DATA`：
+The plugin must resolve and pass the current Workspace to the shared runtime. `.pd/` is authoritative for configuration and Runtime V2 SQLite state; `.state/principle_training_state.json` is authoritative for the Principle Tree ledger, while the existing remaining `.state/` paths hold Workspace-scoped host/runtime artifacts. Principles, approval state, pain/evidence, lineage, feature flags, ledger entries, and runtime artifacts must not silently move to plugin-global storage.
 
-```typescript
-function resolveWorkspaceDir(env: Record<string, string | undefined>, stdin?: unknown): string {
-  // Plugin mode: PLUGIN_DATA is set by Codex plugin host
-  if (env.PLUGIN_DATA) {
-    return env.PLUGIN_DATA;
-  }
-  // CLI mode: PD_WORKSPACE_DIR is set by installer
-  if (env.PD_WORKSPACE_DIR) {
-    return env.PD_WORKSPACE_DIR;
-  }
-  // Fallback: stdin.workspace_dir (from hook payload)
-  // ...
-}
-```
+`PLUGIN_DATA` may hold bounded plugin-private auxiliary data such as install metadata or non-authoritative cache entries. It must not become the database/config authority and must be safe to delete without losing governed Workspace state. `PLUGIN_ROOT` identifies packaged code/assets.
 
-### 6.2 数据存储路径
+## 6. Installation, trust, and disable flow
 
-```
-$PLUGIN_DATA/
-├── state.db              # SQLite 数据库（principles, pain signals, evidence）
-├── config.yaml           # PD 配置
-├── install-records/      # 安装记录
-└── logs/                 # 日志
-```
+1. Owner adds or selects the PD repository/personal Marketplace.
+2. Owner installs the plugin into Codex.
+3. Codex discovers the bundle's default `hooks/hooks.json` (or manifest-declared path).
+4. Owner reviews and trusts the lifecycle hooks.
+5. In the selected Workspace, PD reads `.pd/config.yaml`; behavior runs only when `host.codex.enabled` is true.
+6. Health/acceptance evidence distinguishes installed, discovered, trusted, enabled, and behavior-verified states. "Installed" alone must never be reported as functional parity.
+7. After repository/personal Marketplace testing passes, a Workspace admin may publish the local plugin to selected Workspace roles. This publication stays inside that organization and does not publish PD to the universal public directory.
 
-### 6.3 Feature Flag
+Fresh setup and migration must write both rollout entries explicitly; omission is not accepted as delivery evidence:
 
-`host.codex.enabled` 在插件模式下默认为 `true`（插件安装即启用）。
-用户可通过 `.pd/config.yaml` 禁用：
 ```yaml
-host:
-  codex:
+features:
+  host.codex:
+    category: core
+    enabled: true
+  abstraction_layer_v1:
+    category: quiet
     enabled: false
 ```
 
-## 7. Skills 层（全平台）
+The registry retains `host.codex` since 2026-08-11 and adds `abstraction_layer_v1` since 2026-08-13. Loader tests must read fresh and migrated files, then explicitly set each flag false and prove the Codex-neutral/OpenClaw-legacy operator rollback plus its observable reason.
 
-### 7.1 pd-thinking-os SKILL.md
+Rollback is exact: set `host.codex.enabled: false` in the Workspace `.pd/config.yaml`. All Codex hook events then return the host-neutral allow/empty result, emit a structured skip reason outside strict stdout, and perform no prompt injection, RuleHost enforcement, or pain/evidence write. OpenClaw behavior, `.pd/config.yaml`, `.pd/state.db`, `.state/principle_training_state.json`, and existing `.state/` runtime artifacts remain unchanged. Uninstalling the plugin is a separate packaging action, not the primary behavior kill switch.
 
-```markdown
----
-name: pd-thinking-os
-description: Inject Principles Disciple thinking-OS guidance for agent behavior governance.
----
+## 7. Observable acceptance contract
 
-Use this skill when working in a workspace governed by Principles Disciple.
+PRI-523 is accepted only when the installed repository-Marketplace bundle, in one test Workspace after hook trust, proves:
 
-## Thinking OS Principles
+- **Prompt**: a known active, Owner-approved principle appears in Codex prompt context and matches the OpenClaw result.
+- **Before tool**: a known RuleHost fixture denies the same unsafe tool call in Codex and OpenClaw, while a safe control call is allowed.
+- **After tool**: a completed Codex tool call creates pain/evidence with Codex source lineage in that same Workspace and no duplicate write.
+- **Kill switch**: after `host.codex.enabled: false`, all three effects are absent and the structured disabled reason is observable.
+- **Bundle reality**: tests install/use the packaged plugin layout and default `hooks/hooks.json`, not a hand-wired source path.
+- **Quoted path**: the installed bundle runs successfully when `PLUGIN_ROOT` contains spaces; all hook commands keep the executable script path quoted.
+- **Node evidence gate**: before compatibility is claimed, add and pass installed-bundle, `codex-adapter`, and `host-runtime` package tests on both Node 20 and Node 22; setup/health must also fail loud with reason/next action when Node is missing or below 20.
+- **Workspace publication**: after repository/personal Marketplace testing, a Workspace admin can publish that local plugin to selected roles without rewriting either Workspace authority path.
+- **Explicit flags**: fresh and migrated `.pd/config.yaml` contain both entries, and loader tests exercise `host.codex` neutral rollback and `abstraction_layer_v1` legacy rollback.
 
-1. **Owner-governed**: The owner reviews and approves all behavior changes.
-2. **Reversible**: All changes can be rolled back.
-3. **Evidence-based**: Principles are distilled from observed pain signals.
-4. **Non-blocking**: PD does not own task execution; it governs behavior.
+The OpenClaw adapter cutover must also pass the three-path parity E2E. PRI-523 registers `abstraction_layer_v1` as quiet/default-off/since 2026-08-13: off uses legacy OpenClaw orchestration and on is limited to controlled `@principles/host-runtime` parity validation. It may be promoted to core/default-on only after OpenClaw parity and Codex installed-bundle E2E both pass, and PRI-523 must not remove the legacy path. `host.codex` remains the existing core/default-on Codex kill switch; ADR-0020 §2.4's old quiet/default-off text is historical and superseded.
 
-## When to apply
+## 8. Emotional-value review
 
-- Before executing mutating tool calls (Bash, file writes)
-- When a tool call produces an error
-- When the user submits a new prompt
+The plugin should reduce **失控感** and **不信任感**: the Owner can distinguish installed, trusted, enabled, and behavior-verified states, while one Workspace remains authoritative. It should create **掌控感** and **安心感** through explicit trust, owner-reviewed principles, observable parity, and the `host.codex` kill switch. Sharing the three behavior paths reduces repeated-correction **疲惫感** without adding a new dashboard or notification stream.
 
-## What PD does NOT do
+## 9. Universal public-directory submission — DRAFT / HOLD
 
-- Does not execute tasks
-- Does not manage general memory
-- Does not repair tools
-- Does not make autonomous value decisions
-```
+The following remain Post-MVP/Hold even while PRI-523 proceeds:
 
-### 7.2 Skills 在无 Hooks 平台的作用
+- ChatGPT Web/Mobile or IDE feature parity;
+- a PD MCP server or public Web command surface;
+- automatic Skill activation or a new thinking-OS distribution channel;
+- long-running service replacement, outbound host runtimes, schedulers, or general memory;
+- universal public-directory submission, review, discovery, or auto-update claims; organization-internal Workspace publication is already supported and is not this public route.
 
-在 ChatGPT Web/Mobile（无 hooks）中，Skills 提供：
-- thinking-OS 指导（模型遵循的原则）
-- principle 参考（但无法自动注入，依赖模型主动调用 skill）
-- 无 gate 防护（无法拦截 tool calls）
+Public submission may restart only when all are true:
 
-**限制**: 无 hooks 平台中，PD 仅提供"建议"而非"强制"。
+- OpenAI documentation explicitly accepts lifecycle-hook plugins as a public submission type;
+- at least one seed customer requests public discovery or non-Codex parity;
+- Workspace/plugin-data lifecycle has been verified on the target channel;
+- the proposal remains inside `PRODUCT_IDENTITY.md` and receives a separately recorded Owner scope decision.
 
-## 8. MCP Server（可选，Post-MVP）
+This section alone remains `DRAFT / HOLD` until the public-submission uncertainty is resolved or the universal public-directory portion is removed. Sections 1-8 and 10-11 remain Accepted for local/repository/Workspace delivery.
 
-如果需要提供 principle evaluation 工具给 ChatGPT Web/Mobile：
+## 10. Risks and mitigations
 
-### 8.1 .mcp.json
+| Risk | Impact | Required mitigation |
+|---|---|---|
+| Plugin installed but hooks untrusted | False sense of protection | Report installed/discovered/trusted/enabled separately; require trust in acceptance |
+| Node absent or unsupported | Hooks cannot start | Require Node >=20; setup/health fails loud with detected state and next action; Marketplace does not install Node |
+| `PLUGIN_ROOT` contains spaces | Hook command fails to launch | Quote every command path and run installed-bundle path-with-spaces acceptance |
+| Codex codec fails open | Unsafe call proceeds | Keep schema/whitelist fixture gates from `CODEX_CLI_ADAPTER_SPEC.md`; positive deny E2E |
+| `PLUGIN_DATA` becomes state authority | Cross-host drift or apparent data loss | Preserve `.pd/` config/SQLite and `.state/` ledger/runtime authority paths; auxiliary data must be deletable |
+| Shared runtime regresses OpenClaw | Existing MVP path breaks | Three-path parity E2E plus `abstraction_layer_v1` rollback |
+| Public support is overstated | Owner/customer distrust | Keep universal public submission gated and §9 explicitly Draft/Hold |
 
-```json
-{
-  "principles-disciple": {
-    "command": "node",
-    "args": ["${PLUGIN_ROOT}/mcp-server.js"]
-  }
-}
-```
+## 11. Relationship to existing work
 
-### 8.2 暴露的工具
-
-| 工具 | 描述 | 平台 |
-|------|------|------|
-| `get_principles` | 获取当前活跃原则列表 | 全平台 |
-| `check_behavior` | 检查行为是否符合原则 | 全平台 |
-| `report_pain` | 报告 pain signal | 全平台 |
-
-**决策点**: MVP 阶段是否需要 MCP server？还是 hooks + skills 足够？
-
-## 9. 与 CLI 方式的关系
-
-| 维度 | CLI 方式（当前） | 插件市场方式（新） |
-|------|-----------------|-------------------|
-| 安装 | `create-principles-disciple` | 插件市场一键安装 |
-| hooks 注册 | 编辑 `~/.codex/hooks.json` | 插件 `hooks/hooks.json` 自动注册 |
-| 数据存储 | `{workspace}/.principles/` | `$PLUGIN_DATA/` |
-| 更新 | 重新运行安装器 | 市场自动更新 |
-| 信任 | 用户手动信任 | 用户审查 hooks 后信任 |
-| 回滚 | `--uninstall` | 插件市场卸载 |
-
-**两者共存**: CLI 方式和插件市场方式不冲突。CLI 方式适合开发者/高级用户，插件市场适合普通用户。
-
-## 10. Implementation Plan
-
-### Phase 1: Plugin Scaffolding (Post-MVP)
-- [ ] 创建 `packages/chatgpt-plugin/` 目录
-- [ ] 编写 `plugin.json` manifest
-- [ ] 适配 `pd-hook.js` 支持 `PLUGIN_DATA` 环境变量
-- [ ] 创建 `hooks/hooks.json`
-- [ ] 创建 `skills/pd-thinking-os/SKILL.md`
-
-### Phase 2: Local Testing (Post-MVP)
-- [ ] 创建本地 marketplace 条目
-- [ ] 在 Codex CLI 中测试插件安装
-- [ ] 在 ChatGPT 桌面应用中测试插件安装
-- [ ] 验证 hooks 注册和信任流程
-- [ ] 验证 `PLUGIN_DATA` 数据存储
-
-### Phase 3: MCP Server (Conditional)
-- [ ] 设计 MCP server 工具 schema
-- [ ] 实现 `mcp-server.js`
-- [ ] 测试 ChatGPT Web 中的 skill + MCP 工具组合
-
-### Phase 4: Marketplace Submission (Post-MVP)
-- [ ] 准备提交材料（隐私政策、服务条款、截图）
-- [ ] 通过插件提交门户提交
-- [ ] 响应审核反馈
-- [ ] 发布到通用插件目录
-
-## 11. Open Questions
-
-1. **PLUGIN_DATA 持久性**: `PLUGIN_DATA` 目录在插件卸载后是否保留？如果不保留，用户的原则数据会丢失。
-2. **多 workspace 支持**: CLI 方式支持 per-workspace 存储（`{workspace}/.principles/`）。插件方式只有单个 `PLUGIN_DATA`，如何支持多 workspace？
-3. **Skills 在无 hooks 平台的触发**: ChatGPT Web 中，skill 何时被激活？需要用户手动 `@principles-disciple` 还是可以自动触发？
-4. **MCP server 必要性**: hooks 已覆盖 Codex 环境。MCP server 是否值得为 ChatGPT Web/Mobile 单独开发？
-5. **版本兼容性**: 插件 hooks 与 CLI hooks.json 是否完全相同？是否有插件特有的限制？
-6. **信任模型**: 用户审查 hooks 的 UX 是怎样的？是否需要 PD 提供信任说明文档？
-
-## 12. Risks
-
-| 风险 | 影响 | 缓解 |
-|------|------|------|
-| PLUGIN_DATA 不持久 | 用户原则数据丢失 | 文档警告 + 提供 export/import 工具 |
-| ChatGPT Web 不支持 hooks | 全平台体验不一致 | Skills 层提供降级体验 |
-| 插件审核被拒 | 无法发布 | 遵循 OpenAI 提交指南，准备充分材料 |
-| hooks 信任 UX 差 | 用户不信任 hooks | 提供清晰的信任说明 + 文档 |
-| MCP server 复杂度 | 增加 Post-MVP 工作量 | Phase 3 设为 conditional，先验证 hooks + skills 足够 |
-
-## 13. Relationship to Existing Work
-
-- **ADR-0020**: 定义了 HostAdapter 抽象层，插件市场方式复用相同的 `CodexHooksHostAdapter`
-- **CODEX_CLI_ADAPTER_SPEC v4.1**: 定义了 hooks 协议和输出编码，插件方式完全复用
-- **feature-flag-contract.ts**: `host.codex` flag 在插件模式下默认 ON
-- **principles-core**: 纯逻辑完全复用（pain detection, principle evaluation）
-- **codex-adapter**: `pd-hook.js` 和 codec 层完全复用，仅需适配环境变量
+- **ADR-0020 §10**: authorizes `@principles/host-runtime`, thin OpenClaw/Codex adapters, supported distribution facts, acceptance, and rollback.
+- **Post-MVP Conditional Roadmap §21/§22**: records which PRI-523 slices are active by exception and which remain Hold.
+- **`DATA_ARCHITECTURE.md`**: authority for the split `.pd/` config/SQLite and `.state/` ledger/runtime paths.
+- **`host.codex`**: existing Workspace kill switch; stays enabled only through the production feature-flag loader.
+- **PRI-521**: long-running service replacement remains deferred.
+- **CODEX_CLI_ADAPTER_SPEC**: codec schema, fail-open risks, and hook result contract remain authoritative unless separately amended.

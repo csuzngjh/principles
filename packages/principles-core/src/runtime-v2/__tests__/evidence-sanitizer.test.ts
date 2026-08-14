@@ -333,6 +333,36 @@ describe('sanitizeToolParams', () => {
     expect(result.content).toContain('___REDACTED___');
   });
 
+  it('redacts sensitive fields at any nesting level', () => {
+    expect(sanitizeToolParams({
+      token: 'not-pattern-shaped-but-secret',
+      nested: { authorization: 'Bearer owner-secret', apiKey: 'key-value' },
+      file_path: 'src/auth.ts',
+    })).toEqual({
+      token: '<sensitive___REDACTED___field>',
+      nested: { authorization: '<sensitive___REDACTED___field>', apiKey: '<sensitive___REDACTED___field>' },
+      file_path: 'src/auth.ts',
+    });
+  });
+
+  it('redacts combined sensitive keys but not lookalike ones', () => {
+    expect(sanitizeToolParams({
+      userApiKey: 'secret',
+      openaiApiKey: 'secret',
+      clientSecretId: 'secret',
+      access_token: 'secret',
+      tokenizer: 'not-a-secret',
+      file_path: 'src/auth.ts',
+    })).toEqual({
+      userApiKey: '<sensitive___REDACTED___field>',
+      openaiApiKey: '<sensitive___REDACTED___field>',
+      clientSecretId: '<sensitive___REDACTED___field>',
+      access_token: '<sensitive___REDACTED___field>',
+      tokenizer: 'not-a-secret',
+      file_path: 'src/auth.ts',
+    });
+  });
+
   it('converges paths with workspaceDir', () => {
     const params = {
       file_path: '/workspace/repo/src/config.ts',

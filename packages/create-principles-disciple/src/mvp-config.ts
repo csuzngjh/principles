@@ -2,6 +2,7 @@ import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
+import { atomicReplaceTextFile, errnoCode, withConfigFileLock } from './utils/config-file-io.js';
 
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
@@ -280,6 +281,7 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
       defer_archive:      { category: 'core',  enabled: true },
       // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
       code_rule_capability: { category: 'core', enabled: true },
+      'host.codex':        { category: 'core', enabled: true },
       // MVP-Quiet (ADR-0014 §2.5)
       correction_observer:{ category: 'quiet', enabled: false },
       feedback_channel:   { category: 'quiet', enabled: true },
@@ -289,6 +291,7 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },
+      abstraction_layer_v1: { category: 'quiet', enabled: false },
       // MVP-Gone (ADR-0014 §2.6)
       nocturnal:          { category: 'gone',  enabled: false },
       idle_trigger:       { category: 'gone',  enabled: false },
@@ -411,6 +414,92 @@ export function validateConfigYamlFull(workspaceDir: string): void {
   const agents = config.internalAgents as Record<string, unknown>;
   if (!Object.hasOwn(agents, 'defaultRuntime') || typeof agents.defaultRuntime !== 'string' || agents.defaultRuntime.length === 0) {
     throw new Error(`config.yaml at ${configPath}: 'internalAgents.defaultRuntime' must be a non-empty string, got ${!Object.hasOwn(agents, 'defaultRuntime') ? 'missing' : typeof agents.defaultRuntime}. Delete the file and re-run the installer.`);
+  }
+}
+
+/**
+ * PRI-523: add the two explicit host rollout flags to an existing valid config.
+ * Existing values are authoritative and are never overwritten.
+ */
+export interface HostRuntimeConfigMigrationDeps {
+  withLock<T>(filePath: string, action: () => T): T;
+  atomicReplace(filePath: string, content: string): void;
+}
+
+/**
+ * Migration infrastructure failure (config lock unavailable, atomic write
+ * EPERM/ENOSPC/...). The config file itself is NOT necessarily malformed —
+ * callers must not advise deleting it. Contrast with validation errors
+ * thrown from inside the lock, which do indicate a malformed config.
+ */
+export class HostRuntimeConfigMigrationInfraError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'HostRuntimeConfigMigrationInfraError';
+  }
+}
+
+function isMigrationInfraFailure(error: unknown): boolean {
+  if (error instanceof HostRuntimeConfigMigrationInfraError) return true;
+  // atomicReplaceTextFile pairs a failed replace with a failed cleanup this way.
+  if (error instanceof AggregateError) return true;
+  if (typeof errnoCode(error) === 'string') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith('Failed to acquire config lock');
+}
+
+const HOST_RUNTIME_CONFIG_MIGRATION_DEPS: HostRuntimeConfigMigrationDeps = {
+  withLock: withConfigFileLock,
+  atomicReplace: atomicReplaceTextFile,
+};
+
+export function migrateHostRuntimeFlagsInConfigYaml(
+  workspaceDir: string,
+  deps: HostRuntimeConfigMigrationDeps = HOST_RUNTIME_CONFIG_MIGRATION_DEPS,
+): boolean {
+  const configPath = getConfigYamlPath(workspaceDir);
+  try {
+    return deps.withLock(configPath, () => {
+      // The locked reread is authoritative; validation before lock acquisition
+      // would leave a lost-update window for an Owner edit.
+      validateConfigYamlFull(workspaceDir);
+      const parsed: unknown = yaml.load(readFileSync(configPath, 'utf8'));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error(`config.yaml at ${configPath} must be an object. Fix it before retrying migration.`);
+      }
+      const featuresValue = Object.getOwnPropertyDescriptor(parsed, 'features')?.value;
+      if (typeof featuresValue !== 'object' || featuresValue === null || Array.isArray(featuresValue)) {
+        throw new Error(`config.yaml at ${configPath}: 'features' must be an object. Fix it before retrying migration.`);
+      }
+
+      let changed = false;
+      if (!Object.hasOwn(featuresValue, 'host.codex')) {
+        Object.defineProperty(featuresValue, 'host.codex', {
+          value: { category: 'core', enabled: true }, enumerable: true, writable: true, configurable: true,
+        });
+        changed = true;
+      }
+      if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
+        Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
+          value: { category: 'quiet', enabled: false }, enumerable: true, writable: true, configurable: true,
+        });
+        changed = true;
+      }
+      if (changed) {
+        deps.atomicReplace(configPath, yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' }));
+      }
+      return changed;
+    });
+  } catch (error) {
+    // Distinguish infrastructure failures from malformed-config failures so
+    // the installer does not tell the Owner to delete a perfectly valid
+    // .pd/config.yaml (PRI-523 review finding: lock contention and EPERM on
+    // the atomic rename were both misreported as "malformed").
+    if (isMigrationInfraFailure(error)) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HostRuntimeConfigMigrationInfraError(message, { cause: error });
+    }
+    throw error;
   }
 }
 

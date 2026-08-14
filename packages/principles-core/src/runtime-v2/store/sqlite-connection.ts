@@ -24,6 +24,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
+  /** Keep read-only access side-effect free when state.db has not been initialized. */
+  bootstrapIfMissing?: boolean;
 }
 
 export interface SqlitePragmaReport {
@@ -39,6 +41,7 @@ export class SqliteConnection {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private readonly readonlyMode: boolean;
+  private readonly bootstrapIfMissing: boolean;
   /**
    * Schema initialization warnings collected during getDb(). Populated when initSchema()
    * or migrateSchema() fails (rc-9: no silent fallback — callers can read these warnings
@@ -55,6 +58,7 @@ export class SqliteConnection {
     const workspaceDir = guardWorkspaceLeak(opts.workspaceDir);
     const pdDir = join(workspaceDir, '.pd');
     this.readonlyMode = opts.readonly ?? false;
+    this.bootstrapIfMissing = opts.bootstrapIfMissing ?? true;
     if (!this.readonlyMode && !fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
@@ -76,7 +80,7 @@ export class SqliteConnection {
     // (triggers initSchema), then close and reopen in readonly mode. This prevents
     // pd-console GET routes and other readonly callers from throwing SqliteError on
     // fresh workspaces where state.db has not been created yet.
-    if (this.readonlyMode && !fs.existsSync(this.dbPath)) {
+    if (this.readonlyMode && this.bootstrapIfMissing && !fs.existsSync(this.dbPath)) {
       const bootstrapper = new SqliteConnection({ workspaceDir: this.workspaceDirFromDbPath(), readonly: false });
       try {
         bootstrapper.getDb(); // triggers initSchema + migrateSchema
@@ -93,7 +97,7 @@ export class SqliteConnection {
     }
 
     this.db = this.readonlyMode
-      ? new Database(this.dbPath, { readonly: true })
+      ? new Database(this.dbPath, { readonly: true, fileMustExist: true })
       : new Database(this.dbPath);
 
     if (!this.readonlyMode) {
@@ -622,7 +626,7 @@ export class SqliteConnection {
   close(): void {
     if (!this.db) return;
     try {
-      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      if (!this.readonlyMode) this.db.pragma('wal_checkpoint(TRUNCATE)');
       this.db.close();
     } catch {
       // ignore errors during close (e.g., if db file was removed externally)

@@ -62,6 +62,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts --exclude tests/commands/evolver.test.ts",
     "test:integration": "vitest run tests/integration/",
+    "test:host-runtime-parity": "vitest run --config vitest.parity.config.ts tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts tests/package/published-host-runtime-bundle.test.ts",
     "test:coverage": "vitest run --coverage",
     "test:all": "vitest run",
     "lint": "eslint \"src/**/*.ts\"",
@@ -70,6 +71,7 @@
     "sync-plugin": "node scripts/sync-plugin.mjs"
   },
   "devDependencies": {
+    "@principles/host-runtime": "^0.1.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",

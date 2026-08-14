@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import { normalizeProfile } from '../core/profile.js';
 import { getSession, trackFriction } from '../core/session-tracker.js';
+import type { SessionState } from '../core/session-tracker.js';
 import { computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -33,6 +34,8 @@ import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
+import type { ProductionPainEnrichment } from '@principles/host-runtime';
+import type { HostEventResult } from '@principles/core/host';
 
 import {
   classifyToolCallOutcome,
@@ -47,6 +50,53 @@ import {
 
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 export { buildTrajectoryEvidence };
+
+const pendingPainContinuations = new Set<Promise<void>>();
+const PAIN_CONTINUATION_TIMEOUT_MS = 30_000;
+
+function logPainContinuationFailure(workspaceDir: string, reason: string): void {
+  try {
+    SystemLogger.log(workspaceDir, 'PAIN_CONTINUATION_FAILED', JSON.stringify({
+      reason: reason.slice(0, 200),
+      nextAction: 'inspect the admitted pain and retry diagnosis from the persisted canonical pain ID',
+    }));
+  } catch {
+    // Logging must not turn a best-effort continuation into an unhandled rejection.
+  }
+}
+
+/**
+ * Host-owned best-effort continuation after durable shared persistence.
+ * The hook may return once SQLite commits, while rejections remain observable
+ * and tests/shutdown code can explicitly drain scheduled work.
+ */
+export function schedulePainContinuation(workspaceDir: string, continuation: Promise<void>): void {
+  let finished = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bounded = new Promise<void>((resolve) => {
+    const finish = (reason?: string): void => {
+      if (finished) return;
+      finished = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (reason) logPainContinuationFailure(workspaceDir, reason);
+      resolve();
+    };
+    continuation.then(
+      () => finish(),
+      (error: unknown) => finish(error instanceof Error ? error.message : String(error)),
+    );
+    timer = setTimeout(() => finish(`pain_continuation_timeout:${PAIN_CONTINUATION_TIMEOUT_MS}ms`), PAIN_CONTINUATION_TIMEOUT_MS);
+  });
+  const observed = bounded.finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+    pendingPainContinuations.delete(observed);
+  });
+  pendingPainContinuations.add(observed);
+}
+
+export async function drainPainContinuationsForTest(): Promise<void> {
+  await Promise.all([...pendingPainContinuations]);
+}
 
 // ── Service Factory ─────────────────────────────────────────────────────────
 
@@ -256,7 +306,7 @@ export function handleAfterToolCall(
   // ── Stage 2: Build Observation ──
   const observation = buildToolCallObservation(event, outcome, effectiveWorkspaceDir, profile);
 
-  let latestFailureState: import('../core/session-tracker.js').SessionState | undefined;
+  let latestFailureState: SessionState | undefined;
 
   if (outcome.isFailure) {
     // ── Stage 3a: Friction + Recording (Failure) ──
@@ -292,6 +342,99 @@ export function handleAfterToolCall(
   emitPainIfAdmitted(
     wctx, event, observation, outcome, admission, sessionId, ctx.agentId, effectiveWorkspaceDir, emitPainDetectedEvent
   );
+}
+
+/**
+ * OpenClaw-owned enrichment for the shared ordinary after-tool kernel.
+ * Session/GFI, event-log, probation, PROFILE and hygiene behavior stays here;
+ * the shared runtime owns classification/admission and the atomic trajectory write.
+ */
+export function prepareOrdinaryAfterToolCallForSharedRuntime(
+  event: PluginHookAfterToolCallEvent,
+  ctx: PluginHookToolContext & { workspaceDir: string; pluginConfig?: Record<string, unknown> },
+): ProductionPainEnrichment {
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
+  const sessionId = ctx.sessionId || 'unknown';
+  const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
+  const gfiBefore = sessionState?.currentGfi ?? 0;
+  const profilePath = wctx.resolve('PROFILE');
+  let profile = normalizeProfile({});
+  if (fs.existsSync(profilePath)) {
+    try {
+      const content = fs.readFileSync(profilePath, 'utf8');
+      if (content.length <= 1024 * 1024) profile = normalizeProfile(JSON.parse(content));
+      else SystemLogger.log(ctx.workspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping');
+    } catch (error) {
+      SystemLogger.log(ctx.workspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(error)}`);
+    }
+  }
+  const outcome = classifyToolCallOutcome(event);
+  const observation = buildToolCallObservation(event, outcome, ctx.workspaceDir, profile);
+  const rawEventId = Object.hasOwn(event, 'toolUseId') ? event.toolUseId
+    : Object.hasOwn(event, 'toolCallId') ? event.toolCallId
+    : undefined;
+  let latestFailureState: SessionState | undefined;
+  if (outcome.isFailure) {
+    latestFailureState = handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
+    handleProbationFeedback(sessionId, event.toolName, ctx.workspaceDir, wctx, false);
+  } else {
+    handleFrictionTrackingForSuccess(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx, { recordTrajectory: false });
+    handleProbationFeedback(sessionId, event.toolName, ctx.workspaceDir, wctx, true);
+    recordHygieneTracking(event, observation, wctx);
+  }
+  return {
+    ...(typeof rawEventId === 'string' && rawEventId.trim().length > 0 ? { eventId: `openclaw:${rawEventId}` } : {}),
+    painScore: observation.painScore,
+    isRisky: observation.isRisk,
+    consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors ?? 0,
+    relativePath: observation.relPath,
+    errorHash: observation.errorHash,
+    agentId: ctx.agentId,
+    evidence: buildTrajectoryEvidence(wctx, sessionId),
+  };
+}
+
+function metadataString(metadata: Readonly<Record<string, unknown>>, key: string): string | null {
+  const value = Object.hasOwn(metadata, key) ? metadata[key] : undefined;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+/** Restore OpenClaw-owned pain UX/diagnosis after the shared atomic evidence write. */
+export function handleSharedPainEvidenceResult(
+  event: PluginHookAfterToolCallEvent,
+  ctx: PluginHookToolContext & { workspaceDir: string },
+  result: HostEventResult,
+): void {
+  const metadata = result.metadata;
+  if (!metadata || metadata.admitted !== true || metadata.duplicate === true) return;
+  const painId = metadataString(metadata, 'painId');
+  const failureSource = metadataString(metadata, 'failureSource');
+  const relativePath = metadataString(metadata, 'relativePath');
+  const triggerReason = metadataString(metadata, 'triggerReason');
+  const score = metadata.painScore;
+  if (!painId || !failureSource || !relativePath || !triggerReason || typeof score !== 'number' || !Number.isFinite(score)) {
+    SystemLogger.log(ctx.workspaceDir, 'SHARED_PAIN_RESULT_INVALID', JSON.stringify({ reason: 'shared_pain_metadata_invalid', nextAction: 'inspect host-runtime after-tool result metadata' }));
+    return;
+  }
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
+  const sessionId = ctx.sessionId || 'unknown';
+  const traceId = metadataString(metadata, 'eventId') ?? createTraceId();
+  const reason = `Tool ${event.toolName} failed on ${relativePath}`;
+  wctx.eventLog.recordPainSignal(sessionId, { score, source: failureSource, reason, isRisky: metadata.isRisky === true });
+  getEvolutionLogger(ctx.workspaceDir, wctx.trajectory).logPainDetected({ traceId, source: failureSource, reason, score, toolName: event.toolName, filePath: relativePath, sessionId });
+  const rawEvidence = metadata.evidence;
+  const evidence = Array.isArray(rawEvidence)
+    ? rawEvidence.filter((entry): entry is { sourceRef: string; note: string } => typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+      && typeof Object.getOwnPropertyDescriptor(entry, 'sourceRef')?.value === 'string'
+      && typeof Object.getOwnPropertyDescriptor(entry, 'note')?.value === 'string').slice(0, 8)
+    : [];
+  schedulePainContinuation(ctx.workspaceDir, emitPainDetectedEvent(wctx, {
+    ts: new Date().toISOString(), type: 'pain_detected', data: {
+      painId, painType: 'tool_failure', source: event.toolName,
+      reason: `${reason}; diagnosticGate=${triggerReason}`, score, sessionId, traceId,
+      agentId: ctx.agentId, provenance: 'automatic_hook', evidence,
+    },
+  }, { recordObservability: false }));
 }
 
 // ── Manual Pain Handler ─────────────────────────────────────────────────────

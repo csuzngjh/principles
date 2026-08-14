@@ -65,7 +65,6 @@ Errors where AI assistants skipped required testing or verification steps.
 |----|---------|--------|
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
-| ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
 | ERR-066 | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw | PRI-397 |
 | ERR-070 | New public types/classes not exported from barrel index.ts — module consumers cannot import the new API surface | PRI-424 |
 | ERR-071 | Async cleanup not `await`ed in finally; test resources not in try-finally; `process.env` not restored | PRI-428 |
@@ -115,8 +114,6 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
-| ERR-085 | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults | PR #1079 |
-| ERR-087 | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases | PRI-485 / PR #1102 |
 
 ---
 
@@ -129,7 +126,6 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
-| ERR-027 | Strategic pivot lands but executable docs and issue templates continue dispatching superseded work | PRI-252 |
 | ERR-028 | Baseline fixture directly constructs writer instead of routing through production dispatcher | PRI-240 |
 | ERR-029 | CLI unknown input silently dropped instead of failing loud | PRI-240 |
 | ERR-030 | Path prefix `startsWith` matches sibling directories as production workspace | PRI-240 |
@@ -139,7 +135,6 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162; PRI-516 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
-| ERR-086 | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state | PR #1079 |
 
 ---
 
@@ -208,6 +203,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 
 **[ERR-002]** | Catch-and-degrade pattern silently swallows failure reasons
+
+- **2026-08-13 PRI-523 C1.3 recurrence (consolidated)**: SQLite construction/pragma/schema checks occurred outside the guarded failure boundary and enrichment ran before readiness. The first correction recognized table/index names but not required columns/types/index properties; the next checked that the canonical index was unique and partial but not that its predicate was the required `canonical_pain_id IS NOT NULL`, so a same-name index over `WHERE score > 50` still passed. The gate now validates unknown-first PRAGMA rows for every column used, reads bounded `sqlite_master.sql` and normalizes harmless whitespace/identifier quoting/case to require the exact canonical partial predicate, and prepares every exact production statement without mutation before enrichment. Corrupt/injected-open/stale-schema/wrong-predicate failures return a bounded structured warning + nextAction without rejection, partial write, bootstrap, or host side effects.
 
 - **What happened**: `buildFullTraceSafe()` catch block caught all exceptions and returned `null` with no observability — no logging, no error propagation, no ambiguity notes.
 - **Why it's wrong**: Downstream diagnostician receives `fullTrace: null` and cannot distinguish between "no painId provided" and "trace construction crashed". Degradation is correct design, but degradation ≠ silence. Silent degradation hides bugs and makes debugging impossible.
@@ -304,6 +301,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-190
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — lineage/source fields come from the wrong task or are racy across a read-then-write.
+  - 2026-08-13 PRI-523 C1.3 quality review: a supplied host event ID could override canonical identity, so its lineage no longer matched a changed payload/outcome. Fixed by binding workspace/source/session/tool/sanitized payload/outcome and supplied ID into one digest, with collision and exact-retry regressions.
   - 2026-06-20 PRI-435 (PR#982): `resolveSourcePainIdFromDiagnostician()` lacked `taskKind === 'diagnostician'` guard — added kind guard + corruption regression
   - 2026-06-19 PRI-408 (PR#972): `assembleRuleArtifact` set `sourcePrincipleId: undefined`; `sqlite-approval-store.edit()` read-then-write race → atomic `SET previous_artifact_id`
   - Pattern: lineage from unverified task or non-atomic read-then-write. Fix: verify task kind; atomic writes; mismatch regression tests.
@@ -374,6 +372,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
+  - 2026-08-13 PRI-523: structural guards accepted blank/relative route fields and incompatible results. Added semantic route validation and fail-loud tables.
   - 2026-07-23 PRI-518: `DiagnosticianOutputV1Schema.recommendations` was `Type.Array(...)` with no `minItems`, and `DefaultDiagnosticianValidator` iterated `for (const rec of output.recommendations)` with no length check, so a structurally valid output with `recommendations: []` committed ZERO owner-reviewable candidates and marked the diagnosis task SUCCEEDED with no structured reason. This was the root cause of the Story A "4 pain records, 8 leased tasks, 0 candidates" symptom. Fixed by adding `minItems: 1` to the schema + an explicit validator length check + a committer guard (defense-in-depth). An intentional "no action" decision MUST be expressed as a `{ kind: 'defer', ... }` recommendation. The convention already existed on sibling schemas (`dreamer-output.candidates`, `artificer-output.affectedTools` both use `minItems: 1`) but was missed on `recommendations`.
   - 2026-06-25 PRI-459 (PR#1045): `createRule`/`createImplementation` silently overwrote existing id (orphaning parent link)
   - 2026-06-23 PR#1026: 4 review `as`-bypass violations (`(err as Error)`, `this.token as string`, etc.)
@@ -397,7 +396,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every new CLI command that needs database access must use an existing Read Model or Service facade from `@principles/core/runtime-v2`. If no suitable facade exists, create one first. Architecture regression tests must assert that CLI command files do not import `RuntimeStateManager`. Read-only operations must pass `readonly: true` to the facade.
 - **Source**: PRI-131 (Tier 2)
 - **Date**: 2026-05-21
-- **Recurrence**: Yes — same boundary violation pattern as PRI-129 (trace.ts) and PRI-131 Tier 1 (health.ts, runtime-pruning.ts, runtime-internalization-queue.ts)
+- **Recurrence**: Yes — same boundary violation pattern as PRI-129 (trace.ts) and PRI-131 Tier 1 (health.ts, runtime-pruning.ts, runtime-internalization-queue.ts). 2026-08-13 PRI-523 C1.1 review: the shared prompt reader opened the Runtime V2 database through the normal bootstrapping connection path, so a logically read-only prompt build could create/migrate the database and checkpoint WAL state. Fixed by using the existing validated store APIs over a file-must-exist read-only connection with bootstrap and close-time checkpoint disabled; a production test proves a missing database yields a structured warning without changing the workspace filesystem.
 
 ---
 
@@ -425,6 +424,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-201 / PR #663 (Codex review, variant A); PRI-480 / PR #1089 (CodeRabbit review, variant B)
 - **Date**: 2026-05-21 (variant A); 2026-06-28 (variant B)
 - **Recurrence**: Yes — same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent.
+  - 2026-08-13 PRI-523 C1.3 self-review: the first shared PostToolUse enrichment validator used direct property reads after only checking that the value was object-like, so inherited enrichment fields could be treated as host-owned facts. Fixed by reading own data descriptors only and adding a regression where an inherited event ID cannot deduplicate two distinct canonical events.
   - 2026-06-28 PRI-480 (PR #1089) variant B: `canonicalizeToolKind()` lookup-table indexing returned `Object.prototype` for `__proto__` — fixed with `Object.hasOwn` guard
   - 2026-06-14 PRI-394 (PR #926): SQLite INSERT guessed column names — same trust-boundary pattern on DB schema
   - Earlier recurrences (PR#702-#810): variant A — `computeEffectiveFlags()` lacked dangerous-key rejection; Scribe/Evaluator/Artificer validators used direct property access. See git history.
@@ -584,35 +584,12 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — tests assert shapes/strings/isolated helper behavior instead of the real production contract, or vacuously pass when data is absent.
+  - 2026-08-14 PRI-523 (PR#1315 review): `CodexHostInstaller.resolvePdHookPath()` only used `createRequire` from the installer package. Resolution succeeded in the dev worktree (workspace-sibling node_modules) and in tests that mock `module`, but the documented end-user flow (`npm install -g @principles/codex-adapter` + `npx create-principles-disciple install --host codex`) dead-ended: the npx cache is not an ancestor of the global npm root, so the adapter was never resolvable even after following the failure nextAction. Fixed by probing `npm root -g` as a fallback with injectable-deps tests covering fallback/preference/fail-loud. Same class: the production consumer path was never the thing under test.
   - 2026-08-11 PR #1298 (CodeRabbit #3758794691): `mvp-config.test.ts` used `content.indexOf('runHostInstallers')` to locate the substring extraction boundary for asserting the `!hasHostFailures` guard. But `runHostInstallers` first appears in a JSDoc comment and function declaration (lines 1105-1114), while the intended `return {` block with `!hasHostFailures` is at line 1322. The `indexOf` matched the wrong occurrence, so the extracted `returnBlock` did NOT contain the actual `!hasHostFailures` guard — the test passed vacuously. Fixed by using `await runHostInstallers(` (function call pattern) as the boundary anchor, which uniquely identifies the call site, not the declaration. Same class as ERR-026 (test environment drifts from production) — the test boundary drifted from the real code structure.
   - 2026-06-25 PRI-467 (PR#1059): mock stubbed `readActivations()` but prod calls `readActivatedPrinciples()` — TypeError catch-and-continue masked it
   - 2026-06-25 PRI-459 (PR#1045): ledger no-lost-update test was sequential (passes without lock); fails-LOUD lock contract untested
   - 2026-07-17 PRI-518: the OpenClaw CLI adapter's mocked test asserted a remembered `--message @file` convention, while the checked OpenClaw source accepts multiline payloads through `--message-file <path>`. The real replay therefore sent the diagnostician a literal path and repeatedly received schema-invalid output. Fixed by emitting the source-backed flag and asserting the exact spawned argument contract.
   - Earlier recurrences (PR#689-#1004): same vacuous-pass pattern across MVP smoke, repair loop, package tests, nav tests, RuleHost fixtures. See git history.
-
----
-
-**[ERR-026]** | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests
-
-- **What happened**: Real-path tests for `InternalizationChainIntegrityReadModel` created a hand-written SQLite schema with `source_task_id` in the `artifacts` table, but the production schema (in `SqliteConnection`) uses `task_id`. The `lineage_mismatch` SQL query (`SELECT source_task_id FROM artifacts`) would fail in production with "no such column", but tests passed because the test schema matched the wrong column name. Additionally, the test schema omitted `NOT NULL` constraints present in production (e.g., `content_json`), allowing test data that production would reject.
-- **Why it's wrong**: When test schemas drift from production, tests provide false confidence. Invalid SQL, missing columns, and wrong column names all pass in tests but fail in production. The test becomes a tautology — it proves the code works against the test schema, not against the real schema. This is the same class as ERR-025 (tests prove isolated behavior, not production defense) and ERR-012 (stale base causes rollback) — the test environment does not reflect the real environment.
-- **Correct approach**: For SQLite real-path tests, prefer using the production schema initializer (e.g., `SqliteConnection` or the actual migration function) to create the test database. If a hand-written test schema is unavoidable, add `PRAGMA table_info(tableName)` assertions that verify critical columns exist and match production definitions. Never assume column names — assert them.
-- **How to prevent**: (1) Prefer production schema initializers for test databases. (2) If hand-writing test schemas, add `PRAGMA table_info` assertions for every column referenced in production SQL. (3) When a query references a column, the test must prove that column exists in the production schema definition. Review trigger: any PR that creates a `CREATE TABLE` statement in a test file must also include a `PRAGMA table_info` assertion or use the production initializer.
-- **Source**: PRI-209 / PR #689
-- **Date**: 2026-05-23
-- **Recurrence**: None
-
----
-
-**[ERR-027]** | Strategic pivot lands but executable docs and issue templates continue dispatching superseded work
-
-- **What happened**: PR #696 introduced ADR-0014 and an MVP-First execution document that paused Attribution / Phase 1C / Phase 1D expansion, but the same merged documentation set still contained a Linear sync template directing agents to create PRI-232~236, a risk register allowing Phase 1C work in parallel, active architecture status tables marking already-delivered RuleHost work as pending, and a mandatory feature-flag gate before any registry/loader existed.
-- **Why it's wrong**: For an AI-driven project, route documents and issue templates are an executable control plane. Contradictory instructions are not cosmetic drift: they dispatch canceled work, make nonexistent enforcement mechanisms mandatory, and push the project away from its declared product objective.
-- **Correct approach**: When a strategy ADR changes active scope, update the executable control plane in the same convergence change: agent instructions, current roadmap, Linear sync plan, risk register, active architecture status, user-facing scope statements, and live Linear issue states. Historical analysis may remain only with a prominent `DO NOT DISPATCH` marker and restart condition.
-- **How to prevent**: Before merging a strategy pivot, search for the superseded issue IDs, phase names, component names, and gate requirements across active docs and Linear. Require one explicit table of active, deferred/canceled, and stretch issues. Do not state a governance gate is mandatory until a production enforcement path and test exist.
-- **Source**: PRI-252 / follow-up to PR #696
-- **Date**: 2026-05-24
-- **Recurrence**: None
 
 ---
 
@@ -655,6 +632,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier recurrence (PR#701, 2026-05-24): `resolveRuntimeConfig()` didn't accept `requestedRuntimeKind`; `?? 'local'` overrode gateway intent. See git history.
 
 ---
+
+> PRI-523 C2 recurrence for ERR-034 (2026-08-13): The Codex hook initially preferred inherited `PD_WORKSPACE_DIR` over codex-cli 0.147.0's validated `cwd`, so stale process-global compatibility state could route one Workspace's hook into another Workspace's business state. The fix treats hook `cwd` as authoritative and resolves its nearest ancestor `.pd/config.yaml`; executable regressions cover nested-cwd selection and flag-off/no-mutation behavior.
 
 **[ERR-035]** | Static guard only covers frozen-basename dynamic imports, misses other legacy paths
 
@@ -831,7 +810,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`.
+- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`. 2026-08-13 PRI-523: bundled plugin retained an inlined workspace-only dependency, breaking clean install; packaging now strips and pack-tests it.
 
 ---
 
@@ -860,6 +839,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 
 **[ERR-055]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
+
+- **2026-08-13 PRI-523 C1.3 recurrence**: the shared sanitizer documented ANY-segment key redaction but only applied value-shaped token regexes, allowing `token` and nested `authorization` values through. Fixed in the canonical core sanitizer with nested sensitive-key regressions and verified through persisted host-runtime evidence.
 
 - **What happened**: `isSensitiveKey()` required EVERY segment of a composite key to match `SENSITIVE_KEY_SEGMENTS`. This meant `github_token` (segments: `["github", "token"]`) was NOT flagged because "github" is not in the sensitive set. Only keys where ALL segments were sensitive (e.g., `auth_token` where both "auth" and "token" are in the set) were caught.
 - **Why it's wrong**: The privacy guarantee is that any key containing a sensitive segment should be redacted. Using ALL-segment logic inverts this — it only redacts when the entire key name is composed of sensitive words. This is a security vulnerability: `db_password`, `github_token`, `api_key`, `aws_secret` all pass through unredacted.
@@ -1142,6 +1123,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount.
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
+  - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
+  - 2026-08-13 PRI-523 C1.3 self-review (corrected classification, consolidated): the OpenClaw host-owned diagnosis continuation must remain best-effort so the PostToolUse hook returns after durable shared SQLite persistence, but the first implementation used bare `void emitPainDetectedEvent(...)` with no lifecycle-owned rejection handling or test drain. The first corrective scheduler still allowed a never-settling continuation to keep the pending set and lifecycle drain open forever. Fixed with an explicit scheduler that attaches immediate resolution/rejection handlers, enforces a finite 30-second timeout, emits bounded reason/nextAction, clears its timer on every terminal path, removes settled or timed-out promises, and exposes a test-only drain. Rejected and never-settling continuation regressions prove observability and bounded cleanup without extending hook latency; the original promise remains rejection-observed even if it settles after the timeout.
 
 ---
 
@@ -1247,6 +1230,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-459 / PR #1045
 - **Date**: 2026-06-25
 - **Recurrence**: 2026-07-16 PR #1230 / PRI-516: retry deduplication claimed a run before turn-index resolution and synchronous signal collection completed, so a trajectory or detector failure caused the next retry to be skipped. Fixed by claiming only after successful detection and adding a fail -> retry success -> duplicate skip regression test.
+  - 2026-08-13 PRI-523: config migration first lacked atomic locking, then removed unowned stale-looking locks. It now atomically replaces under an owned lock and fails loud after bounded no-unlink contention.
+  - 2026-08-13 PRI-523 C1.3 self-review and quality-review correction: the first shared PostToolUse kernel checked duplicates only when an event had already produced a `pain_events` row, so repeated successful/control host events wrote duplicate `tool_calls` evidence. Its follow-up digest still allowed the supplied host event ID to replace payload/outcome identity. Fixed by making canonical tool evidence the all-outcome dedup claim and binding canonical workspace/source/session/tool/sanitized payload/outcome plus supplied ID into the digest; same ID with different payload/outcome remains distinct while exact cross-runtime retries deduplicate.
 
 ---
 
@@ -1261,7 +1246,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-056 (security transformation applied at wrong point in pipeline), ERR-024 (security validator not wired into real enforcement path), ERR-014 (bounding asymmetry across code paths), ERR-017 (unsafe serialization on unknown values), ERR-081 (same PR, TOCTOU in stat-then-read file size cap).
 - **Source**: PRI-467 / PR #1059 (CodeRabbit review)
 - **Date**: 2026-06-25
-- **Recurrence**: 2026-08-12 PR #1302 (CodeRabbit review, semantic-canonicalization flavor): the demo RuleCode exemplar in `story-a-demo.ts` / `proven-channel-baseline.ts` used `String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? "")` — raw path first, so `/project/../../etc/passwd` bypassed the `/etc` block (demo activations run in the production RuleHost shadow, so this was a real, if low-impact, correctness gap). Fixed by swapping to `normalizedPath ?? paramsSummary.path`; regression test in `story-a-demo.test.ts` ("blocks via normalizedPath even when paramsSummary.path is a traversal").
+- **Recurrence**: 2026-08-13 PRI-523 C1.2 quality review: RuleCode evaluation ran in a bounded child, but compilation still executed untrusted top-level source in the parent; the timeout applied per rule, so N active rules created an N×timeout gate; active rows/source/output/warnings were uncapped. The control protected one evaluation phase, not the canonical full untrusted workload. Fixed by moving compilation+evaluation into one 32 MiB child batch with one total deadline, bounded SQL/source/output/warnings, and parent-only validation of bounded child JSON. Narrow re-review found the same root cause at the storage/lifecycle boundary: the first SQL query still materialized full artifact JSON before checking its envelope size, and provider deadline timers survived early settlement. Fixed with a metadata-only SQLite byte-length preflight, a bounded second fetch with defensive actual-byte verification, and timer cleanup in `finally`. Regression covers top-level loops, syntax errors, memory/output/source exhaustion, active-rule overflow, multi-rule elapsed time, a small RuleCode inside oversized irrelevant JSON, and early provider resolve/reject timer cleanup. 2026-08-13 PRI-523 C1.1 review: the shared active-principle kernel budgeted compact pre-render lines, then XML-escaped and wrapped them as directives; expandable content could therefore make the final emitted block exceed the 2,000-character contract. Fixed by selecting only whole directives whose fully rendered escaped block fits, with regression coverage for 10 expandable principles, complete tags, truncation metadata, and exact fit. 2026-08-12 PR #1302 (CodeRabbit review, semantic-canonicalization flavor): the demo RuleCode exemplar in `story-a-demo.ts` / `proven-channel-baseline.ts` used `String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? "")` — raw path first, so `/project/../../etc/passwd` bypassed the `/etc` block (demo activations run in the production RuleHost shadow, so this was a real, if low-impact, correctness gap). Fixed by swapping to `normalizedPath ?? paramsSummary.path`; regression test in `story-a-demo.test.ts` ("blocks via normalizedPath even when paramsSummary.path is a traversal").
 
 ---
 
@@ -1307,6 +1292,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-08-13 PRI-523 C1.2 self-review: the first shared RuleHost kernel correctly moved canonical action construction and RuleCode evaluation into `@principles/host-runtime`, but hardcoded `currentGfi=0`, `recentThinking=false`, and `epTier=0` instead of preserving the OpenClaw-owned enrichment contract. Existing RuleCode that reads those fields would silently allow rather than enforce. Fixed by adding a validated neutral `ruleInputEnrichmentProvider`, wiring OpenClaw's existing session/evolution helpers through it, and adding a production-entry regression whose unique deny requires all three host values.
+  - 2026-08-13 PRI-523 C1.3 quality-review recurrence (consolidated): the shared pain readiness contract initially checked only recognizable table/index names, then checked unique/partial flags without the index predicate. Older schemas missing referenced columns—or a same-name index with `WHERE score > 50`—could invoke OpenClaw enrichment before failure or violate canonical pain uniqueness semantics. Fixed by validating all consumed columns/types, unique-index properties, exact normalized partial predicate, and running host-runtime plus OpenClaw malformed/wrong-predicate regressions proving neither enrichment nor continuation runs.
+  - 2026-08-13 PRI-523 C1.1 review cycle: the initial shared prompt-kernel wiring omitted OpenClaw's legacy active/probation ID exclusion, so the same principle could be injected twice when present in both stores. The first fix passed host-owned exclusion IDs into the host-neutral selector, but did not expose exclusion metadata and therefore made OpenClaw misreport the all-excluded state as `no_validated_activations`. The converged fix returns host-neutral exclusion IDs/count/reason and preserves OpenClaw's exact `all_deduped_against_legacy` reason and next action.
+  - 2026-08-13 PRI-523 C1.1 review cycle: the exclusion caller then supplied every raw legacy active/probation ID, although pruning and legacy budgets meant some of those principles were not actually emitted. That suppressed the only visible Runtime V2 copy. Fixed by preparing the legacy selection once, excluding only its selected IDs, and reusing the same selection for legacy rendering; real registration BDD covers masked, budget-omitted, and actually injected overlaps.
+  - 2026-08-13 PRI-523: The first OpenClaw shared-runtime cutover preserved returned values but changed the default flag-off `before_tool_call` / `after_tool_call` calling convention from synchronous callbacks to Promises. Fixed by keeping the legacy route synchronous and making only the enabled shared route async; the production-registration regression asserts the legacy deny result is not a Promise. Shared-contract audits must cover sync/async semantics as well as payload and result shapes.
   - 2026-07-01 PR #1137 (PRI-491): status enum change `'active' | 'inactive'` → `'active' | 'deactivated' | 'suspended_by_flag'` not propagated to UI validator `VALID_ACTIVATION_STATUSES` set, integration test assertion, and UI test; new `recordRuleHostSkipped` method added to `EventLogService` but mock in `gate-rule-context-v2.vm-e2e.test.ts` not updated (TypeError) + assertion expected old skip-message format ("suspended because..." vs new "suspended_by_flag: ...")
   - 2026-07-02 PR #1162 (PRI-501): shared default runtime profile in `pd-config-defaults.ts` changed from `openclaw.default` to `pd.default` (pi-ai placeholder), but `resolve-runtime-config-from-pd-config.test.ts` AC3/AC5 still asserted null config resolves to `openclaw-cli` success — principles-core CI failed (new placeholder returns `needs_setup` error). Fixed by updating AC3/AC5 to expect `needs_setup`.
 - 2026-07-04 PR #1182: package renamed from `principles-disciple` to `@csuzngjh/principles-disciple` in `packages/openclaw-plugin/package.json`, but `.github/workflows/ci.yml` (lines 178, 246, 247) and `.github/workflows/publish-npm.yml` (lines 186, 190) still used `npm run build --workspace=principles-disciple` — CI jobs `Test pd-cli` and `Test create-principles-disciple` failed at "Build plugin dependency" step with exit code 1 (npm couldn't resolve workspace `principles-disciple`). Root cause: package rename only propagated to source-tree `package.json` references but NOT to CI workflow `--workspace=<name>` refs. Fixed by updating all 5 occurrences to `@csuzngjh/principles-disciple`. Lesson: `npm run build --workspace=<name>` resolves by the `name` field in `package.json`, not the directory name — renaming a package's `name` field silently breaks every `--workspace=<old-name>` reference in CI workflows and scripts.
@@ -1329,53 +1319,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-085]** | Intermediate checks and silent coercions bypass canonical validator — specific schema errors masked as generic reasons, unknown enum values silently coerced to defaults
-
-- **What happened**: Two trust-boundary defects in PR #1079's `RuleHostWriter.extractGoldenTrace()` and `migrate-illegal-expected-decision.ts`:
-  1. `extractGoldenTrace()` performed intermediate checks (`cases` non-empty, `traceId` non-empty) before calling the canonical `validateGoldenTrace()`. When these intermediate checks failed, the function returned `no_golden_trace` — masking the real schema violation (e.g. empty cases, missing traceId) with a less actionable "missing trace" reason. The owner saw `no_golden_trace` when the actual problem was "cases array missing required positive/negative entries".
-  2. `normalizeExpectedDecision()` in the migration script coerced any unknown `kind` value to `block` via `kind === 'positive' ? 'allow' : 'block'`. An artifact with `kind: "shadow"` (illegal) and `expectedDecision: "requireApproval"` would be silently rewritten to `block`, hiding the data-quality issue from the operator.
-- **Why it's wrong**: When a canonical validator exists (`validateGoldenTrace()`), intermediate field-level checks must NOT short-circuit it — they steal the validator's chance to produce actionable, specific error details. Silent coercion of unknown enum values to a default violates rc-9 (no silent fallback): the operator never learns the data was malformed. Both defects share the root cause: bypassing the canonical validator's specific, observable error surface.
-- **Generalized failure mode**: When a canonical validator exists for a schema, intermediate checks must defer to it (not preempt it) so failure reasons stay specific and actionable; and unknown enum values must be recorded for manual review, never silently coerced to a "safe" default.
-- **Correct approach**: (1) In `extractGoldenTrace()`, only check `typeof trace !== 'object' || trace === null || Array.isArray(trace)` to decide `no_golden_trace`; once it's an object, defer ALL field validation to `validateGoldenTrace()` and surface `golden_trace_schema_invalid: <detail>`. (2) In `normalizeExpectedDecision()`, only map explicit `kind === 'positive'` → `'allow'` and `kind === 'negative'` → `'block'`; for any other `kind`, return `null` and record the artifact in `issues[]` for manual review.
-- **How to prevent**: (1) When writing a validator wrapper, ask: "Does my intermediate check produce a MORE specific reason than the canonical validator?" If no, delete the intermediate check. (2) For any coercion/default rule on enum-like fields, ask: "Can I distinguish 'default applies because value is X' from 'default applies because value is unknown'?" If no, the unknown case must be reported, not coerced. (3) Code-review checklist: grep for `? 'allow' : 'block'` and `'block' : 'allow'` ternaries in normalization code — every branch must be an explicit enum match.
-- **Regression guard**: `rule-host-writer.test.ts` "rejects artifact with empty GoldenTrace cases" now asserts `golden_trace_schema_invalid` (not `no_golden_trace`); "rejects artifact with illegal expectedDecision" asserts `gateDeps.evaluateInSandbox` was NOT called, proving the schema guard (not the sandbox) is the defense. Migration script's `issues[]` array captures unknown-kind cases for manual review.
-- **Related ERRs**: ERR-001, ERR-005, ERR-009, ERR-010, ERR-069 (same trust-boundary pattern group — `as`/intermediate checks/silent defaults bypass canonical validation); ERR-002 (silent degradation without observability — rc-9)
-- **Source**: PR #1079
-- **Date**: 2026-06-27
-- **Recurrence**: None
-
----
-
-**[ERR-086]** | Batch DB mutations in migration script not wrapped in transaction — partial failure leaves DB in inconsistent half-migrated state
-
-- **What happened**: `migrate-illegal-expected-decision.ts` Step 4 ("应用修复") iterated over artifacts needing fixes and called `db.prepare('UPDATE pi_artifacts ...').run(...)` once per artifact without any transaction wrapping. If the script crashed, threw, or was interrupted (Ctrl+C, OOM, power loss) after updating some artifacts but before others, the DB would be left in a half-migrated state: some artifacts have corrected `expectedDecision`, others still have `requireApproval`. The operator has no way to know which subset was modified without inspecting each row.
-- **Why it's wrong**: Migration scripts that mutate multiple rows must be atomic — either ALL rows are updated or NONE are. Without a transaction, a partial failure creates an inconsistent state that is strictly worse than no migration at all: the operator believes "the script ran" but the data is half-fixed, and re-running the script may skip already-fixed rows (depending on idempotency) or re-fix them (depending on logic). This violates the CLI Command Gate implicit contract that failure paths must not leave partial state.
-- **Generalized failure mode**: When a migration or batch-mutation script modifies multiple DB rows, the entire mutation set must be wrapped in a single transaction (`db.transaction(() => { ... })()`) so partial failures roll back to the pre-migration state. Better-sqlite3's `db.transaction()` makes this trivial.
-- **Correct approach**: Wrap the entire Step 4 loop in `const applyTx = db.transaction(() => { for (...) { ... } }); applyTx();`. If any `UPDATE` throws (e.g. DB locked, disk full, constraint violation), the transaction auto-rolls-back and the exception propagates — leaving the DB untouched. The script can then be safely re-run after the underlying issue is resolved.
-- **How to prevent**: (1) Code-review checklist for any script that loops `db.prepare(...).run()`: "Is this loop inside `db.transaction(() => { ... })()`?" If no, block the PR. (2) Better-sqlite3 idiom: prefer `const tx = db.transaction(() => { ... }); tx()` over manual `BEGIN`/`COMMIT`/`ROLLBACK` (handles nested transactions and exception rollback automatically). (3) Test by killing the script mid-loop (Ctrl+C) and verifying the DB is unchanged.
-- **Regression guard**: Manual smoke test — run `--write` mode, interrupt with Ctrl+C after first UPDATE, verify all artifacts still have original `expectedDecision` (transaction rolled back). The script's `[summary]` log now reports "transaction committed" only after the transaction completes.
-- **Related ERRs**: ERR-071 (async cleanup not awaited — same "cleanup/lifecycle hygiene" class), ERR-074 (inner try/catch exit tunnel bypasses outer cleanup — same "transactional boundary" concern)
-- **Source**: PR #1079
-- **Date**: 2026-06-27
-- **Recurrence**: None
-
----
-
-**[ERR-087]** | Domain-specific generator lacks precondition guard — write-path templates applied to non-write tools, producing semantically wrong negative cases
-
-- **What happened**: In PRI-485 Phase 6, `generateV2CasesFromArtificer()` (packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts) generated 5 v2 adversarial cases for ANY `canonicalKind` returned by `canonicalizeToolKind()`. But the 5 templates (alias/path-boundary/combination) are write-path semantics — they assume the action tool is a write tool. For non-write tools (read/search/execute/agent/other), the generated cases are semantically wrong: e.g. `v2-path-boundary` expects `block` on a `read_file` tool, which a correct read-rule would never do. This would cause the Evaluator to reject valid read-path rules during adversarial replay.
-- **Why it's wrong**: The function's type signature accepts all `CanonicalKind` values (`read | search | write | execute | agent | other`), but its implementation only correctly handles `write`. This is a type contract overpromise — the signature promises more than the implementation delivers. The spec §10.1 acceptance scenarios are ALL write-oriented, which created a blind spot: the generator was coded to the spec's examples without considering what happens for non-write inputs the spec didn't mention.
-- **Generalized failure mode**: When implementing a generator whose templates are domain-specific (proven by spec examples all being one domain), assistants must add a precondition guard that filters non-applicable inputs and degrades with structured telemetry (rc-9), otherwise the generator produces semantically wrong artifacts for unhandled domains.
-- **Correct approach**: Before calling `generateV2ContextAdversarialCases()`, check `canonicalKind !== 'write'` and degrade to `[]` with a telemetry event carrying `reason` + `nextAction` + `toolName` + `canonicalKind`. Non-write tools fall back to LLM-supplied adversarial cases only.
-- **How to prevent**: 30-second PR-review check — when a generator produces domain-specific artifacts from a generic input type (enum/union), verify: (1) does the spec/acceptance criteria cover ALL values of the input type, or only a subset? (2) if only a subset, is there a precondition guard filtering non-applicable values? (3) is there a regression test asserting the guard fires for a non-applicable value? If any answer is no, the generator has a domain blind spot.
-- **Regression guard**: `packages/principles-core/src/runtime-v2/__tests__/evaluator-runner-vslice-v2.test.ts` — "PRI-485 Phase 6: v2 cases skipped when canonicalKind is non-write (read tool)" asserts: (a) trace captured with only 3 LLM cases (no v2 caseIds), (b) telemetry event `evaluator_v2_adversarial_cases_skipped` emitted with `reason: 'non_write_canonical_kind_for_v2_adversarial_cases'` and `canonicalKind: 'read'`.
-- **Related ERRs**: ERR-069 (writing against remembered contract instead of actual schema — same pattern group: spec-driven blind spot), ERR-025 (test reality gap — fixtures used read_file and passed without asserting semantic correctness), EP-02 (production path wiring — component exists but real inputs it can't handle break it).
-- **Source**: PRI-485 / PR #1102 (CodeRabbit review)
-- **Date**: 2026-06-29
-- **Recurrence**: None
-
----
-
 **[ERR-088]** | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path
 
 - **What happened**: In PRI-486 Phase 7 E2E tests (PR #1109), two test cases used non-unique assertion signals:
@@ -1389,7 +1332,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+- **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
 
 ---
 

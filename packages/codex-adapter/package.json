@@ -22,16 +22,17 @@
   },
   "files": [
     "dist",
-    "hooks"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@principles/core": "^1.74.1"
+    "@principles/core": "^1.74.1",
+    "@principles/host-runtime": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
