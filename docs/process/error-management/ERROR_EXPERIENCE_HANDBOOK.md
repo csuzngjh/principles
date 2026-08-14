@@ -661,6 +661,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+> PRI-523 C2 recurrence for ERR-034 (2026-08-13): The Codex hook initially preferred inherited `PD_WORKSPACE_DIR` over codex-cli 0.147.0's validated `cwd`, so stale process-global compatibility state could route one Workspace's hook into another Workspace's business state. The fix treats hook `cwd` as authoritative and resolves its nearest ancestor `.pd/config.yaml`; executable regressions cover nested-cwd selection and flag-off/no-mutation behavior.
+
 **[ERR-035]** | Static guard only covers frozen-basename dynamic imports, misses other legacy paths
 
 - **What happened**: `nocturnal-entrypoint-guard.test.ts` `findImportLines()` only checked dynamic imports against `FROZEN_NOCTURNAL_MODULES` basenames. A dynamic import like `import('../service/sleep-cycle.js')` or `import('../service/idle-detector.js')` would not be detected because `sleep-cycle` and `idle-detector` are not in the frozen set. PRI-227's goal is to prevent new legacy nocturnal callers, not just frozen module callers.
