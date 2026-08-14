@@ -256,6 +256,16 @@ The exception exposes exactly three MVP-Core behavior paths:
 
 This is a host-surface refactor of existing MVP-Core behavior, not a fourth activation channel. `defer_archive` remains an owner-reviewed activation outcome in the domain, but it does not require a separate host hook path.
 
+### 10.2.1 Decision mapping under the shared protocol (clarified 2026-08-14)
+
+`HostEventResult.decision` in `@principles/core` has exactly four legal values: `'allow' | 'deny' | 'modify' | 'observe'` (see `host-adapter.ts:113`, `isHostDecision`). The earlier PRI-523 plan text referenced four OpenClaw-era RuleHost decisions (`allow` / `block` / `requireApproval` / `auto_correct`) and asked for a per-decision Codex mapping. Under the shared runtime that mapping is no longer applicable, because `production-rulehost-gate.ts` collapses RuleCode evaluation into the new protocol before any host codec sees it:
+
+- RuleHost `block` → shared runtime `deny` (with owner-visible reason).
+- RuleHost `allow` / no matching activation → shared runtime `allow`.
+- `requireApproval` and `auto_correct` are OpenClaw-private legacy decisions emitted by the old `gate.ts` RuleHost path. The shared runtime does not produce them, so Codex never receives them and no host-level mapping is required.
+
+Codex therefore encodes only `allow` / `deny` / `modify(additionalContext)` / `observe`. The `modify` path is used exclusively for `before_prompt_build` additional-context injection, not for tool-input rewriting (Codex 0.147 has no `modifiedInput` field that RuleCode can populate). This is a protocol convergence, not a feature loss: OpenClaw keeps its legacy `requireApproval` / `auto_correct` handling intact through `gate.ts`, and Codex gets equivalent gate coverage through `deny` + reason.
+
 ### 10.3 Explicitly still deferred
 
 This exception does not authorize:
@@ -304,6 +314,17 @@ features:
 Registry metadata retains `host.codex.since: '2026-08-11'` and registers `abstraction_layer_v1.since: '2026-08-13'`. Loader/migration tests must cover fresh config, migrated config, explicit `host.codex.enabled: false`, and explicit `abstraction_layer_v1.enabled: false`; each operator rollback must select the neutral/legacy route and emit its observable reason. Installed-bundle acceptance must also execute from a `PLUGIN_ROOT` path containing spaces, proving that every hook command quotes the path correctly.
 
 Rollback is also exact: setting `host.codex.enabled: false` in the Workspace `.pd/config.yaml` makes every Codex hook return the host's neutral allow/empty result, records the structured skip reason, and leaves OpenClaw plus both Workspace authority paths unchanged.
+
+### 10.5.1 Cooldown behavior under per-invocation host processes (clarified 2026-08-14)
+
+`production-pain-evidence.ts` keeps an in-memory `cooldowns` Map keyed by `workspaceDir:sessionId:failureSource:errorHash` with a 15-minute window. In OpenClaw's long-running process this Map persists across hook calls. Codex spawns a fresh Node process per hook invocation (`spawnSync` in `pd-hook.production.test.ts` proves this), so the Map is empty on every entry and the in-memory cooldown is effectively inactive on the Codex host.
+
+This is accepted fail-open behavior, not a defect, because two stronger guards remain in force:
+
+1. **`canonical_pain_id` idempotency** — `production-pain-evidence.ts:261` derives a stable hash from `workspace + session + toolName + errorHash` and queries `pain_signals` before insert. A duplicate canonical id sets `duplicate = true` and the pain record is not re-created, even when the in-memory cooldown has expired (or was never populated).
+2. **Conservative collection direction** — pain capture is fail-open by design (prefer recording extra evidence to silently dropping it). Trajectory rows may be written more than once for the same errorHash within 15 minutes on Codex, but this does not produce duplicate pain records, duplicate diagnostic tasks, or owner-visible noise.
+
+Persisting cooldown to SQLite was considered and rejected: it would add I/O on the hot pain path, diverge from OpenClaw's in-memory cooldown (creating a dual-track state), and contradict the shared-runtime goal of one orchestration path. If future evidence shows trajectory volume becoming a problem on Codex, a follow-up issue may add a bounded trajectory dedup query; that is not required for MVP acceptance.
 
 This amendment changes the active flag contract unambiguously:
 
