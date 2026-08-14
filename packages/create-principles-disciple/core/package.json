@@ -77,7 +77,12 @@
     "./quality-scorecard": {
       "types": "./dist/quality-scorecard/index.d.ts",
       "default": "./dist/quality-scorecard/index.js"
-    }
+    },
+    "./host": {
+      "types": "./dist/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -89,21 +94,22 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.79.4",
-    "@earendil-works/pi-ai": "^0.79.4",
+    "@earendil-works/pi-agent-core": "^0.84.1",
+    "@earendil-works/pi-ai": "^0.84.1",
     "@mariozechner/pi-ai": "^0.73.1",
     "@sinclair/typebox": "^0.34.48",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^13.0.3",
     "js-yaml": "^4.1.1",
     "typebox": "^1.2.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.0.1",
-    "typescript": "^6.0.3",
+    "@types/node": "^26.1.2",
+    "fast-check": "4.9.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.16",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "license": "MIT",
   "repository": {

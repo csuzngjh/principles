@@ -62,6 +62,7 @@ packages/openclaw-plugin/skills
 
 # create-principles-disciple: bundled plugin (build artifact)
 packages/create-principles-disciple/plugin/
+packages/create-principles-disciple/host-runtime/
 
 # Local environment and state
 # .claude/ is ignored except for skills (shared with team)

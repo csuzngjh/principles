@@ -1,6 +1,34 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
+
+// PRI-523: the after_tool_call route drives the real production pain-evidence
+// kernel, which short-circuits (and skips the enrichment provider) when the
+// workspace lacks a canonical trajectory.db. The registration test asserts
+// that the enrichment provider and onAfterToolResult side-effect are wired
+// through the shared runtime, so we provision a real temporary workspace
+// with a schema-compatible trajectory.db for the after_tool_call case only.
+const workspaces: string[] = [];
+
+function workspaceWithTrajectory(): string {
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-reg-'));
+  workspaces.push(workspaceDir);
+  const stateDir = path.join(workspaceDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const db = new Database(path.join(stateDir, 'trajectory.db'));
+  db.exec(`
+    CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL);
+    CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
+  `);
+  db.close();
+  return workspaceDir;
+}
 
 const dispatch = vi.fn<(event: HostEvent, next: (event: HostEvent) => Promise<HostEventResult>) => Promise<HostEventResult>>(
   (event, next) => next(event),
@@ -95,6 +123,9 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    for (const workspaceDir of workspaces.splice(0)) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
+    }
   });
 
   it('does not schedule a delayed write to the real OpenClaw home config', async () => {
@@ -118,8 +149,14 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     if (hookName === 'before_prompt_build') handleBeforePromptBuild.mockResolvedValue(nativeResult);
     if (hookName === 'before_tool_call') handleBeforeToolCall.mockReturnValue(nativeResult);
 
+    // after_tool_call exercises the real production pain-evidence kernel, which
+    // requires a schema-compatible trajectory.db to reach the enrichment provider
+    // and onAfterToolResult side-effect. before_prompt_build / before_tool_call
+    // do not touch the database, so they keep the synthetic workspace path.
+    const workspaceDir = hookName === 'after_tool_call' ? workspaceWithTrajectory() : 'D:/workspace';
+
     const result = await hook?.(nativeEvent, {
-      workspaceDir: 'D:/workspace', sessionId: 'session-1', agentId: 'agent-1', trigger: 'user',
+      workspaceDir, sessionId: 'session-1', agentId: 'agent-1', trigger: 'user',
     });
 
     expect(createProductionHostRuntime).toHaveBeenCalled();

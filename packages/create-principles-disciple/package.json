@@ -12,6 +12,7 @@
     "pd-cli",
     "console",
     "core",
+    "host-runtime",
     "templates",
     "README.md",
     "LICENSE"

@@ -17,6 +17,8 @@ const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
 const CONSOLE_DEST = join(__dirname, '..', 'console');
 const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
 const CORE_DEST = join(__dirname, '..', 'core');
+const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
+const HOST_RUNTIME_DEST = join(__dirname, '..', 'host-runtime');
 
 const PLUGIN_REQUIRED = [
   'dist',
@@ -46,6 +48,12 @@ const CONSOLE_REQUIRED = [
 ];
 
 const CORE_REQUIRED = [
+  'dist',
+  'dist/index.js',
+  'package.json',
+];
+
+const HOST_RUNTIME_REQUIRED = [
   'dist',
   'dist/index.js',
   'package.json',
@@ -85,6 +93,15 @@ for (const item of CORE_REQUIRED) {
   if (!existsSync(src)) {
     console.error(`❌ Required core item not found: ${src}`);
     console.error(`   Run: cd packages/principles-core && npm run build`);
+    process.exit(1);
+  }
+}
+
+for (const item of HOST_RUNTIME_REQUIRED) {
+  const src = join(HOST_RUNTIME_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required host-runtime item not found: ${src}`);
+    console.error(`   Run: cd packages/host-runtime && npm run build`);
     process.exit(1);
   }
 }
@@ -178,11 +195,39 @@ for (const item of CORE_REQUIRED) {
 
 console.log(`   Core: ${CORE_DEST}`);
 
-console.log('\n🔧 Rewriting bundled dependencies (@principles/core, principles-disciple)...');
+if (existsSync(HOST_RUNTIME_DEST)) {
+  console.log('  Removing old host-runtime/ directory...');
+  rmSync(HOST_RUNTIME_DEST, { recursive: true, force: true });
+}
+mkdirSync(HOST_RUNTIME_DEST, { recursive: true });
+
+for (const item of HOST_RUNTIME_REQUIRED) {
+  const src = join(HOST_RUNTIME_SRC, item);
+  const dest = join(HOST_RUNTIME_DEST, item);
+  console.log(`  Copying host-runtime/${item}...`);
+  try {
+    cpSync(src, dest, { recursive: true });
+  } catch {
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+}
+
+console.log(`   Host Runtime: ${HOST_RUNTIME_DEST}`);
+
+console.log('\n🔧 Rewriting bundled dependencies (@principles/core, @principles/host-runtime, principles-disciple)...');
 
 function rewriteBundledDependency(pkgPath, label, depName, replacement) {
-  if (!existsSync(pkgPath)) return;
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  // Avoid TOCTOU: skip the existsSync check and handle ENOENT from readFileSync
+  // directly. The prior existsSync + readFileSync pair allowed a race where the
+  // file could be deleted between check and use.
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
   let changed = false;
   if (pkg.dependencies && depName in pkg.dependencies) {
     pkg.dependencies[depName] = replacement;
@@ -199,8 +244,15 @@ function rewriteBundledDependency(pkgPath, label, depName, replacement) {
 }
 
 function removeBundledDependency(pkgPath, label, depName) {
-  if (!existsSync(pkgPath)) return;
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  // Avoid TOCTOU: same pattern as rewriteBundledDependency — read directly and
+  // handle ENOENT instead of checking existsSync first.
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
   let changed = false;
   for (const section of ['dependencies', 'devDependencies']) {
     if (pkg[section] && Object.hasOwn(pkg[section], depName)) {
@@ -217,6 +269,17 @@ function removeBundledDependency(pkgPath, label, depName) {
 rewriteBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core', 'file:./core');
 removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
+// pd-cli depends on @principles/host-runtime at runtime (it statically imports
+// createProductionHostRuntime). Rewrite to a local file reference so the
+// bundled package is self-contained. The installer's syncPdCli() creates a
+// node_modules/@principles/host-runtime symlink to the installed host-runtime
+// directory. Without this rewrite + symlink, `pd --version` crashes with
+// ERR_MODULE_NOT_FOUND because pd-cli cannot resolve @principles/host-runtime.
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/host-runtime', 'file:../host-runtime');
+// host-runtime itself depends on @principles/core. Rewrite to a local file
+// reference so the bundled host-runtime package can resolve core without a
+// separate npm install. The installer creates the corresponding symlink.
+rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
 // file reference so the bundled package is self-contained. The installer's syncPdCli()

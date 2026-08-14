@@ -188,6 +188,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Checking built plugin', weight: 3 },
   { name: 'Backing up existing install', weight: 3 },
   { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Installing bundled @principles/host-runtime', weight: 3 },
   { name: 'Installing core dependencies', weight: 10 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Preparing core library for plugin', weight: 3 },
@@ -573,6 +574,23 @@ function syncPdCli(pluginDir: string): boolean {
     }
   }
 
+  // Create node_modules/@principles/host-runtime symlink so pd-cli can resolve
+  // its @principles/host-runtime dependency (rewritten to "file:../host-runtime"
+  // by bundle-plugin.mjs). Without this, `pd --version` crashes with
+  // ERR_MODULE_NOT_FOUND because pd-cli statically imports createProductionHostRuntime.
+  // host-runtime's own better-sqlite3 / js-yaml / @principles/core dependencies
+  // resolve through the plugin's <ext>/node_modules/ (shared via Node's upward
+  // module resolution), so no separate npm install is needed.
+  const hostRuntimeLinkTarget = path.join(getPluginExtDir(), 'host-runtime');
+  const hostRuntimeLinkPath = path.join(coreLinkDir, 'host-runtime');
+  if (!existsSync(hostRuntimeLinkPath)) {
+    if (isWindows()) {
+      symlinkSync(hostRuntimeLinkTarget, hostRuntimeLinkPath, 'junction');
+    } else {
+      symlinkSync('../../../host-runtime', hostRuntimeLinkPath, 'dir');
+    }
+  }
+
   // Create node_modules/principles-disciple symlink so pd-cli can resolve
   // its principles-disciple dependency (the plugin package, rewritten to
   // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
@@ -684,6 +702,10 @@ function getInstalledCoreDir(): string {
   return path.join(getPluginExtDir(), 'core');
 }
 
+function getInstalledHostRuntimeDir(): string {
+  return path.join(getPluginExtDir(), 'host-runtime');
+}
+
 function installBundledCore(pluginDir: string): void {
   const coreSrc = path.join(pluginDir, 'core');
   const coreDest = getInstalledCoreDir();
@@ -700,6 +722,24 @@ function installBundledCore(pluginDir: string): void {
 
   rmSync(coreDest, { recursive: true, force: true });
   cpSync(coreSrc, coreDest, { recursive: true });
+}
+
+function installBundledHostRuntime(pluginDir: string): void {
+  const hostRuntimeSrc = path.join(pluginDir, 'host-runtime');
+  const hostRuntimeDest = getInstalledHostRuntimeDir();
+
+  if (!existsSync(hostRuntimeSrc)) {
+    throw new Error('Bundled @principles/host-runtime not found in package. Cannot resolve runtime dependencies.');
+  }
+
+  const hostRuntimePkgJson = path.join(hostRuntimeSrc, 'package.json');
+  const hostRuntimeDist = path.join(hostRuntimeSrc, 'dist');
+  if (!existsSync(hostRuntimePkgJson) || !existsSync(hostRuntimeDist)) {
+    throw new Error('Bundled @principles/host-runtime is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(hostRuntimeDest, { recursive: true, force: true });
+  cpSync(hostRuntimeSrc, hostRuntimeDest, { recursive: true });
 }
 
 function ensureCoreDependency(_targetDir: string): void {
@@ -1278,6 +1318,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
     installBundledCore(pluginDir);
+    stepIndex++;
+
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/host-runtime...');
+    installBundledHostRuntime(pluginDir);
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing core dependencies...');
