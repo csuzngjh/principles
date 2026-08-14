@@ -12,18 +12,15 @@ import baseConfig from './vitest.config.js';
  *
  * Running these in separate forks causes "Worker exited unexpectedly" on Linux
  * because better-sqlite3 native handles don't clean up properly when a fork
- * subprocess exits. singleFork forces both files into the same process so
+ * subprocess exits. maxWorkers: 1 forces both files into the same worker so
  * native handles are only torn down once, at the end of the run.
+ * (vitest 4.x ignores the legacy poolOptions.forks.singleFork flag.)
  */
 export default mergeConfig(
   baseConfig,
   defineConfig({
     test: {
-      poolOptions: {
-        forks: {
-          singleFork: true,
-        },
-      },
+      maxWorkers: 1,
     },
   })
 );
