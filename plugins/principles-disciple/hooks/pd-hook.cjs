@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+/**
+ * PD Codex plugin hook entry (cross-platform, zero-build CJS).
+ *
+ * Codex spawns this wrapper for every hook event with stdin carrying the hook
+ * payload and stdout/stderr feeding back into the session. The wrapper does
+ * NOT parse the payload — it resolves the pinned @principles/codex-adapter
+ * runtime and re-spawns its dist/pd-hook.js with stdio passthrough, so the
+ * adapter (which owns the pinned Codex schema codec and the shared
+ * host-runtime dispatch) sees the exact bytes Codex wrote.
+ *
+ * Runtime resolution order:
+ *   1. ${PLUGIN_DATA}/runtime/node_modules — installed by the $pd-setup skill
+ *      with versions pinned in ${PLUGIN_ROOT}/runtime-version.json.
+ *   2. The global npm root (`npm install -g @principles/codex-adapter`).
+ *
+ * Every failure is fail-open (rc-9: observable, never a bare crash):
+ * `{}` on stdout + a bounded `[PD] status=degraded reason=... nextAction=...`
+ * line on stderr + exit 0, matching the adapter's own contract.
+ */
+'use strict';
+
+const { execSync, spawnSync } = require('child_process');
+const path = require('path');
+
+function failOpen(reason, nextAction) {
+  process.stderr.write(`[PD] status=degraded reason=${reason} nextAction=${nextAction}\n`);
+  process.stdout.write('{}\n');
+  process.exit(0);
+}
+
+function globalNpmRoot() {
+  try {
+    const root = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return root.length > 0 ? root : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveAdapterEntry() {
+  const roots = [];
+  if (process.env.PLUGIN_DATA) roots.push(path.join(process.env.PLUGIN_DATA, 'runtime', 'node_modules'));
+  const global = globalNpmRoot();
+  if (global) roots.push(global);
+  for (const root of roots) {
+    try {
+      // `paths` entries are used as node_modules roots; the adapter's exports
+      // map routes "@principles/codex-adapter/pd-hook" to dist/pd-hook.js.
+      return require.resolve('@principles/codex-adapter/pd-hook', { paths: [root] });
+    } catch {
+      /* try next root */
+    }
+  }
+  return undefined;
+}
+
+const entry = resolveAdapterEntry();
+if (!entry) {
+  failOpen(
+    'pd_runtime_not_installed',
+    'Run the $pd-setup skill in this workspace to install the pinned PD runtime (or npm install -g @principles/codex-adapter), then retry.',
+  );
+}
+
+const result = spawnSync(process.execPath, [entry], { stdio: 'inherit' });
+if (result.error) {
+  failOpen(`pd_runtime_spawn_failed:${result.error.message.slice(0, 200)}`, 'Re-run $pd-setup to reinstall the PD runtime, then retry.');
+}
+// The adapter owns the exit contract (always 0: fail-open); propagate anything
+// else verbatim so anomalies stay observable instead of being masked here.
+process.exit(result.status === null ? 0 : result.status);

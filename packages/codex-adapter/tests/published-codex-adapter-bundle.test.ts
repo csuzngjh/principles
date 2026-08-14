@@ -93,9 +93,11 @@ describe('published @principles/codex-adapter bundle safety', () => {
 
   afterAll(() => {
     if (tempDir) {
-      try { fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* best effort */ }
+      // Windows deletion of the installed node_modules can exceed vitest's
+      // default 10s hookTimeout; give cleanup room to finish.
+      try { fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 0 }); } catch { /* best effort */ }
     }
-  });
+  }, 180_000);
 
   it('packs and installs without pulling in openclaw-plugin', () => {
     expect(tempDir).not.toBe('');

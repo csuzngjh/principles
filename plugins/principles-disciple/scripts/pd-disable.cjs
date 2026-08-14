@@ -1,0 +1,109 @@
+#!/usr/bin/env node
+/**
+ * $pd-disable — the Codex kill switch (mvp-q-3).
+ *
+ * Sets features.host.codex.enabled=false in the nearest .pd/config.yaml.
+ * Every Codex hook then returns the neutral allow/empty result with an
+ * observable skip reason, and no PD business state is written. OpenClaw and
+ * all workspace owner data (.pd/, .state/) are untouched. Run with --enable
+ * to re-activate. Uninstalling the plugin is a separate action and is NOT
+ * required to stop PD behavior.
+ *
+ * The edit is targeted and line-based (zero dependencies, works even when the
+ * runtime is not installed): only the `enabled:` line inside the
+ * `features: → host.codex:` block is rewritten, via write-temp-then-rename.
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { locateWorkspace } = require('./pd-locate.cjs');
+
+function fail(reason, nextAction) {
+  console.error(`[PD:disable] status=failed reason=${reason}`);
+  console.error(`[PD:disable] nextAction=${nextAction}`);
+  process.exitCode = 1;
+}
+
+/** Rewrite the enabled value inside the host.codex block of BLOCK-style YAML.
+ * Returns the new content, or undefined when the block cannot be located. */
+function rewriteBlockYaml(raw, target) {
+  const lines = raw.split(/\r?\n/);
+  let inFeatures = false;
+  let hostLine = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^features:\s*$/.test(line)) { inFeatures = true; continue; }
+    if (/^\S/.test(line)) { if (inFeatures && hostLine === -1) inFeatures = false; }
+    if (inFeatures && /^\s+host\.codex:\s*$/.test(line)) { hostLine = i; break; }
+  }
+  if (hostLine === -1) return undefined;
+  for (let i = hostLine + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\S/.test(line)) break;
+    if (/^\s{2,}enabled:\s*(true|false)\s*$/.test(line)) {
+      lines[i] = line.replace(/enabled:\s*(true|false)/, `enabled: ${target}`);
+      return lines.join('\n');
+    }
+  }
+  return undefined;
+}
+
+/** FLOW-style (JSON) configs — our own production tests and some tools write
+ * JSON, which is valid YAML the runtime reads fine. Mutate via JSON parse. */
+function rewriteJsonConfig(raw, target) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return undefined; }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const features = parsed.features;
+  if (typeof features !== 'object' || features === null || Array.isArray(features)) return undefined;
+  if (!Object.hasOwn(features, 'host.codex')) return undefined;
+  const entry = features['host.codex'];
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry) || typeof entry.enabled !== 'boolean') return undefined;
+  if (entry.enabled === target) return raw;
+  entry.enabled = target;
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  let workspaceArg;
+  let target = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--workspace') workspaceArg = argv[++i];
+    else if (argv[i] === '--enable') target = true;
+    else { fail(`unknown_argument:${argv[i]}`, 'Supported: --workspace <dir> --enable'); return; }
+  }
+
+  const ws = locateWorkspace(workspaceArg ?? process.cwd());
+  if (!ws.ok) { fail(ws.reason, ws.nextAction); return; }
+  const configPath = path.join(ws.workspaceDir, '.pd', 'config.yaml');
+
+  let raw;
+  try { raw = fs.readFileSync(configPath, 'utf8'); } catch (error) {
+    fail(`config_unreadable:${error.message.slice(0, 160)}`, `Fix read access to ${configPath} and retry.`);
+    return;
+  }
+
+  const next = rewriteBlockYaml(raw, target) ?? rewriteJsonConfig(raw, target);
+  if (next === undefined) {
+    fail('host_codex_entry_missing', `Add this block under features: in ${configPath}:\n  host.codex:\n    category: core\n    enabled: ${target}`);
+    return;
+  }
+  if (next === raw) {
+    console.log(`[PD:disable] already ${target ? 'enabled' : 'disabled'} — no change (${configPath})`);
+    return;
+  }
+
+  const tempPath = `${configPath}.pd-disable-tmp`;
+  fs.writeFileSync(tempPath, next, 'utf8');
+  fs.renameSync(tempPath, configPath);
+
+  console.log(`[PD:disable] host.codex.enabled=${target} written to ${configPath}`);
+  console.log(target
+    ? '  PD Codex behavior is ACTIVE again — prompt injection, tool gating, and pain capture resume on the next hook invocation.'
+    : '  PD Codex behavior is now STOPPED: every Codex hook returns the neutral allow/empty result with a skip reason, and no PD business state is written. OpenClaw and workspace data are untouched.');
+  if (!target) console.log('  re-enable → run $pd-disable --enable (or set features.host.codex.enabled=true manually).');
+}
+
+main();

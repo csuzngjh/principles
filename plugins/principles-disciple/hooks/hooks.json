@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.cjs\"",
+            "timeout": 5,
+            "statusMessage": "PD: checking tool call"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.cjs\"",
+            "timeout": 5,
+            "statusMessage": "PD: capturing pain signal"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.cjs\"",
+            "timeout": 5,
+            "additionalContextLimit": 10000,
+            "statusMessage": "PD: injecting principles"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/pd-hook.cjs\"",
+            "timeout": 30,
+            "statusMessage": "PD: workspace health"
+          }
+        ]
+      }
+    ]
+  }
+}
