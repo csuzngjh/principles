@@ -34,6 +34,12 @@ export interface ConsoleLaunchResult {
   reused: boolean;
   /** True when a browser should/has been opened (skipped in --json mode). */
   browserOpened: boolean;
+  /**
+   * PID of the freshly spawned console server process. Present only when
+   * status === 'started'; absent on 'reused' (the server was started by
+   * another process, so this launcher cannot know its PID).
+   */
+  serverPid?: number;
 }
 
 export interface ConsoleLaunchOptions {
