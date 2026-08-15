@@ -726,10 +726,21 @@ describe('CLI command wiring (pd console open)', () => {
 
     it('sets browserOpened: false when browser fails to open', async () => {
       const { handleConsoleOpen } = await import('../../src/commands/console.js');
-      
+
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // The in-process handler resolves the console dir via getConsoleDir(),
+      // which reads HOME/USERPROFILE directly. Point them at the isolated
+      // fake home — a clean CI runner has no real ~/.openclaw console, and
+      // relying on one (as this test implicitly did before) makes the result
+      // machine-dependent.
+      const fakeHome = process.env.__PD_CONSOLE_TEST_FAKE_HOME ?? '';
+      const savedHome = process.env.HOME;
+      const savedUserProfile = process.env.USERPROFILE;
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
 
       const mockChild = new EventEmitter() as any;
       mockChild.unref = vi.fn();
@@ -758,23 +769,29 @@ describe('CLI command wiring (pd console open)', () => {
         };
       };
 
-      await handleConsoleOpen({
-        workspace: tmp,
-        json: false,
-      });
+      try {
+        await handleConsoleOpen({
+          workspace: tmp,
+          json: false,
+        });
 
-      await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 150));
 
-      const loggedOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
-      expect(exitSpy).not.toHaveBeenCalled();
-      expect(spawnCalled).toBe(true);
-      
-      expect(loggedOutput).not.toContain('Browser opened');
-      expect(loggedOutput).toContain('Open http://127.0.0.1:3100 in your browser');
+        const loggedOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+        expect(exitSpy).not.toHaveBeenCalled();
+        expect(spawnCalled).toBe(true);
 
-      exitSpy.mockRestore();
-      logSpy.mockRestore();
-      errorSpy.mockRestore();
+        expect(loggedOutput).not.toContain('Browser opened');
+        expect(loggedOutput).toContain('Open http://127.0.0.1:3100 in your browser');
+      } finally {
+        if (savedHome === undefined) delete process.env.HOME;
+        else process.env.HOME = savedHome;
+        if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = savedUserProfile;
+        exitSpy.mockRestore();
+        logSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
     });
   });
 
@@ -957,13 +974,13 @@ async function teardownCliTree(run: CliJsonRun | undefined): Promise<void> {
   killTreeForce(run.child);
 }
 
-/** Force-kill a child process tree (Windows needs taskkill /T for grandchildren). */
+/**
+ * Last-resort kill of the CLI child process. The console server grandchild is
+ * reaped separately via its reported serverPid (see teardownCliTree), so a
+ * plain signal kill suffices — no shell/argv command wrapper needed.
+ */
 function killTreeForce(child: childProcessModule.ChildProcess): void {
   try {
-    if (process.platform === 'win32' && typeof child.pid === 'number') {
-      childProcessModule.spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F']);
-    } else {
-      child.kill('SIGKILL');
-    }
+    child.kill('SIGKILL');
   } catch { /* already gone */ }
 }
