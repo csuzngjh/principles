@@ -55,10 +55,22 @@
       </p>
     </section>
 
+    <section class="guide-step">
+      <h2 class="step-title">{{ isZh ? 'Codex 宿主（CLI / 桌面端）' : 'Codex host (CLI / Desktop)' }}</h2>
+      <div class="command-row"><code>codex plugin marketplace add csuzngjh/principles</code></div>
+      <div class="command-row"><code>codex plugin add principles-disciple@principles</code></div>
+      <p class="step-desc">
+        {{ isZh
+          ? '需要 Codex CLI ≥ 0.147 与 Node ≥ 20。安装插件后，在 Codex 会话中运行 $pd-setup 初始化工作区，并通过 /hooks 信任 PD 钩子。$pd-review 打开 Owner 审核控制台，$pd-disable 一键停用。'
+          : 'Requires Codex CLI >= 0.147 and Node >= 20. After installing the plugin, run $pd-setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. $pd-review opens the owner console; $pd-disable stops PD instantly.'
+        }}
+      </p>
+    </section>
+
     <div class="host-disclaimer">
       {{ isZh
-        ? '当前支持 OpenClaw 宿主。Codex/Claude Code 支持正在开发中。'
-        : 'Currently supports OpenClaw host. Codex/Claude Code support is under development.'
+        ? 'OpenClaw 宿主：npx 一键安装。Codex（CLI/桌面端）：插件市场两行命令安装。Claude Code 支持规划中。'
+        : 'OpenClaw host: one-command npx install. Codex (CLI/Desktop): two-command plugin install. Claude Code is planned.'
       }}
     </div>
   </div>
